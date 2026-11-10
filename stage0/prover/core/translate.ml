@@ -119,6 +119,10 @@ type loop_cost = {
   held : (frame -> L.term) option;  (** The potential of what the loop changes. *)
 }
 
+(* Which elements an index or a range reaches: one, or the run from a start
+   to before a stop. *)
+type place_value = One of L.term | Run of L.term * L.term
+
 (* Where a cursor came from: a call to a yielding method, whose clauses
    each pull meets, read in [method_frame] with the call's arguments. *)
 type cursor = { method_frame : frame; own : part; element : T.ty }
@@ -147,7 +151,8 @@ type context = {
   fits : (int * T.ty) list;  (** The type checker's [Integer_fits] obligations, by expression. *)
   disjoint : (int * int) list;
       (** The ownership check's pairs of indexes, by expression, that must differ. *)
-  mutable indexes : (int * (L.term * span)) list;  (** The value of each such index, once read. *)
+  mutable indexes : (int * (place_value * span)) list;
+      (** The value of each such index or range, once read. *)
   mutable output : T.ty option;  (** What the function proven returns, for [?]. *)
   mutable hands_out : (T.ty * [ `Lends | `Yields ]) option;
       (** In a lending or yielding method's body, the type of the parts it hands out. *)
@@ -901,20 +906,41 @@ let rec expression context frame (written : expression) : (frame * L.term) optio
    the prover. Each is read as it is evaluated, and the pair is shown once
    both are. *)
 and disjoint_index context frame (written : expression) value =
+  note_place context frame written (One value)
+
+(* An index or a range read, which the ownership check may have paired
+   with another: the two must reach different elements. *)
+and note_place context frame (written : expression) place =
   if List.exists (fun (first, second) -> first = written.id || second = written.id) context.disjoint
   then begin
-    context.indexes <- (written.id, (value, written.span)) :: context.indexes;
+    context.indexes <- (written.id, (place, written.span)) :: context.indexes;
+    let outside index start stop =
+      L.(Apply ("<", [ index; start ]) ||| Apply ("<=", [ stop; index ]))
+    in
     List.iter
       (fun (first, second) ->
         if first = written.id || second = written.id then
           match (List.assoc_opt first context.indexes, List.assoc_opt second context.indexes) with
           | Some (a, first_span), Some (b, second_span) ->
+              let apart =
+                match (a, b) with
+                | One a, One b -> L.not_ (L.equal a b)
+                | One index, Run (start, stop) | Run (start, stop), One index ->
+                    outside index start stop
+                | Run (start, stop), Run (other_start, other_stop) ->
+                    L.disjunction
+                      [
+                        L.Apply ("<=", [ stop; other_start ]);
+                        L.Apply ("<=", [ other_stop; start ]);
+                        L.Apply ("<=", [ stop; start ]);
+                        L.Apply ("<=", [ other_stop; other_start ]);
+                      ]
+              in
               oblige context frame Disjoint written.span
                 (Printf.sprintf
-                   "`%s` and `%s` may be the same index, but the elements they reach are used \
-                    together."
+                   "`%s` and `%s` may reach the same elements, which are used together."
                    (quote frame.source first_span) (quote frame.source second_span))
-                (L.not_ (L.equal a b))
+                apart
           | _ -> ())
       context.disjoint
   end
@@ -1019,6 +1045,9 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | Call (callee, arguments) -> call context frame written callee arguments
   | Mode (_, inner) -> expression context frame inner
   | Member (base, _) -> member context frame written base
+  | Bracket (base, [ Item ({ kind = Range _; _ } as range) ])
+    when source.checked.calls.(written.id) = None ->
+      Some (slice context frame written base range)
   | Bracket _ -> (
       match source.checked.calls.(written.id) with
       | Some call_ -> resolved_call context frame written call_
@@ -1034,7 +1063,7 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
       Some (lambda context frame written parameters body ~facts:(fun _ -> []))
   | List items -> Some (list_literal context frame written items)
   | Map _ -> unsupported written.span "a map literal"
-  | String _ -> unsupported written.span "a string"
+  | String literal -> Some (string_literal context frame written literal)
   | Float _ -> (
       match literal_value frame written with
       | Some term -> Some (frame, term)
@@ -1457,6 +1486,11 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
         else
           let expression_ = find_expression written argument.expression in
           let frame, term = value context frame expression_ in
+          let term =
+            match argument.conversion with
+            | Some Owned_to_view -> view_of context frame (type_of frame expression_) term
+            | _ -> term
+          in
           (frame, (argument.parameter, term) :: values))
       (frame, []) call_.arguments
   in
@@ -2282,6 +2316,122 @@ and list_literal context frame (written : expression) items =
         | _ -> Costs.zero)
   in
   (frame, literal)
+
+(* A slice, [items[a..b]]: a view of the elements from [a] to before [b],
+   which must be within the collection, whose model is that run of the
+   collection's model. *)
+and slice context frame (written : expression) base (range : expression) =
+  let base_type = type_of frame base in
+  let element =
+    match base_type with
+    | Named { arguments = T.Type element :: _; _ } -> element
+    | _ -> unsupported written.span "a slice of `%s`" (T.show base_type)
+  in
+  let frame, collection = value context frame base in
+  let model =
+    match model_of context base_type collection ~element with
+    | Some model -> model
+    | None -> unsupported written.span "a slice of `%s`" (T.show base_type)
+  in
+  let length = sequence_length context element model in
+  match range.kind with
+  | Range { start; stop; inclusive; _ } ->
+      let frame, low =
+        match start with Some start -> value context frame start | None -> (frame, L.int 0)
+      in
+      let frame, high =
+        match stop with
+        | Some stop ->
+            let frame, high = value context frame stop in
+            (frame, if inclusive then Costs.plus high (L.int 1) else high)
+        | None -> (frame, length)
+      in
+      oblige context frame Requires range.span
+        (Printf.sprintf "`%s` may not be within `%s`." (quote frame.source range.span)
+           (quote frame.source base.span))
+        L.(
+          Apply ("<=", [ int 0; low ])
+          &&& Apply ("<=", [ low; high ])
+          &&& Apply ("<=", [ high; length ]));
+      note_place context frame range (Run (low, high));
+      let slice_type = type_of frame written in
+      let viewed = arrive context frame "slice" slice_type in
+      (match model_of context slice_type viewed ~element with
+      | Some viewed_model -> (
+          let count = Costs.minus high low in
+          assume context frame (L.equal (sequence_length context element viewed_model) count);
+          context.fresh <- context.fresh + 1;
+          let position = Printf.sprintf "index.%d" context.fresh in
+          match
+            ( sequence_at context element viewed_model (L.Symbol position),
+              sequence_at context element model (Costs.plus low (L.Symbol position)) )
+          with
+          | Some inside, Some outside ->
+              assume context frame
+                (L.Forall
+                   ( [ (position, L.Int) ],
+                     L.(
+                       Apply ("<=", [ int 0; Symbol position ])
+                       &&& Apply ("<", [ Symbol position; count ])
+                       ==> equal inside outside) ))
+          | _ -> ())
+      | None -> ());
+      (frame, viewed)
+  | _ -> unsupported range.span "this slice"
+
+(* A [List] passed as a [Slice], or a [String] as a [StringSlice]: a view
+   of the value, with the same model. See DESIGN.md, "Views". *)
+and view_of context frame (owned : T.ty) term =
+  let standard modules name : Path.t = Top { module_ = { package = "standard"; modules }; name } in
+  let viewed =
+    match owned with
+    | Named { path; arguments } when Path.equal path (standard [ "list" ] "List") ->
+        Some (T.Named { path = standard [ "list" ] "Slice"; arguments }, arguments)
+    | Named { path; arguments } when Path.equal path (standard [ "text" ] "String") ->
+        Some (T.Named { path = standard [ "text" ] "StringSlice"; arguments }, arguments)
+    | _ -> None
+  in
+  match viewed with
+  | Some (view_type, arguments) -> (
+      let element = match arguments with T.Type element :: _ -> element | _ -> T.builtin UInt8 in
+      let view = arrive context frame "view" view_type in
+      match (model_of context owned term ~element, model_of context view_type view ~element) with
+      | Some owned_model, Some view_model ->
+          assume context frame (L.equal view_model owned_model);
+          view
+      | _ -> view)
+  | None -> term
+
+(* A string literal. Plain text is a [String] in static memory, which costs
+   nothing to make, whose model is its UTF-8 bytes. Text with
+   interpolations is a new [String], about which nothing more is known,
+   since each part is written out by its [Display]. *)
+and string_literal context frame (written : expression) (literal : string_literal) =
+  let ty = type_of frame written in
+  let frame =
+    List.fold_left (fun frame (part, _) -> fst (value context frame part)) frame literal.rest
+  in
+  match (literal.tag, literal.rest) with
+  | None, [] ->
+      let text = literal.first.value in
+      let string = arrive context frame "string" ty in
+      let byte = T.builtin UInt8 in
+      (match model_of context ty string ~element:byte with
+      | Some model ->
+          assume context frame
+            (L.equal (sequence_length context byte model) (L.int (String.length text)));
+          String.iteri
+            (fun index character ->
+              match sequence_at context byte model (L.int index) with
+              | Some at -> assume context frame (L.equal at (L.int (Char.code character)))
+              | None -> ())
+            text
+      | None -> ());
+      (frame, string)
+  | None, _ ->
+      let frame = spend context frame (unknown_amount context frame) in
+      (frame, arrive context frame "string" ty)
+  | Some _, _ -> unsupported written.span "a tagged template"
 
 (* A value's model, by the standard library's [impl] of [Model] for its
    type, as a call of [model()] would read it. *)

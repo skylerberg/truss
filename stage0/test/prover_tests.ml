@@ -1090,6 +1090,57 @@ let () =
       not_proven "fn f(value: UInt32) -> Bool\n  ensures result\n{\n  (value & 1) == 0\n}\n"
         "prover.ensures")
 
+(* Slices *)
+
+let () =
+  test "a slice's elements are its collection's, from its start" (fun () ->
+      proven
+        "fn f(items: List[Int64]) -> Int64\n\
+        \  requires items.length() > 3\n\
+        \  ensures result == items[2]\n\
+         {\n\
+        \  let part = items[1..3]\n\
+        \  part[1]\n\
+         }\n");
+  test "a slice must be within its collection" (fun () ->
+      not_proven "fn f(items: List[Int64]) -> Slice[Int64] {\n  items[0..5]\n}\n" "prover.requires");
+  test "two slices lent together must not overlap" (fun () ->
+      not_proven
+        "fn both(first: mut Slice[Int64], second: mut Slice[Int64]) {}\n\n\
+         fn f(items: mut List[Int64])\n\
+        \  requires items.length() > 3\n\
+         {\n\
+        \  both(mut items[0..2], second: mut items[1..3])\n\
+         }\n"
+        "prover.disjoint");
+  test "two halves of a list can be lent together" (fun () ->
+      proven
+        "fn both(first: mut Slice[Int64], second: mut Slice[Int64]) {}\n\n\
+         fn f(items: mut List[Int64], middle: USize)\n\
+        \  requires middle <= items.length()\n\
+         {\n\
+        \  both(mut items[..middle], second: mut items[middle..])\n\
+         }\n")
+
+(* Strings *)
+
+let () =
+  test "a string literal's length is its bytes'" (fun () ->
+      proven "fn f() -> USize\n  ensures result == 4\n{\n  \"abcé\".length() - 1\n}\n");
+  test "pushing text onto a string adds its length" (fun () ->
+      proven
+        "fn f() -> USize\n\
+        \  ensures result == 5\n\
+         {\n\
+        \  var text = \"ab\"\n\
+        \  mut text.push(\"cde\")\n\
+        \  text.length()\n\
+         }\n");
+  test "an interpolated string is a string about which little is known" (fun () ->
+      not_proven
+        "fn f(count: Int64) -> USize\n  ensures result == 1\n{\n  \"${count}\".length()\n}\n"
+        "prover.ensures")
+
 (* Floats *)
 
 let () =
@@ -1875,7 +1926,7 @@ let () =
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven "fn f(text: String) -> String {\n  \"${text}!\"\n}\n" "prover.unsupported");
+      not_proven "fn f() -> Map[Int64, Int64] {\n  [1: 2]\n}\n" "prover.unsupported");
   ()
 
 (* Queries *)

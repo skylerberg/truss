@@ -1027,8 +1027,17 @@ It proves, with one canonical, numbered, hashed query per obligation:
   through their models, prove facts such as a pushed element's index and
   value; `Set` and `Map`, by their `FiniteSet` and `FiniteMap` models;
   sequences, sets, and maps are extensional; and literals of `List` and
-  `Sequence` have their elements. The contracts of `String`, and literals
-  of maps and sets, are not built yet.
+  `Sequence` have their elements. Literals of maps and sets are not built
+  yet.
+- views: a `List` passed as a `Slice`, or a `String` as a `StringSlice`,
+  is a view with the same model, and a slice, `items[a..b]`, must be
+  within its collection and has that run of its model; two slices, or a
+  slice and an index, lent together reach different elements
+- strings: `String`, `StringSlice`, and a template's `Literal` are modeled
+  by their UTF-8 bytes. A plain string literal is a `String` with those
+  bytes, which costs nothing; one with interpolations is a new `String`
+  known only by its type, since each part is written out by its
+  `Display`.
 - quantifiers over every value of a type, each in its range and meeting
   its type's invariants
 - bitwise operations, by their facts and then, once more, exactly, as
@@ -1069,7 +1078,8 @@ A call whose callee's contract it cannot read, such as one with errors,
 gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a string, is reported as
+definition that uses anything else, such as a tagged template, is
+reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.
 
