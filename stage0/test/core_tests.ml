@@ -306,6 +306,54 @@ let () =
      ensures (old(count) == count)\n\
      { true }"
 
+(* Capabilities *)
+
+let () =
+  test "a call holds what each capability parameter of what it calls stands for" (fun () ->
+      let text =
+        "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\
+        \  uses Granted\n\
+         {\n\
+        \  visit(count)\n\
+         }\n\n\
+         fn g()\n\
+        \  uses Clock\n\
+         {\n\
+        \  for_each(3, visit: fn(step) {\n\
+        \    let _ = Clock.now()\n\
+        \    let _ = step\n\
+        \  })\n\
+         }\n"
+      in
+      let database = setup [ ("app::main", text) ] in
+      let found = ref [] in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = Resolve.Names.key_of declaration in
+          if Path.show key.path = "app::main::g" then
+            match Query.demand database Infer.core key with
+            | Some form ->
+                Core_walk.parts
+                  {
+                    Core_walk.nothing with
+                    expression =
+                      (fun (node : Core.expression) ->
+                        match node.kind with
+                        | Call { callee = Function { path; _ }; capability_arguments; uses; _ }
+                          when Path.show path = "app::main::for_each" ->
+                            found :=
+                              List.map
+                                (fun ((parameter : Types.parameter), solved) ->
+                                  Printf.sprintf "%s = %d, uses %d" parameter.name
+                                    (List.length solved) (List.length uses))
+                                capability_arguments
+                        | _ -> ());
+                  }
+                  form.parts
+            | None -> fail "no form")
+        (Query.demand database Resolve.Names.declarations (module_of "app::main"));
+      if !found <> [ "Granted = 1, uses 1" ] then fail "found [%s]" (String.concat "; " !found))
+
 (* Where a node came from *)
 
 let () =
@@ -412,6 +460,7 @@ let () =
                         (fun (node : Core.pattern) ->
                           once node.id;
                           decided "a pattern" node.type_);
+                      callee = ignore;
                     }
                     form.parts)
             (Query.demand database Resolve.Names.declarations module_)))
