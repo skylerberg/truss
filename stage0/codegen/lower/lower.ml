@@ -66,11 +66,7 @@ let any_table = Generated.any_table
 let real_evidence = Generated.real_evidence
 
 let trait_provides context ~trait ~name ~receiver =
-  match
-    Interface.Summary.definition context.database (Method { owner = trait; name; receiver })
-  with
-  | Some (_, { kind = Function _; _ }) -> true
-  | _ -> false
+  written context (Method { owner = trait; name; receiver }) <> None
 
 (* Binds the parameters of the code being lowered, each as [how] passes it.
    The function owns each [own] one, apart from one with a default, which
