@@ -955,8 +955,8 @@ sanitized runs, test the trusted base against real executions.
   laws of `Ordered`.
 - **Arrays and surrogates.** An `Array[Element, count]` is to be a sequence
   of length `count`, and a `Character` is never to be a surrogate. An array
-  is a value known only by its type, and a `Character` is any integer up
-  to `0x10FFFF`.
+  is a sort the solver knows nothing about, a literal of one is code the
+  prover cannot read, and a `Character` is any integer up to `0x10FFFF`.
 - **Ranks for a collection's elements.** An element of a standard
   collection is to be smaller than the collection, as Dafny orders its
   sequences, so that recursion over a tree whose children are a list ends
