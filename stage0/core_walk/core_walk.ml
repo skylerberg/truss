@@ -24,6 +24,10 @@ let place_type : place -> Types.ty = function
   | Local { type_; _ } | Constant { type_; _ } | Field { type_; _ } -> type_
   | Lent value | Temporary value -> value.type_
 
+let place_origin : place -> origin = function
+  | Local { origin; _ } | Constant { origin; _ } | Field { origin; _ } -> origin
+  | Lent value | Temporary value -> value.origin
+
 let rec place visit = function
   | Local _ | Constant _ -> ()
   | Field { base; _ } -> place visit base

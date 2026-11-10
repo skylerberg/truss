@@ -1094,7 +1094,7 @@ and place_value context frame (place : place) =
       match Locals.find_opt local frame.locals with
       | Some term -> (frame, term)
       | None -> raise (Foreign_unsupported "a local the prover did not bind"))
-  | Field { base; field; type_ } ->
+  | Field { base; field; type_; _ } ->
       let base_type = place_type context frame base in
       let frame, term = place_value context frame base in
       if constructors context base_type = None then
@@ -6099,7 +6099,13 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
     {
       callee = next;
       arguments =
-        [ Passed { mode = T.Mut; value = Place (Local { local = id; type_ = cursor_type }) } ];
+        [
+          Passed
+            {
+              mode = T.Mut;
+              value = Place (Local { local = id; type_ = cursor_type; origin = node.origin });
+            };
+        ];
       lends = None;
       uses = [];
     }
@@ -6158,7 +6164,8 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
             {
               position = 0;
               mode = T.Mut;
-              operand = Some (Place (Local { local = id; type_ = cursor_type }));
+              operand =
+                Some (Place (Local { local = id; type_ = cursor_type; origin = node.origin }));
               type_ = cursor_type;
               term = cursor;
             };

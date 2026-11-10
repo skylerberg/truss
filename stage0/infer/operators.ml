@@ -115,7 +115,7 @@ and with_ state env (value : expression) (base : expression) updates =
                         | Some new_value, _ -> build_expression state new_value
                         | None, Some (Local id) ->
                             synthetic_expression state ~origin:update.id (Form.local_type state id)
-                              (Form.local_use state id)
+                              (Form.local_use state ~origin:update.id id)
                         | None, _ -> bug "`with (%s)` names no local" first.text )
                 | Update_error -> None)
               updates;
