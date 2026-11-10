@@ -110,10 +110,6 @@ type intrinsic =
   | Round_even
   | Float_bits  (** A float's bits, with every NaN replaced by one canonical NaN *)
   | Float_from_bits
-  | Grow
-      (** [(buffer pointer's address, length, capacity's address, element size, alignment, minimum)]:
-          gives storage room for at least [minimum] elements. Storage with capacity 0 and a nonzero
-          length is static, and is copied to the heap, never freed. *)
   | Environment  (** [() -> pointer] to the environment the process was started with *)
   | Terminated_length  (** [(bytes) -> USize]: how many bytes come before the first zero byte *)
   | Float_text

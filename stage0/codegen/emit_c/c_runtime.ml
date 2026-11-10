@@ -71,8 +71,6 @@ let runtime_declarations (target : Memory_layout.target) =
       "void *t_runtime_allocate(t_usize size, t_usize alignment);\n";
       "void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usize alignment);\n";
       "void t_runtime_free(void *pointer);\n";
-      "void t_runtime_storage_grow(void **buffer, t_usize length, t_usize *capacity, t_usize size, \
-       t_usize alignment, t_usize minimum);\n";
       "t_usize t_runtime_float32_text(float value, uint8_t *bytes);\n";
       "t_usize t_runtime_float64_text(double value, uint8_t *bytes);\n";
       "void t_runtime_debug_begin(void);\n";

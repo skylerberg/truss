@@ -232,26 +232,6 @@ void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usiz
   return moved;
 }
 
-/* Gives storage room for at least [minimum] elements, at least doubling it
-   so that pushing is amortized O(1). Storage with capacity 0 owns no
-   buffer: its elements, if any, are static, so they are copied, and the
-   old buffer is never freed. */
-void t_runtime_storage_grow(void **buffer, t_usize length, t_usize *capacity, t_usize size, t_usize alignment,
-                            t_usize minimum) {
-  t_usize wanted = *capacity * 2;
-  if (wanted < minimum) wanted = minimum;
-  if (wanted < 4) wanted = 4;
-  if (size != 0 && wanted > (t_usize)-1 / size) t_out_of_memory();
-  if (*capacity == 0) {
-    void *fresh = t_runtime_allocate(wanted * size, alignment);
-    if (length > 0) memcpy(fresh, *buffer, length * size);
-    *buffer = fresh;
-  } else {
-    *buffer = t_runtime_reallocate(*buffer, *capacity * size, wanted * size, alignment);
-  }
-  *capacity = wanted;
-}
-
 /* Debug output: generated debug functions append a value's text here, and
    echo, failed asserts, and the test runner read it. Each thread has its
    own, since tasks run on threads. */
