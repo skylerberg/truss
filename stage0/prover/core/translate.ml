@@ -2415,6 +2415,9 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
   if List.length parameters <> List.length function_type.inputs then
     unsupported span "a lambda with a different number of parameters";
   let inside = { frame with result = None; loop = None; updating = None } in
+  let start_fresh = context.fresh
+  and start_facts = List.length context.facts
+  and start_declarations = List.length context.declarations in
   let arguments, inside =
     List.fold_left2
       (fun (arguments, inside) (pattern : pattern) (_, input) ->
@@ -2486,6 +2489,12 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
     }
   in
   let mark = context.fresh and facts_mark = List.length context.facts in
+  let premises =
+    List.filteri
+      (fun index _ -> index >= List.length context.facts - facts_mark)
+      (facts_since context start_facts)
+  in
+  let ended = ref [] in
   let saved_returns = context.returns and saved_terminates = context.terminates in
   context.returns <- [];
   context.terminates <- T.terminates function_type;
@@ -2501,6 +2510,9 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
           (match finished with Some (frame, _) -> [ frame ] | None -> [])
           @ List.map fst context.returns
         in
+        ended :=
+          (match finished with Some (frame, value) -> [ (frame, Some value) ] | None -> [])
+          @ context.returns;
         let spent_of (exit_ : frame) counter =
           match List.assoc_opt (Costs.key counter) exit_.spent with
           | Some term -> term
@@ -2554,10 +2566,16 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
           | None -> None
         else None)
   in
+  let end_fresh = context.fresh in
   let term =
     match lambda_definition context frame function_type parameters body with
     | Some term -> term
-    | None -> arrive context frame "lambda" ty
+    | None ->
+        let term = arrive context frame "lambda" ty in
+        if in_the_logic function_type && frame.bound = [] then
+          what_a_lambda_does context function_type term ~arguments ~start_fresh ~end_fresh
+            ~start_declarations ~premises ~shown:(facts_since context facts_mark) ~ended:!ended;
+        term
   in
   context.lambda_captures <-
     (term, List.map (fun (capture : capture) -> capture.local) captures) :: context.lambda_captures;
@@ -2565,6 +2583,75 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
   | Some found -> context.lambda_times <- (term, found) :: context.lambda_times
   | None -> ());
   (frame, term)
+
+(* What a lambda whose body is not its definition does, for every argument:
+   its body ran on arguments that are arbitrary but for [premises], so what
+   it showed, and the value it ended with on each path, hold for each
+   argument the premises admit. Over each argument, each value made in the
+   body is a function of the arguments, since it can differ for each. A
+   nested lambda's symbol, named after what it captures, is not such a
+   function, so a body with one gives nothing. *)
+and what_a_lambda_does context function_type term ~arguments ~start_fresh ~end_fresh
+    ~start_declarations ~premises ~shown ~ended =
+  let declared_here =
+    List.filteri
+      (fun index _ -> index < List.length context.declarations - start_declarations)
+      context.declarations
+  in
+  let nested_lambda =
+    List.exists
+      (function
+        | L.Constant (name, _) ->
+            String.starts_with ~prefix:"lambda." name && not (Hashtbl.mem context.fresh_order name)
+        | _ -> false)
+      declared_here
+  in
+  if not nested_lambda then begin
+    let parameters =
+      List.mapi
+        (fun index (_, input) -> (Printf.sprintf "lambda.argument.%d" index, sort_of context input))
+        function_type.T.inputs
+    in
+    let variables = List.map (fun (name, _) -> L.Symbol name) parameters in
+    let renamed = Hashtbl.create 16 in
+    List.iter2
+      (fun argument variable ->
+        match argument with L.Symbol name -> Hashtbl.replace renamed name variable | _ -> ())
+      arguments variables;
+    List.iter
+      (function
+        | L.Constant (name, sort) when not (Hashtbl.mem renamed name) -> (
+            match Hashtbl.find_opt context.fresh_order name with
+            | Some made when made > start_fresh && made <= end_fresh ->
+                let over = name ^ ".over" in
+                declare context (L.Function (over, List.map snd parameters, sort));
+                Hashtbl.replace renamed name (L.Apply (over, variables))
+            | _ -> ())
+        | _ -> ())
+      declared_here;
+    let rec over = function
+      | L.Symbol name as symbol -> Option.value (Hashtbl.find_opt renamed name) ~default:symbol
+      | (L.Integer _ | L.Boolean _ | L.Bits _) as term -> term
+      | L.Apply (name, arguments) -> L.Apply (name, List.map over arguments)
+      | L.Forall (bound, body) -> L.Forall (bound, over body)
+      | L.Exists (bound, body) -> L.Exists (bound, over body)
+    in
+    let premise = over (L.conjunction premises) in
+    let applied_here = applied context function_type term variables in
+    let statements =
+      List.map over shown
+      @ List.filter_map
+          (fun ((exit_ : frame), value) ->
+            Option.map
+              (fun value -> L.( ==> ) (over exit_.condition) (L.equal applied_here (over value)))
+              value)
+          ended
+    in
+    List.iter
+      (fun statement ->
+        context.facts <- L.Forall (parameters, L.( ==> ) premise statement) :: context.facts)
+      statements
+  end
 
 (* A clause's value: a specification, which never runs, so it spends
    nothing whatever it calls. *)
@@ -3654,7 +3741,10 @@ and named_function context frame (node : expression) path type_arguments contrac
             let function_symbol = "function." ^ Path.show path ^ instance in
             declare context
               (L.Function (function_symbol, List.map snd parameters, sort_of context output));
-            L.Apply (function_symbol, inputs)
+            let value = L.Apply (function_symbol, inputs) in
+            if instance = "" then
+              contract_for_every_argument context frame contract parameters value;
+            value
       in
       fact context frame
         (L.Forall (parameters, L.equal (applied context function_type term inputs) value))
@@ -3675,6 +3765,54 @@ and named_function context frame (node : expression) path type_arguments contrac
      let time = time_of context frame ty term in
      fact context frame (L.equal time (L.int 1)));
   term
+
+(* What a pure function's contract says of its value for every argument:
+   where its [requires] holds, its [ensures] does. Its clauses are read over
+   the parameters as a quantifier's body is. *)
+and contract_for_every_argument context frame (contract : contract) parameters value =
+  let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
+  let over =
+    {
+      frame with
+      bound = List.map fst parameters @ frame.bound;
+      binders =
+        List.rev_map (fun (name, sort) -> (name, sort, L.Boolean true)) parameters @ frame.binders;
+      checking = false;
+    }
+  in
+  let read (part : part) =
+    {
+      (part_frame over part
+         ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+         ~substitution:[])
+      with
+      result = Some value;
+    }
+  in
+  try
+    let requiring =
+      match contract.parts with
+      | own :: others -> if own.requires <> [] || others = [] then [ own ] else others
+      | [] -> []
+    in
+    let required =
+      L.conjunction
+        (List.concat_map
+           (fun (part : part) ->
+             List.map (fun clause -> snd (clause_value context (read part) clause)) part.requires)
+           requiring)
+    in
+    List.iter
+      (fun (part : part) ->
+        List.iter
+          (fun clause ->
+            let ensured = snd (clause_value context (read part) clause) in
+            match closed_over_binders over (L.( ==> ) required ensured) with
+            | Some closed -> context.facts <- closed :: context.facts
+            | None -> ())
+          part.ensures)
+      contract.parts
+  with Unsupported _ | Foreign_unsupported _ -> ()
 
 (* A function named as a value and passed for a function-typed parameter
    must accept every argument the parameter's type promises it, and keep
