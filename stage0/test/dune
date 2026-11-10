@@ -17,6 +17,7 @@
   patterns_tests
   usage_tests
   ownership_tests
+  ownership_matrix_tests
   capabilities_tests
   package_checks_tests
   documents_tests
