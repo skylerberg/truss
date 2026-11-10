@@ -4,6 +4,9 @@ type kind =
   | Shape of Memory_layout.shape
   | Storage of Ground.ty
   | Handle  (** An operating system's descriptor, in a [descriptor] field, closed when dropped *)
+  | Shared of Ground.ty
+      (** A reference to a reference-counted heap block that holds a value of the type. The [value]
+          field is the address of the value in the block. *)
 
 module Types = Map.Make (struct
   type t = Ground.ty
@@ -44,7 +47,7 @@ let rec trivial t ty =
         if any then false
         else
           match t.kind_of ty with
-          | Storage _ | Handle -> false
+          | Storage _ | Handle | Shared _ -> false
           | Shape (Scalar _) -> true
           | Shape (Record fields) -> List.for_all (fun (_, m) -> member m) fields
           | Shape (Array (element, _)) -> trivial t element
@@ -111,6 +114,40 @@ let drop t ty =
              arguments = [ Copy (value / Field "descriptor") ];
              result = Discarded;
            })
+  | _, Shared inner ->
+      (* The last reference drops the value and frees the block. The value
+         is dropped by a call of its type's drop function: drop elaboration
+         would remove a [Drop] of a place behind a local pointer. *)
+      let pointer = Lir.Copy (value / Field "value") in
+      let last = local b (Raw Bool) in
+      emit b
+        (Call
+           {
+             target = Intrinsic Shared_release;
+             arguments = [ pointer ];
+             result = Returned (at last);
+           });
+      when_ b
+        (Copy (at last))
+        (fun () ->
+          if not (trivial t inner) then begin
+            let typed = local b (Pointer { target = Value inner; writable = true }) in
+            emit b (Assign (at typed, Use pointer));
+            emit b
+              (Call
+                 {
+                   target =
+                     Direct
+                       {
+                         function_ = Instance (Drop inner);
+                         signature = Convention.drop_signature inner;
+                       };
+                   arguments = [ Copy (at typed) ];
+                   result = Discarded;
+                 })
+          end;
+          emit b
+            (Call { target = Intrinsic Shared_free; arguments = [ pointer ]; result = Discarded }))
   | _, Storage element ->
       if not (trivial t element) then
         loop t b
@@ -248,6 +285,16 @@ let copy t ty =
    else
      match t.kind_of ty with
      | Handle -> bug "a copy of a handle, which is not Copyable"
+     | Shared _ ->
+         (* A copy is another reference to the same block. *)
+         emit b
+           (Call
+              {
+                target = Intrinsic Shared_retain;
+                arguments = [ Copy (self / Field "value") ];
+                result = Discarded;
+              });
+         emit b (Assign (result, Use (Copy self)))
      | Storage element ->
          (* A storage that owns no buffer, empty or static, is shared. One
             that owns a buffer is never shared, or two would free it: with
@@ -499,6 +546,7 @@ let debug t ty =
   | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
       storage_or_view field_ty (value / Field field) ~as_text:(t.debug_form ty = Text)
   | _, Handle -> text "Handle"
+  | _, Shared _ -> text "Shared"
   | _, Storage element ->
       list_of element ~element_at:(Storage.at value) ~count:(Copy (Storage.length value))
   | _, Shape shape -> (
@@ -589,6 +637,7 @@ let encode t ty =
   (if parameter <> None then
      match t.kind_of ty with
      | Handle -> bug "a handle cannot be worked out while compiling"
+     | Shared _ -> bug "a shared value cannot be worked out while compiling"
      | Storage element ->
          bytes (Storage.length value) (Memory_layout.of_type t.env t.usize).size;
          loop t b

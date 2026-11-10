@@ -613,6 +613,27 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                  fields = [ ("descriptor", value 0) ];
                })
       | Handle_descriptor -> set (Use (Copy (read (argument 0) / Field "descriptor")))
+      | Shared_new ->
+          let ty = type_argument 0 in
+          let block = local b (Raw (Pointer Opaque)) in
+          call ~result:(at block) Shared_allocate
+            [ Constant (Size_of ty); Constant (Alignment_of ty) ];
+          if (Memory_layout.of_type env ty).size > 0 then begin
+            (* The pointer is [borrowed] so that drop elaboration does not
+               track the block's contents, which the [Shared] owns. *)
+            let typed = local b ~borrowed:true (Pointer { target = Value ty; writable = true }) in
+            emit b (Assign (at typed, Use (Copy (at block))));
+            emit b (Assign ({ root = Local typed; projections = [ Deref ] }, Use (value 0)))
+          end;
+          set
+            (Build
+               {
+                 ty = Named { path = Intrinsic.builtin_path Shared; arguments = [ Type ty ] };
+                 variant = None;
+                 fields = [ ("value", Copy (at block)) ];
+               })
+      | Shared_key -> set (Convert (Copy (read (argument 0) / Field "value"), Integer UInt64))
+      | Shared_update -> bug "shared_update is lowered with the call of its function value"
       | Handle_release ->
           (* The handle is moved into a local that nothing drops, so its
              descriptor stays open. *)

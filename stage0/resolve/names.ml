@@ -229,7 +229,7 @@ let builtin_items () =
         name = Intrinsic.builtin_name builtin;
         kind = Type;
         visibility = Public;
-        generic = (match builtin with Array | Storage | View -> true | _ -> false);
+        generic = (match builtin with Array | Storage | View | Shared -> true | _ -> false);
       })
     Intrinsic.builtins
   @ List.map

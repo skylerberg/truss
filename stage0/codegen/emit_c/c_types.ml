@@ -10,6 +10,10 @@ type key =
   | Block of Ground.ty * string
   | Code of Ground.function_type
   | Environment of string * int  (** The instance's symbol, and the nested function *)
+  | Evidence of int
+      (** The evidence that a [provide] builds on the stack, with room for this many pointers to the
+          evidence its [impl] uses. It has a name so that every use of it in a file is one C type: a
+          region that captures such a local holds a pointer to it. *)
 
 let compare_key a b =
   match (a, b) with
@@ -21,8 +25,15 @@ let compare_key a b =
   | Environment (s, n), Environment (t, m) ->
       let c = String.compare s t in
       if c <> 0 then c else Int.compare n m
+  | Evidence n, Evidence m -> Int.compare n m
   | _ ->
-      let rank = function Type _ -> 0 | Block _ -> 1 | Code _ -> 2 | Environment _ -> 3 in
+      let rank = function
+        | Type _ -> 0
+        | Block _ -> 1
+        | Code _ -> 2
+        | Environment _ -> 3
+        | Evidence _ -> 4
+      in
       Int.compare (rank a) (rank b)
 
 module Keys = Map.Make (struct
@@ -36,6 +47,7 @@ let key_name = function
   | Block (ty, variant) -> Instance.type_symbol ty ^ "_Block_" ^ variant
   | Code f -> Instance.type_symbol (Function f) ^ "_Code"
   | Environment (symbol, n) -> Printf.sprintf "%s_Environment_%d" symbol n
+  | Evidence n -> Printf.sprintf "t_Evidence_%d" n
 
 (* How a key is defined: a [typedef] of a scalar or a pointer, which needs
    only forward declarations; a function pointer type; or a [struct], which
@@ -123,8 +135,9 @@ let rec c_ty context symbol : Lir.ty -> string = function
       register context (Environment (symbol, n));
       key_name (Environment (symbol, n))
   | Evidence n ->
-      Printf.sprintf "struct { struct t_evidence evidence; const struct t_evidence *outer[%d]; }"
-        (max n 1)
+      let key = Evidence (max n 1) in
+      register context key;
+      key_name key
 
 let member_c context : Memory_layout.member -> string = function
   | Typed ty -> value_c context ty
@@ -225,6 +238,14 @@ and define_text context key =
       Code_typedef
         (Printf.sprintf "typedef %s (*%s)(%s);\n" result (key_name key)
            (signature_parameters context "" signature.parameters None))
+  | Evidence n ->
+      Struct
+        {
+          body =
+            Printf.sprintf "  struct t_evidence evidence;\n  const struct t_evidence *outer[%d];\n"
+              n;
+          holds = [];
+        }
   | Environment _ ->
       let fields = match Keys.find_opt key context.environments with Some f -> f | None -> [] in
       let symbol = match key with Environment (symbol, _) -> symbol | _ -> "" in

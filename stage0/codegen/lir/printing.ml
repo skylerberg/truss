@@ -129,6 +129,12 @@ let intrinsic_name = function
   | Coroutine_resume -> "coroutine_resume"
   | Coroutine_suspend -> "coroutine_suspend"
   | Tasks_spawn -> "tasks_spawn"
+  | Shared_allocate -> "shared_allocate"
+  | Shared_retain -> "shared_retain"
+  | Shared_release -> "shared_release"
+  | Shared_free -> "shared_free"
+  | Shared_lock -> "shared_lock"
+  | Shared_unlock -> "shared_unlock"
 
 let rvalue_to_string = function
   | Use operand -> operand_to_string operand

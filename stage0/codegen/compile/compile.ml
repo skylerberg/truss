@@ -322,6 +322,7 @@ let decode t ty text : Lir.static_value =
     else
       match Monomorphic.kind monomorphic ty with
       | Handle -> bug "a handle worked out while compiling"
+      | Shared _ -> bug "a shared value worked out while compiling"
       | Storage element ->
           let count = Z.to_int (integer USize) in
           Static_storage

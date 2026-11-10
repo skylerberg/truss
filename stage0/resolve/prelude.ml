@@ -13,7 +13,7 @@ let types =
   List.filter_map
     (fun (builtin : Intrinsic.builtin) ->
       match builtin with
-      | Storage | View | Handle -> None
+      | Storage | View | Handle | Shared -> None
       | _ -> Some (Intrinsic.builtin_name builtin, Intrinsic.module_))
     Intrinsic.builtins
   @ List.concat_map

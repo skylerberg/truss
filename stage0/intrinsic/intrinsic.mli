@@ -32,6 +32,11 @@ type builtin =
   | Handle
       (** An operating system's descriptor for an open file, owned: dropping it closes it, so it is
           neither [Copyable] nor [Plain]. *)
+  | Shared
+      (** [Shared[Value: Storable]]: a reference to a heap block that holds one value, a reference
+          count, and a mutex. A copy increments the count and refers to the same value, and the last
+          drop drops the value. The value is read and changed only through [shared_update], which
+          holds the mutex. It is [Copyable], never [Plain], and not a view type. *)
 
 val builtins : builtin list
 val builtin_name : builtin -> string
@@ -188,6 +193,16 @@ type operation =
           that calls [work(item)], and returns true. If the group is already cancelled, spawns
           nothing and returns false. The runtime's other task functions take only integers, so they
           are rows of the C library's table. *)
+  | Shared_new  (** [shared_new(value: own Value) -> Shared[Value]], with a count of one *)
+  | Shared_update
+      (** [shared_update(shared, input: own Input, change: fn(mut Value, own Input) -> Result) ->
+           Result]: locks the mutex, calls [change] on the value and [input], unlocks, and returns
+          the result. [change] uses no capability, so it cannot block or call [shared_update], and
+          two updates cannot deadlock. [Result] is [Storable], so no view of the value escapes the
+          lock. *)
+  | Shared_key
+      (** [shared_key(shared) -> UInt64]: the address of the heap block, as a key for [Tasks.wait]
+          and [Tasks.wake]. Every copy of one [Shared] has the same key. *)
   | System_is_os of Libc.os
       (** [system_is_linux()], [system_is_macos()]: whether the program is built for that operating
           system, which lowering knows *)
@@ -205,6 +220,9 @@ val operation_of_path : Path.t -> operation option
 
 val uses : operation -> Path.t list
 (** The capabilities that a call of the operation requires. An intrinsic takes no evidence, so only
-    the capability check reads this. The check allows the call where each capability is available,
-    and in the body of a method of a capability's [impl]. Every operation returns the empty list for
-    now. *)
+    the capability check reads this. The check allows the call where each capability is available.
+    It also allows the call directly in a method of an [impl] of any capability, because such a
+    method is reachable only through a capability call, which is already an effect of its caller. A
+    lambda, a [parallel] branch, a specification, and a helper function in such a method are not
+    exempt. [Shared_update] and [Shared_key] require [Tasks]: which task updates first, and a heap
+    address, both differ from run to run, so code that observes them is not pure. *)

@@ -860,28 +860,9 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
         ~call_next:(fun destination -> call_with_places st next [ cursor ] ~destination)
         ~body:owned_each
 
-(* Whether a yielding method gives its parts by position: its body is one
-   loop over a range of integers that does nothing but yield. The loop's
-   iterations share nothing, so a [parallel for] over the method runs that
-   loop in parts. *)
 and yields_by_position st path =
   let _, _, (body : Core.block) = body_of st.context path in
-  match (body.statements, body.value) with
-  | ( [
-        {
-          kind =
-            For
-              {
-                iteration = Integer_range _;
-                body = { statements = [ { kind = Yield _; _ } ]; value = None; _ };
-                _;
-              };
-          _;
-        };
-      ],
-      None ) ->
-      true
-  | _ -> false
+  Core_walk.yields_by_position body
 
 (* A loop over the cursor of a yielding method's call: the pulled method's
    [next] is called until it gives [None]. *)
@@ -1033,6 +1014,44 @@ and field_default st (ty : Ground.ty) ~variant ~field : Core.expression =
 (* Lowers a call of an intrinsic. Returns the place it lends, for one that
    lends. *)
 and intrinsic st operation ~type_arguments (arguments : Core.argument list) ~destination ~site =
+  match ((operation : Intrinsic.operation), arguments) with
+  | Shared_update, [ shared; input; change ] ->
+      shared_update st ~shared ~input ~change ~destination;
+      None
+  | _ -> intrinsic_operation st operation ~type_arguments arguments ~destination ~site
+
+(* Lowers [shared_update]: locks the shared value's mutex, calls [change]
+   on the value and the input, and unlocks the mutex. *)
+and shared_update st ~shared ~input ~change ~destination =
+  let _, _, shared = argument_place st shared in
+  let _, _, input = argument_place st input in
+  let _, change_ty, change = argument_place st change in
+  let function_type =
+    match change_ty with
+    | Function function_type -> function_type
+    | ty -> bug "shared_update with a %s, which is not a function" (Ground.to_string ty)
+  in
+  let value_ty, result_ty =
+    match (function_type.parameters, function_type.result) with
+    | (_, value_ty) :: _, Returns result_ty -> (value_ty, result_ty)
+    | _ -> bug "shared_update with a function that takes no value or returns none"
+  in
+  let pointer = Lir.Copy (shared / Field "value") in
+  emit st.b (Call { target = Intrinsic Shared_lock; arguments = [ pointer ]; result = Discarded });
+  (* The pointer is [borrowed] so that drop elaboration does not track the
+     value, which the [Shared] owns. *)
+  let typed = local st.b ~borrowed:true (Pointer { target = Value value_ty; writable = true }) in
+  emit st.b (Assign (at typed, Use pointer));
+  let result =
+    match destination with Some destination -> destination | None -> temporary st result_ty
+  in
+  call_indirect st ~function_type ~value:change
+    [ { root = Local typed; projections = [ Deref ] }; input ]
+    result;
+  emit st.b (Call { target = Intrinsic Shared_unlock; arguments = [ pointer ]; result = Discarded })
+
+and intrinsic_operation st operation ~type_arguments (arguments : Core.argument list) ~destination
+    ~site =
   let ground_arguments =
     List.map
       (Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution)

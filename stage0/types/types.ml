@@ -60,7 +60,7 @@ let builtin_of = function
   | Named { path; arguments = [] } -> Intrinsic.builtin_of_path path
   | Named { path; _ } -> (
       match Intrinsic.builtin_of_path path with
-      | Some (Array | Storage | View) as found -> found
+      | Some (Array | Storage | View | Shared) as found -> found
       | _ -> None)
   | _ -> None
 

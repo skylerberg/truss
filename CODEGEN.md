@@ -433,6 +433,32 @@ code that fills a table for an `impl` and the code that calls through the
 `any value` allocates the block and moves the value in, which is the one
 allocation DESIGN.md says it costs.
 
+### Shared values
+
+`intrinsic::Shared[Value]` is one pointer, to a value in a heap block. The
+block starts with a header that the runtime owns: the block's address, an
+atomic reference count, and a mutex. The value follows the header, and the
+pointer is the value's address, so the header ends where the value starts.
+
+| Operation | Lowering |
+|---|---|
+| `shared_new(value)` | Allocates the block with a count of one and moves the value in |
+| `copy()` | Increments the count and copies the pointer |
+| drop | Decrements the count. The reference that brings it to zero calls the value's drop function and frees the block |
+| `shared_update(shared, input, change)` | Locks the mutex, calls `change` with the value's address as its `mut` argument and with `input`, and unlocks |
+| `shared_key(shared)` | The pointer as a `UInt64` |
+
+- **The count is atomic** because a reference can be copied and dropped
+  on any thread, in a `parallel` branch for one.
+- **`change` cannot block or deadlock.** Its type has no `uses`, so it
+  cannot wait, and it cannot call `shared_update`, which requires `Tasks`.
+- **Drop elaboration does not track the block's contents.** The code that
+  writes the value into the block or lends it to `change` reaches it
+  through a pointer local marked `borrowed`. The value is dropped by a
+  direct call of its type's drop function.
+- **The runtime's functions are declared only in the C files that call
+  them,** so adding them changed the C of no other instance.
+
 ### Function values
 
 A function value is two pointers: the code and its environment. A lambda's

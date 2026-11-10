@@ -401,6 +401,55 @@ void t_runtime_coroutine_suspend(void) {
   pthread_mutex_unlock(&coroutine->lock);
 }
 
+/* Shared values.
+
+   The heap block of a shared value is this header followed by the value.
+   A [Shared] holds the address of the value, and the header ends where
+   the value starts. Every reference to the block counts in [count], and
+   [mutex] is held while the value is read or changed. */
+struct t_shared {
+  void *block;
+  atomic_size_t count;
+  pthread_mutex_t mutex;
+};
+
+static struct t_shared *t_shared_header(void *value) { return (struct t_shared *)value - 1; }
+
+void *t_runtime_shared_allocate(t_usize size, t_usize alignment) {
+  if (alignment < _Alignof(struct t_shared)) alignment = _Alignof(struct t_shared);
+  t_usize offset = (sizeof(struct t_shared) + alignment - 1) / alignment * alignment;
+  char *block = t_runtime_allocate(offset + size, alignment);
+  struct t_shared *shared = t_shared_header(block + offset);
+  shared->block = block;
+  atomic_init(&shared->count, 1);
+  pthread_mutex_init(&shared->mutex, NULL);
+  return block + offset;
+}
+
+void t_runtime_shared_retain(void *value) {
+  atomic_fetch_add_explicit(&t_shared_header(value)->count, 1, memory_order_relaxed);
+}
+
+/* Returns 1 to the caller that released the last reference. The acquire
+   fence orders every earlier use of the value, on any thread, before the
+   drop that follows. */
+uint8_t t_runtime_shared_release(void *value) {
+  if (atomic_fetch_sub_explicit(&t_shared_header(value)->count, 1, memory_order_release) != 1)
+    return 0;
+  atomic_thread_fence(memory_order_acquire);
+  return 1;
+}
+
+void t_runtime_shared_free(void *value) {
+  struct t_shared *shared = t_shared_header(value);
+  pthread_mutex_destroy(&shared->mutex);
+  t_runtime_free(shared->block);
+}
+
+void t_runtime_shared_lock(void *value) { pthread_mutex_lock(&t_shared_header(value)->mutex); }
+
+void t_runtime_shared_unlock(void *value) { pthread_mutex_unlock(&t_shared_header(value)->mutex); }
+
 /* Tasks.
 
    Tasks do not have their own threads yet. [t_runtime_tasks_spawn] calls

@@ -420,6 +420,43 @@ fn main(arguments: List[String]) -> ExitCode
   ExitCode.success
 }
 |});
+  test "tasks spawned inside a provide block capture its evidence" (fun () ->
+      expect_main ~expected:"total 10 then 110\n"
+        {|type Counter(count: Int64)
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+impl Tally for Counter {
+  fn add(mut self, amount: Int64) {
+    self.count += amount
+  }
+
+  fn total(self) -> Int64 {
+    self.count
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var counter = Counter(count: 0)
+  provide mut counter {
+    concurrent for index in 1..=4 {
+      Tally.add(index)
+    }
+    let first = Tally.total()
+    concurrent {
+      Tally.add(40)
+      Tally.add(60)
+    }
+    Console.print_line("total ${first} then ${Tally.total()}")
+  }
+  ExitCode.success
+}
+|});
   test "a concurrent for over mut elements gives each task its own element" (fun () ->
       expect_main ~expected:"2 4 6\n2 4 3 at 3\n"
         {|fn doubled(items: mut List[Int64])
