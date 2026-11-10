@@ -477,6 +477,19 @@ two arms of an `if` do. A `match` arm's guard runs only where its patterns match
 the next arm is tried where they did not, joined with where they did and
 the guard, which may change locals the same way, was false.
 
+A `parallel` block's branches change disjoint places, so they are read
+one after another. A `concurrent` block's are too: they change disjoint
+places as well, and a capability call already gives a fresh value, so
+nothing a proof relies on is changed by what another task does between
+two calls. A `concurrent for` loop's iterations are read as a `for`'s. A
+`?`, `return`, or `break` that leaves a branch takes effect only where the
+block ends, after the other branches, which are cancelled and run to their
+own ends: each later branch is read from where the exit was as well as
+from where the branches before it ended, and the exit is then taken with
+what each branch did. A cancelled task's capability calls return the
+cancelled value from their implementations, which their contracts cover,
+so cancelling asks nothing more of a proof.
+
 An `assert` makes one query: the facts gathered before it, and its fact as
 the goal, guarded by its path. Once made, it is a fact for the rest of the
 body, since its own query proves it. Code the prover cannot read soundly
@@ -1243,22 +1256,15 @@ test the prover itself:
 - **Proof states in the language server.** `Prover.states` gives each
   obligation's state at its position, proven or not with the diagnostic
   that says why; the language server, `truss lsp`, is not built yet.
-- **`concurrent`.** Its branches are to be proven as `parallel`'s are, one
-  after another. They change disjoint places, and a capability call
-  already gives a fresh value, so nothing a proof relies on is changed by
-  what another task does between two calls.
-  - A branch's `?`, `return`, or `break` is taken where the block ends,
-    after the other branches, which run on as far as cancellation lets
-    them. The places they change are disjoint, so the state there is each
-    branch's where it ended.
-  - Cancellation asks nothing more. The cancelled value is returned by an
-    implementation, which is proven against its method's contract like any
-    other result, so a method's `ensures` hold of it too.
-  - A channel's `receive` and `send` have no `time` clause, so a function
-    that must end cannot wait on one.
-  - A message that is received is known by its type's invariant, as a
-    capability call's result is. What a channel's contract should say
-    about the order of messages is not decided.
+- **An early exit from an iteration of a `concurrent for` loop** is
+  reported as code the prover cannot read: the iterations after it are
+  cancelled and run to their ends, which the loop's invariant would have
+  to say of where the exit is.
+- **Channels.** A channel's `receive` and `send` have no `time` clause, so
+  a function that must end cannot wait on one. A message that is received
+  is known by its type's invariant, as a capability call's result is. What
+  a channel's contract should say about the order of messages is not
+  decided.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.

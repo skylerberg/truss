@@ -109,6 +109,12 @@ type contract = {
 
 type loop_exits = { mutable breaks : frame list; mutable continues : frame list }
 
+(* An early exit from [concurrent] code, which takes effect only where the
+   tasks it leaves end: the tasks, innermost first, where it was, and what
+   it does then. *)
+and leaving = { tasks : Core.task list; at : frame; exit : exit_ }
+and exit_ = Returning of L.term option | Breaking | Continuing
+
 (* Where a path is: the value of each local, the values on entry for
    [old], the path's condition, and what [self] and [result] are. *)
 and frame = {
@@ -200,6 +206,7 @@ type context = {
   mutable values : (string * string) list;  (** For counterexamples. *)
   local_names : (Core.local, string) Hashtbl.t;  (** Each local's name, as its pattern binds it. *)
   mutable returns : (frame * L.term option) list;
+  mutable leaving : leaving list;  (** The early exits of the [concurrent] code being read. *)
   mutable instantiating : Path.t list;  (** Contracts being assumed, to stop at recursion. *)
   disjoint : (int * int) list;
       (** The ownership check's pairs of indexes, by the origin of each, that must differ. *)
@@ -1478,7 +1485,33 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Specification_function { function_; arguments } ->
       specification_function context frame node function_ arguments
   | Method_time callee -> Some (frame, method_time context frame callee)
-  | Leaving _ -> unsupported (at frame node) "an early exit from `concurrent` code"
+  | Leaving { tasks; exit } -> (
+      (* The exit is where the block it leaves ends, after the other
+         branches, so here it is only recorded. *)
+      match tasks with
+      | Iteration _ :: _ ->
+          unsupported (at frame node) "an early exit from an iteration of a `concurrent for` loop"
+      | _ -> (
+          let record at exit_ = context.leaving <- { tasks; at; exit = exit_ } :: context.leaving in
+          match exit.kind with
+          | Return (Some returned) -> (
+              match expression context frame returned with
+              | Some (after, term) ->
+                  record after (Returning (Some term));
+                  None
+              | None -> None)
+          | Return None ->
+              record frame (Returning None);
+              None
+          | Break ->
+              record frame Breaking;
+              None
+          | Continue ->
+              record frame Continuing;
+              None
+          | _ ->
+              unsupported (at frame node)
+                "an early exit that is not a `return`, `break`, or `continue`"))
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -6288,9 +6321,9 @@ and statement_kind context frame (node : statement) : frame option =
       let after, new_value = value context { frame with updating = Some current } updated in
       Some (store context { after with updating = frame.updating } target new_value)
   | While { condition; clauses; body } -> while_ context frame node condition clauses body
-  | For { mode = Concurrent_loop; _ } ->
-      unsupported (span_of frame.source node.origin) "a `concurrent for` loop"
-  | For { pattern; iteration; clauses; body; mode = Sequential | Parallel_loop } ->
+  | For { pattern; iteration; clauses; body; _ } ->
+      (* A loop's iterations change disjoint places, so however they run, as
+         tasks or at once, they can be read one after another. *)
       for_ context frame node pattern iteration clauses body
   | Assert { value = asserted; _ } ->
       let frame, term = value context frame asserted in
@@ -6314,8 +6347,77 @@ and statement_kind context frame (node : statement) : frame option =
         (fun frame branch ->
           match frame with Some frame -> statement context frame branch | None -> None)
         (Some frame) branches
-  | Concurrent _ -> unsupported (span_of frame.source node.origin) "a `concurrent` block"
+  | Concurrent branches -> concurrent context frame node branches
   | Yield { mode; part } -> handing_out context frame node mode part
+
+(* A [concurrent] block. Its branches change disjoint places, and a
+   capability call gives a fresh value whoever calls in between, so they
+   are read one after another, as [parallel]'s are. An early exit from a
+   branch takes effect where the block ends, after the other branches,
+   which are cancelled and run to their own ends: each later branch runs
+   from where the exit was as well as from where the branches before it
+   ended, and each exit is then taken with what its path changed, or, if
+   it leaves tasks around this block too, left to them. *)
+and concurrent context frame (node : statement) branches =
+  let outer = context.leaving in
+  let from_here (left : leaving) =
+    match left.tasks with Branch { block; _ } :: _ -> block = node.origin | _ -> false
+  in
+  let run start branch =
+    context.leaving <- [];
+    let ended = statement context start branch in
+    let left = context.leaving in
+    (ended, left)
+  in
+  let normal, pending =
+    List.fold_left
+      (fun (normal, pending) branch ->
+        let normal, left =
+          match normal with Some start -> run start branch | None -> (None, [])
+        in
+        let pending =
+          List.concat_map
+            (fun (waiting : leaving) ->
+              match run waiting.at branch with
+              | Some ended, _ -> [ { waiting with at = ended } ]
+              | None, stopped ->
+                  (* The branch left too, so either exit may be the one
+                     taken, with what the branch did before it left. *)
+                  List.map (fun (stop : leaving) -> { waiting with at = stop.at }) stopped @ stopped)
+            pending
+        in
+        (normal, pending @ left))
+      (Some frame, []) branches
+  in
+  let passed_on =
+    List.filter_map
+      (fun (left : leaving) ->
+        if not (from_here left) then Some left
+        else
+          match List.tl left.tasks with
+          | _ :: _ as outer_tasks -> Some { left with tasks = outer_tasks }
+          | [] -> (
+              match left.exit with
+              | Returning value ->
+                  context.returns <- (left.at, value) :: context.returns;
+                  None
+              | Breaking -> (
+                  match left.at.loop with
+                  | Some exits ->
+                      exits.breaks <- left.at :: exits.breaks;
+                      None
+                  | None -> unsupported (span_of frame.source node.origin) "`break` outside a loop")
+              | Continuing -> (
+                  match left.at.loop with
+                  | Some exits ->
+                      exits.continues <- left.at :: exits.continues;
+                      None
+                  | None ->
+                      unsupported (span_of frame.source node.origin) "`continue` outside a loop")))
+      pending
+  in
+  context.leaving <- outer @ passed_on;
+  normal
 
 (* A [yield] in a lending or yielding method's own body: the part meets
    the clauses about each part; a [mut] part comes back as the caller left
@@ -7288,6 +7390,7 @@ let new_context database ~home ~current ~terminates ~measures =
     values = [];
     local_names = Hashtbl.create 16;
     returns = [];
+    leaving = [];
     instantiating = [];
     hands_out = None;
     handing = None;
