@@ -185,6 +185,19 @@ let () =
      update total = add(updating, item) }; for step in count 0..=total {  }; while (total < 3) { \
      update total = add(updating, 1) }; total }"
 
+let () =
+  builds "a loop over the result of a call iterates over the result's `each`"
+    "fn make() -> List[Int64] {\n\
+    \  todo\n\
+     }\n\n\
+     fn g() {\n\
+    \  for item in make() {\n\
+    \    let _ = item\n\
+    \  }\n\
+     }\n"
+    "{ for item in each standard::list::List.each[Int64](app::main::make()) { let _ = place item \
+     } }"
+
 (* Specifications *)
 
 let () =
@@ -466,6 +479,33 @@ let () =
      cost calls(standard::capabilities::Clock.now) <= 1\n\
      cost time O(multiply(to_integer(standard::list::List.length[Int64](place items)), time(visit)))\n\
      {  }"
+
+let () =
+  test "the origin of a cost is its cost clause" (fun () ->
+      let text =
+        "fn g(items: List[Int64]) -> USize\n\
+        \  cost time O(items.length())\n\
+         {\n\
+        \  items.length()\n\
+         }\n"
+      in
+      let database = setup [ ("app::main", text) ] in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = Resolve.Names.key_of declaration in
+          match
+            ( Query.demand database Infer.core key,
+              Query.demand database Resolve.Names.spans key,
+              Query.demand database Resolve.Names.text key )
+          with
+          | ( Some { parts = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
+              Some spans,
+              Some written ) ->
+              let span = spans.(cost.origin) in
+              let quoted = String.sub written span.start (span.stop - span.start) in
+              if quoted <> "cost time O(items.length())" then fail "found `%s`" quoted
+          | _ -> fail "no form with one cost")
+        (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
 (* Every form of the standard library holds to what a form promises. *)
 
