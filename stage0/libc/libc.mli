@@ -85,6 +85,16 @@ type function_ =
   | Fstat
   | Stat
   | Lstat
+  | Mkdir
+  | Remove
+  | Rename
+  | Symlink
+  | Link
+  | Chmod
+  | Utimensat
+  | Readlink
+  | Realpath
+  | Nanosleep
 
 val functions : function_ list
 
@@ -152,6 +162,9 @@ type number =
   | S_ifreg
   | S_ifdir
   | S_iflnk
+  | At_fdcwd
+  | Utime_omit
+  | Path_max
 
 val numbers : number list
 
