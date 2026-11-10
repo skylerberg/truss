@@ -286,6 +286,88 @@ let () =
         ~fixed:"fn f(items: List[Int64]) {\n  let _ = items.length()\n}\n");
   test "a let cannot be assigned" (fun () ->
       one_diagnostic "fn f() {\n  let count = 0\n  count = 1\n}\n" "types.not_assignable");
+  List.iter
+    (fun (what, text) ->
+      test (what ^ " cannot be marked `mut`") (fun () -> one_diagnostic text "types.wrong_mark"))
+    [
+      ("a read-only parameter", "fn f(items: List[Int64]) {\n  mut items.push(2)\n}\n");
+      ("an `own` parameter", "fn f(items: own List[Int64]) {\n  mut items.push(2)\n}\n");
+      ("a `let`", "fn f() {\n  let items: List[Int64] = [1]\n  mut items.push(2)\n}\n");
+      ( "a field of a `let`",
+        "type Config(ports: List[Int64])\n\n\
+         fn f() {\n\
+        \  let config = Config(ports: [1])\n\
+        \  mut config.ports.push(2)\n\
+         }\n" );
+      ( "an element of a read-only parameter",
+        "fn f(rows: List[List[Int64]]) {\n  mut rows[0].push(2)\n}\n" );
+      ("a constant", "let names: List[Int64] = [1, 2]\n\nfn f() {\n  mut names.push(3)\n}\n");
+      ( "a read-only argument",
+        "fn change(items: mut List[Int64]) {}\n\n\
+         fn f(items: List[Int64]) {\n\
+        \  change(mut items)\n\
+         }\n" );
+      ( "the collection of a `for` loop that is a read-only parameter",
+        "fn f(items: List[Int64]) {\n  for item in mut items {\n    item = 0\n  }\n}\n" );
+      ( "`self` in a method that takes `self` read-only",
+        "type Counter(counts: List[Int64])\n\n\
+         fn Counter.add(self) {\n\
+        \  mut self.counts.push(1)\n\
+         }\n" );
+      ( "`self` inside a lambda",
+        "type Counter(counts: List[Int64])\n\n\
+         fn Counter.add_all(mut self, items: List[Int64]) {\n\
+        \  let _ = items.map(fn(item) {\n\
+        \    mut self.counts.push(item)\n\
+        \    item\n\
+        \  })\n\
+         }\n" );
+      ( "a local that a lambda captures",
+        "fn f(items: List[Int64]) {\n\
+        \  var seen: List[Int64] = []\n\
+        \  let _ = items.map(fn(item) {\n\
+        \    mut seen.push(item)\n\
+        \    item\n\
+        \  })\n\
+        \  let _ = seen\n\
+         }\n" );
+    ];
+  test "a `var`, a `mut` parameter, `mut self`, and a `mut` loop variable can be marked `mut`"
+    (fun () ->
+      fine
+        "type Counter(counts: List[Int64])\n\n\
+         fn Counter.add(mut self) {\n\
+        \  mut self.counts.push(1)\n\
+         }\n\n\
+         fn f(rows: mut List[List[Int64]]) {\n\
+        \  var items: List[Int64] = [1]\n\
+        \  mut items.push(2)\n\
+        \  mut rows[0].push(3)\n\
+        \  for row in mut rows {\n\
+        \    mut row.push(4)\n\
+        \  }\n\
+         }\n");
+  test "the variable of a loop over a call that yields `mut` can be marked `mut`" (fun () ->
+      fine
+        "trait Rows {\n\
+        \  fn rows(mut self) yields mut List[Int64]\n\
+         }\n\n\
+         type Grid(cells: List[List[Int64]])\n\n\
+         impl Rows for Grid {\n\
+        \  fn rows(mut self) yields mut List[Int64] {\n\
+        \    for row in mut self.cells {\n\
+        \      yield mut row\n\
+        \    }\n\
+        \  }\n\
+         }\n\n\
+         fn f[Source: Rows](grid: mut Grid, source: mut Source) {\n\
+        \  for row in mut grid.rows() {\n\
+        \    mut row.push(1)\n\
+        \  }\n\
+        \  for row in mut source.rows() {\n\
+        \    mut row.push(2)\n\
+        \  }\n\
+         }\n");
   test "a var can be assigned" (fun () ->
       fine "fn f() {\n  var count = 0\n  count = 1\n  let _ = count\n}\n");
   test "an empty list with nothing to decide its elements is an error" (fun () ->

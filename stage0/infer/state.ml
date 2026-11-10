@@ -1218,12 +1218,56 @@ let scrutinee_mode state (scrutinee : expression) : T.mode =
   | Mode (Mut, inner) when Option.is_none (marked_call state inner) && not (is_slice inner) -> Mut
   | _ -> if borrowed state scrutinee then Read else Own
 
-(* Marks a place as mutated: it is assigned, passed [mut], or lent [mut].
-   Every index expression in the place then uses the [mut self] version of
-   [at], which lends its element [mut]. *)
-let rec mutable_place state (value : expression) =
+(* Mutation *)
+
+(* Why a place cannot be mutated. *)
+type immutable =
+  | Read_only of string
+      (** The place is, or is part of, a [let] binding, a parameter that is not [mut], a constant,
+          or [self] in a method that does not take [mut self]. *)
+  | Captured of string  (** Inside a lambda, the place belongs to the enclosing function. *)
+  | Lent_read_only  (** The place is part of what a call lends read-only. *)
+  | Not_a_place
+
+(* Why a place cannot be mutated, or [None] if it can. Only a [var], a
+   [mut] parameter, the variable of a [mut] loop, [mut self], a part of one
+   of these, and a part that a call lends [mut] can be mutated. *)
+let rec immutable state env (value : expression) : immutable option =
   match value.kind with
-  | Member (base, _) | Parenthesized base | Mode (_, base) -> mutable_place state base
+  | Name path -> (
+      match target state path.last with
+      | Some (Local id) -> (
+          let captured =
+            match (state.lambdas, Hashtbl.find_opt state.binding_spans id) with
+            | (lambda : span) :: _, Some (binding : span) ->
+                binding.start < lambda.start || binding.start >= lambda.stop
+            | _ -> false
+          in
+          match Hashtbl.find_opt state.locals id with
+          | _ when captured -> Some (Captured path.last.text)
+          | Some local ->
+              if local.mutable_ || local.mode = Mut then None else Some (Read_only path.last.text)
+          | None -> None)
+      | Some (Definition _) -> Some (Read_only path.last.text)
+      | _ -> None)
+  | Self_value ->
+      if state.lambdas <> [] then Some (Captured "self")
+      else if env.self_mode = T.Mut then None
+      else Some (Read_only "self")
+  | Member (base, _) | Bracket (base, _) | Parenthesized base -> immutable state env base
+  | Mode (Mut, inner) when Option.is_some (marked_call state inner) -> immutable state env inner
+  | Call _ -> (
+      match lent state value with
+      | Some T.Mut -> None
+      | Some _ -> Some Lent_read_only
+      | None -> Some Not_a_place)
+  | _ -> Some Not_a_place
+
+(* Records that a place is mutated: every index expression in the place
+   uses the [mut self] version of [at], which lends its element [mut]. *)
+let rec use_mutable_indexes state (value : expression) =
+  match value.kind with
+  | Member (base, _) | Parenthesized base | Mode (_, base) -> use_mutable_indexes state base
   | Bracket (base, _) ->
       (match state.tables.calls.(value.id) with
       | Some ({ callee = Trait_method ({ name = "at"; _ } as method_); arguments; _ } as call) ->
@@ -1239,8 +1283,45 @@ let rec mutable_place state (value : expression) =
                     arguments;
               }
       | _ -> ());
-      mutable_place state base
+      use_mutable_indexes state base
   | _ -> ()
+
+type mutation =
+  | Assignment
+  | Mut_mark  (** The place is passed [mut], is a [mut] receiver, or is lent or yielded [mut]. *)
+
+(* Checks that a place may be mutated, and records that it is. Every
+   construct that mutates a place calls this. *)
+let mutate state env ~(by : mutation) (value : expression) =
+  let code : Diagnostic.Code.types =
+    match by with Assignment -> Not_assignable | Mut_mark -> Wrong_mark
+  in
+  (match (immutable state env value, by) with
+  | None, _ -> ()
+  | Some (Captured name), _ ->
+      report state code value.span
+        (Printf.sprintf
+           "A lambda cannot change what it captures, and `%s` is from outside it. Return the new \
+            value instead, or use a loop."
+           name)
+  | Some (Read_only name), _ ->
+      report state code value.span
+        (Printf.sprintf
+           "`%s` cannot change here: only a `var`, a `mut` parameter, or `mut self`, and their \
+            parts, can be %s."
+           name
+           (match by with Assignment -> "assigned" | Mut_mark -> "marked `mut`"))
+  | Some Lent_read_only, Assignment ->
+      report state code value.span
+        ~fixes:[ fix "Mark it `mut`." [ insert value.span.start "mut " ] ]
+        "This part is lent read-only, so it cannot change. Mark the place it is lent from `mut`, \
+         so that it is lent `mut`."
+  | Some Not_a_place, Assignment ->
+      report state code value.span
+        "Only a place, such as a variable, a field, or an element, can be assigned."
+  (* The check of the mark or of the receiver reports these. *)
+  | Some (Lent_read_only | Not_a_place), Mut_mark -> ());
+  use_mutable_indexes state value
 
 (* Arguments and modes *)
 
@@ -1258,7 +1339,7 @@ let argument_form state (value : expression) =
 let mark_span (value : expression) (inner : expression) =
   Span.make value.span.start inner.span.start
 
-let check_mode state (value : expression) (parameter : T.parameter_info) type_ =
+let check_mode state env (value : expression) (parameter : T.parameter_info) type_ =
   let name = parameter.name in
   match (parameter.mode, argument_form state value) with
   | Read, (Place | Temporary | Lent _) -> ()
@@ -1270,12 +1351,12 @@ let check_mode state (value : expression) (parameter : T.parameter_info) type_ =
               [ Diagnostic.delete (Source.span value.span.start inner.span.start) ];
           ]
         (Printf.sprintf "`%s` only reads its argument, so it takes no mark." name)
-  | Mut, Marked (Mut, inner) -> mutable_place state inner
+  | Mut, Marked (Mut, inner) -> mutate state env ~by:Mut_mark inner
   | Mut, Place ->
       report state Missing_mark value.span
         ~fixes:[ fix "Mark it `mut`." [ insert value.span.start "mut " ] ]
         (Printf.sprintf "`%s` may change its argument, so the call marks it `mut`." name)
-  | Mut, Lent Mut -> mutable_place state value
+  | Mut, Lent Mut -> mutate state env ~by:Mut_mark value
   | Mut, Lent (Read | Own) ->
       report state Wrong_mark value.span
         (Printf.sprintf

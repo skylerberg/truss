@@ -115,7 +115,8 @@ and expression_kind state env ?expected (value : expression) : T.ty =
             (call_id, match mode with Mut -> T.Mut | Own -> T.Own) :: state.receiver_modes
       | None -> ());
       let type_ = expression state env ?expected inner in
-      if mode = Mut && Option.is_none (marked_call state inner) then mutable_place state inner;
+      if mode = Mut && Option.is_none (marked_call state inner) then
+        mutate state env ~by:Mut_mark inner;
       alias_expression state value inner;
       type_
   | Any inner -> any_ state env ?expected value inner

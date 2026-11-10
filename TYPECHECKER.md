@@ -886,6 +886,11 @@ The keyword at a call site must agree with the parameter:
   there.
 - **A mark covers the longest place it can,** and the first method call
   after it takes that place as its receiver, as SYNTAX.md describes.
+- **A `mut` mark needs a mutable place.** The place in `mut place`, the
+  receiver of a `mut self` method, and the collection of a `for` loop over
+  `mut place` must be mutable, by the rule for the left side of an
+  assignment in [Statements and blocks](#statements-and-blocks). A `mut`
+  mark on any other place is an error.
 - **A receiver's mode chooses the method's version.** No mark chooses the
   read-only version, and `mut` and `own` choose theirs. On a temporary, the
   `own` version is chosen if there is one, and the read-only one otherwise.
@@ -939,9 +944,11 @@ type of a bound.
   there is one, and then the pattern against the expression's type. The
   pattern must be irrefutable unless there is an `else`, whose block must
   have type `Never`.
-- **An assignment's left side** must be a place that may change: a `var`, a
-  field or element of one, a `mut` parameter or a part of it, or a part of
-  `mut self`. A constant, a `let`, and a read-only parameter cannot change.
+- **An assignment's left side must be a mutable place.** A mutable place is
+  a `var`, a `mut` parameter, the variable of a `mut` loop, `self` in a
+  `mut self` method, a field or an element of one of these, or a part that
+  a call lends `mut`. A constant, a `let`, a read-only or `own` parameter,
+  and a local that a lambda captures are not mutable.
 - **A block's value is its last expression.** Every other statement must
   have type `Unit` or `Never`; any other value is an error with a fix that
   writes `let _ =`, as DESIGN.md requires. An `if` without an `else` has type
@@ -952,11 +959,13 @@ type of a bound.
 - **`while`** takes a `Bool`. A `while` whose condition is the literal
   `true`, and which no `break` leaves, has type `Never`, as Java and Kotlin
   treat it. Any other loop is a statement of type `Unit`.
-- **`for pattern in expression`** calls `each` with the loop's mode, as
-  SYNTAX.md describes: a call to a `yields` method drives the loop directly;
-  a cursor is pulled until it ends; and any other value has its `each`
-  method looked up by the mode, which must be a `yields` method. The pattern
-  is checked against what is yielded.
+- **`for pattern in expression`** has three forms, as SYNTAX.md describes.
+  If the expression is a call of a `yields` method, the loop iterates over
+  that call, and the loop variable has the mode that the method yields
+  with. If it is a cursor, the loop advances the cursor until it is
+  exhausted. For any other value, the loop calls the value's `each` with
+  the loop's mode; `each` must be a `yields` method. The pattern is checked
+  against the yielded type.
 - **`return`, `?`, `break`, and `continue`** have type `Never`. `return` and
   `?` belong to the innermost function or lambda: `return` checks its value
   against that result type, and `?` takes a `Result` whose error type is the
