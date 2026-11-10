@@ -877,6 +877,38 @@ let () =
      }\n"
     "ownership.field_not_restored"
 
+(* Guards *)
+
+let () =
+  let bump = "fn bump(count: mut Int64) -> Bool {\n  count = 1\n  false\n}\n\n" in
+  test "a guard cannot change what the `match` matches" (fun () ->
+      one_diagnostic
+        (bump
+       ^ "fn f() -> Int64 {\n\
+         \  var n: Int64 = 0\n\
+         \  match n {\n\
+         \    0 if bump(mut n) => 1\n\
+         \    0 => 2\n\
+         \    _ => 3\n\
+         \  }\n\
+          }\n")
+        "ownership.changed_while_viewed");
+  test "a guard can change another place, and an arm's body can change what was matched" (fun () ->
+      fine
+        (bump
+       ^ "fn f() -> Int64 {\n\
+         \  var n: Int64 = 0\n\
+         \  var other: Int64 = 0\n\
+         \  match n {\n\
+         \    0 if bump(mut other) => 1\n\
+         \    0 => {\n\
+         \      n = 5\n\
+         \      n + other\n\
+         \    }\n\
+         \    _ => 3\n\
+         \  }\n\
+          }\n"))
+
 (* Constants *)
 
 let () =

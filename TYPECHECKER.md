@@ -1205,6 +1205,11 @@ the value of an assignment and then the keys of its target.
   move it, or lend it `mut`. So `show(items[0], count: grow(mut items))` is
   an error, as in Rust: the call would be given an element of a list that
   `grow` has since changed. An operand that is a copy lends nothing.
+- **What a `match` matches is lent while a guard is evaluated.** If the
+  guard is false, the arms after it are tried against the same value, so a
+  guard may read it and may not change it: `0 if bump(mut n) => 1` in
+  `match n` is an error, as in Rust. An arm's body may change it, once the
+  arm is chosen.
 - **A `mut` borrow for an argument begins at the call,** after every
   argument is evaluated. So `mut items.push(items.length())` is allowed, as
   Rust's two-phase borrows allow it. At the call, two places that the call
