@@ -138,6 +138,9 @@ type builder = {
   mutable simultaneous_loops : simultaneous_loop list;
   plain : T.ty -> bool;
   is_view : T.ty -> bool;
+  stores_function : Core.callee -> int -> bool;
+      (** Whether the callee declares the parameter at a position as an [own] parameter of a
+          function type. *)
 }
 
 let add builder action origin =
@@ -681,12 +684,14 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
      parameter. *)
   let frontier =
     List.fold_left
-      (fun frontier (argument : Core.argument) ->
+      (fun frontier (position, (argument : Core.argument)) ->
         match argument with
-        | Passed { mode = Own; value = Value ({ type_ = T.Function _; _ } as value) } ->
+        | Passed { mode = Own; value = Value ({ type_ = T.Function _; _ } as value) }
+          when builder.stores_function call.callee position ->
             emit builder frontier (Pass_owned_function (views_of builder value)) value.origin
         | _ -> frontier)
-      frontier call.arguments
+      frontier
+      (List.mapi (fun position argument -> (position, argument)) call.arguments)
   in
   (* A call of a lending method borrows its receiver until the statement
      ends. *)
@@ -1077,7 +1082,7 @@ and loop builder frontier ~bound ~views ~loan ~condition ~simultaneous (body : C
 
 (* The graph of a definition, or [None] if the definition has no body to
    check: only a function, a test, and a law's proof have one. *)
-let of_definition ~plain ~is_view (definition : Core.definition) : t option =
+let of_definition ~plain ~is_view ~stores_function (definition : Core.definition) : t option =
   let body =
     match definition with
     | Function { body = Some body; _ } -> Some (body, true)
@@ -1098,6 +1103,7 @@ let of_definition ~plain ~is_view (definition : Core.definition) : t option =
           simultaneous_loops = [];
           plain;
           is_view;
+          stores_function;
         }
       in
       let entry = add builder Enter 0 in

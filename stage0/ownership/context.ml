@@ -33,6 +33,33 @@ let plain context type_ = Interface.Impls.plain context.database ~bounds:context
 let copyable context type_ = Interface.Impls.copyable context.database ~bounds:context.bounds type_
 let is_view context type_ = Interface.Impls.is_view context.database ~bounds:context.bounds type_
 
+(* Whether the callee declares the parameter at [position] as an [own]
+   parameter of a function type, where a method's receiver is position 0.
+   The callee may store a function that it receives through such a
+   parameter. A generic [own] parameter that is instantiated with a function
+   type does not count: the callee treats its value as any other view, so
+   the view rules track it. *)
+let stores_function context (callee : Core.callee) position =
+  let declared (signature : T.signature) =
+    let index = if Option.is_some signature.receiver then position - 1 else position in
+    match List.nth_opt signature.parameters index with
+    | Some parameter when index >= 0 -> List.mem parameter.name signature.stores_functions
+    | _ -> false
+  in
+  match callee with
+  | Function { path; _ } ->
+      Option.fold ~none:false ~some:declared (Interface.Impls.signature context.database path)
+  | Trait_method { trait; name; receiver; _ } ->
+      Option.fold ~none:false
+        ~some:(fun (method_ : T.trait_method) -> declared method_.method_signature)
+        (Infer.Members.trait_method context.database trait.trait name receiver)
+  | Capability_method { capability; name } ->
+      List.exists
+        (fun (method_ : T.trait_method) -> declared method_.method_signature)
+        (Infer.Members.trait_methods context.database capability name)
+  | Intrinsic _ -> false
+  | Indirect _ -> true
+
 let span context (origin : Core.origin) : Syntax.span =
   if origin >= 0 && origin < Array.length context.spans then context.spans.(origin)
   else Syntax.Span.make 0 0
