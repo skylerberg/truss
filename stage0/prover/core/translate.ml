@@ -3330,6 +3330,9 @@ and pattern_match context frame (written : pattern) term ty : L.term * frame =
   | Binding_or_constant name_ -> (
       match source.resolved.names.(name_.id) with
       | Some Binding -> (L.Boolean true, { frame with locals = Ids.add name_.id term frame.locals })
+      | Some (Local id) ->
+          (* A later alternative's name for the binding the first one made. *)
+          (L.Boolean true, { frame with locals = Ids.add id term frame.locals })
       | Some (Definition path) ->
           ( L.equal term
               (constant_value context frame
@@ -3383,16 +3386,32 @@ and pattern_match context frame (written : pattern) term ty : L.term * frame =
           fields_match context frame written type_ None term fields
       | _ -> unsupported written.span "this record pattern")
   | Alternatives alternatives ->
-      let conditions =
-        List.map
-          (fun alternative ->
-            let condition, after = pattern_match context frame alternative term ty in
-            if not (Ids.equal ( = ) after.locals frame.locals) then
-              unsupported written.span "alternatives that bind names";
-            condition)
-          alternatives
+      (* Each alternative binds the same names, each the part of the value
+         the first alternative that matches names. *)
+      let matched =
+        List.map (fun alternative -> pattern_match context frame alternative term ty) alternatives
       in
-      (L.disjunction conditions, frame)
+      let bound =
+        match matched with
+        | [] -> frame.locals
+        | (_, first) :: _ ->
+            Ids.mapi
+              (fun id _ ->
+                match List.rev matched with
+                | (_, last) :: earlier ->
+                    List.fold_left
+                      (fun otherwise (condition, (after : frame)) ->
+                        match Ids.find_opt id after.locals with
+                        | Some part -> L.ite condition part otherwise
+                        | None -> otherwise)
+                      (Ids.find id last.locals) earlier
+                | [] -> Ids.find id first.locals)
+              (Ids.filter
+                 (fun id _ ->
+                   List.for_all (fun (_, (after : frame)) -> Ids.mem id after.locals) matched)
+                 first.locals)
+      in
+      (L.disjunction (List.map fst matched), { frame with locals = bound })
   | Pattern_error -> unsupported written.span "this pattern"
 
 and literal_condition context (written : pattern) literal term ty =

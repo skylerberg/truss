@@ -971,8 +971,9 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - records and sum types whose fields the package sees, as algebraic
   datatypes with their variants and fields sorted by name: building them,
   with fields defaulted, reading fields, variants with no fields,
-  constants, `with`, `match` with guards and every pattern but alternatives
-  that bind, with a string pattern matching text by its bytes, `is`, `?`
+  constants, `with`, `match` with guards and every pattern, with
+  alternatives binding each name to the part the first alternative that
+  matches names and a string pattern matching text by its bytes, `is`, `?`
   on a `Result` or an `Option`, and `==` as the solver's equality for
   types with structural equality. Each field
   read is in its type's range, and a counterexample shows a value by its
@@ -1096,8 +1097,8 @@ A call whose callee's contract it cannot read, such as one with errors,
 gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as alternatives in a pattern
-that bind names, is reported as
+definition that uses anything else, such as a quantifier over a
+collection whose elements a pattern takes apart, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.
 

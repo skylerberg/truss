@@ -2087,17 +2087,22 @@ let () =
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven
+      not_proven "fn f(items: List[Int64]) -> Bool {\n  forall _ in items => true\n}\n"
+        "prover.unsupported");
+  test "alternatives bind each name to the part that matched" (fun () ->
+      proven
         "type Side =\n\
         \  | Left(value: Int64)\n\
-        \  | Right(value: Int64)\n\n\
-         fn f(side: Side) -> Int64 {\n\
+        \  | Right(value: Int64)\n\
+        \  derives Equal\n\n\
+         fn f(side: Side) -> Int64\n\
+        \  requires side == Side.Left(value: 3) || side == Side.Right(value: 3)\n\
+        \  ensures result == 3\n\
+         {\n\
         \  match side {\n\
         \    Left(value) | Right(value) => value\n\
         \  }\n\
-         }\n"
-        "prover.unsupported");
-  ()
+         }\n")
 
 (* Queries *)
 
