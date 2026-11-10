@@ -97,9 +97,10 @@ let bind_parameters ?how st =
 (* The start every function from source shares, after its result's slot:
    its parameters, the mask of defaults passed, and the evidence it is
    given, with its defaults filled in and its [requires] clauses checked.
-   Gives the parameters bound, the mask, and every parameter's local in
-   order. *)
-let begin_body ?how st =
+   [defaults] and [requirements] give those, read from the syntax tree
+   unless the caller reads them from the core form. Returns the parameters
+   bound, the mask, and every parameter's local in order. *)
+let begin_body ?how ?(defaults = syntax_defaults) ?(requirements = syntax_requirements) st =
   let code = st.frame.code in
   let bound = bind_parameters ?how st in
   let mask =
@@ -109,8 +110,8 @@ let begin_body ?how st =
   start st.b (block st.b);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
-  Option.iter (fill_defaults st) mask;
-  check_requires st;
+  Option.iter (fun mask -> fill_defaults st mask (defaults st)) mask;
+  check_requires st (requirements st);
   ( bound,
     mask,
     List.filter_map (fun (arrives, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence )
@@ -233,33 +234,35 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
    fallback to the syntax tree, if there was one. *)
 let source_code context key ~path ~type_arguments : Lir.t * string option =
   let code = code_of context path type_arguments in
-  (* Lowers the function with [body] lowering its body, or returns the error
-     that [body] returns. *)
-  let lowered body : (Lir.t, string) result =
+  (* Lowers the function, reading its defaults, its [requires] clauses, and
+     its body through the three functions. *)
+  let lowered ~defaults ~requirements ~body : Lir.t =
     let st = enter context (frame_of code ~inlined:[ path ]) in
     let convention, returns = result_of context code.substitution code.result in
     result_slot st convention;
-    let _, _, parameters = begin_body st in
-    Result.map
-      (fun () : Lir.t ->
-        {
-          key;
-          main = finish_function st ~returns ~first:[] ~rest:parameters ();
-          nested = nested_functions st;
-        })
-      (body st)
+    let _, _, parameters = begin_body st ~defaults ~requirements in
+    body st;
+    {
+      key;
+      main = finish_function st ~returns ~first:[] ~rest:parameters ();
+      nested = nested_functions st;
+    }
   in
-  let from_core =
-    match demand context Infer.core_of_path path with
-    | Some (form, _) -> lowered (fun st -> Core_form.body st form)
-    | None -> Error "a definition with no core form"
+  let from_syntax_tree () =
+    lowered ~defaults:syntax_defaults ~requirements:syntax_requirements ~body:(fun st ->
+        block_into st code.body (result_place st))
   in
-  match from_core with
-  | Ok instance -> (instance, None)
-  | Error reason -> (
-      match lowered (fun st -> Ok (block_into st code.body (result_place st))) with
-      | Ok instance -> (instance, Some reason)
-      | Error _ -> bug "a body that was not lowered")
+  match demand context Infer.core_of_path path with
+  | None -> (from_syntax_tree (), Some "a definition with no core form")
+  | Some (form, _) -> (
+      match
+        lowered
+          ~defaults:(fun st -> Core_form.defaults st form)
+          ~requirements:(fun st -> Core_form.requirements st form)
+          ~body:(fun st -> Core_form.body st form)
+      with
+      | instance -> (instance, None)
+      | exception Core_form.Unhandled_node reason -> (from_syntax_tree (), Some reason))
 
 let core_fallback_reason context (key : Instance.key) =
   match key with

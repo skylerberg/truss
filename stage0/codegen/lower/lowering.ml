@@ -63,6 +63,23 @@ type state = {
   pulling : bool;  (** Whether this is a yielding method's pulled version, whose [yield]s stay *)
 }
 
+(* A parameter's default, as function entry fills it in. *)
+type default = {
+  mode : T.mode;
+  ty : Ground.ty;
+  binding : S.id;  (** The key of the parameter's place in the frame's bindings *)
+  name : string;
+  evaluate : Lir.place -> unit;  (** Evaluates the default into a place *)
+  span : S.span;  (** The default's position *)
+}
+
+(* A [requires] clause that can run, as function entry tests it. *)
+type requirement = {
+  test : yes:Lir.block -> no:Lir.block -> unit;  (** Lowers the clause to jumps *)
+  text : string;  (** The clause's source text *)
+  site : Lir.site;  (** The clause's position *)
+}
+
 (* The code a function starts lowering: its own, with nothing bound yet. *)
 let frame_of code ~inlined =
   {

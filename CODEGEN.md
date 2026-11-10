@@ -38,8 +38,9 @@ body when every node in the body is of a supported kind:
 - constructor calls that pass every field
 
 A body with any other node falls back to the older lowering, which walks the
-syntax tree and the checked form's tables. Parameter binding and `requires`
-checks always use the older lowering.
+syntax tree and the checked form's tables. A function's parameter defaults
+and `requires` checks are lowered from the same source as its body, so an
+unsupported node in either one also falls back.
 
 Code generation:
 
@@ -1532,9 +1533,8 @@ a command line can hold.
   syntax-tree lowering: lending calls, calls through a function value,
   capability method calls, lambdas, array, set, and map literals,
   interpolated and tagged strings, `with` updates, slices, constructor
-  calls that rely on a field default, `for` over a cursor, and parameter
-  binding and `requires` checks. Once all of them are supported, the
-  syntax-tree lowering is deleted.
+  calls that rely on a field default, and `for` over a cursor. Once all of
+  them are supported, the syntax-tree lowering is deleted.
 - **`match` as a decision tree.** A tree would test each part of the value
   once, in the order the patterns need, and switch on tags and integers,
   where arms tested in order may test one part again for each arm.
