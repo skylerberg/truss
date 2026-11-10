@@ -52,6 +52,10 @@ type action =
   | Ends of Core.local list
       (** These locals stop being bound: a loop's variables when the loop ends, an arm's names after
           the arm, and a lambda's parameters at the end of its body. *)
+  | Task_end of { first : int; limit : int }
+      (** A branch of a [concurrent] block ends. Its points are those from [first] up to, but not
+          including, [limit]. If another branch leaves early, the code after the block does not run,
+          so the branch must have put back what it took out of a place that is lent [mut]. *)
   | Suspend of view list
       (** A [yield]. A loop may stop a yielding method here. The views are what the yielded value
           views, if its type can hold a view. *)
@@ -212,8 +216,9 @@ let rec viewed builder (value : Core.expression) : view list =
      listed, so that a new kind is decided here. *)
   | Integer _ | Float _ | Boolean _ | String _ | Interpolated _ | Function_value _
   | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _ | Or _ | Implies _
-  | Matches _ | Return _ | Break | Continue | Todo | Unreachable | Result | Old _ | Current_target
-  | Quantified _ | Yielded | Finished | Identical _ | Specification_function _ | Method_time _ ->
+  | Matches _ | Return _ | Break | Continue | Leaving _ | Todo | Unreachable | Result | Old _
+  | Current_target | Quantified _ | Yielded | Finished | Identical _ | Specification_function _
+  | Method_time _ ->
       []
 
 (* What a part of a value views, if the part's type can hold a view. *)
@@ -283,9 +288,9 @@ let rec viewed_temporaries builder (value : Core.expression) : Core.expression l
   | Copy (Place _)
   | Cursor_next _ | Lambda _ | Integer _ | Float _ | Boolean _ | String _ | Interpolated _
   | Function_value _ | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _
-  | Or _ | Implies _ | Matches _ | Return _ | Break | Continue | Todo | Unreachable | Result | Old _
-  | Current_target | Quantified _ | Yielded | Finished | Identical _ | Specification_function _
-  | Method_time _ ->
+  | Or _ | Implies _ | Matches _ | Return _ | Break | Continue | Leaving _ | Todo | Unreachable
+  | Result | Old _ | Current_target | Quantified _ | Yielded | Finished | Identical _
+  | Specification_function _ | Method_time _ ->
       []
 
 and owned_temporary builder (found : Core.operand) : Core.expression list =
@@ -357,6 +362,9 @@ let rec expression builder frontier (node : Core.expression) : int list =
   | Current_target | Yielded | Finished | Todo | Method_time _ ->
       frontier
   | Quantified { binder; body; _ } -> quantified builder frontier node binder body
+  (* An exit that leaves a task goes where the exit goes. The other tasks
+     have ended by then, each as its own flow describes. *)
+  | Leaving { exit; _ } -> expression builder frontier exit
   | Unreachable -> []
   | Break ->
       (match builder.loops with (breaks, _) :: _ -> breaks := frontier @ !breaks | [] -> ());
@@ -856,17 +864,23 @@ and statement_kind builder frontier (node : Core.statement) =
       in
       loop builder frontier ~bound:(pattern_locals pattern) ~views ~held ~condition:None body
         node.origin
-        ~parallel:(match node.kind with For { parallel; _ } -> parallel | _ -> false)
+        ~parallel:(match node.kind with For { mode; _ } -> mode <> Sequential | _ -> false)
   | While { condition; body; _ } ->
       loop builder frontier ~bound:[] ~views:[] ~held:None ~condition:(Some condition) body
         node.origin ~parallel:false
-  | Parallel branches ->
+  | Parallel branches | Concurrent branches ->
+      let concurrent = match node.kind with Concurrent _ -> true | _ -> false in
       let frontier, ranges =
         List.fold_left
           (fun (frontier, ranges) branch ->
             let first = builder.count in
             let frontier = statement builder frontier branch in
-            (frontier, { first; limit = builder.count } :: ranges))
+            let limit = builder.count in
+            let frontier =
+              if concurrent then emit builder frontier (Task_end { first; limit }) branch.origin
+              else frontier
+            in
+            (frontier, { first; limit } :: ranges))
           (frontier, []) branches
       in
       builder.parallel_blocks <- List.rev ranges :: builder.parallel_blocks;

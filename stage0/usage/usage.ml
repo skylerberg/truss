@@ -121,8 +121,10 @@ let never context (value : expression) =
   match context.checked.types.(value.id) with Some T.Never -> true | _ -> false
 
 (* Whether a statement never finishes, from types alone. *)
-let statement_never context (written : statement) =
+let rec statement_never context (written : statement) =
   match written.kind with
+  (* A [parallel] or [concurrent] block ends only when every branch does. *)
+  | Parallel body | Concurrent body -> List.exists (statement_never context) body.statements
   | Expression value -> never context value
   | Let { value; _ } -> never context value
   | Assignment { value; _ } -> never context value
@@ -179,8 +181,11 @@ let check_unreachable context (definition : definition) =
     Syntax_walk.expression_parts ~expression ~statement value
   and statement (written : statement) =
     (match written.kind with
-    | For { body; _ } | While { body; _ } | Parallel body | Concurrent body | Proof body ->
-        check_block context body
+    | For { body; _ } | While { body; _ } | Proof body -> check_block context body
+    (* The branches of a [parallel] or [concurrent] block do not run one
+       after another, so a branch after one that never finishes still
+       runs. *)
+    | Parallel _ | Concurrent _ -> ()
     | Let { else_ = Some block; _ } -> check_block context block
     | _ -> ());
     Syntax_walk.statement_parts ~expression ~statement written

@@ -87,9 +87,9 @@ let transfer context (point : point) (before : holdings) : holdings =
       match resolve context before views with
       | [] -> before
       | viewed -> hold before place.root viewed)
-  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Ends _ | Suspend _ | Exit
-  | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _ | Write_through _
-  | Arguments _ ->
+  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Ends _ | Task_end _ | Suspend _
+  | Exit | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _
+  | Write_through _ | Arguments _ ->
       before
 
 (* What each holder may view before each point. *)
@@ -538,7 +538,7 @@ let check context (graph : Graph.t) =
                    (show_root context local.place.root)
                    (show_root context local.place.root))
           | None -> ())
-      | Enter | Take_lent _ | Bind _ | Ends _ | Exit | Hold _ -> ())
+      | Enter | Take_lent _ | Bind _ | Ends _ | Task_end _ | Exit | Hold _ -> ())
     graph.points;
   (* What a stretch of code changes and uses, for [parallel]. *)
   let effects (range : range) =

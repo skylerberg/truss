@@ -14,13 +14,6 @@ open Lookups
 open Pattern_typing
 open Operators
 
-(* A [concurrent] block or loop is checked as a [parallel] one is, and has
-   no core form yet. *)
-let not_built state (written : statement) =
-  report state Not_built
-    (Span.make written.span.start (written.span.start + String.length "concurrent"))
-    "`concurrent` is not built yet."
-
 (* A block used as a value. Its last expression is checked against the
    expected type of the block, as part of the enclosing statement. *)
 let rec block_value state env ?expected (written : block) =
@@ -200,22 +193,29 @@ and statement state env (written : statement) ~last : unit =
       List.iter
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
         clauses;
-      (match running with
-      | Concurrent_loop -> not_built state written
-      | Sequential | Parallel_loop ->
-          register_statement state written (fun () ->
-              let iteration = Form.iteration state written inner in
-              let pattern = build_pattern state written_pattern in
-              let clauses = List.map (Form.loop_clause state) clauses in
-              For
-                {
-                  pattern;
-                  iteration;
-                  clauses;
-                  body = build_block state body;
-                  parallel = running = Parallel_loop;
-                }));
-      loop_body state env body
+      register_statement state written (fun () ->
+          let iteration = Form.iteration state written inner in
+          let pattern = build_pattern state written_pattern in
+          let clauses = List.map (Form.loop_clause state) clauses in
+          For
+            {
+              pattern;
+              iteration;
+              clauses;
+              body = build_block state body;
+              mode =
+                (match running with
+                | Sequential -> Sequential
+                | Parallel_loop -> Parallel_loop
+                | Concurrent_loop -> Concurrent_loop);
+            });
+      (* Each iteration of a [concurrent for] is a task. *)
+      let around =
+        match running with
+        | Concurrent_loop -> Task (Iteration { loop = written.id })
+        | Sequential | Parallel_loop -> Loop
+      in
+      loop_body state { env with around = around :: env.around } body
   | While { condition = test; clauses; body } ->
       in_statement state env test.span (fun () -> check state env test T.bool);
       List.iter (loop_clause state env) clauses;
@@ -223,15 +223,21 @@ and statement state env (written : statement) ~last : unit =
           let condition = build_expression state test in
           let clauses = List.map (Form.loop_clause state) clauses in
           While { condition; clauses; body = build_block state body });
-      loop_body state env body
+      loop_body state { env with around = Loop :: env.around } body
   | Parallel body | Concurrent body ->
-      (match written.kind with
-      | Concurrent _ -> not_built state written
-      | _ ->
-          register_statement state written (fun () ->
-              Parallel (List.map (build_statement state) body.statements)));
-      List.iter
-        (fun (branch : statement) ->
+      let concurrent = match written.kind with Concurrent _ -> true | _ -> false in
+      register_statement state written (fun () ->
+          let branches = List.map (build_statement state) body.statements in
+          if concurrent then Concurrent branches else Parallel branches);
+      (* Each branch of a [concurrent] block is a task. No exit leaves a
+         branch of a [parallel] block, which the parser refuses. *)
+      List.iteri
+        (fun index (branch : statement) ->
+          let env =
+            if concurrent then
+              { env with around = Task (Branch { block = written.id; index }) :: env.around }
+            else env
+          in
           in_statement state env branch.span (fun () -> statement state env branch ~last:false))
         body.statements
   | Proof body ->

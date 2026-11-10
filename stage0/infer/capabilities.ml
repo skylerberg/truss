@@ -31,6 +31,12 @@ let panic : T.capability =
   Capability
     (Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Panic" })
 
+(* What [concurrent] code uses: what it does can depend on which task runs
+   first. *)
+let tasks : T.capability =
+  Capability
+    (Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Tasks" })
+
 (* [spans] maps a syntax node id to its span. A core node is reported at the
    span of its origin. *)
 type checking = { state : state; spans : span array }
@@ -243,7 +249,11 @@ and check_statement checking scope (statement : Core.statement) =
       (* A branch may only use [Panic], so the result of a [parallel] block
          does not depend on the order its branches run in. *)
       List.iter (check_statement checking (panic_only "a `parallel` branch")) branches
-  | For { parallel; pattern; iteration; clauses; body } ->
+  | Concurrent branches ->
+      (* A branch may use what is available around the block. *)
+      require_available checking scope statement.origin [ tasks ];
+      List.iter (check_statement checking scope) branches
+  | For { mode; pattern; iteration; clauses; body } ->
       (match iteration with
       | Integer_range { start; stop; _ } ->
           check_expression checking scope start;
@@ -256,7 +266,14 @@ and check_statement checking scope (statement : Core.statement) =
           Option.iter (require_callee_uses checking scope statement.origin) next);
       check_children checking scope (`Pattern pattern);
       check_loop_clauses checking clauses;
-      check_block checking (if parallel then panic_only "a `parallel for`" else scope) body
+      check_block checking
+        (match mode with
+        | Parallel_loop -> panic_only "a `parallel for`"
+        | Sequential -> scope
+        | Concurrent_loop ->
+            require_available checking scope statement.origin [ tasks ];
+            scope)
+        body
   | While { condition; clauses; body } ->
       check_expression checking scope condition;
       check_loop_clauses checking clauses;

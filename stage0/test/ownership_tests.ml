@@ -804,6 +804,79 @@ let () =
          }\n"
         "ownership.changed_while_viewed")
 
+(* Concurrent code *)
+
+let () =
+  let helpers =
+    "type Holder(items: List[Int64], count: USize)\n\n\
+     fn wait(count: USize) -> Result[USize, USize]\n\
+    \  uses Clock\n\
+     {\n\
+    \  Ok(count)\n\
+     }\n\n\
+     fn keep(items: own List[Int64]) {}\n\n"
+  in
+  let rejected name body code = test name (fun () -> one_diagnostic (helpers ^ body) code) in
+  let accepted name body = test name (fun () -> fine (helpers ^ body)) in
+  rejected "one branch of a `concurrent` block cannot change a place that another uses"
+    "fn f(items: mut List[Int64]) -> USize\n\
+    \  uses Tasks\n\
+     {\n\
+    \  concurrent {\n\
+    \    let length = items.length()\n\
+    \    mut items.push(1)\n\
+    \  }\n\
+    \  length\n\
+     }\n"
+    "ownership.parallel_conflict";
+  rejected "an iteration of a `concurrent for` changes only its own element and locals"
+    "fn f(items: List[Int64], total: mut Int64)\n\
+    \  uses Tasks\n\
+     {\n\
+    \  concurrent for item in items {\n\
+    \    total = item\n\
+    \  }\n\
+     }\n"
+    "ownership.parallel_conflict";
+  rejected "a branch puts back what it takes out of a place that is lent `mut`"
+    "fn f(holder: mut Holder) -> Result[USize, USize]\n\
+    \  uses Tasks, Clock\n\
+     {\n\
+    \  concurrent {\n\
+    \    let taken = own holder.items\n\
+    \    let waited = wait(1)?\n\
+    \  }\n\
+    \  holder.items = own taken\n\
+    \  Ok(waited)\n\
+     }\n"
+    "ownership.field_not_restored";
+  accepted "a branch may take a value out of a place that is lent `mut` and put one back"
+    "fn f(holder: mut Holder) -> Result[USize, USize]\n\
+    \  uses Tasks, Clock\n\
+     {\n\
+    \  concurrent {\n\
+    \    {\n\
+    \      keep(own holder.items)\n\
+    \      holder.items = []\n\
+    \    }\n\
+    \    let waited = wait(1)?\n\
+    \  }\n\
+    \  Ok(waited)\n\
+     }\n";
+  rejected "what is moved out before a `concurrent` block must be back where a branch returns"
+    "fn f(holder: mut Holder) -> Result[USize, USize]\n\
+    \  uses Tasks, Clock\n\
+     {\n\
+    \  let taken = own holder.items\n\
+    \  concurrent {\n\
+    \    let first = wait(1)?\n\
+    \    let second = wait(2)?\n\
+    \  }\n\
+    \  holder.items = own taken\n\
+    \  Ok(first + second)\n\
+     }\n"
+    "ownership.field_not_restored"
+
 (* Constants *)
 
 let () =

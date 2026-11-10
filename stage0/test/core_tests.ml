@@ -421,6 +421,46 @@ let () =
      Cursor.skip for the cursor of standard::list::impl Iterable for List[Element].each by derived \
      standard::core::Cursor for standard::list::impl Iterable for List[Element].each(own \
      standard::list::impl Iterable for List[Element].each[Int64](place items), 1)) }";
+  expect_body "an early exit from concurrent code names the tasks that it ends"
+    "fn fetch(item: Int64) -> Result[Int64, Int64]\n\
+    \  uses Clock\n\
+     {\n\
+    \  Ok(item)\n\
+     }\n\n\
+     fn g(items: List[Int64]) -> Result[Int64, Int64]\n\
+    \  uses Tasks, Clock\n\
+     {\n\
+    \  for item in items {\n\
+    \    concurrent {\n\
+    \      let first = fetch(item)?\n\
+    \      if item > 3 {\n\
+    \        break\n\
+    \      }\n\
+    \    }\n\
+    \    let _ = first\n\
+    \  }\n\
+    \  concurrent for item in items {\n\
+    \    if item > 5 {\n\
+    \      break\n\
+    \    }\n\
+    \    if item > 4 {\n\
+    \      continue\n\
+    \    }\n\
+    \    if item > 3 {\n\
+    \      return Err(item)\n\
+    \    }\n\
+    \  }\n\
+    \  Ok(0)\n\
+     }\n"
+    "{ for item in yielding_call standard::list::impl Iterable for List[Element].each[Int64](place \
+     items) { concurrent #48 { let own first = match app::main::fetch(place item) { Ok(value: own \
+     value) => { value } Err(error: own error) => { leaving branch 0 of #48 { return Result[Int64, \
+     Int64].Err(error: error) } } diverges }; if (item > 3) { leaving branch 1 of #48 { break } } \
+     diverges }; let _ = place first }; concurrent #93 for item in yielding_call \
+     standard::list::impl Iterable for List[Element].each[Int64](place items) { if (item > 5) { \
+     leaving an iteration of #93 { break } } diverges; if (item > 4) { continue } diverges; if \
+     (item > 3) { leaving an iteration of #93 { return Result[Int64, Int64].Err(error: item) } } \
+     diverges }; Result[Int64, Int64].Ok(value: 0) }";
   expect_body "patterns of constants, ranges, and strings"
     "let limit: Int64 = 10\n\n\
      fn g(count: Int64, name: String) -> Int64 {\n\

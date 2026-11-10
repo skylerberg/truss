@@ -68,9 +68,9 @@ let transfer verdicts (index : int) (point : point) (before : moved list) : move
           | Local local -> not (List.mem local locals)
           | Constant _ | Environment -> true)
         before
-  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Suspend _ | Hold _ | Store _
-  | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _ | Write_through _
-  | Arguments _ ->
+  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Task_end _ | Suspend _ | Hold _
+  | Store _ | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _
+  | Write_through _ | Arguments _ ->
       before
 
 (* The places that may have been moved before each point. *)
@@ -140,12 +140,12 @@ let check context (graph : Graph.t) =
      out of it must be given a value again before it goes back. [roots]
      says which of the moved places go back at the point. *)
   let unrestored = Hashtbl.create 8 in
-  let restored index ~roots ~at message =
+  let restored ?(moved_within = fun _ -> true) index ~roots ~at message =
     List.iter
       (fun ((moved : Place.t), moved_at) ->
         if
           kind context moved.root = Mut_access
-          && roots moved.root
+          && roots moved.root && moved_within moved_at
           && not (Hashtbl.mem unrestored moved)
         then begin
           Hashtbl.replace unrestored moved ();
@@ -197,6 +197,17 @@ let check context (graph : Graph.t) =
               Printf.sprintf
                 "`%s` belongs to the caller, so it must be given a value again before the function \
                  returns."
+                moved)
+      | Task_end { first; limit } ->
+          restored index
+            ~moved_within:(fun point -> first <= point && point < limit)
+            ~roots:(fun _ -> true)
+            ~at:None
+            (fun moved _ ->
+              Printf.sprintf
+                "`%s` is moved out in this branch and is not given a value again in it. If another \
+                 branch leaves early, the code after the `concurrent` block does not run, so a \
+                 branch puts back what it takes out of a place that is lent `mut`."
                 moved)
       | Suspend _ ->
           if context.yields then

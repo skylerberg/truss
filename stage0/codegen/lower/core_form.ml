@@ -410,6 +410,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Implies _ | Result | Old _ | Yielded | Finished | Identical _ | Specification_function _
   | Method_time _ ->
       bug "a specification-only expression in code that runs"
+  | Leaving _ -> Compiler_bug.unsupported "an early exit from `concurrent` code"
 
 (* Evaluates a call's arguments, one for each of the callee's parameters, in
    order. An argument that is a place is passed where it is, and a value is
@@ -997,6 +998,8 @@ and statement st (node : Core.statement) =
       | Parallel statements ->
           (* Stage0 runs the statements of a [parallel] block in order. *)
           List.iter (statement st) statements
+      | Concurrent _ -> Compiler_bug.unsupported "a `concurrent` block"
+      | For { mode = Concurrent_loop; _ } -> Compiler_bug.unsupported "a `concurrent for` loop"
       | Let { pattern = { kind = Bind { local; name; _ }; type_; _ }; value; else_ = None } -> (
           let ty = ground st type_ in
           match value with
