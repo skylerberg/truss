@@ -96,11 +96,17 @@ and operand =
   | Value of expression
       (** A value. An [own] parameter takes ownership of it. A read-only parameter borrows it for
           the call. A [mut] parameter receives a [Value] only when the value is a {!Slice}, which is
-          a mutable view of part of a place. *)
+          a mutable view of part of a place. As the scrutinee of a [match], [is], or [let], the
+          pattern's bindings own the parts of the value: every binding has the mode [Own]. *)
 
-(** A memory location. *)
+(** A memory location. Every place has a type: [Local], [Constant], and [Field] carry it, and a
+    [Lent] or [Temporary] place has the type of its expression. [Core_walk.place_type] returns it.
+*)
 and place =
-  | Local of local
+  | Local of { local : local; type_ : Types.ty }
+  | Constant of { path : Path.t; type_ : Types.ty }
+      (** The static data of a constant. It is read-only. A constant used as a value is a {!Use} of
+          this place. *)
   | Field of { base : place; field : string; type_ : Types.ty }
       (** A field of a record. [type_] is the field's type. The fields of a sum type's variant are
           never places of this kind: they are only reachable through pattern bindings. *)
@@ -144,12 +150,12 @@ and kind =
   | Function_value of { path : Path.t; type_arguments : Types.argument list }
       (** A reference to a named function or method, used as a value. A variant constructor used as
           a function is desugared to a {!Lambda}. *)
-  | Constant of Path.t
   | Value_parameter of Types.parameter  (** A use of a [USize] generic parameter as a value. *)
   | Lambda of {
       parameters : pattern list;
-      captures : local list;
-          (** The locals of the enclosing function that the body reads, in order of first use. *)
+      captures : capture list;
+          (** The locals of the enclosing function that the body reads, in order of first use. The
+              lambda borrows them. *)
       body : block;
       result : Types.ty;
     }
@@ -207,6 +213,10 @@ and kind =
   | Break
   | Continue
   | Todo
+      (** [todo]: stops the program. A [todo] with no expected type has the type [Never]. The type
+          checker does not resolve an operation on such a [todo], or on a local bound to one, so the
+          core form replaces the operation: it evaluates the operands and ends in a [Todo]. A use of
+          such a local is a [Todo], and a pattern that would bind it is a {!Wildcard}. *)
   | Unreachable
   | Echo of expression
   (* Specification-only expressions *)
@@ -224,6 +234,7 @@ and kind =
       (** A cost function inside a [cost] bound: [log(count)], [power(base, exponent)],
           [time(visit)], or [calls(visit)]. *)
 
+and capture = { local : local; type_ : Types.ty }
 and cost_function = Log | Power | Time | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
 
@@ -362,7 +373,8 @@ and pattern_kind =
           ignored. *)
   | Record of (string * pattern) list
   | Literal of expression
-      (** An {!Integer} or {!Boolean} literal, compared with built-in equality. *)
+      (** An {!Integer} or {!Boolean} literal, or a constant of a built-in type. The scrutinee is
+          compared with it by built-in equality. *)
   | Range of { start : expression; stop : expression; inclusive : bool }
       (** A range of literals or constants. *)
   | Equal_to of { value : expression; equal : callee }

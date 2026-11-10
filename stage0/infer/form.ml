@@ -251,7 +251,7 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                                 ( field.field_name,
                                   Some
                                     (synthetic_expression state ~origin:value.id field.field_type
-                                       (Core.Use (Local local))) ))
+                                       (Core.Use (Local { local; type_ = field.field_type }))) ))
                               fields;
                         }));
               diverges = false;
@@ -264,6 +264,30 @@ let local_type state (id : id) =
   match state.tables.local_types.(id) with
   | Some type_ -> type_
   | None -> bug "a local has no recorded type"
+
+(* The place of a parameter or a pattern binding, by the id of the name
+   that declares it. *)
+let named_local state (id : id) : Core.place =
+  Local { local = Named id; type_ = local_type state id }
+
+(* A use of a parameter or a pattern binding. A local whose type is a hole
+   is never bound, so a use of it is a [Todo]. *)
+let local_use state (id : id) : Core.kind =
+  if was_hole state (fun tables -> tables.local_types) id then Todo else Use (named_local state id)
+
+let self_type state (env : env) =
+  match env.self with
+  | Some type_ -> final state type_
+  | None -> bug "`self` is used outside a method"
+
+(* The place of [self]. *)
+let self_local state (env : env) : Core.place = Local { local = Self; type_ = self_type state env }
+
+(* The place of a constant's static data. *)
+let constant_place state (path : Path.t) : Core.place =
+  match Query.demand state.database Environment.constant_type path with
+  | Some type_ -> Constant { path; type_ }
+  | None -> bug "the constant `%s` has no type" (Path.show path)
 
 (* A range expression used as a value: a [Construct] of the [Range]
    record. *)
@@ -414,7 +438,8 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
           (Evaluate
              (intrinsic Storage_push T.unit
                 [
-                  Passed { mode = Mut; value = Place (Local storage) };
+                  Passed
+                    { mode = Mut; value = Place (Local { local = storage; type_ = storage_type }) };
                   Passed { mode = Own; value = Value element };
                 ])))
       elements
@@ -436,7 +461,14 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                       };
                   arguments =
                     [
-                      Passed { mode = Own; value = Value (make storage_type (Use (Local storage))) };
+                      Passed
+                        {
+                          mode = Own;
+                          value =
+                            Value
+                              (make storage_type
+                                 (Use (Local { local = storage; type_ = storage_type })));
+                        };
                     ];
                   lends = None;
                   uses = [];
@@ -548,7 +580,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
 (* A constant used as a pattern, or as a bound of a range pattern. *)
 let pattern_constant state (id : id) : Core.kind =
   match state.tables.patterns.(id) with
-  | Some (Constant_pattern path) -> Constant path
+  | Some (Constant_pattern path) -> Use (constant_place state path)
   | _ -> bug "a pattern names a constant that was not recorded"
 
 (* A literal used as a pattern, or as a bound of a range pattern. *)
@@ -593,9 +625,9 @@ let operation_of : binary -> Intrinsic.operation = function
   | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal | And | Or | Implies ->
       bug "this operator is not an arithmetic operation"
 
-(* An arithmetic operator on built-in types, or on a hole left by a
-   [todo]. If the result type is [Integer], which happens only in a
-   specification, built-in integer operands are converted to [Integer]. *)
+(* An arithmetic operator on built-in types. If the result type is
+   [Integer], which happens only in a specification, built-in integer
+   operands are converted to [Integer]. *)
 let operator state (value : expression) operation (operands : expression list) : Core.kind =
   let arguments = List.map (build_expression state) operands in
   Operator
@@ -885,7 +917,8 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) : Core
       },
       List.map
         (fun ((field : T.field), local) ->
-          (field.field_name, make field.field_type (Core.Use (Local local))))
+          ( field.field_name,
+            make field.field_type (Core.Use (Local { local; type_ = field.field_type })) ))
         fields )
   in
   let success_pattern, success_fields = bind_fields success in

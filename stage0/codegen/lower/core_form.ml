@@ -142,7 +142,8 @@ let bind_name st (bound : bound_name) =
 
 let rec place st (source : Core.place) : Lir.place =
   match source with
-  | Local local -> local_place st local
+  | Local { local; _ } -> local_place st local
+  | Constant { path; _ } -> Matching.static_constant st path
   | Field { base; field; _ } -> place st base / Field field
   | Temporary value -> value_place st value
   | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(site_of st origin)
@@ -179,7 +180,6 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Integer _ | Float _ | Boolean _ -> assign (Use (operand st value))
   | Use source -> take st (place st source) ty ~destination
   | String text -> string_literal st ty text ~destination
-  | Constant path -> take st (Matching.static_constant st path) ty ~destination
   | Construct { variant; fields } ->
       let fields =
         List.map

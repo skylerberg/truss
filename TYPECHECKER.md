@@ -1248,12 +1248,12 @@ generation passes the implementation's own evidence. A direct call of the capabi
 call the implementation itself, so it still needs the capability among the
 `impl`'s `uses`, from outside.
 
-The check runs on [the core form](#the-core-form), where every call the
-code makes is a node, however it was written. So a `for` loop over a value
-needs what the value's `each` uses, as the call written out would, and so
-does what a piece of a string is displayed by. A definition with an error,
-or with a `todo` whose type nothing fixes, has no form, and is not checked
-for what it may call until it has one.
+The check runs on [the core form](#the-core-form), where every call is a
+node, including the calls that sugar expands to. So a `for` loop over a
+collection needs the capabilities that the collection's `each` uses, and an
+interpolated string needs the capabilities that the `display` of each value
+uses. A definition with an error has no core form, so it is not checked
+until the error is fixed.
 
 - **A capability call,** such as `Clock.now()`, needs its capability
   available.
@@ -1551,112 +1551,186 @@ describes.
 
 ### The core form
 
-The core form of a definition is what checking decided, as a tree that
-leaves nothing about the program's meaning to work out. A definition has one
-when it parsed whole, nothing in it is an error, and every type in it is
-decided. One with an error, or with a `todo` whose type nothing fixes, has
-none, and nothing that runs or proves the program reaches it.
+The core form is the type checker's output for one definition: a typed,
+desugared tree. Ownership checking, the prover, and code generation read it
+instead of the syntax tree, and none of them repeats a decision that the
+type checker made.
 
-- **A call names what it calls and lists an argument for every parameter,**
-  in the callee's order, a method's receiver first. A parameter nothing was
-  passed for is marked as taking its default, which is in the callee's own
-  form. The callee is a function or a type's method with its type
-  arguments, a trait's method with how its `impl` was found, a capability's
-  method, an operation of `standard::intrinsic`, or a function value.
-- **A place is told from a value.** A place is a local, a field of a place,
-  the part a lending call lends, which is what an index is, or a value held
-  for the statement so that a part of it can be named. Wherever a place can
-  be used where it is, the node says whether it is: an argument, what a
-  `match`, a `let`, or an `is` takes apart, what a `yield` gives, an
-  implementation that is provided, a function value that is called, what a
-  string displays, and a cursor a loop pulls. So the value of a place,
-  where the form has it as a value, is taken from the place: copied where
-  its type copies implicitly, and moved otherwise. Nothing that only reads
-  a place is given its value.
-- **An operator is what it means.** Arithmetic, a bitwise operator, or a
-  shift on built-in types is one node holding the operation, whether it was
+A definition has a core form if it parsed completely and has no error. A
+definition with an error has none, and no later stage runs on it.
+
+The core form records these decisions:
+
+- **Calls are resolved.** Every call names its callee and has one argument
+  per parameter, in parameter order. The receiver of a method is the first
+  argument. An omitted argument is marked as a default, and the default
+  expression is in the callee's own core form. A callee is a function or a
+  method of a type with its type arguments, a trait method with the
+  evidence that selects its `impl`, a capability method, an operation of
+  `standard::intrinsic`, or a function value (an indirect call).
+- **Every expression is a place or a value.** A place is a local, a
+  constant, a field of a place, the result of a lending call, or a
+  temporary that holds a value for the enclosing statement. An index
+  expression is a lending call of `Index.at`. Every place carries its type.
+- **An operand is a borrowed place or a value.** The operands are: an
+  argument, the scrutinee of a `match`, a `let`, or an `is`, the operand of
+  a `yield`, an implementation in a `provide`, an indirect callee, an
+  interpolated value, and the cursor of a loop. Reading a value out of a
+  place is a node of its own. It copies the value if the type is `Plain`
+  and moves it otherwise. Code that only borrows a place never has that
+  node.
+- **Operators are resolved.** An arithmetic, bitwise, or shift operator on
+  built-in types is one node that holds the operation, whether it was
   written `left + right` or `left.add(right)`. A comparison of built-in
-  values is a comparison. On any other type `==` is the call of `equal`,
-  `!=` is its negation, and an ordering is a test of the `Ordering` that
-  `compare` gives. In a specification, where arithmetic and comparisons are
-  of `Integer`s, a built-in operand is first converted.
-- **Sugar is the construct it stands for:** `?` is a `match` that gives the
-  value or returns what there is in its place; a compound assignment is an
-  update of its target, worked out once, by the operator applied to what
-  the target held; a `for` over a value is a loop over the call of its
-  `each`; a range written as a value is the range type's record; a variant
-  used as a function is the lambda that builds it; `with (port)` names the
-  field and the local; a list literal is a storage with room for its
-  elements, each pushed onto it, made into the list; and an owned
-  collection seen as its view is the call of its `slice`.
-- **A node of its own is for what no other node says.** A tagged string is
-  the call of its tag's `from_template` on the template built from it,
-  beside the texts as they were written, which the prover runs the tag's
-  clauses on. An array literal is built in place, and a specification's
-  sequence, set, or map is built by no code. A function value widened, and
-  an integer meeting an `Integer`, are conversions where they happen. An
-  interpolated string holds its pieces, each value with its `display`, and
-  the builder's methods, and a set or a map literal what makes it empty and
-  what inserts into it.
-- **Every node has its type,** solved and normalized.
-- **A condition says whether it runs:** each `requires` and each `assert`
-  is marked as one the program checks when nothing in it is only for
-  specifications. That is no quantifier, no `Integer`, no `old` or `result`,
-  and no function for specifications only.
-- **A block says whether it ends,** so that what follows a `return`, or a
-  loop with nothing to leave it, is known to be unreachable without looking
-  at types.
-- **A definition is its parts:** a function's parameters, with their
-  defaults and what a function-typed parameter requires of calls, its
-  contract, and its body; a type's defaults, invariants, and potential; a
-  trait's laws; a constant's value; a test; a law's proof.
+  values is a comparison node. For any other type, `==` is a call of
+  `equal`, `!=` is the negation of that call, and an ordering operator is a
+  call of `compare` followed by a test of the resulting `Ordering`. In a
+  specification, arithmetic and comparisons work on `Integer`, so built-in
+  integer operands are converted first.
+- **Syntactic sugar is desugared.**
+  - `?` is a `match` that evaluates to the success value or returns the
+    failure.
+  - A compound assignment such as `total += step` evaluates its target
+    once, and assigns the result of the operator applied to the target's
+    current value.
+  - A `for` loop over a collection is a loop over a call of the
+    collection's `each`.
+  - A range expression used as a value is a `Range` record.
+  - A variant constructor used as a function is a lambda that constructs
+    the variant.
+  - `config with (port)` is `config with (port: port)`.
+  - A list literal is a block that allocates storage with capacity for the
+    elements, pushes each element, and converts the storage to a list.
+  - An owned collection passed where its view is expected, such as a
+    `String` passed as a `StringSlice`, is a call of `slice`.
+  - A tagged string is a call of the tag type's `from_template` on a
+    `Template` record. The node also keeps the literal text segments,
+    because the prover evaluates the tag's `requires` clauses on them.
+- **Some constructs keep a node of their own.** An array literal is
+  constructed in place. A specification's sequence, set, or map is never
+  constructed at run time. A set or map literal records the callees that
+  create the empty collection and insert an element. An interpolated string
+  records its pieces, the `display` method of each interpolated value, and
+  the methods of the text builder. Widening a function value, and
+  converting between a built-in integer and `Integer`, are explicit
+  conversion nodes.
+- **Every node has a type.** The type is fully inferred and normalized. It
+  contains no inference variable and no hole.
+- **A condition says whether it is executable.** A `requires` clause or an
+  `assert` is executable if it can be evaluated at run time: it contains no
+  quantifier, no `Integer` value, no `old` or `result`, and no call of a
+  specification-only function.
+- **A block says whether it diverges.** A block diverges if control never
+  reaches its end. The code after a `return`, or after a loop that nothing
+  leaves, is then known to be unreachable without inspecting types.
+- **A definition's core form holds its checked parts.** For a function:
+  the parameters, with their defaults and the `requires` clauses of a
+  function-typed parameter, the contract, and the body. For a type: the
+  field defaults, the invariants, and the potential. For a trait: its laws.
+  For a constant: its value. For a test or a law proof: its body.
 
-Each node has an id of its own, numbered within the definition as the form
-is built, which later results are keyed by, and the id of the syntax node
-it came from, which is how a diagnostic finds the text to quote. Several
-nodes can come from one syntax node, as the call and the update of
-`total += step` do. No node holds a span, so a definition that was only
-laid out again has the same form. Where each syntax node is, by its id, is
-a result of its own, which only what shows source asks for.
+#### Ids and origins
 
-The type checker says how each node is built where it decides what the
-expression, statement, or pattern is, and builds the form once the
-definition has checked: only then is every type final, and every choice a
-statement settles at its end, such as the `impl` an operator means.
-[What code may call](#what-code-may-call) is checked on the form before it
-is given out, and that is where each unknown set of capabilities is solved,
-since only the form has every call. Where a definition has such sets, the
-form is then built again, from types that hold what they were solved as.
+Every node has an id that is unique within the definition. Later results
+are keyed by it. Every node also has an origin: the id of the syntax node
+it was built from. A diagnostic uses the origin to find the source text to
+quote. Several core nodes can share one origin: `total += step` produces
+both a call and an assignment.
 
-A method a derived `impl` gives is written nowhere, so its form is made
-from the type's shape, as the body the method would have if it were
-written:
+Core nodes hold no source spans, so reformatting a definition does not
+change its core form. The span of each syntax node, by id, is a separate
+result that only code that shows source asks for.
+
+#### How the core form is built
+
+When the type checker checks an expression, a statement, or a pattern, it
+registers a function that builds the core node. These functions run after
+the whole definition is checked. Only then is every type final, and some
+choices, such as the `impl` an operator resolves to, are made at the end of
+a statement.
+
+The check described in [What code may call](#what-code-may-call) runs on
+the core form, and it solves the capability variables, because only the
+core form has every call. If the definition has capability variables, the
+core form is built again after they are solved, so that its types contain
+the solutions.
+
+#### Holes
+
+A `todo` with no expected type has a hole type, and so does everything
+computed from it. The type checker accepts any operation on a hole without
+resolving it. Evaluating a hole never returns, because the `todo` it comes
+from stops the program. The core form relies on that, so that it holds no
+operation that the checker did not resolve:
+
+- A hole type is `Never`.
+- A use of a local whose type is a hole is a `todo`.
+- A pattern that matches a hole is a wildcard.
+- An expression with an operand whose type is a hole is a block that
+  evaluates the operands in order and ends in a `todo`.
+- A `for` loop over a hole, or an assignment to one, only evaluates the
+  hole.
+
+#### Invariants
+
+A test checks the following on the core form of every definition in the
+standard library, and of every program that a test of the type checker, of
+ownership, or of the prover accepts:
+
+- Node ids are unique.
+- No type contains an inference variable, a hole, or an error.
+- Every generic parameter that appears is declared by the definition or by
+  its enclosing type, trait, or `impl`, and never by a callee.
+- A `mut` parameter receives a place or a slice, and an `own` parameter
+  receives a value.
+- A place that is assigned, passed `mut`, or advanced as a cursor is
+  mutable: it is not a constant, and every lent place in it is lent `mut`.
+- A `let`, a `match`, or an `is` on a value binds every name `own`. A `let`
+  that binds a mutable local receives a value.
+- The alternatives of a pattern bind the same locals, with the same types
+  and modes.
+- Every use of a local has the type of the parameter or pattern that binds
+  it.
+- A loop over a call iterates over a call of a yielding method.
+
+#### Derived methods
+
+A method of a derived `impl` has no source, so its core form is generated
+from the type's definition. It is the body that the method would have if it
+were written by hand:
 
 - **`equal`** tests that the other value is the same variant, and then
-  that each field equals the other's, in order, with `&&`, so the first
-  difference ends it.
-- **`hash`** writes the variant's number, counted from 0 in the order the
-  variants are declared, and then hashes each field.
-- **`compare`** orders by variant, in the order they are declared, and
-  between two values of one variant by each field in turn: the first
-  field that is not equal decides.
-- **`default`** builds the record of each field's default.
+  compares each pair of fields in order with `&&`, so it stops at the first
+  difference.
+- **`hash`** writes the variant's index, counted from 0 in declaration
+  order, and then hashes each field.
+- **`compare`** orders by variant index. For two values of the same
+  variant, it compares the fields in order, and the first pair that is not
+  equal decides.
+- **`default`** constructs the record from the default of each field.
 
-A sum's method matches on `self`, and on the other value inside each arm,
-with patterns that bind each variant's fields, as a person would write it:
-a part of a sum is reached only through a pattern, in a derived method as
-anywhere. Each field's method is a call of the trait's method on the
-field's type, with the `impl` the type has, or a bound where the type is a
-parameter. The form is made once for a method, whatever it is compiled
-for. A method the trait itself gives a body, such as `not_equal`, has the
-trait's form, as in any `impl` that leaves it to the trait, and a type
-that is still `todo` has none.
+For a sum type, the method matches on `self`, and inside each arm it
+matches on the other value, with patterns that bind the variant's fields.
+The fields of a variant are reachable only through a pattern, in a derived
+method as anywhere else. Each field's method is a call of the trait method
+on the field's type, with the `impl` for that type, or with a bound if the
+type is a generic parameter.
 
-So the form of a function or a method is found by its path, for every path
-that code is compiled or proven at: a written one has its own, a method a
-derived `impl` gives has the one made from the type, and a method an `impl`
-leaves to its trait has the trait's, together with what `Self` and the
-trait's parameters stand for at that `impl`.
+The core form is generated once per method, not once per instantiation. A
+method that the trait defines with a default body, such as `not_equal`,
+uses the trait's core form, as in any `impl` that inherits it. A type whose
+definition is still `todo` has no derived core forms.
+
+#### The core form of a path
+
+Code generation and the prover ask for the core form of a function or
+method by its path. There are three cases:
+
+- A function or method with a written body has its own core form.
+- A method of a derived `impl` has the generated core form.
+- A method that an `impl` inherits from its trait has the core form of the
+  trait's default method, together with a substitution that maps `Self` and
+  the trait's generic parameters to the types of the `impl`.
 
 ### Obligations the type checker creates
 

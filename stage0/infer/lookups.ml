@@ -36,7 +36,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Local id -> (
       state.references <- id :: state.references;
       state.tables.meanings.(value.id) <- Some (Local_value id);
-      register_expression state value (fun () -> Use (Local (Named id)));
+      register_expression state value (fun () -> Form.local_use state id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> bug "the local `%s` has no type" text)
@@ -59,7 +59,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | None -> bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) -> (
       state.tables.meanings.(value.id) <- Some (Global { path; type_arguments = [] });
-      register_expression state value (fun () -> Constant path);
+      register_expression state value (fun () -> Use (Form.constant_place state path));
       match Query.demand state.database Environment.constant_type path with
       | Some type_ -> type_
       | None -> bug "the constant `%s` has no type" (Path.show path))
@@ -88,7 +88,13 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
               with
               | Some written ->
                   register_expression state value (fun () ->
-                      Use (Field { base = Local Self; field; type_ = Form.type_of state value }));
+                      Use
+                        (Field
+                           {
+                             base = Form.self_local state env;
+                             field;
+                             type_ = Form.type_of state value;
+                           }));
                   written.field_type
               | None -> bug "the field `%s` is not in its record" field)
           | None -> bug "the field `%s` is not in a record" field)
@@ -211,7 +217,7 @@ and static_member state (value : expression) type_ (member : name) =
         | Some constant -> (
             state.tables.meanings.(value.id) <-
               Some (Global { path = constant; type_arguments = [] });
-            register_expression state value (fun () -> Constant constant);
+            register_expression state value (fun () -> Use (Form.constant_place state constant));
             match Query.demand state.database Environment.constant_type constant with
             | Some type_ -> type_
             | None -> bug "the constant `%s` has no type" (Path.show constant))

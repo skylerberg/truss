@@ -116,6 +116,24 @@ let create size =
     obligations = [];
   }
 
+let copy tables =
+  {
+    types = Array.copy tables.types;
+    local_types = Array.copy tables.local_types;
+    meanings = Array.copy tables.meanings;
+    calls = Array.copy tables.calls;
+    literals = Array.copy tables.literals;
+    patterns = Array.copy tables.patterns;
+    pattern_types = Array.copy tables.pattern_types;
+    loops = Array.copy tables.loops;
+    templates = Array.copy tables.templates;
+    captures = Array.copy tables.captures;
+    own_operator = Array.copy tables.own_operator;
+    provides = Array.copy tables.provides;
+    lends = Array.copy tables.lends;
+    obligations = tables.obligations;
+  }
+
 let undecided what (span : Syntax.span) =
   Compiler_bug.bug ~stage:"Checked" "the %s at %d..%d has no type" what span.start span.stop
 

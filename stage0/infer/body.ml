@@ -565,6 +565,7 @@ let check database (key : Names.key) =
               definition_builder = None;
               next_node_id = 0;
               synthetic_local_count = 0;
+              tables_with_holes = None;
             };
           obligations = [];
           diagnostics = [];
@@ -594,40 +595,53 @@ let check database (key : Names.key) =
           (since interface_named !(context.named))
         @ state.diagnostics;
       finalize state;
-      (* A definition has a core form if it parsed completely, has no
-         diagnostic, and no recorded type contains an error or a hole. A
-         type contains an error when it depends on a definition that has
-         one, and a hole when a [todo] leaves it uninferred. *)
-      let decided table =
-        Array.for_all
-          (function
-            | Some type_ ->
-                let decided = ref true in
-                ignore
-                  (T.map
-                     (function
-                       | T.Error _ | T.Hole ->
-                           decided := false;
-                           None
-                       | _ -> None)
-                     type_);
-                !decided
-            | None -> true)
-          table
+      (* Whether a recorded type contains a type that [unwanted] accepts. *)
+      let any_type unwanted =
+        let contains table =
+          Array.exists
+            (function
+              | Some type_ ->
+                  let found = ref false in
+                  ignore
+                    (T.map
+                       (fun part ->
+                         if unwanted part then found := true;
+                         None)
+                       type_);
+                  !found
+              | None -> false)
+            table
+        in
+        contains state.tables.types || contains state.tables.local_types
+        || contains state.tables.pattern_types
       in
+      (* A definition has a core form if it parsed completely, has no
+         diagnostic, and no recorded type contains an error. A type contains
+         an error when it depends on a definition that has one. *)
       let whole =
         state.diagnostics = [] && resolved.diagnostics = []
         && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
         && (match lowered.interface with Error_interface _ -> false | _ -> true)
-        && decided state.tables.types && decided state.tables.local_types
-        && decided state.tables.pattern_types
+        && not (any_type T.is_error)
       in
       let build () : Core.t =
         state.form.next_node_id <- 0;
         state.form.synthetic_local_count <- 0;
+        (* The core form has no hole type. If the definition has one, the
+           builders read a copy of the tables in which every hole is
+           [Never]. The tables themselves keep their holes for the stages
+           that still read them. *)
+        let checked = state.tables in
+        if any_type (fun part -> part = T.Hole) then begin
+          state.form.tables_with_holes <- Some checked;
+          state.tables <- C.copy checked;
+          finalize state
+        end;
         let definition =
           match state.form.definition_builder with Some build -> build () | None -> Core.Empty
         in
+        state.tables <- checked;
+        state.form.tables_with_holes <- None;
         {
           definition;
           node_count = state.form.next_node_id;

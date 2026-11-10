@@ -167,6 +167,24 @@ let () =
       }\n")
     "{ match place shape { Circle(radius: radius) => { radius } Square(side: side) if (side > 2) \
      => { side } _ => { 0 } } }";
+  expect_body "a `match` or `is` on a value binds `own`, even if the receiver of the call is marked"
+    "type Queue(items: List[Int64])\n\n\
+     fn Queue.take(mut self) -> Option[List[Int64]] {\n\
+    \  todo\n\
+     }\n\n\
+     fn g(queue: mut Queue) -> USize {\n\
+    \  if mut queue.take() is Some(first) {\n\
+    \    return first.length()\n\
+    \  }\n\
+    \  match mut queue.take() {\n\
+    \    Some(second) => second.length()\n\
+    \    None => 0\n\
+    \  }\n\
+     }\n"
+    "{ if (app::main::Queue.take(mut self)(mut place queue) is Some(value: own first)) { return \
+     standard::list::List.length[Int64](place first) } diverges; match app::main::Queue.take(mut \
+     self)(mut place queue) { Some(value: own second) => { \
+     standard::list::List.length[Int64](place second) } None => { 0 } } }";
   expect_body "`is` becomes a Matches, and a block that returns diverges"
     (shape
    ^ "fn g(shape: Shape) -> Int64 {\n  if shape is Circle(radius) { return radius }\n  0\n}\n")
@@ -255,9 +273,9 @@ let () =
     \  for value in count_to(2) {}\n\
     \  for value in first {}\n\
      }\n"
-    "{ let var own first = app::main::count_to(3); while (cursor_next(first) is Some(value: left)) \
-     { let _ = place left }; for value in yielding_call app::main::count_to(2) {  }; for value in \
-     cursor first {  } }";
+    "{ let var own first = app::main::count_to(3); while (cursor_next(first) is Some(value: own \
+     left)) { let _ = place left }; for value in yielding_call app::main::count_to(2) {  }; for \
+     value in cursor first {  } }";
   expect_body "a conversion to `any` records the impl, and a method call on `any` is dynamic"
     "trait Source {\n\
     \  type Item\n\
@@ -286,6 +304,17 @@ let () =
     \  mut grid.cell(0).state = 4\n\
      }\n"
     "{ lent app::main::Grid.cell(mut self)(mut place grid, 0) lends mut.state = 4 }";
+  expect_body
+    "a `mut self` method called on an indexed element indexes with the `mut self` version of `at`"
+    "type Worker(count: Int64)\n\n\
+     fn Worker.reset(mut self) {\n\
+    \  self.count = 0\n\
+     }\n\n\
+     fn g(workers: mut List[Worker], index: USize) {\n\
+    \  mut workers[index].reset()\n\
+     }\n"
+    "{ app::main::Worker.reset(mut self)(mut place lent Index.at for List[Worker] by \
+     standard::list::impl Index for List[Element](mut place workers, place index) lends mut) }";
   test "a `lends mut` method yields a mutable place" (fun () ->
       let found =
         printed_body
@@ -337,6 +366,61 @@ let () =
     \  sort_part(mut items[..2])\n\
      }\n"
     "{ app::main::sort_part(mut items[..2]) }"
+
+(* Holes *)
+
+let () =
+  expect_body
+    "a use of a local whose type is a hole is a Todo, and a pattern on a hole is a Wildcard"
+    "fn g() -> Int64 {\n  let value = todo\n  value\n}\n" "{ let _ = todo; todo } diverges";
+  expect_body "an operation on a hole evaluates its operands and ends in a Todo"
+    "fn g(count: Int64) -> Int64 {\n  let value = todo\n  value.method(count) + 1\n}\n"
+    "{ let _ = todo; { let _ = todo; let _ = place count; let _ = 1; todo } diverges } diverges";
+  List.iter
+    (fun statement ->
+      test (Printf.sprintf "`%s` on a hole has a core form" statement) (fun () ->
+          no_diagnostics
+            ~check:(fun database module_ ->
+              Resolve.diagnostics database module_
+              @ Interface.diagnostics database module_
+              @ Infer.diagnostics database module_)
+            [
+              ( "app::main",
+                "type Config(port: Int64)\n\n\
+                 fn take(count: Int64) -> Int64 {\n\
+                \  count\n\
+                 }\n\n\
+                 fn g(items: List[Int64], config: Config) -> Int64 {\n\
+                \  var hole = todo\n\
+                \  " ^ statement ^ "\n  config.port\n}\n" );
+            ]))
+    [
+      "let member = hole.field";
+      "let called = hole(1, items)";
+      "let result = hole.method(items)";
+      "let mapped = items.map(fn(item) { item + hole })";
+      "let indexed = hole[0]";
+      "let sliced = hole[1..]";
+      "let sum = hole + 1";
+      "let negated = -hole";
+      "let same = hole == 1";
+      "let less = 1 < hole";
+      "let tried = hole?";
+      "let updated = hole with (port: 1)";
+      "let text = \"${hole} and ${items.length()}\"";
+      "let listed = [hole, hole]";
+      "let passed = take(hole)";
+      "let chosen = if hole is Some(inner) { inner } else { 0 }";
+      "let matched = match hole {\n    Some(inner) if inner > 0 => inner\n    _ => 0\n  }";
+      "let Some(bound) = hole else { return 0 }";
+      "for item in hole {\n    let _ = item\n  }";
+      "hole.field = 1";
+      "hole += 1";
+      "hole = 2";
+      "while hole is Some(inner) {\n    let _ = inner\n  }";
+      "let shown = echo hole";
+      "let field = Config(port: hole)";
+    ]
 
 (* Capabilities *)
 

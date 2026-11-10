@@ -266,8 +266,12 @@ and lambda state env ?expected (value : expression) parameters body =
         {
           parameters;
           captures =
-            List.map
-              (fun id : Core.local -> if id = state.definition.id then Self else Named id)
+            List.filter_map
+              (fun id : Core.capture option ->
+                if id = state.definition.id then
+                  Some { local = Self; type_ = Form.self_type state env }
+                else if was_hole state (fun tables -> tables.local_types) id then None
+                else Some { local = Named id; type_ = Form.local_type state id })
               captures;
           body = build_block state body;
           result =
@@ -364,16 +368,11 @@ and match_ state env ?expected (value : expression) scrutinees arms =
         (scrutinee, in_statement state env scrutinee.span (fun () -> expression state env scrutinee)))
       scrutinees
   in
-  let mode_of (scrutinee : expression) =
-    match scrutinee.kind with
-    | Mode (Own, _) -> T.Own
-    | Mode (Mut, _) -> T.Mut
-    | _ -> if borrowed state scrutinee then T.Read else T.Own
-  in
   register_expression state value (fun () ->
       let scrutinees =
         List.map
-          (fun scrutinee -> Form.operand (mode_of scrutinee) (build_expression state scrutinee))
+          (fun scrutinee ->
+            Form.operand (scrutinee_mode state scrutinee) (build_expression state scrutinee))
           scrutinees
       in
       Match
@@ -408,7 +407,7 @@ and match_ state env ?expected (value : expression) scrutinees arms =
         else
           List.iter2
             (fun written (scrutinee, type_) ->
-              pattern state env written type_ ~mode:(mode_of scrutinee))
+              pattern state env written type_ ~mode:(scrutinee_mode state scrutinee))
             arm.patterns types;
         Option.iter (fun guard -> check state env guard T.bool) arm.guard;
         ( arm_value state env ?expected arm.body,

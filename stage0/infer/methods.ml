@@ -423,11 +423,9 @@ and method_call state env ?expected (value : expression) (base : expression) (me
         | None -> choose versions
       else choose versions
     in
-    (* A [mut self] method of a lent part changes it through each index on
-       the way to it. *)
-    (match (chosen, lent_mode) with
-    | Some (Path.Mut, _), Some _ -> mutable_place state base
-    | _ -> ());
+    (* A [mut self] method mutates its receiver, so every index expression
+       in the receiver must use the [mut self] version of [at]. *)
+    (match chosen with Some (Path.Mut, _) -> mutable_place state base | _ -> ());
     chosen
   in
   let wrong_receiver versions =

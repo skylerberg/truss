@@ -94,7 +94,7 @@ let form database (path : Path.t) : Core.t option =
           in
           let given () : Core.place =
             match List.filter (fun (p : Core.parameter) -> p.local <> Self) parameters with
-            | [ parameter ] -> Local parameter.local
+            | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_ }
             | _ -> bug "`%s` takes one value beside its own" (Path.show path)
           in
           (* A method of [wanted] on a value of [of_type], by the [impl] the
@@ -172,20 +172,26 @@ let form database (path : Path.t) : Core.t option =
                        bound;
                  })
           in
-          let parts bound = List.map (fun (field, local, _) -> (field, Core.Local local)) bound in
+          let parts bound =
+            List.map
+              (fun ((field : T.field), local, _) ->
+                (field, Core.Local { local; type_ = field.field_type }))
+              bound
+          in
+          let self_place : Core.place = Local { local = Self; type_ = self_type } in
           let is variant : Core.pattern = pattern self_type (Variant { variant; fields = [] }) in
           (* What [each] gives of the parts of [self]: of a record's fields,
              or of the fields of the variant it is, by an arm for each. *)
           let of_self type_
               (each : string option -> int -> (T.field * Core.place) list -> Core.block) =
             match variants with
-            | None -> each None 0 (record_parts (Local Self))
+            | None -> each None 0 (record_parts self_place)
             | Some variants ->
                 giving
                   (node type_
                      (Match
                         {
-                          scrutinees = [ Place (Local Self) ];
+                          scrutinees = [ Place self_place ];
                           arms =
                             List.mapi
                               (fun index (variant, fields) ->
@@ -248,7 +254,8 @@ let form database (path : Path.t) : Core.t option =
             | "Hash", "hash" ->
                 let hasher, hasher_type =
                   match List.rev parameters with
-                  | ({ local; type_; _ } : Core.parameter) :: _ -> (Core.Local local, type_)
+                  | ({ local; type_; _ } : Core.parameter) :: _ ->
+                      (Core.Local { local; type_ }, type_)
                   | [] -> bug "`hash` takes a hasher"
                 in
                 let hasher_path =
@@ -335,7 +342,9 @@ let form database (path : Path.t) : Core.t option =
                                                mutable_ = false;
                                                mode = Own;
                                              }))
-                                       (giving (node result (Use (Local decided))));
+                                       (giving
+                                          (node result
+                                             (Use (Local { local = decided; type_ = result }))));
                                    ];
                                  guards_exhaustive = false;
                                }))
@@ -375,7 +384,8 @@ let form database (path : Path.t) : Core.t option =
                                     {
                                       comparison = Less;
                                       left = node number (Integer (Z.of_int index));
-                                      right = node number (Use (Local theirs));
+                                      right =
+                                        node number (Use (Local { local = theirs; type_ = number }));
                                     });
                              then_ = giving (ordering "Less");
                              else_ = Some (giving (ordering "Greater"));

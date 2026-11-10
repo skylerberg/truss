@@ -49,12 +49,14 @@ let rec expression names (node : expression) =
   | Copy given -> "copy(" ^ operand given ^ ")"
   | Function_value { path; type_arguments = arguments } ->
       "fn " ^ Path.show path ^ type_arguments arguments
-  | Constant path -> Path.show path
   | Value_parameter parameter -> parameter.name
   | Lambda { parameters; captures; body; _ } ->
       Printf.sprintf "lambda(%s)%s %s"
         (list (pattern names) parameters)
-        (match captures with [] -> "" | captures -> " capturing " ^ list (local names) captures)
+        (match captures with
+        | [] -> ""
+        | captures ->
+            " capturing " ^ list (fun (capture : capture) -> local names capture.local) captures)
         (block names body)
   | Construct { variant; fields } ->
       Printf.sprintf "%s%s(%s)" (T.show node.type_)
@@ -182,7 +184,8 @@ and operand names = function
   | Value value -> expression names value
 
 and place names = function
-  | Local found -> local names found
+  | Local { local = found; _ } -> local names found
+  | Constant { path; _ } -> Path.show path
   | Field { base; field; _ } -> Printf.sprintf "%s.%s" (place names base) field
   | Lent call -> "lent " ^ expression names call
   | Temporary value -> "temporary " ^ expression names value

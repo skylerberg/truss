@@ -69,6 +69,11 @@ type form = {
   mutable definition_builder : (unit -> Core.definition) option;
   mutable next_node_id : int;
   mutable synthetic_local_count : int;
+  mutable tables_with_holes : C.t option;
+      (** Set while the builders run, if a type in the definition is a hole. The core form has no
+          hole type: a [todo] whose type is not inferred has the type [Never] there. So while the
+          builders run, [state.tables] is a copy in which every hole is [Never], and this field
+          holds the tables as the checker recorded them. *)
 }
 
 type state = {
@@ -79,7 +84,7 @@ type state = {
   resolved : Resolve.resolved;
   context : Lower.context;
   text : string;  (** The definition's source text, for fixes. *)
-  tables : C.t;
+  mutable tables : C.t;
   form : form;
   mutable obligations : C.obligation list;
   mutable diagnostics : Diagnostic.t list;
@@ -147,19 +152,126 @@ let register_expression state (value : expression) kind =
         | Some type_ -> { Core.id; origin = value.id; type_; kind = kind () }
         | None -> bug "`%s` has a node and no type" (source state value.span))
 
-let build_expression state (value : expression) : Core.expression =
-  match state.form.expression_builders.(value.id) with
-  | Some build -> build ()
-  | None -> bug "`%s` has no node in the core form" (source state value.span)
+(* Holes
+
+   A [todo] with no expected type has a hole type, and so does everything
+   computed from it. The checker accepts any operation on a hole without
+   resolving it. Evaluating a hole never returns, because the [todo] it
+   comes from stops the program. The core form uses that:
+
+   - a hole type is [Never];
+   - a use of a local whose type is a hole is a [Todo];
+   - a pattern that matches a hole is a [Wildcard];
+   - an expression with an operand whose type is a hole is a block that
+     evaluates the operands in order and ends in a [Todo];
+   - a [for] loop over a hole, or an assignment to one, only evaluates the
+     hole.
+
+   So the form holds no operation that the checker did not resolve. *)
+
+(* Whether the checker recorded a hole as the type of an entry of one of
+   its tables. *)
+let was_hole state (table : C.t -> T.ty option array) (id : id) =
+  match state.form.tables_with_holes with
+  | Some tables -> (table tables).(id) = Some T.Hole
+  | None -> false
+
+(* The sub-expressions that an expression evaluates before it does
+   anything else. A part that has no core node of its own, such as the
+   [receiver.name] of a method call or the range of a slice, is replaced
+   by its own operands. *)
+let rec operands state (value : expression) : expression list =
+  let checked (part : expression) =
+    if Option.is_some state.form.expression_builders.(part.id) then [ part ]
+    else operands state part
+  in
+  match value.kind with
+  (* The guards and bodies run after the patterns bind their names. *)
+  | Match { scrutinees; _ } -> List.concat_map checked scrutinees
+  | Quantified { binder = Binder_in (_, collection); _ } -> checked collection
+  | Quantified { binder = Binder_type _; _ } -> []
+  (* A branch runs only if the condition holds, and the condition is a
+     [Bool]. An alias evaluates nothing itself. *)
+  | If _ | Parenthesized _ | Mode _ -> []
+  | _ ->
+      let found = ref [] in
+      Syntax_walk.expression_parts ~statement:ignore value ~expression:(fun part ->
+          found := checked part :: !found);
+      List.concat (List.rev !found)
+
+let rec build_expression state (value : expression) : Core.expression =
+  let evaluated =
+    if Option.is_some state.form.tables_with_holes then operands state value else []
+  in
+  if
+    List.exists
+      (fun (operand : expression) -> was_hole state (fun t -> t.types) operand.id)
+      evaluated
+  then begin
+    let evaluate (operand : expression) : Core.statement option =
+      match operand.kind with
+      (* Creating a closure has no effect, and the checker did not resolve
+         the parameters of a lambda that is passed to a hole. *)
+      | Lambda _ -> None
+      | _ ->
+          let node = build_expression state operand in
+          Some
+            {
+              id = fresh_node_id state;
+              origin = operand.id;
+              kind =
+                Let
+                  {
+                    pattern =
+                      {
+                        id = fresh_node_id state;
+                        origin = operand.id;
+                        type_ = node.type_;
+                        kind = Wildcard;
+                      };
+                    value = (match node.kind with Use place -> Place place | _ -> Value node);
+                    else_ = None;
+                  };
+            }
+    in
+    let statements = List.filter_map evaluate evaluated in
+    let todo = synthetic_expression state ~origin:value.id T.Never Todo in
+    synthetic_expression state ~origin:value.id T.Never
+      (Block { statements; value = Some todo; diverges = true })
+  end
+  else
+    match state.form.expression_builders.(value.id) with
+    | Some build -> build ()
+    | None -> bug "`%s` has no node in the core form" (source state value.span)
 
 let register_statement state (written : statement) kind =
   state.form.statement_builders.(written.id) <-
     Some (fun () -> { Core.id = fresh_node_id state; origin = written.id; kind = kind () })
 
 let build_statement state (written : statement) : Core.statement =
-  match state.form.statement_builders.(written.id) with
-  | Some build -> build ()
-  | None -> bug "`%s` has no node in the core form" (source state written.span)
+  let rec unmarked (value : expression) =
+    match value.kind with Mode (_, inner) | Parenthesized inner -> unmarked inner | _ -> value
+  in
+  let hole (value : expression) =
+    let value = unmarked value in
+    if was_hole state (fun t -> t.types) value.id then Some value else None
+  in
+  match
+    match written.kind with
+    | For { iterable; _ } -> hole iterable
+    | Assignment { target; _ } -> hole target
+    | _ -> None
+  with
+  | Some value ->
+      {
+        id = fresh_node_id state;
+        origin = written.id;
+        kind = Evaluate (build_expression state value);
+      }
+  | None -> (
+      match state.form.statement_builders.(written.id) with
+      | Some build -> build ()
+      | None -> bug "`%s` has no node in the core form" (source state written.span))
 
 (* Registers the builder for a pattern's core node. The node's type is
    the type of the value the pattern matches. *)
@@ -173,9 +285,12 @@ let register_pattern state (written : pattern) kind =
         | None -> bug "`%s` has a node and no type" (source state written.span))
 
 let build_pattern state (written : pattern) : Core.pattern =
-  match state.form.pattern_builders.(written.id) with
-  | Some build -> build ()
-  | None -> bug "`%s` has no node in the core form" (source state written.span)
+  if was_hole state (fun t -> t.pattern_types) written.id then
+    { id = fresh_node_id state; origin = written.id; type_ = T.Never; kind = Wildcard }
+  else
+    match state.form.pattern_builders.(written.id) with
+    | Some build -> build ()
+    | None -> bug "`%s` has no node in the core form" (source state written.span)
 
 (* Makes an expression's core node the core node of [inner]. Used for
    parentheses and for a mode marker such as [mut value]. *)
@@ -249,11 +364,15 @@ let resolve_capabilities state (capabilities : T.capability list) =
 
 (* The final form of a type: inference variables replaced by their
    solutions, projections normalized, and capability variables replaced
-   by their solutions. An unsolved inference variable becomes an error. *)
+   by their solutions. An unsolved inference variable becomes an error.
+   While the core form is built, a hole becomes [Never]. *)
 let final state type_ =
   let type_ =
     T.map
-      (function T.Variable _ | T.Literal _ -> Some (unsolved state) | _ -> None)
+      (function
+        | T.Variable _ | T.Literal _ -> Some (unsolved state)
+        | T.Hole when Option.is_some state.form.tables_with_holes -> Some T.Never
+        | _ -> None)
       (normalize state type_)
   in
   match state.capability_solution with
@@ -1072,13 +1191,36 @@ let rec lent state (value : expression) : T.mode option =
   | Mode (_, inner) when Option.is_some (marked_call state inner) -> lent state inner
   | _ -> None
 
-(* Whether a value is borrowed where it is: a place, or a part that is
-   lent. What binds it views it, and what matches it binds views of its
-   parts. *)
-let borrowed state (value : expression) = is_place state value || Option.is_some (lent state value)
+(* Whether an expression is a slice, such as [items[1..3]]. A slice is
+   written like an index, but it is a value: a view of part of its base. *)
+let rec is_slice (value : expression) =
+  match value.kind with
+  | Bracket (_, [ Item { kind = Range _; _ } ]) -> true
+  | Parenthesized inner | Mode (_, inner) -> is_slice inner
+  | _ -> false
 
-(* A place that is assigned or lent [mut]: each index on its way is the
-   [mut] version of [at], which lends its element [mut]. *)
+(* Whether a [let], [match], or [is] borrows the expression: it denotes a
+   place, or a part that a lending call lends. The bindings then borrow
+   parts of that place. A slice is a value, so it is not borrowed. *)
+let borrowed state (value : expression) =
+  (is_place state value || Option.is_some (lent state value)) && not (is_slice value)
+
+(* The mode with which the bindings of a pattern hold the parts of the
+   scrutinee of a [match] or an [is]. A scrutinee marked [own] or [mut]
+   gives that mode. An unmarked place or lent part is borrowed, so the
+   bindings are [Read]. Any other scrutinee is a value that the match
+   consumes, so the bindings are [Own]. A mark that belongs to the receiver
+   of a method call, as in [mut cursor.next()], is not a mark on the
+   scrutinee. *)
+let scrutinee_mode state (scrutinee : expression) : T.mode =
+  match scrutinee.kind with
+  | Mode (Own, inner) when Option.is_none (marked_call state inner) -> Own
+  | Mode (Mut, inner) when Option.is_none (marked_call state inner) && not (is_slice inner) -> Mut
+  | _ -> if borrowed state scrutinee then Read else Own
+
+(* Marks a place as mutated: it is assigned, passed [mut], or lent [mut].
+   Every index expression in the place then uses the [mut self] version of
+   [at], which lends its element [mut]. *)
 let rec mutable_place state (value : expression) =
   match value.kind with
   | Member (base, _) | Parenthesized base | Mode (_, base) -> mutable_place state base
