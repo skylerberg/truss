@@ -108,6 +108,12 @@ type operation =
   | Storage_from_array
       (** [storage_from_array(array)]: new storage that holds the elements of an [own] array, in
           order, with the array's length as its length and its capacity. The array is moved. *)
+  | Array_view
+      (** [array_view(array)]: a view of an array's elements, in order, which is valid for as long
+          as the array is *)
+  | Array_at_mut
+      (** [array_at_mut(mut array, index)]: lends the element at an index, to change. The index is
+          less than the array's length. *)
   | Storage_at
   | Storage_at_mut
   | Storage_view

@@ -254,19 +254,20 @@ public opaque type FileWriter(file: File)
 public fn FileWriter.write(mut self, text: StringSlice) -> Result[Unit, SystemError]
   uses Handles
 {
-  handles::write_all(mut self.file.handle.descriptor, bytes: text.bytes)
+  mut self.file.write_text(text)
 }
 
 public fn FileWriter.write_line(mut self, text: StringSlice) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  mut self.file.write_text(text)?
+  mut self.file.write_text("\n")
 }
 
 public fn FileWriter.write_bytes(mut self, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  mut self.file.write_all(bytes)
 }
 
 public fn FileWriter.flush(mut self) -> Result[Unit, SystemError]

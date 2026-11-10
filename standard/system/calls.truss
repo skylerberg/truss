@@ -80,10 +80,14 @@ internal fn read_at_onto_end(
   }
 }
 
-internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[USize, Int32] {
+internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[USize, Int32]
+  ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
+{
   let length = intrinsic::view_length(bytes)
   var wrote = intrinsic::libc_write(descriptor, bytes: bytes, count: length)
-  while wrote < 0 && interrupted_by_signal() {
+  while wrote < 0 && interrupted_by_signal()
+    invariant wrote <= length
+  {
     wrote = intrinsic::libc_write(descriptor, bytes: bytes, count: length)
   }
   if wrote < 0 {
@@ -94,10 +98,14 @@ internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Resu
   }
 }
 
-internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offset: Int64) -> Result[USize, Int32] {
+internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offset: Int64) -> Result[USize, Int32]
+  ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
+{
   let length = intrinsic::view_length(bytes)
   var wrote = intrinsic::libc_pwrite(descriptor, bytes: bytes, count: length, offset: offset)
-  while wrote < 0 && interrupted_by_signal() {
+  while wrote < 0 && interrupted_by_signal()
+    invariant wrote <= length
+  {
     wrote = intrinsic::libc_pwrite(descriptor, bytes: bytes, count: length, offset: offset)
   }
   if wrote < 0 {

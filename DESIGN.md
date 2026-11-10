@@ -2204,6 +2204,13 @@ package may want those names for its own types. They are `core::Pair`,
 - **`Type.parse(text)` parses text,** through the `Parse` trait. `From`
   and `TryFrom` convert between types. `Display` formats a value for
   people.
+- **A write reports at most the bytes it was given.** `Handles.write` and
+  `streams::Writer.write` ensure it, so it is proven for every
+  implementation: the operating system's, a fake's, and a package's own
+  writer. `write_all` relies on it to find the bytes that are left. When a
+  write that was given bytes takes none, `write_all` returns
+  `SystemError.NothingWritten` and does not try again, as Rust's
+  `write_all` returns `WriteZero`.
 - **Each capability ships with its test fakes,** in the capability's
   module: `time::ManualClock`, `random::SeededRandom`,
   `files::MemoryFiles`, `console::CapturedConsole`, `log::CapturedLog`.

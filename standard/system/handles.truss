@@ -127,7 +127,10 @@ internal fn open_with(file: Path, flags: Int32) -> Result[streams::Handle, Syste
   Ok(streams::Handle(descriptor: own descriptor, number: 0))
 }
 
-internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, SystemError] {
+internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, SystemError]
+  ensures !(result is Ok(kept) && outcome is Ok(given) && !identical(kept, given))
+  ensures (result is Ok(_)) == (outcome is Ok(_))
+{
   match own outcome {
     Ok(value) => Ok(own value)
     Err(number) => Err(file_error(number))
