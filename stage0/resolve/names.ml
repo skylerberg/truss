@@ -611,6 +611,13 @@ let definition =
       | Some (module_, declaration) ->
           Some (Query.demand database items module_).(declaration.index).value)
 
+(* Where each node of a definition is within it, by its id. The core form
+   holds no positions, so that laying a definition out again changes nothing
+   that reads its form; what shows a node's source asks here. *)
+let spans =
+  Query.query ~name:"spans" ~phase:Declarations ~show:show_key (fun database key ->
+      Option.map Syntax_walk.spans (Query.demand database definition key))
+
 (* Where a definition starts in its file, for showing its diagnostics. *)
 let base =
   Query.query ~name:"base" ~phase:Declarations ~show:show_key ~saved:true (fun database key ->

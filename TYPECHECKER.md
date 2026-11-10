@@ -1568,7 +1568,8 @@ is built, which later results are keyed by, and the id of the syntax node
 it came from, which is how a diagnostic finds the text to quote. Several
 nodes can come from one syntax node, as the call and the update of
 `total += step` do. No node holds a span, so a definition that was only
-laid out again has the same form.
+laid out again has the same form. Where each syntax node is, by its id, is
+a result of its own, which only what shows source asks for.
 
 The type checker says how each node is built where it decides what the
 expression, statement, or pattern is, and builds the form once the

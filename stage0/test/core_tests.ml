@@ -306,6 +306,46 @@ let () =
      ensures (old(count) == count)\n\
      { true }"
 
+(* Where a node came from *)
+
+let () =
+  test "a node's origin finds the source it came from" (fun () ->
+      let text =
+        "fn g(items: List[Int64]) -> Int64 {\n\
+        \  var total = 0\n\
+        \  for item in items {\n\
+        \    total += item\n\
+        \  }\n\
+        \  total\n\
+         }\n"
+      in
+      let database = setup [ ("app::main", text) ] in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = Resolve.Names.key_of declaration in
+          match
+            ( Query.demand database Infer.core key,
+              Query.demand database Resolve.Names.spans key,
+              Query.demand database Resolve.Names.text key )
+          with
+          | Some form, Some spans, Some written ->
+              let found = ref [] in
+              Core_walk.parts
+                {
+                  Core_walk.nothing with
+                  statement =
+                    (fun (node : Core.statement) ->
+                      match node.kind with
+                      | Update _ ->
+                          let span = spans.(node.origin) in
+                          found := String.sub written span.start (span.stop - span.start) :: !found
+                      | _ -> ());
+                }
+                form.parts;
+              if !found <> [ "total += item" ] then fail "found [%s]" (String.concat "; " !found)
+          | _ -> fail "no form")
+        (Query.demand database Resolve.Names.declarations (module_of "app::main")))
+
 (* Every form of the standard library holds together. *)
 
 let () =
