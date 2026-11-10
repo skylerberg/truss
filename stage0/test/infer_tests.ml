@@ -614,19 +614,9 @@ let () =
           \  }\n\
            }\n")
          "capabilities.monitor_needs_tasks");
-   test "a monitor needs `Tasks` when the body uses a capability parameter" (fun () ->
-       one_diagnostic
-         (tally
-        ^ "fn f[capability Granted](run: (fn() uses Granted))\n\
-          \  uses Granted\n\
-           {\n\
-          \  var tally = Tally(count: 0)\n\
-          \  provide mut tally {\n\
-          \    run()\n\
-          \  }\n\
-           }\n")
-         "capabilities.monitor_needs_tasks");
-   test "a monitor can lock through `Tasks` of the same or an enclosing `provide`" (fun () ->
+   test
+     "a monitor can lock through `Tasks` of its `provide`, an enclosing one, or a capability \
+      parameter" (fun () ->
        fine
          (tally
         ^ "fn same() {\n\
@@ -651,8 +641,8 @@ let () =
           \    }\n\
           \  }\n\
            }\n\n\
-           fn declared[capability Granted](run: (fn() uses Granted))\n\
-          \  uses Granted, Tasks\n\
+           fn through_parameter[capability Granted](run: (fn() uses Granted))\n\
+          \  uses Granted\n\
            {\n\
           \  var tally = Tally(count: 0)\n\
           \  provide mut tally {\n\
