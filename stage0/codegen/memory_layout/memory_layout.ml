@@ -63,6 +63,7 @@ type env = {
 
 let create target ~shape_of = { target; shape_of; done_ = Types.empty; in_progress = Types.empty }
 let target env = env.target
+let shape env ty = env.shape_of ty
 
 let integer_size target = function
   | Int8 | UInt8 -> 1

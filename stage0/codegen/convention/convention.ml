@@ -11,6 +11,14 @@ let parameter env (mode : Ground.mode) ty =
       | Mut -> Pointer { target = Value ty; writable = true }
       | Own -> if small then Value ty else Pointer { target = Value ty; writable = true })
 
+let held env (mode : Ground.mode) ty =
+  match mode with
+  | Own -> if (Memory_layout.of_type env ty).size = 0 then None else Some (Lir.Value ty)
+  | Read | Mut -> parameter env mode ty
+
+let cursor_state = "state"
+let cursor_parameter position = Printf.sprintf "parameter%d" position
+
 type result = Nothing | Returned of Lir.ty | Through_pointer of Lir.ty
 
 let result env (ty : Ground.ty) =

@@ -68,15 +68,8 @@ let operand_as st (mode : T.mode) ty (place : Lir.place) (lir_ty : Lir.ty option
 let pass st (mode : T.mode) ty place =
   operand_as st mode ty place (Convention.parameter st.context.env (Monomorphic.mode mode) ty)
 
-(* How a cursor holds an argument for its method's parameter: an [own]
-   argument as a value of its own, since the cursor owns it and may outlive
-   the caller's statement, and any other as the parameter takes it. *)
-let held context (mode : T.mode) ty =
-  match mode with
-  | Own -> if (Memory_layout.of_type context.env ty).size = 0 then None else Some (Lir.Value ty)
-  | Read | Mut -> Convention.parameter context.env (Monomorphic.mode mode) ty
-
-let hold st mode ty place = operand_as st mode ty place (held st.context mode ty)
+let hold st mode ty place =
+  operand_as st mode ty place (Convention.held st.context.env (Monomorphic.mode mode) ty)
 
 (* Calls a function instance with arguments that are places of their
    parameter types, writing the result to [destination]. *)

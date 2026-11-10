@@ -408,7 +408,9 @@ capture nothing, so storing one never stores a pointer into a stack.
 A cursor is the state machine of one pulled yielding method (see
 [Cursors](#cursors-1)). Its layout is a state number, the method's
 parameters, and the locals that are live across a `yield`, with the states
-of any cursors it pulls from inside it. An `own` argument is held as a
+of any cursors it pulls from inside it. A parameter's field is named by its
+place among the parameters that have a size, in `Convention`, which is how
+the code that makes a cursor and the method's state machine agree on it. An `own` argument is held as a
 value the cursor owns and drops, whatever its size, since the cursor may
 outlive the statement that made it. Other arguments are held as their
 parameters take them, a view or a pointer to the caller's place. The type has no name in Truss, and
@@ -1180,6 +1182,9 @@ Each instance is checked as it is lowered, once its passes have run:
 - a function with a result returns one on every `return`, and one without
   returns none
 - a call gives its target as many arguments as the target's signature takes
+- a value that has a size is built as a record or a variant its type has,
+  with fields the type has, since the emitter leaves out a field it does
+  not find in the layout, as it must for a field of no size
 - a call of a nested function names it with the signature it has
 
 Everything a build links is checked together before any C is emitted:

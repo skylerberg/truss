@@ -38,6 +38,22 @@ let () =
   test "a place that names a local that does not exist is a bug" (fun () ->
       expect_bug ~saying:"local 5, of 0" (fun () ->
           Verify.instance env (entry [] [ block [] (Return (Some (copy 5))) ])));
+  test "a value built with a field its type does not have is a bug" (fun () ->
+      expect_bug ~saying:"built with a field third, which it does not have" (fun () ->
+          Verify.instance (shape_env ~extra:drop_shapes ())
+            (entry
+               [ local (value pair) ]
+               [
+                 block
+                   [
+                     Assign
+                       ( at 0,
+                         Build
+                           { ty = pair; variant = None; fields = [ ("third", constant_int32 1) ] }
+                       );
+                   ]
+                   (Return (Some (constant_int32 0)));
+               ])));
   test "an instance whose calls fit their targets passes" (fun () ->
       Verify.instance env (caller [ constant_int32 1 ]));
   let find units key =

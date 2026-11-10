@@ -150,7 +150,12 @@ let kept (f : Lir.function_) =
     (yields f);
   List.filter (fun i -> keep.(i)) (List.init (Array.length f.locals) Fun.id)
 
-let field_name local = Printf.sprintf "local%d" local
+(* A kept local's field of the cursor: a parameter's is named by its place
+   among the parameters, which is how whoever makes a cursor fills it in. *)
+let field_name (f : Lir.function_) local =
+  match List.find_index (Int.equal local) f.parameters with
+  | Some position -> Convention.cursor_parameter position
+  | None -> Printf.sprintf "local%d" local
 
 let member : Lir.ty -> Memory_layout.member = function
   | Value ty -> Typed ty
@@ -161,8 +166,8 @@ let member : Lir.ty -> Memory_layout.member = function
 let state_ty = Lir.Raw (Integer UInt32)
 
 let cursor_fields _env (f : Lir.function_) =
-  ("state", Memory_layout.Raw (Integer UInt32))
-  :: List.map (fun local -> (field_name local, member f.locals.(local).ty)) (kept f)
+  (Convention.cursor_state, Memory_layout.Raw (Integer UInt32))
+  :: List.map (fun local -> (field_name f local, member f.locals.(local).ty)) (kept f)
 
 (* The state machine *)
 
@@ -177,7 +182,7 @@ let state_machine (f : Lir.function_) ~cursor ~base ~yield_ ~return_ =
     | Local local when List.mem local kept ->
         {
           Lir.root = Local cursor;
-          projections = Deref :: Field (field_name local) :: p.projections;
+          projections = Deref :: Field (field_name f local) :: p.projections;
         }
     | Local local -> { p with root = Local (local + base) }
     | Static _ -> p
@@ -202,7 +207,7 @@ let state_machine (f : Lir.function_) ~cursor ~base ~yield_ ~return_ =
 
 let set_state cursor state : Lir.statement =
   Assign
-    ( { root = Local cursor; projections = [ Deref; Field "state" ] },
+    ( { root = Local cursor; projections = [ Deref; Field Convention.cursor_state ] },
       Use (Constant (Integer (UInt32, Z.of_int state))) )
 
 let entry_switch cursor cases ~default : Lir.basic_block =
@@ -211,7 +216,8 @@ let entry_switch cursor cases ~default : Lir.basic_block =
     terminator =
       Switch
         {
-          value = Copy { root = Local cursor; projections = [ Deref; Field "state" ] };
+          value =
+            Copy { root = Local cursor; projections = [ Deref; Field Convention.cursor_state ] };
           cases = List.map (fun (state, block) -> (Z.of_int state, block)) cases;
           default;
         };
@@ -299,7 +305,7 @@ let cursor_drop _env ~cursor ~owned (f : Lir.function_) =
       statements =
         List.map
           (fun local ->
-            Lir.Drop { root = Local 0; projections = [ Deref; Field (field_name local) ] })
+            Lir.Drop { root = Local 0; projections = [ Deref; Field (field_name f local) ] })
           owned;
       terminator = Return None;
     }

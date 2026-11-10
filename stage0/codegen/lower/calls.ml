@@ -328,7 +328,7 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
            defaults' mask, then the evidence. *)
         let fields =
           List.mapi
-            (fun i operand -> (Printf.sprintf "local%d" i, operand))
+            (fun i operand -> (Convention.cursor_parameter i, operand))
             (passed @ mask @ evidence)
         in
         let cursor = Ground.Cursor { method_ = path; type_arguments } in
@@ -339,7 +339,7 @@ and call_with st (call_ : C.call) ~(expressions : S.expression list) ~(arguments
                  {
                    ty = cursor;
                    variant = None;
-                   fields = ("state", Constant (Integer (UInt32, Z.zero))) :: fields;
+                   fields = (Convention.cursor_state, Constant (Integer (UInt32, Z.zero))) :: fields;
                  } ))
     | Trait_method { trait; name; self_type; _ }
       when primitive (ground st self_type)
