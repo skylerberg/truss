@@ -53,6 +53,9 @@ type obligation = {
   code : Code.prover;
   span : span;  (** Relative to the definition being proven. *)
   message : string;
+  cited : (Names.key * span) option;
+      (** The clause it comes from, in the definition that states it, where that is not the one
+          being proven: a callee's [requires]. *)
   query : L.query;
   contracts_alone : L.query option;
       (** The query without what unfolding callees' definitions gave, where it has any: asked when
@@ -326,10 +329,10 @@ let assume context frame term =
    after it. Inside a quantifier it is shown for each value the
    quantifier's premise admits, which is how a quantifier's body is shown
    to be well defined. *)
-let rec oblige ?evaluation context frame code span message goal =
+let rec oblige ?evaluation ?cited context frame code span message goal =
   match obligation_at ?evaluation context frame code span message goal with
   | Some obligation ->
-      context.obligations <- obligation :: context.obligations;
+      context.obligations <- { obligation with cited } :: context.obligations;
       assume context frame goal
   | None -> ()
 
@@ -385,6 +388,7 @@ and make_obligation ?evaluation context frame code span message goal =
     code;
     span;
     message;
+    cited = None;
     query;
     contracts_alone;
     values = context.values;
@@ -1474,6 +1478,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Specification_function { function_; arguments } ->
       specification_function context frame node function_ arguments
   | Method_time callee -> Some (frame, method_time context frame callee)
+  | Leaving _ -> unsupported (at frame node) "an early exit from `concurrent` code"
 
 (* The right side of [&&], [||], or [==>], which runs only where [runs]
    holds. One that changes a local, as a call with a [mut] argument does,
@@ -4635,6 +4640,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           (fun (clause : expression) ->
             let _, term = clause_value context entry clause in
             oblige context frame Requires span
+              ?cited:
+                (Option.map (fun key -> (key, span_of part.callee clause.origin)) part.callee.key)
               (Printf.sprintf "`%s` may not hold for this call to `%s`."
                  (quote part.callee clause.origin) (Path.show path))
               term;
@@ -6281,7 +6288,9 @@ and statement_kind context frame (node : statement) : frame option =
       let after, new_value = value context { frame with updating = Some current } updated in
       Some (store context { after with updating = frame.updating } target new_value)
   | While { condition; clauses; body } -> while_ context frame node condition clauses body
-  | For { pattern; iteration; clauses; body; parallel = _ } ->
+  | For { mode = Concurrent_loop; _ } ->
+      unsupported (span_of frame.source node.origin) "a `concurrent for` loop"
+  | For { pattern; iteration; clauses; body; mode = Sequential | Parallel_loop } ->
       for_ context frame node pattern iteration clauses body
   | Assert { value = asserted; _ } ->
       let frame, term = value context frame asserted in
@@ -6305,6 +6314,7 @@ and statement_kind context frame (node : statement) : frame option =
         (fun frame branch ->
           match frame with Some frame -> statement context frame branch | None -> None)
         (Some frame) branches
+  | Concurrent _ -> unsupported (span_of frame.source node.origin) "a `concurrent` block"
   | Yield { mode; part } -> handing_out context frame node mode part
 
 (* A [yield] in a lending or yielding method's own body: the part meets

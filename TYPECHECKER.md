@@ -1005,7 +1005,9 @@ run, and is an error with a fix that deletes it, as in Java. This uses types
 alone: `return`, `break`, `continue`, `unreachable`, a call that returns
 `Never`, an `if` or `match` whose branches all have type `Never`, and a
 `while true` that is never left. Nothing is decided from values, so
-`if false { ... }` is not reported.
+`if false { ... }` is not reported. A `parallel` or `concurrent` block never
+finishes when one of its branches never does, since the block ends only
+when every branch has.
 
 ### `todo`, `echo`, and `unreachable`
 
@@ -1480,6 +1482,25 @@ change of what the slice views, so one branch cannot push to a list while
 another reads a slice of it. A `parallel for` may change only its own
 element and its own locals.
 
+### `concurrent`
+
+The branches of a `concurrent` block and the iterations of a
+`concurrent for` follow the same rule for places as `parallel`'s. They
+differ in that `?`, `return`, `break`, and `continue` may leave one, which
+adds one rule:
+
+- **A branch leaves each place whole.** When a branch leaves early, the
+  other branches end along their own paths and the code after the block
+  does not run. So a branch that takes a value out of a place that is lent
+  `mut` must give the place a value again before the branch ends. Under
+  `parallel`, the code after the block could do that. A value that is taken
+  out before the block must be back where a branch returns, as at any
+  `return`.
+- **An exit that leaves a branch goes where it would go outside
+  `concurrent` code,** for the check: a `return` ends the function, and a
+  `break` or a `continue` goes to its loop. Each other branch has by then
+  not started or run to one of its ends, and each end is checked.
+
 ## Capabilities
 
 ### What code may call
@@ -1544,6 +1565,9 @@ until the error is fixed.
   function around it declares. **`parallel` branches and `parallel for`
   bodies** have only `Panic` available. A test without `uses` has only
   `Panic`, and whatever it provides.
+- **`concurrent` code needs `Tasks`,** at a `concurrent` block and at a
+  `concurrent for`, as a call needs what its callee uses. Its branches and
+  iterations have the capabilities that are available around it.
 - **A `uses` clause that is never needed is not an error,** since a function
   may declare a capability its later versions will use, and callers already
   provide it.
@@ -1860,6 +1884,16 @@ The core form records these decisions:
   call of `compare` followed by a test of the resulting `Ordering`. In a
   specification, arithmetic and comparisons work on `Integer`, so built-in
   integer operands are converted first.
+- **`concurrent` code names the tasks that an exit ends.** A `concurrent`
+  block is a statement of its own beside `parallel`, and a `for` loop says
+  whether its iterations run in order, in parallel, or as tasks. A
+  `return`, a `break`, or a `continue` that leaves a branch or an iteration
+  is inside a node that lists the tasks it ends early, innermost first:
+  the branch of a block, by the block and the branch's index, or an
+  iteration of a loop. A `?` in a task is the `match` it always is, with
+  its `return` inside that node. A `continue` of a `concurrent for` itself
+  only ends its own iteration, so it is not marked. An exit inside a
+  lambda leaves no task.
 - **Syntactic sugar is desugared.**
   - `?` is a `match` that evaluates to the success value or returns the
     failure.
@@ -2212,31 +2246,19 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **`concurrent`.** The parser reads a `concurrent` block and a
-  `concurrent for`, and their names resolve as a `parallel` block's and
-  loop's do. The checker gives the body its types and reports
-  `types.not_built` at the keyword, so a definition that has one has no
-  core form. What is to be built:
-  - The function needs `Tasks`, as a `for` loop needs what its `each` uses.
-    A branch has the capabilities that are available around the block.
-  - Branches follow `parallel`'s rule for places: a place that one branch
-    changes must not overlap a place that another uses, and a
-    `concurrent for` may change only its own element and its own locals.
-  - `?`, `return`, `break`, and `continue` may leave a branch. A
-    `concurrent` block has type `Never` when one of its branches does,
-    since the block ends normally only when every branch does.
-  - An early exit from one branch is checked as if each other branch had
-    either not started or run to any of its ends, since the code after the
-    block does not run. So what a branch moves out of a place that
-    outlives the block, that branch puts back.
+- **Two rules for `concurrent` code.** The checker builds `concurrent`
+  blocks and loops, and the ownership check applies its rules to them. The
+  prover and code generation report them as not built. Still to be built
+  here:
   - The type argument of `Channel` is never a view type, which leaves out
-    every function type and every `any` type.
+    every function type and every `any` type. The standard library has no
+    `Channel` yet.
   - At a `provide mut` whose body can use `Tasks`, the implementation's
     calls take turns, so its capability may have no method with a
     parameter whose type can hold, at any depth, a function or an `any`
     value that uses a capability. A body that uses a capability parameter
-    of the enclosing function counts as able to use `Tasks`.
-  - The core form's shape for both is not decided.
+    of the enclosing function counts as able to use `Tasks`. The core form
+    will say whether a `provide`'s calls take turns.
 - **An interpolated string as calls.** It is still a node that names the
   text builder's methods and each value's `display`. It will be desugared
   to those calls once they have `time` clauses.

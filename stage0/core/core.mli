@@ -232,6 +232,13 @@ and kind =
   | Return of expression option
   | Break
   | Continue
+  | Leaving of { tasks : task list; exit : expression }
+      (** An early exit from [concurrent] code. [exit] is the {!Return}, {!Break}, or {!Continue},
+          and [tasks] are the tasks that it ends early, innermost first. The other tasks of each
+          block or loop that it leaves are cancelled and run to their ends, and then the exit takes
+          effect. A [?] in a task is the {!Match} that it always is, with its [Return] inside this
+          node. A [continue] of a [concurrent for] itself only ends its own iteration, so it is not
+          inside this node. An exit inside a lambda leaves no task. *)
   | Todo
       (** [todo]: stops the program. A [todo] with no expected type has the type [Never]. The type
           checker does not resolve an operation on such a [todo], or on a local bound to one, so the
@@ -339,14 +346,32 @@ and statement_kind =
       iteration : iteration;
       clauses : loop_clause list;
       body : block;
-      parallel : bool;
+      mode : loop_mode;
     }
   | While of { condition : expression; clauses : loop_clause list; body : block }
   | Parallel of statement list
+      (** A [parallel] block. Each statement is a branch. A branch uses no capability but [Panic],
+          and no early exit leaves one. *)
+  | Concurrent of statement list
+      (** A [concurrent] block. Each statement is a branch, which runs as a task with the
+          capabilities that are available around the block. The block ends when every branch has
+          ended. A branch is named by the block's id and its index, from 0 (see {!Leaving}). *)
   | Proof of block
   | Assert of condition
   | Yield of { mode : Types.mode; part : operand }
       (** [yield] in a lending or yielding method. [mode] is the mode in the method's signature. *)
+
+(** How the iterations of a [for] loop run: one after another, at the same time with no capability
+    but [Panic], or as tasks. *)
+and loop_mode = Sequential | Parallel_loop | Concurrent_loop
+
+(** A task that an early exit ends (see {!Leaving}). The block or the loop is named by its
+    statement's origin, which no other statement of the definition has. *)
+and task =
+  | Branch of { block : origin; index : int }
+      (** The branch [index], from 0, of the {!Concurrent} statement with the origin [block]. *)
+  | Iteration of { loop : origin }
+      (** An iteration of the [concurrent for] loop with the origin [loop]. *)
 
 (** What a [for] loop iterates over. *)
 and iteration =

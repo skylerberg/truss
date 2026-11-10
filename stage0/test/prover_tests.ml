@@ -2373,6 +2373,24 @@ let () =
       let failed = List.filter (fun (state : Prover.state) -> state.failure <> None) states in
       if List.length failed <> 1 || List.length states < 2 then
         fail "%d states, %d failed" (List.length states) (List.length failed));
+  test "a call's requires that may not hold has a note at the clause" (fun () ->
+      let text =
+        "fn halved(count: Int64) -> Int64\n\
+        \  requires count > 0\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  count / 2\n\
+         }\n\n\
+         fn f(value: Int64) -> Int64 {\n\
+        \  halved(value)\n\
+         }\n"
+      in
+      let database = Support.setup [ ("app::main", text) ] in
+      match check database (Support.module_of "app::main") with
+      | [ { notes = [ (span, _) ]; _ } ] ->
+          let noted = String.sub text span.start (span.stop - span.start) in
+          if noted <> "count > 0" then fail "the note is at `%s`" noted
+      | found -> fail "%s" (String.concat "; " (Support.codes found)));
   test "the same failure on another path is reported once" (fun () ->
       let found =
         codes

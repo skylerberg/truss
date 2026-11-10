@@ -121,6 +121,15 @@ let rec expression names (node : expression) =
       match value with Some value -> "return " ^ expression value | None -> "return")
   | Break -> "break"
   | Continue -> "continue"
+  | Leaving { tasks; exit } ->
+      Printf.sprintf "leaving %s { %s }"
+        (String.concat ", "
+           (List.map
+              (function
+                | Branch { block; index } -> Printf.sprintf "branch %d of #%d" index block
+                | Iteration { loop } -> Printf.sprintf "an iteration of #%d" loop)
+              tasks))
+        (expression exit)
   | Todo -> "todo"
   | Unreachable -> "unreachable"
   | Echo inner -> "echo " ^ expression inner
@@ -203,9 +212,12 @@ and statement names (node : statement) =
       Printf.sprintf "%s = %s" (place names target) (expression names value)
   | Compound_assign { target; value } ->
       Printf.sprintf "compound_assign %s = %s" (place names target) (expression names value)
-  | For { pattern = bound; iteration; clauses; body; parallel } ->
+  | For { pattern = bound; iteration; clauses; body; mode } ->
       Printf.sprintf "%sfor %s in %s%s %s"
-        (if parallel then "parallel " else "")
+        (match mode with
+        | Sequential -> ""
+        | Parallel_loop -> "parallel "
+        | Concurrent_loop -> Printf.sprintf "concurrent #%d " node.origin)
         (pattern names bound)
         (match iteration with
         | Integer_range { start; stop; inclusive } ->
@@ -222,6 +234,9 @@ and statement names (node : statement) =
         (block names body)
   | Parallel branches ->
       "parallel { " ^ String.concat "; " (List.map (statement names) branches) ^ " }"
+  | Concurrent branches ->
+      Printf.sprintf "concurrent #%d { %s }" node.origin
+        (String.concat "; " (List.map (statement names) branches))
   | Proof body -> "proof " ^ block names body
   | Assert found -> "assert " ^ condition names found
   | Yield { mode = lent; part } -> "yield " ^ mode lent ^ operand names part

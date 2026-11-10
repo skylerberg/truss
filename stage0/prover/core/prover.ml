@@ -563,12 +563,13 @@ let definition_states ?running database solver (key : Names.key) =
           what
       in
       [
-        {
-          code = Unsupported;
-          span = source_span span;
-          shows = message;
-          failure = Some (diagnostic Unsupported (source_span span) message);
-        };
+        ( {
+            code = Unsupported;
+            span = source_span span;
+            shows = message;
+            failure = Some (diagnostic Unsupported (source_span span) message);
+          },
+          None );
       ]
   | Obligations outcome ->
       List.map
@@ -577,40 +578,27 @@ let definition_states ?running database solver (key : Names.key) =
           let failed explained =
             Some (diagnostic obligation.code span (obligation.message ^ explained))
           in
-          {
-            code = obligation.code;
-            span;
-            shows = obligation.message;
-            failure =
-              (match answer with
-              | Solved Proven -> None
-              | Ran_false -> failed " Running it on this template's text gives `false`."
-              | Ran_too_long ->
-                  failed
-                    " Running it on this template's text took longer than the time limit, so it is \
-                     not known."
-              | Solved (Counterexample values) ->
-                  failed (counterexample (Logic.members obligation.query) obligation values)
-              | Solved Out_of_steps ->
-                  failed
-                    " The solver ran out of steps, so it may hold but needs help: a `proof` block \
-                     or a theorem.");
-          })
+          ( {
+              code = obligation.code;
+              span;
+              shows = obligation.message;
+              failure =
+                (match answer with
+                | Solved Proven -> None
+                | Ran_false -> failed " Running it on this template's text gives `false`."
+                | Ran_too_long ->
+                    failed
+                      " Running it on this template's text took longer than the time limit, so it \
+                       is not known."
+                | Solved (Counterexample values) ->
+                    failed (counterexample (Logic.members obligation.query) obligation values)
+                | Solved Out_of_steps ->
+                    failed
+                      " The solver ran out of steps, so it may hold but needs help: a `proof` \
+                       block or a theorem.");
+            },
+            obligation.cited ))
         (answers ?running solver outcome.obligations)
-
-(* The failures among a definition's states. The same failure on another
-   path, as a second index into the same list with the same index is, is
-   reported once. *)
-let definition_diagnostics ?running database solver key =
-  List.fold_left
-    (fun (reported, diagnostics) state ->
-      match state.failure with
-      | Some failure when not (List.mem (state.code, state.shows) reported) ->
-          ((state.code, state.shows) :: reported, diagnostics @ [ failure ])
-      | _ -> (reported, diagnostics))
-    ([], [])
-    (definition_states ?running database solver key)
-  |> snd
 
 (* The queries of every definition of the modules, solved together,
    several at once, so that reading each definition's answers after finds
@@ -629,26 +617,71 @@ let solve_ahead ?(running = not_running) database solver modules =
               (Query.demand database Names.declarations module_))
           modules))
 
-let diagnostics ?(running = not_running) database solver module_ =
+(* Each definition's states, in the file's offsets. A failure of a clause
+   that another definition of the file states has a note at that clause. *)
+let moved_states ?(running = not_running) database solver module_ =
   solve_ahead ~running database solver [ module_ ];
-  Names.per_definition database module_ (definition_diagnostics ~running database solver)
-
-let states ?(running = not_running) database solver module_ =
-  solve_ahead ~running database solver [ module_ ];
-  List.concat_map
+  List.filter_map
     (fun declaration ->
       let key = Names.key_of declaration in
-      match Query.demand database Names.base key with
-      | Some (_, base) ->
-          let moved (span : Diagnostic.span) = Source.span (span.start + base) (span.stop + base) in
-          List.map
-            (fun state ->
-              {
-                state with
-                span = moved state.span;
-                failure = Option.map (Diagnostic.move base) state.failure;
-              })
-            (definition_states ~running database solver key)
-      | None -> [])
+      let base_of key = Option.map snd (Query.demand database Names.base key) in
+      match base_of key with
+      | Some base ->
+          let moved offset (span : Diagnostic.span) =
+            Source.span (span.start + offset) (span.stop + offset)
+          in
+          Some
+            (List.map
+               (fun (state, cited) ->
+                 let note =
+                   match cited with
+                   | Some ((cited : Names.key), span) when cited.module_ = module_ ->
+                       Option.map
+                         (fun offset ->
+                           ( moved offset (source_span (within database cited span)),
+                             "This is the clause that must hold." ))
+                         (base_of cited)
+                   | _ -> None
+                 in
+                 {
+                   state with
+                   span = moved base state.span;
+                   failure =
+                     Option.map
+                       (fun failure ->
+                         let failure = Diagnostic.move base failure in
+                         match note with
+                         | Some note -> { failure with notes = failure.notes @ [ note ] }
+                         | None -> failure)
+                       state.failure;
+                 })
+               (definition_states ~running database solver key))
+      | None -> None)
     (Query.demand database Names.declarations module_)
+
+let in_order list =
+  List.sort
+    (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+      compare (left.span, left.code) (right.span, right.code))
+    list
+
+let states ?running database solver module_ =
+  List.concat (moved_states ?running database solver module_)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
+
+(* The failures among the states. The same failure on another path of one
+   definition, as a second index into the same list with the same index
+   is, is reported once. *)
+let diagnostics ?running database solver module_ =
+  List.concat_map
+    (fun states ->
+      List.fold_left
+        (fun (reported, diagnostics) state ->
+          match state.failure with
+          | Some failure when not (List.mem (state.code, state.shows) reported) ->
+              ((state.code, state.shows) :: reported, failure :: diagnostics)
+          | _ -> (reported, diagnostics))
+        ([], []) states
+      |> snd)
+    (moved_states ?running database solver module_)
+  |> in_order

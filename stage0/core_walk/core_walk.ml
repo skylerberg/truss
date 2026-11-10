@@ -150,6 +150,7 @@ let expression_children visit (node : expression) =
         implementations;
       block visit body
   | Return value -> Option.iter visit.expression value
+  | Leaving { exit; _ } -> visit.expression exit
   | Quantified { binder; body; _ } ->
       (match binder with
       | Over_type _ -> ()
@@ -188,7 +189,7 @@ let statement_children visit (node : statement) =
       visit.expression condition;
       List.iter (loop_clause visit) clauses;
       block visit body
-  | Parallel branches -> List.iter visit.statement branches
+  | Parallel branches | Concurrent branches -> List.iter visit.statement branches
   | Proof body -> block visit body
   | Assert { value; _ } -> visit.expression value
   | Yield { part; _ } -> operand visit part
