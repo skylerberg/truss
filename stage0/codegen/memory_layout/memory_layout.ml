@@ -1,3 +1,5 @@
+let bug format = Compiler_bug.bug ~stage:"Memory_layout" format
+
 type target = { pointer_bytes : int; usize_bytes : int }
 
 let target_64 = { pointer_bytes = 8; usize_bytes = 8 }
@@ -147,10 +149,7 @@ let rec of_type env ty =
   | Some layout -> layout
   | None ->
       if Types.mem ty env.in_progress then
-        invalid_arg
-          (Printf.sprintf
-             "Memory_layout.of_type: %s contains itself in place, which the type checker rejects"
-             (Ground.to_string ty));
+        bug "%s contains itself in place, which the type checker rejects" (Ground.to_string ty);
       env.in_progress <- Types.add ty () env.in_progress;
       let layout = of_shape env ty (env.shape_of ty) in
       env.in_progress <- Types.remove ty env.in_progress;
@@ -256,14 +255,14 @@ let block env ty name =
   | Sum variants -> (
       match List.find_opt (fun (variant : variant_shape) -> variant.name = name) variants with
       | Some { indirect = true; fields = fields'; _ } -> fields env fields'
-      | Some _ -> invalid_arg ("Memory_layout.block: variant " ^ name ^ " is not indirect")
-      | None -> invalid_arg ("Memory_layout.block: no variant " ^ name))
-  | _ -> invalid_arg "Memory_layout.block: not a sum type"
+      | Some _ -> bug "variant %s is not indirect" name
+      | None -> bug "no variant %s" name)
+  | _ -> bug "a block of a type that is not a sum type"
 
 type discriminant = Only | Tag_value of Z.t | Niche_value of Z.t | Not_niche
 
 let discriminant layout name =
-  let missing () = invalid_arg ("Memory_layout.discriminant: no variant " ^ name) in
+  let missing () = bug "no variant %s" name in
   match layout.form with
   | Zero_size -> Only
   | Tag_only { variants; _ } -> (
@@ -278,7 +277,7 @@ let discriminant layout name =
       if dataful.name = name then if others = [] then Only else Not_niche
       else
         match List.assoc_opt name others with Some value -> Niche_value value | None -> missing ())
-  | Scalar _ | Struct _ | Array _ -> invalid_arg "Memory_layout.discriminant: not a sum type"
+  | Scalar _ | Struct _ | Array _ -> bug "a discriminant of a type that is not a sum type"
 
 let integer_to_string = function
   | Int8 -> "Int8"

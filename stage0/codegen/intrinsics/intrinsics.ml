@@ -1,6 +1,6 @@
 open Lir_builder
 
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Intrinsics: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Intrinsics" format
 
 type argument = Place of Lir.place | Value of Lir.operand
 type types = { usize : Ground.ty; isize : Ground.ty; string_slice : Ground.ty }

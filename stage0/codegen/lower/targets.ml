@@ -28,7 +28,7 @@ let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type 
         with
         | Some (From_impl { impl; substitution }) -> (impl, substitution)
         | _ -> bug "no impl of %s for %s" (T.show_trait trait) (T.show self))
-    | Dynamic -> bug "calls through any are not lowered yet"
+    | Dynamic -> bug "a call through any, which reaches no one instance"
     | Built_in -> bug "a built-in trait's method"
   in
   let impl_interface =

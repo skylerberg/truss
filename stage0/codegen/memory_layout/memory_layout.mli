@@ -97,9 +97,7 @@ val scalar_size : target -> scalar -> int
 val integer_size : target -> integer -> int
 
 (* The index of a variant in a sum type's layout, and how it is told apart:
-   by its tag value, or by the value stored at the niche. Raises
-   [Invalid_argument] for a type that is not a sum or a variant it does not
-   have. *)
+   by its tag value, or by the value stored at the niche. *)
 type discriminant =
   | Only  (** The type has one variant, or none with a size: nothing to test *)
   | Tag_value of Z.t

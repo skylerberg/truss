@@ -89,6 +89,12 @@ let encode_signature instance (s : signature) =
   Cbor.Array
     [ list (encode_ty instance) s.parameters; option (encode_ty instance) s.result; Bool s.returns ]
 
+let equal_signature a b =
+  let encoders = { path = Ground.encode_path; instance = Instance.encode } in
+  String.equal
+    (Cbor.encode (encode_signature encoders a))
+    (Cbor.encode (encode_signature encoders b))
+
 let unary_tag = function Negate -> 0 | Not -> 1 | Complement -> 2
 
 let binary_tag = function

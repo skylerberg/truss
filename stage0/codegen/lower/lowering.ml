@@ -92,6 +92,14 @@ let site st (span : S.span) : Lir.site =
     text;
   { definition = st.frame.code.anchor; line = !line; column = !column }
 
+(* A valid program stage0 cannot lower yet, at a place in the code being
+   lowered. *)
+let at_site ({ definition; line; column } : Lir.site) : Compiler_bug.site =
+  { definition; line; column }
+
+let unsupported st (span : S.span) format =
+  Compiler_bug.unsupported ~at:(at_site (site st span)) format
+
 let source st (span : S.span) =
   let text = st.frame.code.text in
   let start = min span.start (String.length text) in

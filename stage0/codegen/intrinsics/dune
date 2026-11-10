@@ -1,3 +1,10 @@
 (library
  (name intrinsics)
- (libraries intrinsic ground memory_layout lir lir_builder zarith))
+ (libraries
+  compiler_bug
+  intrinsic
+  ground
+  memory_layout
+  lir
+  lir_builder
+  zarith))

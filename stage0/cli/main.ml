@@ -10,12 +10,19 @@
 
 open Cmdliner
 
-(* Runs a command, turning a reason it cannot run into status 2. *)
+(* Runs a command, turning a reason it cannot run into status 2: one the
+   command gives, or a bug in the compiler, reported with what the compiler
+   was doing. *)
 let guard f =
-  try f ()
-  with Project.Cannot_run message ->
-    Output.eprint_line message;
-    Outcome.Exit 2
+  try f () with
+  | Project.Cannot_run message ->
+      Output.eprint_line message;
+      Outcome.Exit 2
+  | Compiler_bug.Bug bug ->
+      Output.eprint_line
+        ("The compiler has a bug, and cannot go on. Please report it.\n  "
+       ^ Compiler_bug.to_string bug);
+      Outcome.Exit 2
 
 let exit_with f = guard (fun () -> Outcome.Exit (f ()))
 

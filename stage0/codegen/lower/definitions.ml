@@ -7,7 +7,7 @@ module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lower: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Lower" format
 
 type context = {
   database : Query.context;

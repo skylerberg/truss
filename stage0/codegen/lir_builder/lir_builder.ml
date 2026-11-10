@@ -11,6 +11,9 @@ let local b ?name ty =
   b.locals <- { Lir.ty; name } :: b.locals;
   List.length b.locals - 1
 
+let local_count b = List.length b.locals
+let local_type b local = (List.nth b.locals (List.length b.locals - 1 - local)).ty
+
 let block b =
   b.blocks <- Array.append b.blocks [| { Lir.statements = []; terminator = Unreachable } |];
   Array.length b.blocks - 1

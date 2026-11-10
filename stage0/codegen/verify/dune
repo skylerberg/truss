@@ -1,0 +1,3 @@
+(library
+ (name verify)
+ (libraries compiler_bug ground instance memory_layout lir convention))
