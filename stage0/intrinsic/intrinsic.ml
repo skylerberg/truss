@@ -145,12 +145,11 @@ type operation =
   | View_length
   | View_at
   | View_slice
+  | View_address
   | Crash
   | Write_float
   | Handle_from
   | Handle_descriptor
-  | Environment_variable
-  | Run_process
   | Libc of Libc.function_
   | Libc_number of Libc.number
 
@@ -214,12 +213,11 @@ let operations =
     View_length;
     View_at;
     View_slice;
+    View_address;
     Crash;
     Write_float;
     Handle_from;
     Handle_descriptor;
-    Environment_variable;
-    Run_process;
   ]
   @ List.map (fun function_ -> Libc function_) Libc.functions
   @ List.map (fun number -> Libc_number number) Libc.numbers
@@ -283,12 +281,11 @@ let operation_name = function
   | View_length -> "view_length"
   | View_at -> "view_at"
   | View_slice -> "view_slice"
+  | View_address -> "view_address"
   | Crash -> "crash"
   | Write_float -> "write_float"
   | Handle_from -> "handle_from"
   | Handle_descriptor -> "handle_descriptor"
-  | Environment_variable -> "environment_variable"
-  | Run_process -> "run_process"
   | Libc function_ -> "libc_" ^ Libc.function_name function_
   | Libc_number number -> "libc_" ^ String.lowercase_ascii (Libc.number_name number)
 

@@ -72,3 +72,16 @@ internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intr
     Ok(intrinsic::handle_from(descriptor))
   }
 }
+
+internal fn copy_of(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
+  let length = intrinsic::view_length(bytes)
+  var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  for index in 0..length {
+    intrinsic::storage_push(mut copy, value: intrinsic::view_at(bytes, index: index))
+  }
+  copy
+}
+
+internal fn text_copied_from(bytes: intrinsic::View[UInt8]) -> String {
+  String.from_bytes(copy_of(bytes))
+}

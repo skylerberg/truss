@@ -1,14 +1,17 @@
 use standard::intrinsic
+use standard::system::calls
 
 internal type SystemEnvironment()
 
 impl Environment for SystemEnvironment {
   fn variable(self, name: StringSlice) -> Option[String] {
-    var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-    if intrinsic::environment_variable(name.bytes, buffer: mut bytes) {
-      Some(String.from_bytes(own bytes))
-    } else {
-      None
+    match calls::ended_with_zero_byte(name.bytes) {
+      Ok(name_for_c) => {
+        var found = false
+        let value = intrinsic::libc_getenv(intrinsic::storage_view(name_for_c), found: mut found)
+        if found { Some(calls::text_copied_from(value)) } else { None }
+      }
+      Err(_) => None
     }
   }
 }

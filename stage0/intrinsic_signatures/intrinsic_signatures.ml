@@ -97,6 +97,8 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~generics:[ "Element" ]
         ~output:(Returns (view element))
         [ input "view" (view element); input "start" usize; input "stop" usize ]
+  | View_address ->
+      make ~generics:[ "Element" ] ~output:(Returns usize) [ input "view" (view element) ]
   | Crash ->
       make ~output:(Returns T.Never)
         [ input "message" (T.Named { path = text "StringSlice"; arguments = [] }) ]
@@ -107,25 +109,15 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~output:(Returns (T.builtin Handle)) [ input "descriptor" (T.builtin Int32) ]
   | Handle_descriptor ->
       make ~output:(Returns (T.builtin Int32)) [ input "handle" (T.builtin Handle) ]
-  | Environment_variable ->
-      make ~output:(Returns bool)
-        [
-          input "name" (view (T.builtin UInt8));
-          input ~mode:Mut "buffer" (storage (T.builtin UInt8));
-        ]
-  | Run_process ->
-      make
-        ~output:(Returns (T.builtin Int32))
-        [
-          input "program" (view (T.builtin UInt8));
-          input "arguments" (view (T.builtin UInt8));
-          input ~mode:Mut "error" (T.builtin Int32);
-        ]
   | Libc function_ ->
       let { Libc.parameters; result } = Libc.signature function_ in
+      let found = match result with Text -> [ input ~mode:Mut "found" bool ] | _ -> [] in
       make
         ~output:
-          (Returns (match result with Returns scalar | Points_at scalar -> libc_scalar scalar))
+          (Returns
+             (match result with
+             | Returns scalar | Points_at scalar -> libc_scalar scalar
+             | Text -> view (T.builtin UInt8)))
         (List.concat_map
            (fun (name, (passes : Libc.passes)) ->
              match passes with
@@ -134,8 +126,9 @@ let signature (operation : Intrinsic.operation) : T.signature =
              | Room scalar -> [ input ~mode:Mut name (storage (libc_scalar scalar)) ]
              | Written (scalar, names) ->
                  List.map (fun name -> input ~mode:Mut name (libc_scalar scalar)) names
-             | Always _ -> [])
-           parameters)
+             | Always _ | Environment -> [])
+           parameters
+        @ found)
   | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []
 
 type cost = { constant_time : bool; allocation_free : bool }
@@ -153,9 +146,10 @@ let cost (operation : Intrinsic.operation) =
   | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
   | Rotate_left | Rotate_right | Multiply_high | Storage_empty | Storage_length | Storage_capacity
   | Storage_pop | Storage_swap | Storage_at | Storage_at_mut | Storage_view | View_length | View_at
-  | View_slice | Crash | Storage_lengthen | Handle_from | Handle_descriptor | Libc_number _ ->
+  | View_slice | View_address | Crash | Storage_lengthen | Handle_from | Handle_descriptor
+  | Libc_number _ ->
       { constant_time = true; allocation_free = true }
   | Compare_bytes | Storage_remove -> { constant_time = false; allocation_free = true }
-  | Storage_with_capacity | Storage_reserve | Storage_push | Storage_insert | Write_float
-  | Environment_variable | Run_process | Libc _ ->
+  | Storage_with_capacity | Storage_reserve | Storage_push | Storage_insert | Write_float | Libc _
+    ->
       { constant_time = false; allocation_free = false }

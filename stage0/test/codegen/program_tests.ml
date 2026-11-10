@@ -219,6 +219,68 @@ let () =
       expect_string ~expected:"exited 7\nmissing\n" output)
 
 let () =
+  test "a program run with an argument that holds a zero byte is not started" (fun () ->
+      let status, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  if Processes.run(Path.new("sh".slice()), arguments: ["-c", "exit 3\0; exit 4"]) is Err(_) {
+    Console.print_line("refused".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"refused\n" output);
+  test "a program that a signal ends is told by 128 and the signal" (fun () ->
+      let status, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  if Processes.run(Path.new("sh".slice()), arguments: ["-c", "kill -9 $$"]) is Ok(code) {
+    Console.print_line("ended ${code.code}".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"ended 137\n" output);
+  test "a program is given its arguments, with bytes that are not UTF-8 replaced" (fun () ->
+      let _, output, _ =
+        run_main ~arguments:[ "caf\xff"; "" ]
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  Console.print_line("${arguments.length()} [${arguments[1]}] [${arguments[2]}]".slice())
+  ExitCode(0)
+}
+|}
+      in
+      expect_string ~expected:"3 [caf\xef\xbf\xbd] []\n" output);
+  test "a variable that is set to nothing is told from one that is not set" (fun () ->
+      Unix.putenv "TRUSS_TEST_EMPTY" "";
+      let _, output, _ =
+        run_main
+          {|fn main(arguments: List[String]) -> ExitCode
+  uses Console, Environment
+{
+  if Environment.variable("TRUSS_TEST_EMPTY".slice()) is Some(value) {
+    Console.print_line("set to [${value}]".slice())
+  }
+  if Environment.variable("TRUSS\0_TEST_EMPTY".slice()) is None {
+    Console.print_line("no such name".slice())
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_string ~expected:"set to []\nno such name\n" output)
+
+let () =
   test "a program reads environment variables" (fun () ->
       Unix.putenv "TRUSS_TEST_VARIABLE" "caf\xc3\xa9";
       let status, output, _ =

@@ -16,8 +16,9 @@ type passes =
   | Room of scalar
   | Written of scalar * string list
   | Always of int
+  | Environment
 
-type result = Returns of scalar | Points_at of scalar
+type result = Returns of scalar | Points_at of scalar | Text
 type signature = { parameters : (string * passes) list; result : result }
 
 type declaration = {
@@ -27,9 +28,20 @@ type declaration = {
   variadic_from : int option;
 }
 
-type function_ = Write | Read | Open | Close | Errno | Clock_gettime | Getentropy
+type function_ =
+  | Write
+  | Read
+  | Open
+  | Close
+  | Errno
+  | Clock_gettime
+  | Getentropy
+  | Getenv
+  | Posix_spawnp
+  | Waitpid
 
-let functions = [ Write; Read; Open; Close; Errno; Clock_gettime; Getentropy ]
+let functions =
+  [ Write; Read; Open; Close; Errno; Clock_gettime; Getentropy; Getenv; Posix_spawnp; Waitpid ]
 
 let function_name = function
   | Write -> "write"
@@ -39,11 +51,16 @@ let function_name = function
   | Errno -> "errno"
   | Clock_gettime -> "clock_gettime"
   | Getentropy -> "getentropy"
+  | Getenv -> "getenv"
+  | Posix_spawnp -> "posix_spawnp"
+  | Waitpid -> "waitpid"
 
 (* Everything about a function, written once: each parameter with how Truss
-   passes it and its C type on each system. [headers] declare it, and
-   [layout] is what must hold of a structure it takes for the storage passed
-   to be that structure; only the check reads those two. *)
+   passes it and its C type on each system. Only the check reads the rest:
+   [headers] declare the function; [layout] is what must hold of a structure
+   it takes for the storage passed to be that structure; and [named] gives a
+   parameter the type the headers call it by, where that is a name only the
+   headers have and the C that is emitted says [void]. *)
 type row = {
   symbol : os -> string;
   returns : string;
@@ -52,15 +69,16 @@ type row = {
   variadic_from : int option;
   headers : string list;
   layout : string list;
+  named : (string * string) list;
 }
 
 let everywhere c (_ : os) = c
 let size = everywhere "__SIZE_TYPE__"
 
 let describe function_ =
-  let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = []) returns
-      result parameters ~headers =
-    { symbol; returns; result; parameters; variadic_from; headers; layout }
+  let row ?(symbol = everywhere (function_name function_)) ?variadic_from ?(layout = [])
+      ?(named = []) returns result parameters ~headers =
+    { symbol; returns; result; parameters; variadic_from; headers; layout; named }
   in
   match function_ with
   | Write ->
@@ -120,6 +138,35 @@ let describe function_ =
           ("buffer", Written (UInt64, [ "value" ]), everywhere "void *"); ("count", Always 8, size);
         ]
         ~headers:[ "sys/types.h"; "sys/random.h" ]
+  | Getenv ->
+      row "char *" Text
+        [ ("name", Elements UInt8, everywhere "const char *") ]
+        ~headers:[ "stdlib.h" ]
+  | Posix_spawnp ->
+      row "int" (Returns Int32)
+        [
+          ("process", Written (Int32, [ "process" ]), everywhere "int *");
+          ("program", Elements UInt8, everywhere "const char *");
+          ("file_actions", Always 0, everywhere "const void *");
+          ("attributes", Always 0, everywhere "const void *");
+          ("arguments", Elements USize, everywhere "char *const *");
+          ("environment", Environment, everywhere "char *const *");
+        ]
+        ~named:
+          [
+            ("file_actions", "const posix_spawn_file_actions_t *");
+            ("attributes", "const posix_spawnattr_t *");
+          ]
+        ~headers:[ "spawn.h" ]
+        ~layout:[ "sizeof(char *) == sizeof(__SIZE_TYPE__)" ]
+  | Waitpid ->
+      row "int" (Returns Int32)
+        [
+          ("process", Value Int32, everywhere "int");
+          ("status", Written (Int32, [ "status" ]), everywhere "int *");
+          ("options", Value Int32, everywhere "int");
+        ]
+        ~headers:[ "sys/wait.h" ]
 
 let signature function_ =
   let row = describe function_ in
@@ -260,10 +307,13 @@ let check os =
       @ List.concat_map number_headers numbers)
   in
   let holds what condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition what in
-  let reached symbol c scalar =
+  let reached symbol c count scalar =
     holds
-      (symbol ^ " reaches a number of another size")
-      (Printf.sprintf "sizeof(*(%s)0) == %d" c (bytes scalar))
+      (symbol ^ " reaches numbers of another size")
+      (Printf.sprintf "sizeof(*(%s)0) == %d" c (count * bytes scalar))
+  in
+  let is_void c =
+    String.starts_with ~prefix:"void" c || String.starts_with ~prefix:"const void" c
   in
   String.concat ""
     ([ "#define _DEFAULT_SOURCE\n" ]
@@ -276,9 +326,25 @@ let check os =
     @ List.concat_map
         (fun function_ ->
           let row = describe function_ and declaration = declaration os function_ in
-          (prototype declaration :: List.map (holds declaration.symbol) row.layout)
-          @
-          match row.result with
-          | Points_at scalar -> [ reached declaration.symbol declaration.returns scalar ]
-          | Returns _ -> [])
+          let as_the_headers_name_it =
+            {
+              declaration with
+              takes =
+                List.map
+                  (fun (name, _, c) ->
+                    match List.assoc_opt name row.named with Some named -> named | None -> c os)
+                  row.parameters;
+            }
+          in
+          (prototype as_the_headers_name_it :: List.map (holds declaration.symbol) row.layout)
+          @ (match row.result with
+            | Points_at scalar -> [ reached declaration.symbol declaration.returns 1 scalar ]
+            | Returns _ | Text -> [])
+          @ List.filter_map
+              (fun (_, passes, c) ->
+                match passes with
+                | Written (scalar, names) when not (is_void (c os)) ->
+                    Some (reached declaration.symbol (c os) (List.length names) scalar)
+                | Written _ | Value _ | Elements _ | Room _ | Always _ | Environment -> None)
+              row.parameters)
         functions)

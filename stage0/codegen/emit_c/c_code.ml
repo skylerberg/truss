@@ -67,8 +67,10 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
         (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
   | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
-  | System_environment -> "t_runtime_environment(" ^ all ^ ")"
-  | System_run -> "t_runtime_run(" ^ all ^ ")"
+  | Environment ->
+      declare_prototype context "environ" "extern char **environ;\n";
+      "((void *)environ)"
+  | Terminated_length -> Printf.sprintf "((t_usize)__builtin_strlen((const char *)%s))" (argument 0)
   | Evidence_fill ->
       let slot = argument 0 in
       let outer =
@@ -97,7 +99,7 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | Debug_length -> "t_runtime_debug_length(" ^ all ^ ")"
   | Evidence_implementation ->
       Printf.sprintf "((const struct t_evidence *)%s)->implementation" (argument 0)
-  | Program_argument -> "t_runtime_program_argument(" ^ all ^ ")"
+  | Program_argument -> Printf.sprintf "((void *)((char **)%s)[%s])" (argument 0) (argument 1)
   | Evidence_outer ->
       Printf.sprintf "((void *)((const struct t_evidence *)%s)->outer[%s])" (argument 0)
         (argument 1)
@@ -131,7 +133,11 @@ let call_c context fc (target : Lir.target) arguments =
         with Invalid_argument _ ->
           bug "a call of %s with an argument of zero size" declaration.symbol
       in
-      Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " given)
+      let called = Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " given) in
+      (* An address comes back as C's own type for it, which the local it
+         goes to need not be. *)
+      if String.ends_with ~suffix:"*" declaration.returns then "((void *)" ^ called ^ ")"
+      else called
   | Table_call { table; value; slot; signature } ->
       let table =
         match operand_c context fc table with
