@@ -12,6 +12,23 @@ public trait Equal {
   {
     !self.equal(other)
   }
+
+  law reflexive(value: Self) {
+    value == value
+  }
+
+  law symmetric(first: Self, second: Self)
+    requires first == second
+  {
+    second == first
+  }
+
+  law transitive(first: Self, second: Self, third: Self)
+    requires first == second
+    requires second == third
+  {
+    first == third
+  }
 }
 
 public trait Ordered: Equal {
@@ -28,6 +45,21 @@ public trait Ordered: Equal {
     cost time finite
   {
     if self.compare(other) == Ordering.Greater { other } else { self }
+  }
+
+  law agrees_with_equal(first: Self, second: Self) {
+    (first.compare(second) == Ordering.Equal) == (first == second)
+  }
+
+  law antisymmetric(first: Self, second: Self) {
+    (first.compare(second) == Ordering.Less) == (second.compare(first) == Ordering.Greater)
+  }
+
+  law transitive(first: Self, second: Self, third: Self)
+    requires first.compare(second) == Ordering.Less
+    requires second.compare(third) == Ordering.Less
+  {
+    first.compare(third) == Ordering.Less
   }
 }
 

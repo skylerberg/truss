@@ -453,6 +453,13 @@ let rec sort_of context (ty : T.ty) : L.sort =
   else
     match (ty, float_format ty) with
     | _, Some (exponent, significand) -> Float (exponent, significand)
+    | _ when T.equal ty T.unit ->
+        (* One value, so any two are equal. *)
+        if not (Hashtbl.mem context.declared "Unit") then begin
+          Hashtbl.replace context.declared "Unit" ();
+          context.declarations <- L.Datatype ("Unit", [ ("Unit.unit", []) ]) :: context.declarations
+        end;
+        Uninterpreted "Unit"
     | Function function_type, _ ->
         (* One sort for each number of inputs, whatever the clauses, so a
            value keeps its sort where a function type is widened. *)
@@ -484,7 +491,7 @@ let rec sort_of context (ty : T.ty) : L.sort =
 (* Whether [==] on a type is the solver's equality: built in with identity
    semantics, or derived from fields that all are. *)
 let rec structural context ?(seen = []) (ty : T.ty) =
-  if is_numeric ty || is_bool ty || T.is_builtin Character ty then true
+  if is_numeric ty || is_bool ty || T.is_builtin Character ty || T.equal ty T.unit then true
   else if List.exists (T.equal ty) seen then true
   else
     match (visible_type context ty, constructors context ty) with
@@ -1389,8 +1396,16 @@ and binary context frame (written : expression) operator left right =
            answer, which is what their laws state. *)
           let frame, left_value = value context frame left in
           let frame, right_value = value context frame right in
+          (* The function is the method's result, which the method's
+             contract and definition then tell about. *)
+          let link term =
+            Option.iter
+              (fun result -> assume context frame (L.equal term result))
+              (method_result context frame written call_)
+          in
           if operator = Equal || operator = Not_equal then begin
             let equal = equal_of context frame operand_type left_value right_value in
+            link equal;
             Some (frame, if operator = Equal then equal else L.not_ equal)
           end
           else begin
@@ -1400,6 +1415,7 @@ and binary context frame (written : expression) operator left right =
             let symbol = "compare." ^ type_key operand_type in
             declare context (L.Function (symbol, [ sort; sort ], sort_of context ordering));
             let compared = L.Apply (symbol, [ left_value; right_value ]) in
+            link compared;
             let is variant =
               L.Apply (L.tester (constructor_name ordering (Some variant)), [ compared ])
             in
@@ -2023,7 +2039,7 @@ and intrinsic context frame (operation : Intrinsic.operation) types operands ~ch
       | View_at | View_slice ),
       element :: _ ) ->
       buffer_operation context frame operation element operands ~changed known
-  | (Read_bytes | Handle_read | Write_bytes | Handle_write), _ ->
+  | (Read_bytes | Handle_read | Write_bytes | Handle_write | Compare_bytes), _ ->
       buffer_operation context frame operation (T.builtin UInt8) operands ~changed known
   | _ -> integer_intrinsic context frame operation types operands known
 
@@ -2061,6 +2077,8 @@ and integer_intrinsic context frame (operation : Intrinsic.operation) types oper
           ] )
   | (Add_overflows | Subtract_overflows | Multiply_overflows), Some _, ty :: _, [ left; right ] ->
       L.not_ (in_range ty (exact operation left right))
+  | Equal, None, ty :: _, [ left; right ] when float_format ty <> None -> float_equal left right
+  | Less, None, ty :: _, [ left; right ] when float_format ty <> None -> float_less left right
   | Equal, Some _, _, [ left; right ] -> L.equal left right
   | Less, Some _, _, [ left; right ] -> L.Apply ("<", [ left; right ])
   | Fits, Some _, [ _; target ], [ value ] when bounds target <> None -> in_range target value
@@ -2240,6 +2258,18 @@ and lambda context frame (written : expression) (parameters : pattern list) body
   | Some found -> context.lambda_times <- (term, found) :: context.lambda_times
   | None -> ());
   (frame, term)
+
+(* What the trait method an operator stands for gives, read as the call
+   would be, with nothing counted or obliged again: the operator already
+   was. *)
+and method_result context frame (written : expression) (call_ : C.call) =
+  let saved = context.counters in
+  context.counters <- [];
+  Fun.protect
+    ~finally:(fun () -> context.counters <- saved)
+    (fun () ->
+      try Option.map snd (resolved_call context { frame with checking = false } written call_)
+      with Unsupported _ | Foreign_unsupported _ -> None)
 
 (* A lambda whose body is functional, as a function in the logic: applied,
    it is its body. Lambdas with the same body over the same captured values
@@ -2459,8 +2489,9 @@ and is_updating_helper context path =
 (* The [impl] of a trait for a known type, when it has no generic
    parameters of its own, from the type's package or this one. *)
 (* The [impl] of a trait for a known type, with what its generic parameters
-   stand for there. An [impl] whose parameters have bounds is not taken,
-   since this cannot tell whether they hold. *)
+   stand for there. An [impl] whose parameters have bounds is taken only in
+   its own proofs, where they are what is assumed: elsewhere this cannot
+   tell whether they hold. *)
 and concrete_impl context trait (ty : T.ty) =
   match ty with
   | Named { path; _ } ->
@@ -2471,9 +2502,13 @@ and concrete_impl context trait (ty : T.ty) =
             (fun impl ->
               match Query.demand context.database Interface.Environment.interface impl with
               | Some (Interface.Environment.Impl_interface interface)
-                when List.for_all
-                       (fun (generic : T.generic) -> generic.kind = Type_generic [])
-                       interface.impl_generics -> (
+                when Path.equal impl context.current
+                     || (match context.current with
+                       | Method { owner; _ } -> Path.equal owner impl
+                       | _ -> false)
+                     || List.for_all
+                          (fun (generic : T.generic) -> generic.kind = Type_generic [])
+                          interface.impl_generics -> (
                   let variables =
                     List.map (fun (generic : T.generic) -> generic.generic) interface.impl_generics
                   in
@@ -3409,8 +3444,8 @@ and rank context ty term =
 and variant_value context (written : expression) type_ variant =
   if T.equal type_ T.unit then begin
     (* The one value of [Unit]. *)
-    declare context (L.Constant ("unit.value", sort_of context T.unit));
-    L.Symbol "unit.value"
+    ignore (sort_of context T.unit);
+    L.Apply ("Unit.unit", [])
   end
   else
     match declared_fields context type_ (Some variant) with
@@ -4887,6 +4922,7 @@ and buffer_operation context frame (operation : Intrinsic.operation) element ope
   | Storage_view, [ buffer ] ->
       assume context frame (L.equal (view known) (storage buffer));
       known
+  | Compare_bytes, [ left; right ] -> byte_order context (view left) (view right)
   | (Write_bytes | Handle_write), [ _; bytes ] ->
       (* It writes at most what it is given. *)
       assume context frame (L.Apply ("<=", [ known; length (view bytes) ]));
@@ -4921,6 +4957,36 @@ and buffer_operation context frame (operation : Intrinsic.operation) element ope
            (L.equal (at part (L.Symbol k)) (at whole (L.Apply ("+", [ start; L.Symbol k ])))));
       known
   | _ -> known
+
+(* [compare_bytes] of two byte sequences, as the compiler makes it: their
+   lexicographic order, below zero, zero, or above zero, which is zero
+   exactly when they are the same bytes, and is a total order. *)
+and byte_order context left right =
+  let sequence = sort_of context (sequence_type (T.builtin UInt8)) in
+  let symbol = "compare_bytes.order" in
+  let first = not (Hashtbl.mem context.declared symbol) in
+  declare context (L.Function (symbol, [ sequence; sequence ], L.Int));
+  let order a b = L.Apply (symbol, [ a; b ]) in
+  if first then begin
+    let a = L.Symbol "bytes.first" and b = L.Symbol "bytes.second" and c = L.Symbol "bytes.third" in
+    let over names body = L.Forall (List.map (fun name -> (name, sequence)) names, body) in
+    context.facts <-
+      over [ "bytes.first"; "bytes.second" ]
+        L.(
+          Apply ("<=", [ int (-1); order a b ])
+          &&& Apply ("<=", [ order a b; int 1 ])
+          &&& (equal (order a b) (int 0) ==> equal a b)
+          &&& equal (order b a) (Apply ("-", [ order a b ])))
+      :: over [ "bytes.first" ] (L.equal (order a a) (L.int 0))
+      :: over
+           [ "bytes.first"; "bytes.second"; "bytes.third" ]
+           L.(
+             Apply ("<", [ order a b; int 0 ])
+             &&& Apply ("<", [ order b c; int 0 ])
+             ==> Apply ("<", [ order a c; int 0 ]))
+      :: context.facts
+  end;
+  order left right
 
 (* The sequence a storage or a view holds, as a function of it. *)
 and buffer_model context (builtin : Intrinsic.builtin) element term =

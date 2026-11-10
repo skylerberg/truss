@@ -221,14 +221,23 @@ impl Index for Slice[Element] {
 }
 
 impl Equal for List[Element: Equal] {
-  fn equal(self, other: List[Element]) -> Bool {
+  fn equal(self, other: List[Element]) -> Bool
+    ensures result == (self.length() == other.length()
+      && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+  {
     if self.length() != other.length() {
       return false
     }
-    for index in 0..self.length() {
+    var index: USize = 0
+    while index < self.length()
+      invariant index <= self.length()
+      invariant forall i in 0..index => self.model()[i] == other.model()[i]
+      decreases self.length() - index
+    {
       if self[index] != other[index] {
         return false
       }
+      index += 1
     }
     true
   }
