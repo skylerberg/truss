@@ -121,26 +121,26 @@ public fn Connection.peer_address(self) -> SocketAddress
 public fn Connection.set_read_timeout(mut self, timeout: Option[Duration]) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.set_timeout(self.handle, direction: Direction.Receiving, timeout: timeout)
 }
 
 public fn Connection.set_write_timeout(mut self, timeout: Option[Duration]) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.set_timeout(self.handle, direction: Direction.Sending, timeout: timeout)
 }
 
 public fn Connection.shut_down(mut self, direction: Direction) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.shut_down(self.handle, direction: direction)
 }
 
 impl streams::Reader for Connection {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.read(self.handle, buffer: mut buffer, limit: limit)
   }
 }
 
@@ -148,7 +148,7 @@ impl streams::Writer for Connection {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    Handles.write(self.handle, bytes: bytes)
   }
 
   fn flush(mut self) -> Result[Unit, SystemError]
@@ -175,13 +175,16 @@ public fn Listener.local_address(self) -> SocketAddress
 public fn Listener.accept(mut self) -> Result[Connection, SystemError]
   uses Handles
 {
-  todo
+  let accepted = Handles.accept(self.handle)?
+  Ok(Connection(handle: own accepted.handle, local: self.local, peer: accepted.peer))
 }
 
 public fn Listener.connections(mut self) yields own Result[Connection, SystemError]
   uses Handles
 {
-  todo
+  while true {
+    yield mut self.accept()
+  }
 }
 
 public type Datagram(length: USize, from: SocketAddress)
@@ -201,19 +204,19 @@ public fn DatagramSocket.local_address(self) -> SocketAddress
 public fn DatagramSocket.send_to(mut self, bytes: Slice[UInt8], address: SocketAddress) -> Result[USize, SystemError]
   uses Handles
 {
-  todo
+  Handles.send_to(self.handle, bytes: bytes, address: address)
 }
 
 public fn DatagramSocket.receive_from(mut self, buffer: mut List[UInt8], limit: USize) -> Result[Datagram, SystemError]
   uses Handles
 {
-  todo
+  Handles.receive_from(self.handle, buffer: mut buffer, limit: limit)
 }
 
 public fn DatagramSocket.set_read_timeout(mut self, timeout: Option[Duration]) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  Handles.set_timeout(self.handle, direction: Direction.Receiving, timeout: timeout)
 }
 
 public fn connect(host: StringSlice, port: UInt16, timeout: Option[Duration] = None) -> Result[Connection, SystemError]
