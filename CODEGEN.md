@@ -1033,9 +1033,9 @@ until both handle it.
 |---|---|
 | Numbers | arithmetic, wrapping arithmetic, overflow tests, lawful and IEEE comparisons, bit operations, conversions and whether a value fits a type |
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
-| Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view |
-| Views | length, lend an element, slice |
-| Arrays | a view of the elements, lend an element to change |
+| Storage | empty, with a capacity, from an array, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view, view to change the elements through, take a view back |
+| Views | length, lend an element, lend an element to change, swap, slice, take a view back |
+| Arrays | a view of the elements, lend an element to change, take a view back |
 | Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
 | A test program | run a test by its number, have failures reported to a descriptor, how many blocks are allocated and not freed |
 
@@ -1049,6 +1049,24 @@ itself.
 array's own, so indexing and slicing an array read it in place.
 `array_at_mut` lends the element at an index to change, which is the
 place `array[index]` itself.
+
+`view_at_mut` lends an element of a view to change, and `view_swap`
+exchanges two, which is how a `Slice`'s methods change elements in place.
+A view is an address and a length, and does not record whether its
+elements may be written. So a view to change comes from
+`storage_view_mut`, which gives static storage a buffer of its own first,
+as every operation that writes a buffer does, or from `array_view` of an
+array that is held `mut`. The ownership check keeps a view of a read-only
+place from being passed where its elements are changed.
+
+A view is a value to the prover, though in memory it is its owner's
+elements. So after elements are changed through a view, the standard
+library says that the owner's elements from some index are the view's:
+`storage_take_view(mut storage, view, start)`, and `view_take_view` and
+`array_take_view` for a view of a view and of an array. The prover gives
+the owner's model the view's elements. In memory there is nothing to do,
+so the operation is no code, except that a build with checks stops if the
+view is not of exactly those elements of the owner.
 
 `storage_from_array` moves an `own` array into new storage whose length
 and capacity are the array's length. An array's bytes are its elements in

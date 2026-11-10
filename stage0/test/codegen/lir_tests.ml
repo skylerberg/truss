@@ -662,6 +662,127 @@ let () =
               emit b (Assign (at last, Convert (Copy (element 3), Integer Int32)));
               emit b (Assign (at first, Binary (Add, Copy (at first), Copy (at last))));
               first);
+        ]);
+  test "elements are changed through a view of storage, which is first given its own buffer"
+    (fun () ->
+      let open Lir_builder in
+      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+      let view_ty =
+        Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] }
+      in
+      let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") uint8) ] in
+      let operate b ?destination operation arguments =
+        Intrinsics.lower (shape_env ~extra ()) b intrinsic_types operation ~type_arguments:[ uint8 ]
+          arguments ~destination
+          ~site:{ definition = definition "entry"; line = 0; column = 1 }
+      in
+      expect_status ~extra 105
+        [
+          built_entry (fun b ->
+              let storage = local b (value storage_ty) in
+              emit b
+                (Assign
+                   ( at storage,
+                     Build
+                       {
+                         ty = storage_ty;
+                         variant = None;
+                         fields =
+                           [
+                             ("buffer", Constant (Bytes "abc"));
+                             ("length", usize 3);
+                             ("capacity", usize 0);
+                           ];
+                       } ));
+              let view = local b ~name:"view" (value view_ty) in
+              ignore (operate b ~destination:(at view) Storage_view_mut [ Place (at storage) ]);
+              ignore (operate b View_swap [ Place (at view); Value (usize 0); Value (usize 2) ]);
+              (match operate b View_at_mut [ Place (at view); Value (usize 1) ] with
+              | Some middle ->
+                  emit b (Assign (middle, Use (Constant (Integer (UInt8, Z.of_int 100)))))
+              | None -> failwith "view_at_mut lends nothing");
+              let element i : Lir.operand =
+                let read = local b (value int32) in
+                emit b
+                  (Assign
+                     ( at read,
+                       Convert (Copy (at storage / Field "buffer" / Index (usize i)), Integer Int32)
+                     ));
+                Copy (at read)
+              in
+              let status = local b (value int32) in
+              emit b
+                (Assign (at status, Convert (Copy (at storage / Field "capacity"), Integer Int32)));
+              emit b (Assign (at status, Binary (Add, Copy (at status), element 0)));
+              emit b (Assign (at status, Binary (Add, Copy (at status), element 1)));
+              emit b (Assign (at status, Binary (Subtract, Copy (at status), element 2)));
+              status);
         ])
+
+let () =
+  let open Lir_builder in
+  let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+  let view_ty = Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] } in
+  let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") uint8) ] in
+  let operate b ?destination operation arguments =
+    Intrinsics.lower ~checks:true (shape_env ~extra ()) b intrinsic_types operation
+      ~type_arguments:[ uint8 ] arguments ~destination
+      ~site:{ definition = definition "entry"; line = 0; column = 1 }
+  in
+  (* Takes back, into storage of "abc", a view that [view_of] makes. *)
+  let taking_back view_of =
+    [
+      built_entry (fun b ->
+          let storage = local b (value storage_ty) in
+          emit b
+            (Assign
+               ( at storage,
+                 Build
+                   {
+                     ty = storage_ty;
+                     variant = None;
+                     fields =
+                       [
+                         ("buffer", Constant (Bytes "abc"));
+                         ("length", usize 3);
+                         ("capacity", usize 0);
+                       ];
+                   } ));
+          let view = local b ~name:"view" (value view_ty) in
+          view_of b storage view;
+          ignore
+            (operate b Storage_take_view [ Place (at storage); Place (at view); Value (usize 1) ]);
+          let status = local b (value int32) in
+          emit b (Assign (at status, Use (constant_int32 7)));
+          status);
+    ]
+  in
+  let slice_from b whole view start stop =
+    ignore
+      (operate b ~destination:(at view) View_slice
+         [ Place (at whole); Value (usize start); Value (usize stop) ])
+  in
+  let anchors =
+    [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
+  in
+  test "a checked build lets storage take back a view of its own elements" (fun () ->
+      expect_status ~extra ~anchors 7
+        (taking_back (fun b storage view ->
+             let whole = local b ~name:"whole" (value view_ty) in
+             ignore (operate b ~destination:(at whole) Storage_view_mut [ Place (at storage) ]);
+             slice_from b whole view 1 3)));
+  test "a checked build stops where storage takes back a view of other elements" (fun () ->
+      let other b storage view start stop =
+        ignore storage;
+        let whole = local b ~name:"whole" (value view_ty) in
+        emit b
+          (Assign
+             (at whole, Storage.view view_ty ~elements:(Constant (Bytes "wxyz")) ~length:(usize 4)));
+        slice_from b whole view start stop
+      in
+      expect_status ~extra ~anchors 101
+        (taking_back (fun b storage view -> other b storage view 1 3));
+      expect_status ~extra ~anchors 101
+        (taking_back (fun b storage view -> other b storage view 0 4)))
 
 let () = Harness.finish ()

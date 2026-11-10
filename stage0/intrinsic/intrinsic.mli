@@ -117,8 +117,27 @@ type operation =
   | Storage_at
   | Storage_at_mut
   | Storage_view
+  | Storage_view_mut
+      (** [storage_view_mut(mut storage)]: a view of the storage's elements to change them through,
+          with [view_at_mut] and [view_swap]. Storage whose elements are static gets a buffer of its
+          own first, as it does before any other change. *)
   | View_length
   | View_at
+  | View_at_mut
+      (** [view_at_mut(mut view, index)]: lends the element at an index, to change. The index is
+          less than the view's length, and the view is of elements that may be changed: it came from
+          [storage_view_mut] or from an array held [mut]. *)
+  | View_swap
+      (** [view_swap(mut view, first, second)]: exchanges two elements of a view of elements that
+          may be changed. Each index is less than the view's length. *)
+  | Storage_take_view
+      (** [storage_take_view(mut storage, view, start)]: says that the storage's elements from
+          [start] are the view's, where the view was made from this storage to change them through.
+          In memory they already are, so it does nothing; the prover gives the storage's model the
+          view's elements. A checked build stops if the view is not of those elements. *)
+  | View_take_view  (** [view_take_view(mut view, part, start)]: the same for a view of a view *)
+  | Array_take_view
+      (** [array_take_view(mut array, view, start)]: the same for a view of an array *)
   | View_slice
   | Storage_model  (** [(storage) -> Sequence]: its elements, in specifications only *)
   | View_model  (** [(view) -> Sequence]: its elements, in specifications only *)
