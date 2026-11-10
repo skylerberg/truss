@@ -454,10 +454,10 @@ let () =
       if checked () <> checked () then fail "different")
 
 let () =
-  test "no checked form of the standard library holds an unsolved type" (fun () ->
+  test "no checked form of the standard library holds a type inference left unsolved" (fun () ->
       let database = setup [] in
       let rec unsolved = function
-        | Types.Variable _ | Types.Literal _ | Types.Hole -> true
+        | Types.Variable _ | Types.Literal _ -> true
         | Types.Named { arguments; _ } | Types.Cursor { arguments; _ } ->
             List.exists (function Types.Type type_ -> unsolved type_ | _ -> false) arguments
         | Types.Function { inputs; output; _ } -> (
@@ -769,5 +769,79 @@ let () =
         \  }\n\
          }\n"
         "resolve.unknown_name")
+
+(* Every error type carries its report, so nothing is accepted of code that
+   reported nothing: what was once an error with no report is reported. *)
+
+let identity = "fn identity[Value](value: own Value) -> Value {\n  value\n}\n\n"
+
+let () =
+  test "type arguments after a parenthesized name are read as after the name" (fun () ->
+      fine (identity ^ "fn f() -> Int64 {\n  (identity)[Int64](5)\n}\n");
+      one_diagnostic (identity ^ "fn f() -> String {\n  (identity)[Int64](5)\n}\n") "types.mismatch");
+  test "a parenthesized name with type arguments is a value of that function" (fun () ->
+      fine (identity ^ "fn f() -> Int64 {\n  let same = (identity)[Int64]\n  same(5)\n}\n"));
+  test "a trait's written arguments are the ones its call uses" (fun () ->
+      let database = setup [ ("app::main", "fn f() -> Int64 {\n  Add[String].add(1, 2)\n}\n") ] in
+      if not (List.mem "types.no_impl" (codes (check database (module_of "app::main")))) then
+        fail "the written argument was ignored");
+  test "a literal is the receiver of a trait method written in full" (fun () ->
+      fine "fn f() -> Int64 {\n  Add[Int64].add(1, 2)\n}\n");
+  test "a generic parameter takes no type arguments" (fun () ->
+      one_diagnostic "fn f[Element: Default]() -> Element {\n  Element[Int64].default()\n}\n"
+        "types.arity");
+  test "a member of a generic parameter that it does not have is an error" (fun () ->
+      one_diagnostic "fn f[Element](value: Element) -> Int64 {\n  Element.anything\n}\n"
+        "types.unknown_member");
+  test "a type with no fields is not its own value" (fun () ->
+      one_diagnostic "type Marker()\n\nfn f() -> Marker {\n  Marker\n}\n" "types.not_a_value");
+  test "`self` outside a method is an error" (fun () ->
+      one_diagnostic "fn f() -> Int64 {\n  self.anything\n}\n" "types.not_a_value");
+  test "`old` without what it is about is an error" (fun () ->
+      one_diagnostic "fn f(value: Int64) -> Int64\n  ensures old == 3\n{\n  value\n}\n"
+        "types.not_a_value");
+  test "a type argument that nothing decides is an error at its call" (fun () ->
+      one_diagnostic "fn make[Value]() -> Int64 {\n  1\n}\n\nfn f() -> Int64 {\n  make()\n}\n"
+        "types.cannot_infer");
+  test "a trait is not called" (fun () ->
+      one_diagnostic "fn f() -> Int64 {\n  Ordered[Int64](1)\n}\n" "types.not_callable");
+  test "a generic function given type arguments, as a value, must meet its bounds" (fun () ->
+      one_diagnostic
+        (point
+       ^ "fn need[Value: Ordered](value: Value) -> Bool {\n\
+         \  true\n\
+          }\n\n\
+          fn f() {\n\
+         \  let check = need[Point]\n\
+         \  let _ = check\n\
+          }\n")
+        "types.unsatisfied_bound");
+  test "a `for` over a call to `each` binds what the call yields" (fun () ->
+      fine
+        "fn total(items: List[Int64]) -> Int64 {\n\
+        \  var sum = 0\n\
+        \  for item in items.each() {\n\
+        \    sum += item\n\
+        \  }\n\
+        \  sum\n\
+         }\n");
+  test "`Self` in the body of a method without `self` is the method's type" (fun () ->
+      fine
+        "type Box(value: Int64)\n\n\
+         fn Box.made() -> Box {\n\
+        \  let made: Self = Box(value: 1)\n\
+        \  made\n\
+         }\n");
+  test "a pattern that does not fit its type still gives its bindings a type" (fun () ->
+      one_diagnostic
+        "fn f(value: Int64) -> Int64 {\n\
+        \  match value {\n\
+        \    Some(inner) => inner\n\
+        \    _ => 0\n\
+        \  }\n\
+         }\n"
+        "types.unknown_variant");
+  test "a `todo` that nothing decides keeps the hole type in the checked form" (fun () ->
+      has_type "fn f() {\n  let later = todo\n  let _ = later\n}\n" "todo" "an undecided type")
 
 let () = finish ()

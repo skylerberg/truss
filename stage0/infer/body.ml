@@ -321,16 +321,33 @@ let check_definition state (lowered : Environment.lowered) =
    statement was being checked, such as a call's type arguments, are
    final only once it settled. *)
 let finalize (state : state) =
+  (* What no statement settled is an error, under the report of the first
+     statement that could not work its types out, or one made here when
+     there is none: nothing unsolved is ever stored unreported. A hole stays
+     a hole, since a [todo] is not an error. *)
+  let unsolved () =
+    match state.unsolved with
+    | Some report -> T.Error report
+    | None ->
+        let report =
+          reported state Cannot_infer
+            (Span.make state.definition.span.start state.definition.span.start)
+            "A type in this definition cannot be worked out. Give the `let` a type, or the call \
+             type arguments."
+        in
+        state.unsolved <- Some report;
+        T.Error report
+  in
   let final type_ =
     T.map
-      (function T.Variable _ | T.Literal _ | T.Hole -> Some T.Error | _ -> None)
+      (function T.Variable _ | T.Literal _ -> Some (unsolved ()) | _ -> None)
       (Interface.Impls.normalize state.database ~bounds:(bounds state) (zonk state type_))
   in
   let argument = function
     | T.Type type_ -> T.Type (final type_)
     | T.Value value -> (
         match Unify.resolve_value state.unifier value with
-        | T.Value_variable _ -> T.Type T.Error
+        | T.Value_variable _ -> T.Type (unsolved ())
         | value -> T.Value value)
     | T.Capabilities _ as capabilities -> capabilities
   in
@@ -405,31 +422,6 @@ let finalize (state : state) =
         part_conversions = List.map (Option.map call) template.part_conversions;
       })
 
-(* The [Self] a body's annotations name: a method's type, a trait's
-   [Self], or an [impl]'s type with its associated types. *)
-let body_context (context : Lower.context) (interface : Environment.interface) key =
-  match interface with
-  | Environment.Impl_interface impl ->
-      {
-        context with
-        self_type = Some impl.for_type;
-        self_trait = Some impl.implements;
-        self_associated = impl.implements.associated;
-      }
-  | Trait_interface _ ->
-      let self = T.Parameter { owner = key; name = "Self" } in
-      { context with self_type = Some self }
-  | Function_interface { receiver = Some (_, self); _ } -> { context with self_type = Some self }
-  | Type_interface interface ->
-      {
-        context with
-        self_type =
-          Some
-            (T.Named
-               { path = key; arguments = Environment.generic_arguments interface.type_generics });
-      }
-  | _ -> context
-
 let check database (key : Names.key) =
   match
     (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
@@ -451,7 +443,7 @@ let check database (key : Names.key) =
           package = module_.package;
           definition;
           resolved;
-          context = body_context context lowered.interface key.path;
+          context;
           text;
           tables = C.create (definition.id + 1);
           obligations = [];
@@ -463,6 +455,7 @@ let check database (key : Names.key) =
           receiver_modes = [];
           binding_spans;
           lambdas = [];
+          unsolved = None;
         }
       in
       (* What lowering reported for the interface is the interface's to
@@ -493,7 +486,8 @@ let check database (key : Names.key) =
 let checked =
   Query.query ~name:"checked" ~phase:Bodies ~show:Names.show_key ~saved:true
     ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
-    check
+    (fun database key ->
+      Compiler_bug.within ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
 
 (* Every body error of a file, in its offsets and in order. *)
 let diagnostics database module_ =

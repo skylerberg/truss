@@ -97,12 +97,12 @@ module Code : sig
     | Not_generic
     | Not_a_constant
     | Alternative_bindings
-    | Misplaced_self_type
     | Not_a_generic_parameter
     | Null
 
   type types =
     | Bad_character
+    | Misplaced_self_type
     | Mismatch
     | Cannot_infer
     | Missing_label
@@ -249,6 +249,18 @@ val fix : string -> edit list -> fix
 val replace : span -> string -> edit
 val insert : int -> string -> edit
 val delete : span -> edit
+
+type reported
+(** Proof that an error was reported. A result that stands for something wrong, such as the type of
+    an expression that did not check, holds one, so it cannot be made where nothing was reported.
+    Everything is accepted of such a result, and that never accepts a mistake silently. *)
+
+val reported : t -> reported
+(** The diagnostic is the report. *)
+
+val recovered : span -> reported
+(** A span the parser recorded as a recovery is the report: it records one only where it or the
+    lexer reported an error. *)
 
 val move : int -> t -> t
 (** [move offset diagnostic] adds [offset] to every span in [diagnostic]: its own, its notes', and

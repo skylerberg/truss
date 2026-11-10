@@ -16,7 +16,7 @@ type hole = {
    error type there, and is not decided yet. *)
 let show_type (checked : Checked.t) id =
   match if id < Array.length checked.types then checked.types.(id) else None with
-  | Some (Types.Error | Types.Hole) -> "not decided yet"
+  | Some (Types.Error _ | Types.Hole) -> "not decided yet"
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
@@ -75,10 +75,10 @@ type explanation = {
 
 let describe_target (target : Resolve.target) =
   match target with
-  | Definition path -> (Printf.sprintf "the definition %s" (Path.show path), Some path)
+  | Definition (_, path) -> (Printf.sprintf "the definition %s" (Path.show path), Some path)
   | Local _ -> ("a local variable or parameter", None)
   | Binding -> ("a name bound here", None)
-  | Generic _ -> ("a generic parameter", None)
+  | Type_parameter _ | Capability_parameter _ | Value_parameter _ -> ("a generic parameter", None)
   | Variant (path, name) -> (Printf.sprintf "the variant %s of %s" name (Path.show path), None)
   | Module module_ -> (Printf.sprintf "the module %s" (Path.show_module module_), None)
   | Field name -> (Printf.sprintf "the field %s" name, None)
@@ -88,7 +88,7 @@ let describe_target (target : Resolve.target) =
   | Yielded -> ("the parts handed out so far, in a specification", None)
   | Finished -> ("whether the method has ended, in a specification", None)
   | Cost_function _ -> ("a cost function", None)
-  | Unknown -> ("nothing: the name is not known", None)
+  | Unknown _ -> ("nothing: the name is not known", None)
 
 let contains (span : span) offset = span.start <= offset && offset <= span.stop
 

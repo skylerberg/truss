@@ -151,7 +151,7 @@ let impl_interface database (path : Path.t) =
 
 (* Matching *)
 
-let open_type = function T.Error | T.Variable _ | T.Hole -> true | _ -> false
+let open_type = function T.Error _ | T.Variable _ | T.Hole -> true | _ -> false
 
 (* Matches a type with an [impl]'s generic parameters in it against a type,
    extending the substitution, or fails. Inference variables and errors
@@ -195,11 +195,15 @@ and match_arguments ~variables substitution patterns arguments =
 
 type evidence =
   | From_impl of { impl : Path.t; substitution : T.substitution }
-  | From_bound of T.parameter  (** A generic parameter's bound, or a trait it requires. *)
+  | From_bound
+      (** A bound in scope, on a generic parameter or on an associated type of one, or a trait such
+          a bound requires: the [impl] is found when the code is instantiated. *)
   | From_any  (** [any Trait] implements its trait. *)
   | Built_in  (** [Copyable] and [Plain], which the compiler implements. *)
-  | Accepted
-      (** An [Error] or [Hole], or a trait whose definition did not parse: accepted silently. *)
+  | Accepted of T.ty
+      (** Everything is accepted of this type: an [Error], a [Hole], or a type the statement has not
+          worked out yet. A trait whose definition did not parse is accepted of every type, as the
+          [Error] of its report. *)
 
 let cursor_trait : Path.t =
   Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
@@ -257,10 +261,14 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) (type_ : T.ty)
               | _ -> false))
       wanted.associated
   in
+  let broken_trait =
+    match Query.demand database Environment.interface wanted.trait with
+    | Some (Environment.Error_interface report) -> Some report
+    | _ -> None
+  in
   if depth > 32 then None
-  else if
-    Query.demand database Environment.interface wanted.trait = Some Environment.Error_interface
-  then Some Accepted
+  else if Option.is_some broken_trait then
+    Option.map (fun report -> Accepted (T.Error report)) broken_trait
   else if Path.equal wanted.trait copyable_path || Path.equal wanted.trait plain_path then
     if
       (Path.equal wanted.trait copyable_path && Properties.copyable database ~bounds type_)
@@ -269,7 +277,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) (type_ : T.ty)
     else None
   else
     match type_ with
-    | T.Error | T.Hole | T.Variable _ -> Some Accepted
+    | T.Error _ | T.Hole | T.Variable _ -> Some (Accepted type_)
     | T.Cursor _ -> if Path.equal wanted.trait cursor_trait then Some Built_in else None
     | T.Never | T.Integer | T.Literal _ | T.Function _ -> None
     | T.Parameter _ | T.Projection _ ->
@@ -280,7 +288,7 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) (type_ : T.ty)
               && arguments_match bound.trait_arguments
               && associated_match ~base:(Some type_) bound.associated)
             (Properties.known_bounds database ~bounds type_)
-        then Some (match type_ with T.Parameter parameter -> From_bound parameter | _ -> Accepted)
+        then Some From_bound
         else None
     | T.Any trait ->
         if
@@ -363,7 +371,7 @@ and associated_type database ~bounds type_ (trait : T.trait_reference) name =
               Option.map (T.substitute substitution)
                 (List.assoc_opt name impl.implements.associated)
           | None -> None)
-      | Some (From_bound _) -> (
+      | Some From_bound -> (
           match
             List.find_map
               (fun (bound : T.trait_reference) -> List.assoc_opt name bound.associated)
@@ -382,13 +390,17 @@ and associated_type database ~bounds type_ (trait : T.trait_reference) name =
           match type_ with
           | T.Cursor { method_; arguments } when name = "Element" ->
               cursor_element database method_ arguments
-          | _ -> Some T.Error)
-      | Some Accepted -> Some T.Error
+          | _ -> None)
+      (* An associated type of an [Error] or a [Hole] is one too; of a type
+         not worked out yet, it is not known. *)
+      | Some (Accepted (T.Variable _)) -> None
+      | Some (Accepted unknown) -> Some unknown
       | None -> None)
 
 (* Replaces every projection whose base is known by what the [impl]
    chooses. A projection on a generic parameter stays, unless a bound fixes
-   it. *)
+   it, and so does one no [impl] answers, which then equals nothing but
+   itself. *)
 and normalize database ~bounds (type_ : T.ty) : T.ty =
   T.map
     (function
@@ -396,15 +408,15 @@ and normalize database ~bounds (type_ : T.ty) : T.ty =
           let base = normalize database ~bounds base in
           match base with
           | T.Variable _ | T.Hole -> Some (T.Projection { base; trait; name })
-          | T.Error -> Some T.Error
+          | T.Error _ -> Some base
           | T.Parameter _ | T.Projection _ -> (
               match associated_type database ~bounds base trait name with
               | Some (T.Projection _ as projection) -> Some projection
-              | Some fixed when fixed <> T.Error -> Some (normalize database ~bounds fixed)
+              | Some fixed when not (T.is_error fixed) -> Some (normalize database ~bounds fixed)
               | _ -> Some (T.Projection { base; trait; name }))
           | _ -> (
               match associated_type database ~bounds base trait name with
               | Some fixed -> Some (normalize database ~bounds fixed)
-              | None -> Some T.Error))
+              | None -> Some (T.Projection { base; trait; name })))
       | _ -> None)
     type_

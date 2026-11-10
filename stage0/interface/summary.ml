@@ -85,7 +85,7 @@ let trait_header =
                 match resolved with
                 | Some resolved -> (
                     match resolved.names.(bound.path.last.id) with
-                    | Some (Definition path) -> Some path
+                    | Some (Definition (_, path)) -> Some path
                     | _ -> None)
                 | None -> None)
               requires

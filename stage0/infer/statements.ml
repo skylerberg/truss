@@ -69,7 +69,7 @@ and statement state env (written : statement) ~last : unit =
             | resolved ->
                 if
                   not
-                    (resolved = T.unit || resolved = T.Never || resolved = T.Error
+                    (resolved = T.unit || resolved = T.Never || T.is_error resolved
                    || resolved = T.Hole)
                 then
                   report state Unused_value value.span
@@ -159,12 +159,13 @@ and statement state env (written : statement) ~last : unit =
                   match (normalize state target_type, normalize state right_type) with
                   | (T.Literal _ | T.Variable _), _ | _, (T.Literal _ | T.Variable _) -> false
                   | left, right ->
-                      if not (T.is_integer_type left || left = T.Error) then
+                      if not (T.is_integer_type left || T.is_error left) then
                         report state No_impl written_target.span
                           (Printf.sprintf "Shifts work on built-in integers, not `%s`."
                              (T.show left));
                       if
-                        not ((T.is_integer_type right && not (T.is_signed right)) || right = T.Error)
+                        not
+                          ((T.is_integer_type right && not (T.is_signed right)) || T.is_error right)
                       then
                         report state Mismatch value.span
                           (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
@@ -177,7 +178,7 @@ and statement state env (written : statement) ~last : unit =
                   match normalize state target_type with
                   | T.Literal _ | T.Variable _ -> false
                   | resolved ->
-                      if not (T.is_integer_type resolved || resolved = T.Error) then
+                      if not (T.is_integer_type resolved || T.is_error resolved) then
                         report state No_impl written_target.span
                           (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                              (T.show resolved));
@@ -262,28 +263,27 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
               else begin
                 if T.is_integer_type element || T.is_builtin Character element then
                   state.tables.loops.(written.id) <- Some (Integer_range { element; inclusive })
-                else if not (element = T.Error) then
+                else if not (T.is_error element) then
                   report state Not_indexable iterable.span
                     (Printf.sprintf "A `for` loop's range is of integers, not `%s`."
                        (T.show element));
                 true
               end);
           element
-      | _ -> T.Error)
+      | _ -> bug "a range is not of the range type")
   | _ -> (
       let type_ = normalize state (expression state env iterable) in
       let call =
         Option.bind (called iterable) (fun (inner : expression) -> state.tables.calls.(inner.id))
       in
       match (type_, call) with
-      | T.Cursor _, Some call -> (
+      | T.Cursor _, Some call ->
           (* A call to a [yields] method drives the loop directly, with its
-             mark, as in [for x in mut items.each()]. *)
+             mark, as in [for x in mut items.each()]. What the call gives is
+             what it yields. *)
           state.tables.loops.(written.id) <- Some (Yielding { call; mode });
-          match function_output state call with
-          | Some (T.Yields (_, element)) -> element
-          | _ -> T.Error)
-      | T.Error, _ | T.Hole, _ -> type_
+          call.result
+      | T.Error _, _ | T.Hole, _ -> type_
       | _ -> (
           match each_call state type_ mode with
           | Some (call, element) ->
@@ -294,11 +294,9 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
               match implements state type_ cursor with
               | Some _ ->
                   state.tables.loops.(written.id) <- Some (Pulled { cursor = type_ });
-                  Option.value ~default:T.Error
-                    (Impls.associated_type state.database ~bounds:(bounds state) type_ cursor
-                       "Element")
+                  associated state type_ cursor "Element" ~at:iterable.span
               | None ->
-                  report state Not_indexable iterable.span
+                  error state Not_indexable iterable.span
                     (Printf.sprintf
                        "`%s` has no `each` that takes %s, so a `for` loop cannot go over it this \
                         way."
@@ -306,8 +304,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                        (match mode with
                        | T.Read -> "`self`"
                        | Mut -> "`mut self`"
-                       | Own -> "`own self`"));
-                  T.Error)))
+                       | Own -> "`own self`")))))
 
 (* An assignment's left side must be a place that may change. *)
 and check_assignable state env (written : expression) =

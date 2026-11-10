@@ -160,6 +160,22 @@ Names live in separate namespaces, which the case rules keep apart:
   resolved form records the type, and the type checker looks the member up
   in it.
 
+**What a name refers to is one closed set of cases.** The resolved form
+records each name as a local, a generic parameter that is a type, a
+capability, or a `USize` value, a definition with the kind of definition it
+is, a prelude variant, a module, a field, a specification word, or a name
+that nothing answers, with its report. A later stage matches on those cases
+in full. It never works a kind out again, from how a name is spelled or by
+looking the definition up, so resolution and checking cannot disagree about
+what a name is.
+
+**An expression is read as a name in one way.** `parse`, `(parse)`,
+`parse[Int64]`, and `(parse)[Int64]` all name `parse`, the last two with
+type arguments. That reading is made in one place, which resolution,
+checking a name as a value, checking it as a callee, and reading a type
+written in an expression all use, so each takes parentheses and type
+arguments alike.
+
 Definitions are named in the resolved form by package, module path, and
 name, never by a hash, as DESIGN.md requires. A method is named
 by its type and its name, together with its receiver mode, since one name
@@ -170,7 +186,9 @@ can have a version for each mode.
 - **Every `use` line imports one module.** Two imported modules with the same
   last name are an error at the second `use`. A module that no name in the
   file uses is an error, as in Go, with a fix that deletes the line.
-  `standard::intrinsic` can be imported only by the `standard` package.
+  `standard::intrinsic` can be imported only by the `standard` package. That
+  error is at the `use` line alone: names written through the import
+  resolve as usual.
 - **Locals follow blocks.** A `let` or `var` is in scope for the rest of its
   block. A name bound by `is` is in scope in the rest of its `&&` chain, in
   the block of the `if` or `while` whose condition contains it at the top
@@ -278,7 +296,9 @@ The type checker uses that as follows:
   call to such a function takes any arguments and has type `Error`. Building
   such a type, reading its fields, matching on it, and looking up its
   members all give `Error`. A trait with the `Error` interface satisfies
-  every bound that names it, and a constant with it has type `Error`.
+  every bound that names it, and a constant with it has type `Error`. The
+  interface or shape holds the parser's report, which every `Error` made of
+  it hands on (see [Errors carry their report](#errors-carry-their-report)).
 - **A part that is not broken is checked as usual.** A function whose body
   is broken keeps its interface, so callers are checked against its
   signature as written, as for any function.
@@ -333,7 +353,7 @@ type ty =
   | Variable of int                         (* while checking one statement *)
   | Literal of literal_kind * int           (* an integer or float literal not yet decided *)
   | Hole                                    (* the type of a todo with nothing expected *)
-  | Error                                   (* after an error, to stop cascades *)
+  | Error of reported                       (* after an error, to stop cascades, with its report *)
 
 and argument = Type of ty | Value of value  (* USize generic arguments *)
 and value = Known of Z.t | Value_parameter of parameter
@@ -361,8 +381,40 @@ and function_type = {
   `impl` to look in. A projection on a generic parameter stays a projection,
   equal only to itself or to what a bound fixes, as in
   `Iterable[Element = Int64]`.
-- **`Variable`, `Literal`, and `Hole` exist only while checking.** A stored
-  checked form contains none of them.
+- **`Variable` and `Literal` exist only while checking.** A stored checked
+  form contains neither. A `Hole` stays where a `todo`'s type was never
+  decided: a `todo` is not an error, so a `Hole` is never turned into one.
+
+### Errors carry their report
+
+`Error` unifies with everything, so that one mistake is reported once. That
+is safe only when the mistake was reported, so an `Error` cannot be made
+without a report: it holds a value that only a report gives, as rustc's
+`ErrorGuaranteed` does.
+
+- **A report is one of two things:** a diagnostic a stage made, or a place
+  where the parser recorded that it recovered, which it does only where it
+  or the lexer reported an error.
+- **Everything that stands for something wrong holds one:** the `Error`
+  type, the `Error` interface and shape of a broken definition, a broken
+  member of a trait, and a name that resolution found nothing by.
+- **A report is handed on, never made up.** A call of a broken function has
+  the `Error` of that function's report, and a use of an unknown name has
+  the `Error` of the name's. Where a use meets an error that another
+  definition's check reported, as with an `impl` that leaves out an
+  associated type, it reads that definition's diagnostics and takes the
+  first as the report.
+- **Code with no report to hand on reports, or keeps what it cannot work
+  out.** A function that cannot report returns no `Error`. An associated
+  type that no `impl` answers stays a projection, which equals only itself,
+  so code that depends on it is rejected, not accepted.
+- **A pattern that does not fit its type still binds its names,** each with
+  the `Error` of the pattern's report, so no use of a local is without a
+  type.
+- **What cannot happen stops the compiler.** Where resolution, the
+  interfaces, and checking must agree, as that every local has a type and
+  every expression of a checked body has one, a disagreement is a bug in
+  the compiler and raises. Going on would accept code that nothing checked.
 
 ### No subtyping
 
@@ -423,12 +475,20 @@ the definition's interface: the types of its parameters and result, its
 
 ### Functions and methods
 
+- **`Self`** is the type a method's head names, the type being defined, a
+  trait's implementing type, or an `impl`'s type. Anywhere else, as in a
+  function that is not a method or in a capability, it is an error.
+  `Self.Name` is an associated type, so it is written only in a trait or in
+  an `impl` of one. Only lowering a written type knows what `Self` stands
+  for, so it alone reports this.
 - **Every type is well-formed:** it has the right number of arguments, value
   arguments are `USize` constants or value parameters, and every bound the
   type requires holds. `SortedList[Element]` in a signature needs
   `Element: Ordered` from the signature's own bounds, as in Rust.
 - **`self`** may only be the first parameter of a method, and a type can have
-  at most one method of each name for each receiver mode. A method's type
+  at most one method of each name for each receiver mode. Where there is no
+  method, a `self` parameter gives the function no receiver, and `self` in
+  the body is an error. A method's type
   must be defined in the same package, and a method of a type private to its
   file must be in that file.
 - **Defaults** are constant expressions of the parameter's type that name no
@@ -670,7 +730,9 @@ statement's variables are solved. Explicit type arguments, as in
 **An `impl` is never chosen from the expected type.** A trait method's
 `impl` is chosen by `Self` and by the trait's type arguments, and those come
 from the receiver, a type name, or the arguments, as DESIGN.md requires.
-`Int64.from(count)` chooses `From[UInt32]` by the type of `count`.
+`Int64.from(count)` chooses `From[UInt32]` by the type of `count`. Type
+arguments written after the trait, as in `Add[Int64].add(left, right)`,
+are the ones the call uses.
 
 ### Modes at calls
 
@@ -1279,8 +1341,8 @@ gives an exact fix whenever it knows what was meant:
 | An unknown name, member, or label | The closest visible one, when one is near |
 
 - **One error per cause.** An expression whose type is wrong becomes `Error`,
-  which unifies with everything and is never reported again, so one mistake
-  is reported once. A definition the parser could not read is reported by the
+  which holds its report, unifies with everything, and is never reported
+  again, so one mistake is reported once. A definition the parser could not read is reported by the
   parser alone (see [Broken definitions](#broken-definitions)).
 - **The reading of `f[X]` is stated.** An error in `f[X]` says which reading
   applied, such as "`parse` is a generic function, and `[Int64]` is its type

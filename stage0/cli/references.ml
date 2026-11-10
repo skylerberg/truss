@@ -70,7 +70,7 @@ let of_definition database (key : Names.key) =
                match
                  if name.id < Array.length resolved.names then resolved.names.(name.id) else None
                with
-               | Some (Definition path) -> [ occurrence name.span (Definition path) ]
+               | Some (Definition (_, path)) -> [ occurrence name.span (Definition path) ]
                | Some (Module m) ->
                    (* A module is written as its import's name, one name, or
                       as its full path, the package's name and then each

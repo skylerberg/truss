@@ -14,6 +14,19 @@ let core name : Path.t = Top { module_ = { package = "standard"; modules = [ "co
 let copyable_trait = core "Copyable"
 let plain_trait = core "Plain"
 
+(* What a trait's [Self] and parameters stand for in a reference to it. A
+   reference with the wrong number of arguments, which lowering reported,
+   gives [Self] alone: a parameter left standing equals nothing. *)
+let trait_substitution (interface : T.trait_interface) ~self (reference : T.trait_reference) :
+    T.substitution =
+  (({ owner = reference.trait; name = "Self" } : T.parameter), T.Type self)
+  ::
+  (if List.length interface.trait_generics = List.length reference.trait_arguments then
+     List.combine
+       (List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics)
+       reference.trait_arguments
+   else [])
+
 (* Every trait a bound gives a type, with the traits each requires, and
    [Self] in what they require replaced by the type. *)
 let rec bound_closure database ?(seen = []) ~self (bound : T.trait_reference) =
@@ -23,15 +36,7 @@ let rec bound_closure database ?(seen = []) ~self (bound : T.trait_reference) =
     let required =
       match Query.demand database Environment.trait_interface bound.trait with
       | Some trait ->
-          let substitution =
-            (({ owner = bound.trait; name = "Self" } : T.parameter), T.Type self)
-            :: List.combine
-                 (List.map (fun (generic : T.generic) -> generic.generic) trait.trait_generics)
-                 (if List.length trait.trait_generics = List.length bound.trait_arguments then
-                    bound.trait_arguments
-                  else List.map (fun _ -> T.Type T.Error) trait.trait_generics)
-          in
-          List.map (T.substitute_trait substitution) trait.requires
+          List.map (T.substitute_trait (trait_substitution trait ~self bound)) trait.requires
       | None -> []
     in
     bound :: List.concat_map (bound_closure database ~seen:(bound :: seen) ~self) required
@@ -47,15 +52,9 @@ let associated_bounds database ~base (trait : T.trait_reference) name =
           interface.associated_types
       with
       | Some associated ->
-          let substitution =
-            (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type base)
-            :: List.combine
-                 (List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics)
-                 (if List.length interface.trait_generics = List.length trait.trait_arguments then
-                    trait.trait_arguments
-                  else List.map (fun _ -> T.Type T.Error) interface.trait_generics)
-          in
-          List.map (T.substitute_trait substitution) associated.associated_bounds
+          List.map
+            (T.substitute_trait (trait_substitution interface ~self:base trait))
+            associated.associated_bounds
       | None -> [])
   | None -> []
 
@@ -90,7 +89,7 @@ let substitution_of (interface : T.type_interface) arguments =
 let rec has database ~bounds ?(visiting = []) property (type_ : T.ty) =
   let recurse = has database ~bounds ~visiting property in
   match type_ with
-  | T.Error | T.Hole | T.Variable _ | T.Never | T.Literal _ | T.Integer -> property <> View
+  | T.Error _ | T.Hole | T.Variable _ | T.Never | T.Literal _ | T.Integer -> property <> View
   | T.Parameter _ | T.Projection _ -> (
       match property with
       | Copyable ->
@@ -161,10 +160,10 @@ let rec has database ~bounds ?(visiting = []) property (type_ : T.ty) =
                             field_types (Option.value ~default:[] variant.fields))
                           variants,
                         List.exists (fun (variant : T.variant) -> variant.indirect) variants )
-                  | Todo_type | Builtin_type _ | Error_shape -> ([], false)
+                  | Todo_type | Builtin_type _ | Error_shape _ -> ([], false)
                 in
                 match interface.shape with
-                | Error_shape -> property <> View
+                | Error_shape _ -> property <> View
                 | Todo_type -> false
                 | _ -> (
                     match property with

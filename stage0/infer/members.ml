@@ -103,6 +103,11 @@ let shape database path =
   | Some interface -> Some interface.shape
   | None -> None
 
+(* The report of a type whose definition did not parse, of which everything
+   is accepted. *)
+let broken database path =
+  match shape database path with Some (Error_shape report) -> Some report | _ -> None
+
 (* Whether code in a package may see a type's fields: an opaque type's
    fields are visible only in its own package. *)
 let fields_visible database ~package (path : Path.t) =
