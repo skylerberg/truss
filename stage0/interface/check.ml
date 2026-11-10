@@ -328,10 +328,8 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                         List.for_all
                           (fun type_ ->
                             if trait_named trait "Plain" then
-                              Properties.plain state.database ~bounds:(derived_bounds trait) type_
-                            else
-                              Properties.copyable state.database ~bounds:(derived_bounds trait)
-                                type_)
+                              Impls.plain state.database ~bounds:(derived_bounds trait) type_
+                            else Impls.copyable state.database ~bounds:(derived_bounds trait) type_)
                           field_types
                       in
                       let allocates =

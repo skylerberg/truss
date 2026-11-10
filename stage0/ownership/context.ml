@@ -5,7 +5,6 @@
 open Syntax
 module T = Types
 module C = Checked
-module Properties = Interface.Properties
 
 type root = Local of id | Self_root
 
@@ -94,9 +93,9 @@ let report context ?(fixes = []) ?(notes = []) code (span : span) message =
     :: context.diagnostics
 
 let type_of context (value : expression) = C.type_of context.checked value
-let plain context type_ = Properties.plain context.database ~bounds:context.bounds type_
-let copyable context type_ = Properties.copyable context.database ~bounds:context.bounds type_
-let is_view context type_ = Properties.is_view context.database ~bounds:context.bounds type_
+let plain context type_ = Interface.Impls.plain context.database ~bounds:context.bounds type_
+let copyable context type_ = Interface.Impls.copyable context.database ~bounds:context.bounds type_
+let is_view context type_ = Interface.Impls.is_view context.database ~bounds:context.bounds type_
 
 (* The collections whose elements are places the compiler knows: an index
    or a slice of one is a part of it, so two of them can be shown to be

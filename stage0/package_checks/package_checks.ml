@@ -165,46 +165,26 @@ let output_type : T.result -> T.ty = function
 let type_arguments arguments =
   List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
 
-(* Whether a generic type holds its [index]th parameter in place: in a field
-   of a variant that is not [indirect], outside collections' storage,
-   functions, and [any]. [visiting] cuts recursion, as the least answer. *)
-let rec holds database visiting (path, index) =
-  if List.mem (path, index) visiting then false
-  else
-    let parameters, fields = type_fields database path in
-    match List.nth_opt parameters index with
-    | None -> false
-    | Some parameter ->
-        let visiting = (path, index) :: visiting in
-        List.exists
-          (fun (_, indirect, field_type) ->
-            (not indirect)
-            && List.exists
-                 (function `Parameter found -> found = parameter | `Path _ -> false)
-                 (in_place database visiting field_type))
-          fields
-
-(* What a value of a type holds in place: the named types, and the
-   generic parameters, through the arguments of generic types that hold them
+(* The named types each field of a type definition holds in place, with the
+   variant the field is in. The fields of an [indirect] variant hold nothing
    in place. *)
-and in_place database visiting (type_ : T.ty) =
-  match type_ with
-  | T.Parameter parameter -> [ `Parameter parameter ]
-  | T.Named { path; arguments } -> (
-      let arguments = type_arguments arguments in
-      match Intrinsic.builtin_of_path path with
-      | Some Array -> List.concat_map (in_place database visiting) arguments
-      | Some _ -> []
-      | None ->
-          `Path path
-          :: List.concat
-               (List.mapi
-                  (fun index argument ->
-                    if holds database visiting (path, index) then
-                      in_place database visiting argument
-                    else [])
-                  arguments))
-  | _ -> []
+let held database path =
+  let bounds parameter =
+    match Query.demand database Environment.type_interface path with
+    | Some interface ->
+        List.concat_map
+          (fun (generic : T.generic) ->
+            match generic.kind with
+            | Type_generic bounds when generic.generic = parameter -> bounds
+            | _ -> [])
+          interface.type_generics
+    | None -> []
+  in
+  List.filter_map
+    (fun (variant, indirect, field_type) ->
+      if indirect then None
+      else Some (variant, Interface.Impls.held_in_place database ~bounds field_type))
+    (snd (type_fields database path))
 
 (* A cycle of types that hold each other in place, from a type back to it:
    [Some variant] with the variant of [start] where the cycle leaves it,
@@ -216,19 +196,12 @@ let find_cycle database (start : Path.t) =
     || (not (Hashtbl.mem visited path))
        && begin
          Hashtbl.replace visited path ();
-         List.exists
-           (fun (_, indirect, field_type) -> (not indirect) && reaches_any field_type)
-           (snd (type_fields database path))
+         List.exists (fun (_, held) -> List.exists reaches held) (held database path)
        end
-  and reaches_any field_type =
-    List.exists
-      (function `Path path -> reaches path | `Parameter _ -> false)
-      (in_place database [] field_type)
   in
   List.find_map
-    (fun (variant, indirect, field_type) ->
-      if (not indirect) && reaches_any field_type then Some variant else None)
-    (snd (type_fields database start))
+    (fun (variant, held) -> if List.exists reaches held then Some variant else None)
+    (held database start)
 
 (* Whether a generic type contains itself with growing type arguments,
    through any field at all, so that it has no fixed set of instances. As in

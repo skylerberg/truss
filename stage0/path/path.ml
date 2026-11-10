@@ -35,3 +35,12 @@ let rec show = function
 
 let compare = Stdlib.compare
 let equal left right = compare left right = 0
+
+module Ordered = struct
+  type nonrec t = t
+
+  let compare = compare
+end
+
+module Map = Map.Make (Ordered)
+module Set = Set.Make (Ordered)

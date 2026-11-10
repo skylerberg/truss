@@ -224,52 +224,139 @@ let list type_ = Types.named (standard [ "list" ] "List") [ type_ ]
 let slice type_ = Types.named (standard [ "list" ] "Slice") [ type_ ]
 
 let () =
-  property "an integer is Plain" true "" (fun _ -> int64) Interface.Properties.plain;
-  property "an Option of plain data is Plain" true ""
-    (fun _ -> option int64)
-    Interface.Properties.plain;
-  property "a List is Copyable" true "" (fun _ -> list int64) Interface.Properties.copyable;
+  property "an integer is Plain" true "" (fun _ -> int64) Interface.Impls.plain;
+  property "an Option of plain data is Plain" true "" (fun _ -> option int64) Interface.Impls.plain;
+  property "a List is Copyable" true "" (fun _ -> list int64) Interface.Impls.copyable;
   property "a handle is not Copyable" false ""
     (fun _ -> Types.named (Intrinsic.builtin_path Handle) [])
-    Interface.Properties.copyable;
+    Interface.Impls.copyable;
   property "a handle is not Plain" false ""
     (fun _ -> Types.named (Intrinsic.builtin_path Handle) [])
-    Interface.Properties.plain;
+    Interface.Impls.plain;
   property "an Option of a handle is not Copyable" false ""
     (fun _ -> option (Types.named (Intrinsic.builtin_path Handle) []))
-    Interface.Properties.copyable;
+    Interface.Impls.copyable;
   property "an Option of a handle is not Plain" false ""
     (fun _ -> option (Types.named (Intrinsic.builtin_path Handle) []))
-    Interface.Properties.plain;
-  property "a List is not Plain" false "" (fun _ -> list int64) Interface.Properties.plain;
+    Interface.Impls.plain;
+  property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.plain;
   property "an Option of a Slice is a view" true ""
     (fun _ -> option (slice int64))
-    Interface.Properties.is_view;
-  property "a List of integers is not a view" false ""
-    (fun _ -> list int64)
-    Interface.Properties.is_view;
+    Interface.Impls.is_view;
+  property "a List of integers is not a view" false "" (fun _ -> list int64) Interface.Impls.is_view;
   property "a record of plain fields is Plain" true "type Point(x: Int64, y: Int64)\n"
     (fun _ -> Types.named (app "Point") [])
-    Interface.Properties.plain;
+    Interface.Impls.plain;
   property "a variant held indirectly is not Plain" false
     "type Tree =\n  | Leaf\n  | indirect Node(left: Tree, right: Tree)\n"
     (fun _ -> Types.named (app "Tree") [])
-    Interface.Properties.plain;
+    Interface.Impls.plain;
   property "a recursive type is still Copyable" true
     "type Tree =\n  | Leaf\n  | indirect Node(left: Tree, right: Tree)\n"
     (fun _ -> Types.named (app "Tree") [])
-    Interface.Properties.copyable;
+    Interface.Impls.copyable;
   property "an opaque type is not Copyable unless it says so" false
     "public opaque type Token(code: Int64)\n"
     (fun _ -> Types.named (app "Token") [])
-    Interface.Properties.copyable;
+    Interface.Impls.copyable;
   property "an opaque type that derives Plain is Plain" true
     "public opaque type Token(code: Int64)\n  derives Plain\n"
     (fun _ -> Types.named (app "Token") [])
-    Interface.Properties.plain;
+    Interface.Impls.plain;
   property "a type defined as todo is not Copyable" false "type Session = todo\n"
     (fun _ -> Types.named (app "Session") [])
-    Interface.Properties.copyable
+    Interface.Impls.copyable
+
+(* Properties of types that hold types of their own kind *)
+
+let holder = "type Holder[Value](value: Value)\n"
+let held type_ = Types.named (app "Holder") [ type_ ]
+let chain = "type Chain[Value] =\n  | End\n  | indirect Link(value: Value, rest: Chain[Value])\n"
+
+let kept =
+  "trait Shown {\n\
+  \  type Part\n\
+   }\n\n\
+   type Numbers(items: List[Int64])\n\n\
+   impl Shown for Numbers {\n\
+  \  type Part = Slice[Int64]\n\
+   }\n\n\
+   type Counted(count: Int64)\n\n\
+   impl Shown for Counted {\n\
+  \  type Part = Int64\n\
+   }\n\n\
+   type Kept[Source: Shown](part: Source.Part)\n"
+
+let () =
+  property "an Option of an Option of a List is not Plain" false ""
+    (fun _ -> option (option (list int64)))
+    Interface.Impls.plain;
+  property "an Option of an Option of plain data is Plain" true ""
+    (fun _ -> option (option int64))
+    Interface.Impls.plain;
+  property "a type nested in itself around a Slice is a view" true holder
+    (fun _ -> held (held (slice int64)))
+    Interface.Impls.is_view;
+  property "a type nested in itself around a List is not a view" false holder
+    (fun _ -> held (held (list int64)))
+    Interface.Impls.is_view;
+  property "a type nested in itself around a List is not Plain" false holder
+    (fun _ -> held (held (list int64)))
+    Interface.Impls.plain;
+  property "a type that contains itself is a view when its argument is" true chain
+    (fun _ -> Types.named (app "Chain") [ slice int64 ])
+    Interface.Impls.is_view;
+  property "a type that contains itself is not a view when its argument is not" false chain
+    (fun _ -> Types.named (app "Chain") [ int64 ])
+    Interface.Impls.is_view;
+  property "a type that contains itself around a Slice is a view" true
+    "type Nest[Value] =\n  | Leaf(value: Value)\n  | indirect More(inner: Nest[Slice[Value]])\n"
+    (fun _ -> Types.named (app "Nest") [ int64 ])
+    Interface.Impls.is_view;
+  property "types that hold each other are Copyable when nothing in them says otherwise" true
+    "type Even =\n  | Zero\n  | indirect After(odd: Odd)\n\ntype Odd(even: Even, count: Int64)\n"
+    (fun _ -> Types.named (app "Even") [])
+    Interface.Impls.copyable;
+  property "types that hold each other are not Copyable when one holds what is not" false
+    "public opaque type Token(code: Int64)\n\n\
+     type Even =\n\
+    \  | Zero\n\
+    \  | indirect After(odd: Odd)\n\n\
+     type Odd(even: Even, token: Token)\n"
+    (fun _ -> Types.named (app "Even") [])
+    Interface.Impls.copyable;
+  property "a type that holds an associated type is a view when that type is one" true kept
+    (fun _ -> Types.named (app "Kept") [ Types.named (app "Numbers") [] ])
+    Interface.Impls.is_view;
+  property "a type that holds an associated type is not a view when that type is not" false kept
+    (fun _ -> Types.named (app "Kept") [ Types.named (app "Counted") [] ])
+    Interface.Impls.is_view;
+  property "a type that holds an associated type is Plain when that type is" true kept
+    (fun _ -> Types.named (app "Kept") [ Types.named (app "Counted") [] ])
+    Interface.Impls.plain;
+  property "a type that holds a type holding an associated type is a view when that type is one"
+    true
+    (kept ^ "\ntype Outer(kept: Kept[Numbers])\n")
+    (fun _ -> Types.named (app "Outer") [])
+    Interface.Impls.is_view;
+  let through_itself =
+    kept
+    ^ "\n\
+       type Marker()\n\n\
+       impl Shown for Marker {\n\
+      \  type Part = Tree\n\
+       }\n\n\
+       type Tree =\n\
+      \  | Leaf\n\
+      \  | indirect Branch(kept: Kept[Marker])\n"
+  in
+  property "a type that contains itself through an associated type is Copyable" true through_itself
+    (fun _ -> Types.named (app "Tree") [])
+    Interface.Impls.copyable;
+  property "a type that contains itself through an associated type is not a view" false
+    through_itself
+    (fun _ -> Types.named (app "Tree") [])
+    Interface.Impls.is_view
 
 (* Finding impls *)
 
@@ -367,7 +454,7 @@ let () =
           ]
       in
       ignore
-        (Interface.Properties.copyable database
+        (Interface.Impls.copyable database
            ~bounds:(fun _ -> [])
            (Types.named (app "Nested") [ int64 ])));
   test "an impl's method may have the trait method's own generic parameters" (fun () ->
@@ -458,7 +545,7 @@ let () =
       in
       if
         not
-          (Interface.Properties.copyable database
+          (Interface.Impls.copyable database
              ~bounds:(fun _ -> [])
              (Types.named (app "Box") [ int64 ]))
       then fail "not Copyable");

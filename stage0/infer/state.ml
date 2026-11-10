@@ -10,7 +10,6 @@ module C = Checked
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
-module Properties = Interface.Properties
 module Lower = Interface.Lower
 
 (* State *)
@@ -122,10 +121,8 @@ let implements state type_ trait =
   Impls.implements state.database ~bounds:(bounds state) (zonk state type_)
     (Unify.zonk_trait state.unifier trait)
 
-let copyable state type_ =
-  Properties.copyable state.database ~bounds:(bounds state) (zonk state type_)
-
-let plain state type_ = Properties.plain state.database ~bounds:(bounds state) (zonk state type_)
+let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) (zonk state type_)
+let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk state type_)
 
 (* The associated type the [impl] of a trait for a type gives. An [impl]
    that leaves one out has that reported as its own error, which is the

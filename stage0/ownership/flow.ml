@@ -5,7 +5,6 @@
 open Syntax
 module T = Types
 module C = Checked
-module Properties = Interface.Properties
 open Context
 
 (* The places that may have been moved, each with where. [None] is a point
