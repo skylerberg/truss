@@ -82,9 +82,9 @@ and operand =
 (** Where a value is. *)
 and place =
   | Local of local
-  | Field of { base : place; variant : string option; field : string; type_ : Types.ty }
-      (** A field of a record, or of the [variant] a pattern or an [is] showed the base to be;
-          [type_] is the field's. *)
+  | Field of { base : place; field : string; type_ : Types.ty }
+      (** A field of a record; [type_] is the field's. A part of a sum is no place of this kind: it
+          is reached only through a pattern that binds it. *)
   | Lent of expression
       (** The part a lending call lends, for the rest of the statement: [items[index]], which is
           [at], and [grid.cell(position)]. The expression is the [Call], of a method or of an

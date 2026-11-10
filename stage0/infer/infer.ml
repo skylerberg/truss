@@ -10,6 +10,9 @@ type result = Body.result = {
 }
 
 let checked = Body.checked
+
+(* The core form of a method a derived [impl] gives, by the method's path. *)
+let derived = Derived.core
 let diagnostics = Body.diagnostics
 
 (* A definition's core form, when it has one: what the stages after

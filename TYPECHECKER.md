@@ -604,8 +604,11 @@ the definition's interface: the types of its parameters and result, its
   implement the trait, under the same conditions on the type parameters as
   the derived `impl`'s, so `Option[Value]` derives `Equal` as
   `impl Equal for Option[Value: Equal]`. Deriving `Ordered` or `Hash` needs
-  `Equal` to be derived too. Each derived `impl` becomes a definition of its
-  own, as DESIGN.md says, named by the type and the trait.
+  `Equal` to be derived too. Only a record derives `Default`, which is each
+  field's: no variant of a sum type is its default, so that `impl` is
+  written, as Rust asks for a variant to be marked. Each derived `impl`
+  becomes a definition of its own, as DESIGN.md says, named by the type and
+  the trait.
 - **`= todo`** makes a type that can be named and passed but whose contents
   cannot be used. It has none of the properties above, so it cannot be
   copied and is not a view, until it is defined.
@@ -1591,6 +1594,30 @@ is given out, which sets on each call what the call needs and what each
 capability parameter of what it calls stands for there, and on each
 `provide` what its implementations provide.
 
+A method a derived `impl` gives is written nowhere, so its form is made
+from the type's shape, as the body the method would have if it were
+written:
+
+- **`equal`** tests that the other value is the same variant, and then
+  that each field equals the other's, in order, with `&&`, so the first
+  difference ends it.
+- **`hash`** writes the variant's number, counted from 0 in the order the
+  variants are declared, and then hashes each field.
+- **`compare`** orders by variant, in the order they are declared, and
+  between two values of one variant by each field in turn: the first
+  field that is not equal decides.
+- **`default`** builds the record of each field's default.
+
+A sum's method matches on `self`, and on the other value inside each arm,
+with patterns that bind each variant's fields, as a person would write it:
+a part of a sum is reached only through a pattern, in a derived method as
+anywhere. Each field's method is a call of the trait's method on the
+field's type, with the `impl` the type has, or a bound where the type is a
+parameter. The form is made once for a method, whatever it is compiled
+for. A method the trait itself gives a body, such as `not_equal`, has the
+trait's form, as in any `impl` that leaves it to the trait, and a type
+that is still `todo` has none.
+
 ### Obligations the type checker creates
 
 Most proof obligations come from the program itself: every index, every
@@ -1770,8 +1797,7 @@ the compiler. The prelude holds:
 
 - **Reading the core form.** Ownership, the prover, and code generation
   read the checked form's tables and the syntax tree, and work out again
-  what the core form holds. The methods of a derived `impl` have no core
-  form.
+  what the core form holds.
 - **A contract as a result of its own.** DESIGN.md has callers' proofs read a
   function's contract, apart from its interface and its body. The contract
   is type-checked with the body, and the prover reads it from the callee's

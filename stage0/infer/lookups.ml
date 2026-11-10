@@ -88,14 +88,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
               with
               | Some written ->
                   draft state value (fun () ->
-                      Use
-                        (Field
-                           {
-                             base = Local Self;
-                             variant = None;
-                             field;
-                             type_ = Form.type_of state value;
-                           }));
+                      Use (Field { base = Local Self; field; type_ = Form.type_of state value }));
                   written.field_type
               | None -> bug "the field `%s` is not in its record" field)
           | None -> bug "the field `%s` is not in a record" field)

@@ -2446,7 +2446,7 @@ type Option[Value] =
 | `Equal` | Two values are equal when all their fields are equal. |
 | `Hash` | Combines the hashes of all fields. |
 | `Ordered` | Compares variants in the order they are declared, then fields in the order they are declared. |
-| `Default` | Uses each field's default. |
+| `Default` | Uses each field's default. Only a record can derive it. |
 | `Copyable`, `Plain` | Nothing: they state that an opaque type can be copied, explicitly or implicitly. See below. |
 
 - Every field must already have the trait, or deriving it is an error.

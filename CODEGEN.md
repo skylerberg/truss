@@ -743,6 +743,17 @@ and its siblings. Full-width multiplication, used by hashing and
   test is incomplete and ends the worker. Builds refuse programs that can
   reach a `todo`.
 
+What a program can reach is what its `main` calls, takes as a value, reads,
+or drops, and so on from each of those, with one difference from what a
+build compiles. A capability's implementation is compiled whole, since its
+table has an entry for every method, but a method of it is reached only
+where code that is reached calls that method of the capability. So a
+`todo` in a method of an implementation stops a program that can call the
+method, and no other: an implementation can be written a method at a time
+while programs that use the rest of it build. A call of a capability's
+method names the capability for this, and a table says which capability's
+methods it holds.
+
 ## Generics and traits
 
 - **Every call to a trait method is resolved before code generation.** The

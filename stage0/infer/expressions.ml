@@ -228,7 +228,6 @@ and member_value state env (value : expression) (base : expression) (member : na
                 (Field
                    {
                      base = place_of (built state base);
-                     variant = None;
                      field = member.text;
                      type_ = Form.type_of state value;
                    }));
