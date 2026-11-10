@@ -57,6 +57,7 @@ touches. It follows [GOALS.md](GOALS.md) and the decisions in
 | `truss rename` | Renames a definition, method, or module, and every reference to it in the worktree |
 | `truss add` | Makes registry packages dependencies of the package, and writes their versions in the lock file |
 | `truss upgrade` | Moves the project's registry packages to other versions, and says what that changes |
+| `truss publish` | Adds the package to the registry as its next version, once it is finished and breaks nothing |
 | `truss new` | Makes a new package |
 | `truss sync`, `truss status`, `truss stop` | Brings a worktree's session up to date, lists the background process's sessions, and stops it |
 | `truss clean` | Stops the background process and deletes the store |
@@ -626,6 +627,76 @@ JSON document is `{"format", "diagnostics", "changes", "signatures",
 signature with its path, its text before and after, and what reads it, and
 each error as a sentence.
 
+### `truss publish`
+
+```text
+truss publish [--json]
+```
+
+Adds the package the command is run in to the registry, as DESIGN.md's
+"Versions" and "The registry" describe. The package must have an owner in
+its name. It is published only when:
+
+- **It has no errors,** proofs included, and no problem with its manifest or
+  the lock file.
+- **It has no `todo` and no `echo`,** anywhere, since a library has no
+  `main` to reach them from. Each is listed with its place.
+- **Its tests that have no `uses` pass.** They are run as `truss test` runs
+  them, so a result that is kept is not run again.
+- **It is published with registry packages only.** A dependency that is one
+  of the project's packages counts as the registry's when its files are
+  those of a version the registry holds, which is how a project's packages
+  are published one after another, and otherwise is to be published first.
+- **It breaks nothing its last version offers** (below).
+
+What is published is the package's files, as SYNTAX.md's "The lock file"
+lists them: its manifest as it is written, its modules, and the Markdown
+files beside them, with a lock file in place of the project's that has a
+line for each registry package the package's code uses, its tests apart,
+and for each that those use in turn, at the build's versions. A dependency
+that only tests use is left out, so that a project that uses the package
+does not take it on. Files that are the newest version already are not
+published again.
+
+**The number is the registry's to give,** as DESIGN.md decides. The first
+version is 1.0.0, or 2.0.0 for a name that ends in `_v2`. After that, the
+package is compared with its newest version, which is loaded into a state
+of its own with the packages it was published with:
+
+- A release that breaks something is refused, with each definition that
+  breaks, what about it does, and its signature as it was and as it is, and
+  the name to publish it under.
+- A release that offers more gets the next minor number, and what is new is
+  listed.
+- Any other gets the next patch number.
+
+```text
+This would break what `acme::geometry` 1.4.2 offers, so it cannot be published under that name:
+  acme::geometry::vector::length has other parameters or another result.
+    was: public fn length(self) -> Float64
+    now: public fn length(self, scale: Float64) -> Float64
+Publish it under a new name, such as `acme::geometry_v2`.
+```
+
+The comparison is of every public definition and every `impl`:
+
+| Of | Breaks | Offers more |
+|---|---|---|
+| Any public definition | It is gone, moved, or no longer public | It is new |
+| A function, method, or theorem | Other generic parameters, parameters, or result; a capability more in `uses`; a `requires` clause more; an `ensures` or `cost` clause fewer; a `time` clause gone; a default gone | A capability fewer; a `requires` clause fewer; an `ensures` or `cost` clause more; a default more |
+| A type that shows its fields | Other fields, variants, or invariant; `opaque` added; a derived trait fewer | A derived trait more |
+| An opaque type | Other generic parameters; a derived trait fewer | `opaque` taken away; a derived trait more |
+| A trait or capability | Other generic parameters, required traits, associated types, or laws; a method gone or changed as a function's may not; a method more without a body | A method more with a body |
+| A constant | Another type or value | |
+| An `impl` | It is gone | It is new |
+| The package | `usize_bits = 64` where it ran on every target | |
+
+Types are compared as the checker worked them out, so a type written
+through another `use` is the same type. The exit status is 1 when the
+package is not published, and the JSON document is `{"format",
+"diagnostics", "problems", "package", "version", "hash", "grows"}`, or with
+`"refused"`, the sentences that say why.
+
 ## Making a package
 
 ```text
@@ -703,9 +774,16 @@ It is left out of each command's help.
 
 ## Not built
 
-- **`truss publish`,** and with it the registry's check that a release
-  breaks nothing and the number it gives each release, which DESIGN.md's
-  "Versions" describes.
+- **A contract compared by what it means.** DESIGN.md has a release keep a
+  `requires` that the old one implies and an `ensures` that implies the old
+  one, which is the prover's to show. `truss publish` compares a contract's
+  clauses as they are written: one that is reworded breaks, and one whose
+  words are the same and whose meaning changed, because a private
+  definition it names did, is not seen.
+- **A method that could be pulled and no longer can,** which DESIGN.md
+  counts as breaking.
+- **The registry checking a release itself.** `truss publish` checks the
+  package where it is run and writes to the registry's directory.
 - **A registry that is not a directory.** DESIGN.md's registry is served
   over a network, keeps a public log of every version's hash, signs the
   proofs it computed, has owners who alone publish under their names, and

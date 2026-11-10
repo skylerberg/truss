@@ -28,6 +28,7 @@ type manifest_problem = Package_checks.manifest_problem =
 
 let manifest_problems = Package_checks.manifest_problems
 let manifest_sentence = Package_checks.manifest_sentence
+let code_packages = Package_checks.code_packages
 
 let file_diagnostics =
   Query.query ~name:"all_diagnostics" ~phase:Diagnostics ~show:Path.show_module ~saved:true

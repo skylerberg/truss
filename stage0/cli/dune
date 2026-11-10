@@ -33,4 +33,6 @@
   compile
   solver
   prover
+  compatibility
+  token
   database))

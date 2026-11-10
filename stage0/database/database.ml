@@ -255,6 +255,23 @@ let dependency_cycle (packages : (string * Type_checker.Manifest.package) list) 
       Option.map (fun way -> (directory, way)) (reaches package.name [] package.name))
     packages
 
+(* Sets a published package's manifest and modules as an engine's inputs. *)
+let set_published engine (found : published) =
+  let name = found.manifest.name in
+  let sources =
+    List.map
+      (fun (modules, text) -> (({ package = name; modules } : Path.module_), text))
+      found.sources
+  in
+  List.iter (fun (module_, text) -> Engine.set engine Workspace.file_text module_ text) sources;
+  Engine.set engine Workspace.packages name
+    {
+      Workspace.name;
+      dependencies = found.manifest.dependencies;
+      modules = List.map fst sources;
+      usize_bits = found.manifest.usize_bits;
+    }
+
 (* Brings the inputs in line with a set of files, each with its contents, or
    [Unchanged] when its stamp shows it is the same as before. The files are
    every manifest and module file under the project's root. Those of another
@@ -587,24 +604,7 @@ let apply session (files : (string * file_contents) list) =
   List.iter
     (fun (found : Registry.Selection.package) ->
       if not (List.mem (found.name, found.version, found.hash) old.registry) then
-        match Hashtbl.find_opt published found.hash with
-        | Some { sources; _ } ->
-            let sources =
-              List.map
-                (fun (modules, text) -> (({ package = found.name; modules } : Path.module_), text))
-                sources
-            in
-            List.iter
-              (fun (module_, text) -> Engine.set engine Workspace.file_text module_ text)
-              sources;
-            Engine.set engine Workspace.packages found.name
-              {
-                Workspace.name = found.name;
-                dependencies = found.manifest.dependencies;
-                modules = List.map fst sources;
-                usize_bits = found.manifest.usize_bits;
-              }
-        | None -> ())
+        Option.iter (set_published engine) (Hashtbl.find_opt published found.hash))
     selected;
   Engine.set engine layout ()
     {
@@ -1351,6 +1351,39 @@ let plan_lock session ~set ~all =
                 selected
             in
             Ok { text = Registry.Lock.print after; before; after })
+
+(* A published package at a version, in an engine of its own with the
+   packages it was published with, for comparing a release with it. *)
+let published_engine name version =
+  let state = current () in
+  let packages = Store.files state.store "packages" in
+  match
+    Option.bind (Registry.Index.current ()) (fun registry ->
+        Registry.Index.hash_of registry name version)
+  with
+  | None ->
+      Error (Printf.sprintf "The registry has no `%s` %s." name (Registry.Version.show version))
+  | Some hash ->
+      let engine = new_engine state in
+      let set name version ~hash =
+        match load_published ~packages name version ~hash with
+        | Ok found ->
+            set_published engine found;
+            Ok found
+        | Error reason ->
+            Error
+              (Printf.sprintf "`%s` %s cannot be read: %s." name (Registry.Version.show version)
+                 reason)
+      in
+      Result.bind (set name version ~hash) (fun found ->
+          List.fold_left
+            (fun result (entry : Registry.Lock.entry) ->
+              Result.bind result (fun engine ->
+                  Result.map (fun _ -> engine) (set entry.name entry.version ~hash:entry.hash)))
+            (Ok engine) found.record)
+
+let code_packages session name =
+  try Engine.get session.engine Type_checker.code_packages name with Not_found -> []
 
 (* A session that starts from another's state, with a lock file in place of
    its own, for seeing what other versions would change before the file is
