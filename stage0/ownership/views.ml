@@ -22,18 +22,30 @@ let hold (holdings : holdings) holder views : holdings =
   let added = List.filter (fun view -> not (List.mem view known)) views in
   (holder, known @ added) :: List.remove_assoc holder holdings
 
+(* Whether a name refers to a place that is not its own: a name that a
+   [let] binds to a place, that a pattern binds to a part of a place, or
+   that a loop binds to an element. A parameter is not such a name: what
+   the caller gave it is all that the function knows. *)
+let refers_elsewhere context (root : Place.root) =
+  match root with
+  | Local local ->
+      local <> Self && (not (List.mem local context.parameters)) && kind context root <> Owned
+  | Constant _ | Environment -> false
+
 (* What a value views, given the places it names. A value that refers to a
    place views the place and what the place's root is known to view. A
-   value taken out of a place views only what the root is known to view. If
-   nothing is known of the root, as for a parameter, the place stands for
-   what was taken out of it. *)
-let resolve (holdings : holdings) (views : view list) : view list =
+   value taken out of a place views only what the root is known to view,
+   and so does a value that refers to a name that itself refers elsewhere:
+   a slice of [found], after [match self.user { Some(found) => ... }], views
+   [self.user]. If nothing is known of the root, as for a parameter, the
+   place stands for what was taken out of it. *)
+let resolve context (holdings : holdings) (views : view list) : view list =
   List.concat_map
     (fun (view : view) ->
-      match (held holdings view.place.root, view.taken) with
-      | Some known, true -> known
-      | Some known, false -> known @ [ view ]
-      | None, _ -> [ view ])
+      match held holdings view.place.root with
+      | Some known when view.taken || refers_elsewhere context view.place.root -> known
+      | Some known -> known @ [ view ]
+      | None -> [ view ])
     views
 
 (* Whether what is viewed is gone when the function returns, so that
@@ -66,13 +78,15 @@ let transfer context (point : point) (before : holdings) : holdings =
         (fun (holder, _) -> not (List.exists (fun local -> holder = Place.Local local) locals))
         before
   | Hold { holders; views } ->
-      let viewed = resolve before views in
+      let viewed = resolve context before views in
       List.fold_left
         (fun holdings holder ->
           (Place.Local holder, viewed) :: List.remove_assoc (Place.Local holder) holdings)
         before holders
   | Store { place; views } -> (
-      match resolve before views with [] -> before | viewed -> hold before place.root viewed)
+      match resolve context before views with
+      | [] -> before
+      | viewed -> hold before place.root viewed)
   | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Assign _ | Ends _ | Suspend _ | Exit
   | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Gives_function _ | Write_through _
   | Arguments _ ->
@@ -204,7 +218,7 @@ let check context (graph : Graph.t) =
     else if
       List.exists
         (fun (viewed : view) -> overlaps viewed.place place)
-        (resolve before.(index) [ { place = loan.lent; taken = false } ])
+        (resolve context before.(index) [ { place = loan.lent; taken = false } ])
     then Some true
     else None
   in
@@ -297,7 +311,7 @@ let check context (graph : Graph.t) =
              it views. *)
           List.iter
             (fun (position, viewed, view_at) ->
-              let viewed = resolve before.(index) viewed in
+              let viewed = resolve context before.(index) viewed in
               List.iter
                 (fun (passed : passed) ->
                   if
@@ -349,7 +363,7 @@ let check context (graph : Graph.t) =
                 | Environment -> true
                 | Constant _ -> false
                 | Local _ -> kind context viewed.place.root <> Owned)
-              (resolve before.(index) views)
+              (resolve context before.(index) views)
           with
           | Some { place = { root = Environment; _ }; _ } ->
               report context Stores_local_view at
@@ -365,7 +379,9 @@ let check context (graph : Graph.t) =
                    (show context viewed.place))
           | None -> ())
       | Return_view views -> (
-          match List.find_opt (ends_with_function context) (resolve before.(index) views) with
+          match
+            List.find_opt (ends_with_function context) (resolve context before.(index) views)
+          with
           | Some { place = { root = Environment; _ }; _ } ->
               report context Returns_local_view at
                 "This returns a lambda that captures. What a lambda captures is kept in the \
@@ -386,7 +402,7 @@ let check context (graph : Graph.t) =
                 context.implements_capability
                 && List.exists
                      (fun (view : view) -> view.place.root = Local Self && not view.taken)
-                     (resolve before.(index) views)
+                     (resolve context before.(index) views)
               then
                 report context Returns_local_view at
                   "This returns a view of a part of an implementation of a capability. Code that \
@@ -394,7 +410,7 @@ let check context (graph : Graph.t) =
                    change that part. Return a copy instead.")
       | Store { place; views } -> (
           if kept_by_caller context place then
-            let resolved = resolve before.(index) views in
+            let resolved = resolve context before.(index) views in
             (* The caller assumes that what it keeps views only what the
                function was given as a view. So the function cannot put
                there a view of a parameter that it was only lent, or a view
@@ -493,7 +509,7 @@ let check context (graph : Graph.t) =
                 List.find_opt
                   (fun (viewed : view) ->
                     viewed.place <> slice && not (mutable_root viewed.place.root))
-                  (resolve before.(index) [ { place = slice; taken = true } ])
+                  (resolve context before.(index) [ { place = slice; taken = true } ])
               with
               | Some viewed ->
                   report context Read_only_view at
@@ -505,7 +521,9 @@ let check context (graph : Graph.t) =
       | Suspend views -> (
           (* The caller may keep a view that it is given, so a method gives
              views only of what reached it through its parameters. *)
-          match List.find_opt (ends_with_function context) (resolve before.(index) views) with
+          match
+            List.find_opt (ends_with_function context) (resolve context before.(index) views)
+          with
           | Some { place = { root = Environment; _ }; _ } ->
               report context Returns_local_view at
                 "This yields a lambda that captures. What a lambda captures is kept in the method \
@@ -532,7 +550,7 @@ let check context (graph : Graph.t) =
       let viewed place =
         List.map
           (fun (view : view) -> view.place)
-          (resolve before.(index) [ { place; taken = true } ])
+          (resolve context before.(index) [ { place; taken = true } ])
       in
       match point.action with
       | Read place -> uses := (place :: viewed place) @ !uses

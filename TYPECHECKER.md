@@ -1252,6 +1252,13 @@ all read from one account of what a value views:
 - **A name bound by a `match` or an `is` on a place views that place,**
   because the name refers to a part of it. `slot = None` inside the
   `Some(inner)` arm of `match slot` is an error while `inner` is in use.
+- **A view of a name that refers to a place is a view of the place.** A
+  name that a `let` binds to a place, that a pattern binds to a part of a
+  place, or that a loop binds to an element has no value of its own. So in
+  `match self.user { Some(found) => Some(found.slice()) ... }`, the slice
+  views `self.user`, and a method may return it, as it may return
+  `self.scheme.slice()`. The same `match` on a local gives a view of the
+  local, which cannot be returned.
 - **The names that a `for` loop binds view what the loop goes over:** what
   the yielding call's arguments lend, or what the cursor views. A name of a
   `Plain` type is a copy, so it views only what that views. After
