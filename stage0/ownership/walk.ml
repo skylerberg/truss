@@ -193,38 +193,13 @@ and compound state flow (value : expression) : flow =
       flow
 
 (* An owned value where one is required: a collection element, or a
-   [var]'s initializer. A place there must be marked [own] or copied unless
-   it copies implicitly. *)
+   [var]'s initializer. The type checker has checked that a place there is
+   marked [own] or is [Plain]. *)
 and owned_value state flow (value : expression) =
   let context = state.context in
   match (value.kind, place_of context value) with
   | Mode (Own, _), _ -> expression state flow value
   | _, None -> expression state flow ~position:Owned_position value
-  | _, Some ({ root = Constant_root _; _ } as place)
-    when not (plain context (type_of context value)) ->
-      report context Needs_owned value.span
-        ~fixes:
-          (if copyable context (type_of context value) then
-             [ Diagnostic.fix "Copy it." [ Diagnostic.insert value.span.stop ".copy()" ] ]
-           else [])
-        (Printf.sprintf "An owned value is needed here, and `%s` is %s. Copy it."
-           (show_place context.names place)
-           (if place.steps = [] then "a constant" else "part of a constant"));
-      expression state flow value
-  | _, Some place when not (plain context (type_of context value)) ->
-      let shown = show_place context.names place in
-      report context Needs_owned value.span
-        ~fixes:
-          (Diagnostic.fix "Give it up with `own`." [ Diagnostic.insert value.span.start "own " ]
-          ::
-          (if copyable context (type_of context value) then
-             [ Diagnostic.fix "Copy it." [ Diagnostic.insert value.span.stop ".copy()" ] ]
-           else []))
-        (Printf.sprintf
-           "An owned value is needed here, and `%s` is a place. Mark it `own` to give it up, or \
-            copy it."
-           shown);
-      expression state flow value
   | _ -> expression state flow value
 
 (* A returned value moves what it names. A view may be returned only of

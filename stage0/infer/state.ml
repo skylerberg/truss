@@ -26,7 +26,15 @@ type env = {
   loop_element : T.ty option;
       (** In a [for] loop's clauses, what each iteration receives, which [yielded] is a sequence of.
       *)
+  compile_time : bool;
+      (** The expression is a constant expression, which the compiler evaluates: the value of a
+          constant, or a default. *)
 }
+
+(* Whether an expression runs in the compiled program. A specification
+   does not run, and the compiler evaluates a constant expression. Only
+   code that runs moves values, so only there must a value be owned. *)
+let runs (env : env) = not (env.specification || env.compile_time)
 
 (* A constraint between two capability sets: every capability in [subset]
    must be in [superset]. Either set may contain capability variables.
@@ -1434,3 +1442,46 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
         (Printf.sprintf "`%s` takes ownership of its argument, so it is marked `own`, not `mut`."
            name)
   | (Mut | Own), Marked (Read, _) -> ()
+
+(* Checks a value where an owned value is required and no parameter
+   receives it: the initializer of a [var], the value of an assignment, an
+   element of a collection literal, or a part of a tagged string. A place
+   there must be marked [own] or copied, unless its type is [Plain]. This
+   is a rule of ownership. The type checker reports it because only the
+   syntax tree has the marks. *)
+let check_owned state env (value : expression) type_ =
+  if runs env then
+    defer state (fun () ->
+        let type_ = normalize state type_ in
+        if T.contains_unsolved type_ then false
+        else begin
+          (match argument_form state value with
+          | Place when not (plain state type_) ->
+              let place = source state value.span in
+              let copy =
+                if copyable state type_ then [ fix "Copy it." [ insert value.span.stop ".copy()" ] ]
+                else []
+              in
+              let fixes, message =
+                if is_part_of_constant state value then
+                  ( copy,
+                    Printf.sprintf "An owned value is needed here, and `%s` is %s. Copy it." place
+                      (match value.kind with
+                      | Name _ -> "a constant"
+                      | _ when is_member_constant state value -> "a constant"
+                      | _ -> "part of a constant") )
+                else
+                  ( fix "Give it up with `own`." [ insert value.span.start "own " ] :: copy,
+                    Printf.sprintf
+                      "An owned value is needed here, and `%s` is a place. Mark it `own` to give \
+                       it up, or copy it."
+                      place )
+              in
+              state.diagnostics <-
+                Diagnostic.make ~fixes ~code:(Ownership Needs_owned)
+                  (Source.span value.span.start value.span.stop)
+                  message
+                :: state.diagnostics
+          | _ -> ());
+          true
+        end)

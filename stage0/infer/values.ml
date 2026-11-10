@@ -83,6 +83,8 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
           let tag_type =
             T.Named { path = tag_path; arguments = instantiate_type state tag.last.span tag_path }
           in
+          (* Each part goes into the template that the tag receives. *)
+          List.iter (fun (part, part_type) -> check_owned state env part part_type) parts;
           (match expected with
           | Some expected -> ignore (unify state tag_type expected)
           | None -> ());
@@ -166,6 +168,7 @@ and list_literal state env ?expected (value : expression) items =
         (element, fun element -> T.Named { path = list_path; arguments = [ T.Type element ] })
   in
   List.iter (fun item -> check state env item element) items;
+  List.iter (fun item -> check_owned state env item element) items;
   register_expression state value (fun () ->
       Form.collection_literal state value (List.map (build_expression state) items));
   make element
@@ -186,7 +189,9 @@ and map_literal state env ?expected (value : expression) entries =
   List.iter
     (fun (entry_key, entry_value) ->
       check state env entry_key key;
-      check state env entry_value value_type)
+      check state env entry_value value_type;
+      check_owned state env entry_key key;
+      check_owned state env entry_value value_type)
     entries;
   register_expression state value (fun () ->
       Map_literal
