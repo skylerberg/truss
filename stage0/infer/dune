@@ -1,6 +1,7 @@
 (library
  (name infer)
  (libraries
+  compiler_bug
   query
   path
   intrinsic

@@ -343,7 +343,7 @@ let lowered =
         (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
       with
       | Some definition, Some resolved ->
-          Names.within key (fun () ->
+          Compiler_bug.within ~stage:"Interface" (Names.show_key key) (fun () ->
               Some (fst (lower_definition database key definition resolved)))
       | _ -> None)
 

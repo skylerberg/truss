@@ -42,7 +42,7 @@ let error context code span message = T.Error (reported context code span messag
 
 (* What resolution and lowering agree on cannot fail; if it does, that is a
    bug in the compiler, and stopping is better than accepting the code. *)
-let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lower: " ^ message)) format
+let bug format = Compiler_bug.bug ~stage:"Interface" format
 let target context (name : name) = context.resolved.names.(name.id)
 
 (* A generic parameter resolution found, by the id of the name that binds
