@@ -66,12 +66,23 @@ public fn List[Element].pop(mut self) -> Option[Element] {
 
 public fn List[Element].insert_at(mut self, position: USize, item: own Element)
   requires position <= self.length()
+  ensures self.model().length() == old(self.model()).length() + 1
+  ensures forall i in 0..position => identical(self.model()[i], old(self.model())[i])
+  ensures identical(self.model()[position], item)
+  ensures forall i: Integer =>
+    position <= i && i < old(self.model()).length() ==>
+      identical(self.model()[i + 1], old(self.model())[i])
   cost time O(self.length())
 {
   intrinsic::storage_insert(mut self.storage, index: position, value: own item)
 }
 
 public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
+  requires forall i in 0..self.length() => forall j in i..self.length() =>
+    before(self.model()[j]) ==> before(self.model()[i])
+  ensures result <= self.length()
+  ensures forall i in 0..result => before(self.model()[i])
+  ensures forall i in result..self.length() => !before(self.model()[i])
   cost time O(log(self.length()) * time(before))
 {
   var low: USize = 0
@@ -79,6 +90,8 @@ public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost 
   while low < high
     invariant low <= high
     invariant high <= self.length()
+    invariant forall i in 0..low => before(self.model()[i])
+    invariant forall i in high..self.length() => !before(self.model()[i])
     decreases high - low
     cost time O((log(self.length()) - log(high - low)) * time(before))
   {

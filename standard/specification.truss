@@ -53,6 +53,15 @@ public fn Sequence[Element].contains(self, value: Element) -> Bool
   todo
 }
 
+public fn Sequence[Element].elements(self) -> FiniteSet[Element]
+  ensures forall value: Element => result.contains(value) == self.contains(value)
+  ensures (forall i in 0..self.length() => forall j in 0..self.length() =>
+    i == j || !identical(self[i], self[j])) ==> result.size() == self.length()
+  cost time finite
+{
+  todo
+}
+
 public fn Sequence[Element].sum(self, measure: (fn(Element) -> Integer cost time finite)) -> Integer
   ensures self.length() == 0 ==> result == 0
   ensures (forall i in 0..self.length() => measure(self[i]) >= 0) ==> result >= 0

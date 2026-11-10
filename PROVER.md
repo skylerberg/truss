@@ -203,7 +203,9 @@ and `reads` clauses):
   over their buffers. Each operation reads or changes that sequence as the
   compiler makes it do: `storage_push` appends, `storage_insert` shifts
   what follows, `view_slice` is a run of its view, and reading bytes
-  appends what it says it read. An operation that stops the program on a
+  appends what it says it read; `compare_bytes` is a total lexicographic
+  order on its views' bytes, zero exactly when they are the same. An
+  operation that stops the program on a
   bad index says what holds when it returns. A part `storage_at_mut` lends
   changes nothing until the lend ends, where the storage takes back what
   the caller left in it.
@@ -503,6 +505,11 @@ invariants and the validity of its fields.
 - **Functions in an invariant are definitions or contracts like any
   others,** so a type's validity may unfold `is_sorted` or rely on its
   contract.
+- **Another package's opaque type** has a validity that is a predicate the
+  prover never unfolds there: a value of the type comes from its own
+  package, which shows the invariant, so elsewhere validity is assumed
+  where a value arrives and shown where one leaves, which the facts it
+  arrived with already do.
 
 ### Specifications
 
@@ -672,6 +679,8 @@ The prover adds a ghost counter for each resource that has a cost clause:
 | `allocated_bytes` | The bytes of each allocation, and each callee's `allocated_bytes` |
 | `calls(target)` | Each call to the target, and each callee's count for it |
 
+- **A specification spends nothing.** A `requires`, an `ensures`, an
+  invariant, or a bound never runs, so what it calls is not counted.
 - **A counter is an `Integer` on each path,** increased at each call and
   each iteration, so costs are proven by the same verification conditions
   as everything else. Where paths join, a counter is what the path taken
@@ -799,9 +808,12 @@ plus what happens before and after:
   potentials of its parts, as DESIGN.md defines it. In the logic it is a
   function of the value, whose definition is unfolded once for each value
   it is asked of, so a recursive type's potential is never unfolded
-  forever. A collection whose model is a sequence, such as a `List`, holds
-  the sum of its elements' potentials over its model, as
-  `Sequence.sum` gives it.
+  forever. A growable buffer, a storage or a type whose model is the
+  sequence of the storage it holds, such as a `List` or a `String`, holds
+  what it saved for growing, which is between zero and its length, and the
+  sum of its elements' potentials over its model, as `Sequence.sum` gives
+  it. `storage_push` takes one step, amortized, paid out of that saving, so
+  pushing `count` times costs `O(count + items.length())`.
 - **Potential is counted in a unit of its type's own,** one unknown constant
   for each type with a potential, the same for every method of the type, so
   that potential saved by one method pays for another's work. Since every
@@ -981,12 +993,9 @@ sanitized runs, test the trusted base against real executions.
 ## Not built
 
 - **The rest of the standard library proven.** The standard library's
-  test lists what does not prove yet: `Map` and `Set`, whose models over
-  their sorted lists need a way to make a finite set or map from a
-  sequence; `List.push`, whose `amortized` bound needs the cost of growing a
-  storage; and `Index` on a `List`
-  or a `Slice`, whose `requires` the trait does not state. Until it all
-  proves, `truss build` keeps the run-time checks.
+  test lists what does not prove yet, `Map` and `Set`, whose contracts are
+  stated up to their elements' `==`. Until it all proves, `truss build`
+  keeps the run-time checks.
 - **A trait's provided methods proven on their own.** A provided body is
   proven only where an `impl` replaces it, which shows its result is the
   body's. A body that every `impl` keeps is not proven against the trait's

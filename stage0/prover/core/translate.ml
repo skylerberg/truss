@@ -2259,6 +2259,13 @@ and lambda context frame (written : expression) (parameters : pattern list) body
   | None -> ());
   (frame, term)
 
+(* A clause's value: a specification, which never runs, so it spends
+   nothing whatever it calls. *)
+and clause_value context frame (clause : expression) =
+  let saved = context.counters in
+  context.counters <- [];
+  Fun.protect ~finally:(fun () -> context.counters <- saved) (fun () -> value context frame clause)
+
 (* What the trait method an operator stands for gives, read as the call
    would be, with nothing counted or obliged again: the operator already
    was. *)
@@ -2424,7 +2431,7 @@ and callback_facts context frame (call_ : C.call) index evaluated arguments =
                     result = None;
                   }
                 in
-                List.map (fun clause -> snd (value context inside clause)) requires
+                List.map (fun clause -> snd (clause_value context inside clause)) requires
           | _ -> [])
       | _ -> [])
   | _ -> []
@@ -2462,7 +2469,7 @@ and check_callback_requires context frame (written : expression) values =
                       oblige context frame Requires written.span
                         (Printf.sprintf "`%s` may not hold for this call through `%s`."
                            (quote frame.source clause.span) (quote frame.source callee.span))
-                        (snd (value context inside clause)))
+                        (snd (clause_value context inside clause)))
                     requires
               | _ -> ())
           | None -> ())
@@ -2606,7 +2613,8 @@ and law_fact context frame source trait ty (law : law) =
     in
     try
       let premise =
-        L.conjunction (List.map (fun clause -> snd (value context inside clause)) law.requires)
+        L.conjunction
+          (List.map (fun clause -> snd (clause_value context inside clause)) law.requires)
       in
       let range =
         L.conjunction (List.map2 (fun symbol ty -> in_range ty (L.Symbol symbol)) symbols types)
@@ -3023,7 +3031,7 @@ and tagged_template context frame (written : expression) (literal : string_liter
               oblige ?evaluation context frame Requires written.span
                 (Printf.sprintf "This template may not meet `%s`, which its tag requires."
                    (quote own.callee clause.span))
-                (snd (value context entry clause)))
+                (snd (clause_value context entry clause)))
             own.requires;
           let result = arrive context frame "tagged" tag_type in
           assume_valid context frame tag_type result;
@@ -3298,7 +3306,7 @@ and pull context frame (made : cursor) cursor ~cursor_type =
     List.iter
       (fun (clause : expression) ->
         if mentions_result made.own.callee clause = each then
-          assume context at (snd (value context inside clause)))
+          assume context at (snd (clause_value context inside clause)))
       made.own.ensures
   in
   assume context frame (L.( ==> ) (cursor_ended context cursor_type cursor) (L.not_ some));
@@ -3602,7 +3610,7 @@ and check_named_callback context frame (call_ : C.call) (argument : C.argument)
                   "`%s` may not accept every argument this parameter's type promises it: its `%s` \
                    may not hold."
                   (Path.show path) (quote own.callee clause.span))
-               (snd (value context inside clause)))
+               (snd (clause_value context inside clause)))
            own.requires);
       List.iter
         (fun (cost : T.cost) ->
@@ -4054,14 +4062,20 @@ and invariants_of context (ty : T.ty) =
   | _ -> None
 
 (* Whether a value meets its type's invariants, and with [deep] its
-   fields' too, each read with [self] as the value. An invariant the prover
-   cannot read, as one about another package's opaque fields, is no fact
-   when assumed, and stops the definition when it must be shown. *)
+   fields' too, each read with [self] as the value. The invariant of a type
+   whose fields this package does not see is a fact about the value only:
+   a value of it comes from the type's own package, which shows it, so
+   here it is assumed where a value arrives and shown where one leaves, and
+   never unfolded. *)
 and validity context frame ~assuming ?(deep = true) ?(seen = []) ty term =
   if List.exists (T.equal ty) seen then L.Boolean true
   else
     let own =
       match invariants_of context ty with
+      | Some _ when constructors context ty = None ->
+          let symbol = "valid." ^ type_key ty in
+          declare context (L.Function (symbol, [ sort_of context ty ], L.Bool));
+          L.Apply (symbol, [ term ])
       | Some (source, written) -> (
           let substitution = match visible_type context ty with Some (_, s) -> s | None -> [] in
           let inner =
@@ -4283,7 +4297,7 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
         let entry = entry_frame part in
         List.map
           (fun (clause : expression) ->
-            let _, term = value context entry clause in
+            let _, term = clause_value context entry clause in
             oblige context frame Requires written.span
               (Printf.sprintf "`%s` may not hold for this call to `%s`."
                  (quote part.callee clause.span) (Path.show path))
@@ -4413,7 +4427,7 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
                 { ensures_frame with locals = entry_locals; self = entry_self; yielded = None }
               else ensures_frame
             in
-            match value context frame_for_clause clause with
+            match clause_value context frame_for_clause clause with
             | _, term -> assume context after (L.( ==> ) required term))
           part.ensures)
       (* A yielding method's clauses are about each part it hands out and
@@ -6393,7 +6407,7 @@ and each_loop context frame (written : statement) pattern iterable clauses body 
         List.iter
           (fun (clause : expression) ->
             if mentions_result own.callee clause = each then
-              assume context at (snd (value context inside clause)))
+              assume context at (snd (clause_value context inside clause)))
           own.ensures
     | _ -> ()
   in
@@ -7040,11 +7054,12 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
                 | Method { owner; _ } -> Path.equal owner template_trait
                 | _ -> false) ->
         List.iter
-          (fun (clause : expression) -> assume context start (snd (value context inside clause)))
+          (fun (clause : expression) ->
+            assume context start (snd (clause_value context inside clause)))
           part.requires;
         List.fold_left
           (fun frame (clause : expression) ->
-            let frame, term = value context frame clause in
+            let frame, term = clause_value context frame clause in
             oblige context frame Requires clause.span
               (Printf.sprintf
                  "`%s` may not follow from the trait's `requires`, which callers through the trait \
@@ -7056,7 +7071,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
     | _ ->
         List.fold_left
           (fun frame (clause : expression) ->
-            let frame, term = value context frame clause in
+            let frame, term = clause_value context frame clause in
             assume context frame term;
             frame)
           start own_requires
@@ -7191,7 +7206,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       | Some (part, inside) when List.length part.binding = List.length own_terms ->
           List.iter
             (fun (clause : expression) ->
-              let _, term = value context inside clause in
+              let _, term = clause_value context inside clause in
               oblige context frame Ensures body.span
                 (Printf.sprintf "The trait's `%s` may not hold when this method returns."
                    (quote part.callee clause.span))
@@ -7282,7 +7297,7 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
              proofs);
         let inside = law_frame !frame law_source trait for_type law terms in
         List.iter
-          (fun clause -> assume context !frame (snd (value context inside clause)))
+          (fun clause -> assume context !frame (snd (clause_value context inside clause)))
           law.requires;
         match block_value context inside law.body with
         | Some (_, holds) ->

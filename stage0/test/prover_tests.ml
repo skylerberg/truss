@@ -2341,6 +2341,16 @@ let () =
         ("fn half(value: Int64) -> Int64\n  cost time O(1)\n{\n  value / 2\n}\n\n" ^ apply_function
        ^ "fn f() -> Int64\n  ensures result == 3\n{\n  apply(half, value: 7)\n}\n"))
 
+let () =
+  test "a specification spends nothing, whatever it calls" (fun () ->
+      proven
+        "fn f(items: List[Int64], keep: (fn(Int64) -> Bool cost time finite)) -> USize\n\
+        \  requires forall i in 0..items.length() => keep(items.model()[i])\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  items.length()\n\
+         }\n")
+
 (* Sums over sequences *)
 
 let () =
