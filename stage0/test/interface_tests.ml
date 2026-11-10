@@ -118,6 +118,9 @@ let () =
   test "deriving needs every field to implement the trait" (fun () ->
       one_diagnostic "type Opaque(x: Int64)\n\ntype Point(inner: Opaque)\n  derives Equal\n"
         "types.cannot_derive");
+  test "only a record derives Default" (fun () ->
+      one_diagnostic "type Light =\n  | Off\n  | On\n  derives Default\n" "types.cannot_derive";
+      no_diagnostics [ ("app::main", "type Point(x: Int64, y: Int64)\n  derives Default\n") ]);
   test "deriving Ordered needs Equal derived too" (fun () ->
       one_diagnostic "type Point(x: Int64)\n  derives Ordered\n" "types.cannot_derive");
   test "a generic type derives under conditions on its parameters" (fun () ->
