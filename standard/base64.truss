@@ -1,0 +1,39 @@
+public type Alphabet = Standard | UrlSafe
+  derives Equal
+
+public type DecodeError =
+  | InvalidCharacter(offset: USize)
+  | InvalidLength
+  | InvalidPadding
+  derives Equal
+
+impl Display for DecodeError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, padding: Bool = true) -> String
+  cost time O(bytes.length())
+  cost allocations <= 1
+{
+  todo
+}
+
+public fn encode_onto(
+  bytes: Slice[UInt8],
+  output: mut TextBuilder,
+  alphabet: Alphabet = Alphabet.Standard,
+  padding: Bool = true,
+)
+  cost time O(bytes.length())
+{
+  todo
+}
+
+public fn decode(text: StringSlice, alphabet: Alphabet = Alphabet.Standard) -> Result[List[UInt8], DecodeError]
+  cost time O(text.length())
+  cost allocations <= 1
+{
+  todo
+}

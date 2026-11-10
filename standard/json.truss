@@ -1,0 +1,538 @@
+use standard::streams
+use standard::text
+
+public type Value =
+  | Null
+  | Bool(value: Bool)
+  | Number(value: Number)
+  | String(value: String)
+  | Array(items: List[Value])
+  | Object(members: Map[String, Value])
+  derives Equal
+
+public opaque type Number(whole: Bool, integer: Int64, fraction: Float64)
+  derives Plain
+
+public fn Number.from_float64(value: Float64) -> Option[Number]
+  ensures (result is Some(_)) == value.is_finite()
+  cost time O(1)
+{
+  todo
+}
+
+public fn Number.is_whole(self) -> Bool
+  cost time O(1)
+{
+  self.whole
+}
+
+public fn Number.to_int64(self) -> Option[Int64]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Number.to_float64(self) -> Float64
+  cost time O(1)
+{
+  todo
+}
+
+impl From[Int64] for Number {
+  fn from(value: own Int64) -> Number {
+    Number(whole: true, integer: value, fraction: 0.0)
+  }
+}
+
+impl Equal for Number {
+  fn equal(self, other: Number) -> Bool {
+    todo
+  }
+}
+
+impl Display for Number {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type ParseProblem =
+  | UnexpectedEnd
+  | UnexpectedCharacter
+  | InvalidNumber
+  | InvalidEscape
+  | InvalidUnicode
+  | TooDeep
+  | TrailingCharacters
+  derives Equal
+
+public type ParseError(problem: ParseProblem, offset: USize, line: USize, column: USize)
+  derives Equal
+
+impl Display for ParseError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public fn parse(text: StringSlice, maximum_depth: USize = 128) -> Result[Value, ParseError]
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn parse_bytes(bytes: Slice[UInt8], maximum_depth: USize = 128) -> Result[Value, ParseError]
+  cost time O(bytes.length())
+{
+  todo
+}
+
+public fn quote(text: StringSlice) -> String
+  cost time O(text.length())
+{
+  todo
+}
+
+public fn Value.number(value: Float64) -> Option[Value]
+  ensures (result is Some(_)) == value.is_finite()
+  cost time O(1)
+{
+  todo
+}
+
+public fn Value.is_null(self) -> Bool
+  cost time O(1)
+{
+  self is Null
+}
+
+public fn Value.to_bool(self) -> Option[Bool]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Value.to_int64(self) -> Option[Int64]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Value.to_float64(self) -> Option[Float64]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Value.text(self) -> Option[StringSlice]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Value.items(self) -> Option[Slice[Value]]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Value.members(self) lends Option[Map[String, Value]]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Value.get(self, name: StringSlice) lends Option[Value]
+  cost time finite
+{
+  todo
+}
+
+public fn Value.get_index(self, index: USize) lends Option[Value]
+  cost time O(1)
+{
+  todo
+}
+
+public fn Value.pointer(self, path: StringSlice) lends Option[Value]
+  cost time finite
+{
+  todo
+}
+
+public fn Value.write(self, output: mut TextBuilder)
+  cost time finite
+{
+  todo
+}
+
+public fn Value.write_pretty(self, output: mut TextBuilder, indent: USize = 2)
+  cost time finite
+{
+  todo
+}
+
+public fn Value.to_text(self) -> String
+  cost time finite
+{
+  todo
+}
+
+public fn Value.to_pretty_text(self, indent: USize = 2) -> String
+  cost time finite
+{
+  todo
+}
+
+impl Display for Value {
+  fn display(self, output: mut TextBuilder) {
+    self.write(mut output)
+  }
+}
+
+impl text::Parse for Value {
+  type Error = ParseError
+
+  fn parse(text: StringSlice) -> Result[Value, ParseError] {
+    todo
+  }
+}
+
+impl FromTemplate for Value {
+  type Part = Value
+
+  fn from_template(template: Template[Value]) -> Value
+    requires is_valid_template(template.literals)
+  {
+    todo
+  }
+}
+
+public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  todo
+}
+
+impl From[Bool] for Value {
+  fn from(value: own Bool) -> Value {
+    Value.Bool(value)
+  }
+}
+
+impl From[Int64] for Value {
+  fn from(value: own Int64) -> Value {
+    Value.Number(Number.from(value))
+  }
+}
+
+impl From[String] for Value {
+  fn from(value: own String) -> Value {
+    Value.String(own value)
+  }
+}
+
+impl From[StringSlice] for Value {
+  fn from(value: own StringSlice) -> Value {
+    Value.String(value.to_string())
+  }
+}
+
+impl From[List[Value]] for Value {
+  fn from(value: own List[Value]) -> Value {
+    Value.Array(own value)
+  }
+}
+
+impl From[Map[String, Value]] for Value {
+  fn from(value: own Map[String, Value]) -> Value {
+    Value.Object(own value)
+  }
+}
+
+public type DecodeError(path: String, problem: String)
+  derives Equal
+
+impl Display for DecodeError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type Error =
+  | Malformed(error: ParseError)
+  | Mismatched(error: DecodeError)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public type ReadError =
+  | Unreadable(error: SystemError)
+  | Unparsed(error: ParseError)
+  derives Equal
+
+impl Display for ReadError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public trait Encode {
+  fn to_json(self) -> Value
+}
+
+public trait Decode {
+  fn from_json(value: Value) -> Result[Self, DecodeError]
+}
+
+public fn encode[Item: Encode](item: Item) -> String {
+  todo
+}
+
+public fn encode_pretty[Item: Encode](item: Item, indent: USize = 2) -> String {
+  todo
+}
+
+public fn decode[Item: Decode](text: StringSlice) -> Result[Item, Error] {
+  todo
+}
+
+public fn Value.field[Field: Decode](self, name: StringSlice) -> Result[Field, DecodeError] {
+  todo
+}
+
+public fn Value.optional_field[Field: Decode](self, name: StringSlice) -> Result[Option[Field], DecodeError] {
+  todo
+}
+
+public fn read_from[Source: streams::Reader](source: mut Source, maximum_depth: USize = 128) -> Result[Value, ReadError]
+  uses Handles
+{
+  todo
+}
+
+public fn write_to[Sink: streams::Writer](value: Value, sink: mut Sink) -> Result[Unit, SystemError]
+  uses Handles
+{
+  todo
+}
+
+impl Encode for Bool {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Bool {
+  fn from_json(value: Value) -> Result[Bool, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Int8 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Int8 {
+  fn from_json(value: Value) -> Result[Int8, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Int16 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Int16 {
+  fn from_json(value: Value) -> Result[Int16, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Int32 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Int32 {
+  fn from_json(value: Value) -> Result[Int32, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Int64 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Int64 {
+  fn from_json(value: Value) -> Result[Int64, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for UInt8 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for UInt8 {
+  fn from_json(value: Value) -> Result[UInt8, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for UInt16 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for UInt16 {
+  fn from_json(value: Value) -> Result[UInt16, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for UInt32 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for UInt32 {
+  fn from_json(value: Value) -> Result[UInt32, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for UInt64 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for UInt64 {
+  fn from_json(value: Value) -> Result[UInt64, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for USize {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for USize {
+  fn from_json(value: Value) -> Result[USize, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for ISize {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for ISize {
+  fn from_json(value: Value) -> Result[ISize, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Float32 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Float32 {
+  fn from_json(value: Value) -> Result[Float32, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Float64 {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Float64 {
+  fn from_json(value: Value) -> Result[Float64, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for String {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for String {
+  fn from_json(value: Value) -> Result[String, DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Value {
+  fn to_json(self) -> Value {
+    self.copy()
+  }
+}
+
+impl Decode for Value {
+  fn from_json(value: Value) -> Result[Value, DecodeError] {
+    Ok(value.copy())
+  }
+}
+
+impl Encode for List[Element: Encode] {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for List[Element: Decode] {
+  fn from_json(value: Value) -> Result[List[Element], DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Option[Inner: Encode] {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Option[Inner: Decode] {
+  fn from_json(value: Value) -> Result[Option[Inner], DecodeError] {
+    todo
+  }
+}
+
+impl Encode for Map[Key: Hash + Ordered + Display, Member: Encode] {
+  fn to_json(self) -> Value {
+    todo
+  }
+}
+
+impl Decode for Map[Key: Hash + Ordered + text::Parse, Member: Decode] {
+  fn from_json(value: Value) -> Result[Map[Key, Member], DecodeError] {
+    todo
+  }
+}

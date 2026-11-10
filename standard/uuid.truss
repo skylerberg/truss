@@ -1,0 +1,74 @@
+use standard::text
+
+public opaque type Uuid(bytes: Array[UInt8, 16])
+  derives Plain, Equal, Hash, Ordered
+
+public let Uuid.nil: Uuid = Uuid(bytes: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+public type ParseError =
+  | InvalidLength
+  | InvalidCharacter(offset: USize)
+  derives Equal
+
+impl Display for ParseError {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+public fn random() -> Uuid
+  uses Random
+{
+  todo
+}
+
+public fn time_ordered() -> Uuid
+  uses Random, Clock
+{
+  todo
+}
+
+public fn from_name(namespace: Uuid, name: Slice[UInt8]) -> Uuid
+  cost time O(name.length())
+{
+  todo
+}
+
+public fn Uuid.from_bytes(bytes: Array[UInt8, 16]) -> Uuid
+  cost time O(1)
+{
+  Uuid(bytes: bytes)
+}
+
+public fn Uuid.bytes(self) -> Array[UInt8, 16]
+  cost time O(1)
+{
+  self.bytes
+}
+
+public fn Uuid.version(self) -> UInt8
+  ensures result < 16
+  cost time O(1)
+{
+  todo
+}
+
+public fn Uuid.is_nil(self) -> Bool
+  cost time O(1)
+{
+  self == Uuid.nil
+}
+
+impl Display for Uuid {
+  fn display(self, output: mut TextBuilder) {
+    todo
+  }
+}
+
+impl text::Parse for Uuid {
+  type Error = ParseError
+
+  fn parse(text: StringSlice) -> Result[Uuid, ParseError] {
+    todo
+  }
+}
