@@ -244,23 +244,6 @@ and into st (value : Core.expression) (destination : Lir.place) =
       | _ -> bug "the value parameter %s is not a number" parameter.name)
   | Collection_literal { elements; construction = Array } ->
       List.iteri (fun index element -> into st element (destination / Index (usize index))) elements
-  | Collection_literal { elements; construction = By_insertion { empty; insert } } ->
-      call_with_places st empty [] ~destination;
-      List.iter
-        (fun element ->
-          call_with_places st insert
-            [ destination; value_place st element ]
-            ~destination:(temporary st (result_type st insert)))
-        elements
-  | Map_literal { entries; construction = By_insertion { empty; insert } } ->
-      call_with_places st empty [] ~destination;
-      List.iter
-        (fun (key, entry) ->
-          let key = value_place st key in
-          call_with_places st insert
-            [ destination; key; value_place st entry ]
-            ~destination:(temporary st (result_type st insert)))
-        entries
   | Collection_literal { construction = Specification_only; _ } | Map_literal _ ->
       bug "a specification's collection in code that runs"
   | Record_update { base; updates } ->

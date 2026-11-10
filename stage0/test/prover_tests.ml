@@ -1430,7 +1430,7 @@ let () =
         \  table.contains(3)\n\
          }\n");
   test "a map literal's keys must be distinct" (fun () ->
-      not_proven "fn f() -> Map[Int64, Int64] {\n  [1: 2, 1: 3]\n}\n" "prover.disjoint");
+      not_proven "fn f() -> Map[Int64, Int64] {\n  [1: 2, 1: 3]\n}\n" "prover.requires");
   test "a set literal contains what it lists and nothing else" (fun () ->
       proven
         "fn f() -> Bool\n\

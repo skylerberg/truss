@@ -137,6 +137,19 @@ let () =
      own 2); intrinsic::storage_push(mut place storage, own 3); \
      standard::list::List.from_storage[Int64](own storage) }; let _ = numbers[1..]; lent Index.at \
      for List[Int64] by standard::list::impl Index for List[Element](place numbers, 0) lends }";
+  expect_body "a set literal becomes `with_capacity` and one `insert` per element"
+    "fn g(first: own String, second: own String) -> Set[String] {\n  [own first, own second]\n}\n"
+    "{ { let var own set = standard::set::Set.with_capacity[String](2); \
+     standard::set::Set.insert(mut self)[String](mut place set, own first); \
+     standard::set::Set.insert(mut self)[String](mut place set, own second); set } }";
+  expect_body "a map literal becomes `with_capacity` and one `insert_absent` per entry"
+    "fn g() -> Map[Int64, Int64] {\n  [1: 2, 3: 4]\n}\n"
+    "{ { let var own map = standard::map::Map.with_capacity[Int64, Int64](2); \
+     standard::map::Map.insert_absent(mut self)[Int64, Int64](mut place map, own 1, own 2); \
+     standard::map::Map.insert_absent(mut self)[Int64, Int64](mut place map, own 3, own 4); map } \
+     }";
+  expect_body "an empty set literal is the call of `with_capacity`"
+    "fn g() -> Set[Int64] {\n  []\n}\n" "{ standard::set::Set.with_capacity[Int64](0) }";
   expect_body "a record update lists the replaced fields, and expands the shorthand"
     "type Config(port: Int64, host: String)\n\n\
      fn g(config: Config, port: Int64) -> Config {\n\

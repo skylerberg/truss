@@ -194,16 +194,12 @@ and map_literal state env ?expected (value : expression) entries =
       check_owned state env entry_value value_type)
     entries;
   register_expression state value (fun () ->
-      Map_literal
-        {
-          entries =
-            List.map
-              (fun (entry_key, entry_value) ->
-                let entry_key = build_expression state entry_key in
-                (entry_key, build_expression state entry_value))
-              entries;
-          construction = Form.construction_of_type (Form.type_of state value);
-        });
+      Form.map_literal state value
+        (List.map
+           (fun (entry_key, entry_value) ->
+             let entry_key = build_expression state entry_key in
+             (entry_key, build_expression state entry_value))
+           entries));
   T.Named { path = map_type; arguments = [ T.Type key; T.Type value_type ] }
 
 (* Lambdas: their types come only from where they are used. *)
