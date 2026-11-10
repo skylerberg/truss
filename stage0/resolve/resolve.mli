@@ -14,8 +14,11 @@ type cost_function = Walk.cost_function = Log | Power | Time | Calls
 type target = Walk.target =
   | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
   | Local of Syntax.id  (** A local or parameter, by the id of the name that binds it. *)
-  | Generic of Syntax.id  (** A generic parameter of the definition, by the id of its name. *)
-  | Definition of Path.t
+  | Type_parameter of Syntax.id
+      (** A generic type parameter, by the id of the name that binds it. *)
+  | Capability_parameter of Syntax.id  (** A generic parameter declared [capability Name]. *)
+  | Value_parameter of Syntax.id  (** A [USize] generic parameter. *)
+  | Definition of Names.named * Path.t  (** A definition, and what kind of definition it is. *)
   | Variant of Path.t * string  (** A prelude variant written bare, such as [Some]. *)
   | Module of Path.module_
   | Field of string  (** A record's field, by name, in the record's invariant or potential. *)
@@ -48,6 +51,20 @@ type resolved = {
           in order. *)
   diagnostics : Diagnostic.t list;  (** Relative to the definition. *)
 }
+
+type head = {
+  name : Syntax.name;
+  target : target;
+  type_arguments : Syntax.bracket_item list option;
+      (** The type arguments written after it, as in [parse[Int64]]. *)
+}
+(** What an expression names, when it is a name. *)
+
+val head : resolved -> Syntax.expression -> head option
+(** What an expression names: a name, under any parentheses, with the type arguments written after
+    it, so [parse], [(parse)], [parse[Int64]], and [(parse)[Int64]] all name [parse]. [None] for an
+    expression that is not a name, which computes a value. Every stage reads a name this way, so
+    none decides it differently. *)
 
 val resolved : (Names.key, resolved option) Query.query
 (** A definition's resolved form, or [None] if there is no such definition. *)

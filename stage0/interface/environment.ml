@@ -33,7 +33,7 @@ type lowered = {
 let head_type context owner (head : type_head) =
   let generics = Lower.generics context owner head.generics in
   match Lower.target context head.path.last with
-  | Some (Definition type_path) ->
+  | Some (Definition (Type, type_path)) ->
       (match Query.demand context.database Summary.generics_of type_path with
       | Some expected when List.length expected <> List.length generics ->
           Lower.report context Arity head.span
@@ -58,6 +58,12 @@ let head_type context owner (head : type_head) =
         | _ -> T.Named { path = type_path; arguments }
       in
       (generics, type_)
+  | Some (Definition (((Trait | Capability) as kind), _)) ->
+      ( generics,
+        Lower.error context Not_a_type head.span
+          (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
+             (Names.spell_path head.path)
+             (Names.kind_name (Names.kind_of_named kind))) )
   | Some (Unknown report) -> (generics, T.Error report)
   | _ -> Lower.bug "the type head `%s` is not resolved" (Names.spell_path head.path)
 
@@ -138,7 +144,7 @@ let lower_definition database (key : Names.key) (definition : definition)
                       List.filter_map
                         (fun (trait : path_type) ->
                           match Lower.target context trait.path.last with
-                          | Some (Definition trait) -> Some trait
+                          | Some (Definition (_, trait)) -> Some trait
                           | _ -> None)
                         traits
                   | Type_invariant _ | Potential _ -> [])

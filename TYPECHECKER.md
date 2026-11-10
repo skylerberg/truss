@@ -160,6 +160,22 @@ Names live in separate namespaces, which the case rules keep apart:
   resolved form records the type, and the type checker looks the member up
   in it.
 
+**What a name refers to is one closed set of cases.** The resolved form
+records each name as a local, a generic parameter that is a type, a
+capability, or a `USize` value, a definition with the kind of definition it
+is, a prelude variant, a module, a field, a specification word, or a name
+that nothing answers, with its report. A later stage matches on those cases
+in full. It never works a kind out again, from how a name is spelled or by
+looking the definition up, so resolution and checking cannot disagree about
+what a name is.
+
+**An expression is read as a name in one way.** `parse`, `(parse)`,
+`parse[Int64]`, and `(parse)[Int64]` all name `parse`, the last two with
+type arguments. That reading is made in one place, which resolution,
+checking a name as a value, checking it as a callee, and reading a type
+written in an expression all use, so each takes parentheses and type
+arguments alike.
+
 Definitions are named in the resolved form by package, module path, and
 name, never by a hash, as DESIGN.md requires. A method is named
 by its type and its name, together with its receiver mode, since one name
@@ -714,7 +730,9 @@ statement's variables are solved. Explicit type arguments, as in
 **An `impl` is never chosen from the expected type.** A trait method's
 `impl` is chosen by `Self` and by the trait's type arguments, and those come
 from the receiver, a type name, or the arguments, as DESIGN.md requires.
-`Int64.from(count)` chooses `From[UInt32]` by the type of `count`.
+`Int64.from(count)` chooses `From[UInt32]` by the type of `count`. Type
+arguments written after the trait, as in `Add[Int64].add(left, right)`,
+are the ones the call uses.
 
 ### Modes at calls
 

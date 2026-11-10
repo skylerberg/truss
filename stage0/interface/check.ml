@@ -125,20 +125,21 @@ let check_method_location state (head : type_head) =
   in
   match owner with
   | Some (Top { module_ = owner_module; name } as owner) -> (
-      if owner_module.package <> state.key.module_.package then
-        report state Method_outside_package head.span
-          (Printf.sprintf
-             "`%s` is defined in the package `%s`, so its methods and constants must be too. A \
-              function of this package can take it as a parameter instead."
-             (Path.show owner) owner_module.package)
-      else
-        match Query.demand state.database Names.find (owner_module, name) with
-        | Some { visibility = Private; _ } when owner_module <> state.key.module_ ->
+      (* A head that names no type has that as its one error. *)
+      match Query.demand state.database Names.find (owner_module, name) with
+      | Some { kind = Type; visibility; _ } ->
+          if owner_module.package <> state.key.module_.package then
+            report state Method_outside_package head.span
+              (Printf.sprintf
+                 "`%s` is defined in the package `%s`, so its methods and constants must be too. A \
+                  function of this package can take it as a parameter instead."
+                 (Path.show owner) owner_module.package)
+          else if visibility = Private && owner_module <> state.key.module_ then
             report state Method_outside_package head.span
               (Printf.sprintf
                  "`%s` is private to its file, so its methods and constants must be in that file."
                  (Path.show owner))
-        | _ -> ())
+      | _ -> ())
   | _ -> ()
 
 (* Every type a signature mentions: its parameters, its result, and the
@@ -195,7 +196,7 @@ let rec constant_expression state (resolved : Resolve.resolved) (value : express
   | Name path -> (
       match resolved.names.(path.last.id) with
       | Some (Definition _ | Variant _) -> true
-      | Some (Local _ | Generic _) -> false
+      | Some (Local _ | Type_parameter _ | Capability_parameter _ | Value_parameter _) -> false
       | _ -> true)
   | Member (base, _) -> recurse base
   | Bracket (base, items) ->
@@ -298,7 +299,7 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
           List.iter
             (fun (written : path_type) ->
               match (resolved : Resolve.resolved).names.(written.path.last.id) with
-              | Some (Definition trait) ->
+              | Some (Definition (_, trait)) ->
                   let shown = Names.spell_path written.path in
                   if
                     not

@@ -80,7 +80,7 @@ let rec string_literal state env ?expected (literal : string_literal) =
       string_type
   | Some tag -> (
       match target state tag.last with
-      | Some (Definition tag_path) ->
+      | Some (Definition (Type, tag_path)) ->
           let tag_type = T.Named { path = tag_path; arguments = fresh_arguments state tag_path } in
           (match expected with
           | Some expected -> ignore (unify state tag_type expected)

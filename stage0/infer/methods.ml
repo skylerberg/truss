@@ -18,7 +18,28 @@ open Calls
 let rec call state env ?expected (value : expression) (callee : expression)
     (arguments : argument list) : T.ty =
   match callee.kind with
-  | Name { modules = []; last } when target state last = Some Old -> (
+  | Member (base, member) -> (
+      match static_ state base with
+      | Some (Static_type type_) -> static_call state env ?expected value type_ member arguments
+      | Some (Static_trait (trait, trait_arguments)) ->
+          trait_call_in_full state env value trait ~trait_arguments member arguments
+      | Some (Static_capability capability) ->
+          capability_call state env value capability member arguments
+      | None -> method_call state env ?expected value base member ~type_arguments:[] arguments)
+  | Bracket ({ kind = Member (base, member); _ }, items)
+    when state.resolved.brackets.(callee.id) = Some Method_bracket ->
+      method_call state env ?expected value base member ~type_arguments:items arguments
+  | _ -> (
+      match head state callee with
+      | Some found -> call_named state env ?expected value callee found arguments
+      | None -> function_value_call state env value callee arguments)
+
+(* A call whose callee is a name: what is called follows from what the name
+   means. *)
+and call_named state env ?expected (value : expression) (callee : expression)
+    ({ name; target; type_arguments } : Resolve.head) arguments =
+  match target with
+  | Old -> (
       match arguments with
       | [ argument ] -> expression state env ?expected argument.value
       | _ ->
@@ -26,7 +47,7 @@ let rec call state env ?expected (value : expression) (callee : expression)
             (error state
                (if arguments = [] then Missing_argument else Too_many_arguments)
                value.span "`old` takes one value: `old(value)`."))
-  | Name { modules = []; last } when target state last = Some Identical -> (
+  | Identical -> (
       (* Identity, for values of any one type: the solver's equality. *)
       match arguments with
       | [ first; second ] ->
@@ -36,82 +57,42 @@ let rec call state env ?expected (value : expression) (callee : expression)
             mismatch state second.value.span ~expected:first_type ~found:second_type;
           T.bool
       | _ ->
-          List.iter
-            (fun (argument : argument) -> ignore (expression state env argument.value))
-            arguments;
           report state
             (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
             value.span "`identical` takes two values of one type.";
-          T.bool)
-  | Name { modules = []; last }
-    when match target state last with Some (Cost_function _) -> true | _ -> false ->
-      List.iter
-        (fun (argument : argument) -> ignore (expression state env argument.value))
-        arguments;
-      T.Integer
-  | Member (base, member) -> (
-      match static_ state base with
-      | Some (Static_type type_) -> static_call state env ?expected value type_ member arguments
-      | Some (Static_trait trait) -> trait_call_in_full state env value trait member arguments
-      | Some (Static_capability capability) ->
-          capability_call state env value capability member arguments
-      | None -> method_call state env ?expected value base member ~type_arguments:[] arguments)
-  | Bracket ({ kind = Member (base, member); _ }, items)
-    when state.resolved.brackets.(callee.id) = Some Method_bracket ->
-      method_call state env ?expected value base member ~type_arguments:items arguments
-  | Name path -> (
-      match target state path.last with
-      | Some (Definition definition_path) -> (
-          match Interface.Summary.kind_of state.database definition_path with
-          | Some Type -> construct state env ?expected value definition_path None arguments
-          | _ -> (
-              match function_signature state definition_path with
-              | Some (Ok signature) ->
-                  named_call state env ?expected value definition_path signature ~type_arguments:[]
-                    arguments
-              | Some (Error report) -> arguments_alone state env arguments (T.Error report)
-              | None -> function_value_call state env value callee arguments))
-      | Some (Variant (type_path, variant)) ->
-          construct state env ?expected value type_path (Some variant) arguments
-      | _ -> function_value_call state env value callee arguments)
-  | Bracket ({ kind = Name path; _ }, items)
-    when state.resolved.brackets.(callee.id) = Some Type_arguments -> (
-      match target state path.last with
-      | Some (Definition definition_path) -> (
-          match Interface.Summary.kind_of state.database definition_path with
-          | Some Type -> (
-              match static_ state callee with
-              | Some (Static_type (Named { arguments = type_arguments; _ })) ->
-                  construct state env ?expected ~type_arguments value definition_path None arguments
-              | _ ->
-                  arguments_alone state env arguments
-                    (error state Not_callable callee.span
-                       (Printf.sprintf "`%s` takes no type arguments, and builds no value."
-                          path.last.text)))
-          | _ -> (
-              match function_signature state definition_path with
-              | Some (Ok signature) ->
-                  named_call state env ?expected value definition_path signature
-                    ~type_arguments:items arguments
-              | Some (Error report) -> arguments_alone state env arguments (T.Error report)
-              | None ->
-                  arguments_alone state env arguments
-                    (error state Not_callable callee.span
-                       (Printf.sprintf "`%s` is not a function or a type, so it cannot be called."
-                          path.last.text))))
-      | _ ->
-          arguments_alone state env arguments
-            (error_at state Not_callable callee
-               (Printf.sprintf "`%s` is not a function or a type, so it cannot be called."
-                  path.last.text)))
-  | _ -> function_value_call state env value callee arguments
+          arguments_alone state env arguments T.bool)
+  | Cost_function _ -> arguments_alone state env arguments T.Integer
+  | Definition (Type, path) -> (
+      match named_type state callee path type_arguments with
+      | T.Named { arguments = type_arguments; _ } ->
+          construct state env ?expected ~type_arguments value path None arguments
+      | _ -> construct state env ?expected value path None arguments)
+  | Variant (type_path, variant) ->
+      construct state env ?expected value type_path (Some variant) arguments
+  | Definition ((Function | Theorem), path) -> (
+      match function_signature state path with
+      | Some (Ok signature) ->
+          named_call state env ?expected value path signature
+            ~type_arguments:(Option.value ~default:[] type_arguments)
+            arguments
+      | Some (Error report) -> arguments_alone state env arguments (T.Error report)
+      | None -> bug "`%s` has no signature" (Path.show path))
+  | Definition ((Trait | Capability), _) | Type_parameter _ | Capability_parameter _ ->
+      arguments_alone state env arguments
+        (error state Not_callable callee.span
+           (Printf.sprintf "`%s` is not a function or a type, so it cannot be called." name.text))
+  | Unknown report -> arguments_alone state env arguments (T.Error report)
+  | Local _ | Value_parameter _
+  | Definition (Constant, _)
+  | Field _ | Result_value | Yielded | Finished ->
+      function_value_call state env value callee arguments
+  | Binding | Module _ -> bug "the name `%s` is not resolved" name.text
 
 (* [Type.name(...)]: a variant, a method without [self], or a method
    written in full with its receiver first. *)
 and static_call state env ?expected (value : expression) type_ (member : name) arguments =
   match type_ with
-  | T.Named { path; arguments = type_arguments }
-    when member.text.[0] >= 'A' && member.text.[0] <= 'Z' ->
+  | T.Named { path; arguments = type_arguments } when names_variant member ->
       construct state env ?expected ~type_arguments value path (Some member.text) arguments
   | T.Named { path; _ } -> (
       match Members.own_methods state.database path member.text with
@@ -234,14 +215,28 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
    constructor such as [Int64.from(count)] or [Self.empty()]. The trait's
    own arguments are worked out from the call's arguments, never from the
    expected type. *)
-and trait_method_through_type state env ?expected:_ (value : expression) self_type
+and trait_method_through_type state env ?expected:_ ?trait_arguments (value : expression) self_type
     (trait : T.trait_reference) (method_ : T.trait_method) arguments =
   let trait_generics =
     match Query.demand state.database Environment.trait_interface trait.trait with
     | Some interface -> interface.trait_generics
     | None -> []
   in
-  let trait_arguments = List.map (fun (_ : T.generic) -> T.Type (fresh state)) trait_generics in
+  (* The trait's arguments as written, as in [From[UInt32].from(count)], or
+     else unknown ones that the call's arguments decide. *)
+  let trait_arguments =
+    match trait_arguments with
+    | Some written when List.length written = List.length trait_generics -> written
+    | Some written ->
+        report state Arity value.span
+          (Printf.sprintf "`%s` takes %d type %s, and %d %s given." (T.show_trait trait)
+             (List.length trait_generics)
+             (if List.length trait_generics = 1 then "argument" else "arguments")
+             (List.length written)
+             (if List.length written = 1 then "is" else "are"));
+        List.map (fun (_ : T.generic) -> T.Type (fresh state)) trait_generics
+    | None -> List.map (fun (_ : T.generic) -> T.Type (fresh state)) trait_generics
+  in
   let extra =
     (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type self_type)
     :: List.combine
@@ -260,6 +255,7 @@ and trait_method_through_type state env ?expected:_ (value : expression) self_ty
               { name = "self"; mode; type_ = receiver_type; has_default = false }
             in
             let conversion = argument_value state env first.value parameter in
+            ignore (default_literal state self_type);
             ( [ { C.expression = first.value.id; parameter = 0; mode; conversion } ],
               1,
               parameters,
@@ -302,15 +298,14 @@ and trait_method_through_type state env ?expected:_ (value : expression) self_ty
 
 (* [Ordered.compare(first, second)]: a trait method written in full, with
    its receiver first. *)
-and trait_call_in_full state env (value : expression) trait (member : name) arguments =
+and trait_call_in_full state env (value : expression) trait ~trait_arguments (member : name)
+    arguments =
   match Members.trait_methods state.database trait member.text with
-  | method_ :: _ -> (
-      match arguments with
-      | _ ->
-          (* [Self] is the receiver's type, which checking it as the first
-             argument decides. *)
-          trait_method_through_type state env value (fresh state) (trait_reference trait) method_
-            arguments)
+  | method_ :: _ ->
+      (* [Self] is the receiver's type, which checking it as the first
+         argument decides. *)
+      trait_method_through_type state env ?trait_arguments value (fresh state)
+        (trait_reference trait) method_ arguments
   | [] ->
       error state Unknown_member member.span
         (Printf.sprintf "`%s` has no method `%s`." (Path.show trait) member.text)
@@ -344,18 +339,7 @@ and capability_call state env (value : expression) capability (member : name) ar
 (* [receiver.name(...)]: the type's own method, or a trait's. *)
 and method_call state env ?expected (value : expression) (base : expression) (member : name)
     ~type_arguments arguments =
-  let receiver_type = normalize state (expression state env base) in
-  (* A literal receiver, as in [5.wrapping_add(3)], has its default type. *)
-  let receiver_type =
-    match resolve state receiver_type with
-    | T.Literal (Integer_literal, _) ->
-        ignore (unify state receiver_type (T.builtin Int64));
-        T.builtin Int64
-    | T.Literal (Float_literal, _) ->
-        ignore (unify state receiver_type (T.builtin Float64));
-        T.builtin Float64
-    | _ -> receiver_type
-  in
+  let receiver_type = default_literal state (normalize state (expression state env base)) in
   let wanted : Path.receiver =
     match List.assoc_opt value.id state.receiver_modes with
     | Some Mut -> Mut

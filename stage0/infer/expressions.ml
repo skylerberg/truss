@@ -87,7 +87,10 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Self_type_value ->
       error state Not_a_value value.span
         "`Self` is a type. Build a value of it, or call one of its methods."
-  | Name path -> name state env value path
+  | Name path -> (
+      match head state value with
+      | Some found -> named state env value found
+      | None -> bug "the name `%s` is not resolved" path.last.text)
   | Member (base, member) -> member_value state env value base member
   | Bracket (base, items) -> bracket state env ?expected value base items
   | Call (callee, arguments) -> call state env ?expected value callee arguments
@@ -174,25 +177,10 @@ and member_value state env (value : expression) (base : expression) (member : na
 and bracket state env ?expected (value : expression) (base : expression) items =
   match state.resolved.brackets.(value.id) with
   | Some Type_arguments -> (
-      (* A generic function with explicit type arguments, as a value. *)
-      match base.kind with
-      | Name path -> (
-          match target state path.last with
-          | Some (Definition definition_path) -> (
-              match function_signature state definition_path with
-              | Some (Ok signature) ->
-                  let instance = instantiate state ~span:value.span signature in
-                  explicit_type_arguments state value instance items;
-                  state.tables.meanings.(value.id) <-
-                    Some
-                      (Global { path = definition_path; type_arguments = instance.type_arguments });
-                  T.Function (T.function_type_of instance.signature)
-              | Some (Error report) -> T.Error report
-              | None -> error state Not_a_value value.span "A type is not a value.")
-          | _ -> error_at state Not_a_value value "A type is not a value.")
-      | _ ->
-          error_at state Not_a_value value
-            "Type arguments are written after the name of a generic function or a type.")
+      (* A name with type arguments, as a value. *)
+      match head state value with
+      | Some found -> named state env value found
+      | None -> bug "type arguments are written after what is not a name")
   | Some Method_bracket -> (
       (* Resolution cannot tell a field from a method before the dot; a
          field followed by brackets is indexed. *)

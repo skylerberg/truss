@@ -28,11 +28,11 @@ let rec expression database ~visiting resolved (value : expression) : Z.t option
       | _ -> None)
   | Name path -> (
       match (resolved : Resolve.resolved).names.(path.last.id) with
-      | Some (Definition path) -> evaluate database ~visiting path
+      | Some (Definition (Constant, path)) -> evaluate database ~visiting path
       | _ -> None)
   | Member ({ kind = Name owner; _ }, member) -> (
       match resolved.names.(owner.last.id) with
-      | Some (Definition owner) ->
+      | Some (Definition (Type, owner)) ->
           evaluate database ~visiting (Member_constant { owner; name = member.text })
       | _ -> None)
   | _ -> None
@@ -57,6 +57,7 @@ let is_usize database path =
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) -> (
       match Query.demand database Resolve.resolved key with
       | Some resolved ->
-          resolved.names.(written.path.last.id) = Some (Definition (Intrinsic.builtin_path USize))
+          resolved.names.(written.path.last.id)
+          = Some (Definition (Type, Intrinsic.builtin_path USize))
       | None -> false)
   | _ -> false

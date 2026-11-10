@@ -73,14 +73,14 @@ let law_proofs database package trait (for_type : Types.ty) =
                   Some proof_source ) -> (
                   let named_trait =
                     match resolved.names.(trait_.path.last.id) with
-                    | Some (Definition path) -> Path.equal path trait
+                    | Some (Definition (_, path)) -> Path.equal path trait
                     | _ -> false
                   in
                   let named_type =
                     match (type_.kind, head) with
                     | Path_type written, Some head -> (
                         match resolved.names.(written.path.last.id) with
-                        | Some (Definition path) -> Path.equal path head
+                        | Some (Definition (_, path)) -> Path.equal path head
                         | _ -> false)
                     | _ -> false
                   in

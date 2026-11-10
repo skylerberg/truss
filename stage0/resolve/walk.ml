@@ -14,8 +14,10 @@ type cost_function = Log | Power | Time | Calls
 type target =
   | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
   | Local of id  (** A local or parameter, by the id of the name that binds it. *)
-  | Generic of id  (** A generic parameter of the definition, by the id of its name. *)
-  | Definition of Path.t
+  | Type_parameter of id  (** A generic type parameter, by the id of the name that binds it. *)
+  | Capability_parameter of id  (** A generic parameter declared [capability Name]. *)
+  | Value_parameter of id  (** A [USize] generic parameter. *)
+  | Definition of Names.named * Path.t  (** A definition, and what kind of definition it is. *)
   | Variant of Path.t * string  (** A prelude variant written bare, such as [Some]. *)
   | Module of Path.module_
   | Field of string  (** A record's field, by name, in the record's invariant or potential. *)
@@ -45,7 +47,7 @@ type specification = {
 
 type scope = {
   values : (value * string) String_map.t;  (** With what binds it, as messages name it. *)
-  types : id String_map.t;  (** Generic type and capability parameters. *)
+  types : target String_map.t;  (** Generic type and capability parameters, as names mean them. *)
   specification : specification;
   hands_out : bool;  (** In a method that lends or yields, whose [ensures] name what it hands out. *)
 }
@@ -182,7 +184,7 @@ let in_module state module_ (name : name) ~types =
   | Some item when if types then Names.is_type_kind item.kind else Names.is_value_kind item.kind ->
       if Names.visible ~from:state.module_ module_ item.visibility then begin
         let path : Path.t = Top { module_; name = name.text } in
-        set state name (Definition path);
+        set state name (Definition (item.kind, path));
         Some (path, item)
       end
       else begin
@@ -237,14 +239,15 @@ let type_name state scope ?(variants = false) (path : path) =
   | [] -> (
       let text = path.last.text in
       match String_map.find_opt text scope.types with
-      | Some id -> set state path.last (Generic id)
+      | Some parameter -> set state path.last parameter
       | None -> (
           match file_item state text with
           | Some item when Names.is_type_kind item.kind ->
-              set state path.last (Definition (Top { module_ = state.module_; name = text }))
+              set state path.last
+                (Definition (item.kind, Top { module_ = state.module_; name = text }))
           | _ -> (
               match prelude_type state text with
-              | Some (path_, _) -> set state path.last (Definition path_)
+              | Some (path_, item) -> set state path.last (Definition (item.kind, path_))
               | None -> (
                   match if variants then Prelude.find_variant text else None with
                   | Some (type_, variant) -> set state path.last (Variant (type_, variant))
@@ -262,7 +265,7 @@ let rec type_expression state scope (type_ : type_expression) =
   | Self_type _ -> ()
   | Associated (base, _) -> (
       match String_map.find_opt base.text scope.types with
-      | Some id -> set state base (Generic id)
+      | Some parameter -> set state base parameter
       | None ->
           set state base
             (Unknown
@@ -294,11 +297,11 @@ and type_argument state scope = function
 (* A lowercase type argument: a value generic parameter, or a constant. *)
 and count_name state scope (name : name) =
   match String_map.find_opt name.text scope.values with
-  | Some (Value_generic id, _) -> set state name (Generic id)
+  | Some (Value_generic id, _) -> set state name (Value_parameter id)
   | _ -> (
       match file_item state name.text with
       | Some item when item.kind = Constant ->
-          set state name (Definition (Top { module_ = state.module_; name = name.text }))
+          set state name (Definition (Constant, Top { module_ = state.module_; name = name.text }))
       | _ ->
           set state name
             (Unknown
@@ -353,7 +356,7 @@ and local_value state scope (name : name) =
   let text = name.text in
   match String_map.find_opt text scope.values with
   | Some (Value_local id, _) -> set state name (Local id)
-  | Some (Value_generic id, _) -> set state name (Generic id)
+  | Some (Value_generic id, _) -> set state name (Value_parameter id)
   | Some (Value_field field, _) -> set state name (Field field)
   | None ->
       if scope.specification.active && text = "old" then set state name Old
@@ -364,7 +367,7 @@ and local_value state scope (name : name) =
       else
         begin match file_item state text with
         | Some item when Names.is_value_kind item.kind ->
-            set state name (Definition (Top { module_ = state.module_; name = text }))
+            set state name (Definition (item.kind, Top { module_ = state.module_; name = text }))
         | _ ->
             if text = "null" || text = "nil" then begin
               set state name
@@ -411,13 +414,6 @@ and name_target state (value : expression) =
   | Parenthesized inner -> name_target state inner
   | _ -> None
 
-and is_generic_definition state = function
-  | Path.Top { module_; name } -> (
-      match Query.demand state.database Names.find (module_, name) with
-      | Some item -> Some item
-      | None -> None)
-  | _ -> None
-
 and bracket state scope (value : expression) base items =
   expression state scope base;
   let decision =
@@ -425,25 +421,22 @@ and bracket state scope (value : expression) base items =
     | Member _ -> Method_bracket
     | _ -> (
         match name_target state base with
-        | Some (Definition path) -> (
-            match is_generic_definition state path with
-            | Some item when Names.is_type_kind item.kind -> Type_arguments
-            | Some item when item.kind = Function || item.kind = Theorem ->
-                if item.generic then Type_arguments
-                else begin
-                  report state Not_generic value.span
-                    (Printf.sprintf
-                       "`%s` is a function without generic parameters, so `[...]` cannot give it \
-                        type arguments, and a function cannot be indexed."
-                       (match base.kind with Name path -> path.last.text | _ -> "this"));
-                  Type_arguments
-                end
-            | _ -> Index)
-        | Some (Generic _) -> (
-            match base.kind with
-            | Name path when path.last.text.[0] >= 'A' && path.last.text.[0] <= 'Z' ->
-                Type_arguments
-            | _ -> Index)
+        | Some (Definition ((Type | Trait | Capability), _))
+        | Some (Type_parameter _ | Capability_parameter _) ->
+            Type_arguments
+        | Some (Definition ((Function | Theorem), Top { module_; name })) ->
+            let generic =
+              match Query.demand state.database Names.find (module_, name) with
+              | Some item -> item.generic
+              | None -> false
+            in
+            if not generic then
+              report state Not_generic value.span
+                (Printf.sprintf
+                   "`%s` is a function without generic parameters, so `[...]` cannot give it type \
+                    arguments, and a function cannot be indexed."
+                   name);
+            Type_arguments
         | _ -> Index)
   in
   state.brackets.(value.id) <- Some decision;
@@ -477,10 +470,7 @@ and check_place state (marked : expression) (inner : expression) =
     | Name path -> (
         match target_of state path.last with
         | Some (Local _ | Field _) -> `Place false
-        | Some (Definition path_) -> (
-            match is_generic_definition state path_ with
-            | Some item when item.kind = Constant -> `Place false
-            | _ -> `Not_a_place value)
+        | Some (Definition (Constant, _)) -> `Place false
         | Some (Unknown _) -> `Unknown
         | _ -> `Not_a_place value)
     | _ -> `Not_a_place value
@@ -623,7 +613,7 @@ and declare_value state scope (name : name) =
   | None -> (
       match file_item state name.text with
       | Some item when Names.is_value_kind item.kind ->
-          hides (Names.kind_name item.kind ^ " in this file")
+          hides (Names.kind_name (Names.kind_of_named item.kind) ^ " in this file")
       | _ -> ()));
   set state name Binding;
   {
@@ -647,11 +637,12 @@ and pattern state scope bound (pattern_ : pattern) =
   | Wildcard | Pattern_error -> ()
   | Binding_or_constant name -> (
       match String_map.find_opt name.text scope.values with
-      | Some (Value_generic id, _) -> set state name (Generic id)
+      | Some (Value_generic id, _) -> set state name (Value_parameter id)
       | _ -> (
           match file_item state name.text with
           | Some item when item.kind = Constant ->
-              set state name (Definition (Top { module_ = state.module_; name = name.text }))
+              set state name
+                (Definition (Constant, Top { module_ = state.module_; name = name.text }))
           | _ -> bound := name :: !bound))
   | Qualified_constant constant_ -> qualified_constant state scope constant_
   | Literal literal -> literal_pattern state scope literal
@@ -721,9 +712,9 @@ and range_end state scope (end_ : range_end) =
   | End_constant constant_ -> qualified_constant state scope constant_
   | End_name name -> (
       match (String_map.find_opt name.text scope.values, file_item state name.text) with
-      | Some (Value_generic id, _), _ -> set state name (Generic id)
+      | Some (Value_generic id, _), _ -> set state name (Value_parameter id)
       | _, Some item when item.kind = Constant ->
-          set state name (Definition (Top { module_ = state.module_; name = name.text }))
+          set state name (Definition (Constant, Top { module_ = state.module_; name = name.text }))
       | _ ->
           set state name
             (Unknown
@@ -815,7 +806,7 @@ and loop_clause ?(for_loop = false) state scope (written : loop_clause) =
 
 (* Generic parameters *)
 
-let declare_type state scope (name : name) =
+let declare_type state scope (name : name) ~parameter =
   let hides what =
     report state Hides_name name.span
       (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
@@ -825,10 +816,10 @@ let declare_type state scope (name : name) =
    else
      match file_item state name.text with
      | Some item when Names.is_type_kind item.kind ->
-         hides (Names.kind_name item.kind ^ " in this file")
+         hides (Names.kind_name (Names.kind_of_named item.kind) ^ " in this file")
      | _ -> if List.mem name.text Prelude.names then hides "a name in the prelude");
   set state name Binding;
-  { scope with types = String_map.add name.text name.id scope.types }
+  { scope with types = String_map.add name.text (parameter name.id) scope.types }
 
 let generics state scope (generics : generic_parameter list) =
   (* All of a list's parameters are in scope in each one's bounds. *)
@@ -836,7 +827,10 @@ let generics state scope (generics : generic_parameter list) =
     List.fold_left
       (fun scope (generic : generic_parameter) ->
         match generic.kind with
-        | Type_parameter (name, _) | Capability_parameter name -> declare_type state scope name
+        | Type_parameter (name, _) ->
+            declare_type state scope name ~parameter:(fun id : target -> Type_parameter id)
+        | Capability_parameter name ->
+            declare_type state scope name ~parameter:(fun id : target -> Capability_parameter id)
         | Value_parameter (name, _) ->
             let scope = declare_value state scope name in
             {

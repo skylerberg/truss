@@ -75,10 +75,10 @@ type explanation = {
 
 let describe_target (target : Resolve.target) =
   match target with
-  | Definition path -> (Printf.sprintf "the definition %s" (Path.show path), Some path)
+  | Definition (_, path) -> (Printf.sprintf "the definition %s" (Path.show path), Some path)
   | Local _ -> ("a local variable or parameter", None)
   | Binding -> ("a name bound here", None)
-  | Generic _ -> ("a generic parameter", None)
+  | Type_parameter _ | Capability_parameter _ | Value_parameter _ -> ("a generic parameter", None)
   | Variant (path, name) -> (Printf.sprintf "the variant %s of %s" name (Path.show path), None)
   | Module module_ -> (Printf.sprintf "the module %s" (Path.show_module module_), None)
   | Field name -> (Printf.sprintf "the field %s" name, None)
