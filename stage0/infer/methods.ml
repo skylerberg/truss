@@ -1,6 +1,6 @@
-(* A call: which callee it names, and the calls of types' own methods,
-   traits' methods, written in full or through a receiver, and
-   capabilities'. *)
+(* Checks calls: resolving the callee, and calls of methods of types, of
+   trait methods (in full form or with a receiver), and of capability
+   methods. *)
 
 open Syntax
 module T = Types
@@ -34,8 +34,8 @@ let rec call state env ?expected (value : expression) (callee : expression)
       | Some found -> call_named state env ?expected value callee found arguments
       | None -> function_value_call state env value callee arguments)
 
-(* A call whose callee is a name: what is called follows from what the name
-   means. *)
+(* A call whose callee is a name. The callee is whatever the name resolves
+   to. *)
 and call_named state env ?expected (value : expression) (callee : expression)
     ({ name; target; type_arguments } : Resolve.head) arguments =
   match target with
@@ -50,7 +50,8 @@ and call_named state env ?expected (value : expression) (callee : expression)
                (if arguments = [] then Missing_argument else Too_many_arguments)
                value.span "`old` takes one value: `old(value)`."))
   | Identical -> (
-      (* Identity, for values of any one type: the solver's equality. *)
+      (* [identical(first, second)] compares two values of the same type
+         with the solver's equality. *)
       match arguments with
       | [ first; second ] ->
           let first_type = expression state env first.value in
@@ -104,8 +105,8 @@ and call_named state env ?expected (value : expression) (callee : expression)
       function_value_call state env value callee arguments
   | Binding | Module _ -> bug "the name `%s` is not resolved" name.text
 
-(* [Type.name(...)]: a variant, a method without [self], or a method
-   written in full with its receiver first. *)
+(* [Type.name(...)]: a variant constructor, a static method, or a method
+   called in full form with its receiver as the first argument. *)
 and static_call state env ?expected (value : expression) type_ (member : name) arguments =
   let ambiguous (traits : T.trait_reference list) =
     arguments_alone state env arguments
@@ -124,8 +125,9 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
              versions take."
             member.text))
   in
-  (* A method with [self], written in full: its first argument is the
-     receiver, whose mark chooses the version, as with a dot. *)
+  (* A method with [self] called in full form. The first argument is the
+     receiver, and its mark selects the version of the method, as it does in
+     a call with a dot. *)
   let wanted : Path.receiver =
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
   in
@@ -138,8 +140,8 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           match function_signature state method_path with
           | Some (Ok signature) ->
               let instance = instantiate state value.span signature in
-              (* The type's arguments, as written or inferred, are the
-                 head's generic arguments. *)
+              (* The type's arguments, written or inferred, are the type
+                 arguments of the method's type. *)
               let head =
                 List.filteri
                   (fun index _ ->
@@ -167,7 +169,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           | Some (Error report) -> arguments_alone state env arguments (T.Error report)
           | None -> bug "the method `%s` has no signature" (Path.show method_path))
       | None -> (
-          (* A trait's method without [self], as [Int64.from(count)]. *)
+          (* A static trait method, as in [Int64.from(count)]. *)
           match trait_static_method state path member.text Static with
           | [ (trait, method_) ] ->
               trait_method_through_type state env ?expected value type_ trait method_ arguments
@@ -212,9 +214,10 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                               (Printf.sprintf "`%s` has no method `%s`." (show state type_)
                                  member.text))))))
   | T.Parameter parameter -> (
-      (* A method of a bound: the one without [self], or else the version
-         the first argument's mark names. Two bounds on one trait differ only
-         in the trait's arguments, which the call's arguments decide. *)
+      (* A method of a trait bound: the static method, or the version that
+         the first argument's mark selects. Two bounds on the same trait
+         differ only in the trait's type arguments, which the call's
+         arguments determine. *)
       let without_self =
         List.fold_left
           (fun found (bound : T.trait_reference) ->
@@ -249,10 +252,9 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
         (error state Unknown_member member.span
            (Printf.sprintf "`%s` has no method `%s`." (show state type_) member.text))
 
-(* A trait method called through a type, with [Self] that type: a
-   constructor such as [Int64.from(count)] or [Self.empty()]. The trait's
-   own arguments are worked out from the call's arguments, never from the
-   expected type. *)
+(* A static trait method called on a type, which is [Self]: a constructor
+   such as [Int64.from(count)] or [Self.empty()]. The trait's type arguments
+   are inferred from the call's arguments, never from the expected type. *)
 and trait_method_through_type state env ?expected:_ ?trait_arguments (value : expression) self_type
     (trait : T.trait_reference) (method_ : T.trait_method) arguments =
   let trait_generics =
@@ -260,8 +262,9 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
     | Some interface -> interface.trait_generics
     | None -> []
   in
-  (* The trait's arguments as written, as in [From[UInt32].from(count)], or
-     else unknown ones that the call's arguments decide. *)
+  (* The trait's type arguments as written, as in
+     [From[UInt32].from(count)], or fresh inference variables that the
+     call's arguments determine. *)
   let trait_arguments =
     match trait_arguments with
     | Some written when List.length written = List.length trait_generics -> written
@@ -333,20 +336,20 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
   resolve_evidence state value self_type reference;
   normalize state result
 
-(* [Ordered.compare(first, second)]: a trait method written in full, with
-   its receiver first. *)
+(* [Ordered.compare(first, second)]: a trait method called in full form,
+   with its receiver as the first argument. *)
 and trait_call_in_full state env (value : expression) trait ~trait_arguments (member : name)
     arguments =
-  (* The method without [self], or else the version the receiver's mark
-     names, as with a dot. *)
+  (* The static method, or the version that the receiver's mark selects, as
+     in a call with a dot. *)
   let wanted : Path.receiver =
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
   in
   let version = Members.trait_method state.database trait member.text in
   match match version Static with None -> version wanted | found -> found with
   | Some method_ ->
-      (* [Self] is the receiver's type, which checking it as the first
-         argument decides. *)
+      (* [Self] is the receiver's type. Checking the receiver as the first
+         argument infers it. *)
       trait_method_through_type state env ?trait_arguments value (fresh state)
         (trait_reference trait) method_ arguments
   | None when Members.trait_methods state.database trait member.text <> [] ->
@@ -386,13 +389,13 @@ and capability_call state env (value : expression) capability (member : name) ar
         (error state Unknown_member member.span
            (Printf.sprintf "`%s` has no method `%s`." (Path.show capability) member.text))
 
-(* [receiver.name(...)]: the type's own method, or a trait's. *)
+(* [receiver.name(...)]: a method of the receiver's type, or a trait method. *)
 and method_call state env ?expected (value : expression) (base : expression) (member : name)
     ~type_arguments arguments =
   let receiver_type = default_literal state (normalize state (expression state env base)) in
   let marked = List.mem_assoc value.id state.receiver_modes in
-  (* A part that is lent [mut] is changed through its [mut self] methods
-     with no mark of its own: the mark is on the place it is lent from. *)
+  (* A part that is lent [mut] takes no mark of its own to call a [mut self]
+     method: the mark is on the place that lends it. *)
   let lent_mode = if marked then None else lent state base in
   let wanted : Path.receiver =
     match (List.assoc_opt value.id state.receiver_modes, lent_mode) with
@@ -402,9 +405,9 @@ and method_call state env ?expected (value : expression) (base : expression) (me
   in
   let place = is_place state base || Option.is_some lent_mode in
   let choose versions =
-    (* No mark picks the read-only version; on a temporary, the [own]
-       version if there is one; a [Plain] place may give its [own] version a
-       copy. *)
+    (* Without a mark, the call selects the read-only version. On a
+       temporary it selects the [own] version if there is one. A [Plain]
+       place can be copied for an [own] version. *)
     match List.assoc_opt wanted versions with
     | Some found -> Some (wanted, found)
     | None when lent_mode = Some T.Mut && List.mem_assoc Path.Read versions ->
@@ -434,8 +437,8 @@ and method_call state env ?expected (value : expression) (base : expression) (me
          (Path.show_receiver wanted)
          (String.concat ", " (List.map (fun (receiver, _) -> Path.show_receiver receiver) versions)))
   in
-  (* A place that calls a method with only a [mut] or [own] version is
-     missing its mark, which the fix adds. *)
+  (* A place that calls a method with only a [mut] or an [own] version lacks
+     its mark. The fix adds the mark. *)
   let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> T.ty =
    fun versions ->
     let has receiver = List.exists (fun (found, _) -> found = receiver) versions in
@@ -500,8 +503,8 @@ and method_call state env ?expected (value : expression) (base : expression) (me
               trait_method_call state env value ~receiver:base ~receiver_type trait method_
                 ~type_arguments arguments)
       | Error traits ->
-          (* The call written in full: the receiver first, then the
-                   arguments as written. *)
+          (* The call in full form: the receiver first, then the arguments
+             as written. *)
           let receiver_text = source state base.span in
           let arguments_text =
             List.map
@@ -588,10 +591,10 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
     (({ owner = trait.trait; name = "Self" } : T.parameter), T.Type receiver_type)
     :: Option.value ~default:[] (T.substitution_of trait_generics trait_arguments)
   in
-  (* An [any] value holds one version of each method, for the type it
-     hides. A method with generic parameters of its own has a version for
-     each set of arguments, and one that takes or returns [Self] names the
-     hidden type, so neither can be called through it. *)
+  (* An [any] value has one compiled version of each method, for the type it
+     hides. A method with generic parameters of its own would need a version
+     for each set of type arguments, and a method that takes or returns
+     [Self] names the hidden type. Neither can be called on an [any] value. *)
   (match receiver_type with
   | T.Any _ ->
       let self : T.parameter = { owner = trait.trait; name = "Self" } in
