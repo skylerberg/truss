@@ -450,13 +450,16 @@ void t_runtime_shared_lock(void *value) { pthread_mutex_lock(&t_shared_header(va
 
 void t_runtime_shared_unlock(void *value) { pthread_mutex_unlock(&t_shared_header(value)->mutex); }
 
-/* Tasks.
+/* Tasks. */
 
-   Tasks do not have their own threads yet. [t_runtime_tasks_spawn] calls
-   the task's function and returns when it returns, so the tasks of a
-   group run sequentially. That is correct for tasks that never block on
-   one another. A task that waits on a key would deadlock, because the
-   task that would wake it cannot run, so [t_runtime_tasks_wait] panics. */
+#ifdef T_IN_ORDER
+
+/* A test program, and code run while compiling, have one thread.
+   [t_runtime_tasks_spawn] calls the task's function and returns when it
+   returns, so the tasks of a group run sequentially, in the order they
+   are spawned. That is correct for tasks that never block on one another.
+   A task that waits on a key would deadlock, because the task that would
+   wake it cannot run, so [t_runtime_tasks_wait] panics. */
 struct t_group {
   int cancelled;
 };
@@ -520,6 +523,217 @@ int32_t t_runtime_tasks_unlock(uint64_t mutex) {
 }
 
 int32_t t_runtime_tasks_yield(void) { return 0; }
+
+#else
+
+/* Each task runs on a thread of its own.
+
+   A group counts its tasks that have not ended, and [join] blocks until
+   the count is zero. A group is cancelled once, and a task is cancelled
+   when its group or a group that encloses it is. [parent] is the group of
+   the task that opened this group. It outlives this group: the task that
+   opened this group joins it before the task ends. */
+struct t_group {
+  pthread_mutex_t lock;
+  pthread_cond_t ended;
+  size_t running;
+  atomic_int cancelled;
+  struct t_group *parent;
+};
+
+/* The group of the task that the calling thread runs. NULL on a thread
+   that runs no task. */
+static _Thread_local struct t_group *t_task_group;
+
+struct t_task {
+  struct t_group *group;
+  void (*code)(void *environment, uint64_t item);
+  void *environment;
+  uint64_t item;
+};
+
+/* Waiting on a key. A key hashes to a slot, which counts the wakes of its
+   keys. [watch] reads the count as a ticket, [wait] blocks while the count
+   equals the ticket, and [wake] increments the count. Two keys can share
+   a slot, so [wait] can return without a wake of its own key, and its
+   caller tests its condition again. */
+#define T_WAIT_SLOTS 64
+
+struct t_wait_slot {
+  pthread_mutex_t lock;
+  pthread_cond_t woken;
+  uint64_t wakes;
+};
+
+static struct t_wait_slot t_wait_slots[T_WAIT_SLOTS];
+static pthread_once_t t_wait_slots_once = PTHREAD_ONCE_INIT;
+
+static void t_wait_slots_start(void) {
+  for (int index = 0; index < T_WAIT_SLOTS; index++) {
+    pthread_mutex_init(&t_wait_slots[index].lock, NULL);
+    pthread_cond_init(&t_wait_slots[index].woken, NULL);
+    t_wait_slots[index].wakes = 0;
+  }
+}
+
+static struct t_wait_slot *t_wait_slot(uint64_t key) {
+  pthread_once(&t_wait_slots_once, t_wait_slots_start);
+  return &t_wait_slots[(key * 0x9E3779B97F4A7C15ULL) >> 58];
+}
+
+int32_t t_runtime_tasks_cancelled(void) {
+  for (struct t_group *group = t_task_group; group != NULL; group = group->parent)
+    if (atomic_load_explicit(&group->cancelled, memory_order_acquire)) return 1;
+  return 0;
+}
+
+uint64_t t_runtime_tasks_watch(uint64_t key) {
+  struct t_wait_slot *slot = t_wait_slot(key);
+  pthread_mutex_lock(&slot->lock);
+  uint64_t ticket = slot->wakes;
+  pthread_mutex_unlock(&slot->lock);
+  return ticket;
+}
+
+/* Blocks until the slot of [key] has been woken after [ticket] was
+   issued. A cancellable wait also returns when the calling task is
+   cancelled. */
+static void t_wait(uint64_t key, uint64_t ticket, int cancellable) {
+  struct t_wait_slot *slot = t_wait_slot(key);
+  pthread_mutex_lock(&slot->lock);
+  while (slot->wakes == ticket && !(cancellable && t_runtime_tasks_cancelled()))
+    pthread_cond_wait(&slot->woken, &slot->lock);
+  pthread_mutex_unlock(&slot->lock);
+}
+
+int32_t t_runtime_tasks_wait(uint64_t key, uint64_t ticket) {
+  t_wait(key, ticket, 1);
+  return 0;
+}
+
+int32_t t_runtime_tasks_wake(uint64_t key) {
+  struct t_wait_slot *slot = t_wait_slot(key);
+  pthread_mutex_lock(&slot->lock);
+  slot->wakes += 1;
+  pthread_cond_broadcast(&slot->woken);
+  pthread_mutex_unlock(&slot->lock);
+  return 0;
+}
+
+uint64_t t_runtime_tasks_open(void) {
+  struct t_group *group = malloc(sizeof *group);
+  if (group == NULL) t_out_of_memory();
+  pthread_mutex_init(&group->lock, NULL);
+  pthread_cond_init(&group->ended, NULL);
+  group->running = 0;
+  atomic_init(&group->cancelled, 0);
+  group->parent = t_task_group;
+  return (uint64_t)(uintptr_t)group;
+}
+
+static void *t_task_main(void *argument) {
+  struct t_task task = *(struct t_task *)argument;
+  free(argument);
+  t_task_group = task.group;
+  /* Signals sent to the process go to the thread that started it, as they
+     do in a program with one thread. */
+  sigset_t all;
+  sigfillset(&all);
+  sigdelset(&all, SIGSEGV);
+  sigdelset(&all, SIGBUS);
+  sigdelset(&all, SIGFPE);
+  sigdelset(&all, SIGILL);
+  pthread_sigmask(SIG_SETMASK, &all, NULL);
+  struct t_thread_signal_stack signal_stack;
+  t_thread_signal_stack_install(&signal_stack);
+  task.code(task.environment, task.item);
+  t_thread_signal_stack_remove(&signal_stack);
+  pthread_mutex_lock(&task.group->lock);
+  task.group->running -= 1;
+  if (task.group->running == 0) pthread_cond_broadcast(&task.group->ended);
+  pthread_mutex_unlock(&task.group->lock);
+  return NULL;
+}
+
+uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, uint64_t item),
+                              void *environment, uint64_t item) {
+  struct t_group *group = (struct t_group *)(uintptr_t)handle;
+  if (atomic_load_explicit(&group->cancelled, memory_order_acquire)) return 0;
+  struct t_task *task = malloc(sizeof *task);
+  if (task == NULL) t_out_of_memory();
+  task->group = group;
+  task->code = code;
+  task->environment = environment;
+  task->item = item;
+  pthread_mutex_lock(&group->lock);
+  group->running += 1;
+  pthread_mutex_unlock(&group->lock);
+  pthread_t thread;
+  pthread_attr_t attributes;
+  t_thread_attributes(&attributes);
+  pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+  int failed = pthread_create(&thread, &attributes, t_task_main, task);
+  pthread_attr_destroy(&attributes);
+  if (failed) t_out_of_memory();
+  return 1;
+}
+
+int32_t t_runtime_tasks_join(uint64_t handle) {
+  struct t_group *group = (struct t_group *)(uintptr_t)handle;
+  pthread_mutex_lock(&group->lock);
+  while (group->running > 0) pthread_cond_wait(&group->ended, &group->lock);
+  pthread_mutex_unlock(&group->lock);
+  pthread_mutex_destroy(&group->lock);
+  pthread_cond_destroy(&group->ended);
+  free(group);
+  return 0;
+}
+
+/* Cancels the group. Returns 1 to the first caller. Every waiter is woken
+   so that a cancelled one returns: the slot's lock is held for the
+   broadcast, so a waiter either tests the flag after it is set or is
+   already blocked when the broadcast comes. */
+int32_t t_runtime_tasks_cancel(uint64_t handle) {
+  struct t_group *group = (struct t_group *)(uintptr_t)handle;
+  int cancelled = 0;
+  if (!atomic_compare_exchange_strong(&group->cancelled, &cancelled, 1)) return 0;
+  pthread_once(&t_wait_slots_once, t_wait_slots_start);
+  for (int index = 0; index < T_WAIT_SLOTS; index++) {
+    pthread_mutex_lock(&t_wait_slots[index].lock);
+    pthread_cond_broadcast(&t_wait_slots[index].woken);
+    pthread_mutex_unlock(&t_wait_slots[index].lock);
+  }
+  return 1;
+}
+
+/* A mutex is a [uint64_t] that its owner initialized to zero: 0 is
+   unlocked and 1 is locked. A thread that finds it locked waits on the
+   mutex's address as a key. The wait is not cancellable: a cancelled task
+   still waits for the lock, since nothing else could answer for the
+   method it called. */
+int32_t t_runtime_tasks_lock(uint64_t mutex) {
+  uint64_t *word = (uint64_t *)(uintptr_t)mutex;
+  for (;;) {
+    uint64_t ticket = t_runtime_tasks_watch(mutex);
+    uint64_t unlocked = 0;
+    if (__atomic_compare_exchange_n(word, &unlocked, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+      return 0;
+    t_wait(mutex, ticket, 0);
+  }
+}
+
+int32_t t_runtime_tasks_unlock(uint64_t mutex) {
+  uint64_t *word = (uint64_t *)(uintptr_t)mutex;
+  __atomic_store_n(word, 0, __ATOMIC_RELEASE);
+  return t_runtime_tasks_wake(mutex);
+}
+
+int32_t t_runtime_tasks_yield(void) {
+  sched_yield();
+  return 0;
+}
+
+#endif
 
 struct t_branch {
   void (*run)(void *environment);

@@ -12,7 +12,7 @@ let output_with ~workers text =
   output
 
 let same_with_any_workers text ~expected =
-  List.iter (fun workers -> expect_string ~expected (output_with ~workers text)) [ 1; 2; 8; 32 ]
+  List.iter (fun workers -> expect_string ~expected (output_with ~workers text)) worker_counts
 
 let () =
   test "branches give results through lets, change their own parts, and call a lambda" (fun () ->

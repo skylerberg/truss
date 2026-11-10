@@ -192,6 +192,13 @@ let sanitizers =
 let settings : Build.settings =
   { build = Development; optimization = O1; extra = strict @ sanitizers }
 
+(* The thread counts that a program on threads is run with. More threads
+   than cores makes them interleave more. ThreadSanitizer slows a program
+   several times, so under it a program runs once, with a count above the
+   number of cores. *)
+let worker_counts =
+  if Sys.getenv_opt "TRUSS_SANITIZE" = Some "thread" then [ 8 ] else [ 1; 2; 8; 32 ]
+
 (* Compiles the instances into a program whose [main] calls [entry], runs
    it, and returns its status, output, and errors. *)
 let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : Lir.t list) =
@@ -266,11 +273,15 @@ let expect_output text expected = expect_string ~expected (run_source text)
 (* A test of a module whose one test passes. *)
 let passes name source = test name (fun () -> expect_output source "test 0 passed\n")
 
-(* Compiles a module with a [main] and runs it with the arguments. *)
-let run_main ?(arguments = []) ?input text =
+(* Compiles a module with a [main] and runs it with the arguments. With
+   [in_order], the program is linked with the runtime that starts no
+   threads, so its tasks and [parallel] branches run sequentially. *)
+let run_main ?(arguments = []) ?input ?in_order text =
   let _, compile = load text in
   match
-    Compile.run_program ?input compile ~main:(Top { module_ = example; name = "main" }) ~arguments
+    Compile.run_program ?input ?in_order compile
+      ~main:(Top { module_ = example; name = "main" })
+      ~arguments
   with
   | Ok result -> result
   | Error message -> failwith message

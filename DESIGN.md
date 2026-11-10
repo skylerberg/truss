@@ -2060,8 +2060,9 @@ effect: code that does it declares `uses Tasks`.
   an implementation, which is proven against its method's `ensures` like
   any other result, so a caller's proof holds whether or not the task was
   cancelled. An implementation written on calls that wait passes their
-  error on. A task that waits for its turn in a `mut` implementation keeps
-  waiting, since nothing else could answer for the method.
+  error on. A cancelled task that is blocked on the mutex of a `mut`
+  implementation stays blocked until it acquires the mutex, since the call
+  has no other result to return.
   This is Go's `Context` without the parameter, since whatever provides
   `Tasks` knows which task is calling. Trio and Kotlin raise an exception
   at the call instead, and Rust drops a future at whichever `await` it had
@@ -2103,33 +2104,34 @@ effect: code that does it declares `uses Tasks`.
   implements a `Sessions` capability, provided `mut` around the code that
   serves requests. `uses Sessions` then marks every function that can touch
   the table.
-- **Calls into a `mut` implementation take turns.** Where the code inside a
-  `provide mut` can use `Tasks`, each call of the implementation's methods
-  runs from start to end before the next begins, and a task that calls
-  meanwhile waits. This is a monitor: Ada's protected objects, Java's
-  `synchronized` methods, and an Erlang `gen_server` work the same way. A
-  check and the change that depends on it therefore go in one method.
-  Within a call nothing else changes the state, and between two calls
-  anything may. No task is left holding a view of the state, since a method
-  returns none. An implementation provided without `mut` is only read, so
-  calls into it need no turns.
+- **Calls into a `mut` implementation are mutually exclusive.** Where the
+  code inside a `provide mut` can use `Tasks`, the implementation has a
+  mutex. Each call of its methods holds the mutex from start to end, and a
+  task that calls meanwhile blocks. This is a monitor: Ada's protected
+  objects, Java's `synchronized` methods, and an Erlang `gen_server` work
+  the same way. A check and the change that depends on it therefore go in
+  one method. Within a call nothing else changes the state, and between
+  two calls anything may. No task is left holding a view of the state,
+  since a method returns none. An implementation provided without `mut` is
+  only read, so it has no mutex.
 - **Proofs already allow for it.** The prover never models an
   implementation's state: a capability call gives a value of which only
   the method's `ensures` is known. No proof ever assumed that the state
   stays the same from one call to the next, so every proof still holds when
   other tasks' calls come between.
-- **Turns cannot deadlock on each other.** An implementation's methods can
-  call only capabilities provided outside it, so tasks always take turns
-  from the innermost implementation outward, and no two wait for each
-  other's. One rule keeps this true: an implementation whose calls take
-  turns has no method with a parameter that can hold a function, or an
-  `any` value, that uses a capability, since calling it could reach an
-  implementation further in.
-- **Turns cost nothing where there are no tasks.** Whether the code inside
-  a `provide mut` can use `Tasks` is known where the `provide` is written,
-  from the signatures of what it calls. Code that uses a capability
-  parameter of the function around it counts, since the parameter may stand
-  for `Tasks`. Only such a `provide` makes calls take turns.
+- **These mutexes cannot deadlock.** An implementation's methods can call
+  only capabilities provided outside it, so every task acquires the
+  mutexes in one order, from the innermost implementation outward. One
+  rule keeps this true: an implementation with a mutex has no method with
+  a parameter that can hold a function, or an `any` value, that uses a
+  capability, since calling it could acquire the mutex of a nested
+  implementation out of order.
+- **Mutual exclusion costs nothing where there are no tasks.** Whether the
+  code inside a `provide mut` can use `Tasks` is known where the `provide`
+  is written, from the signatures of what it calls. Code that uses a
+  capability parameter of the enclosing function counts, since the
+  parameter may be instantiated with `Tasks`. Only such a `provide` gets a
+  mutex.
 - **A mutex is not a value.** Rust's `Mutex` and Go's `sync.Mutex` change
   what a read-only place holds, which mutable value semantics rules out,
   and two tasks that take two of them in different orders deadlock. A task

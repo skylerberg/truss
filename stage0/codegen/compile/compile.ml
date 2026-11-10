@@ -85,7 +85,8 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
   let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
   let code instance = Compiled (elaborate_code context instance) in
   match key with
-  | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ -> code (Lower.instance context key)
+  | Code _ | Entry _ | Program_main _ | Any_entry _ | Adapter _ | Locked_entry _ ->
+      code (Lower.instance context key)
   | Constant path -> (
       match Lower.constant context path with
       | Folded data -> Compiled (Data data)
@@ -116,6 +117,7 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       code (Lower.call_evaluation context key ~function_ ~arguments)
   | Any_table _ -> Compiled (Table (Lower.any_table context key))
   | Table _ -> Compiled (Table (Lower.table context key))
+  | Locked_table capability -> Compiled (Table (Lower.locked_table context key ~capability))
 
 (* What an instance compiles to, or for a constant whose value does not
    fold, that its evaluator is to be run, which no query can do, since
@@ -475,13 +477,14 @@ and build_test_program ?progress ?made t ~time_limit ~roots ~output =
 
 (* Builds what the roots reach into a temporary program and runs it with
    [arguments], then removes it. *)
-and build_and_run ?input ?time_limit t ~roots ~startup ~arguments =
+and build_and_run ?input ?time_limit ?(in_order = true) t ~roots ~startup ~arguments =
   let output =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "truss-%d-%d" (Unix.getpid ()) (Hashtbl.hash roots))
   in
-  (* Code run while compiling starts no threads. *)
-  build t ~in_order:true ~roots ~startup ~output;
+  (* Code run while compiling starts no threads, so it is linked with the
+     in-order runtime unless the caller asks for the threaded one. *)
+  build t ~in_order ~roots ~startup ~output;
   let result = Toolchain.run ?input ?time_limit output arguments in
   (try Sys.remove output with Sys_error _ -> ());
   result
@@ -858,10 +861,10 @@ let test_keys t tests =
       | exception (Compiler_bug.Bug _ | Compiler_bug.Unsupported _) -> None)
     tests
 
-let run_program ?input t ~main ~arguments =
+let run_program ?input ?(in_order = false) t ~main ~arguments =
   reporting t @@ fun () ->
   let root = Instance.Program_main main in
-  build_and_run ?input t ~roots:[ root ]
+  build_and_run ?input ~in_order t ~roots:[ root ]
     ~startup:(Startup.program_calling (Instance.symbol root))
     ~arguments
 

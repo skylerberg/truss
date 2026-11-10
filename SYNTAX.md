@@ -2320,8 +2320,8 @@ fn total_size(paths: Slice[Path]) -> USize
 
 State that several tasks change belongs to a capability implementation.
 When the code inside a `provide mut` can use `Tasks`, calls of the
-implementation's methods take turns: each runs from start to end before the
-next begins.
+implementation's methods are mutually exclusive: each call holds the
+implementation's mutex from start to end.
 
 ```truss
 capability Sessions {
@@ -2356,12 +2356,13 @@ fn run(listener: network::Listener)
 
 - A check and the change that depends on it go in one method, since other
   tasks' calls can come between two calls.
-- An implementation whose calls take turns has no method with a parameter
-  that can hold a function, or an `any` value, that uses a capability.
+- An implementation whose calls are mutually exclusive has no method with
+  a parameter that can hold a function, or an `any` value, that uses a
+  capability. Calling it while holding the mutex could deadlock.
 - A capability's method keeps no view that it is given and returns no view
   of its implementation's state.
-- An implementation provided without `mut` is only read, so calls into it
-  do not take turns.
+- An implementation provided without `mut` is only read, so it has no
+  mutex.
 
 ### Testing concurrent code
 

@@ -307,20 +307,43 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Provide { implementations; body } ->
       (* The body runs with the evidence of each implementation added. *)
       let enclosing = st.evidence in
-      let added =
-        List.concat_map
+      let provided =
+        List.map
           (fun (implementation : Core.implementation) ->
             let place = operand_place st implementation.value in
             let pointer =
               if zero_size st (ground st implementation.type_) then Lir.Constant Null
               else Address { place; writable = true }
             in
-            provided_evidence st ~implementation:pointer
-              (List.map
-                 (fun (provided : Core.provided) ->
-                   (provided.capability, provided.impl, provided.arguments))
-                 implementation.provides))
+            ( implementation.mode,
+              provided_evidence st ~implementation:pointer
+                (List.map
+                   (fun (provided : Core.provided) ->
+                     (provided.capability, provided.impl, provided.arguments))
+                   implementation.provides) ))
           implementations
+      in
+      (* Several tasks may call a [mut] implementation at the same time
+         when the body can use [Tasks], which would be a data race on the
+         implementation. Its evidence is then replaced by evidence whose
+         table locks a mutex around each call. The locks go through the
+         [Tasks] that this [provide] lists, or else the enclosing one, so
+         that a scheduler sees them. An implementation of [Tasks] is never
+         locked: it guards its own state. *)
+      let is_tasks (capability, _) = Path.equal capability Core_walk.tasks_capability in
+      let tasks =
+        if Core_walk.can_use_tasks body then
+          Option.map snd (List.find_opt is_tasks (List.concat_map snd provided @ enclosing))
+        else None
+      in
+      let added =
+        List.concat_map
+          (fun ((mode : T.mode), evidence) ->
+            match tasks with
+            | Some tasks when mode = Mut && not (List.exists is_tasks evidence) ->
+                locked_evidence st ~tasks evidence
+            | _ -> evidence)
+          provided
       in
       st.evidence <- added @ enclosing;
       block_into st body (Some destination);
@@ -1114,6 +1137,35 @@ and return_ st (returned : Core.expression option) =
   | Some returned, _, _ -> ignore (value_place st returned)
   | None, _, _ -> ());
   return_from_frame st
+
+(* Evidence for the capabilities of one [mut] implementation whose calls
+   are mutually exclusive. The implementation's capabilities share one
+   mutex, a word in this frame. The evidence for each capability has the
+   capability's locking table, the mutex's address as its implementation
+   pointer, and the implementation's own evidence and the evidence for
+   [Tasks] as its outer evidence. *)
+and locked_evidence st ~(tasks : Lir.operand) (evidence : (Path.t * Lir.operand) list) =
+  let mutex = at (local st.b ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
+  emit st.b (Assign (mutex, Use (constant_int UInt64 Z.zero)));
+  List.map
+    (fun (capability, implementation) ->
+      let slot = local st.b (Evidence 2) in
+      emit st.b
+        (Call
+           {
+             target = Intrinsic Evidence_fill;
+             arguments =
+               [
+                 Address { place = at slot; writable = true };
+                 Address { place = mutex; writable = true };
+                 Constant (Symbol_address (Locked_table capability));
+                 implementation;
+                 tasks;
+               ];
+             result = Discarded;
+           });
+      (capability, Lir.Address { place = at slot; writable = false }))
+    evidence
 
 (* Returns from the function, whose result is already written. In an
    inlined method, jumps to the method's end instead. *)

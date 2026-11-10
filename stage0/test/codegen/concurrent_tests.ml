@@ -5,8 +5,10 @@
 
 open Codegen_support
 
+(* The output of a program whose tasks run sequentially, in the order they
+   are spawned, so that the output shows which tasks ran. *)
 let expect_main ~expected text =
-  let status, output, errors = run_main text in
+  let status, output, errors = run_main ~in_order:true text in
   if status <> 0 then fail "ended with status %d: %s" status errors;
   expect_string ~expected output
 
@@ -754,6 +756,211 @@ test "the list is the function's result" {
   assert none.length() == 0
 }
 |}
+
+(* Tasks on threads *)
+
+let expect_threaded ~expected text =
+  let status, output, errors = run_main text in
+  if status <> 0 then fail "ended with status %d: %s" status errors;
+  expect_string ~expected output
+
+let () =
+  test "on threads, calls of a mut implementation by many tasks are mutually exclusive" (fun () ->
+      expect_threaded ~expected:"total 40000 after 40000 calls\n"
+        {|type Counter(count: Int64, calls: Int64)
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+  fn calls() -> Int64
+}
+
+impl Tally for Counter {
+  fn add(mut self, amount: Int64) {
+    let before = self.count
+    self.calls += 1
+    self.count = before + amount
+  }
+
+  fn total(self) -> Int64 {
+    self.count
+  }
+
+  fn calls(self) -> Int64 {
+    self.calls
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var counter = Counter(count: 0, calls: 0)
+  provide mut counter {
+    concurrent for task in 0..8 {
+      for step in 0..5000 {
+        if task >= 0 && step >= 0 {
+          Tally.add(1)
+        }
+      }
+    }
+    Console.print_line("total ${Tally.total()} after ${Tally.calls()} calls")
+  }
+  ExitCode.success
+}
+|});
+  test "on threads, a task that waits on a key runs again when another task wakes the key"
+    (fun () ->
+      expect_threaded ~expected:"saw the flag\n"
+        {|type Flag(raised: Bool)
+
+capability Flags {
+  fn raise()
+  fn raised() -> Bool
+}
+
+impl Flags for Flag {
+  fn raise(mut self) {
+    self.raised = true
+  }
+
+  fn raised(self) -> Bool {
+    self.raised
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var flag = Flag(raised: false)
+  provide mut flag {
+    concurrent {
+      {
+        var seen = false
+        while !seen {
+          let ticket = Tasks.watch(7)
+          if Flags.raised() {
+            seen = true
+          } else {
+            Tasks.wait(7, ticket: ticket, reason: "the flag")
+          }
+        }
+        Console.print_line("saw the flag")
+      }
+      {
+        Tasks.yield_now()
+        Flags.raise()
+        Tasks.wake(7)
+      }
+    }
+  }
+  ExitCode.success
+}
+|});
+  test "on threads, a return cancels a blocked task and the tasks it has spawned" (fun () ->
+      expect_threaded ~expected:"5 cancelled true and nested true\n"
+        {|type Seen(outer: Bool, nested: Bool)
+
+capability Report {
+  fn outer(cancelled: Bool)
+  fn nested(cancelled: Bool)
+  fn text() -> String
+}
+
+impl Report for Seen {
+  fn outer(mut self, cancelled: Bool) {
+    self.outer = cancelled
+  }
+
+  fn nested(mut self, cancelled: Bool) {
+    self.nested = cancelled
+  }
+
+  fn text(self) -> String {
+    "cancelled ${self.outer} and nested ${self.nested}"
+  }
+}
+
+fn blocked()
+  uses Tasks, Report
+{
+  var waiting = true
+  while waiting {
+    let ticket = Tasks.watch(9)
+    if Tasks.cancelled() {
+      waiting = false
+    } else {
+      Tasks.wait(9, ticket: ticket, reason: "a key that is never woken")
+    }
+  }
+  Report.outer(Tasks.cancelled())
+  concurrent {
+    Report.nested(Tasks.cancelled())
+  }
+}
+
+fn race() -> Int64
+  uses Tasks, Report
+{
+  concurrent {
+    blocked()
+    {
+      Tasks.yield_now()
+      return 5
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var seen = Seen(outer: false, nested: false)
+  provide mut seen {
+    let winner = race()
+    Console.print_line("${winner} ${Report.text()}")
+  }
+  ExitCode.success
+}
+|});
+  test "on threads, tasks take ownership of their items and free the blocks" (fun () ->
+      expect_threaded ~expected:"total 1400\n"
+        {|type Sum(total: USize)
+
+capability Lengths {
+  fn add(length: USize)
+  fn total() -> USize
+}
+
+impl Lengths for Sum {
+  fn add(mut self, length: USize) {
+    self.total += length
+  }
+
+  fn total(self) -> USize {
+    self.total
+  }
+}
+
+fn labels(count: Int64) yields own String {
+  var index: Int64 = 0
+  while index < count {
+    yield "label number ${index % 10}"
+    index += 1
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var sum = Sum(total: 0)
+  provide mut sum {
+    concurrent for label in labels(100) {
+      Lengths.add(label.length())
+    }
+    Console.print_line("total ${Lengths.total()}")
+  }
+  ExitCode.success
+}
+|})
 
 (* Programs that are reported as not built *)
 

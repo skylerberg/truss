@@ -196,7 +196,7 @@ let () =
       | Error message -> failwith message)
 
 let () =
-  test "threads copy and drop references to one shared value" (fun () ->
+  test "on threads, references to one shared value are copied and dropped" (fun () ->
       let _, compile = Lazy.force loaded in
       List.iter
         (fun workers ->
@@ -207,7 +207,7 @@ let () =
           | Ok (0, output, _) -> expect_string ~expected:"released\n" output
           | Ok (status, _, errors) -> fail "ended with status %d: %s" status errors
           | Error message -> failwith message)
-        [ 1; 8 ])
+        worker_counts)
 
 (* Where the capability check allows [shared_update] and [shared_key],
    which require [Tasks], and the [Storable] bound on [Shared]'s value. *)

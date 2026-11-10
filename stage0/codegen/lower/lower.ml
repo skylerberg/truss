@@ -43,6 +43,7 @@ type constant = Constants.constant = Folded of Lir.data | Run of Ground.ty
 let constant = Constants.constant
 let evaluator = Constants.evaluator
 let table = Generated.table
+let locked_table = Generated.locked_table
 let any_table = Generated.any_table
 
 let trait_provides context ~trait ~name ~receiver =
@@ -238,6 +239,7 @@ let instance context (key : Instance.key) : Lir.t =
   match key with
   | Entry method_key -> entry context key method_key
   | Any_entry method_key -> any_entry context key method_key
+  | Locked_entry { capability; name } -> Generated.locked_entry context key ~capability ~name
   | Adapter { function_; ty } -> adapter context key ~function_ ~ty
   | Program_main main -> program_main context key main
   | Code
