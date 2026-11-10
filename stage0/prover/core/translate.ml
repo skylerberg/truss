@@ -2048,9 +2048,82 @@ and intrinsic context frame ~written (operation : Intrinsic.operation) types ope
       | View_length | View_at | View_slice ),
       element :: _ ) ->
       buffer_operation context frame ~written operation element operands ~changed known
-  | (Compare_bytes | Libc (Read | Write | Snprintf)), _ ->
+  | Compare_bytes, _ ->
       buffer_operation context frame ~written operation (T.builtin UInt8) operands ~changed known
+  | Libc function_, _ -> libc_call context frame ~written function_ operands ~changed known
   | _ -> integer_intrinsic context frame operation types operands known
+
+(* A function of the C library is never given a storage, only an address
+   into its buffer, so each storage it is lent keeps its length and its
+   capacity, whatever the function does. One passed as the room after its
+   elements keeps its elements too; one passed as its elements, for the
+   function to change, has elements nothing more is known of. What is left
+   to each function is the room it needs and what it returns. *)
+and libc_call context frame ~(written : expression) (function_ : Libc.function_) operands ~changed
+    known =
+  let { Libc.parameters; _ } = Libc.signature function_ in
+  let passed =
+    List.concat_map
+      (fun (_, (passes : Libc.passes)) ->
+        match passes with
+        | Value _ | Elements _ | Room _ | Elements_to_change _ -> [ Some passes ]
+        | Written (_, names) -> List.map (fun _ -> None) names
+        | Always _ | Environment -> [])
+      parameters
+  in
+  let storage_of scalar = T.builtin (Intrinsic.libc_builtin scalar) in
+  let length element term =
+    sequence_length context element (buffer_model context Storage element term)
+  in
+  List.iteri
+    (fun position passes ->
+      match (passes, List.nth_opt operands position, List.nth_opt changed position) with
+      | Some ((Libc.Room scalar | Elements_to_change scalar) as passes), Some before, Some after
+        -> (
+          let element = storage_of scalar in
+          let model term = buffer_model context Storage element term in
+          assume context frame
+            L.(
+              equal (length element after) (length element before)
+              &&& equal
+                    (buffer_capacity context element after)
+                    (buffer_capacity context element before));
+          match passes with
+          | Room _ -> assume context frame (L.equal (model after) (model before))
+          | _ -> ())
+      | _ -> ())
+    passed;
+  let byte = T.builtin UInt8 in
+  let needs room =
+    oblige context frame Requires written.span
+      (Printf.sprintf "`%s` may not have the room it writes into." (quote frame.source written.span))
+      room
+  in
+  let room_for buffer count =
+    L.Apply
+      ("<=", [ L.Apply ("+", [ length byte buffer; count ]); buffer_capacity context byte buffer ])
+  in
+  (match (function_, operands) with
+  | Write, [ _; bytes; count ] ->
+      (* It reads at most [count] of the view's bytes, and writes at most
+         as many. *)
+      needs
+        (L.Apply
+           ("<=", [ count; sequence_length context byte (buffer_model context View byte bytes) ]));
+      assume context frame (L.Apply ("<=", [ known; count ]))
+  | Read, [ _; buffer; count ] ->
+      (* It fills at most [count] bytes of the room after the storage's
+         elements, which are the storage's only once [storage_lengthen]
+         says so. *)
+      needs (room_for buffer count);
+      assume context frame (L.Apply ("<=", [ known; count ]))
+  | Snprintf, buffer :: size :: _ ->
+      (* It fills at most [size] bytes of the room after the storage's
+         elements. It returns how many it would have written, which may be
+         more. *)
+      needs (room_for buffer size)
+  | _ -> ());
+  known
 
 and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
@@ -4886,7 +4959,6 @@ and buffer_operation context frame ~(written : expression) (operation : Intrinsi
           (fun value -> applied context (measure_type element) (L.Symbol measure) [ value ]) )
   in
   let changed_storage () = storage (List.hd changed) in
-  let changed_storage_at position = storage (List.nth changed position) in
   match (operation, operands) with
   | Storage_model, [ buffer ] -> storage buffer
   | View_model, [ buffer ] -> view buffer
@@ -5006,30 +5078,6 @@ and buffer_operation context frame ~(written : expression) (operation : Intrinsi
       assume context frame (L.equal (view known) (storage buffer));
       known
   | Compare_bytes, [ left; right ] -> byte_order context (view left) (view right)
-  | Libc Write, [ _; bytes; count ] ->
-      (* It reads at most [count] of the view's bytes, and writes at most
-         as many. *)
-      needs (L.Apply ("<=", [ count; length (view bytes) ]));
-      assume context frame (L.Apply ("<=", [ known; count ]));
-      known
-  | Libc Read, [ _; buffer; count ] ->
-      (* It fills at most [count] bytes of the room after the storage's
-         elements, which stay as they were until [storage_lengthen]. *)
-      let before = storage buffer in
-      needs (L.Apply ("<=", [ L.Apply ("+", [ length before; count ]); capacity buffer ]));
-      assume context frame (L.equal (changed_storage_at 1) before);
-      assume context frame (L.equal (capacity (List.nth changed 1)) (capacity buffer));
-      assume context frame (L.Apply ("<=", [ known; count ]));
-      known
-  | Libc Snprintf, buffer :: size :: _ ->
-      (* It fills at most [size] bytes of the room after the storage's
-         elements, which stay as they were until [storage_lengthen]. It
-         returns how many it would have written, which may be more. *)
-      let before = storage buffer in
-      needs (L.Apply ("<=", [ L.Apply ("+", [ length before; size ]); capacity buffer ]));
-      assume context frame (L.equal (changed_storage ()) before);
-      keeps_capacity ();
-      known
   | View_slice, [ buffer; start; stop ] ->
       let whole = view buffer and part = view known in
       let k = bound () in

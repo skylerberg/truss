@@ -202,11 +202,14 @@ and `reads` clauses):
   name, so `List`, `Slice`, `String`, and `StringSlice` define `model()`
   over their buffers. Each operation reads or changes that sequence as the
   compiler makes it do: `storage_push` appends, `storage_insert` shifts
-  what follows, `view_slice` is a run of its view, and reading bytes
-  appends what it says it read; `compare_bytes` is a total lexicographic
-  order on its views' bytes, zero exactly when they are the same. An
-  operation that stops the program on a
-  bad index says what holds when it returns. A part `storage_at_mut` lends
+  what follows, `view_slice` is a run of its view, and `storage_lengthen`
+  makes the room a C function wrote into the storage's; `compare_bytes` is
+  a total lexicographic order on its views' bytes, zero exactly when they
+  are the same. A C function is given only an address into a storage, so
+  every storage it is lent keeps its length and its capacity; one passed
+  as its room keeps its elements too, and one passed as its elements, to
+  change, has elements nothing more is known of. An operation that stops
+  the program on a bad index says what holds when it returns. A part `storage_at_mut` lends
   changes nothing until the lend ends, where the storage takes back what
   the caller left in it.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
