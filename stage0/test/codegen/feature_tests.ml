@@ -116,7 +116,8 @@ test "dropped early" {
   mut colors.insert("blue")
   mut colors.insert("${1}")
   assert colors.length() == 4
-  var ages: Map[String, Int64] = ["ada": 36, "alan": 41, "ada": 37]
+  var ages: Map[String, Int64] = ["ada": 36, "alan": 41]
+  mut ages.insert("ada", value: 37)
   assert ages.length() == 2
   assert ages.contains("ada")
   mut ages.insert("grace", value: 85)
