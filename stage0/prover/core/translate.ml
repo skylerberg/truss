@@ -1500,12 +1500,17 @@ and quantified context frame (written : expression) quantifier binder body =
             inner
       | None -> unsupported written.span "a quantifier over a value without a type")
   | Binder_in
-      ( { kind = Binding_or_constant name_; _ },
+      ( ({ kind = Binding_or_constant _ | Wildcard; _ } as binding),
         { kind = Range { start = Some start; stop = Some stop; inclusive; _ }; _ } ) ->
       let _, low = value context frame start in
       let _, high = value context frame stop in
-      let ty = match local_type frame name_.id with Some ty -> ty | None -> T.Integer in
-      let inner, _ = with_bound name_.id ty in
+      let inner =
+        match binding.kind with
+        | Binding_or_constant name_ ->
+            let ty = match local_type frame name_.id with Some ty -> ty | None -> T.Integer in
+            fst (with_bound name_.id ty)
+        | _ -> { frame with bound = symbol :: frame.bound }
+      in
       let bound = L.Symbol symbol in
       let premise =
         L.(
@@ -1515,13 +1520,14 @@ and quantified context frame (written : expression) quantifier binder body =
         if inclusive then Costs.plus (Costs.minus high low) (L.int 1) else Costs.minus high low
       in
       make ~count symbol Int premise inner
-  | Binder_in ({ kind = Binding_or_constant name_; _ }, collection) -> (
+  | Binder_in (binding, collection) -> (
       (* Over a collection's elements: by index into its sequence, or each
-         value its set contains. *)
+         value its set contains, each matched against the binding's pattern,
+         which names its parts and leaves out what it does not match. *)
       let collection_type = type_of frame collection in
       let _, collected = value context frame collection in
       let element =
-        match local_type frame name_.id with
+        match Option.map (substituted frame) frame.source.checked.pattern_types.(binding.id) with
         | Some ty -> ty
         | None -> unsupported written.span "a quantifier over a value without a type"
       in
@@ -1529,7 +1535,10 @@ and quantified context frame (written : expression) quantifier binder body =
         Top { module_ = { package = "standard"; modules = [ "set" ] }; name = "Set" }
       in
       let bound_to term =
-        { frame with locals = Ids.add name_.id term frame.locals; bound = symbol :: frame.bound }
+        let matched, inner =
+          pattern_match context { frame with bound = symbol :: frame.bound } binding term element
+        in
+        (matched, inner)
       in
       match collection_type with
       | Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
@@ -1544,11 +1553,14 @@ and quantified context frame (written : expression) quantifier binder body =
             | None -> unsupported collection.span "a quantifier over `%s`" (T.show collection_type)
           in
           let each = L.Symbol symbol in
+          let matched, inner = bound_to each in
           make symbol (sort_of context element)
-            (finite_function context finite "contains" L.Bool
-               [ (each, sort_of context element) ]
-               model)
-            (bound_to each)
+            (L.( &&& )
+               (finite_function context finite "contains" L.Bool
+                  [ (each, sort_of context element) ]
+                  model)
+               matched)
+            inner
       | _ -> (
           let sequence =
             match collection_type with
@@ -1561,13 +1573,13 @@ and quantified context frame (written : expression) quantifier binder body =
               match sequence_at context element sequence index with
               | Some at ->
                   let length = sequence_length context element sequence in
+                  let matched, inner = bound_to at in
                   make ~count:length symbol Int
-                    L.(Apply ("<=", [ int 0; index ]) &&& Apply ("<", [ index; length ]))
-                    (bound_to at)
+                    L.(Apply ("<=", [ int 0; index ]) &&& Apply ("<", [ index; length ]) &&& matched)
+                    inner
               | None ->
                   unsupported collection.span "a quantifier over `%s`" (T.show collection_type))
           | None -> unsupported collection.span "a quantifier over `%s`" (T.show collection_type)))
-  | Binder_in _ -> unsupported written.span "a quantifier over a collection with a pattern"
 
 (* Calls *)
 

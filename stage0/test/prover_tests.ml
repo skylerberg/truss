@@ -1383,6 +1383,18 @@ let () =
         \  }\n\
         \  if value < 255 { value + 1 } else { value }\n\
          }\n");
+  test "a quantifier's pattern takes each element apart" (fun () ->
+      proven
+        "type Span(low: Int64, high: Int64)\n\n\
+         fn f(spans: List[Span]) -> Bool\n\
+        \  requires forall (low, high) in spans => low <= high\n\
+        \  ensures result\n\
+         {\n\
+        \  spans.length() == 0 || spans[0].low <= spans[0].high\n\
+         }\n");
+  test "a quantifier over a range may ignore its index" (fun () ->
+      proven
+        "fn f(count: Int64) -> Bool\n  ensures result\n{\n  forall _ in 0..count => true\n}\n");
   test "a quantifier over a list ranges over its elements" (fun () ->
       proven
         "fn f(items: List[Int64]) -> Bool\n\
@@ -2093,8 +2105,7 @@ let () =
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
-      not_proven "fn f(items: List[Int64]) -> Bool {\n  forall _ in items => true\n}\n"
-        "prover.unsupported");
+      not_proven "fn f() -> Range[Int64] {\n  0..3\n}\n" "prover.unsupported");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\
