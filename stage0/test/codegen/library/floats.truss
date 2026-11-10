@@ -1,0 +1,233 @@
+test "a float says whether it is finite, infinite, or negative" {
+  let one: Float64 = 1.0
+  let negative_zero: Float64 = -0.0
+  assert one.is_finite()
+  assert !one.is_infinite()
+  assert Float64.infinity.is_infinite()
+  assert Float64.negative_infinity.is_infinite()
+  assert !Float64.infinity.is_finite()
+  assert !Float64.not_a_number.is_finite()
+  assert !Float64.not_a_number.is_infinite()
+  assert negative_zero.is_negative()
+  assert !one.is_negative()
+  assert Float64.negative_infinity.is_negative()
+  let single: Float32 = -3.5
+  assert single.is_finite()
+  assert single.is_negative()
+  assert Float32.infinity.is_infinite()
+  assert !Float32.not_a_number.is_finite()
+}
+
+test "absolute and copy_sign change only the sign" {
+  let value: Float64 = -2.5
+  let negative_zero: Float64 = -0.0
+  let three: Float64 = 3.0
+  assert value.absolute() == 2.5
+  assert !negative_zero.absolute().is_negative()
+  assert Float64.negative_infinity.absolute() == Float64.infinity
+  assert Float64.not_a_number.absolute().is_nan()
+  assert three.copy_sign(value) == -3.0
+  assert value.copy_sign(three) == 2.5
+  assert three.copy_sign(negative_zero) == -3.0
+  let single: Float32 = -1.5
+  assert single.absolute() == 1.5
+  assert single.absolute().copy_sign(single) == -1.5
+}
+
+test "a float rounds down, up, to the nearest, and toward zero" {
+  let half: Float64 = 2.5
+  let negative: Float64 = -2.5
+  assert half.floor() == 2.0
+  assert half.ceiling() == 3.0
+  assert half.round() == 3.0
+  assert half.round_to_even() == 2.0
+  assert half.truncate() == 2.0
+  assert negative.floor() == -3.0
+  assert negative.ceiling() == -2.0
+  assert negative.round() == -3.0
+  assert negative.round_to_even() == -2.0
+  assert negative.truncate() == -2.0
+  let below_half: Float64 = 0.49999999999999994
+  assert below_half.round() == 0.0
+  let odd: Float64 = 3.5
+  assert odd.round_to_even() == 4.0
+  let large: Float64 = 4503599627370497.0
+  assert large.round() == large
+  let small: Float64 = -0.4
+  assert small.round().is_negative()
+  assert Float64.infinity.round() == Float64.infinity
+  assert Float64.not_a_number.round().is_nan()
+  let single: Float32 = 1.5
+  assert single.round() == 2.0
+  assert single.floor() == 1.0
+}
+
+test "a float gives its fraction and its sign" {
+  let value: Float64 = 2.75
+  let negative: Float64 = -2.75
+  let zero: Float64 = 0.0
+  let negative_zero: Float64 = -0.0
+  assert value.fraction() == 0.75
+  assert negative.fraction() == -0.75
+  assert value.sign() == 1.0
+  assert negative.sign() == -1.0
+  assert zero.sign() == 0.0
+  assert negative_zero.sign().is_negative()
+  assert Float64.not_a_number.sign().is_nan()
+  assert Float64.negative_infinity.sign() == -1.0
+}
+
+fn close(found: Float64, expected: Float64) -> Bool {
+  (found - expected).absolute() <= expected.absolute() * 1.0e-15
+}
+
+test "degrees and radians convert both ways" {
+  let straight: Float64 = 180.0
+  let right: Float64 = 1.5707963267948966
+  assert close(straight.to_radians(), expected: 3.141592653589793)
+  assert close(right.to_degrees(), expected: 90.0)
+  let single: Float32 = 180.0
+  assert (single.to_radians() - 3.1415927).absolute() < 0.000001
+}
+
+test "the IEEE comparisons treat a float that is not a number as unordered" {
+  let one: Float64 = 1.0
+  let two: Float64 = 2.0
+  let nothing = Float64.not_a_number
+  assert nothing == nothing
+  assert nothing.ieee_not_equal(nothing)
+  assert !one.ieee_not_equal(one)
+  assert one.ieee_less_or_equal(one)
+  assert one.ieee_less_or_equal(two)
+  assert !two.ieee_less_or_equal(one)
+  assert !nothing.ieee_less_or_equal(one)
+  assert !one.ieee_less_or_equal(nothing)
+  assert two.ieee_greater(one)
+  assert !one.ieee_greater(one)
+  assert !nothing.ieee_greater(one)
+  assert one.ieee_greater_or_equal(one)
+  assert !one.ieee_greater_or_equal(nothing)
+}
+
+test "a float is raised to a whole power" {
+  let two: Float64 = 2.0
+  let negative: Float64 = -2.0
+  assert two.power_integer(10) == 1024.0
+  assert two.power_integer(-2) == 0.25
+  assert two.power_integer(0) == 1.0
+  assert negative.power_integer(3) == -8.0
+  assert two.power_integer(1024) == Float64.infinity
+  assert two.power_integer(Int32.minimum) == 0.0
+  let single: Float32 = 3.0
+  assert single.power_integer(4) == 81.0
+}
+
+test "fused multiply and add rounds once" {
+  let tenth: Float64 = 0.1
+  let ten: Float64 = 10.0
+  assert tenth * ten - 1.0 == 0.0
+  assert tenth.fused_multiply_add(ten, addend: -1.0) == 5.551115123125783e-17
+  let two: Float64 = 2.0
+  assert two.fused_multiply_add(3.0, addend: 1.0) == 7.0
+}
+
+test "a hypotenuse does not overflow on the way" {
+  let three: Float64 = 3.0
+  let huge: Float64 = 1.0e200
+  let zero: Float64 = 0.0
+  assert three.hypotenuse(4.0) == 5.0
+  assert three.hypotenuse(-4.0) == 5.0
+  assert huge.hypotenuse(huge).is_finite()
+  assert close(huge.hypotenuse(huge), expected: 1.4142135623730951e200)
+  assert zero.hypotenuse(zero) == 0.0
+  assert Float64.infinity.hypotenuse(Float64.not_a_number) == Float64.infinity
+  assert three.hypotenuse(Float64.not_a_number).is_nan()
+  let single: Float32 = 6.0
+  assert single.hypotenuse(8.0) == 10.0
+}
+
+test "a sum keeps what each addition rounds away" {
+  let tenths: List[Float64] = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+  assert Float64.sum(tenths) == 1.0
+  let cancelling: List[Float64] = [1.0e100, 1.0, -1.0e100]
+  assert Float64.sum(cancelling) == 1.0
+  let none: List[Float64] = []
+  assert Float64.sum(none) == 0.0
+  let unbounded: List[Float64] = [1.0, Float64.infinity, 2.0]
+  assert Float64.sum(unbounded) == Float64.infinity
+  let singles: List[Float32] = [1.5, 2.5, -1.0]
+  assert Float32.sum(singles) == 3.0
+}
+
+test "an integer converts to the nearest float" {
+  let odd: Int64 = 9007199254740993
+  assert odd.to_float64() == 9007199254740992.0
+  assert UInt64.maximum.to_float64() == 18446744073709551616.0
+  assert Int64.minimum.to_float64() == -9223372036854775808.0
+  let wide: Int32 = 16777217
+  assert wide.to_float32() == 16777216.0
+  let small: Int32 = -7
+  assert Float64.from(small) == -7.0
+  let byte: UInt8 = 200
+  assert Float32.from(byte) == 200.0
+  let single: Float32 = 1.5
+  assert Float64.from(single) == 1.5
+}
+
+test "a float narrows to the nearest single, or to an infinity" {
+  let tenth: Float64 = 0.1
+  let single_tenth: Float32 = 0.1
+  let huge: Float64 = 1.0e300
+  assert tenth.to_float32() == single_tenth
+  assert huge.to_float32() == Float32.infinity
+  assert (-huge).to_float32() == Float32.negative_infinity
+  assert Float64.not_a_number.to_float32().is_nan()
+  let greatest: Float64 = 3.4028234663852886e38
+  assert greatest.to_float32() == Float32.maximum
+}
+
+test "a float converts to an integer only when it is whole and fits" {
+  let two: Float64 = 2.0
+  let half: Float64 = 2.5
+  let negative_zero: Float64 = -0.0
+  assert Int32.try_from(two) == Ok(2)
+  assert Int32.try_from(half) is Err(_)
+  assert Int32.try_from(Float64.not_a_number) is Err(_)
+  assert Int32.try_from(Float64.infinity) is Err(_)
+  let past: Float64 = 2147483648.0
+  let least: Float64 = -2147483648.0
+  assert Int32.try_from(past) is Err(_)
+  assert Int32.try_from(least) == Ok(Int32.minimum)
+  assert UInt8.try_from(negative_zero) == Ok(0)
+  let full: Float64 = 255.0
+  let over: Float64 = 256.0
+  let minus_one: Float64 = -1.0
+  assert UInt8.try_from(full) == Ok(255)
+  assert UInt8.try_from(over) is Err(_)
+  assert UInt8.try_from(minus_one) is Err(_)
+  let beyond: Float64 = 9223372036854775808.0
+  let lowest: Float64 = -9223372036854775808.0
+  assert Int64.try_from(beyond) is Err(_)
+  assert Int64.try_from(lowest) == Ok(Int64.minimum)
+  let single: Float32 = 65535.0
+  assert UInt16.try_from(single) == Ok(65535)
+  let single_half: Float32 = 0.5
+  assert UInt16.try_from(single_half) is Err(_)
+}
+
+test "a float is cut toward zero and held within an integer's range" {
+  assert Int64.saturating_from(1.9) == 1
+  assert Int64.saturating_from(-1.9) == -1
+  assert Int64.saturating_from(1.0e30) == Int64.maximum
+  assert Int64.saturating_from(-1.0e30) == Int64.minimum
+  assert Int64.saturating_from(Float64.not_a_number) == 0
+  assert Int64.saturating_from(Float64.infinity) == Int64.maximum
+  assert Int64.saturating_from(Float64.negative_infinity) == Int64.minimum
+  assert UInt8.saturating_from(255.9) == 255
+  assert UInt8.saturating_from(256.0) == 255
+  assert UInt8.saturating_from(-0.5) == 0
+  assert UInt8.saturating_from(-5.0) == 0
+  assert Int8.saturating_from(-128.9) == -128
+  assert Int8.saturating_from(-129.0) == -128
+  assert USize.saturating_from(1.0e30) == USize.maximum
+}

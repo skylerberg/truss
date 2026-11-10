@@ -133,19 +133,27 @@ public fn Int8.absolute_difference(self, other: Int8) -> UInt8
 public fn Int8.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn Int8.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn Int8.saturating_from(value: Float64) -> Int8
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, Int8](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    Int8.minimum
+  } else {
+    Int8.maximum
+  }
 }
 
 public fn Int8.total(items: Slice[Int8]) -> Integer
@@ -449,19 +457,27 @@ public fn Int16.absolute_difference(self, other: Int16) -> UInt16
 public fn Int16.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn Int16.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn Int16.saturating_from(value: Float64) -> Int16
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, Int16](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    Int16.minimum
+  } else {
+    Int16.maximum
+  }
 }
 
 public fn Int16.total(items: Slice[Int16]) -> Integer
@@ -765,19 +781,27 @@ public fn Int32.absolute_difference(self, other: Int32) -> UInt32
 public fn Int32.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn Int32.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn Int32.saturating_from(value: Float64) -> Int32
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, Int32](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    Int32.minimum
+  } else {
+    Int32.maximum
+  }
 }
 
 public fn Int32.total(items: Slice[Int32]) -> Integer
@@ -1081,19 +1105,27 @@ public fn Int64.absolute_difference(self, other: Int64) -> UInt64
 public fn Int64.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn Int64.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn Int64.saturating_from(value: Float64) -> Int64
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, Int64](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    Int64.minimum
+  } else {
+    Int64.maximum
+  }
 }
 
 public fn Int64.total(items: Slice[Int64]) -> Integer
@@ -1397,19 +1429,27 @@ public fn ISize.absolute_difference(self, other: ISize) -> USize
 public fn ISize.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn ISize.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn ISize.saturating_from(value: Float64) -> ISize
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, ISize](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    ISize.minimum
+  } else {
+    ISize.maximum
+  }
 }
 
 public fn ISize.total(items: Slice[ISize]) -> Integer
@@ -1692,19 +1732,27 @@ public fn UInt8.absolute_difference(self, other: UInt8) -> UInt8
 public fn UInt8.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn UInt8.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn UInt8.saturating_from(value: Float64) -> UInt8
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, UInt8](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    UInt8.minimum
+  } else {
+    UInt8.maximum
+  }
 }
 
 public fn UInt8.total(items: Slice[UInt8]) -> Integer
@@ -1986,19 +2034,27 @@ public fn UInt16.absolute_difference(self, other: UInt16) -> UInt16
 public fn UInt16.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn UInt16.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn UInt16.saturating_from(value: Float64) -> UInt16
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, UInt16](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    UInt16.minimum
+  } else {
+    UInt16.maximum
+  }
 }
 
 public fn UInt16.total(items: Slice[UInt16]) -> Integer
@@ -2280,19 +2336,27 @@ public fn UInt32.absolute_difference(self, other: UInt32) -> UInt32
 public fn UInt32.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn UInt32.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn UInt32.saturating_from(value: Float64) -> UInt32
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, UInt32](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    UInt32.minimum
+  } else {
+    UInt32.maximum
+  }
 }
 
 public fn UInt32.total(items: Slice[UInt32]) -> Integer
@@ -2574,19 +2638,27 @@ public fn UInt64.absolute_difference(self, other: UInt64) -> UInt64
 public fn UInt64.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn UInt64.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn UInt64.saturating_from(value: Float64) -> UInt64
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, UInt64](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    UInt64.minimum
+  } else {
+    UInt64.maximum
+  }
 }
 
 public fn UInt64.total(items: Slice[UInt64]) -> Integer
@@ -2868,19 +2940,27 @@ public fn USize.absolute_difference(self, other: USize) -> USize
 public fn USize.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn USize.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::convert(self)
 }
 
 public fn USize.saturating_from(value: Float64) -> USize
   cost time O(1)
 {
-  todo
+  if intrinsic::fits[Float64, USize](value) {
+    intrinsic::convert(value)
+  } else if intrinsic::is_nan(value) {
+    0
+  } else if value < 0.0 {
+    USize.minimum
+  } else {
+    USize.maximum
+  }
 }
 
 public fn USize.total(items: Slice[USize]) -> Integer

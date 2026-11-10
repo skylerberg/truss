@@ -19,67 +19,75 @@ public let Float32.epsilon: Float32 = 1.1920929e-7
 public fn Float32.is_infinite(self) -> Bool
   cost time O(1)
 {
-  todo
+  (self.to_bits() & 0x7fff_ffff) == 0x7f80_0000
 }
 
 public fn Float32.is_finite(self) -> Bool
   cost time O(1)
 {
-  todo
+  (self.to_bits() & 0x7fff_ffff) < 0x7f80_0000
 }
 
 public fn Float32.is_negative(self) -> Bool
   cost time O(1)
 {
-  todo
+  self.to_bits() >= 0x8000_0000
 }
 
 public fn Float32.absolute(self) -> Float32
   cost time O(1)
 {
-  todo
+  Float32.from_bits(self.to_bits() & 0x7fff_ffff)
 }
 
 public fn Float32.floor(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::floor(self)
 }
 
 public fn Float32.ceiling(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::ceiling(self)
 }
 
 public fn Float32.round(self) -> Float32
   cost time O(1)
 {
-  todo
+  let whole = intrinsic::truncate(self)
+  let one: Float32 = 1.0
+  if (self - whole).absolute() >= 0.5 { whole + one.copy_sign(self) } else { whole }
 }
 
 public fn Float32.round_to_even(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::round_to_even(self)
 }
 
 public fn Float32.truncate(self) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::truncate(self)
 }
 
 public fn Float32.fraction(self) -> Float32
   cost time O(1)
 {
-  todo
+  self - intrinsic::truncate(self)
 }
 
 public fn Float32.sign(self) -> Float32
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) || self == 0.0 {
+    self
+  } else if self < 0.0 {
+    -1.0
+  } else {
+    1.0
+  }
 }
 
 public fn Float32.cube_root(self) -> Float32
@@ -199,13 +207,13 @@ public fn Float32.inverse_hyperbolic_tangent(self) -> Float32
 public fn Float32.to_degrees(self) -> Float32
   cost time O(1)
 {
-  todo
+  self * 57.29577951308232
 }
 
 public fn Float32.to_radians(self) -> Float32
   cost time O(1)
 {
-  todo
+  self * 0.017453292519943295
 }
 
 public fn Float32.power(self, exponent: Float32) -> Float32
@@ -229,49 +237,74 @@ public fn Float32.arctangent_2(self, x: Float32) -> Float32
 public fn Float32.copy_sign(self, sign: Float32) -> Float32
   cost time O(1)
 {
-  todo
+  Float32.from_bits((self.to_bits() & 0x7fff_ffff) | (sign.to_bits() & 0x8000_0000))
 }
 
 public fn Float32.hypotenuse(self, other: Float32) -> Float32
   cost time O(1)
 {
-  todo
+  let first = self.absolute()
+  let second = other.absolute()
+  if first.is_infinite() || second.is_infinite() {
+    return Float32.infinity
+  }
+  let larger = if first < second { second } else { first }
+  let smaller = if first < second { first } else { second }
+  if larger == 0.0 || intrinsic::is_nan(larger) {
+    return larger
+  }
+  let ratio = smaller / larger
+  larger * intrinsic::square_root(1.0 + ratio * ratio)
 }
 
 public fn Float32.ieee_not_equal(self, other: Float32) -> Bool
   cost time O(1)
 {
-  todo
+  !intrinsic::ieee_equal(self, right: other)
 }
 
 public fn Float32.ieee_less_or_equal(self, other: Float32) -> Bool
   cost time O(1)
 {
-  todo
+  intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other)
 }
 
 public fn Float32.ieee_greater(self, other: Float32) -> Bool
   cost time O(1)
 {
-  todo
+  intrinsic::ieee_less(other, right: self)
 }
 
 public fn Float32.ieee_greater_or_equal(self, other: Float32) -> Bool
   cost time O(1)
 {
-  todo
+  intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other)
 }
 
 public fn Float32.power_integer(self, exponent: Int32) -> Float32
   cost time O(1)
 {
-  todo
+  let magnitude = exponent.unsigned_absolute()
+  var result: Float32 = 1.0
+  var square = self
+  var bit: USize = 0
+  while bit < 32 && (magnitude >> bit) != 0
+    invariant bit <= 32
+    decreases 32 - bit
+  {
+    if (magnitude >> bit) % 2 == 1 {
+      result = result * square
+    }
+    square = square * square
+    bit += 1
+  }
+  if exponent < 0 { 1.0 / result } else { result }
 }
 
 public fn Float32.fused_multiply_add(self, multiplier: Float32, addend: Float32) -> Float32
   cost time O(1)
 {
-  todo
+  intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend)
 }
 
 public fn Float32.to_bits(self) -> UInt32
@@ -289,7 +322,18 @@ public fn Float32.from_bits(bits: UInt32) -> Float32
 public fn Float32.sum(items: Slice[Float32]) -> Float32
   cost time O(items.length())
 {
-  todo
+  var total: Float32 = 0.0
+  var lost: Float32 = 0.0
+  for item in items {
+    let next = total + item
+    if total.absolute() >= item.absolute() {
+      lost = lost + ((total - next) + item)
+    } else {
+      lost = lost + ((item - next) + total)
+    }
+    total = next
+  }
+  if lost.is_finite() { total + lost } else { total }
 }
 
 public fn Float32.to_fixed(self, decimals: USize) -> String
@@ -313,106 +357,160 @@ impl text::Parse for Float32 {
 }
 
 impl From[Int8] for Float32 {
-  fn from(value: own Int8) -> Float32 {
-    todo
+  fn from(value: own Int8) -> Float32
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl From[Int16] for Float32 {
-  fn from(value: own Int16) -> Float32 {
-    todo
+  fn from(value: own Int16) -> Float32
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl From[UInt8] for Float32 {
-  fn from(value: own UInt8) -> Float32 {
-    todo
+  fn from(value: own UInt8) -> Float32
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl From[UInt16] for Float32 {
-  fn from(value: own UInt16) -> Float32 {
-    todo
+  fn from(value: own UInt16) -> Float32
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl TryFrom[Float32] for Int8 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[Int8, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[Int8, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int8](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for Int16 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[Int16, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[Int16, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int16](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for Int32 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[Int32, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[Int32, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int32](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for Int64 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[Int64, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[Int64, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Int64](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for ISize {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[ISize, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[ISize, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, ISize](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for UInt8 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[UInt8, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[UInt8, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt8](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for UInt16 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[UInt16, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[UInt16, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt16](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for UInt32 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[UInt32, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[UInt32, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt32](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for UInt64 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[UInt64, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[UInt64, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, UInt64](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float32] for USize {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float32) -> Result[USize, core::ConversionError] {
-    todo
+  fn try_from(value: own Float32) -> Result[USize, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, USize](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
@@ -433,67 +531,75 @@ public let Float64.epsilon: Float64 = 2.220446049250313e-16
 public fn Float64.is_infinite(self) -> Bool
   cost time O(1)
 {
-  todo
+  (self.to_bits() & 0x7fff_ffff_ffff_ffff) == 0x7ff0_0000_0000_0000
 }
 
 public fn Float64.is_finite(self) -> Bool
   cost time O(1)
 {
-  todo
+  (self.to_bits() & 0x7fff_ffff_ffff_ffff) < 0x7ff0_0000_0000_0000
 }
 
 public fn Float64.is_negative(self) -> Bool
   cost time O(1)
 {
-  todo
+  self.to_bits() >= 0x8000_0000_0000_0000
 }
 
 public fn Float64.absolute(self) -> Float64
   cost time O(1)
 {
-  todo
+  Float64.from_bits(self.to_bits() & 0x7fff_ffff_ffff_ffff)
 }
 
 public fn Float64.floor(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::floor(self)
 }
 
 public fn Float64.ceiling(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::ceiling(self)
 }
 
 public fn Float64.round(self) -> Float64
   cost time O(1)
 {
-  todo
+  let whole = intrinsic::truncate(self)
+  let one: Float64 = 1.0
+  if (self - whole).absolute() >= 0.5 { whole + one.copy_sign(self) } else { whole }
 }
 
 public fn Float64.round_to_even(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::round_to_even(self)
 }
 
 public fn Float64.truncate(self) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::truncate(self)
 }
 
 public fn Float64.fraction(self) -> Float64
   cost time O(1)
 {
-  todo
+  self - intrinsic::truncate(self)
 }
 
 public fn Float64.sign(self) -> Float64
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) || self == 0.0 {
+    self
+  } else if self < 0.0 {
+    -1.0
+  } else {
+    1.0
+  }
 }
 
 public fn Float64.cube_root(self) -> Float64
@@ -613,13 +719,13 @@ public fn Float64.inverse_hyperbolic_tangent(self) -> Float64
 public fn Float64.to_degrees(self) -> Float64
   cost time O(1)
 {
-  todo
+  self * 57.29577951308232
 }
 
 public fn Float64.to_radians(self) -> Float64
   cost time O(1)
 {
-  todo
+  self * 0.017453292519943295
 }
 
 public fn Float64.power(self, exponent: Float64) -> Float64
@@ -643,49 +749,74 @@ public fn Float64.arctangent_2(self, x: Float64) -> Float64
 public fn Float64.copy_sign(self, sign: Float64) -> Float64
   cost time O(1)
 {
-  todo
+  Float64.from_bits((self.to_bits() & 0x7fff_ffff_ffff_ffff) | (sign.to_bits() & 0x8000_0000_0000_0000))
 }
 
 public fn Float64.hypotenuse(self, other: Float64) -> Float64
   cost time O(1)
 {
-  todo
+  let first = self.absolute()
+  let second = other.absolute()
+  if first.is_infinite() || second.is_infinite() {
+    return Float64.infinity
+  }
+  let larger = if first < second { second } else { first }
+  let smaller = if first < second { first } else { second }
+  if larger == 0.0 || intrinsic::is_nan(larger) {
+    return larger
+  }
+  let ratio = smaller / larger
+  larger * intrinsic::square_root(1.0 + ratio * ratio)
 }
 
 public fn Float64.ieee_not_equal(self, other: Float64) -> Bool
   cost time O(1)
 {
-  todo
+  !intrinsic::ieee_equal(self, right: other)
 }
 
 public fn Float64.ieee_less_or_equal(self, other: Float64) -> Bool
   cost time O(1)
 {
-  todo
+  intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other)
 }
 
 public fn Float64.ieee_greater(self, other: Float64) -> Bool
   cost time O(1)
 {
-  todo
+  intrinsic::ieee_less(other, right: self)
 }
 
 public fn Float64.ieee_greater_or_equal(self, other: Float64) -> Bool
   cost time O(1)
 {
-  todo
+  intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other)
 }
 
 public fn Float64.power_integer(self, exponent: Int32) -> Float64
   cost time O(1)
 {
-  todo
+  let magnitude = exponent.unsigned_absolute()
+  var result: Float64 = 1.0
+  var square = self
+  var bit: USize = 0
+  while bit < 32 && (magnitude >> bit) != 0
+    invariant bit <= 32
+    decreases 32 - bit
+  {
+    if (magnitude >> bit) % 2 == 1 {
+      result = result * square
+    }
+    square = square * square
+    bit += 1
+  }
+  if exponent < 0 { 1.0 / result } else { result }
 }
 
 public fn Float64.fused_multiply_add(self, multiplier: Float64, addend: Float64) -> Float64
   cost time O(1)
 {
-  todo
+  intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend)
 }
 
 public fn Float64.to_bits(self) -> UInt64
@@ -703,7 +834,18 @@ public fn Float64.from_bits(bits: UInt64) -> Float64
 public fn Float64.sum(items: Slice[Float64]) -> Float64
   cost time O(items.length())
 {
-  todo
+  var total: Float64 = 0.0
+  var lost: Float64 = 0.0
+  for item in items {
+    let next = total + item
+    if total.absolute() >= item.absolute() {
+      lost = lost + ((total - next) + item)
+    } else {
+      lost = lost + ((item - next) + total)
+    }
+    total = next
+  }
+  if lost.is_finite() { total + lost } else { total }
 }
 
 public fn Float64.to_fixed(self, decimals: USize) -> String
@@ -727,129 +869,192 @@ impl text::Parse for Float64 {
 }
 
 impl From[Int8] for Float64 {
-  fn from(value: own Int8) -> Float64 {
-    todo
+  fn from(value: own Int8) -> Float64
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl From[Int16] for Float64 {
-  fn from(value: own Int16) -> Float64 {
-    todo
+  fn from(value: own Int16) -> Float64
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl From[Int32] for Float64 {
-  fn from(value: own Int32) -> Float64 {
-    todo
+  fn from(value: own Int32) -> Float64
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl From[UInt8] for Float64 {
-  fn from(value: own UInt8) -> Float64 {
-    todo
+  fn from(value: own UInt8) -> Float64
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl From[UInt16] for Float64 {
-  fn from(value: own UInt16) -> Float64 {
-    todo
+  fn from(value: own UInt16) -> Float64
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl From[UInt32] for Float64 {
-  fn from(value: own UInt32) -> Float64 {
-    todo
+  fn from(value: own UInt32) -> Float64
+  {
+    intrinsic::convert(value)
   }
 }
 
 impl TryFrom[Float64] for Int8 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[Int8, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[Int8, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int8](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for Int16 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[Int16, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[Int16, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int16](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for Int32 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[Int32, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[Int32, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int32](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for Int64 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[Int64, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[Int64, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Int64](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for ISize {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[ISize, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[ISize, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, ISize](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for UInt8 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[UInt8, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[UInt8, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt8](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for UInt16 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[UInt16, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[UInt16, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt16](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for UInt32 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[UInt32, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[UInt32, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt32](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for UInt64 {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[UInt64, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[UInt64, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, UInt64](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl TryFrom[Float64] for USize {
   type Error = core::ConversionError
 
-  fn try_from(value: own Float64) -> Result[USize, core::ConversionError] {
-    todo
+  fn try_from(value: own Float64) -> Result[USize, core::ConversionError]
+  {
+    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, USize](value) {
+      Ok(intrinsic::convert(value))
+    } else {
+      Err(core::ConversionError())
+    }
   }
 }
 
 impl From[Float32] for Float64 {
-  fn from(value: own Float32) -> Float64 {
-    todo
+  fn from(value: own Float32) -> Float64
+  {
+    intrinsic::convert(value)
   }
 }
 
 public fn Float64.to_float32(self) -> Float32
   cost time O(1)
 {
-  todo
+  if intrinsic::is_nan(self) {
+    Float32.not_a_number
+  } else if self.absolute() >= 3.4028235677973366e38 {
+    if self < 0.0 { Float32.negative_infinity } else { Float32.infinity }
+  } else {
+    intrinsic::convert(self)
+  }
 }
