@@ -276,24 +276,13 @@ let code_of context (path : Path.t) type_arguments : code =
         match impl with
         | Derived _ -> None
         | _ -> (
-            let impl_key = key_of context impl in
-            match demand context Names.definition impl_key with
-            | Some { kind = Impl { members; _ }; _ } ->
-                List.find_map
-                  (fun (member : S.impl_member S.line) ->
-                    match member.kind with
-                    | Impl_method { signature; body }
-                      when name_of signature = name && receiver_of signature.parameters = receiver
-                      ->
-                        Some (signature, body)
-                    | _ -> None)
-                  members
-            | _ -> bug "%s is not an impl" (Path.show impl))
+            match Interface.Summary.definition context.database path with
+            | Some (key, { kind = Function { signature; body }; _ }) -> Some (key, signature, body)
+            | _ -> None)
       in
       match written with
-      | Some (signature, body) ->
-          let impl_key = key_of context impl in
-          function_code ~definition_key:impl_key ~anchor:impl ~checked:(checked_of context impl_key)
+      | Some (key, signature, body) ->
+          function_code ~definition_key:key ~anchor:path ~checked:(checked_of context key)
             ~signature ~body ~interface ~substitution
       | None -> (
           (* A method the trait provides, compiled for this [impl]: the
@@ -322,22 +311,17 @@ let code_of context (path : Path.t) type_arguments : code =
                    (generic.generic, T.substitute_argument impl_substitution argument))
                  trait_interface.trait_generics impl_interface.implements.trait_arguments
           in
+          let trait_method = Path.Method { owner = trait; name; receiver } in
           match demand context Names.definition trait_key with
-          | Some { kind = Trait { members; _ }; _ } -> (
+          | Some { kind = Trait _; _ } -> (
               let provided =
-                List.find_map
-                  (fun (member : S.trait_member S.line) ->
-                    match member.kind with
-                    | Trait_method { signature; body = Some body }
-                      when name_of signature = name && receiver_of signature.parameters = receiver
-                      ->
-                        Some (signature, body)
-                    | _ -> None)
-                  members
+                match Interface.Summary.definition context.database trait_method with
+                | Some (key, { kind = Function { signature; body }; _ }) ->
+                    Some (key, signature, body)
+                | _ -> None
               in
               match provided with
-              | Some (signature, body) ->
-                  let trait_method = Path.Method { owner = trait; name; receiver } in
+              | Some (method_key, signature, body) ->
                   let trait_signature = signature_of context trait_method in
                   let own =
                     List.filteri
@@ -349,8 +333,8 @@ let code_of context (path : Path.t) type_arguments : code =
                       (fun (generic : T.generic) -> not (Path.equal generic.generic.owner trait))
                       trait_signature.generics
                   in
-                  function_code ~definition_key:trait_key ~anchor:trait
-                    ~checked:(checked_of context trait_key) ~signature ~body
+                  function_code ~definition_key:method_key ~anchor:trait_method
+                    ~checked:(checked_of context method_key) ~signature ~body
                     ~interface:trait_signature
                     ~substitution:(self_substitution @ bind own_generics own @ substitution)
               | None -> bug "%s neither writes nor is given %s" (Path.show impl) name)
