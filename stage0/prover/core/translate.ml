@@ -2277,10 +2277,10 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
   let known = arrive context frame "result" result_type in
   match (operation, types) with
   | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
-      | Storage_capacity | Storage_set_capacity | Storage_lengthen | Storage_push | Storage_pop
-      | Storage_insert | Storage_remove | Storage_swap | Storage_at | Storage_at_mut | Storage_view
-      | View_at_mut | View_swap | Storage_view_mut | Storage_take_view | View_take_view
-      | View_length | View_at | View_slice ),
+      | Storage_capacity | Storage_set_capacity | Storage_lengthen | Storage_shorten | Storage_push
+      | Storage_pop | Storage_insert | Storage_remove | Storage_swap | Storage_at | Storage_at_mut
+      | Storage_view | View_at_mut | View_swap | Storage_view_mut | Storage_take_view
+      | View_take_view | View_length | View_at | View_slice ),
       element :: _ ) ->
       buffer_operation context frame ~node operation element operands ~changed known
   | Compare_bytes, _ ->
@@ -5086,10 +5086,10 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       L.(Apply ("<=", [ length sequence; capacity term ]) &&& fits (capacity term));
     sequence
   in
-  let needs room =
+  let needs ?(what = "have the room it writes into") condition =
     oblige context frame Requires (at frame node)
-      (Printf.sprintf "`%s` may not have the room it writes into." (quote frame.source node.origin))
-      room
+      (Printf.sprintf "`%s` may not %s." (quote frame.source node.origin) what)
+      condition
   in
   let keeps_capacity () =
     assume context frame (L.equal (capacity (List.hd changed)) (capacity (List.hd operands)))
@@ -5148,6 +5148,17 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       assume context frame
         (all k (L.int 0) (length before) (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
       known
+  | Storage_shorten, [ buffer; shorter ] ->
+      (* The first [shorter] elements, in the same room. *)
+      let before = storage buffer and after = changed_storage () in
+      needs ~what:"be given a length at most the storage's"
+        (L.Apply ("<=", [ shorter; length before ]));
+      keeps_capacity ();
+      let k = bound () in
+      assume context frame (L.equal (length after) shorter);
+      assume context frame
+        (all k (L.int 0) shorter (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+      known
   | Storage_push, [ buffer; value ] ->
       needs (L.Apply ("<", [ length (storage buffer); capacity buffer ]));
       keeps_capacity ();
@@ -5155,6 +5166,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       assume context frame (L.equal (changed_storage ()) longer);
       known
   | Storage_pop, [ _ ] ->
+      keeps_capacity ();
       let longer = appended context frame element (changed_storage ()) known in
       assume context frame (L.equal (storage (List.hd operands)) longer);
       known
@@ -5188,6 +5200,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
              L.equal (sum after) (L.Apply ("+", [ sum before; measure value ]))));
       known
   | Storage_remove, [ buffer; index ] ->
+      keeps_capacity ();
       let before = storage buffer and after = changed_storage () in
       let k = bound () in
       assume context frame
@@ -5210,7 +5223,10 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
   | (Storage_swap | View_swap), [ buffer; first; second ] ->
       let before, after =
         if operation = View_swap then (view buffer, view (List.hd changed))
-        else (storage buffer, changed_storage ())
+        else begin
+          keeps_capacity ();
+          (storage buffer, changed_storage ())
+        end
       in
       let k = bound () in
       assume context frame
