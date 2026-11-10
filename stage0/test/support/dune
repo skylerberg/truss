@@ -8,6 +8,7 @@
   path
   workspace
   diagnostic
+  documents
   source
   types
   resolve

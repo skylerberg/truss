@@ -390,12 +390,17 @@ let no_diagnostics ~check files =
       ignore (check_module_core_invariants database (module_of name)))
     files
 
-let one_diagnostic ~check ?(others = []) ?fixed text code =
+let one_diagnostic ~check ?(others = []) ?fixed ?says text code =
   let database = setup (("app::main", text) :: others) in
   match checked ~check database "app::main" with
   | [ (diagnostic : Diagnostic.t) ] -> (
       let actual = Diagnostic.Code.name diagnostic.code in
       if actual <> code then fail "expected %s, got %s: %s" code actual diagnostic.message;
+      Option.iter
+        (fun says ->
+          if Documents.find diagnostic.message says ~occurrence:1 < 0 then
+            fail "expected a message that says %S, got: %s" says diagnostic.message)
+        says;
       match (fixed, diagnostic.fixes) with
       | None, _ -> ()
       | Some _, [] -> fail "no fix"

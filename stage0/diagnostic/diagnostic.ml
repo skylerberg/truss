@@ -164,15 +164,16 @@ module Code = struct
     | Views_temporary
     | Use_after_move
     | Not_owned
-    | Field_not_restored
+    | Not_reinitialized
     | Conflicting_loan
     | Changed_while_viewed
-    | Returns_local_view
-    | Stores_local_view
+    | View_escapes
+    | Self_referential
+    | View_crosses_capability
     | Needs_owned
     | Lends_count
     | Not_pullable
-    | Parallel_conflict
+    | Data_race
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
@@ -399,15 +400,16 @@ module Code = struct
     | Views_temporary -> "views_temporary"
     | Use_after_move -> "use_after_move"
     | Not_owned -> "not_owned"
-    | Field_not_restored -> "field_not_restored"
+    | Not_reinitialized -> "not_reinitialized"
     | Conflicting_loan -> "conflicting_loan"
     | Changed_while_viewed -> "changed_while_viewed"
-    | Returns_local_view -> "returns_local_view"
-    | Stores_local_view -> "stores_local_view"
+    | View_escapes -> "view_escapes"
+    | Self_referential -> "self_referential"
+    | View_crosses_capability -> "view_crosses_capability"
     | Needs_owned -> "needs_owned"
     | Lends_count -> "lends_count"
     | Not_pullable -> "not_pullable"
-    | Parallel_conflict -> "parallel_conflict"
+    | Data_race -> "data_race"
     | Keeps_lent_part -> "keeps_lent_part"
     | Read_only_view -> "read_only_view"
     | Owned_beside_lent -> "owned_beside_lent"

@@ -172,15 +172,16 @@ module Code : sig
     | Views_temporary
     | Use_after_move
     | Not_owned
-    | Field_not_restored
+    | Not_reinitialized
     | Conflicting_loan
     | Changed_while_viewed
-    | Returns_local_view
-    | Stores_local_view
+    | View_escapes
+    | Self_referential
+    | View_crosses_capability
     | Needs_owned
     | Lends_count
     | Not_pullable
-    | Parallel_conflict
+    | Data_race
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent

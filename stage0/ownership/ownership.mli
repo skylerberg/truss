@@ -6,7 +6,7 @@ type result = {
   obligations : Checked.obligation list;
       (** The [Disjoint] obligations: pairs of index calls or slices of one collection, by origin,
           that must select different elements. They come from places passed to one call and from the
-          branches of a [parallel] block. The prover shows that they hold. *)
+          branches of a [parallel] or [concurrent] block. The prover shows that they hold. *)
 }
 
 val ownership : (Resolve.Names.key, result option) Query.query
