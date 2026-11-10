@@ -1,0 +1,28 @@
+(executable
+ (name proof_fuzz)
+ (libraries
+  zarith
+  unix
+  path
+  source
+  diagnostic
+  token
+  lexer
+  documents
+  query
+  engine
+  database
+  workspace
+  resolve
+  types
+  intrinsic
+  interface
+  core
+  type_checker
+  solver
+  prover
+  libc
+  memory_layout
+  toolchain
+  build
+  compile))
