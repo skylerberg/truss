@@ -306,6 +306,14 @@ let () =
      ensures (old(count) == count)\n\
      { true }"
 
+let () =
+  builds "part of a place is changed through a slice of it"
+    "fn sort_part(part: mut Slice[Int64]) {}\n\n\
+     fn g(items: mut List[Int64]) {\n\
+    \  sort_part(mut items[..2])\n\
+     }\n"
+    "{ app::main::sort_part(mut items[..2]) }"
+
 (* Capabilities *)
 
 let () =
@@ -443,6 +451,9 @@ let () =
                           | Call { arguments; _ } ->
                               List.iter
                                 (function
+                                  | Core.Passed { mode = Mut; value = Value { kind = Slice _; _ } }
+                                    ->
+                                      ()
                                   | Core.Passed { mode = Mut; value = Value _ } ->
                                       wrong "a value is passed where a place is changed"
                                   | Passed { mode = Own; value = Place _ } ->

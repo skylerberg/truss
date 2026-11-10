@@ -75,7 +75,9 @@ and operand =
           a [mut] parameter; an [own] parameter never takes a place, it takes the value there, as
           [Value (Use place)]. Matched or bound, its parts are bound where they are. *)
   | Value of expression
-      (** A value: an [own] parameter takes it, and a read-only one sees it for the call. *)
+      (** A value: an [own] parameter takes it, and a read-only one sees it for the call. A [mut]
+          parameter takes one only as a [Slice], the view through which part of a place is changed.
+      *)
 
 (** Where a value is. *)
 and place =
