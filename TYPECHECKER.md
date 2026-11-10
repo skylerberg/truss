@@ -1623,6 +1623,11 @@ The core form records these decisions:
   - `config with (port)` is `config with (port: port)`.
   - A list literal is a block that allocates storage with capacity for the
     elements, pushes each element, and converts the storage to a list.
+  - A set or map literal is a block that creates the collection with
+    capacity for its entries and inserts each entry. A map literal inserts
+    with a method that requires the key to be absent, so the prover checks
+    that the keys are distinct as it checks any `requires`. An empty
+    literal is the call that creates the collection.
   - An owned collection passed where its view is expected, such as a
     `String` passed as a `StringSlice`, is a call of `slice`.
   - A tagged string is a call of the tag type's `from_template` on a
@@ -1630,10 +1635,9 @@ The core form records these decisions:
     because the prover evaluates the tag's `requires` clauses on them.
 - **Some constructs keep a node of their own.** An array literal is
   constructed in place. A specification's sequence, set, or map is never
-  constructed at run time. A set or map literal records the callees that
-  create the empty collection and insert an element. An interpolated string
-  records its pieces, the `display` method of each interpolated value, and
-  the methods of the text builder. Widening a function value, and
+  constructed at run time. An interpolated string records its pieces, the
+  `display` method of each interpolated value, and the methods of the text
+  builder. Widening a function value, and
   converting between a built-in integer and `Integer`, are explicit
   conversion nodes.
 - **Every node has a type.** The type is fully inferred and normalized. It
@@ -1945,14 +1949,12 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **Reading the core form.** Ownership, the prover, and code generation
-  read the checked form's tables and the syntax tree, and work out again
-  what the core form holds.
-- **An interpolated string and a set or map literal as the calls they
-  are.** Each is still a node that names the standard library's functions
-  it stands for. An interpolation is to be the builder's calls once those
-  and `display` promise to end, and a set or a map literal a call of the
-  type's `empty` and its `insert`s once the types have one.
+- **Ownership on the core form.** The prover and code generation read the
+  core form. The ownership check still reads the checked form's tables and
+  the syntax tree.
+- **An interpolated string as calls.** It is still a node that names the
+  text builder's methods and each value's `display`. It will be desugared
+  to those calls once they have `time` clauses.
 - **A contract as a result of its own.** DESIGN.md has callers' proofs read a
   function's contract, apart from its interface and its body. The contract
   is type-checked with the body, and the prover reads it from the callee's

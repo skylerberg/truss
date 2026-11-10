@@ -67,8 +67,8 @@ let rec expression names (node : expression) =
            fields)
   | Collection_literal { elements; construction = how } ->
       Printf.sprintf "%s[%s]" (construction how) (list expression elements)
-  | Map_literal { entries; construction = how } ->
-      Printf.sprintf "%s[%s]" (construction how)
+  | Map_literal { entries } ->
+      Printf.sprintf "%s[%s]" (construction Specification_only)
         (list (fun (key, value) -> expression key ^ ": " ^ expression value) entries)
   | Record_update { base; updates } ->
       Printf.sprintf "%s with (%s)" (expression base)
@@ -152,10 +152,7 @@ let rec expression names (node : expression) =
         (match function_ with Log -> "log" | Power -> "power" | Time -> "time" | Calls -> "calls")
         (list expression arguments)
 
-and construction = function
-  | Array -> "array"
-  | By_insertion _ -> "by_insertion"
-  | Specification_only -> "specification_only"
+and construction = function Array -> "array" | Specification_only -> "specification_only"
 
 and callee names = function
   | Function { path; type_arguments = arguments } -> Path.show path ^ type_arguments arguments
