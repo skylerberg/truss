@@ -1,0 +1,104 @@
+fn clamp(value: Int64, low: Int64, high: Int64) -> Int64
+  requires low <= high
+  ensures low <= result && result <= high
+  cost time O(1)
+{
+  if value < low { low } else if value > high { high } else { value }
+}
+
+fn halve_up(value: UInt32) -> UInt32
+  requires value < 4000000000
+  cost time O(1)
+{
+  (value + 1) / 2
+}
+
+fn steps(value: UInt8) -> UInt8
+  requires value > 0
+  cost time O(1)
+{
+  var left = value
+  var taken: UInt8 = 0
+  while left > 1
+    invariant taken + left <= 255
+    invariant left >= 1
+    decreases left
+  {
+    left = left / 2
+    taken += 1
+  }
+  taken
+}
+
+fn scaled(value: Int32, factor: Int32) -> Int32
+  requires -1000 <= value && value <= 1000
+  requires -1000 <= factor && factor <= 1000
+  cost time O(1)
+{
+  value * factor + 7
+}
+
+fn shifted(value: UInt64, by: UInt64) -> UInt64
+  requires by < 64
+  cost time O(1)
+{
+  value >> by
+}
+
+fn remainder_of(value: Int64, divisor: Int64) -> Int64
+  requires divisor > 0
+  ensures -divisor < result && result < divisor
+  cost time O(1)
+{
+  value % divisor
+}
+
+fn count_down(start: UInt8) -> UInt8
+  cost time O(start)
+{
+  var left = start
+  var calls: UInt8 = 0
+  while left > 0
+    invariant calls + left == start
+    decreases left
+  {
+    left -= 1
+    calls += 1
+  }
+  calls
+}
+
+fn average(left: UInt16, right: UInt16) -> UInt16
+  requires left <= 30000 && right <= 30000
+  ensures result <= 30000
+  cost time O(1)
+{
+  (left + right) / 2
+}
+
+fn sum_to(count: UInt64) -> UInt64
+  requires count <= 60000
+  cost time O(count)
+{
+  var total: UInt64 = 0
+  var index: UInt64 = 0
+  while index < count
+    invariant index <= count
+    invariant total <= index * 60000
+    decreases count - index
+  {
+    index += 1
+    total += index
+  }
+  total
+}
+
+fn distance(from: Int16, to: Int16) -> Int16
+  requires -10000 <= from && from <= 10000
+  requires -10000 <= to && to <= 10000
+  ensures result >= 0
+  cost time O(1)
+{
+  let gap = to - from
+  if gap < 0 { 0 - gap } else { gap }
+}

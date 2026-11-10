@@ -136,6 +136,29 @@ let () =
         (function_ ~parameters:[ 0 ]
            [ local (value (named "Box")) ]
            [ block [ consume [ Move (full "contents") ] None; Drop (at 0) ] (Return None) ]));
+  test "a sum whose part was moved out on one path is asked its variant where the paths meet"
+    (fun () ->
+      let full field = at ~projections:[ Variant_field { variant = "Full"; field } ] 0 in
+      expect_lir
+        ~expected:
+          [
+            "fn(_0: Box, _1: raw Bool)";
+            "b0: _2 = true; switch _1 [1 => b1, _ => b2]";
+            "b1: call test::consume(move _0.Full.contents); _2 = false; goto b2";
+            "b2: switch _0 [Full => b4, _ => b3]";
+            "b3: drop _0; goto b7";
+            "b4: switch _2 [1 => b5, _ => b6]";
+            "b5: drop _0.Full.contents; goto b6";
+            "b6: free _0.Full; goto b7";
+            "b7: _2 = false; return";
+          ]
+        (function_ ~parameters:[ 0; 1 ]
+           [ local (value (named "Box")); condition ]
+           [
+             block [] (Switch { value = copy 1; cases = [ (Z.one, 1) ]; default = Some 2 });
+             block [ consume [ Move (full "contents") ] None ] (Goto 2);
+             block [ Drop (at 0) ] (Return None);
+           ]));
   test "a value moved out on one path is dropped exactly once when the program runs" (fun () ->
       let counter = named "Counter" in
       let pointer = Lir.Pointer { target = value counter; writable = true } in

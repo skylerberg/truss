@@ -398,13 +398,27 @@ and open_ops a s ~flag path =
             if indirect then [ Statement (Free_block { place = place_of_path path; variant }) ]
             else []
           in
+          (* A part of a variant is moved out only of a value that holds
+             the variant. So where a part of it holds nothing on every way
+             here, the value is that variant. Where a part may still hold
+             its value, the value may hold another variant, whose parts
+             have nothing to track, and it is asked which it holds. *)
+          let certain variant =
+            List.exists
+              (fun j ->
+                match List.nth_opt a.paths.(j).steps depth with
+                | Some (Variant (v, _)) -> v = variant && status s j = No
+                | _ -> false)
+              (match index a path with Some i -> a.inside.(i) | None -> [])
+          in
           match variants with
-          | [ only ] -> open_variant only
-          | many ->
+          | [] -> [ Statement (Drop (place_of_path path)) ]
+          | [ only ] when certain only -> open_variant only
+          | variants ->
               [
                 Switch_on
                   ( place_of_path path,
-                    List.map (fun v -> (v, open_variant v)) many,
+                    List.map (fun v -> (v, open_variant v)) variants,
                     [ Statement (Drop (place_of_path path)) ] );
               ])
       | _ -> [ Statement (Drop (place_of_path path)) ])
