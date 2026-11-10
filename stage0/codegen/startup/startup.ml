@@ -13,6 +13,10 @@ let headers =
 #include <signal.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
 |}
 
 let failing =
@@ -239,6 +243,43 @@ void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usiz
 
 |}
 
+let resolving =
+  {|
+/* A host's addresses, for the standard library, which cannot follow the
+   chain of structures [getaddrinfo] gives. Each address is written as a
+   byte that is 4 or 6 and then its 4 or 16 bytes, as many as there is room
+   for. The result is how many bytes were written, -1 where the system knows
+   no such host, and -2 where it could not find out. */
+long t_runtime_addresses_of_host(const char *host, void *room, size_t size) {
+  struct addrinfo wanted;
+  memset(&wanted, 0, sizeof wanted);
+  wanted.ai_socktype = SOCK_STREAM;
+  struct addrinfo *found = NULL;
+  int failed = getaddrinfo(host, NULL, &wanted, &found);
+  if (failed != 0) {
+#ifdef EAI_NODATA
+    if (failed == EAI_NODATA) return -1;
+#endif
+    return failed == EAI_NONAME ? -1 : -2;
+  }
+  uint8_t *bytes = room;
+  size_t used = 0;
+  for (const struct addrinfo *each = found; each != NULL; each = each->ai_next) {
+    if (each->ai_family == AF_INET && size - used >= 5) {
+      bytes[used] = 4;
+      memcpy(bytes + used + 1, &((const struct sockaddr_in *)(const void *)each->ai_addr)->sin_addr, 4);
+      used += 5;
+    } else if (each->ai_family == AF_INET6 && size - used >= 17) {
+      bytes[used] = 6;
+      memcpy(bytes + used + 1, &((const struct sockaddr_in6 *)(const void *)each->ai_addr)->sin6_addr, 16);
+      used += 17;
+    }
+  }
+  freeaddrinfo(found);
+  return (long)used;
+}
+|}
+
 let tests_table =
   {|
 /* The tests of a test program, which its [main] gives before it calls the
@@ -259,6 +300,7 @@ let runtime (target : Memory_layout.target) ~tests =
       Emit_c.anchor_struct;
       failing;
       allocation;
+      resolving;
       (if tests then tests_table else "");
     ]
 

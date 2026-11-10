@@ -281,11 +281,16 @@ type function_ =
   | Recvfrom
   | Fcntl_getfl  (** [fcntl] with [F_GETFL], and then with [F_SETFL] *)
   | Fcntl_setfl
+  | Addresses_of_host  (** The runtime's: a host's addresses, which it gets from [getaddrinfo] *)
 
 val functions : function_ list
 
 val function_name : function_ -> string
 (** The name the standard library calls it by. *)
+
+val of_the_runtime : function_ -> bool
+(** Whether the function is the runtime's own, written in C beside the generated code, and not the C
+    library's. The standard library calls it [runtime_] and its name. *)
 
 val available : system -> function_ -> bool
 (** Whether the system's C library has the function. A program built for a system never calls one

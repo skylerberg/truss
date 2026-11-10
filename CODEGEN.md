@@ -1349,10 +1349,16 @@ runs past a timeout set with `setsockopt` is `TimedOut`. A datagram socket
 that is not bound to an address is an IPv6 socket that also carries IPv4,
 where the system has IPv6: an IPv4 address is sent to as the IPv6 address
 that stands for it, and a sender's is given back as IPv4. Every socket is
-closed in programs that are run. `NetworkClient.resolve` has no body: the C
-library gives the addresses of a name as a chain of structures that hold
-addresses of one another, which the table cannot describe. A handle's is
-the only drop that does more
+closed in programs that are run. `NetworkClient.resolve` asks the system
+for a host's addresses, so that it answers as every other program on the
+machine is answered. The C library gives them as a chain of structures
+that hold addresses of one another, which the table cannot describe, so
+this one call goes through a function of the runtime's, written in C: it
+calls `getaddrinfo`, follows the chain, and writes each address into room
+the standard library gives it, which Truss then reads. Its row is in the
+table with the C library's, so the prover holds the call to its room in
+the same way, and the standard library calls it `runtime_` and its name.
+A handle's is the only drop that does more
 than free memory, and it runs no Truss code, as DESIGN.md requires.
 Standard-library types such as `File` hold one in a field, so their drop
 functions release the resource by dropping that field.
@@ -1776,7 +1782,6 @@ a command line can hold.
   tests runs tasks one at a time, and needs no threads or locks at all.
 - **`parallel` branches at once.** Branches can go to a thread pool with no
   change to the LIR above the statement that starts them.
-- **Finding a host's addresses by its name,** `NetworkClient.resolve`.
 - **Keeping an instance's C and a linked program.** The C is emitted again
   for each build, and found as an object by its text. It could be kept by
   the LIR's hash and the emitter's version, and a program by its objects,

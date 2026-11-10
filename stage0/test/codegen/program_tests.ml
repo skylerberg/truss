@@ -1010,6 +1010,66 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program finds a host's addresses by its name" (fun () ->
+      (* Only names the system answers by itself, so that the test asks no
+         server: addresses, [localhost], and a name too long to be asked
+         about. *)
+      let status, output, _ =
+        run_main
+          {|use standard::network
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn loops_back(address: network::IpAddress) -> Bool {
+  address == network::IpAddress.loopback
+    || address == network::IpAddress.Version6([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, NetworkClient
+{
+  if NetworkClient.resolve("127.0.0.1") is Ok(addresses) {
+    say("an address is itself ${addresses.length() == 1 && addresses[0] == network::IpAddress.loopback}")
+  }
+  if NetworkClient.resolve("::1") is Ok(addresses) {
+    say("so is an IPv6 address ${addresses.length() == 1 && loops_back(addresses[0])}")
+  }
+  if NetworkClient.resolve("localhost") is Ok(addresses) {
+    var all = addresses.length() > 0
+    for address in addresses {
+      if !loops_back(address) {
+        all = false
+      }
+    }
+    say("localhost loops back ${all}")
+  }
+  if NetworkClient.resolve("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") is Err(error) {
+    say("an unknown host is an error ${error == SystemError.HostNotFound || error == SystemError.Unreachable}")
+  }
+  if NetworkClient.resolve("with a\0zero") is Err(error) {
+    say("a name with a zero byte ${error == SystemError.InvalidInput}")
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "an address is itself true";
+               "so is an IPv6 address true";
+               "localhost loops back true";
+               "an unknown host is an error true";
+               "a name with a zero byte true";
+               "";
+             ])
+        output)
+
+let () =
   test "a path that holds a zero byte opens nothing, where C would open the path before it"
     (fun () ->
       let path = Filename.concat (Lazy.force scratch) "before-zero.txt" in
