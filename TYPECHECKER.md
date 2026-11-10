@@ -1262,10 +1262,13 @@ gone.
   body. Inside `for_each`, a `(fn(Int64) uses Granted)` takes only functions
   that use `Granted` or nothing, and a call of `for_each` by itself passes
   `Granted` on as it is.
-- **Specifications and quantifiers' bodies** have no capabilities at all,
-  not even `Panic`, since what they mean must be a value. **`parallel`
-  branches and `parallel for` bodies** have only `Panic` available. A test
-  without `uses` has only `Panic`, and whatever it provides.
+- **What states and does not run** has no capabilities at all, not even
+  `Panic`, since what it means must be a value: a contract's clauses, what
+  a function-typed parameter requires, a loop's clauses, a type's invariant
+  and potential, a law, a proof, and a quantifier's body, whatever the
+  function around it declares. **`parallel` branches and `parallel for`
+  bodies** have only `Panic` available. A test without `uses` has only
+  `Panic`, and whatever it provides.
 - **A `uses` clause that is never needed is not an error,** since a function
   may declare a capability its later versions will use, and callers already
   provide it.

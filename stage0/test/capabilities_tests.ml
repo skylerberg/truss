@@ -105,6 +105,51 @@ let () =
          {\n\
          }\n"
         "capabilities.not_available");
+  test "a loop's invariant may not use what the function declares" (fun () ->
+      one_diagnostic
+        "fn stamp() -> Bool\n\
+        \  uses Clock\n\
+        \  cost time finite\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         fn f()\n\
+        \  uses Clock\n\
+         {\n\
+        \  var count = 0\n\
+        \  while count < 3\n\
+        \    invariant stamp()\n\
+        \  {\n\
+        \    count += 1\n\
+        \  }\n\
+         }\n"
+        "capabilities.not_available");
+  test "a type's invariant may use no capability" (fun () ->
+      one_diagnostic
+        "fn stamp() -> Bool\n\
+        \  uses Clock\n\
+        \  cost time finite\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         type Counted(count: Int64)\n\
+        \  invariant stamp()\n"
+        "capabilities.not_available");
+  test "a law may use no capability" (fun () ->
+      one_diagnostic
+        "fn stamp() -> Bool\n\
+        \  uses Clock\n\
+        \  cost time finite\n\
+         {\n\
+        \  todo\n\
+         }\n\n\
+         trait Steady {\n\
+        \  fn value(self) -> Int64\n\n\
+        \  law timeless(first: Self) {\n\
+        \    stamp()\n\
+        \  }\n\
+         }\n"
+        "capabilities.not_available");
   test "a parallel branch has only Panic" (fun () ->
       one_diagnostic
         "fn f() -> Instant\n\

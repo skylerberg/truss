@@ -296,20 +296,46 @@ and statement checking scope (written : Core.statement) : T.capability list =
         (fun branch -> ignore (statement checking (only_panic scope "a `parallel` branch") branch))
         branches;
       []
-  | For { parallel = true; drive; body; _ } ->
+  | For { parallel; pattern; drive; clauses; body } ->
       let used =
         match drive with
         | Count { start; stop; _ } ->
             union (expression checking scope start) (expression checking scope stop)
         | Each each -> expression checking scope each
-        | Pull { cursor; _ } -> expression checking scope cursor
+        | Pull { cursor; next } ->
+            union
+              (expression checking scope cursor)
+              (match next with
+              | Some next -> callee_needs checking scope (`Statement written) next
+              | None -> [])
       in
-      ignore (block checking (only_panic scope "a `parallel for`") body);
-      used
+      let used = union used (inside checking scope (`Pattern pattern)) in
+      specifications checking scope clauses;
+      if parallel then begin
+        ignore (block checking (only_panic scope "a `parallel for`") body);
+        used
+      end
+      else union used (block checking scope body)
+  | While { condition; clauses; body } ->
+      let used = expression checking scope condition in
+      specifications checking scope clauses;
+      union used (block checking scope body)
   | Proof body ->
       ignore (block checking (pure_only scope "a proof") body);
       []
   | _ -> inside checking scope (`Statement written)
+
+(* A loop's clauses are specifications, which may use nothing, whatever
+   the function around them declares. *)
+and specifications checking scope (clauses : Core.loop_clause list) =
+  List.iter
+    (Core_walk.loop_clause
+       {
+         Core_walk.nothing with
+         expression =
+           (fun value -> ignore (expression checking (pure_only scope "a specification") value));
+       })
+    clauses
 
 (* What is called without being a call of its own: what a piece is
    displayed by, the method that gives a view, what builds a collection.
@@ -460,14 +486,20 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
   let scope ?(own = []) available =
     { available; collecting = false; restricted = None; handed_on = None; own; passed = [] }
   in
-  match (form.parts, state.definition.kind, lowered.interface) with
-  | ( Function { contract; body; _ },
-      (Function _ | Method_declaration _),
-      Function_interface signature ) ->
-      (* A function's clauses are specifications, with only [Panic]. *)
-      let specification value =
-        ignore (expression checking (pure_only (scope []) "a specification") value)
-      in
+  (* What states and does not run may use nothing: a contract, what a
+     function-typed parameter requires, an invariant, a potential, and a
+     law. *)
+  let specification value =
+    ignore (expression checking (pure_only (scope []) "a specification") value)
+  in
+  (match form.parts with
+  | Function { parameters; contract; _ } ->
+      List.iter
+        (fun (parameter : Core.parameter) ->
+          Option.iter
+            (fun (accepted : Core.accepts) -> List.iter specification accepted.requires)
+            parameter.accepts)
+        parameters;
       List.iter (fun (clause : Core.clause) -> specification clause.value) contract.requires;
       List.iter specification contract.ensures;
       List.iter specification contract.decreases;
@@ -476,7 +508,19 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
           match cost.bound with
           | Finite -> ()
           | Order_of value | At_most value | Exactly value -> specification value)
-        contract.costs;
+        contract.costs
+  | Type { invariants; potential; _ } ->
+      List.iter specification invariants;
+      Option.iter specification potential
+  | Trait laws ->
+      List.iter
+        (fun (law : Core.law) ->
+          List.iter specification law.requires;
+          ignore (block checking (pure_only (scope []) "a law") law.body))
+        laws
+  | Constant _ | Test _ | Law_proof _ | Nothing -> ());
+  match (form.parts, state.definition.kind, lowered.interface) with
+  | Function { body; _ }, (Function _ | Method_declaration _), Function_interface signature ->
       (* Inside an implementation of a capability, a function value it
          calls may use the capability, which there means this
          implementation, as [write_with] hands [FileWrite] to its
