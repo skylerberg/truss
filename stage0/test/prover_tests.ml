@@ -511,8 +511,8 @@ let () =
          {\n\
         \  Counter(count: 5).next()\n\
          }\n");
-  test "a mut argument that is part of a value leaves its value unknown" (fun () ->
-      not_proven
+  test "a mut argument that is a field leaves the rest of its value as it was" (fun () ->
+      proven
         "type Point(x: Int64, y: Int64)\n\n\
          fn bump(value: mut Int64)\n\
         \  requires value < 100\n\
@@ -521,11 +521,24 @@ let () =
         \  value += 1\n\
          }\n\n\
          fn f() -> Int64\n\
-        \  ensures result == 2\n\
+        \  ensures result == 4\n\
          {\n\
         \  var point = Point(x: 1, y: 2)\n\
         \  bump(mut point.x)\n\
-        \  point.y\n\
+        \  point.x + point.y\n\
+         }\n");
+  test "a mut argument that is a field is known only by what the callee promises" (fun () ->
+      not_proven
+        "type Point(x: Int64, y: Int64)\n\n\
+         fn reset(value: mut Int64) {\n\
+        \  value = 0\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 0\n\
+         {\n\
+        \  var point = Point(x: 1, y: 2)\n\
+        \  reset(mut point.x)\n\
+        \  point.x\n\
          }\n"
         "prover.ensures");
   test "assigning a field keeps the other fields" (fun () ->

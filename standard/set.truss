@@ -30,6 +30,11 @@ public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
   ensures result == contains_equal(self.model(), value: element)
 {
   let position = self.elements.partition_point(fn(existing) { existing < element })
+  proof {
+    if position < self.elements.length() {
+      assert self.model().contains(self.elements.model()[position])
+    }
+  }
   position < self.elements.length() && self.elements[position] == element
 }
 
@@ -42,6 +47,12 @@ public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
 {
   let position = self.elements.partition_point(fn(existing) { existing < element })
   if !(position < self.elements.length() && self.elements[position] == element) {
+    proof {
+      assert forall k in position..self.elements.length() => element < self.elements.model()[k]
+    }
     mut self.elements.insert_at(position, item: own element)
+    proof {
+      assert self.elements.model().elements().contains(self.elements.model()[position])
+    }
   }
 }

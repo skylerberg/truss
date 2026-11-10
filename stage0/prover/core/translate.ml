@@ -1760,6 +1760,10 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
               (argument_type context frame argument expression_)
               term ~deep:true ~when_:"when it is passed to this call")
         values);
+  (* Each [mut] argument takes a fresh value, stored into its place: a
+     local, [self], a field, which rebuilds the value it is in, or an
+     element, through its collection's [lends mut] index. A place the prover
+     cannot store into forgets its root. *)
   let havoc_mut frame =
     List.fold_left
       (fun frame ((argument : C.argument), (expression_ : expression), _) ->
@@ -1767,7 +1771,12 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
           match place_local frame expression_ with
           | Some (id, ty) ->
               { frame with locals = Ids.add id (arrive context frame "changed" ty) frame.locals }
-          | None -> havoc_root context frame expression_
+          | None -> (
+              let changed =
+                arrive context frame "changed" (argument_type context frame argument expression_)
+              in
+              try store context frame expression_ changed
+              with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame expression_)
         else frame)
       frame values
   in
@@ -4321,9 +4330,8 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
   in
   let required = L.conjunction required in
   let after = havoc_mut frame in
-  (* What each [mut] argument holds after the call: a local's new value,
-     or, for a part of a value, a fresh one, since the prover does not yet
-     write it back into the value it is part of. *)
+  (* What each [mut] argument holds after the call: what its place holds,
+     which [havoc_mut] gave a fresh value. *)
   let changed =
     List.filter_map
       (fun ((argument : C.argument), (expression_ : expression), _) ->
@@ -4332,11 +4340,16 @@ and contract_call context frame (written : expression) (call_ : C.call) path con
           | Some (id, _), _ ->
               Option.map (fun term -> (argument.parameter, term)) (Ids.find_opt id after.locals)
           | None, true -> Option.map (fun term -> (argument.parameter, term)) after.self
-          | None, false ->
-              Some
-                ( argument.parameter,
-                  arrive context after "changed" (argument_type context frame argument expression_)
-                )
+          | None, false -> (
+              try
+                Some
+                  ( argument.parameter,
+                    snd (value context { after with checking = false } expression_) )
+              with Unsupported _ | Foreign_unsupported _ ->
+                Some
+                  ( argument.parameter,
+                    arrive context after "changed"
+                      (argument_type context frame argument expression_) ))
         else None)
       values
   in

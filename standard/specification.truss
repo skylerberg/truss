@@ -54,7 +54,8 @@ public fn Sequence[Element].contains(self, value: Element) -> Bool
 }
 
 public fn Sequence[Element].elements(self) -> FiniteSet[Element]
-  ensures forall value: Element => result.contains(value) == self.contains(value)
+  ensures forall value: Element =>
+    result.contains(value) == (exists i in 0..self.length() => identical(self[i], value))
   ensures (forall i in 0..self.length() => forall j in 0..self.length() =>
     i == j || !identical(self[i], self[j])) ==> result.size() == self.length()
   cost time finite
