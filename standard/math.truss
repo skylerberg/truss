@@ -1,4 +1,5 @@
 use standard::core
+use standard::intrinsic
 use standard::text
 
 public let pi: Float64 = 3.141592653589793
@@ -17,22 +18,59 @@ public let natural_logarithm_of_ten: Float64 = 2.302585092994046
 
 public fn factorial(number: UInt64) -> Option[UInt64]
   ensures (result is Some(_)) == (number <= 20)
-  cost time O(number)
+  cost time O(1)
 {
-  todo
+  let values: Array[UInt64, 21] = [
+    1, 1, 2, 6, 24, 120, 720, 5040, 40320, 362880, 3628800, 39916800, 479001600, 6227020800, 87178291200,
+    1307674368000, 20922789888000, 355687428096000, 6402373705728000, 121645100408832000, 2432902008176640000,
+  ]
+  if number <= 20 { Some(values[intrinsic::convert(number)]) } else { None }
 }
 
 public fn binomial(total: UInt64, chosen: UInt64) -> Option[UInt64]
   cost time O(chosen)
 {
-  todo
+  if chosen > total {
+    return Some(0)
+  }
+  let smaller = if chosen > total - chosen { total - chosen } else { chosen }
+  var found: UInt64 = 1
+  var step: UInt64 = 1
+  var fits = true
+  while step <= smaller && fits
+    invariant 1 <= step
+    invariant step <= smaller + 1
+    decreases smaller + 1 - step
+    cost time O(step)
+  {
+    let shared = found.greatest_common_divisor(step)
+    let divisor = if shared == 0 { step } else { step / shared }
+    if divisor == 0 {
+      fits = false
+    } else {
+      match (found / (if shared == 0 { 1 } else { shared })).checked_multiply((total - smaller + step) / divisor) {
+        Some(next) => {
+          found = next
+        }
+        None => {
+          fits = false
+        }
+      }
+    }
+    step += 1
+  }
+  if fits { Some(found) } else { None }
 }
 
 public fn mean(values: Slice[Float64]) -> Option[Float64]
   ensures (result is None) == (values.length() == 0)
   cost time O(values.length())
 {
-  todo
+  if values.length() == 0 {
+    None
+  } else {
+    Some(Float64.sum(values) / values.length().to_float64())
+  }
 }
 
 public fn median(values: Slice[Float64]) -> Option[Float64]
@@ -46,14 +84,26 @@ public fn variance(values: Slice[Float64]) -> Option[Float64]
   ensures (result is None) == (values.length() < 2)
   cost time O(values.length())
 {
-  todo
+  if values.length() < 2 {
+    return None
+  }
+  let center = Float64.sum(values) / values.length().to_float64()
+  var total: Float64 = 0.0
+  for value in values {
+    let distance = value - center
+    total = total + distance * distance
+  }
+  Some(total / (values.length() - 1).to_float64())
 }
 
 public fn standard_deviation(values: Slice[Float64]) -> Option[Float64]
   ensures (result is None) == (values.length() < 2)
   cost time O(values.length())
 {
-  todo
+  match variance(values) {
+    Some(spread) => Some(intrinsic::square_root(spread))
+    None => None
+  }
 }
 
 public type Division[Number](quotient: Number, remainder: Number)

@@ -1,0 +1,31 @@
+use standard::math
+
+test "factorials and binomial coefficients stop where a UInt64 does" {
+  assert math::factorial(0) == Some(1)
+  assert math::factorial(5) == Some(120)
+  assert math::factorial(20) == Some(2432902008176640000)
+  assert math::factorial(21) is None
+  assert math::binomial(5, chosen: 2) == Some(10)
+  assert math::binomial(10, chosen: 0) == Some(1)
+  assert math::binomial(10, chosen: 10) == Some(1)
+  assert math::binomial(3, chosen: 5) == Some(0)
+  assert math::binomial(100, chosen: 2) == Some(4950)
+  assert math::binomial(64, chosen: 32) == Some(1832624140942590534)
+  assert math::binomial(67, chosen: 33) == Some(14226520737620288370)
+  assert math::binomial(68, chosen: 34) is None
+  assert math::binomial(UInt64.maximum, chosen: 1) == Some(UInt64.maximum)
+  assert math::binomial(UInt64.maximum, chosen: UInt64.maximum - 1) == Some(UInt64.maximum)
+}
+
+test "the mean, the variance, and the standard deviation of a sample" {
+  let values: List[Float64] = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
+  assert math::mean(values) == Some(5.0)
+  assert math::variance(values) is Some(spread) && (spread - 4.571428571428571).absolute() < 1.0e-14
+  assert math::standard_deviation(values) is Some(deviation) && (deviation - 2.138089935299395).absolute() < 1.0e-14
+  let one: List[Float64] = [3.0]
+  assert math::mean(one) == Some(3.0)
+  assert math::variance(one) is None
+  assert math::standard_deviation(one) is None
+  let none: List[Float64] = []
+  assert math::mean(none) is None
+}
