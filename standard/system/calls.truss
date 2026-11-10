@@ -1,3 +1,4 @@
+use standard::growth
 use standard::intrinsic
 
 internal fn interrupted_by_signal() -> Bool {
@@ -31,7 +32,7 @@ internal fn read_onto_end(
   buffer: mut intrinsic::Storage[UInt8],
   count: USize,
 ) -> Result[USize, Int32] {
-  intrinsic::storage_reserve(mut buffer, additional: count)
+  growth::reserve(mut buffer, additional: count)
   var got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
   while got < 0 && interrupted_by_signal() {
     got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)

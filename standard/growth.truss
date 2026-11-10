@@ -1,0 +1,20 @@
+use standard::intrinsic
+
+internal fn reserve[Element](storage: mut intrinsic::Storage[Element], additional: USize) {
+  let needed = intrinsic::storage_length(storage) + additional
+  if needed > intrinsic::storage_capacity(storage) {
+    var capacity = intrinsic::storage_capacity(storage) * 2
+    if capacity < needed {
+      capacity = needed
+    }
+    if capacity < 4 {
+      capacity = 4
+    }
+    intrinsic::storage_set_capacity(mut storage, capacity: capacity)
+  }
+}
+
+internal fn push[Element](storage: mut intrinsic::Storage[Element], value: own Element) {
+  reserve(mut storage, additional: 1)
+  intrinsic::storage_push(mut storage, value: own value)
+}

@@ -260,7 +260,8 @@ let () =
         echo b (option float64) (at real);
         let items = local b (value list) in
         ignore
-          (Intrinsics.lower env b intrinsic_types Storage_empty ~type_arguments:[ int64 ] []
+          (Intrinsics.lower env b intrinsic_types Storage_with_capacity ~type_arguments:[ int64 ]
+             [ Value (usize 3) ]
              ~destination:(Some (at items / Field "storage"))
              ~site);
         List.iter

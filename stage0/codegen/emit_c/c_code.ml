@@ -66,7 +66,6 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
       Printf.sprintf "%s(%s)"
         (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
-  | Grow -> Printf.sprintf "t_runtime_storage_grow((void **)%s)" all
   | Environment ->
       declare_prototype context "environ" "extern char **environ;\n";
       "((void *)environ)"

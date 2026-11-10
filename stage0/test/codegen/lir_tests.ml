@@ -501,7 +501,7 @@ let operate b ?destination ?(type_arguments = [ int32 ]) operation arguments =
     ~site:{ definition = definition "entry"; line = 0; column = 1 }
 
 let () =
-  test "storage grows as it is pushed, and inserts, removes, swaps, and pops in place" (fun () ->
+  test "storage with room is pushed onto, and inserts, removes, swaps, and pops in place" (fun () ->
       let open Lir_builder in
       let storage_ty =
         Ground.Named { path = Intrinsic.builtin_path Storage; arguments = [ Type int32 ] }
@@ -513,6 +513,8 @@ let () =
               let popped = local b (value int32) in
               let sum = local b (value int32) in
               ignore (operate b ~destination:(at storage) Storage_empty []);
+              ignore (operate b Storage_set_capacity [ Place (at storage); Value (usize 2) ]);
+              ignore (operate b Storage_set_capacity [ Place (at storage); Value (usize 8) ]);
               List.iter
                 (fun n ->
                   ignore (operate b Storage_push [ Place (at storage); Value (constant_int32 n) ]))
@@ -548,7 +550,7 @@ let () =
               emit b (Assign (at sum, Binary (Add, Copy (at sum), Copy (at popped))));
               sum);
         ]);
-  test "pushing onto static storage copies it to the heap first" (fun () ->
+  test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
       let open Lir_builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
       expect_status 197
@@ -569,6 +571,9 @@ let () =
                              ("capacity", usize 0);
                            ];
                        } ));
+              ignore
+                (operate b ~type_arguments:[ uint8 ] Storage_set_capacity
+                   [ Place (at storage); Value (usize 4) ]);
               ignore
                 (operate b ~type_arguments:[ uint8 ] Storage_push
                    [ Place (at storage); Value (Constant (Integer (UInt8, Z.of_int 100))) ]);

@@ -986,7 +986,7 @@ until both handle it.
 |---|---|
 | Numbers | arithmetic, wrapping arithmetic, overflow tests, lawful and IEEE comparisons, bit operations, conversions and whether a value fits a type |
 | Exact float operations | `sqrt`, `fma`, `floor`, `ceil`, `trunc`, round to nearest even, `to_bits`, `from_bits` |
-| Storage | empty, with a capacity, length, capacity, reserve, push, pop, insert, remove, swap, lend an element, view |
+| Storage | empty, with a capacity, length, capacity, set the capacity, lengthen, push, pop, insert, remove, swap, lend an element, view |
 | Views | length, lend an element, slice |
 | Operating system | the C library's functions and numbers, a handle from a descriptor and its descriptor, the address of a view, crash |
 
@@ -994,15 +994,20 @@ until both handle it.
 numbers as primitive operations, and storage and views as a few statements
 over their fields, so the C compiler sees each whole. The operations that
 lend an element, such as `storage_at`, lend the place `buffer[index]`
-itself. The one exception is growing storage, which calls the runtime's
-grow function, since growing depends on the element type only through its
-size: it at least doubles the capacity, so pushing is amortized O(1).
+itself.
+
+Storage never grows by itself. `storage_set_capacity` gives it a buffer of
+its own with room for exactly as many elements as it is told, and
+`storage_push` and `storage_insert` write into room it has. How much room
+to make is the standard library's to say, in Truss: where a push finds no
+room, it at least doubles the capacity, so pushing is amortized O(1), and
+the prover reads that as it reads any code.
 
 Storage with capacity 0 and a nonzero length is static, as a string
 literal's is: it owns no buffer, so dropping it frees nothing and copying
 it shares it. Every operation that writes the buffer in place gives such
-storage a buffer of its own first, by growing it, which copies the static
-elements and never frees them. A `String` constant is static in the same
+storage a buffer of its own first, with room for the elements it has, which
+copies the static elements and never frees them. A `String` constant is static in the same
 way. A `List`, `Map`, or `Set` constant has its elements in static memory
 too, but records its capacity as its length, so `copy()` of one really
 copies; a constant is a read-only place, so nothing writes or drops it. The
@@ -1454,8 +1459,8 @@ a command line can hold.
 - **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
-- **The rest of the runtime in Truss.** A float's text, storage's growth,
-  debug output, and the test runner are functions of the C runtime. Each is to be Truss in the standard library
+- **The rest of the runtime in Truss.** A float's text, debug output, and
+  the test runner are functions of the C runtime. Each is to be Truss in the standard library
   on the C library's functions, leaving the runtime only startup, failing,
   and allocation.
 - **`match` as a decision tree.** A tree would test each part of the value

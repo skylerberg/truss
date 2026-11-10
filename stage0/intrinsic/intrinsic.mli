@@ -92,7 +92,11 @@ type operation =
   | Storage_with_capacity
   | Storage_length
   | Storage_capacity
-  | Storage_reserve
+  | Storage_set_capacity
+      (** [(storage, capacity)]: gives the storage a buffer of its own with room for exactly that
+          many elements, at least as many as it has. Nothing else makes room: [storage_push] and
+          [storage_insert] write into room the storage has, and how much to grow by is the standard
+          library's to say. *)
   | Storage_lengthen
       (** [(storage, by)]: the [by] elements after the last, which a function of the C library wrote
           into room the storage had, are the storage's *)
