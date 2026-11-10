@@ -99,7 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        share: [0, 1]
+        share: [0, 1, 2]
     steps:
       - uses: actions/checkout@v7.0.1
 

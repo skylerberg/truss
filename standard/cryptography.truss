@@ -883,7 +883,18 @@ public fn Blake3.new() -> Blake3
   Blake3.with_key(blake3_initial_value, flags: 0)
 }
 
-public fn Blake3.keyed(key: Array[UInt8, 32]) -> Blake3
+internal fn little_endian_word(first: UInt8, second: UInt8, third: UInt8, fourth: UInt8) -> UInt32
+  cost time O(1)
+  cost allocations == 0
+{
+  let low: UInt32 = intrinsic::convert(first)
+  let middle: UInt32 = intrinsic::convert(second)
+  let high: UInt32 = intrinsic::convert(third)
+  let top: UInt32 = intrinsic::convert(fourth)
+  low | (middle * 256) | (high * 65536) | (top * 16777216)
+}
+
+internal fn little_endian_words(key: Array[UInt8, 32]) -> Array[UInt32, 8]
   cost time O(1)
   cost allocations == 0
 {
@@ -892,13 +903,21 @@ public fn Blake3.keyed(key: Array[UInt8, 32]) -> Blake3
   for index in 0..count
     cost allocations == 0
   {
-    let first: UInt32 = intrinsic::convert(key[4 * index])
-    let second: UInt32 = intrinsic::convert(key[4 * index + 1])
-    let third: UInt32 = intrinsic::convert(key[4 * index + 2])
-    let fourth: UInt32 = intrinsic::convert(key[4 * index + 3])
-    words[index] = first | (second * 256) | (third * 65536) | (fourth * 16777216)
+    words[index] = little_endian_word(
+      key[4 * index],
+      second: key[4 * index + 1],
+      third: key[4 * index + 2],
+      fourth: key[4 * index + 3],
+    )
   }
-  Blake3.with_key(words, flags: 16)
+  words
+}
+
+public fn Blake3.keyed(key: Array[UInt8, 32]) -> Blake3
+  cost time O(1)
+  cost allocations == 0
+{
+  Blake3.with_key(little_endian_words(key), flags: 16)
 }
 
 public fn Blake3.update(mut self, bytes: Slice[UInt8])
@@ -1273,7 +1292,18 @@ public opaque type SecretKey(bytes: Array[UInt8, 32])
 public fn SecretKey.generate() -> SecretKey
   uses Random
 {
-  todo
+  var bytes: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let words: USize = 4
+  for word in 0..words {
+    let value = Random.next()
+    let count: USize = 8
+    for index in 0..count {
+      bytes[8 * word + index] = intrinsic::convert((value >> (8 * index)) & 255)
+    }
+  }
+  SecretKey(bytes: bytes)
 }
 
 public fn SecretKey.from_bytes(bytes: Array[UInt8, 32]) -> SecretKey
@@ -1294,7 +1324,18 @@ public type Nonce(bytes: Array[UInt8, 12])
 public fn Nonce.generate() -> Nonce
   uses Random
 {
-  todo
+  var bytes: Array[UInt8, 12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let first = Random.next()
+  let second = Random.next()
+  let count: USize = 8
+  for index in 0..count {
+    bytes[index] = intrinsic::convert((first >> (8 * index)) & 255)
+  }
+  let rest: USize = 4
+  for index in 0..rest {
+    bytes[8 + index] = intrinsic::convert((second >> (8 * index)) & 255)
+  }
+  Nonce(bytes: bytes)
 }
 
 public type Cipher = ChaCha20Poly1305 | Aes256Gcm
@@ -1309,6 +1350,801 @@ impl Display for AuthenticationError {
   }
 }
 
+internal fn chacha20_quarter_round(state: mut Array[UInt32, 16], a: USize, b: USize, c: USize, d: USize)
+  requires a < 16
+  requires b < 16
+  requires c < 16
+  requires d < 16
+  cost time O(1)
+  cost allocations == 0
+{
+  state[a] = wrapping_add_32(state[a], second: state[b])
+  state[d] = rotate_right_32(state[d] ^ state[a], right: 16)
+  state[c] = wrapping_add_32(state[c], second: state[d])
+  state[b] = rotate_right_32(state[b] ^ state[c], right: 20)
+  state[a] = wrapping_add_32(state[a], second: state[b])
+  state[d] = rotate_right_32(state[d] ^ state[a], right: 24)
+  state[c] = wrapping_add_32(state[c], second: state[d])
+  state[b] = rotate_right_32(state[b] ^ state[c], right: 25)
+}
+
+internal fn chacha20_block(key: Array[UInt32, 8], counter: UInt32, nonce: Array[UInt8, 12]) -> Array[UInt32, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  let initial: Array[UInt32, 16] = [
+    0x61707865, 0x3320646e, 0x79622d32, 0x6b206574,
+    key[0], key[1], key[2], key[3], key[4], key[5], key[6], key[7],
+    counter,
+    little_endian_word(nonce[0], second: nonce[1], third: nonce[2], fourth: nonce[3]),
+    little_endian_word(nonce[4], second: nonce[5], third: nonce[6], fourth: nonce[7]),
+    little_endian_word(nonce[8], second: nonce[9], third: nonce[10], fourth: nonce[11]),
+  ]
+  var state = initial
+  let double_rounds: USize = 10
+  for _ in 0..double_rounds
+    cost allocations == 0
+  {
+    chacha20_quarter_round(mut state, a: 0, b: 4, c: 8, d: 12)
+    chacha20_quarter_round(mut state, a: 1, b: 5, c: 9, d: 13)
+    chacha20_quarter_round(mut state, a: 2, b: 6, c: 10, d: 14)
+    chacha20_quarter_round(mut state, a: 3, b: 7, c: 11, d: 15)
+    chacha20_quarter_round(mut state, a: 0, b: 5, c: 10, d: 15)
+    chacha20_quarter_round(mut state, a: 1, b: 6, c: 11, d: 12)
+    chacha20_quarter_round(mut state, a: 2, b: 7, c: 8, d: 13)
+    chacha20_quarter_round(mut state, a: 3, b: 4, c: 9, d: 14)
+  }
+  let count: USize = 16
+  for index in 0..count
+    cost allocations == 0
+  {
+    state[index] = wrapping_add_32(state[index], second: initial[index])
+  }
+  state
+}
+
+internal fn chacha20_xor(
+  output: mut intrinsic::Storage[UInt8],
+  input: Slice[UInt8],
+  key: Array[UInt32, 8],
+  nonce: Array[UInt8, 12],
+)
+  requires intrinsic::storage_length(output) + input.length() <= intrinsic::storage_capacity(output)
+  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + input.length()
+  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+  cost time O(input.length())
+  cost allocations == 0
+{
+  let start = intrinsic::storage_length(output)
+  let capacity = intrinsic::storage_capacity(output)
+  var block: Array[UInt32, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  for index in 0..input.length()
+    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_capacity(output) == capacity
+    cost allocations == 0
+  {
+    if index % 64 == 0 {
+      let number: UInt32 = intrinsic::convert((index / 64 + 1) % 4294967296)
+      block = chacha20_block(key, counter: number, nonce: nonce)
+    }
+    intrinsic::storage_push(mut output, value: input[index] ^ word_byte(block, offset: index % 64))
+  }
+}
+
+internal type Poly1305(
+  r: Array[UInt64, 5],
+  pad: Array[UInt32, 4],
+  h: Array[UInt64, 5],
+  block: Array[UInt8, 16],
+  block_length: USize,
+)
+  invariant block_length < 16
+
+internal fn Poly1305.new(key: Array[UInt32, 16]) -> Poly1305
+  cost time O(1)
+  cost allocations == 0
+{
+  let t0: UInt64 = intrinsic::convert(key[0])
+  let t1: UInt64 = intrinsic::convert(key[1])
+  let t2: UInt64 = intrinsic::convert(key[2])
+  let t3: UInt64 = intrinsic::convert(key[3])
+  Poly1305(
+    r: [
+      t0 & 0x3ffffff,
+      ((t0 >> 26) | (t1 * 64)) & 0x3ffff03,
+      ((t1 >> 20) | (t2 * 4096)) & 0x3ffc0ff,
+      ((t2 >> 14) | (t3 * 262144)) & 0x3f03fff,
+      (t3 >> 8) & 0x00fffff,
+    ],
+    pad: [key[4], key[5], key[6], key[7]],
+    h: [0, 0, 0, 0, 0],
+    block: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    block_length: 0,
+  )
+}
+
+internal fn multiply_add(sum: UInt64, first: UInt64, second: UInt64) -> UInt64
+  cost time O(1)
+  cost allocations == 0
+{
+  intrinsic::wrapping_add(sum, right: intrinsic::wrapping_multiply(first, right: second))
+}
+
+internal fn sum_of_products(carry: UInt64, values: Array[UInt64, 5], factors: Array[UInt64, 5]) -> UInt64
+  cost time O(1)
+  cost allocations == 0
+{
+  var sum = carry
+  let count: USize = 5
+  for index in 0..count
+    cost allocations == 0
+  {
+    sum = multiply_add(sum, first: values[index], second: factors[index])
+  }
+  sum
+}
+
+internal fn Poly1305.absorb_block(mut self)
+  cost time O(1)
+  cost allocations == 0
+{
+  let t0: UInt64 = intrinsic::convert(
+    little_endian_word(self.block[0], second: self.block[1], third: self.block[2], fourth: self.block[3]),
+  )
+  let t1: UInt64 = intrinsic::convert(
+    little_endian_word(self.block[4], second: self.block[5], third: self.block[6], fourth: self.block[7]),
+  )
+  let t2: UInt64 = intrinsic::convert(
+    little_endian_word(self.block[8], second: self.block[9], third: self.block[10], fourth: self.block[11]),
+  )
+  let t3: UInt64 = intrinsic::convert(
+    little_endian_word(self.block[12], second: self.block[13], third: self.block[14], fourth: self.block[15]),
+  )
+  let h0 = intrinsic::wrapping_add(self.h[0], right: t0 & 0x3ffffff)
+  let h1 = intrinsic::wrapping_add(self.h[1], right: ((t0 >> 26) | (t1 * 64)) & 0x3ffffff)
+  let h2 = intrinsic::wrapping_add(self.h[2], right: ((t1 >> 20) | (t2 * 4096)) & 0x3ffffff)
+  let h3 = intrinsic::wrapping_add(self.h[3], right: ((t2 >> 14) | (t3 * 262144)) & 0x3ffffff)
+  let h4 = intrinsic::wrapping_add(self.h[4], right: (t3 >> 8) | 16777216)
+  let r0 = self.r[0]
+  let r1 = self.r[1]
+  let r2 = self.r[2]
+  let r3 = self.r[3]
+  let r4 = self.r[4]
+  let s1 = intrinsic::wrapping_multiply(r1, right: 5)
+  let s2 = intrinsic::wrapping_multiply(r2, right: 5)
+  let s3 = intrinsic::wrapping_multiply(r3, right: 5)
+  let s4 = intrinsic::wrapping_multiply(r4, right: 5)
+  let h: Array[UInt64, 5] = [h0, h1, h2, h3, h4]
+  let d0 = sum_of_products(0, values: h, factors: [r0, s4, s3, s2, s1])
+  let d1 = sum_of_products(d0 >> 26, values: h, factors: [r1, r0, s4, s3, s2])
+  let d2 = sum_of_products(d1 >> 26, values: h, factors: [r2, r1, r0, s4, s3])
+  let d3 = sum_of_products(d2 >> 26, values: h, factors: [r3, r2, r1, r0, s4])
+  let d4 = sum_of_products(d3 >> 26, values: h, factors: [r4, r3, r2, r1, r0])
+  let folded = multiply_add(d0 & 0x3ffffff, first: d4 >> 26, second: 5)
+  self.h = [
+    folded & 0x3ffffff,
+    intrinsic::wrapping_add(d1 & 0x3ffffff, right: folded >> 26),
+    d2 & 0x3ffffff,
+    d3 & 0x3ffffff,
+    d4 & 0x3ffffff,
+  ]
+}
+
+internal fn Poly1305.push_byte(mut self, byte: UInt8)
+  cost time O(1)
+  cost allocations == 0
+{
+  self.block[self.block_length] = byte
+  if self.block_length == 15 {
+    mut self.absorb_block()
+    self.block_length = 0
+  } else {
+    self.block_length += 1
+  }
+}
+
+internal fn Poly1305.update(mut self, bytes: Slice[UInt8])
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  for index in 0..bytes.length()
+    invariant self.block_length < 16
+    cost allocations == 0
+  {
+    mut self.push_byte(bytes[index])
+  }
+}
+
+internal fn Poly1305.pad_to_block(mut self)
+  cost time O(1)
+  cost allocations == 0
+{
+  let most: USize = 16
+  for _ in 0..most
+    invariant self.block_length < 16
+    cost allocations == 0
+  {
+    if self.block_length != 0 {
+      mut self.push_byte(0)
+    }
+  }
+}
+
+internal fn Poly1305.update_length(mut self, length: USize)
+  cost time O(1)
+  cost allocations == 0
+{
+  let value: UInt64 = intrinsic::convert(length)
+  let count: USize = 8
+  for index in 0..count
+    invariant self.block_length < 16
+    cost allocations == 0
+  {
+    mut self.push_byte(intrinsic::convert((value >> (8 * index)) & 255))
+  }
+}
+
+internal fn Poly1305.finish(self) -> Array[UInt8, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  let mask: UInt64 = 0x3ffffff
+  var h1 = self.h[1]
+  var h2 = intrinsic::wrapping_add(self.h[2], right: h1 >> 26)
+  h1 = h1 & mask
+  var h3 = intrinsic::wrapping_add(self.h[3], right: h2 >> 26)
+  h2 = h2 & mask
+  var h4 = intrinsic::wrapping_add(self.h[4], right: h3 >> 26)
+  h3 = h3 & mask
+  var h0 = multiply_add(self.h[0], first: h4 >> 26, second: 5)
+  h4 = h4 & mask
+  h1 = intrinsic::wrapping_add(h1, right: h0 >> 26)
+  h0 = h0 & mask
+  let g0 = intrinsic::wrapping_add(h0, right: 5)
+  let g1 = intrinsic::wrapping_add(h1, right: g0 >> 26)
+  let g2 = intrinsic::wrapping_add(h2, right: g1 >> 26)
+  let g3 = intrinsic::wrapping_add(h3, right: g2 >> 26)
+  let g4 = intrinsic::wrapping_subtract(intrinsic::wrapping_add(h4, right: g3 >> 26), right: 67108864)
+  let use_g = intrinsic::wrapping_subtract(g4 >> 63, right: 1)
+  let keep_h = ~use_g
+  h0 = (h0 & keep_h) | (g0 & mask & use_g)
+  h1 = (h1 & keep_h) | (g1 & mask & use_g)
+  h2 = (h2 & keep_h) | (g2 & mask & use_g)
+  h3 = (h3 & keep_h) | (g3 & mask & use_g)
+  h4 = (h4 & keep_h) | (g4 & mask & use_g)
+  let word: UInt64 = 0xffffffff
+  let w0 = (h0 | intrinsic::wrapping_multiply(h1, right: 67108864)) & word
+  let w1 = ((h1 >> 6) | intrinsic::wrapping_multiply(h2, right: 1048576)) & word
+  let w2 = ((h2 >> 12) | intrinsic::wrapping_multiply(h3, right: 16384)) & word
+  let w3 = ((h3 >> 18) | intrinsic::wrapping_multiply(h4, right: 256)) & word
+  let pad0: UInt64 = intrinsic::convert(self.pad[0])
+  let pad1: UInt64 = intrinsic::convert(self.pad[1])
+  let pad2: UInt64 = intrinsic::convert(self.pad[2])
+  let pad3: UInt64 = intrinsic::convert(self.pad[3])
+  let f0 = w0 + pad0
+  let f1 = w1 + pad1 + (f0 >> 32)
+  let f2 = w2 + pad2 + (f1 >> 32)
+  let f3 = w3 + pad3 + (f2 >> 32)
+  var tag: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let count: USize = 4
+  for index in 0..count
+    cost allocations == 0
+  {
+    tag[index] = intrinsic::convert((f0 >> (8 * index)) & 255)
+    tag[index + 4] = intrinsic::convert((f1 >> (8 * index)) & 255)
+    tag[index + 8] = intrinsic::convert((f2 >> (8 * index)) & 255)
+    tag[index + 12] = intrinsic::convert((f3 >> (8 * index)) & 255)
+  }
+  tag
+}
+
+internal fn chacha20_poly1305_tag(
+  key: Array[UInt32, 8],
+  nonce: Array[UInt8, 12],
+  associated_data: Slice[UInt8],
+  ciphertext: Slice[UInt8],
+) -> Array[UInt8, 16]
+  cost time O(associated_data.length() + ciphertext.length())
+  cost allocations == 0
+{
+  var mac = Poly1305.new(chacha20_block(key, counter: 0, nonce: nonce))
+  mut mac.update(associated_data)
+  mut mac.pad_to_block()
+  mut mac.update(ciphertext)
+  mut mac.pad_to_block()
+  mut mac.update_length(associated_data.length())
+  mut mac.update_length(ciphertext.length())
+  mac.finish()
+}
+
+internal fn push_tag(output: mut intrinsic::Storage[UInt8], tag: Array[UInt8, 16])
+  requires intrinsic::storage_length(output) + 16 <= intrinsic::storage_capacity(output)
+  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + 16
+  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+  cost time O(1)
+  cost allocations == 0
+{
+  let start = intrinsic::storage_length(output)
+  let capacity = intrinsic::storage_capacity(output)
+  let count: USize = 16
+  for index in 0..count
+    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_capacity(output) == capacity
+    cost allocations == 0
+  {
+    intrinsic::storage_push(mut output, value: tag[index])
+  }
+}
+
+internal fn chacha20_poly1305_seal(
+  key: Array[UInt8, 32],
+  nonce: Array[UInt8, 12],
+  plaintext: Slice[UInt8],
+  associated_data: Slice[UInt8],
+) -> List[UInt8]
+  requires plaintext.length() <= USize.maximum - 16
+  ensures result.length() == plaintext.length() + 16
+  cost time O(plaintext.length() + associated_data.length())
+{
+  let words = little_endian_words(key)
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(plaintext.length() + 16)
+  chacha20_xor(mut output, input: plaintext, key: words, nonce: nonce)
+  let tag = chacha20_poly1305_tag(
+    words,
+    nonce: nonce,
+    associated_data: associated_data,
+    ciphertext: Slice(elements: intrinsic::storage_view(output)),
+  )
+  push_tag(mut output, tag: tag)
+  List(storage: own output)
+}
+
+internal fn chacha20_poly1305_open(
+  key: Array[UInt8, 32],
+  nonce: Array[UInt8, 12],
+  sealed: Slice[UInt8],
+  associated_data: Slice[UInt8],
+) -> Result[List[UInt8], AuthenticationError]
+  requires sealed.length() >= 16
+  ensures match result {
+    Ok(plaintext) => plaintext.length() + 16 == sealed.length()
+    Err(_) => true
+  }
+  cost time O(sealed.length() + associated_data.length())
+{
+  let words = little_endian_words(key)
+  let length = sealed.length() - 16
+  let ciphertext = sealed[..length]
+  let tag = chacha20_poly1305_tag(words, nonce: nonce, associated_data: associated_data, ciphertext: ciphertext)
+  if !constant_time_equal(tag[..], second: sealed[length..]) {
+    return Err(AuthenticationError())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  chacha20_xor(mut output, input: ciphertext, key: words, nonce: nonce)
+  Ok(List(storage: own output))
+}
+
+internal fn gf256_double(value: UInt8) -> UInt8
+  cost time O(1)
+  cost allocations == 0
+{
+  let reduce: UInt8 = intrinsic::wrapping_subtract(0, right: value >> 7)
+  intrinsic::wrapping_multiply(value, right: 2) ^ (0x1b & reduce)
+}
+
+internal fn gf256_multiply(first: UInt8, second: UInt8) -> UInt8
+  cost time O(1)
+  cost allocations == 0
+{
+  var multiplicand = first
+  var multiplier = second
+  var product: UInt8 = 0
+  let bits: USize = 8
+  for _ in 0..bits
+    cost allocations == 0
+  {
+    let selected: UInt8 = intrinsic::wrapping_subtract(0, right: multiplier & 1)
+    product = product ^ (multiplicand & selected)
+    multiplicand = gf256_double(multiplicand)
+    multiplier = multiplier >> 1
+  }
+  product
+}
+
+internal fn aes_substitute(byte: UInt8) -> UInt8
+  cost time O(1)
+  cost allocations == 0
+{
+  let power_2 = gf256_multiply(byte, second: byte)
+  let power_3 = gf256_multiply(power_2, second: byte)
+  let power_6 = gf256_multiply(power_3, second: power_3)
+  let power_12 = gf256_multiply(power_6, second: power_6)
+  let power_15 = gf256_multiply(power_12, second: power_3)
+  let power_30 = gf256_multiply(power_15, second: power_15)
+  let power_60 = gf256_multiply(power_30, second: power_30)
+  let power_120 = gf256_multiply(power_60, second: power_60)
+  let power_126 = gf256_multiply(power_120, second: power_6)
+  let power_127 = gf256_multiply(power_126, second: byte)
+  let inverse = gf256_multiply(power_127, second: power_127)
+  inverse
+    ^ intrinsic::rotate_right(inverse, amount: 7)
+    ^ intrinsic::rotate_right(inverse, amount: 6)
+    ^ intrinsic::rotate_right(inverse, amount: 5)
+    ^ intrinsic::rotate_right(inverse, amount: 4)
+    ^ 0x63
+}
+
+internal fn aes256_round_keys(key: Array[UInt8, 32]) -> Array[UInt8, 240]
+  cost time O(1)
+  cost allocations == 0
+{
+  var keys: Array[UInt8, 240] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let key_length: USize = 32
+  for index in 0..key_length
+    cost allocations == 0
+  {
+    keys[index] = key[index]
+  }
+  var round_constant: UInt8 = 1
+  let words: USize = 52
+  for step in 0..words
+    cost allocations == 0
+  {
+    let word = step + 8
+    let at = 4 * word
+    var first = keys[at - 4]
+    var second = keys[at - 3]
+    var third = keys[at - 2]
+    var fourth = keys[at - 1]
+    if word % 8 == 0 {
+      let rotated = first
+      first = aes_substitute(second) ^ round_constant
+      second = aes_substitute(third)
+      third = aes_substitute(fourth)
+      fourth = aes_substitute(rotated)
+      round_constant = gf256_double(round_constant)
+    } else if word % 8 == 4 {
+      first = aes_substitute(first)
+      second = aes_substitute(second)
+      third = aes_substitute(third)
+      fourth = aes_substitute(fourth)
+    }
+    keys[at] = keys[at - 32] ^ first
+    keys[at + 1] = keys[at - 31] ^ second
+    keys[at + 2] = keys[at - 30] ^ third
+    keys[at + 3] = keys[at - 29] ^ fourth
+  }
+  keys
+}
+
+internal fn aes_add_round_key(state: mut Array[UInt8, 16], keys: Array[UInt8, 240], round: USize)
+  requires round <= 14
+  cost time O(1)
+  cost allocations == 0
+{
+  let count: USize = 16
+  for index in 0..count
+    cost allocations == 0
+  {
+    state[index] = state[index] ^ keys[16 * round + index]
+  }
+}
+
+internal fn aes_substitute_and_shift(state: Array[UInt8, 16]) -> Array[UInt8, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  var shifted: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let count: USize = 16
+  for index in 0..count
+    cost allocations == 0
+  {
+    let row = index % 4
+    let column = index / 4
+    shifted[index] = aes_substitute(state[4 * ((column + row) % 4) + row])
+  }
+  shifted
+}
+
+internal fn aes_mix_columns(state: Array[UInt8, 16]) -> Array[UInt8, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  var mixed: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let columns: USize = 4
+  for column in 0..columns
+    cost allocations == 0
+  {
+    let first = state[4 * column]
+    let second = state[4 * column + 1]
+    let third = state[4 * column + 2]
+    let fourth = state[4 * column + 3]
+    let all = first ^ second ^ third ^ fourth
+    mixed[4 * column] = first ^ all ^ gf256_double(first ^ second)
+    mixed[4 * column + 1] = second ^ all ^ gf256_double(second ^ third)
+    mixed[4 * column + 2] = third ^ all ^ gf256_double(third ^ fourth)
+    mixed[4 * column + 3] = fourth ^ all ^ gf256_double(fourth ^ first)
+  }
+  mixed
+}
+
+internal fn aes256_encrypt_block(keys: Array[UInt8, 240], block: Array[UInt8, 16]) -> Array[UInt8, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  var state = block
+  aes_add_round_key(mut state, keys: keys, round: 0)
+  let rounds: USize = 13
+  for round in 0..rounds
+    cost allocations == 0
+  {
+    state = aes_mix_columns(aes_substitute_and_shift(state))
+    aes_add_round_key(mut state, keys: keys, round: round + 1)
+  }
+  state = aes_substitute_and_shift(state)
+  aes_add_round_key(mut state, keys: keys, round: 14)
+  state
+}
+
+internal type Block128(high: UInt64, low: UInt64)
+
+internal fn Block128.from_bytes(bytes: Array[UInt8, 16]) -> Block128
+  cost time O(1)
+  cost allocations == 0
+{
+  var high: UInt64 = 0
+  var low: UInt64 = 0
+  let count: USize = 8
+  for index in 0..count
+    cost allocations == 0
+  {
+    high = intrinsic::wrapping_multiply(high, right: 256) | intrinsic::convert(bytes[index])
+    low = intrinsic::wrapping_multiply(low, right: 256) | intrinsic::convert(bytes[index + 8])
+  }
+  Block128(high: high, low: low)
+}
+
+internal fn Block128.byte(self, index: USize) -> UInt8
+  requires index < 16
+  cost time O(1)
+  cost allocations == 0
+{
+  if index < 8 {
+    intrinsic::convert((self.high >> (56 - 8 * index)) & 255)
+  } else {
+    intrinsic::convert((self.low >> (120 - 8 * index)) & 255)
+  }
+}
+
+internal fn gf128_multiply(first: Block128, second: Block128) -> Block128
+  cost time O(1)
+  cost allocations == 0
+{
+  var product_high: UInt64 = 0
+  var product_low: UInt64 = 0
+  var high = second.high
+  var low = second.low
+  let bits: USize = 128
+  for index in 0..bits
+    cost allocations == 0
+  {
+    let bit: UInt64 = if index < 64 {
+      (first.high >> (63 - index)) & 1
+    } else {
+      (first.low >> (127 - index)) & 1
+    }
+    let selected = intrinsic::wrapping_subtract(0, right: bit)
+    product_high = product_high ^ (high & selected)
+    product_low = product_low ^ (low & selected)
+    let reduce = intrinsic::wrapping_subtract(0, right: low & 1)
+    low = (low >> 1) | intrinsic::wrapping_multiply(high & 1, right: 0x8000000000000000)
+    high = (high >> 1) ^ (0xe100000000000000 & reduce)
+  }
+  Block128(high: product_high, low: product_low)
+}
+
+internal type Ghash(key: Block128, digest: Block128, block: Array[UInt8, 16], block_length: USize)
+  invariant block_length < 16
+
+internal fn Ghash.new(key: Block128) -> Ghash
+  cost time O(1)
+  cost allocations == 0
+{
+  Ghash(
+    key: key,
+    digest: Block128(high: 0, low: 0),
+    block: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    block_length: 0,
+  )
+}
+
+internal fn Ghash.push_byte(mut self, byte: UInt8)
+  cost time O(1)
+  cost allocations == 0
+{
+  self.block[self.block_length] = byte
+  if self.block_length == 15 {
+    let block = Block128.from_bytes(self.block)
+    self.digest = gf128_multiply(
+      Block128(high: self.digest.high ^ block.high, low: self.digest.low ^ block.low),
+      second: self.key,
+    )
+    self.block_length = 0
+  } else {
+    self.block_length += 1
+  }
+}
+
+internal fn Ghash.update(mut self, bytes: Slice[UInt8])
+  cost time O(bytes.length())
+  cost allocations == 0
+{
+  for index in 0..bytes.length()
+    invariant self.block_length < 16
+    cost allocations == 0
+  {
+    mut self.push_byte(bytes[index])
+  }
+}
+
+internal fn Ghash.pad_to_block(mut self)
+  cost time O(1)
+  cost allocations == 0
+{
+  let most: USize = 16
+  for _ in 0..most
+    invariant self.block_length < 16
+    cost allocations == 0
+  {
+    if self.block_length != 0 {
+      mut self.push_byte(0)
+    }
+  }
+}
+
+internal fn Ghash.update_bit_length(mut self, length: USize)
+  cost time O(1)
+  cost allocations == 0
+{
+  let bits = intrinsic::wrapping_multiply(intrinsic::convert[USize, UInt64](length), right: 8)
+  let count: USize = 8
+  for index in 0..count
+    invariant self.block_length < 16
+    cost allocations == 0
+  {
+    mut self.push_byte(intrinsic::convert((bits >> (56 - 8 * index)) & 255))
+  }
+}
+
+internal fn aes_gcm_counter_block(nonce: Array[UInt8, 12], counter: UInt32) -> Array[UInt8, 16]
+  cost time O(1)
+  cost allocations == 0
+{
+  [
+    nonce[0], nonce[1], nonce[2], nonce[3], nonce[4], nonce[5], nonce[6], nonce[7],
+    nonce[8], nonce[9], nonce[10], nonce[11],
+    intrinsic::convert(counter >> 24),
+    intrinsic::convert((counter >> 16) & 255),
+    intrinsic::convert((counter >> 8) & 255),
+    intrinsic::convert(counter & 255),
+  ]
+}
+
+internal fn aes_gcm_xor(
+  output: mut intrinsic::Storage[UInt8],
+  input: Slice[UInt8],
+  keys: Array[UInt8, 240],
+  nonce: Array[UInt8, 12],
+)
+  requires intrinsic::storage_length(output) + input.length() <= intrinsic::storage_capacity(output)
+  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + input.length()
+  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+  cost time O(input.length())
+  cost allocations == 0
+{
+  let start = intrinsic::storage_length(output)
+  let capacity = intrinsic::storage_capacity(output)
+  var block: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  for index in 0..input.length()
+    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_capacity(output) == capacity
+    cost allocations == 0
+  {
+    if index % 16 == 0 {
+      let number: UInt32 = intrinsic::convert((index / 16 + 2) % 4294967296)
+      block = aes256_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: number))
+    }
+    intrinsic::storage_push(mut output, value: input[index] ^ block[index % 16])
+  }
+}
+
+internal fn aes_gcm_tag(
+  keys: Array[UInt8, 240],
+  nonce: Array[UInt8, 12],
+  associated_data: Slice[UInt8],
+  ciphertext: Slice[UInt8],
+) -> Array[UInt8, 16]
+  cost time O(associated_data.length() + ciphertext.length())
+  cost allocations == 0
+{
+  let zero: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  var hash = Ghash.new(Block128.from_bytes(aes256_encrypt_block(keys, block: zero)))
+  mut hash.update(associated_data)
+  mut hash.pad_to_block()
+  mut hash.update(ciphertext)
+  mut hash.pad_to_block()
+  mut hash.update_bit_length(associated_data.length())
+  mut hash.update_bit_length(ciphertext.length())
+  let mask = aes256_encrypt_block(keys, block: aes_gcm_counter_block(nonce, counter: 1))
+  var tag: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let count: USize = 16
+  for index in 0..count
+    cost allocations == 0
+  {
+    tag[index] = hash.digest.byte(index) ^ mask[index]
+  }
+  tag
+}
+
+internal fn aes256_gcm_seal(
+  key: Array[UInt8, 32],
+  nonce: Array[UInt8, 12],
+  plaintext: Slice[UInt8],
+  associated_data: Slice[UInt8],
+) -> List[UInt8]
+  requires plaintext.length() <= USize.maximum - 16
+  ensures result.length() == plaintext.length() + 16
+  cost time O(plaintext.length() + associated_data.length())
+{
+  let keys = aes256_round_keys(key)
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(plaintext.length() + 16)
+  aes_gcm_xor(mut output, input: plaintext, keys: keys, nonce: nonce)
+  let tag = aes_gcm_tag(
+    keys,
+    nonce: nonce,
+    associated_data: associated_data,
+    ciphertext: Slice(elements: intrinsic::storage_view(output)),
+  )
+  push_tag(mut output, tag: tag)
+  List(storage: own output)
+}
+
+internal fn aes256_gcm_open(
+  key: Array[UInt8, 32],
+  nonce: Array[UInt8, 12],
+  sealed: Slice[UInt8],
+  associated_data: Slice[UInt8],
+) -> Result[List[UInt8], AuthenticationError]
+  requires sealed.length() >= 16
+  ensures match result {
+    Ok(plaintext) => plaintext.length() + 16 == sealed.length()
+    Err(_) => true
+  }
+  cost time O(sealed.length() + associated_data.length())
+{
+  let keys = aes256_round_keys(key)
+  let length = sealed.length() - 16
+  let ciphertext = sealed[..length]
+  let tag = aes_gcm_tag(keys, nonce: nonce, associated_data: associated_data, ciphertext: ciphertext)
+  if !constant_time_equal(tag[..], second: sealed[length..]) {
+    return Err(AuthenticationError())
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  aes_gcm_xor(mut output, input: ciphertext, keys: keys, nonce: nonce)
+  Ok(List(storage: own output))
+}
+
 public fn seal(
   key: SecretKey,
   nonce: Nonce,
@@ -1319,7 +2155,23 @@ public fn seal(
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
-  todo
+  if plaintext.length() > USize.maximum - 16 {
+    intrinsic::crash("a list cannot hold that many bytes".slice())
+  }
+  match cipher {
+    ChaCha20Poly1305 => chacha20_poly1305_seal(
+      key.bytes,
+      nonce: nonce.bytes,
+      plaintext: plaintext,
+      associated_data: associated_data,
+    )
+    Aes256Gcm => aes256_gcm_seal(
+      key.bytes,
+      nonce: nonce.bytes,
+      plaintext: plaintext,
+      associated_data: associated_data,
+    )
+  }
 }
 
 public fn open(
@@ -1335,7 +2187,23 @@ public fn open(
   }
   cost time O(sealed.length() + associated_data.length())
 {
-  todo
+  if sealed.length() < 16 {
+    return Err(AuthenticationError())
+  }
+  match cipher {
+    ChaCha20Poly1305 => chacha20_poly1305_open(
+      key.bytes,
+      nonce: nonce.bytes,
+      sealed: sealed,
+      associated_data: associated_data,
+    )
+    Aes256Gcm => aes256_gcm_open(
+      key.bytes,
+      nonce: nonce.bytes,
+      sealed: sealed,
+      associated_data: associated_data,
+    )
+  }
 }
 
 public opaque type SigningKey(seed: Array[UInt8, 32])
