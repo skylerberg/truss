@@ -194,6 +194,15 @@ and `reads` clauses):
   have a `time` clause, so `wrapping_add`, `saturating_add`,
   `checked_add`, `try_from`, and the rest are definitions their callers
   unfold.
+- **A storage and a view are sequences.** Each is known by its model, a
+  `Sequence` of its elements whose length fits a `USize`, which
+  `storage_model` and `view_model`, intrinsics for specifications only,
+  name, so `List`, `Slice`, `String`, and `StringSlice` define `model()`
+  over their buffers. Each operation reads or changes that sequence as the
+  compiler makes it do: `storage_push` appends, `storage_insert` shifts
+  what follows, `view_slice` is a run of its view, and reading bytes
+  appends what it says it read. An operation that stops the program on a
+  bad index says what holds when it returns.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
   as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit
@@ -370,7 +379,10 @@ is a term, every fact is guarded by the condition of the path it holds on,
 and where paths join, each local that differs gets a fresh symbol that each
 path defines. So what a body gives its queries grows with the body, not
 with its number of paths. No step goes around a loop: each loop is cut at
-its head by its invariant, as below.
+its head by its invariant, as below. The right side of `&&`, `||`, or
+`==>` runs on only one path, so when it changes a local, as a call with a
+`mut` argument does, that path joins the one where it did not run, as the
+two arms of an `if` do.
 
 An `assert` makes one query: the facts gathered before it, and its fact as
 the goal, guarded by its path. Once made, it is a fact for the rest of the
@@ -671,11 +683,13 @@ The prover adds a ghost counter for each resource that has a cost clause:
 - **Allocations are counted where DESIGN.md says they happen:** building an
   `indirect` variant is one allocation, of a fixed size that is not known
   to the prover, and so is any callee's allocation.
-- **The intrinsic module's operations** each take a fixed number of steps
-  and allocate nothing, or are known by no bound, as the compiler declares
-  them: arithmetic and reading or swapping in place are the first kind,
-  growing storage, copying runs of bytes, and reaching the system the
-  second.
+- **The intrinsic module's operations** each take a fixed number of steps,
+  steps in proportion to a buffer's length, or are known by no bound, as
+  the compiler declares them: arithmetic and reading or swapping in place
+  are the first kind; inserting into or removing from a storage, and
+  comparing runs of bytes, the second; growing storage and reaching the
+  system the third. Only the first kind never allocates, with removing and
+  comparing.
 - **A `calls(target)` counter** counts each call through a function value
   or of a capability's method. A callee that is passed the function value,
   or uses the capability, counts what its own `calls` clause about it says;
@@ -935,8 +949,10 @@ A proof is as trustworthy as:
   are extensional, what `log` and `power` are, the few facts about bitwise
   operations, and what a derived `Equal` means
 - the contracts of `standard::specification`, which say what the
-  mathematical collections are
-- what the prover knows of the intrinsic module's integer operations
+  mathematical collections are, so its definitions are not proven
+- what the prover knows of the intrinsic module's integer operations, its
+  storage and views, and reading and writing bytes, and the costs the
+  compiler declares for each intrinsic
 - the standard library's contracts whose bodies end in any other
   intrinsic, which the prover knows only by its type, so they are relied
   on and not proven
@@ -959,15 +975,20 @@ sanitized runs, test the trusted base against real executions.
 
 ## Not built
 
-- **Contracts for the intrinsic module's other operations.** The compiler
-  is to declare a contract for each intrinsic, and the standard library is
-  to be proven against them, `List`'s `model()` as a definition over its
-  buffer, so that nothing above the intrinsic module is trusted. Only the
-  integer operations have meanings. A call of any other intrinsic gives a
-  value known only by its type, so the contracts of `List`, `Map`, `Set`,
-  and the strings are relied on without proof, and what the standard
-  library states no contract for, such as the `ieee_` comparisons, is
-  known only by its type.
+- **The rest of the standard library proven.** The standard library's
+  test lists what does not prove yet: `Map` and `Set`, whose models over
+  their sorted lists need a way to make a finite set or map from a
+  sequence; `List`'s `mut` index and its `each(mut self)`, which need a
+  part lent `mut` by an intrinsic to be written back when the lend ends;
+  `List.push`, whose `amortized` bound needs the cost of growing a
+  storage; `partition_point`'s logarithmic bound; and `Index` on a `List`
+  or a `Slice`, whose `requires` the trait does not state. Until it all
+  proves, `truss build` keeps the run-time checks.
+- **Contracts for the intrinsic module's floats and system calls.** Only
+  the integer operations, storage, views, and reading and writing bytes
+  have meanings. A call of any other intrinsic gives a value known only by
+  its type, and what the standard library states no contract for, such as
+  the `ieee_` comparisons, is known only by its type.
 - **Obligations and facts under a quantifier.** An obligation that names a
   quantifier's bound name, such as the bounds of an index on it, is not
   made, so nothing checks that a quantifier's body is well defined. A fact
@@ -1009,9 +1030,8 @@ sanitized runs, test the trusted base against real executions.
   specification module has no sum over a finite set or map, so a
   potential that needs one is reported as one the prover cannot read.
 - **Code the prover cannot read yet.** Among what is reported as
-  `prover.unsupported`: a loop over a cursor that is not in a local, a
-  local changed on the right of `&&`, `||`, or `==>`, and a string pattern
-  with a tag or interpolations.
+  `prover.unsupported`: a loop over a cursor that is not in a local, and a
+  string pattern with a tag or interpolations.
 - **More in a diagnostic.** A note at the clause an obligation comes from,
   the branches a counterexample's path takes, listed by position, the
   values of locals, and a fix that adds an obligation about parameters

@@ -587,7 +587,3 @@ It is left out of each command's help.
 - **Renaming a field or a variant** with `truss rename`.
 - **Listing the proofs to check again** in `truss impact`, as it lists the
   tests whose code changed.
-- **`--check-proofs`,** a flag for working on the compiler, on `test`,
-  `run`, and `build`. It is to emit a run-time check for every proven
-  obligation. Stage0's builds keep every run-time check whether or not its
-  proofs are done, so they all check what the prover proves.

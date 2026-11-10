@@ -1326,12 +1326,12 @@ a command line can hold.
 
 ## Not built
 
-- **Programs built without checks.** A program is to be built without the
-  checks a test build has, once its proofs are done. Stage0 builds programs
-  with the checks too. A flag for testing the compiler, `--check-proofs`, is
-  then to build a program with the checks: a failed check in code whose
-  obligations were all proven reports a prover bug with the obligation's
-  position, which checks the prover against real executions.
+- **Programs built without checks.** `truss build` builds a program only
+  once its proofs are done, so it is to build it without the checks a test
+  build has. It keeps them until the standard library proves, since a
+  program reaches the standard library's code too. Test builds keep every
+  check, so each test run checks the prover against real executions; no
+  flag is needed for that.
 - **A `requires` check that reports its caller's position.** One of a
   function called reports the clause's own. Rust's `#[track_caller]` does
   this by passing the caller's location.
