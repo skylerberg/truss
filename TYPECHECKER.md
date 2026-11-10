@@ -1511,6 +1511,12 @@ checks them like code, with these differences:
   range or a collection is an expression in code as well; one over a type,
   and `==>`, are errors in a body that is compiled, which the parser leaves
   to this stage since only the signature's types say whether a body is.
+- **`log` and `power` are specification functions.** A call of `log(n)` or
+  `power(base, exponent)` by bare name is the function on `Integer` that a
+  `cost` bound uses. In a `cost` bound the names always mean these
+  functions. In any other specification, a local or a definition of the
+  file with the same name takes precedence. `time` and `calls` are cost
+  functions only.
 - **Theorems** are called only from proofs, and a call makes their `ensures`
   available. `assert` is only in tests, theorems, and proofs.
 
