@@ -127,7 +127,7 @@ let unknowns unifier (type_ : T.ty) =
         List.iter (fun (_, type_) -> go type_) inputs;
         match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> go type_)
     | Any reference -> trait reference
-    | Parameter _ | Never | Integer | Hole | Error -> ()
+    | Parameter _ | Never | Integer | Hole | Error _ -> ()
   and argument = function
     | T.Type type_ -> go type_
     | T.Value value -> (
@@ -142,6 +142,14 @@ let unknowns unifier (type_ : T.ty) =
   go type_;
   List.sort_uniq compare !found
 
+let argument_unknowns unifier = function
+  | T.Type type_ -> unknowns unifier type_
+  | T.Value value -> (
+      match resolve_value unifier value with
+      | Value_variable index -> [ Unknown_value index ]
+      | _ -> [])
+  | T.Capabilities _ -> []
+
 (* Unifies two types, solving variables in either. Errors and holes agree
    with anything, so one mistake is reported once. *)
 let rec unify unifier (left : T.ty) (right : T.ty) =
@@ -149,17 +157,17 @@ let rec unify unifier (left : T.ty) (right : T.ty) =
   match (left, right) with
   (* An error, or a hole, solves a variable it meets, so that one mistake is
      not reported again as a type that cannot be worked out. *)
-  | (T.Variable index | T.Literal (_, index)), (T.Error | T.Hole)
-  | (T.Error | T.Hole), (T.Variable index | T.Literal (_, index)) ->
-      Hashtbl.replace unifier.types index T.Error;
+  | (T.Variable index | T.Literal (_, index)), ((T.Error _ | T.Hole) as unknown)
+  | ((T.Error _ | T.Hole) as unknown), (T.Variable index | T.Literal (_, index)) ->
+      Hashtbl.replace unifier.types index unknown;
       true
-  | (T.Error | T.Hole), other | other, (T.Error | T.Hole) ->
+  | ((T.Error _ | T.Hole) as unknown), other | other, ((T.Error _ | T.Hole) as unknown) ->
       (* Every variable inside what an error meets is solved as an error
          too, so nothing it held is reported as unknown. *)
       List.iter
         (function
           | Unknown_type index | Unknown_literal (_, index) ->
-              Hashtbl.replace unifier.types index T.Error
+              Hashtbl.replace unifier.types index unknown
           | Unknown_value _ -> ())
         (unknowns unifier other);
       true
@@ -205,7 +213,7 @@ and unify_arguments unifier left right =
          match (left, right) with
          | T.Type left, T.Type right -> unify unifier left right
          | T.Value left, T.Value right -> unify_value unifier left right
-         | T.Type T.Error, _ | _, T.Type T.Error -> true
+         | T.Type (T.Error _), _ | _, T.Type (T.Error _) -> true
          | T.Capabilities _, T.Capabilities _ -> true
          | _ -> false)
        left right

@@ -27,7 +27,9 @@ type ty =
   | Variable of int  (** An unknown type, while one statement is checked. *)
   | Literal of literal_kind * int  (** A literal whose type is not decided yet. *)
   | Hole  (** The type of a [todo] with nothing expected. *)
-  | Error  (** After an error, to stop cascades. Unifies with everything. *)
+  | Error of Diagnostic.reported
+      (** After an error, to stop cascades. Unifies with everything, which the proof that the error
+          was reported makes safe. *)
 
 and argument =
   | Type of ty
@@ -96,6 +98,8 @@ val equal : ty -> ty -> bool
 (** Structural: types are nominal, so two [Named] types are equal when they name the same definition
     with equal arguments. *)
 
+val is_error : ty -> bool
+
 val contains_unsolved : ty -> bool
 (** Whether a type still has a [Variable], [Literal], or [Hole] in it. *)
 
@@ -147,7 +151,7 @@ type shape =
   | Sum of variant list
   | Todo_type  (** [= todo]: it can be named and passed, but not used. *)
   | Builtin_type of Intrinsic.builtin
-  | Error_shape  (** A type whose definition did not parse. *)
+  | Error_shape of Diagnostic.reported  (** A type whose definition did not parse. *)
 
 type type_interface = {
   type_generics : generic list;
@@ -171,7 +175,8 @@ type trait_interface = {
   associated_types : associated_type list;
   methods : trait_method list;
   is_capability : bool;
-  broken_methods : string list;  (** Members the parser could not read, whose uses get [Error]. *)
+  broken_methods : (string * Diagnostic.reported) list;
+      (** Members the parser could not read, whose uses get [Error]. *)
 }
 
 type impl_interface = {

@@ -31,7 +31,7 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
   | Integer -> bug "Integer exists only in specifications"
   | (Variable _ | Literal _ | Hole) as ty ->
       bug "a type the checker left undecided: %s" (Types.show ty)
-  | Error -> bug "a type with an error, which no build reaches"
+  | Error _ -> bug "a type with an error, which no build reaches"
 
 and ground_argument context substitution (argument : Types.argument) : Ground.argument =
   match Types.substitute_argument substitution argument with
@@ -171,7 +171,7 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
                        variants)
               | Builtin_type _ -> bug "a built-in type under a path that is not built in"
               | Todo_type -> bug "%s is a todo, which no build reaches" (Path.show path)
-              | Error_shape -> bug "%s did not parse, which no build reaches" (Path.show path))))
+              | Error_shape _ -> bug "%s did not parse, which no build reaches" (Path.show path))))
 
 let kind context ty : Glue.kind =
   match ty with

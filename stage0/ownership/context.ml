@@ -93,9 +93,7 @@ let report context ?(fixes = []) ?(notes = []) code (span : span) message =
       message
     :: context.diagnostics
 
-let type_of context (value : expression) =
-  Option.value ~default:T.Error context.checked.types.(value.id)
-
+let type_of context (value : expression) = C.type_of context.checked value
 let plain context type_ = Properties.plain context.database ~bounds:context.bounds type_
 let copyable context type_ = Properties.copyable context.database ~bounds:context.bounds type_
 let is_view context type_ = Properties.is_view context.database ~bounds:context.bounds type_

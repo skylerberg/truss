@@ -32,17 +32,31 @@ let create database resolved =
     named = ref [];
   }
 
-let report context code (span : span) message =
-  context.diagnostics :=
-    Diagnostic.make ~code:(Types code) (Source.span span.start span.stop) message
-    :: !(context.diagnostics)
+let reported context code (span : span) message =
+  let diagnostic = Diagnostic.make ~code:(Types code) (Source.span span.start span.stop) message in
+  context.diagnostics := diagnostic :: !(context.diagnostics);
+  Diagnostic.reported diagnostic
 
+let report context code span message = ignore (reported context code span message)
+let error context code span message = T.Error (reported context code span message)
+
+(* What resolution and lowering agree on cannot fail; if it does, that is a
+   bug in the compiler, and stopping is better than accepting the code. *)
+let bug format = Compiler_bug.bug ~stage:"Interface" format
 let target context (name : name) = context.resolved.names.(name.id)
+
+(* A generic parameter resolution found, by the id of the name that binds
+   it. *)
+let declared context id (name : name) =
+  match Hashtbl.find_opt context.parameters id with
+  | Some parameter -> parameter
+  | None -> bug "the generic parameter `%s` is not declared" name.text
 
 let parameter_of context (name : name) =
   match target context name with
-  | Some (Generic id) -> Hashtbl.find_opt context.parameters id
-  | _ -> None
+  | Some (Generic id) -> Ok (declared context id name)
+  | Some (Unknown report) -> Error report
+  | _ -> bug "`%s` is not resolved as a generic parameter" name.text
 
 let declare context owner (name : name) =
   let parameter : T.parameter = { owner; name = name.text } in
@@ -56,15 +70,16 @@ let show_path (path : path) = Resolve.Names.spell_path path
 let rec type_ context (written : type_expression) : T.ty =
   match written.kind with
   | Path_type path -> path_type context path
-  | Self_type None -> ( match context.self_type with Some self -> self | None -> T.Error)
-  | Self_type (Some key) -> self_associated context key
+  | Self_type None -> (
+      match self context written.span with Ok self -> self | Error report -> T.Error report)
+  | Self_type (Some key) -> self_associated context written.span key
   | Associated (base, key) -> (
       match parameter_of context base with
-      | Some parameter -> associated context (T.Parameter parameter) parameter key
-      | None -> T.Error)
+      | Ok parameter -> associated context (T.Parameter parameter) parameter key
+      | Error report -> T.Error report)
   | Any_type path -> (
       match trait_reference context path with
-      | Some trait ->
+      | Ok (trait : T.trait_reference) ->
           (* A method that mentions an associated type could not be called
              through [any] otherwise. *)
           let open_names =
@@ -84,16 +99,33 @@ let rec type_ context (written : type_expression) : T.ty =
                  "`any %s` must fix every associated type of its trait, such as `%s[%s = ...]`."
                  (show_path path.path) (show_path path.path) (List.hd open_names));
           T.Any trait
-      | None -> T.Error)
+      | Error report -> T.Error report)
   | Function_type function_type -> T.Function (function_type_ context function_type)
-  | Type_error -> T.Error
+  | Type_error -> T.Error (Resolve.Parts.error_node written.span)
 
-and self_associated context (key : name) =
+(* What [Self] means, which only lowering knows: resolution cannot tell a
+   method of a type from a function. *)
+and self context (span : span) =
+  match context.self_type with
+  | Some self -> Ok self
+  | None ->
+      Error
+        (reported context Misplaced_self_type span
+           "`Self` names a type only in a type's definition, a trait, an `impl`, or a method.")
+
+and self_associated context (span : span) (key : name) =
   match List.assoc_opt key.text context.self_associated with
   | Some fixed -> fixed
   | None -> (
-      match (context.self_type, context.self_trait) with
-      | Some self, Some trait -> (
+      match (self context span, context.self_trait) with
+      | Error report, _ -> T.Error report
+      | Ok _, None ->
+          error context Unknown_associated_type key.span
+            (Printf.sprintf
+               "`Self.%s` names an associated type of a trait, and `Self` is not in a trait or in \
+                an `impl` of one here."
+               key.text)
+      | Ok self, Some trait -> (
           match List.assoc_opt key.text trait.associated with
           | Some fixed -> fixed
           | None -> (
@@ -107,11 +139,9 @@ and self_associated context (key : name) =
                   in
                   T.Projection { base = self; trait; name = key.text }
               | None ->
-                  report context Unknown_associated_type key.span
+                  error context Unknown_associated_type key.span
                     (Printf.sprintf "`%s` declares no associated type `%s`." (T.show_trait trait)
-                       key.text);
-                  T.Error))
-      | _ -> T.Error)
+                       key.text))))
 
 (* Whether a trait, or a trait it requires, declares the associated type. *)
 and declares context trait name = Option.is_some (declaring context trait name)
@@ -146,9 +176,8 @@ and associated context base parameter (key : name) =
   match found with
   | Some found -> found
   | None ->
-      report context Unknown_associated_type key.span
-        (Printf.sprintf "No bound of `%s` declares an associated type `%s`." parameter.name key.text);
-      T.Error
+      error context Unknown_associated_type key.span
+        (Printf.sprintf "No bound of `%s` declares an associated type `%s`." parameter.name key.text)
 
 and arguments context (path : path_type) =
   List.filter_map
@@ -161,27 +190,25 @@ and arguments context (path : path_type) =
 
 and count_name context (name : name) : T.argument =
   match target context name with
-  | Some (Generic id) -> (
-      match Hashtbl.find_opt context.parameters id with
-      | Some parameter -> T.Value (T.Value_parameter parameter)
-      | None -> T.Type T.Error)
+  | Some (Generic id) -> T.Value (T.Value_parameter (declared context id name))
   | Some (Definition path) -> (
-      if not (Constants.is_usize context.database path) then begin
-        report context Arity name.span
-          (Printf.sprintf "`%s` in a type argument must be a constant of type `USize`." name.text);
-        T.Type T.Error
-      end
+      if not (Constants.is_usize context.database path) then
+        T.Type
+          (error context Arity name.span
+             (Printf.sprintf "`%s` in a type argument must be a constant of type `USize`." name.text))
       else
         match Query.demand context.database Constants.value_of path with
         | Some value -> T.Value (T.Known value)
         | None ->
-            report context Arity name.span
-              (Printf.sprintf
-                 "The value of `%s` cannot be worked out: a constant used in a type cannot refer \
-                  to itself, and is made of literals, arithmetic, and other such constants."
-                 name.text);
-            T.Type T.Error)
-  | _ -> T.Type T.Error
+            T.Type
+              (error context Arity name.span
+                 (Printf.sprintf
+                    "The value of `%s` cannot be worked out: a constant used in a type cannot \
+                     refer to itself, and is made of literals, arithmetic, and other such \
+                     constants."
+                    name.text)))
+  | Some (Unknown report) -> T.Type (T.Error report)
+  | _ -> bug "`%s` is not resolved as a type argument" name.text
 
 and check_arity context (path : path_type) shown expected =
   match expected with
@@ -216,14 +243,12 @@ and check_arity context (path : path_type) shown expected =
 and path_type context (path : path_type) : T.ty =
   let shown = show_path path.path in
   match target context path.path.last with
-  | Some (Generic id) -> (
+  | Some (Generic id) ->
       if path.arguments <> [] then begin
         report context Arity path.span
           (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." shown)
       end;
-      match Hashtbl.find_opt context.parameters id with
-      | Some parameter -> T.Parameter parameter
-      | None -> T.Error)
+      T.Parameter (declared context id path.path.last)
   | Some (Definition definition_path) -> (
       match Intrinsic.builtin_of_path definition_path with
       | Some Never -> T.Never
@@ -243,19 +268,18 @@ and path_type context (path : path_type) : T.ty =
               context.named := (path.span, type_) :: !(context.named);
               type_
           | Some (Trait | Capability) ->
-              report context Not_a_type path.span
+              error context Not_a_type path.span
                 (Printf.sprintf
                    "`%s` is a trait, not a type. A value of any type with it is `any %s`." shown
-                   shown);
-              T.Error
-          | _ ->
-              report context Not_a_type path.span (Printf.sprintf "`%s` is not a type." shown);
-              T.Error))
-  | _ -> T.Error
+                   shown)
+          | _ -> error context Not_a_type path.span (Printf.sprintf "`%s` is not a type." shown)))
+  | Some (Unknown report) -> T.Error report
+  | _ -> bug "`%s` is not resolved as a type" shown
 
 (* A bound, an [impl]'s trait, or the trait after [any]. An [impl] may
    implement a capability too. *)
-and trait_reference ?(capability = false) context (path : path_type) : T.trait_reference option =
+and trait_reference ?(capability = false) context (path : path_type) :
+    (T.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
   match target context path.path.last with
   | Some (Definition trait) -> (
@@ -271,26 +295,33 @@ and trait_reference ?(capability = false) context (path : path_type) : T.trait_r
                    | Type_argument _ | Count _ | Count_name _ -> None)
                  path.arguments)
           in
-          Some { trait; trait_arguments = arguments context path; associated }
+          Ok { trait; trait_arguments = arguments context path; associated }
       | _ ->
-          report context Not_a_trait path.span (Printf.sprintf "`%s` is not a trait." shown);
-          None)
-  | _ -> None
+          Error
+            (reported context Not_a_trait path.span (Printf.sprintf "`%s` is not a trait." shown)))
+  | Some (Generic _) ->
+      Error
+        (reported context Not_a_trait path.span
+           (Printf.sprintf "`%s` is a generic parameter, not a trait." shown))
+  | Some (Unknown report) -> Error report
+  | _ -> bug "`%s` is not resolved as a trait" shown
+
+and trait_bounds context paths =
+  List.filter_map (fun path -> Result.to_option (trait_reference context path)) paths
 
 and capability context (path : path_type) : T.capability option =
   let shown = show_path path.path in
   match target context path.path.last with
-  | Some (Generic id) -> (
-      match Hashtbl.find_opt context.parameters id with
-      | Some parameter when not (Hashtbl.mem context.bounds parameter) ->
-          Some (T.Capability_parameter parameter)
-      | Some parameter ->
-          report context Not_a_capability path.span
-            (Printf.sprintf
-               "`%s` is a type parameter. A capability parameter is declared `capability %s`."
-               parameter.name parameter.name);
-          None
-      | None -> None)
+  | Some (Generic id) ->
+      let parameter = declared context id path.path.last in
+      if Hashtbl.mem context.bounds parameter then begin
+        report context Not_a_capability path.span
+          (Printf.sprintf
+             "`%s` is a type parameter. A capability parameter is declared `capability %s`."
+             parameter.name parameter.name);
+        None
+      end
+      else Some (T.Capability_parameter parameter)
   | Some (Definition path_) when Summary.kind_of context.database path_ = Some Capability ->
       Some (T.Capability path_)
   | Some (Definition _) ->
@@ -360,7 +391,7 @@ let generics context owner (written : generic_parameter list) : T.generic list =
     (fun (parameter, kind) ->
       match kind with
       | `Type bounds ->
-          let bounds = List.filter_map (trait_reference context) bounds in
+          let bounds = trait_bounds context bounds in
           Hashtbl.replace context.bounds parameter bounds;
           { T.generic = parameter; kind = Type_generic bounds }
       | `Value _ -> { T.generic = parameter; kind = Value_generic }
@@ -387,7 +418,7 @@ let rec mentions_integer = function
       match output with
       | Returns type_ | Yields (_, type_) | Lends (_, type_) -> mentions_integer type_)
   | T.Projection { base; _ } -> mentions_integer base
-  | T.Parameter _ | T.Any _ | T.Never | T.Variable _ | T.Literal _ | T.Hole | T.Error -> false
+  | T.Parameter _ | T.Any _ | T.Never | T.Variable _ | T.Literal _ | T.Hole | T.Error _ -> false
 
 (* A signature, given the generics of the head before it and the type of
    [self]. *)
@@ -400,7 +431,7 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
         let receiver : Path.receiver =
           match written_mode with None -> Read | Some Mut -> Mut | Some Own -> Own
         in
-        Some (receiver, Option.value ~default:T.Error self_type)
+        Option.map (fun self -> (receiver, self)) self_type
     | _ -> None
   in
   let parameters =

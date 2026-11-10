@@ -16,10 +16,14 @@ type state = {
   mutable diagnostics : Diagnostic.t list;
 }
 
-let report state ?fixes code (span : span) message =
-  state.diagnostics <-
+let reported state ?fixes code (span : span) message =
+  let diagnostic =
     Diagnostic.make ?fixes ~code:(Types code) (Source.span span.start span.stop) message
-    :: state.diagnostics
+  in
+  state.diagnostics <- diagnostic :: state.diagnostics;
+  Diagnostic.reported diagnostic
+
+let report state ?fixes code span message = ignore (reported state ?fixes code span message)
 
 let bounds state parameter =
   Option.value ~default:[] (List.assoc_opt parameter state.lowered.bounds)
@@ -277,7 +281,7 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
               (fun (field : T.field) -> field.field_type)
               (Option.value ~default:[] variant.fields))
           variants
-    | Todo_type | Builtin_type _ | Error_shape -> []
+    | Todo_type | Builtin_type _ | Error_shape _ -> []
   in
   (* The conditions of a derived [impl]: each type parameter bounded by the
      trait, as [impl Equal for Option[Value: Equal]]. *)
@@ -454,7 +458,7 @@ let show_signature (signature : T.signature) =
    anything, since it was reported already. *)
 let rec agrees (left : T.ty) (right : T.ty) =
   match (left, right) with
-  | T.Error, _ | _, T.Error -> true
+  | T.Error _, _ | _, T.Error _ -> true
   | T.Named left, T.Named right ->
       Path.equal left.path right.path
       && List.length left.arguments = List.length right.arguments
@@ -531,6 +535,21 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
                impl.implements.trait_arguments
            else [])
         in
+        (* An associated type the trait declares and this [impl] does not
+           give is reported once, here, and is an error wherever a method's
+           signature mentions it. *)
+        let missing_associated =
+          List.filter_map
+            (fun (associated : T.associated_type) ->
+              if List.mem_assoc associated.associated_name impl.implements.associated then None
+              else
+                Some
+                  ( associated.associated_name,
+                    reported state Missing_member trait_path.span
+                      (Printf.sprintf "This `impl` must give `type %s`, which `%s` declares."
+                         associated.associated_name shown_trait) ))
+            trait.associated_types
+        in
         (* The trait's types as this [impl] sees them: [Self] its type, and
            each associated type of [Self] what this [impl], or the [impl] of
            a trait it requires, chooses. *)
@@ -538,15 +557,16 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
           T.map
             (function
               | T.Projection { base; trait = projected; name } when T.equal base impl.for_type -> (
-                  match List.assoc_opt name impl.implements.associated with
-                  | Some fixed -> Some fixed
-                  | None -> (
-                      match
-                        Impls.associated_type database ~bounds:impl_bounds impl.for_type projected
-                          name
-                      with
-                      | Some fixed -> Some fixed
-                      | None -> Some T.Error))
+                  match
+                    ( List.assoc_opt name impl.implements.associated,
+                      List.assoc_opt name missing_associated )
+                  with
+                  | Some fixed, _ -> Some fixed
+                  | None, Some report when Path.equal projected.trait impl.implements.trait ->
+                      Some (T.Error report)
+                  | None, _ ->
+                      Impls.associated_type database ~bounds:impl_bounds impl.for_type projected
+                        name)
               | _ -> None)
             (T.substitute substitution type_)
         in
@@ -586,10 +606,7 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
         List.iter
           (fun (associated : T.associated_type) ->
             match List.assoc_opt associated.associated_name impl.implements.associated with
-            | None ->
-                report state Missing_member trait_path.span
-                  (Printf.sprintf "This `impl` must give `type %s`, which `%s` declares."
-                     associated.associated_name shown_trait)
+            | None -> ()
             | Some chosen ->
                 (* What an [impl] chooses meets the bounds the trait declares. *)
                 List.iter
@@ -847,3 +864,13 @@ let diagnostics =
               compare (left.span, left.code) (right.span, right.code))
             (lowered.diagnostics @ state.diagnostics)
       | _ -> [])
+
+(* The report of a definition whose interface has an error, for a use of it
+   that the error leaves nothing to check against. *)
+let reported database (path : Path.t) =
+  match Query.demand database Summary.key path with
+  | Some key -> (
+      match Query.demand database diagnostics key with
+      | first :: _ -> Some (Diagnostic.reported first)
+      | [] -> None)
+  | None -> None

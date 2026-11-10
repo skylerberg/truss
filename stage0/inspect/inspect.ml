@@ -16,7 +16,7 @@ type hole = {
    error type there, and is not decided yet. *)
 let show_type (checked : Checked.t) id =
   match if id < Array.length checked.types then checked.types.(id) else None with
-  | Some (Types.Error | Types.Hole) -> "not decided yet"
+  | Some (Types.Error _ | Types.Hole) -> "not decided yet"
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
@@ -88,7 +88,7 @@ let describe_target (target : Resolve.target) =
   | Yielded -> ("the parts handed out so far, in a specification", None)
   | Finished -> ("whether the method has ended, in a specification", None)
   | Cost_function _ -> ("a cost function", None)
-  | Unknown -> ("nothing: the name is not known", None)
+  | Unknown _ -> ("nothing: the name is not known", None)
 
 let contains (span : span) offset = span.start <= offset && offset <= span.stop
 

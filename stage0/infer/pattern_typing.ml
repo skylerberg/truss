@@ -24,6 +24,7 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
   | Some frame -> frame.patterns <- written.id :: frame.patterns
   | None -> ());
   let recurse = pattern_with state env ~mutable_ ~mode in
+  let unknown type_ = unknown_pattern state env written type_ ~mutable_ ~mode in
   match written.kind with
   | Wildcard | Pattern_error -> ()
   | Binding_or_constant bound -> (
@@ -72,12 +73,12 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
   | Variant { name = variant_name; fields } -> (
       match type_ with
       | T.Named { path; arguments } -> (
-          if not (Members.fields_visible state.database ~package:state.package path) then
-            report state Private_field written.span
-              (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
-                 (T.show type_));
           match Members.variants state.database path arguments with
           | Some variants -> (
+              if not (Members.fields_visible state.database ~package:state.package path) then
+                report state Private_field written.span
+                  (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
+                     (T.show type_));
               match
                 List.find_opt
                   (fun (variant : T.variant) -> variant.variant_name = variant_name.last.text)
@@ -99,31 +100,36 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                     (Option.value ~default:[] variant.fields)
                     (Option.value ~default:[] fields) ~mutable_ ~mode
               | None ->
-                  report state Unknown_variant variant_name.last.span
-                    ~fixes:
-                      (match
-                         Resolve.closest variant_name.last.text
-                           (List.map (fun (variant : T.variant) -> variant.variant_name) variants)
-                       with
-                      | Some candidate ->
-                          [
-                            fix
-                              (Printf.sprintf "Write `%s`." candidate)
-                              [ replace variant_name.last.span candidate ];
-                          ]
-                      | None -> [])
-                    (Printf.sprintf "`%s` has no variant `%s`." (T.show type_)
-                       variant_name.last.text))
+                  unknown
+                  @@ error state Unknown_variant variant_name.last.span
+                       ~fixes:
+                         (match
+                            Resolve.closest variant_name.last.text
+                              (List.map
+                                 (fun (variant : T.variant) -> variant.variant_name)
+                                 variants)
+                          with
+                         | Some candidate ->
+                             [
+                               fix
+                                 (Printf.sprintf "Write `%s`." candidate)
+                                 [ replace variant_name.last.span candidate ];
+                             ]
+                         | None -> [])
+                       (Printf.sprintf "`%s` has no variant `%s`." (T.show type_)
+                          variant_name.last.text))
           | None -> (
-              match Members.shape state.database path with
-              | Some Error_shape -> ()
-              | _ ->
-                  report state Unknown_variant written.span
-                    (Printf.sprintf "`%s` has no variants." (T.show type_))))
-      | T.Error | T.Hole -> ()
+              match Members.broken state.database path with
+              | Some report -> unknown (T.Error report)
+              | None ->
+                  unknown
+                    (error state Unknown_variant written.span
+                       (Printf.sprintf "`%s` has no variants." (T.show type_)))))
+      | T.Error _ | T.Hole -> unknown type_
       | _ ->
-          report state Unknown_variant written.span
-            (Printf.sprintf "`%s` has no variants." (show state type_)))
+          unknown
+            (error state Unknown_variant written.span
+               (Printf.sprintf "`%s` has no variants." (show state type_))))
   | Record fields -> (
       match type_ with
       | T.Named { path; arguments } -> (
@@ -135,13 +141,18 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                      (T.show type_));
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
               pattern_fields state env written record_fields fields ~mutable_ ~mode
-          | None ->
-              report state Not_a_record written.span
-                (Printf.sprintf "`%s` is not a record." (show state type_)))
-      | T.Error | T.Hole -> ()
+          | None -> (
+              match Members.broken state.database path with
+              | Some report -> unknown (T.Error report)
+              | None ->
+                  unknown
+                    (error state Not_a_record written.span
+                       (Printf.sprintf "`%s` is not a record." (show state type_)))))
+      | T.Error _ | T.Hole -> unknown type_
       | _ ->
-          report state Not_a_record written.span
-            (Printf.sprintf "`%s` is not a record." (show state type_)))
+          unknown
+            (error state Not_a_record written.span
+               (Printf.sprintf "`%s` is not a record." (show state type_))))
   | Alternatives alternatives ->
       List.iter (fun alternative -> recurse alternative type_) alternatives
 
@@ -192,18 +203,21 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
           with
           | Some declared -> pattern_with state env inner declared.field_type ~mutable_ ~mode
           | None ->
-              report state Unknown_member name.span
-                ~fixes:
-                  (match
-                     Resolve.closest name.text
-                       (List.map (fun (declared : T.field) -> declared.field_name) fields)
-                   with
-                  | Some candidate ->
-                      [
-                        fix (Printf.sprintf "Write `%s`." candidate) [ replace name.span candidate ];
-                      ]
-                  | None -> [])
-                (Printf.sprintf "There is no field `%s` here." name.text))
+              pattern_with state env inner ~mutable_ ~mode
+              @@ error state Unknown_member name.span
+                   ~fixes:
+                     (match
+                        Resolve.closest name.text
+                          (List.map (fun (declared : T.field) -> declared.field_name) fields)
+                      with
+                     | Some candidate ->
+                         [
+                           fix
+                             (Printf.sprintf "Write `%s`." candidate)
+                             [ replace name.span candidate ];
+                         ]
+                     | None -> [])
+                   (Printf.sprintf "There is no field `%s` here." name.text))
       | Field inner -> (
           let named =
             Option.bind (bare_name inner) (fun name ->
@@ -217,12 +231,28 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
                 String.concat ", "
                   (List.map (fun (declared : T.field) -> "`" ^ declared.field_name ^ "`") fields)
               in
-              report state Unknown_member inner.span
-                (Printf.sprintf
-                   "A bare pattern must name a field, since this has %d fields: %s. Truss has no \
-                    tuples, so fields match by name."
-                   (List.length fields) names)))
+              pattern_with state env inner ~mutable_ ~mode
+                (error state Unknown_member inner.span
+                   (Printf.sprintf
+                      "A bare pattern must name a field, since this has %d fields: %s. Truss has \
+                       no tuples, so fields match by name."
+                      (List.length fields) names))))
     written_fields
+
+(* A pattern that cannot be matched against its type still binds its names,
+   each as unknown as what the pattern matches, so that no use of one is
+   without a type. *)
+and unknown_pattern state env (written : pattern) unknown ~mutable_ ~mode =
+  match written.kind with
+  | Variant { fields = Some fields; _ } | Record fields ->
+      List.iter
+        (fun (field : pattern_field) ->
+          match field.kind with
+          | Named_field (_, inner) | Field inner ->
+              pattern_with state env inner unknown ~mutable_ ~mode
+          | Rest -> ())
+        fields
+  | _ -> ()
 
 (* A constant in a pattern, or a range's end: recorded by the node's id, and
    of the matched type. *)
@@ -292,7 +322,7 @@ and structural ?(seen = []) state (type_ : T.ty) =
                     | Some fields -> fields_structural fields
                     | None -> true)
                   variants
-            | Todo_type | Builtin_type _ | Error_shape -> false
+            | Todo_type | Builtin_type _ | Error_shape _ -> false
             end
         | _ -> false)
     | _ -> false
@@ -402,7 +432,7 @@ and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
       state.tables.literals.(id) <- Some (Integer_value number);
-      if not (T.is_integer_type type_ || type_ = T.Error || type_ = T.Hole) then
+      if not (T.is_integer_type type_ || T.is_error type_ || type_ = T.Hole) then
         report state Mismatch span
           (Printf.sprintf "An integer pattern matches an integer, not `%s`." (T.show type_))
       else
@@ -423,6 +453,6 @@ and literal_pattern state id (span : span) literal type_ =
 
 (* A string literal in a pattern matches a string. *)
 and string_pattern state span type_ =
-  if not (is_named string_path type_ || is_named string_slice_path type_ || type_ = T.Error) then
+  if not (is_named string_path type_ || is_named string_slice_path type_ || T.is_error type_) then
     report state Mismatch span
       (Printf.sprintf "A string pattern matches a string, not `%s`." (T.show type_))

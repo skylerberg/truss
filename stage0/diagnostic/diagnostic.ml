@@ -89,12 +89,12 @@ module Code = struct
     | Not_generic
     | Not_a_constant
     | Alternative_bindings
-    | Misplaced_self_type
     | Not_a_generic_parameter
     | Null
 
   type types =
     | Bad_character
+    | Misplaced_self_type
     | Mismatch
     | Cannot_infer
     | Missing_label
@@ -308,13 +308,13 @@ module Code = struct
     | Not_generic -> "not_generic"
     | Not_a_constant -> "not_a_constant"
     | Alternative_bindings -> "alternative_bindings"
-    | Misplaced_self_type -> "misplaced_self_type"
     | Not_a_generic_parameter -> "not_a_generic_parameter"
     | Null -> "null"
 
   let types_name code =
     match code with
     | Bad_character -> "bad_character"
+    | Misplaced_self_type -> "misplaced_self_type"
     | Mismatch -> "mismatch"
     | Cannot_infer -> "cannot_infer"
     | Missing_label -> "missing_label"
@@ -460,6 +460,11 @@ type t = {
 }
 
 let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span; notes; fixes }
+
+type reported = Reported
+
+let reported (_ : t) = Reported
+let recovered (_ : span) = Reported
 let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert offset replacement = { span = Source.zero_width offset; replacement }

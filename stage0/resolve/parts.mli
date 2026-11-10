@@ -14,3 +14,10 @@ type part =
   | Member_body of int
 
 val broken : Syntax.definition -> part -> bool
+
+val reported : Syntax.definition -> part -> Diagnostic.reported option
+(** The report of a broken part: the parser's, or the lexer's, where the parser recovered. [None]
+    for a part that is as written. *)
+
+val error_node : Syntax.span -> Diagnostic.reported
+(** The report of an [Error] node, by its span: the parser builds one only where it recovered. *)

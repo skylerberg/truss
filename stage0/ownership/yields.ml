@@ -188,22 +188,20 @@ let check_pulls context =
             C.callee = Trait_method { name = "next"; self_type = T.Cursor { method_; _ }; _ };
             result;
             _;
-          } ->
-          let element =
-            match result with
-            | T.Named { arguments = [ T.Type element ]; _ } -> element
-            | _ -> T.Error
-          in
-          Option.iter
-            (fun (value : expression) -> check_pull context value.span method_ element)
-            (find_expression context id)
+          } -> (
+          (* [next] gives an [Option] of what the method yields. *)
+          match result with
+          | T.Named { arguments = [ T.Type element ]; _ } ->
+              Option.iter
+                (fun (value : expression) -> check_pull context value.span method_ element)
+                (find_expression context id)
+          | _ -> ())
       | _ -> ())
     context.checked.calls;
   let rec statement (written : statement) =
     (match (written.kind, context.checked.loops.(written.id)) with
     | For { iterable; pattern; _ }, Some (Pulled { cursor = T.Cursor { method_; _ } }) ->
-        check_pull context iterable.span method_
-          (Option.value ~default:T.Error context.checked.pattern_types.(pattern.id))
+        check_pull context iterable.span method_ (C.pattern_type context.checked pattern)
     | _ -> ());
     Syntax_walk.statement_parts ~expression ~statement written
   and expression value = Syntax_walk.expression_parts ~expression ~statement value in

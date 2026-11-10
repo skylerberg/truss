@@ -401,7 +401,7 @@ let constructors context ty =
                     ( Some variant.variant_name,
                       match variant.fields with Some list -> fields list | None -> [] ))
                   variants))
-      | Todo_type | Builtin_type _ | Error_shape -> None)
+      | Todo_type | Builtin_type _ | Error_shape _ -> None)
   | None -> None
 
 (* The fields of one constructor, in the order they are declared, which is
@@ -868,7 +868,7 @@ let method_contract database (trait : T.trait_reference) name receiver (evidence
                    ~own:part ~others:[] ~result:signature.result ~body:None)
           | None, None -> None)
       | _ -> None)
-  | Bound _ | Dynamic ->
+  | Bound | Dynamic ->
       Option.map
         (fun (part, (signature : signature)) ->
           make_contract database
@@ -1195,8 +1195,8 @@ and name context frame (written : expression) (path : path) =
               let field_type =
                 match declared_fields context self_type None with
                 | Some fields -> (
-                    match List.assoc_opt field fields with Some ty -> ty | None -> T.Error)
-                | None -> T.Error
+                    match List.assoc_opt field fields with Some ty -> ty | None -> T.Hole)
+                | None -> T.Hole
               in
               Some (frame, field_of context frame self_type None field field_type self)
           | _ -> unsupported written.span "a field outside its type's invariant")
@@ -1784,7 +1784,7 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
          proven for one [impl], reaches that type's [impl]. *)
       let evidence =
         match evidence with
-        | Bound _ -> (
+        | Bound -> (
             match concrete_impl context trait.trait self_type with
             | Some impl -> C.Impl { impl; arguments = [] }
             | None -> evidence)
@@ -1792,7 +1792,7 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
       in
       assume_laws context frame trait.trait self_type;
       (match evidence with
-      | (Bound _ | Dynamic) when name = "from_template" && Path.equal trait.trait template_trait ->
+      | (Bound | Dynamic) when name = "from_template" && Path.equal trait.trait template_trait ->
           oblige context frame Requires written.span
             "A call of `from_template` through a bound or `any` cannot see what the tag requires \
              of its template: build the value with a template, where the tag is known."
@@ -2258,8 +2258,8 @@ and law_parameter_types frame source trait ty (law : law) =
           match source.checked.local_types.(name_.id) with
           | Some declared ->
               T.substitute [ ({ T.owner = trait; name = "Self" }, T.Type ty) ] declared
-          | None -> T.Error)
-      | _ -> T.Error)
+          | None -> T.Hole)
+      | _ -> T.Hole)
     law.parameters
   |> fun types ->
   ignore frame;
@@ -2267,7 +2267,7 @@ and law_parameter_types frame source trait ty (law : law) =
 
 and law_fact context frame source trait ty (law : law) =
   let types = law_parameter_types frame source trait ty law in
-  if List.exists (fun ty -> ty = T.Error) types then None
+  if List.exists (fun ty -> T.is_error ty) types then None
   else begin
     context.fresh <- context.fresh + 1;
     let symbols = List.mapi (fun index _ -> Printf.sprintf "law.%d.%d" context.fresh index) types in
@@ -3038,8 +3038,8 @@ and member context frame (written : expression) base =
       ignore (sort_of context type_);
       let field_type =
         match declared_fields context type_ None with
-        | Some fields -> ( match List.assoc_opt field fields with Some ty -> ty | None -> T.Error)
-        | None -> T.Error
+        | Some fields -> ( match List.assoc_opt field fields with Some ty -> ty | None -> T.Hole)
+        | None -> T.Hole
       in
       Some (frame, field_of context frame type_ None field field_type term)
   | Some (Variant_value { type_; variant }) ->
@@ -4815,7 +4815,7 @@ and has_potential context ?(seen = []) (ty : T.ty) =
                   List.concat_map
                     (fun (variant : T.variant) -> Option.value variant.fields ~default:[])
                     variants
-              | Todo_type | Builtin_type _ | Error_shape -> []
+              | Todo_type | Builtin_type _ | Error_shape _ -> []
             in
             List.exists
               (fun (field : T.field) ->
@@ -6401,7 +6401,7 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
   List.iter
     (fun (law_source, (law : law)) ->
       let types = law_parameter_types start law_source trait for_type law in
-      if not (List.exists (fun ty -> ty = T.Error) types) then begin
+      if not (List.exists (fun ty -> T.is_error ty) types) then begin
         (* The other laws are facts here, and this one is not. *)
         context.laws_assumed <-
           (Path.show trait ^ " for " ^ type_key for_type) :: context.laws_assumed;

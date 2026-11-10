@@ -138,7 +138,7 @@ let describe names base (target : Resolve.target option) =
   | Some Yielded -> "yielded"
   | Some Finished -> "finished"
   | Some (Cost_function _) -> "cost function"
-  | Some Unknown -> "unknown"
+  | Some (Unknown _) -> "unknown"
 
 let refers ?(others = []) text ~name:(written, occurrence) expected =
   let database = setup (("app::main", text) :: others) in
@@ -572,5 +572,11 @@ let () =
             \  }\n\
              }\n" );
         ])
+
+let () =
+  test "a name used through an import of standard::intrinsic is not an error of its own" (fun () ->
+      one_diagnostic
+        "use standard::intrinsic\n\nfn f(left: Int64) -> Int64 {\n  intrinsic::add(left, left)\n}\n"
+        "resolve.intrinsic_import")
 
 let () = finish ()

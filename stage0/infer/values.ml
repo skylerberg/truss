@@ -104,11 +104,7 @@ let rec string_literal state env ?expected (literal : string_literal) =
                                      evidence [] tag_type);
                             }
                     | None -> ());
-                    let part =
-                      Option.value ~default:T.Error
-                        (Impls.associated_type state.database ~bounds:(bounds state) tag_type
-                           template_trait "Part")
-                    in
+                    let part = associated state tag_type template_trait "Part" ~at:literal.span in
                     (* Each part becomes the tag's [Part] through [From], chosen by
                        the part's type. *)
                     List.iteri
@@ -129,7 +125,7 @@ let rec string_literal state env ?expected (literal : string_literal) =
                                    (T.show part_type) (T.show part) (T.show tag_type)))
                       parts
                 | None ->
-                    if tag_type <> T.Error then
+                    if not (T.is_error tag_type) then
                       report state No_impl literal.span
                         (Printf.sprintf
                            "`%s` does not implement `FromTemplate`, so it is not a tag."
@@ -137,7 +133,8 @@ let rec string_literal state env ?expected (literal : string_literal) =
                 true
               end);
           tag_type
-      | _ -> T.Error)
+      | Some (Unknown report) -> T.Error report
+      | _ -> error state Not_a_type tag.last.span "A string's tag is a type.")
 
 and list_literal state env ?expected (value : expression) items =
   let expected = Option.map (normalize state) expected in
@@ -189,6 +186,13 @@ and lambda state env ?expected (value : expression) parameters body =
   let references_before = state.references in
   state.lambdas <- value.span :: state.lambdas;
   let expected = Option.map (normalize state) expected in
+  (* A lambda whose types are not known is still checked, for its own
+     errors, with what it binds as unknown as it is. *)
+  let untyped unknown =
+    List.iter (fun written -> pattern state env written unknown ~mode:T.Read) parameters;
+    ignore (block_value state env body);
+    unknown
+  in
   let result =
     match expected with
     | Some (T.Function function_type) when List.length function_type.inputs = List.length parameters
@@ -206,19 +210,18 @@ and lambda state env ?expected (value : expression) parameters body =
               mismatch state body.span ~expected:output ~found:body_type);
         T.Function function_type
     | Some (T.Function function_type) ->
-        report state Mismatch value.span
-          (Printf.sprintf "This lambda takes %d parameters, and `%s` takes %d."
-             (List.length parameters)
-             (T.show (T.Function function_type))
-             (List.length function_type.inputs));
-        T.Error
+        untyped
+          (error state Mismatch value.span
+             (Printf.sprintf "This lambda takes %d parameters, and `%s` takes %d."
+                (List.length parameters)
+                (T.show (T.Function function_type))
+                (List.length function_type.inputs)))
+    | Some ((T.Error _ | T.Hole) as unknown) -> untyped unknown
     | _ ->
-        report state Lambda_needs_type value.span
-          "A lambda's parameter types come from where it is used, and nothing here gives them. \
-           Give the `let` a function type, or the call type arguments.";
-        List.iter (fun written -> pattern state env written T.Error ~mode:T.Read) parameters;
-        ignore (block_value state env body);
-        T.Error
+        untyped
+          (error state Lambda_needs_type value.span
+             "A lambda's parameter types come from where it is used, and nothing here gives them. \
+              Give the `let` a function type, or the call type arguments.")
   in
   state.lambdas <- List.tl state.lambdas;
   (* The outer locals the lambda reads, in the order it first reads them. *)
@@ -303,9 +306,12 @@ and match_ state env ?expected (value : expression) scrutinees arms =
     List.map
       (fun (arm : arm) ->
         if List.length arm.patterns <> List.length types then
-          report state Mismatch arm.span
-            (Printf.sprintf "This arm has %d patterns, and the `match` has %d values."
-               (List.length arm.patterns) (List.length types))
+          let unknown =
+            error state Mismatch arm.span
+              (Printf.sprintf "This arm has %d patterns, and the `match` has %d values."
+                 (List.length arm.patterns) (List.length types))
+          in
+          List.iter (fun written -> pattern state env written unknown ~mode:T.Read) arm.patterns
         else
           List.iter2
             (fun written (scrutinee, type_) ->
@@ -330,11 +336,10 @@ and element_of_collection state env (collection : expression) =
   let collection_type = normalize state (expression state env collection) in
   match collection_type with
   | T.Named { path; arguments = [ T.Type element ] } when Path.equal path range_path -> element
-  | T.Error | T.Hole -> collection_type
+  | T.Error _ | T.Hole -> collection_type
   | _ -> (
       match yielded state collection_type T.Read with
       | Some element -> element
       | None ->
-          report state Not_indexable collection.span
-            (Printf.sprintf "`%s` cannot be looped over." (T.show collection_type));
-          T.Error)
+          error state Not_indexable collection.span
+            (Printf.sprintf "`%s` cannot be looped over." (T.show collection_type)))

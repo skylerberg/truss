@@ -27,16 +27,17 @@ and name state env (value : expression) (path : path) =
   | Some (Local id) -> (
       state.references <- id :: state.references;
       state.tables.meanings.(value.id) <- Some (Local_value id);
-      match Hashtbl.find_opt state.locals id with Some local -> local.type_ | None -> T.Error)
+      match Hashtbl.find_opt state.locals id with
+      | Some local -> local.type_
+      | None -> bug "the local `%s` has no type" path.last.text)
   | Some (Generic id) -> (
       match Hashtbl.find_opt state.context.parameters id with
       | Some parameter when path.last.text.[0] >= 'a' && path.last.text.[0] <= 'z' ->
           state.tables.meanings.(value.id) <- Some (Generic_value parameter);
           T.builtin USize
       | _ ->
-          report state Not_a_value value.span
-            (Printf.sprintf "`%s` is a type, not a value." path.last.text);
-          T.Error)
+          error state Not_a_value value.span
+            (Printf.sprintf "`%s` is a type, not a value." path.last.text))
   | Some (Definition definition_path) -> (
       match intrinsic_signature definition_path with
       | Some signature ->
@@ -48,40 +49,35 @@ and name state env (value : expression) (path : path) =
           match Interface.Summary.kind_of state.database definition_path with
           | Some (Function | Theorem) -> (
               match function_signature state definition_path with
-              | Some signature ->
+              | Some (Ok signature) ->
                   let instance = instantiate state ~span:value.span signature in
                   state.tables.meanings.(value.id) <-
                     Some
                       (Global { path = definition_path; type_arguments = instance.type_arguments });
                   T.Function (T.function_type_of instance.signature)
-              | None -> T.Error)
+              | Some (Error report) -> T.Error report
+              | None -> bug "`%s` has no signature" (Path.show definition_path))
           | Some Constant -> (
               state.tables.meanings.(value.id) <-
                 Some (Global { path = definition_path; type_arguments = [] });
               match Query.demand state.database Environment.constant_type definition_path with
               | Some type_ -> type_
-              | None -> T.Error)
+              | None -> bug "the constant `%s` has no type" (Path.show definition_path))
           | Some (Type | Trait | Capability) | None ->
               if Intrinsic.builtin_of_path definition_path = Some Unit then begin
                 state.tables.meanings.(value.id) <-
                   Some (Variant_value { type_ = T.unit; variant = "Unit" });
                 T.unit
               end
-              else begin
-                (match Interface.Summary.kind_of state.database definition_path with
-                | Some Type -> (
-                    match Members.shape state.database definition_path with
-                    | Some (Record []) -> ()
-                    | _ ->
-                        report state Not_a_value value.span
-                          (Printf.sprintf "`%s` is a type. Build a value with `%s(...)`."
-                             path.last.text path.last.text))
-                | _ ->
-                    report state Not_a_value value.span
-                      (Printf.sprintf "`%s` is not a value." path.last.text));
-                T.Error
-              end
-          | Some _ -> T.Error))
+              else if Interface.Summary.kind_of state.database definition_path = Some Type then
+                error state Not_a_value value.span
+                  (Printf.sprintf "`%s` is a type. Build a value with `%s(...)`." path.last.text
+                     path.last.text)
+              else
+                error state Not_a_value value.span
+                  (Printf.sprintf "`%s` is not a value." path.last.text)
+          | Some (Method | Member_constant | Impl | Test | Law_proof) ->
+              bug "`%s` is not what a name can mean" (Path.show definition_path)))
   | Some (Variant (type_path, variant)) ->
       variant_value state value type_path variant ~arguments:(fresh_arguments state type_path)
   | Some (Field field) -> (
@@ -93,15 +89,19 @@ and name state env (value : expression) (path : path) =
                 List.find_opt (fun (written : T.field) -> written.field_name = field) fields
               with
               | Some written -> written.field_type
-              | None -> T.Error)
-          | None -> T.Error)
-      | _ -> T.Error)
+              | None -> bug "the field `%s` is not in its record" field)
+          | None -> bug "the field `%s` is not in a record" field)
+      | _ -> bug "the field `%s` is named outside its type" field)
   | Some Result_value -> (
       state.tables.meanings.(value.id) <- Some Specification_value;
-      match env.output with Some output -> output_type output | None -> T.Error)
+      match env.output with
+      | Some output -> output_type output
+      | None -> bug "`result` is named where nothing is returned")
   | Some (Old | Identical | Cost_function _) ->
       state.tables.meanings.(value.id) <- Some Specification_value;
-      T.Error
+      error state Not_a_value value.span
+        (Printf.sprintf "`%s` is applied to what it is about, as in `%s(...)`." path.last.text
+           path.last.text)
   | Some Yielded -> (
       (* The parts handed out so far, in order. *)
       state.tables.meanings.(value.id) <- Some Specification_value;
@@ -113,11 +113,12 @@ and name state env (value : expression) (path : path) =
       in
       match part with
       | Some part -> T.Named { path = sequence_path; arguments = [ T.Type part ] }
-      | None -> T.Error)
+      | None -> bug "`yielded` is named where nothing is handed out")
   | Some Finished ->
       state.tables.meanings.(value.id) <- Some Specification_value;
       T.bool
-  | Some (Binding | Module _ | Unknown) | None -> T.Error
+  | Some (Unknown report) -> T.Error report
+  | Some (Binding | Module _) | None -> bug "the name `%s` is not resolved" path.last.text
 
 (* A variant used as a value: one with no fields is a value, and one with
    fields is a function that builds it. *)
@@ -139,21 +140,24 @@ and variant_value state (value : expression) type_path variant ~arguments =
               costs = [ { amortized = false; resource = "time"; bound = Order_of } ];
             }
       | None ->
-          report state Unknown_variant value.span
-            (Printf.sprintf "`%s` has no variant `%s`." (T.show type_) variant);
-          T.Error)
-  | None -> T.Error
+          error state Unknown_variant value.span
+            (Printf.sprintf "`%s` has no variant `%s`." (T.show type_) variant))
+  | None -> (
+      match Members.broken state.database type_path with
+      | Some report -> T.Error report
+      | None ->
+          error state Unknown_variant value.span
+            (Printf.sprintf "`%s` has no variants." (T.show type_)))
 
 and field state (value : expression) base_type (member : name) =
   let unknown candidates =
-    report state Unknown_member member.span
+    error state Unknown_member member.span
       ~fixes:
         (match Resolve.closest member.text candidates with
         | Some candidate ->
             [ fix (Printf.sprintf "Write `%s`." candidate) [ replace member.span candidate ] ]
         | None -> [])
-      (Printf.sprintf "`%s` has no field `%s`." (show state base_type) member.text);
-    T.Error
+      (Printf.sprintf "`%s` has no field `%s`." (show state base_type) member.text)
   in
   match base_type with
   | T.Named { path; arguments } -> (
@@ -164,11 +168,10 @@ and field state (value : expression) base_type (member : name) =
           with
           | Some written ->
               if not (Members.fields_visible state.database ~package:state.package path) then begin
-                report state Private_field member.span
+                error state Private_field member.span
                   (Printf.sprintf
                      "`%s` is opaque, so its fields can be read only in its own package."
-                     (show state base_type));
-                T.Error
+                     (show state base_type))
               end
               else begin
                 state.tables.meanings.(value.id) <-
@@ -177,19 +180,20 @@ and field state (value : expression) base_type (member : name) =
               end
           | None ->
               if Members.own_methods state.database path member.text <> [] then begin
-                report state Not_a_value member.span
+                error state Not_a_value member.span
                   (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text
-                     member.text);
-                T.Error
+                     member.text)
               end
               else unknown (List.map (fun (written : T.field) -> written.field_name) fields))
-      | None ->
-          if Members.own_methods state.database path member.text <> [] then begin
-            report state Not_a_value member.span
-              (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text member.text);
-            T.Error
-          end
-          else unknown [])
+      | None -> (
+          match Members.broken state.database path with
+          | Some report -> T.Error report
+          | None ->
+              if Members.own_methods state.database path member.text <> [] then
+                error state Not_a_value member.span
+                  (Printf.sprintf "`%s` is a method, so it is called: `%s()`." member.text
+                     member.text)
+              else unknown []))
   | _ -> unknown []
 
 (* [Type.name] read as a value: a variant, a constant under the type, or a
@@ -206,12 +210,12 @@ and static_member state (value : expression) type_ (member : name) =
               Some (Global { path = constant; type_arguments = [] });
             match Query.demand state.database Environment.constant_type constant with
             | Some type_ -> type_
-            | None -> T.Error)
+            | None -> bug "the constant `%s` has no type" (Path.show constant))
         | None -> (
             match Members.own_methods state.database path member.text with
             | (_, method_path) :: _ -> (
                 match function_signature state method_path with
-                | Some signature ->
+                | Some (Ok signature) ->
                     let instance = instantiate state signature in
                     (match instance.signature.receiver with
                     | Some (_, receiver) -> ignore (unify state receiver type_)
@@ -219,13 +223,16 @@ and static_member state (value : expression) type_ (member : name) =
                     state.tables.meanings.(value.id) <-
                       Some (Global { path = method_path; type_arguments = instance.type_arguments });
                     T.Function (T.function_type_of instance.signature)
-                | None -> T.Error)
+                | Some (Error report) -> T.Error report
+                | None -> bug "the method `%s` has no signature" (Path.show method_path))
             | [] ->
-                report state Unknown_member member.span
-                  (Printf.sprintf "`%s` has no member `%s`." (show state type_) member.text);
-                T.Error)
+                error state Unknown_member member.span
+                  (Printf.sprintf "`%s` has no member `%s`." (show state type_) member.text))
         end
-  | _ -> T.Error
+  | T.Error _ | T.Hole -> type_
+  | _ ->
+      error state Unknown_member member.span
+        (Printf.sprintf "`%s` has no member `%s`." (show state type_) member.text)
 
 (* Explicit type arguments give the function's own generic parameters, in
    order, after those of a method's type head: exactly one for each, of its
@@ -287,7 +294,7 @@ and cursor_type _state callee (instance : instance) =
           method_ = Method { owner = trait.trait; name; receiver };
           arguments = instance.type_arguments;
         }
-  | _ -> T.Error
+  | _ -> bug "a call that yields is not a call of a method"
 
 and check_specification_call state env (value : expression) (signature : T.signature) =
   if signature.specification_only && not env.specification then
@@ -354,7 +361,7 @@ and resolve_evidence state (value : expression) self_type (reference : T.trait_r
                     }
             | _ -> ())
         | None ->
-            if self_type <> T.Error then
+            if not (T.is_error self_type) then
               report state No_impl value.span
                 (Printf.sprintf "`%s` does not implement `%s`." (T.show self_type)
                    (T.show_trait reference)));
@@ -409,13 +416,6 @@ and trait_candidates state receiver_type name =
                (Query.demand state.database Members.traits_declaring (package, name)))
            (Members.visible_packages state.database state.package))
 
-and function_output state (call : C.call) =
-  match call.callee with
-  | Function { path; _ } ->
-      Option.map (fun (signature : T.signature) -> signature.output) (function_signature state path)
-  | Trait_method _ -> Some (T.Yields (Read, call.result))
-  | _ -> None
-
 and each_call state type_ mode =
   let receiver : Path.receiver = match mode with T.Read -> Read | Mut -> Mut | Own -> Own in
   match type_ with
@@ -423,7 +423,7 @@ and each_call state type_ mode =
       match List.assoc_opt receiver (Members.own_methods state.database path "each") with
       | Some method_path -> (
           match function_signature state method_path with
-          | Some signature -> (
+          | Some (Ok signature) -> (
               let instance = instantiate state signature in
               (match instance.signature.receiver with
               | Some (_, self_type) -> ignore (unify state self_type type_)
@@ -442,7 +442,7 @@ and each_call state type_ mode =
                       },
                       element )
               | _ -> None)
-          | None -> None)
+          | Some (Error _) | None -> None)
       | None -> None)
   | T.Parameter _ | T.Any _ -> (
       match trait_candidates state type_ "each" with
@@ -474,7 +474,7 @@ and each_call state type_ mode =
                               evidence =
                                 (match type_ with
                                 | T.Any _ -> Dynamic
-                                | T.Parameter parameter -> Bound parameter
+                                | T.Parameter _ -> Bound
                                 | _ -> Built_in);
                             };
                         arguments = [];
@@ -497,12 +497,12 @@ and yielded state type_ mode =
       match List.assoc_opt receiver (Members.own_methods state.database path "each") with
       | Some method_path -> (
           match function_signature state method_path with
-          | Some signature -> (
+          | Some (Ok signature) -> (
               let instance = instantiate state signature in
               (match instance.signature.receiver with
               | Some (_, self_type) -> ignore (unify state self_type type_)
               | None -> ());
               match instance.signature.output with Yields (_, element) -> Some element | _ -> None)
-          | None -> None)
+          | Some (Error _) | None -> None)
       | None -> None)
   | _ -> None

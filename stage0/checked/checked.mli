@@ -1,16 +1,17 @@
 (** The checked form of a definition: what the prover and code generation read.
 
     It is a set of dense tables keyed by the tree's node ids, so it never copies the tree. Every
-    type in it is solved: no [Variable], [Literal], or [Hole] remains. A local is named by the id of
-    the name that binds it. *)
+    type in it is solved: no [Variable] or [Literal] remains. A [Hole] stays where a [todo]'s type
+    was never decided. A local is named by the id of the name that binds it. *)
 
 type local = Syntax.id
 
 (** How a trait's [impl] was found, for a call to a trait method. *)
 type evidence =
   | Impl of { impl : Path.t; arguments : Types.substitution }  (** A written or derived [impl]. *)
-  | Bound of Types.parameter
-      (** A generic parameter's bound, resolved when the code is instantiated. *)
+  | Bound
+      (** A bound in scope, on a generic parameter or on an associated type of one, resolved when
+          the code is instantiated. *)
   | Dynamic  (** Through an [any] value's table. *)
   | Built_in  (** [Copyable] and [Plain], which the compiler implements. *)
 
@@ -148,5 +149,13 @@ type t = {
 
 val create : int -> t
 (** Empty tables for a definition with that many nodes. *)
+
+val type_of : t -> Syntax.expression -> Types.ty
+(** The type of an expression of a body that checked, where every expression has one. One without is
+    a bug in the compiler, raised as one: the stages after checking run on what it decided, and
+    never guess where it decided nothing. *)
+
+val pattern_type : t -> Syntax.pattern -> Types.ty
+(** The type of the value a pattern matches, as {!type_of}. *)
 
 val show_meaning : meaning -> string
