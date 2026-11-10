@@ -3,9 +3,9 @@
 This document describes stage0's code generation, in
 [`stage0/codegen/`](stage0/codegen): everything between the type checker's
 output and a program that runs. It follows the decisions in
-[DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md), and reads the checked
-form that [TYPECHECKER.md](TYPECHECKER.md) describes. There is no prover
-yet, so this document states what code generation expects of one.
+[DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md), reads the checked form
+that [TYPECHECKER.md](TYPECHECKER.md) describes, and relies on the proofs
+that [PROVER.md](PROVER.md) describes.
 
 ## What code generation does
 
@@ -34,9 +34,13 @@ It does not:
 
 - check anything about the program. Every error a user can see is reported
   by an earlier stage. A failure here is a compiler bug.
-- insert run-time checks. Indexes, overflow, division, shifts, and
-  `unreachable` have all been proven. The only checks in generated code are
-  the ones the program asks for, such as `checked_add` or `items.get(i)`.
+- insert run-time checks into a program. Indexes, overflow, division,
+  shifts, and `unreachable` have all been proven before a program is built.
+  The only checks in a program are the ones it asks for, such as
+  `checked_add` or `items.get(i)`. Test builds, and code run while
+  compiling, are different: they check every operation that could fail, so
+  that they can run before the prover has finished, as DESIGN.md's "Tests
+  do not wait for proofs" describes.
 - compile anything used only by proofs: theorems, laws, `proof` blocks,
   `requires`, `ensures`, invariants, `decreases`, cost clauses, and functions
   called only from those. Code generation starts from what can run, so they
@@ -121,11 +125,14 @@ Division by zero and `Int64.minimum / -1` are proven impossible. Making them
 defined would cost a test per division, so they are the one place where a
 prover bug could still reach undefined behavior.
 
-**Stage0 checks instead of proving.** Stage0 has no prover, so it cannot
-refuse a program whose obligations are unproven, as DESIGN.md's builds do.
-It builds every program with a run-time check for each obligation it can
-test instead, which makes a broken contract a panic rather than a wrong
-answer or a memory error:
+**Test builds check instead of waiting for proofs.** A test build, and code
+run while compiling, is built with the checks below whether or not the
+prover has finished, so tests run alongside the prover, and a broken
+contract is a failed test rather than a wrong answer or a memory error.
+The checks do not depend on which proofs passed, so neither do the test
+build's LIR and the test results cached under it. A program is built
+without them, once its proofs are done. Stage0 builds programs with the
+checks too, whether or not their proofs are done:
 - Each `requires` clause that can run is tested on entry to its function,
   and to each inlined lending or yielding body, with the parameters bound.
   It panics with "requirement not met: requires ...". That is how an index
@@ -167,7 +174,8 @@ A build starts from roots and compiles only what they can reach:
 - **A test run:** each test that must run, that is, each test without a
   cached result.
 - **Code run while compiling:** each constant whose value cannot be folded
-  from its expression, such as a `Map` or a `Set` (see
+  from its expression, such as a `Map` or a `Set`, and each tagged
+  template's check (see
   [Code run while compiling](#code-run-while-compiling)).
 
 ### Instance keys
@@ -990,8 +998,8 @@ again, so absolute lines cost nothing there.
 ## Code run while compiling
 
 DESIGN.md runs pure, terminating Truss code while compiling. That code goes
-through this same generator. Stage0 runs it for one thing: a constant whose
-value cannot be folded from its expression.
+through this same generator. Stage0 runs it for two things: a constant whose
+value cannot be folded from its expression, and a tagged template's check.
 
 - **It is built for the host, with the target's `USize`.** `USize` is a
   `typedef` in the generated C, so code built to run while compiling for a
@@ -1000,8 +1008,9 @@ value cannot be folded from its expression.
 - **Results are written out in a binary form,** and the compiler turns them
   into static data in C. Values are never shared, so every value is a tree,
   and writing it out is a simple walk.
-- **A run has no step limit,** since DESIGN.md requires this code to be pure
-  and to terminate. A stack overflow is reported as an error.
+- **A constant's evaluator runs with no time limit,** since DESIGN.md
+  requires its code to be pure and to terminate. A run that fails, as on a
+  stack overflow, is reported as an error.
 
 A constant whose value cannot be folded from its expression, such as one
 that calls a function or is a `Map` or a `Set`, has an `Evaluator`
@@ -1019,6 +1028,16 @@ the type's shape. The binary form is:
 
 The value is worked out once in a compiler's run, and its program's objects
 are cached as any others are.
+
+A tagged template's check has a `Template_check` instance, of the tag's
+`from_template` and the template's literal texts: it builds a template of
+those texts and no parts, works out each of `from_template`'s `requires`
+clauses that can run, and writes each out as a `Bool`. The prover asks it
+only of a clause that reads the template's literals alone, which its parts
+cannot change (see PROVER.md, "Running code while proving"). It runs with
+the test time limit, and its results are kept under the key of the code
+that ran, as test results are, so a check runs again only when its texts
+or its code change.
 
 ## Tests
 
@@ -1211,22 +1230,24 @@ a command line can hold.
 
 ## Not built
 
-- **Building without checks.** Once there is a prover, a proven obligation
-  is compiled without its check. A flag for testing the compiler,
-  `--check-proofs`, then emits a run-time check for every proven obligation:
-  indexes, overflow, division, shifts, and `unreachable`. A failed check
-  reports a prover bug with the obligation's position, which checks the
-  prover against real executions.
+- **Programs built without checks.** A program is to be built without the
+  checks a test build has, once its proofs are done. Stage0 builds programs
+  with the checks too. A flag for testing the compiler, `--check-proofs`, is
+  then to build a program with the checks: a failed check in code whose
+  obligations were all proven reports a prover bug with the obligation's
+  position, which checks the prover against real executions.
 - **A `requires` check that reports its caller's position.** One of a
   function called reports the clause's own. Rust's `#[track_caller]` does
   this by passing the caller's location.
-- **Tagged-template checks, and the values of templates without
-  interpolation,** which DESIGN.md runs while compiling, in the test
-  runner's workers. Their results are to be kept by the hash of the code
-  that ran and its input, so a check runs again only when its literal or its
-  code changes. The standard library's checkers are to ship already
+- **A constant's value kept between runs.** It is worked out again in each
+  run of the compiler.
+- **Checkers shipped compiled.** The standard library's are to ship already
   compiled with the toolchain, for each host and both widths of `USize`, and
   a dependency's to be compiled once per version.
+- **A quantifier in code.** It is to be a loop over its range or collection,
+  through the same `each` a `for` loop calls, that stops at the first
+  element that decides the answer: `forall` at the first false body,
+  `exists` at the first true one.
 - **A template without interpolation as a constant.** Its value is to be
   computed while compiling and placed in static memory. A `Regex"[a-z]+"`
   that is only read is then used in place, and where an owned value is

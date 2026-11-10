@@ -49,18 +49,6 @@ let gather (project : Project.t) paths =
         (Query.demand project.context Names.declarations module_))
     (Project.selected project paths)
 
-(* Every definition [start] reads, directly or not. *)
-let reachable dependencies start =
-  let seen = Hashtbl.create 64 in
-  let rec walk path =
-    if not (Hashtbl.mem seen path) then begin
-      Hashtbl.replace seen path ();
-      List.iter (fun (read, _, _) -> walk read) (Database.reads dependencies path)
-    end
-  in
-  walk start;
-  seen
-
 (* What each hole blocks: [main], if the program can reach it, and every
    test that can, through what each reads, directly or not. *)
 let fill_blocks (project : Project.t) holes =
@@ -74,7 +62,7 @@ let fill_blocks (project : Project.t) holes =
     in
     List.iter
       (fun (label, root) ->
-        let seen = reachable dependencies root in
+        let seen = Project.reachable dependencies root in
         List.iter
           (fun hole ->
             if Hashtbl.mem seen hole.definition then hole.blocks <- hole.blocks @ [ label ])

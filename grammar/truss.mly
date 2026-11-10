@@ -253,11 +253,15 @@ function_type:
   | FN LPAREN comma_list(function_type_parameter) RPAREN ARROW type_expression { () }
 
 function_type_parameter:
-  | mode_opt type_expression { () }
+  | type_expression { () }
+  | MUT type_expression { () }
+  | OWN type_expression { () }
+  | LOWER COLON mode_opt type_expression { () }
 
 function_type_clause:
   | USES capability_list { () }
   | COST cost { () }
+  | REQUIRES expression { () }
 
 generics_opt:
   | { () }
@@ -372,6 +376,7 @@ assignment_operator:
 loop_clause:
   | INVARIANT expression { () }
   | DECREASES separated_nonempty_list(COMMA, expression) { () }
+  | COST cost { () }
 
 /* Expressions */
 

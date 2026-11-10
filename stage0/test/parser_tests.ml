@@ -281,8 +281,20 @@ let () =
         "(fn (Item) (uses Clock Random) (cost time finite))");
   test "parentheses around a function type need clauses" (fun () ->
       error "fn f(value: (fn(Item))) {}" ~code:Unexpected_token ~at:"(fn");
-  test "requires in a function type" (fun () ->
-      error "fn f(value: (fn(Item) requires true)) {}" ~code:Unexpected_token ~at:"requires");
+  test "a function type's requires names its inputs" (fun () ->
+      definition "fn f(visit: (fn(index: USize) requires index < 3)) {}"
+        "(fn f ((visit: (fn (index: USize) (requires (< index 3))))) (block))");
+  test "requires in a function type needs every input named" (fun () ->
+      error "fn f(value: (fn(Item) requires true)) {}" ~code:Function_type_names ~at:"fn(Item)");
+  test "a function type without requires names no input" (fun () ->
+      error "fn f(value: fn(item: Item)) {}" ~code:Function_type_names ~at:"fn(item");
+  test "ensures in a function type" (fun () ->
+      error "fn f(value: (fn(item: Item) ensures true)) {}" ~code:Unexpected_token ~at:"ensures");
+  test "requires on a function type that is not a parameter's" (fun () ->
+      error "type T(visit: (fn(index: USize) requires index < 3))" ~code:Misplaced_requires
+        ~at:"requires";
+      error "fn f(visits: List[(fn(index: USize) requires index < 3)]) {}" ~code:Misplaced_requires
+        ~at:"requires");
   test "generic parameters" (fun () ->
       definition "fn f[Key: Hash + Ordered, count: USize, capability Granted]() {}"
         "(fn f[Key: Hash + Ordered, count: USize, capability Granted] () (block))")

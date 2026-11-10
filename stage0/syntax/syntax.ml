@@ -106,9 +106,12 @@ and type_argument =
           decides *)
   | Constraint of name * type_expression  (** [Element = Int64] *)
 
-(* A function type in parentheses can carry [Uses] and [Cost] clauses. *)
+(* A function type in parentheses can carry [Uses], [Cost], and [Requires]
+   clauses. Its inputs are named exactly when it has a [Requires], which
+   names them; the names are not labels, and calls stay positional. *)
 and function_type = {
   inputs : (mode option * type_expression) list;
+  input_names : name list;  (** Empty, or one for each input. *)
   output : type_expression option;
   clauses : clause list;
 }
@@ -248,7 +251,11 @@ and statement_kind =
   | Statement_error
 
 and loop_clause = loop_clause_kind node
-and loop_clause_kind = Invariant of expression | Loop_decreases of expression list
+
+and loop_clause_kind =
+  | Invariant of expression
+  | Loop_decreases of expression list
+  | Loop_cost of cost  (** What the loop has spent since it started, at each iteration. *)
 
 and arm = {
   patterns : pattern list;

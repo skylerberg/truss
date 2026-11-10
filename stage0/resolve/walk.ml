@@ -21,6 +21,9 @@ type target =
   | Field of string  (** A record's field, by name, in the record's invariant or potential. *)
   | Result_value  (** [result], in [ensures] and [cost]. *)
   | Old  (** [old], in specifications and proofs. *)
+  | Identical  (** [identical], in specifications and proofs: identity, for every type. *)
+  | Yielded  (** [yielded], what a lending or yielding method handed out so far. *)
+  | Finished  (** [finished], whether a yielding method ran to its end. *)
   | Cost_function of cost_function  (** [log], [power], [time], or [calls], in a [cost] bound. *)
   | Unknown  (** A name that refers to nothing; its error is reported. *)
 
@@ -33,6 +36,11 @@ type specification = {
   active : bool;  (** In a specification or a proof, where [old] has its meaning. *)
   result : bool;  (** In [ensures] or [cost], where [result] does. *)
   cost_bound : bool;  (** In a [cost] bound, where the cost functions do. *)
+  yielded : bool;
+      (** In a lending or yielding method's [ensures], or a [for] loop's clauses, where [yielded]
+          names what was handed out so far. *)
+  finished : bool;
+      (** In a lending or yielding method's [ensures], where [finished] has its meaning. *)
 }
 
 type scope = {
@@ -40,10 +48,13 @@ type scope = {
   types : id String_map.t;  (** Generic type and capability parameters. *)
   specification : specification;
   self_type : bool;  (** Whether [Self] names a type here. *)
+  hands_out : bool;  (** In a method that lends or yields, whose [ensures] name what it hands out. *)
 }
 
-let no_specification = { active = false; result = false; cost_bound = false }
-let in_specification = { active = true; result = false; cost_bound = false }
+let no_specification =
+  { active = false; result = false; cost_bound = false; yielded = false; finished = false }
+
+let in_specification = { no_specification with active = true }
 
 type state = {
   database : Query.context;
@@ -259,10 +270,13 @@ let rec type_expression state scope (type_ : type_expression) =
                base.text
                (match type_.kind with Associated (_, name) -> name.text | _ -> "")
                base.text))
-  | Function_type { inputs; output; clauses } ->
+  | Function_type { inputs; input_names; output; clauses } ->
       List.iter (fun (_, input) -> type_expression state scope input) inputs;
       Option.iter (type_expression state scope) output;
-      List.iter (clause state scope) clauses
+      (* The names of the inputs are in scope in the type's own [requires],
+         after the parameters before it in a signature. *)
+      let named = List.fold_left (declare_parameter state) scope input_names in
+      List.iter (clause state named) clauses
   | Type_error -> ()
 
 and path_type state scope (path : path_type) =
@@ -299,7 +313,16 @@ and clause state scope (clause : clause) =
   | Requires value -> expression state specification value
   | Ensures value ->
       expression state
-        { specification with specification = { in_specification with result = true } }
+        {
+          specification with
+          specification =
+            {
+              in_specification with
+              result = true;
+              yielded = scope.hands_out;
+              finished = scope.hands_out;
+            };
+        }
         value
   | Decreases measures -> List.iter (expression state specification) measures
   | Cost cost -> (
@@ -309,7 +332,11 @@ and clause state scope (clause : clause) =
       | Calls (Call_method (path, _)) -> path_type state scope path
       | Time | Allocations | Allocated_bytes -> ());
       let bound =
-        { scope with specification = { active = true; result = true; cost_bound = true } }
+        {
+          scope with
+          specification =
+            { scope.specification with active = true; result = true; cost_bound = true };
+        }
       in
       match cost.bound with
       | Big_o value | At_most value | Exactly value -> expression state bound value
@@ -327,6 +354,9 @@ and local_value state scope (name : name) =
   | Some (Value_field field, _) -> set state name (Field field)
   | None ->
       if scope.specification.active && text = "old" then set state name Old
+      else if scope.specification.yielded && text = "yielded" then set state name Yielded
+      else if scope.specification.finished && text = "finished" then set state name Finished
+      else if scope.specification.active && text = "identical" then set state name Identical
       else if scope.specification.result && text = "result" then set state name Result_value
       else
         begin match file_item state text with
@@ -719,7 +749,7 @@ and statement state scope (statement_ : statement) =
   | For { pattern = pattern_; iterable; clauses; body; _ } ->
       expression state scope iterable;
       let inner = bind_pattern state scope pattern_ in
-      List.iter (loop_clause state inner) clauses;
+      List.iter (loop_clause ~for_loop:true state inner) clauses;
       block state inner body;
       scope
   | While { condition = test; clauses; body } ->
@@ -757,11 +787,21 @@ and statement state scope (statement_ : statement) =
       scope
   | Statement_error -> scope
 
-and loop_clause state scope (clause : loop_clause) =
-  let specification = { scope with specification = in_specification } in
-  match clause.kind with
+and loop_clause ?(for_loop = false) state scope (written : loop_clause) =
+  let scope =
+    if for_loop then { scope with specification = { scope.specification with yielded = true } }
+    else scope
+  in
+  (* [yielded] names what the nearest loop or method hands out: a [for]
+     loop's own parts, or else, in a lending or yielding method, the
+     method's. *)
+  let specification =
+    { scope with specification = { in_specification with yielded = for_loop || scope.hands_out } }
+  in
+  match written.kind with
   | Invariant value -> expression state specification value
   | Loop_decreases measures -> List.iter (expression state specification) measures
+  | Loop_cost cost -> clause state scope { kind = Cost cost; span = written.span; id = written.id }
 
 (* Generic parameters *)
 
@@ -827,6 +867,7 @@ let empty_scope =
     types = String_map.empty;
     specification = no_specification;
     self_type = false;
+    hands_out = false;
   }
 
 (* The scope a definition's head gives: the type head's generic parameters,
@@ -843,6 +884,11 @@ let signature state scope ~(broken : bool) (signature_ : signature) =
     let scope = generics state scope signature_.generics in
     let scope = parameters state scope signature_.parameters in
     result state scope signature_.result;
+    let scope =
+      match signature_.result with
+      | Some (Yields _ | Lends _) -> { scope with hands_out = true }
+      | _ -> scope
+    in
     List.iter (clause state scope) signature_.clauses;
     Some scope
   end

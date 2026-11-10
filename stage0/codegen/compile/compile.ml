@@ -86,6 +86,8 @@ let make (context : Lower.context) lowering database (key : Instance.key) : Lir.
   | Encode ty -> elaborate_code context (Glue.encode glue ty)
   | Any_drop ty -> elaborate_code context (Glue.any_drop glue ty)
   | Evaluator path -> elaborate_code context (Lower.evaluator context path)
+  | Template_check { from_template; texts } ->
+      elaborate_code context (Lower.template_check context key ~from_template ~texts)
   | Entry _ | Program_main _ | Any_entry _ | Adapter _ ->
       elaborate_code context (Lower.instance context key)
   | Any_table _ -> Table (Lower.any_table context key)
@@ -281,7 +283,7 @@ let build ?progress t ~roots ~startup ~output =
 
 (* Builds what the roots reach into a temporary program and runs it with
    [arguments], then removes it. *)
-let build_and_run ?input t ~roots ~startup ~arguments =
+let build_and_run ?input ?time_limit t ~roots ~startup ~arguments =
   let output =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "truss-%d-%d" (Unix.getpid ()) (Hashtbl.hash roots))
@@ -289,7 +291,7 @@ let build_and_run ?input t ~roots ~startup ~arguments =
   match build t ~roots ~startup ~output with
   | Error message -> Error message
   | Ok () ->
-      let result = Toolchain.run ?input output arguments in
+      let result = Toolchain.run ?input ?time_limit output arguments in
       (try Sys.remove output with Sys_error _ -> ());
       Ok result
 
@@ -726,6 +728,76 @@ let evaluate t path ty =
       invalid_arg
         (Printf.sprintf "Compile: working out %s ended with status %d: %s" (Path.show path) status
            errors)
+
+(* Works out a tagged template's check: each of the tag's [from_template]'s
+   clauses that can run, for a template of these literal texts, by its
+   position among the clauses, with whether it holds. Results are kept for
+   the compiler's run, and, with [results], under the key of the code that
+   ran, as test results are, which the texts are part of. *)
+type template_check = Ran of (int * bool) list | Ran_too_long
+
+let checked_templates : (Instance.key, template_check) Hashtbl.t = Hashtbl.create 8
+
+let check_key t root =
+  t.want t.lowering [ root ];
+  match Query.demand t.database (Lazy.force reach) (t.lowering, root) with
+  | key ->
+      Some
+        (Blake3.hash
+           (Cbor.encode
+              (Cbor.Array
+                 [
+                   Text "truss template check";
+                   Cbor.int Lir.version;
+                   Cbor.Array
+                     [
+                       Cbor.int t.lowering.target.pointer_bytes;
+                       Cbor.int t.lowering.target.usize_bytes;
+                     ];
+                   Bytes key;
+                 ])))
+  | exception _ -> None
+
+let check_template ?results t ~time_limit ~from_template ~texts =
+  let root = Instance.Template_check { from_template; texts } in
+  match Hashtbl.find_opt checked_templates root with
+  | Some found -> Ok found
+  | None -> (
+      match Lower.template_checked t.context from_template with
+      | exception Invalid_argument message -> Error message
+      | [] -> Ok (Ran [])
+      | positions -> (
+          let key =
+            match results with
+            | Some results -> Option.map (fun key -> (results, key)) (check_key t root)
+            | None -> None
+          in
+          let output =
+            match Option.bind key (fun (results, key) -> results.find key) with
+            | Some output -> Ok (0, output, "")
+            | None ->
+                build_and_run t ~time_limit ~roots:[ root ]
+                  ~startup:(Startup.evaluator_calling (Instance.symbol root))
+                  ~arguments:[]
+          in
+          match output with
+          | Error message -> Error message
+          | Ok (0, output, _) when String.length output = List.length positions ->
+              Option.iter (fun (results, key) -> results.add key output) key;
+              let found =
+                Ran
+                  (List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
+              in
+              Hashtbl.replace checked_templates root found;
+              Ok found
+          | Ok (137, _, _) ->
+              (* Killed at its time limit. *)
+              Hashtbl.replace checked_templates root Ran_too_long;
+              Ok Ran_too_long
+          | Ok (status, _, errors) ->
+              Error
+                (Printf.sprintf "Compile: checking a template of %s ended with status %d: %s"
+                   (Path.show from_template) status errors)))
 
 let no_keys _ _ =
   invalid_arg "Compile: keys were asked for, and nothing was given to say which are wanted"

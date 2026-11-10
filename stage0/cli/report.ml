@@ -7,13 +7,19 @@ type file = { module_ : Path.module_; source : Source.t; diagnostics : Diagnosti
 type t = { files : file list; problems : string list }
 
 (* Every file's diagnostics, in the packages' order, leaving out files with
-   none. Each file lists at most [Diagnostic.limit]. *)
-let gather (project : Project.t) =
+   none, and with [proofs], the prover's too. Each file lists at most
+   [Diagnostic.limit]. *)
+let gather ?(proofs = false) (project : Project.t) =
+  let proven = if proofs then Proofs.diagnostics project else fun _ -> [] in
   {
     files =
       List.filter_map
         (fun module_ ->
-          match Diagnostic.shown (Database.diagnostics project.session module_) with
+          let found = Database.diagnostics project.session module_ in
+          (* A file is proven once it checks, since the prover reads what
+             type checking makes. *)
+          let found = if found = [] then proven module_ else found in
+          match Diagnostic.shown found with
           | [] -> None
           | diagnostics -> Some { module_; source = Project.source project module_; diagnostics })
         (Project.modules project);

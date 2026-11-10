@@ -643,8 +643,8 @@ and executable st (e : S.expression) =
 (* In a checked build, tests each [requires] clause that can run on entry
    to the code, its parameters bound, and panics with the clause when one
    does not hold, at [call_site] for inlined code and at the clause
-   otherwise. Stage0 has no prover, so this is how a call that breaks a
-   contract is caught. *)
+   otherwise. Stage0's builds keep these whether or not the proofs are
+   done, so a test catches a call that breaks a contract as it runs. *)
 and check_requires ?call_site st =
   if st.context.checks then
     List.iter

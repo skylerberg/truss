@@ -16,7 +16,8 @@ val roots : (lowering, Instance.key list) Query.input
 
 (* With [checks], the default, the program checks at run time what the
    prover would prove: [requires] clauses that can run, integer overflow,
-   and division. Stage0 has no prover, so its builds check. [file_name] names the file of each position the
+   and division. Stage0's builds keep the checks whether or not the proofs
+   are done. [file_name] names the file of each position the
    program reports, by its module, and is [Workspace.file_path] unless a
    driver shows files another way. [want] is told which instances' keys are
    about to be asked for, and adds them to [roots]; without it, asking for
@@ -124,3 +125,21 @@ val run_program :
   main:Path.t ->
   arguments:string list ->
   (int * string * string, string) result
+
+(* Works out a tagged template's check by running it: each of the tag's
+   [from_template]'s clauses that can run, for a template of these literal
+   texts and no parts, by its position among the clauses, with whether it
+   holds. The prover asks it only of clauses that read the template's
+   literals alone. With [results], each check's results are kept under the
+   key of the code that ran, as test results are. A check that runs past
+   [time_limit], in milliseconds, is stopped. See CODEGEN.md, "Code run
+   while compiling". *)
+type template_check = Ran of (int * bool) list | Ran_too_long
+
+val check_template :
+  ?results:results ->
+  t ->
+  time_limit:int ->
+  from_template:Path.t ->
+  texts:string list ->
+  (template_check, string) result

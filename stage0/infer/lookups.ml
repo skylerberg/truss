@@ -99,9 +99,24 @@ and name state env (value : expression) (path : path) =
   | Some Result_value -> (
       state.tables.meanings.(value.id) <- Some Specification_value;
       match env.output with Some output -> output_type output | None -> T.Error)
-  | Some (Old | Cost_function _) ->
+  | Some (Old | Identical | Cost_function _) ->
       state.tables.meanings.(value.id) <- Some Specification_value;
       T.Error
+  | Some Yielded -> (
+      (* The parts handed out so far, in order. *)
+      state.tables.meanings.(value.id) <- Some Specification_value;
+      let part =
+        match (env.loop_element, env.output) with
+        | Some element, _ -> Some element
+        | None, Some (Yields (_, part) | Lends (_, part)) -> Some part
+        | _ -> None
+      in
+      match part with
+      | Some part -> T.Named { path = sequence_path; arguments = [ T.Type part ] }
+      | None -> T.Error)
+  | Some Finished ->
+      state.tables.meanings.(value.id) <- Some Specification_value;
+      T.bool
   | Some (Binding | Module _ | Unknown) | None -> T.Error
 
 (* A variant used as a value: one with no fields is a value, and one with
@@ -121,7 +136,7 @@ and variant_value state (value : expression) type_path variant ~arguments =
               inputs = List.map (fun (field : T.field) -> (T.Own, field.field_type)) fields;
               output = Returns type_;
               uses = [];
-              costs = [ { amortized = false; resource = "time"; bound = "O(...)" } ];
+              costs = [ { amortized = false; resource = "time"; bound = Order_of } ];
             }
       | None ->
           report state Unknown_variant value.span

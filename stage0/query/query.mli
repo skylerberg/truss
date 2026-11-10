@@ -36,6 +36,7 @@ type phase =
   | Interfaces  (** Signatures, shapes, constants, and the [impl]s found for a type *)
   | Bodies  (** Checked bodies, and what is found in them *)
   | Checks  (** The rules that span a package *)
+  | Proofs  (** Each definition's obligations, as the solver's queries, and the call graph *)
   | Diagnostics  (** Every stage's diagnostics for a file *)
   | Lowering  (** What each instance compiles to *)
   | Linking  (** What each instance refers to, and the hash of its own code *)

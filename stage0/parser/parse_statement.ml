@@ -307,11 +307,33 @@ and for_loop cursor ~parallel =
   let clauses = loop_clauses cursor in
   For { parallel; pattern; iterable; clauses; body = body cursor }
 
-(* [invariant] may repeat; [decreases] appears at most once. *)
+(* [invariant] and [cost] may repeat; [decreases] appears at most once. *)
 and loop_clauses cursor =
   let rec loop clauses =
     let start = cursor.Cursor.index in
     match Cursor.peek_kind cursor with
+    | Keyword Cost ->
+        let keyword = Cursor.next cursor in
+        let cost = cost cursor in
+        if cost.amortized || cost.bound = Finite then
+          Cursor.report cursor Loop_cost_bound keyword.span
+            (Printf.sprintf
+               "A loop's `cost` states what the loop has spent so far, so it takes `O(...)`, `<=`, \
+                or `==`%s. %s"
+               (if cost.bound = Finite then "" else ", and is never `amortized`")
+               (if cost.bound = Finite then
+                  "A loop shows that it ends with `decreases`, not with `time finite`."
+                else
+                  "Potential belongs to the values the loop changes, which the function's own \
+                   `cost` accounts for."));
+        loop
+          (({
+              kind = Loop_cost cost;
+              span = Cursor.span_from cursor start;
+              id = Cursor.fresh cursor;
+            }
+             : loop_clause)
+          :: clauses)
     | Keyword Invariant ->
         Cursor.advance cursor;
         let value = expression cursor in

@@ -253,6 +253,11 @@ let check_name cursor (name : definition_name) =
       (Cursor.absolute cursor name.span)
       "A function cannot be named `old`, which names a value as it was when a function was called, \
        in specifications."
+  else if name.text = "identical" then
+    Cursor.report cursor Reserved_name
+      (Cursor.absolute cursor name.span)
+      "A function cannot be named `identical`, which tests whether two values are the same value, \
+       in specifications."
 
 (* A top-level function's signature, after [fn]. *)
 let function_signature cursor =

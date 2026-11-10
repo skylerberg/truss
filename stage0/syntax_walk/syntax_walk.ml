@@ -41,6 +41,8 @@ and loop_clause f (clause : loop_clause) =
   match clause.kind with
   | Invariant value -> f value
   | Loop_decreases measures -> List.iter f measures
+  | Loop_cost cost -> (
+      match cost.bound with Big_o value | At_most value | Exactly value -> f value | Finite -> ())
 
 and string_literal f (literal : string_literal) = List.iter (fun (value, _) -> f value) literal.rest
 

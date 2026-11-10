@@ -16,7 +16,8 @@ open Expressions
 
 type result = { checked : C.t; diagnostics : Diagnostic.t list }
 
-let no_output : env = { output = None; specification = false; self = None; self_mode = T.Read }
+let no_output : env =
+  { output = None; specification = false; self = None; self_mode = T.Read; loop_element = None }
 
 (* A body: each statement settles its own types, and the last is checked
    against the result type. *)
@@ -89,6 +90,37 @@ let check_clauses state env (clauses : clause list) =
           | `Measure -> ignore (expression state env value)))
     (clause_expressions clauses)
 
+(* The [requires] of a function-typed parameter, a specification over the
+   type's named inputs and the parameters before it. *)
+let check_function_type_requires state env (written : parameter list) (signature : T.signature) =
+  let env = { env with specification = true } in
+  List.iter
+    (fun (parameter : parameter) ->
+      match parameter.kind with
+      | Named_parameter { name; type_ = { kind = Function_type { input_names; clauses; _ }; _ }; _ }
+        when input_names <> [] -> (
+          match
+            List.find_opt
+              (fun (info : T.parameter_info) -> info.name = name.text)
+              signature.parameters
+          with
+          | Some { type_ = T.Function lowered; _ }
+            when List.length lowered.inputs = List.length input_names ->
+              List.iter2
+                (fun (input : name) (mode, type_) ->
+                  declare state input type_ ~mutable_:false ~mode)
+                input_names lowered.inputs;
+              List.iter
+                (fun (clause : clause) ->
+                  match clause.kind with
+                  | Requires value ->
+                      in_statement state env value.span (fun () -> check state env value T.bool)
+                  | _ -> ())
+                clauses
+          | _ -> ())
+      | _ -> ())
+    written
+
 let check_defaults state env (written : parameter list) (signature : T.signature) =
   List.iter
     (fun (parameter : parameter) ->
@@ -111,13 +143,17 @@ let check_function state ~broken_body (written : signature) (body_block : block 
   let env : env =
     {
       output = Some signature.output;
-      specification = false;
+      (* A function for specifications only has a specification for a
+         body: exact arithmetic, and [==>] and quantifiers over types. *)
+      specification = signature.specification_only;
       self = Option.map snd signature.receiver;
       self_mode = self_mode signature;
+      loop_element = None;
     }
   in
   declare_parameters state written.parameters signature;
   check_defaults state no_output written.parameters signature;
+  check_function_type_requires state env written.parameters signature;
   check_clauses state env written.clauses;
   match body_block with Some block when not broken_body -> body state env block | _ -> ()
 
@@ -185,7 +221,7 @@ let check_definition state (lowered : Environment.lowered) =
           (fun index (line : trait_member line) ->
             if not (broken (Member_header index)) then
               match line.kind with
-              | Trait_method { signature; body = Some written } -> (
+              | Trait_method { signature; body } -> (
                   let name =
                     match signature.name with Plain_name name | Member_name (_, name) -> name.text
                   in
@@ -197,8 +233,9 @@ let check_definition state (lowered : Environment.lowered) =
                       trait.methods
                   with
                   | Some method_ ->
-                      check_function state ~broken_body:(broken (Member_body index)) signature
-                        (Some written) method_.method_signature
+                      (* A method without a body still has clauses to check. *)
+                      check_function state ~broken_body:(broken (Member_body index)) signature body
+                        method_.method_signature
                   | None -> ())
               | Law law ->
                   let env : env = { no_output with specification = true; self = Some self } in
@@ -217,7 +254,27 @@ let check_definition state (lowered : Environment.lowered) =
                     law.requires;
                   if not (broken (Member_body index)) then
                     body state { env with output = Some (Returns T.bool) } law.body
-              | Trait_method { body = None; _ } | Associated_type _ | Trait_member_error -> ())
+              | Associated_type _ | Trait_member_error -> ())
+          members
+    | Capability { members; _ }, Trait_interface capability ->
+        (* A capability's methods have no bodies, but clauses to check. *)
+        List.iteri
+          (fun index (line : capability_member line) ->
+            if not (broken (Member_header index)) then
+              match line.kind with
+              | Capability_method signature -> (
+                  let name =
+                    match signature.name with Plain_name name | Member_name (_, name) -> name.text
+                  in
+                  match
+                    List.find_opt
+                      (fun (method_ : T.trait_method) -> method_.method_name = name)
+                      capability.methods
+                  with
+                  | Some method_ ->
+                      check_function state ~broken_body:true signature None method_.method_signature
+                  | None -> ())
+              | Capability_member_error -> ())
           members
     | Impl { members; _ }, Impl_interface impl ->
         List.iteri

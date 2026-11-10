@@ -22,6 +22,11 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `truss.opam`. Install them with
   `opam install . --deps-only --with-test --with-dev-setup`. On macOS, Zarith
   also needs GMP and `pkgconf` from Homebrew.
+- **Z3 5.3.3** runs the prover's queries, and the prover refuses any other
+  version, since another could answer differently. Install it with
+  `brew install z3` on macOS, or from the release's archive, and put it on
+  the path or name it in `TRUSS_Z3`. CI downloads that release and checks
+  its hash.
 - **`dune build`** builds everything, **`dune test`** runs the tests, and
   **`dune fmt`** formats the code with the ocamlformat version that
   `.ocamlformat` pins.
@@ -31,12 +36,15 @@ develop as well as make it easier to bootstrap the compiler in parts.
   - **Nothing is installed in an ordinary run.** OCaml and every dependency
     come from a cache of the whole opam root, keyed by the opam and OCaml
     versions, the runner's image, and `truss.opam`
-    (`.github/actions/opam`). Only a change to one of those builds them. The
-    opam binary is downloaded from its release and checked against a pinned
-    hash, and nothing comes from apt, so a slow package mirror cannot slow a
-    run.
+    (`.github/actions/opam`). A change to `truss.opam` starts from the newest
+    cache with the same opam, OCaml, and image, and installs only what
+    changed. Only a new opam, OCaml, or image builds the switch from nothing,
+    with the opam binary downloaded from its release and checked against a
+    pinned hash. Nothing comes from apt, so a slow package mirror cannot slow
+    a run.
   - **Dune's cache carries over from `main`,** so a pull request builds only
-    what it changed. Only pushes to `main` save it.
+    what it changed. Only pushes to `main` save it, trimmed so that it stays
+    quick to restore.
   - **The build, formatting, the opam file, and the tests are one dune run,**
     so they overlap, and the tests under sanitizers run beside it on a runner
     of their own.
@@ -51,8 +59,9 @@ Each document has one job, and a fact is stated in one of them:
   it is written, and its exact grammar. They describe the language, whether
   or not stage0 builds all of it yet.
 - **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
-  [TYPECHECKER.md](TYPECHECKER.md), [CODEGEN.md](CODEGEN.md),
-  [DATABASE.md](DATABASE.md), and [CLI.md](CLI.md) say what stage0 does,**
+  [TYPECHECKER.md](TYPECHECKER.md), [PROVER.md](PROVER.md),
+  [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and
+  [CLI.md](CLI.md) say what stage0 does,**
   each for its own stage, and each ends with the one list of what that stage
   does not build yet. How results are kept current and kept from being
   computed twice is DATABASE.md's, and the other documents say only what

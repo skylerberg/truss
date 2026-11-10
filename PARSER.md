@@ -370,6 +370,8 @@ at hand:
 - no function named `old`
 - no `lends own`: a part a `lends` method lends stays with `self`, and a fix
   removes the `own`
+- a function type's inputs named exactly when it has a `requires`
+- a loop's `cost` neither `amortized` nor `finite`
 - a body for every function outside a trait or a capability. A missing one
   gets the fix `{ todo }`, the body of unwritten code, indented as its
   signature is.
@@ -395,9 +397,15 @@ says.
 inside a specification, a test, a proof, a loop, a lambda, a `parallel`
 branch, and a method that yields or lends. It reports:
 
-- `forall`, `exists`, and `==>` outside specifications. Specifications are
-  `requires`, `ensures`, `invariant`, `decreases`, `cost`, laws, theorems, and
-  `proof` blocks.
+- `==>`, and a quantifier over a whole type such as `forall value: Int64`,
+  where neither can be: in a test, a constant, or a default. Specifications
+  allow both, and so does a function's body, since a function whose
+  signature mentions a type for specifications only has a body that is a
+  specification, and only the type checker knows the types. The type
+  checker reports them in a body that is compiled. A quantifier over a
+  range or a collection is an ordinary expression, allowed anywhere.
+  Specifications are `requires`, `ensures`, `invariant`, `decreases`,
+  `cost`, laws, theorems, and `proof` blocks.
 - `assert` outside tests, theorems, and proofs, including in a lambda there,
   and `proof` blocks outside function bodies
 - `yield` outside a method whose signature `yields` or `lends`
@@ -405,7 +413,10 @@ branch, and a method that yields or lends. It reports:
 - `return`, `break`, `continue`, and `?` that would leave a `parallel` block,
   and `break`, `return`, and `?` in a `parallel for`
 - `echo` inside a specification, which never runs
-- a parameter named `result`
+- a parameter named `result`, or, in a lending or yielding method, `yielded`
+  or `finished`
+- a `requires` on a function type anywhere but at the top of a parameter's
+  type
 
 These need only the one definition's tree, so they belong to the parse stage
 and are cached with it. They are a separate walk, not part of each parsing

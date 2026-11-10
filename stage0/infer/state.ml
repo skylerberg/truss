@@ -24,6 +24,9 @@ type env = {
   specification : bool;
   self : T.ty option;  (** The type of [self]. *)
   self_mode : T.mode;  (** How the method takes [self]: only [mut self] can be assigned to. *)
+  loop_element : T.ty option;
+      (** In a [for] loop's clauses, what each iteration receives, which [yielded] is a sequence of.
+      *)
 }
 
 type frame = {
@@ -126,6 +129,9 @@ let slice_path = standard [ "list" ] "Slice"
 let string_path = standard [ "text" ] "String"
 let string_slice_path = standard [ "text" ] "StringSlice"
 let set_path = standard [ "set" ] "Set"
+let sequence_path = standard [ "specification" ] "Sequence"
+let finite_set_path = standard [ "specification" ] "FiniteSet"
+let finite_map_path = standard [ "specification" ] "FiniteMap"
 let map_path = standard [ "map" ] "Map"
 let range_path = core "Range"
 

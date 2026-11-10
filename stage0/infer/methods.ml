@@ -22,6 +22,23 @@ let rec call state env ?expected (value : expression) (callee : expression)
       match arguments with
       | [ argument ] -> expression state env ?expected argument.value
       | _ -> T.Error)
+  | Name { modules = []; last } when target state last = Some Identical -> (
+      (* Identity, for values of any one type: the solver's equality. *)
+      match arguments with
+      | [ first; second ] ->
+          let first_type = expression state env first.value in
+          let second_type = expression state env ~expected:first_type second.value in
+          if not (unify state first_type second_type) then
+            mismatch state second.value.span ~expected:first_type ~found:second_type;
+          T.bool
+      | _ ->
+          List.iter
+            (fun (argument : argument) -> ignore (expression state env argument.value))
+            arguments;
+          report state
+            (if List.length arguments < 2 then Missing_argument else Too_many_arguments)
+            value.span "`identical` takes two values of one type.";
+          T.bool)
   | Name { modules = []; last }
     when match target state last with Some (Cost_function _) -> true | _ -> false ->
       List.iter

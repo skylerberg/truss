@@ -9,7 +9,8 @@ module Properties = Interface.Properties
 
 type root = Local of id | Self_root
 
-(* An index whose value the checker cannot compare stands for some element. *)
+(* An index or a range whose value the checker cannot compare stands for
+   some elements. *)
 type step = Field of string | Element of id
 type place = { root : root; steps : step list }
 
@@ -121,13 +122,11 @@ let rec place_in (resolved : Resolve.resolved) (checked : C.t) (value : expressi
          ||
          match checked.calls.(value.id) with
          | Some { callee = Trait_method { name = "at"; _ }; _ } -> true
-         | _ -> false -> (
-      match key.kind with
-      | Range _ -> None
-      | _ ->
-          Option.map
-            (fun place -> { place with steps = place.steps @ [ Element key.id ] })
-            (place_of () base))
+         | _ -> false ->
+      (* A slice, as [items[a..b]], is some elements, as an index is one. *)
+      Option.map
+        (fun place -> { place with steps = place.steps @ [ Element key.id ] })
+        (place_of () base)
   | Parenthesized inner -> place_of () inner
   | _ -> None
 

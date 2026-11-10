@@ -5,8 +5,9 @@ work on Truss code, in [`stage0/cli/`](stage0/cli): checking, testing,
 running, building, and the tools that let an agent see what a change
 touches. It follows [GOALS.md](GOALS.md) and the decisions in
 [DESIGN.md](DESIGN.md), and drives the stages that
-[TYPECHECKER.md](TYPECHECKER.md) and [CODEGEN.md](CODEGEN.md) describe,
-through the code database that [DATABASE.md](DATABASE.md) describes.
+[TYPECHECKER.md](TYPECHECKER.md), [PROVER.md](PROVER.md), and
+[CODEGEN.md](CODEGEN.md) describe, through the code database that
+[DATABASE.md](DATABASE.md) describes.
 
 ## Principles
 
@@ -147,12 +148,17 @@ truss check [--fix] [--json]
 
 `truss check` runs every stage that can report a diagnostic: lexing,
 parsing, name resolution, type checking, ownership, capabilities and
-dependency grants, and package-wide checks. Proofs are to be part of
-checking, not a separate command, because DESIGN.md makes every promise in a
-signature something the compiler proves; a package
+dependency grants, package-wide checks, and proofs.
+Proofs are part of checking, not a separate command, because DESIGN.md
+makes every promise in a signature something the compiler proves; a package
 whose proofs have not been checked has not been checked. Proofs are modular
-and cached, so this costs O(change) like the rest. Code generation reports
-nothing, so `check` never builds.
+and cached, so this costs O(change) like the rest. A file is proven once it
+type-checks, since the prover reads what type checking makes. `check` needs
+the pinned solver, as `run` needs a C compiler, and without it cannot do its
+job. Code generation reports nothing, so `check` builds only the checks of
+tagged templates, which PROVER.md's "Running code while proving" runs, kept
+under the key of their code as test results are. `test` and `run` do not
+wait for proofs, as DESIGN.md's "Tests do not wait for proofs" says.
 
 It prints each diagnostic as `Diagnostic.render` does, at most
 `Diagnostic.limit` of them in each file, and then a count. The JSON document
@@ -291,8 +297,9 @@ begins with `-`. **`--release`** builds as `truss build` does, refusing an
 **`truss build`** builds a release program, as CODEGEN.md's "C files and
 optimization" describes: at `-O2`, optimized across every file as they are
 linked, with ThinLTO where the C compiler is clang. It refuses a program
-whose `main` can reach a `todo` or an `echo`, and lists each one with the
-definitions on the way from `main` to it:
+whose proofs are not done, as `check` reports them, and one whose `main` can
+reach a `todo` or an `echo`, in code or in a proof, and lists each one, a
+`todo` in code with the definitions on the way from `main` to it:
 
 ```text
 render.truss:12:14: `todo` can be reached from `main`, so the program cannot be built.
@@ -324,8 +331,9 @@ truss holes [--json] [FILE_OR_DIRECTORY...]
 Lists every `todo` in the package, or in the named files, as DESIGN.md's
 "Unfinished code" asks: its position, the type it must have, the names in
 scope with their types, and what it blocks, which is `main`, if `main` can
-reach it, and each test that can. Each hole is a task a person or agent can
-take on its own. A type defined as `todo` is listed too.
+reach it, and each test that can. A `todo` in a theorem or a `proof` block
+is a hole in a proof, listed the same way. Each hole is a task a person or
+agent can take on its own. A type defined as `todo` is listed too.
 
 ```text
 render.truss:12:14: hole of type String
@@ -471,20 +479,19 @@ rename weather::forecast::parse read`, or a full path that keeps the
 definition in its module and a method with its type. Renaming a module, as
 in `truss rename weather::forecast weather::outlook`, moves its file, and
 every `use` of it and every full path to it changes. The rename is made in
-a trial, a state that
-starts from the worktree's session and holds only what the rename changes,
-and is checked there first; it is refused, changing nothing, if it would
+a trial, a state that starts from the worktree's session and holds only
+what the rename changes, and is checked there first; it is refused, changing nothing, if it would
 cause any diagnostic, such as for a name that is taken, breaks a naming
 rule, or would hide another, which are the diagnostics a hand-made rename
 would cause. A worktree that already has diagnostics is refused too, since its
 references are found through checked code. References in packages outside
 the worktree cannot be changed, so renaming a public definition changes the
 package's public interface, which `truss impact` reports like any other
-changed signature. Each edit replaces the name's tokens alone, so the files need no
-formatting afterward. Renaming changes callers'
-hashes but not their proofs or test results, since those are keyed with
-names replaced by numbers, so a rename re-proves and re-runs nothing.
-Renaming a local variable is left to the language server, which has the
+changed signature. Each edit replaces the name's tokens alone, so the files
+need no formatting afterward. The callers of what was renamed are checked
+again, but nothing is proven or tested again: a solver's answer and a
+test's result are kept under keys that hold no names. Renaming a local
+variable is left to the language server, which has the
 cursor's position. The JSON document is `{"format", "diagnostics", "edits",
 "moved"}`, with each edit's file, byte range, and replacement.
 
@@ -578,10 +585,9 @@ It is left out of each command's help.
 - **`truss lsp`,** which is to run the language server on standard input and
   output.
 - **Renaming a field or a variant** with `truss rename`.
-- **What the commands do with proofs.** There is no prover. `check` is to
-  report proofs with every other diagnostic, `build` to refuse a `todo` in a
-  proof that `main` can reach, `holes` to list each proof a hole blocks, and
-  `impact` to list the proofs to check again. A flag for working on the
-  compiler, `--check-proofs`, on `test`, `run`, and `build`, is to emit a
-  run-time check for every proven obligation; until then every build checks
-  what a prover would prove.
+- **Listing the proofs to check again** in `truss impact`, as it lists the
+  tests whose code changed.
+- **`--check-proofs`,** a flag for working on the compiler, on `test`,
+  `run`, and `build`. It is to emit a run-time check for every proven
+  obligation. Stage0's builds keep every run-time check whether or not its
+  proofs are done, so they all check what the prover proves.

@@ -136,6 +136,7 @@ phases are the compiler's own order:
 | Interfaces | Signatures, shapes, constants' values, and the `impl`s found for a type |
 | Bodies | Checked bodies, moves and loans, patterns, and what else is found in a body |
 | Checks | The rules that span a package |
+| Proofs | Each package's call graph, and each definition's obligations as the solver's queries, which PROVER.md describes |
 | Diagnostics | Every stage's diagnostics for a file |
 | Lowering | What each instance compiles to |
 | Linking | Each instance's own hash, and what it refers to |
@@ -528,6 +529,7 @@ the machine. It holds:
 | Results of expensive steps | The hash of their kind and of exactly the input that made them (see [Exact keys](#exact-keys)) | `segments/` |
 | A package's artifact | The key of its sources | `segments/` |
 | Object files | Their key, as CODEGEN.md describes | `objects/`, one file each, since a linker reads them by path |
+| A solver's answers | Their key, as PROVER.md describes | `proofs/`, one file each |
 | Pointers | A worktree's session | `pointers/` |
 | The compiler's identity, the list of worktrees, and the background process's lock and log | | the top, and `servers/` |
 
@@ -609,14 +611,17 @@ minutes it checks, and when the segments take more:
 ## Exact keys
 
 The most expensive work in a build is outside the compiler's own queries:
-compiling C and running tests. Each of these is a pure function of an input
-that the compiler can write out completely, so its result is a fact kept
-under the hash of that input:
+compiling C, running tests, running the solver, and running code while
+compiling. Each of these is a pure function of an input that the compiler
+can write out completely, so its result is a fact kept under the hash of
+that input:
 
 | Result | Key | Kept |
 |---|---|---|
 | A test's outcome | The key of everything the test can reach, as CODEGEN.md's "Test results" describes, the code generator's version, and the target's widths | A pass with nothing to show |
 | An object file | The C text, the C compiler's identity, and its flags | The object |
+| A solver's answer | The query's text, with every name numbered, and the solver's identity and options, as PROVER.md's "Queries" describes | The answer |
+| A tagged template's check | The key of the code that ran, as CODEGEN.md's "Code run while compiling" describes | Whether each clause holds |
 
 - **These keys are exact.** Everything the result depends on is in the key,
   so a result can be reused by any session, on any branch, by any compiler
@@ -899,14 +904,11 @@ with the same inputs.
   message are recorded as an instance's number and a place within its
   definition, as CODEGEN.md's anchors are, a kept failure can be shown where
   the code is now.
-- **Proofs, and values worked out while compiling, kept under exact keys.**
-  A proof's key is to be the query sent to the solver, with every name
-  numbered, and the solver's identity, options, and step limit. It needs no
-  target: a proof assumes only what DESIGN.md says `USize` is, 32 or 64
-  bits, unless its package says `usize_bits = 64`, and that assumption is
-  part of the query. A value's key is to be the key of the code that ran,
-  its input, and the target. There is no prover, and code generation runs a
-  constant's evaluator without keeping its result.
+- **A constant's value kept under an exact key.** Its key is to be the key
+  of the code that ran, its input, and the target. Code generation runs a
+  constant's evaluator in each run of the compiler.
+- **A solver's answers in segments.** Each is a file of its own, which costs
+  what [Segments](#segments) says a file for each small value costs.
 - **A package being worked on as an artifact of its own,** keyed by its
   sources and the interfaces it reads of others, so that an unchanged
   package is found in one lookup from any worktree.

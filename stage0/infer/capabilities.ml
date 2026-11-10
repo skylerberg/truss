@@ -33,10 +33,10 @@ let minus left right = List.filter (fun capability -> not (List.mem capability r
 
 (* Where code is: what it may use, and whether it reports what it may not
    (inside a lambda, what it uses is collected instead, for its [uses]).
-   [restricted] names code that only [Panic] is available to whatever the
-   function declares, a [parallel] branch or a specification. [lambdas]
-   holds, for the whole definition, what each lambda checked so far uses,
-   by its id. *)
+   [restricted] names code that may use less than the function declares: a
+   [parallel] branch, which may use only [Panic], or a specification or a
+   proof, which may use nothing. [lambdas] holds, for the whole definition,
+   what each lambda checked so far uses, by its id. *)
 type scope = {
   available : T.capability list;
   collecting : bool;
@@ -50,6 +50,11 @@ type scope = {
 (* Code that may use only [Panic], whatever the function declares. *)
 let only_panic scope reason =
   { scope with available = [ panic ]; collecting = false; restricted = Some reason }
+
+(* Code that may use no capability at all, not even [Panic]: a
+   specification or a proof, whose meaning must be a value. *)
+let pure_only scope reason =
+  { scope with available = []; collecting = false; restricted = Some reason }
 
 (* The capabilities a type implements, each with the [impl] that provides
    it, its generic arguments, and its interface. An [impl] lives with its
@@ -120,7 +125,7 @@ let rec expression state scope (value : expression) : T.capability list =
   match value.kind with
   | Lambda { body; _ } -> lambda state scope value body
   | Provide { implementations; body } -> provide state scope value implementations body
-  | Quantified _ -> specification state scope value
+  | Quantified _ -> quantifier state scope value
   | _ -> (
       let inner = children () in
       match state.tables.calls.(value.id) with
@@ -145,7 +150,7 @@ and statement state scope (written : statement) : T.capability list =
       used
   | Proof body ->
       List.iter
-        (fun branch -> ignore (statement state (only_panic scope "a proof") branch))
+        (fun branch -> ignore (statement state (pure_only scope "a proof") branch))
         body.statements;
       []
   | _ ->
@@ -158,8 +163,10 @@ and statement state scope (written : statement) : T.capability list =
       Syntax_walk.statement_parts ~expression:visit_expression ~statement:visit_statement written;
       !used
 
-and specification state scope (value : expression) =
-  let scope = only_panic scope "a specification" in
+(* A quantifier's body may use no capability, in code as in a
+   specification, since what it means must be a value the prover can read. *)
+and quantifier state scope (value : expression) =
+  let scope = pure_only scope "a quantifier's body" in
   let rec visit_statement written = ignore (statement state scope written)
   and visit_expression inner = ignore (expression state scope inner) in
   Syntax_walk.expression_parts ~expression:visit_expression ~statement:visit_statement value;
@@ -296,6 +303,12 @@ and call_needs state scope (value : expression) (call : C.call) : T.capability l
         then
           report state Not_available value.span
             (match scope.restricted with
+            | Some reason when scope.available = [] ->
+                Printf.sprintf
+                  "This call uses `%s`, but %s may use no capabilities, not even `Panic`: what it \
+                   means must be a value. A function that fails on some inputs says so with \
+                   `requires` instead."
+                  (show_capability capability) reason
             | Some reason ->
                 Printf.sprintf
                   "This call uses `%s`, but %s may use only `Panic`, whatever the function \
@@ -432,7 +445,7 @@ let check (state : state) (lowered : Environment.lowered) =
         List.iter
           (fun (clause : clause) ->
             let check value =
-              ignore (expression state (only_panic (scope []) "a specification") value)
+              ignore (expression state (pure_only (scope []) "a specification") value)
             in
             match clause.kind with
             | Requires value | Ensures value -> check value
@@ -443,7 +456,7 @@ let check (state : state) (lowered : Environment.lowered) =
         run signature.uses body
     | Test { body; _ }, Test_interface uses -> run (union uses [ panic ]) body
     | Theorem { body; _ }, _ | Law_proof { body; _ }, _ ->
-        run_in (only_panic (scope []) "a proof") body
+        run_in (pure_only (scope []) "a proof") body
     | Impl { members; _ }, Impl_interface impl ->
         let is_capability =
           Interface.Summary.kind_of state.database impl.implements.trait = Some Capability

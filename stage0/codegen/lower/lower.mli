@@ -62,3 +62,12 @@ val real_evidence : context -> Path.t -> Lir.evidence
 
 (* The key of a test's instance. *)
 val test_key : Path.t -> Instance.key
+
+(* Code run while compiling, for a tagged template's check: a template of
+   the literal texts and no parts, given to the tag's [from_template]'s
+   clauses that can run, each worked out and written out as a [Bool]. *)
+val template_check : context -> Instance.key -> from_template:Path.t -> texts:string list -> Lir.t
+
+(* The positions, among a tag's [from_template]'s clauses, of those a
+   template check works out, in order. *)
+val template_checked : context -> Path.t -> int list

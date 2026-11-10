@@ -208,9 +208,9 @@ let recovers : Diagnostic.Code.parser -> bool = function
   | Elif ->
       true
   | Use_after_definition | Let_else_brace | Misplaced_opaque | Misplaced_visibility | Misplaced_self
-  | Lends_own | Repeated_clause | Finite_not_time | Specification_only | Misplaced_assert
-  | Misplaced_proof | Misplaced_yield | Misplaced_loop_exit | Leaves_parallel
-  | Echo_in_specification | Reserved_name ->
+  | Lends_own | Repeated_clause | Finite_not_time | Loop_cost_bound | Function_type_names
+  | Misplaced_requires | Specification_only | Misplaced_assert | Misplaced_proof | Misplaced_yield
+  | Misplaced_loop_exit | Leaves_parallel | Echo_in_specification | Reserved_name ->
       false
 
 let report cursor ?notes ?fixes code span message =

@@ -126,6 +126,10 @@ and expression_kind state env ?expected (value : expression) : T.ty =
           let element = element_of_collection state env collection in
           pattern state env written element ~mode:T.Read
       | Binder_type (bound, written) ->
+          if not env.specification then
+            report state Specification_only value.span
+              "A quantifier over a whole type cannot run, so it is only for specifications and the \
+               bodies of functions for specifications only. Quantify over a range or a collection.";
           declare state bound (Lower.type_ state.context written) ~mutable_:false ~mode:T.Read);
       check state env body T.bool;
       T.bool
@@ -253,13 +257,29 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                        index_trait name)
                 in
                 let key_type = associated "Key" and output = associated "Output" in
-                if env.specification then
-                  let found = expression state env ~expected:key_type key in
-                  if resolve state found = T.Integer && T.is_integer_type key_type then
-                    state.obligations <-
-                      Integer_fits { expression = key.id; type_ = key_type } :: state.obligations
-                  else coerce state key ~found ~expected:key_type
-                else check state env key key_type;
+                let key_conversion : C.conversion option =
+                  if env.specification then
+                    let found = expression state env ~expected:key_type key in
+                    if resolve state found = T.Integer && T.is_integer_type key_type then begin
+                      state.obligations <-
+                        Integer_fits { expression = key.id; type_ = key_type } :: state.obligations;
+                      Some From_integer
+                    end
+                    else if
+                      T.is_integer_type (normalize state found)
+                      && resolve state key_type = T.Integer
+                    then
+                      (* A built-in integer is an [Integer] in a specification. *)
+                      Some To_integer
+                    else begin
+                      coerce state key ~found ~expected:key_type;
+                      None
+                    end
+                  else begin
+                    check state env key key_type;
+                    None
+                  end
+                in
                 state.tables.calls.(value.id) <-
                   Some
                     {
@@ -276,7 +296,12 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                       arguments =
                         [
                           { expression = base.id; parameter = 0; mode = Read; conversion = None };
-                          { expression = key.id; parameter = 1; mode = Read; conversion = None };
+                          {
+                            expression = key.id;
+                            parameter = 1;
+                            mode = Read;
+                            conversion = key_conversion;
+                          };
                         ];
                       defaults_left_out = [];
                       uses = [];

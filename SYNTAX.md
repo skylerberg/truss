@@ -98,6 +98,8 @@ or name resolution gives them their meaning where they appear:
 | `time(...)`, `calls(...)`, `log(...)`, `power(...)` | Called inside a `cost` bound, where they are the cost functions |
 | `result` | Inside `ensures` and `cost`, where it names the return value |
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
+| `identical` | Inside specifications: `identical(a, b)`, whether two values of one type are the same value |
+| `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the `invariant` of a `for` loop, where they name what was handed out so far and whether the method ran to its end |
 
 A parameter cannot be named `result`, and a function cannot be named `old`,
 because inside specifications those names mean the return value and a value as
@@ -502,9 +504,11 @@ match status_code {
   appears in a pattern. Any other bare name binds a new variable. Constants
   from other modules and constants under a type are qualified, as everywhere
   else: `http::ok`, `Status.teapot`.
-- A constant in a pattern must have a type whose equality is built in, as for
-  numbers, strings, and `Bool`, or derived, so that matching it compares the
-  value's structure.
+- A constant in a pattern must have a type with structural equality: built
+  in, as for integers, strings, and `Bool`, or derived from fields that all
+  have it, so that matching it and comparing it with `==` agree. A type with
+  a float field derives a lawful `Equal` that is not structural, since
+  `-0.0 == 0.0`. See [DESIGN.md](DESIGN.md#equality-ordering-and-deriving).
 - The ends of a range are literals or constants, as in `0..=max_port` or
   `http::informational_first..=http::informational_last`. A name there must
   be a constant. Both ends are needed.
@@ -671,6 +675,20 @@ public type Tree =
   `| Closed(range: ClosedRange)`.
 - `invariant` may repeat. All of the conditions must hold.
 - Functions called in an invariant must be pure and have a `time` clause.
+- A private method that takes `mut self` may be called while `self` is in
+  the middle of a change. Its `self` is not assumed to meet the invariant,
+  and need not meet it when the method returns, so it states what it needs
+  and what it leaves with `requires` and `ensures`:
+
+  ```truss
+  fn SortedList[Element: Ordered].sift_into_place(mut self, index: USize)
+    requires index < self.items.length()
+    requires is_sorted(self.items[..index])
+    ensures is_sorted(self.items)
+  {
+    todo
+  }
+  ```
 
 Invariants are proven at compile time, never checked at run time. When the
 compiler cannot prove one, the usual fix is a constructor that checks or
@@ -980,6 +998,36 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
   A function that returns a function type with clauses puts it in
   parentheses: `fn make_counter() -> (fn(Int64) -> Int64 uses Clock)`.
 
+The type of a function-typed parameter can say what the function passes it,
+with a `requires`. Its inputs are then named, so the `requires` can mention
+them, and it can also mention the parameters before it:
+
+```truss
+fn List[Element].map[Output](
+  self,
+  transform: (fn(element: Element) -> Output requires self.model().contains(element)),
+) -> List[Output]
+  ensures result.length() == self.length()
+{
+  todo
+}
+
+let picked = indices.map(fn(i) { values[i] })
+```
+
+- The function must meet the `requires` at every call it makes through
+  `transform`, and a lambda passed for it may rely on it. Above, the lambda
+  knows that `i` is one of `indices`, so `values[i]` is proven in bounds
+  when every index in `indices` is.
+- A named function passed for it must accept every argument the `requires`
+  allows.
+- The names are only for the `requires`. They are not labels, and calls
+  through a function value still pass arguments by position. A function
+  type names its inputs exactly when it has a `requires`.
+- Only a parameter's own type can have a `requires`, at its top: not a
+  field's type, a result type, or a type argument such as
+  `List[(fn(index: USize) requires ...)]`.
+
 A function that passes on whatever capabilities its callback needs declares a
 capability parameter with `capability`:
 
@@ -1227,8 +1275,9 @@ A yielding method gives out parts one after another:
   The loop's body runs at each `yield`. When the body leaves the loop with
   `break`, `return`, or `?`, the method stops at that `yield` and does not
   continue. A method may therefore end at any of its `yield`s, so the type's
-  invariants and the method's `ensures` must hold at each one, whatever the
-  caller did to the part it was lent.
+  invariants, and the method's `ensures` clauses about how it ends, must hold
+  at each one, whatever the caller did to the part it was lent. See
+  [Contracts of lending and yielding methods](#contracts-of-lending-and-yielding-methods).
 - `for item in items` uses `items.each()`, and `for item in mut items` and
   `for item in own items` use the `mut self` and `own self` versions. A
   user's type supports `for` by defining `each`.
@@ -1279,6 +1328,63 @@ A yielding method gives out parts one after another:
   the recursion. Calling `next()` on its cursor is a compile error that
   names the recursive loop. To pull such a structure, write a cursor type
   that keeps an explicit stack.
+
+#### Contracts of lending and yielding methods
+
+A lending or yielding method's `ensures` says what it hands out and what it
+leaves behind:
+
+```truss
+fn List[Element].each(self) yields Element
+  ensures identical(result, self[yielded.length()])
+  ensures finished ==> yielded.length() == self.length()
+  cost time O(self.length())
+{
+  for index in 0..self.length() {
+    yield self[index]
+  }
+}
+
+fn Grid.cell(mut self, position: Position) lends mut Cell
+  requires position.row < self.height && position.column < self.width
+  ensures identical(result, old(self.cells[position.row * self.width + position.column]))
+  ensures identical(
+    self.cells.model(),
+    old(self.cells.model()).update(position.row * self.width + position.column, value: yielded[0]),
+  )
+{
+  yield mut self.cells[position.row * self.width + position.column]
+}
+```
+
+- **A clause that mentions `result` holds at each `yield`,** where `result`
+  is the part being handed out. The caller's statement, or the loop's body,
+  may rely on it.
+- **Every other clause holds wherever the method ends:** after its last
+  statement, and, for a yielding method, at any `yield` where the loop
+  stops.
+- **`yielded` is a `Sequence` of the parts handed out so far,** each as the
+  caller left it. A lending method's `yielded` holds its one part once the
+  caller is done with it, which is how `Grid.cell` says that the cell the
+  caller changed is the one in the grid afterward.
+- **`finished` is `true` when the method ran to its end,** and `false`
+  when a loop stopped it at a `yield`.
+- **A `for` loop's `invariant` may use `yielded`,** for the values of the
+  iterations before the current one:
+
+  ```truss
+  var total: Int64 = 0
+  for score in scores
+    invariant total == sum(yielded)
+  {
+    todo
+  }
+  ```
+
+The facts every `for` loop gets, such as `i < count` in `for i in 0..count`
+and that a loop over a list runs once per element, come from these clauses
+on the standard library's `each` methods, so a user's collection gets the
+same facts by making the same promises.
 
 ### Constructors
 
@@ -1524,6 +1630,36 @@ while low < high
 zero, which proves the loop ends. Both are optional. `invariant` may repeat;
 `decreases` appears at most once, and takes a list of measures compared in
 order, as for a function.
+
+A `cost` clause on a loop states what the loop has spent so far, at the
+start of every iteration and when it ends. A loop needs one only when its
+iterations cost different amounts, as when each one handles a row of its own
+length:
+
+```truss
+fn total_cells(rows: Sequence[List[Int64]]) -> Integer {
+  todo
+}
+
+fn sum_all(rows: List[List[Int64]]) -> Int64
+  cost time O(rows.length() + total_cells(rows.model()))
+{
+  var total = 0
+  for row in rows
+    cost time O(yielded.length() + total_cells(yielded))
+  {
+    for cell in row {
+      total = total.saturating_add(cell)
+    }
+  }
+  total
+}
+```
+
+- A loop's `cost` takes the resources and bounds of a function's, and may
+  repeat, but is never `amortized` or `finite`.
+- Its bound can use the variables in scope at the loop and, in a `for`
+  loop, `yielded`.
 
 ### Operators
 
@@ -2049,7 +2185,9 @@ impl FromTemplate for Regex {
 ```
 
 The literal text is known when the code is compiled, so the compiler proves the
-`requires` by running `is_valid_pattern` on it. `Regex"[a-z"` is a compile
+`requires` by running `is_valid_pattern` on it. A check reads each piece's
+text with `literal.text()`, a `StringSlice`, and its bytes with
+`text.byte(index)`. `Regex"[a-z"` is a compile
 error, and `Regex"[a-z]+"` needs no `?`, because building it cannot fail. Text
 that is only known at runtime goes through a function that returns a `Result`,
 such as `Regex.parse(text)`. DESIGN.md explains why tagged templates make
@@ -2154,9 +2292,7 @@ give the same result:
 trait Ordered: Equal {
   fn compare(self, other: Self) -> Ordering
 
-  fn max(own self, other: own Self) -> Self
-    ensures result == (if self.compare(other) == Ordering.Less { other } else { self })
-  {
+  fn max(own self, other: own Self) -> Self {
     if self.compare(other) == Ordering.Less { other } else { self }
   }
 }
@@ -2167,9 +2303,11 @@ impl Ordered for Int64 {
 }
 ```
 
-- The replacement must prove the `ensures` clauses of the method it
-  replaces. A method whose result its `ensures` clauses do not pin down
-  exactly cannot be replaced.
+- The replacement must prove that its result is the one the provided body
+  gives. A provided method can be replaced only when the prover reads its
+  body as its definition: it is pure, has a `time` clause, and its body is
+  functional, with no `var`, assignment, or loop (see
+  [DESIGN.md](DESIGN.md#what-a-function-means-to-the-prover)).
 - Code that calls the method reasons from the trait alone, so a replacement
   never changes what a call means, only how fast it runs.
 
@@ -2323,6 +2461,11 @@ hand.
   for Float64`, which makes `2.0 * velocity` work, lives with `Vector`.
 - Contracts and costs on a trait's methods apply to every `impl` and are
   proven for each one.
+- An `impl`'s method may promise more than the trait: its own `ensures` and
+  `cost` clauses, which it proves, and a `requires` that the trait's
+  `requires` implies. A call that is known to reach that `impl`, such as
+  `grid[position]` on a `Grid`, gets the `impl`'s contract. A call through a
+  bound or through `any` gets the trait's.
 
 ### Values of any type with a trait
 
@@ -2393,6 +2536,11 @@ test "writes the report"
 - Failed tests are never retried automatically.
 - A failed `assert` ends the test as failed. After an `assert`, the rest of the
   test can rely on what it asserted.
+- Tests do not wait for proofs. A test build checks, as the code runs, every
+  operation that could fail, such as an index, a `requires` that can run, or
+  an addition that could overflow, so a test runs safely even where a proof
+  has failed or is still running. A failed check ends the test as failed and names the operation.
+  A program is built only once everything it can reach is proven.
 - A panic fails only the test it happens in. There is no way to expect a
   panic: test error cases as `Result` values instead.
 - A test that does not finish within the project's time limit fails.
@@ -2482,7 +2630,36 @@ These forms can be used in `requires`, `ensures`, invariants, laws, and proofs:
 | `exists item in items => item == target` | True for at least one value. |
 | `index < split ==> items[index] < pivot` | Implication: when the left side is true, so is the right. |
 | `old(self.items)` | A value as it was when the function was called. |
+| `identical(result, self.model()[key])` | The same value, for values of any one type, whether or not it implements `Equal`. `==` is always the type's `Equal`. |
 | `assert condition` | Inside a proof: a fact the prover must show, which can then be used. |
+
+A quantifier over a range or a collection is an ordinary expression, and can
+be used in code too. It runs as a loop that stops as soon as the answer is
+known, and its body may rely on the bound name being in its range:
+
+```truss
+fn is_sorted[Element: Ordered](items: Slice[Element]) -> Bool
+  cost time O(items.length())
+{
+  forall i in 1..items.length() => items[i - 1] <= items[i]
+}
+```
+
+A quantifier over a whole type, such as `forall value: Int64`, and `==>`
+cannot run, so they appear only in specifications and in the bodies of
+functions for specifications only. A quantifier's body is pure: it cannot use
+capabilities.
+
+The prover reads `is_sorted`'s body as what `is_sorted` means, because the
+function is pure, has a `time` clause, and its body is functional: `let`,
+`if`, `match`, `is`, calls, fields, building values, `with`, operators, and
+quantifiers, with no `var`, assignment, or loop. Any other function is known
+to the prover only by its contract. See
+[DESIGN.md](DESIGN.md#what-a-function-means-to-the-prover).
+
+A function called in a specification must be pure, with no `uses` at all,
+and have a `time` clause. A function that is defined only for some inputs
+says so with `requires`, which every specification that calls it must meet.
 
 - `a ==> b` binds more loosely than `&&` and `||`, so `a && b ==> c` means
   `(a && b) ==> c` and `a ==> b || c` means `a ==> (b || c)`, as in Dafny and
@@ -2504,9 +2681,56 @@ specifications:
   `items[i + 1]`, and the prover checks that it fits.
 - A function whose signature mentions `Integer`, such as
   `fn sum(items: Slice[Int64]) -> Integer`, can be called only from
-  specifications. It is never compiled.
+  specifications. It is never compiled, and its body is a specification.
 
 Float arithmetic in specifications follows IEEE 754, the same as in code.
+
+#### Mathematical collections
+
+Specifications describe collections through mathematical values that exist
+only in specifications, as `Integer` does:
+
+| Type | Values |
+|---|---|
+| `Sequence[Element]` | Finite sequences |
+| `FiniteSet[Element]` | Finite sets |
+| `FiniteMap[Key, Value]` | Finite maps |
+| `Multiset[Element]` | Finite multisets |
+
+A type gives its value in these terms by implementing the prelude trait
+`Model`:
+
+```truss
+trait Model {
+  type Value
+  fn model(self) -> Self.Value
+}
+```
+
+`List`, `Slice`, and `String` are modeled by sequences, `Map` by a finite map
+and the order of its keys, and `Set` by a finite set and its order. Contracts
+compare models:
+
+```truss
+fn List[Element].push(mut self, item: own Element)
+  ensures identical(self.model(), old(self.model()).append(item))
+  cost amortized time O(1)
+{
+  todo
+}
+```
+
+- `model()` can be called only in specifications.
+- The mathematical types compare by structure, so two lists with equal
+  models are interchangeable in a proof.
+- Their contracts, in `standard::specification`, are written with
+  `identical`, as are the contracts that describe a collection through its
+  model, such as `List.push`'s
+  `ensures identical(self.model(), old(self.model()).append(item))`.
+- A `[...]` literal is one of these types where one is expected, as in
+  `ensures identical(self.model(), [])`.
+- A function whose signature mentions one of these types is for
+  specifications only, as for `Integer`.
 
 `assert` means two different things in the two places it can appear. In a
 proof, it is proven at compile time. In a test, it is checked when the test
@@ -2639,10 +2863,11 @@ never clash with variable or function names:
 - `Option` (`Some`, `None`) and `Result` (`Ok`, `Err`)
 - the core collections: `List`, `Slice`, `Map`, and `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
-  `Copyable`, `Plain`, `Index`, `Iterable`, `Cursor`, `FromTemplate`, and the
-  arithmetic traits `Add`, `Subtract`, `Multiply`, `Divide`, `Remainder`, and
-  `Negate`
-- `Integer`, for specifications
+  `Copyable`, `Plain`, `Index`, `Iterable`, `Cursor`, `FromTemplate`, `Model`,
+  and the arithmetic traits `Add`, `Subtract`, `Multiply`, `Divide`,
+  `Remainder`, and `Negate`
+- `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`, for
+  specifications
 - the standard capabilities, such as `Console`, `FileRead`, and `Panic`
 
 Everything else is imported with `use`. Projects cannot define their own

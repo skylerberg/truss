@@ -191,14 +191,18 @@ and statement state env (written : statement) ~last : unit =
       in
       (* The loop's header settles its own types before the body, so the
          loop variable's type comes from the header alone. *)
+      let loop_element = ref None in
       in_statement state env iterable.span (fun () ->
           let element = loop_iterable state env written ~mode inner in
+          loop_element := Some element;
           (if inner != iterable then
              match state.tables.types.(inner.id) with
              | Some type_ -> record state iterable type_
              | None -> ());
           binding_pattern state env written_pattern element ~mutable_:false ~mode);
-      List.iter (loop_clause state env) clauses;
+      List.iter
+        (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
+        clauses;
       loop_body state env body
   | While { condition = test; clauses; body } ->
       in_statement state env test.span (fun () -> check state env test T.bool);
@@ -240,6 +244,9 @@ and loop_clause state env (clause : loop_clause) =
   | Invariant value -> check state env value T.bool
   | Loop_decreases measures ->
       List.iter (fun measure -> ignore (expression state env measure)) measures
+  | Loop_cost { bound = Big_o value | At_most value | Exactly value; _ } ->
+      ignore (expression state env value)
+  | Loop_cost { bound = Finite; _ } -> ()
 
 (* What a [for] loop drives: a range of built-in integers, a call to a
    [yields] method, a cursor, or the [each] method of the loop's mode. *)

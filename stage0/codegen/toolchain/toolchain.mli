@@ -44,9 +44,15 @@ val link :
    With [input], the program reads that as its standard input; without, it
    reads this process's. With [on_output], each piece of standard output is
    also handed to it as soon as it is read, for a driver that shows
-   progress. *)
+   progress. With [time_limit], in milliseconds, a program still running
+   then is killed, and its status is [128 + SIGKILL]. *)
 val run :
-  ?input:string -> ?on_output:(string -> unit) -> string -> string list -> int * string * string
+  ?input:string ->
+  ?on_output:(string -> unit) ->
+  ?time_limit:int ->
+  string ->
+  string list ->
+  int * string * string
 
 (* Runs a program on this process's standard input, output, and error, and
    returns its exit status, as [run] gives it. *)

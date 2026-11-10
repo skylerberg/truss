@@ -3,18 +3,33 @@ public opaque type Map[Key: Hash + Ordered, Value](entries: List[Entry[Key, Valu
 
 public type Entry[Key, Value](key: Key, value: Value)
 
+impl Model for Map[Key: Hash + Ordered, Value] {
+  type Value = FiniteMap[Key, Value]
+
+  fn model(self) -> FiniteMap[Key, Value]
+    cost time finite
+  {
+    todo
+  }
+}
+
 public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
+  ensures result == self.model().size()
   cost time O(1)
 {
   self.entries.length()
 }
 
-public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool {
+public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
+  ensures result == self.model().contains_key(key)
+{
   let position = self.entries.partition_point(fn(entry) { entry.key < key })
   position < self.entries.length() && self.entries[position].key == key
 }
 
-public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value) {
+public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: own Value)
+  ensures identical(self.model(), old(self.model()).insert(key, value))
+{
   let position = self.entries.partition_point(fn(entry) { entry.key < key })
   if position < self.entries.length() && self.entries[position].key == key {
     self.entries[position].value = own value

@@ -470,18 +470,37 @@ and parallel state flow (body : block) =
           if other <> index then
             List.iter
               (fun (place, span) ->
-                if
-                  List.exists (fun read -> overlap read place = Overlap) others.reads
-                  || List.exists
-                       (fun (changed, _) -> overlap changed place = Overlap)
-                       others.changes
-                then
+                let used = others.reads @ List.map fst others.changes in
+                if List.exists (fun other_place -> overlap other_place place = Overlap) used then
                   report context Parallel_conflict span
                     (Printf.sprintf
                        "One branch of this `parallel` block changes `%s`, which another branch \
                         uses."
                        (show_place context.names place)))
               effects.changes)
+        branches)
+    branches;
+  (* Two indexes of one collection, one changed by a branch and one used by
+     another, are disjoint only if the prover shows it: each pair of
+     branches once, each change of either against all the other uses. *)
+  List.iteri
+    (fun index effects ->
+      List.iteri
+        (fun other others ->
+          if other > index then
+            let pairs mine theirs =
+              List.concat_map
+                (fun (changed, _) -> List.map (fun used -> (changed, used)) theirs)
+                mine
+            in
+            List.iter
+              (fun (changed, used) ->
+                match overlap changed used with
+                | Maybe_disjoint (first, second) ->
+                    context.obligations <- Disjoint { first; second } :: context.obligations
+                | Overlap | No_overlap -> ())
+              (pairs effects.changes (others.reads @ List.map fst others.changes)
+              @ pairs others.changes effects.reads))
         branches)
     branches;
   flow

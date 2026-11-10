@@ -183,3 +183,15 @@ let write_file path text =
   let temporary = Printf.sprintf "%s.%d.tmp" path (Unix.getpid ()) in
   Out_channel.with_open_bin temporary (fun channel -> output_string channel text);
   Sys.rename temporary path
+
+(* Every definition [start] reads, directly or not. *)
+let reachable dependencies start =
+  let seen = Hashtbl.create 64 in
+  let rec walk path =
+    if not (Hashtbl.mem seen path) then begin
+      Hashtbl.replace seen path ();
+      List.iter (fun (read, _, _) -> walk read) (Database.reads dependencies path)
+    end
+  in
+  walk start;
+  seen
