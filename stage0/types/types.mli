@@ -106,6 +106,14 @@ val contains_unsolved : ty -> bool
 val terminates : function_type -> bool
 (** Whether a function type has a [time] clause, which promises it terminates. *)
 
+val same_clauses : function_type -> function_type -> bool
+(** Whether two function types have the same [uses] and the same costs, in any order. *)
+
+val costs_imply : given:cost list -> wanted:cost list -> bool
+(** Whether costs promise what others ask, by their constants alone: each cost asked has one given
+    for the same resource that is at least as strong, where an exact count is within any bound it
+    does not exceed, a count is [O(...)], and every bound is [finite]. *)
+
 (** {1 Showing types} *)
 
 val show : ty -> string
@@ -124,6 +132,8 @@ type generic_kind =
   | Capability_generic
 
 type generic = { generic : parameter; kind : generic_kind }
+
+val capability_parameters : generic list -> parameter list
 
 val substitution_of : generic list -> argument list -> substitution option
 (** What stands for each of a definition's generic parameters, given its arguments in order, or

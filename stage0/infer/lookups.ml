@@ -12,10 +12,9 @@ module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
 
-let rec coerce state (value : expression) ~found ~expected =
-  match resolve state found with
-  | Never -> ()
-  | _ -> if not (unify state expected found) then mismatch state value.span ~expected ~found
+(* An expression's value where a type is expected of it. *)
+let rec coerce state env ?argument (value : expression) ~found ~expected =
+  convert state env ?argument ~expression:value.id value.span ~found ~expected
 
 and literal_type state ~expected kind =
   match Option.map (resolve state) expected with

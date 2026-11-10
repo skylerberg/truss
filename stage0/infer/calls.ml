@@ -77,8 +77,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
            (Printf.sprintf "`%s` is not a function, so it cannot be called."
               (show state callee_type)))
 
-(* One argument: checked against its parameter's type, with its mark, and
-   with the one implicit conversion, from an owned collection to its view. *)
+(* One argument: checked against its parameter's type, with its mark. *)
 and argument_value state env (value : expression) (parameter : T.parameter_info) =
   let inner =
     match value.kind with
@@ -87,39 +86,7 @@ and argument_value state env (value : expression) (parameter : T.parameter_info)
   in
   let found = expression state env ~expected:parameter.type_ inner in
   if inner != value then record state value found;
-  let expected = normalize state parameter.type_ and found_resolved = normalize state found in
-  let to_view =
-    (is_named slice_path expected && is_named list_path found_resolved)
-    || (is_named string_slice_path expected && is_named string_path found_resolved)
-  in
-  let conversion : C.conversion option =
-    if to_view then begin
-      (match (expected, found_resolved) with
-      | T.Named { arguments = expected_arguments; _ }, T.Named { arguments = found_arguments; _ } ->
-          if not (Unify.unify_arguments state.unifier expected_arguments found_arguments) then
-            mismatch state value.span ~expected ~found
-      | _ -> ());
-      Some Owned_to_view
-    end
-    else if env.specification && resolve state found = T.Integer && T.is_integer_type expected then begin
-      state.obligations <-
-        Integer_fits { expression = value.id; type_ = expected } :: state.obligations;
-      Some From_integer
-    end
-    else if
-      env.specification && T.is_integer_type found_resolved && resolve state expected = T.Integer
-    then Some To_integer
-    else begin
-      coerce state inner ~found ~expected;
-      match (resolve state found, expected, found_resolved) with
-      | T.Never, _, _ -> Some From_never
-      | _, T.Function expected_function, T.Function found_function
-        when expected_function.uses <> found_function.uses
-             || expected_function.costs <> found_function.costs ->
-          Some Function_widening
-      | _ -> None
-    end
-  in
+  let conversion = coerce state env ~argument:true value ~found ~expected:parameter.type_ in
   check_mode state value parameter found;
   conversion
 

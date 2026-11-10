@@ -26,6 +26,9 @@ type env = {
   loop_element : T.ty option;
       (** In a [for] loop's clauses, what each iteration receives, which [yielded] is a sequence of.
       *)
+  own : T.parameter list;
+      (** The capability parameters of the function being checked. Each stands for itself throughout
+          the body, in a call of the function by itself too. *)
 }
 
 type frame = {
@@ -64,6 +67,11 @@ type state = {
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
   mutable unsolved : Diagnostic.reported option;
       (** The report of the first statement whose types could not be worked out. *)
+  widened : (id, T.capability list * T.capability list) Hashtbl.t;
+      (** By its expression, each function value that uses more than the function type it meets
+          lists: that type's [uses], which have a capability parameter of what an enclosing call
+          calls, and the capabilities they do not list, which the call's check takes as passed for
+          the parameter. *)
 }
 
 let reported state ?(fixes = []) code (span : span) message =
@@ -176,10 +184,6 @@ let string_type = T.Named { path = string_path; arguments = [] }
 
 let is_named path type_ =
   match type_ with T.Named named -> Path.equal named.path path | _ -> false
-
-let element_of = function
-  | T.Named { arguments = T.Type element :: _; _ } -> Some element
-  | _ -> None
 
 (* Statements *)
 
@@ -399,6 +403,81 @@ type static_ =
   | Static_trait of Path.t * T.argument list option
       (** With the trait's arguments, when they are written. *)
   | Static_capability of Path.t
+
+(* Where a value of one type goes where another is expected, which is the
+   one place a type converts, and the conversion made:
+
+   - [Never] becomes any type.
+   - A function value becomes a function type with more [uses] or weaker
+     costs. A capability the expected type does not list is allowed only
+     when the type has a capability parameter of another function, which a
+     call of that function solves as what is passed for it: the value is
+     noted for the check of capabilities, which knows the call. Costs that
+     the types' constants do not show to be weaker are the prover's to
+     show: of what is passed for a parameter where it checks the call, and
+     of [expression] elsewhere, as an obligation.
+   - Where a value is passed for a parameter, an owned collection becomes
+     its view and, in a specification, a built-in integer becomes an
+     [Integer] or an [Integer] a built-in integer that it fits.
+
+   Anything else must be the type expected. *)
+let convert state env ?(argument = false) ?expression (span : span) ~found ~expected :
+    C.conversion option =
+  let given = normalize state found and wanted = normalize state expected in
+  let refused () =
+    mismatch state span ~expected ~found;
+    None
+  in
+  match (given, wanted, expression) with
+  | T.Never, _, _ -> Some From_never
+  | T.Named given_named, T.Named wanted_named, _
+    when argument
+         && List.exists
+              (fun (owned, view) ->
+                Path.equal given_named.path owned && Path.equal wanted_named.path view)
+              [ (list_path, slice_path); (string_path, string_slice_path) ] ->
+      if not (Unify.unify_arguments state.unifier wanted_named.arguments given_named.arguments) then
+        mismatch state span ~expected ~found;
+      Some Owned_to_view
+  | T.Integer, _, Some expression when argument && env.specification && T.is_integer_type wanted ->
+      state.obligations <- Integer_fits { expression; type_ = wanted } :: state.obligations;
+      Some From_integer
+  | _, T.Integer, _ when argument && env.specification && T.is_integer_type given -> Some To_integer
+  | T.Function given_function, T.Function wanted_function, _
+    when not (T.same_clauses given_function wanted_function) ->
+      let unlisted =
+        List.filter
+          (fun capability -> not (List.mem capability wanted_function.uses))
+          given_function.uses
+      in
+      let solved_by_a_call =
+        List.exists
+          (function
+            | T.Capability_parameter parameter -> not (List.mem parameter env.own)
+            | T.Capability _ -> false)
+          wanted_function.uses
+      in
+      let proven = T.costs_imply ~given:given_function.costs ~wanted:wanted_function.costs in
+      if
+        Unify.unify state.unifier wanted
+          (T.Function
+             { given_function with uses = wanted_function.uses; costs = wanted_function.costs })
+        && (unlisted = [] || (solved_by_a_call && Option.is_some expression))
+        && (proven || argument || Option.is_some expression)
+      then begin
+        Option.iter
+          (fun expression ->
+            if unlisted <> [] then
+              Hashtbl.replace state.widened expression (wanted_function.uses, unlisted);
+            if not (proven || argument) then
+              state.obligations <-
+                Costs_imply { expression; given = given_function; expected = wanted_function }
+                :: state.obligations)
+          expression;
+        Some Function_widening
+      end
+      else refused ()
+  | _ -> if Unify.unify state.unifier wanted given then None else refused ()
 
 (* Bounds *)
 
