@@ -59,22 +59,26 @@ touches. It follows [GOALS.md](GOALS.md) and the decisions in
 | `truss sync`, `truss status`, `truss stop` | Brings a worktree's session up to date, lists the background process's sessions, and stops it |
 | `truss clean` | Stops the background process and deletes the store |
 
-`truss --version` prints the version of each stage that has one: code
-generation and the Unicode tables. Those are the versions in exact keys, so a
+`truss --version` prints the version of Truss the toolchain is, which a
+package's `truss` is compared with, and the version of each stage that has
+one: code generation and the Unicode tables. Those are the versions in exact keys, so a
 report of a stale result can say which stage it came from. Every other
 result is kept under the compiler's identity, the hash of its executable.
 
 ### Finding the packages
 
-A command acts on the packages of the worktree it is run in, through that
-worktree's session in the code database, as DATABASE.md's "Sessions"
-describes. The worktree is the top of the git worktree, or outside git, the
-nearest directory at or above the current one that holds a `truss.toml`,
-the way Cargo and Go find a package. The command is about the packages at
-or under the current directory, or else the one it is in, so running in a
+A command acts on the packages of the project it is run in, through that
+project's session in the code database, as DATABASE.md's "Sessions"
+describes. The project's root is the nearest directory at or above the
+current one whose `truss.toml` has a `[project]` table, or with none, the
+nearest that holds a `truss.toml`, which is a package that is a project by
+itself, as SYNTAX.md's "Projects" says. Cargo finds a workspace the same
+way. A directory with no manifest at or above it is in no project, and a
+command there cannot do its job. The command is about the packages at or
+under the current directory, or else the one it is in, so running in a
 package's directory, or any directory below it, is about that package, and
-running at the top of a repository of several packages is about all of
-them. `run` and `build` need exactly one, and say so when there are more.
+running at the root of a project of several packages is about all of them.
+`run` and `build` need exactly one, and say so when there are more.
 `-C DIRECTORY`, as in `git` and `make`, runs as if from that directory,
 written before the command or after it. The positional arguments are free
 for what each command acts on.
@@ -84,13 +88,30 @@ SYNTAX.md says, with two exceptions:
 
 - **A directory with its own `truss.toml` is another package,** and none of
   its files are modules of this one, as with Cargo's and Go's nested
-  modules.
+  modules. It is a package of the same project, unless its manifest has a
+  `[project]` table, which makes it and everything under it another
+  project, or the root has none, which makes the root a project of one
+  package.
 - **Directories whose names start with `.`, and `_build` and
   `node_modules`, are skipped,** so `.git` and an editor's hidden
   directories are never read.
 
-A manifest that cannot be read, or a package name used twice, is a problem
-in the code, reported with the diagnostics, and the exit status is 1.
+A package's dependencies are found among the project's packages, by name.
+
+What is wrong with a manifest is a problem in the code, reported with the
+diagnostics, and the exit status is 1:
+
+- a manifest that cannot be read, with the line
+- a package name used twice in the project, or the name `standard`
+- a package without `truss`, or written for a newer Truss than the
+  toolchain's, which `truss --version` gives
+- a dependency that is no package of the project, a package that depends on
+  itself, and packages that depend on each other in a cycle
+- a package that runs on every target with a dependency that says
+  `usize_bits = 64`
+- a package name of one part that is the owner in another package's name,
+  since a path that starts with it could then be read two ways
+- a `[test]` table in a manifest that is not the project's
 
 ### Common options
 
@@ -258,10 +279,10 @@ whose result is kept is not built or run again. External tests, those with
   new ones, as `go test -count=1` does. Results are deterministic, so this
   is only for doubting the cache, after a suspected compiler bug, or for
   timing every test on this machine now.
-- **The time limit** for each test is its package's, set in the manifest as
-  `[test] time_limit = 10`, in seconds, with 10 as the default. It is not a
-  flag, so that every machine and CI run uses the same limit. A run over
-  several packages builds one test program for each.
+- **The time limit** for each test is its project's, set in the project's
+  manifest as `[test] time_limit = 10`, in seconds, with 10 as the default.
+  It is not a flag, so that every machine and CI run uses the same limit. A
+  run over several packages builds one test program for each.
 - **The JSON document** is `{"format", "diagnostics", "tests", "timings"}`,
   where each test is `{"module", "name", "file", "line", "outcome",
   "cached", "microseconds", "message", "echo"}`, for every selected test,
@@ -276,10 +297,11 @@ truss run [--release] [--] [ARGUMENT...]
 truss build [--output PATH] [--json]
 ```
 
-A package has at most one `main`, and its program is built from it, as
-IMPLEMENTATION.md has a package compile to a single program or library. A
-package with no `main` has no program, so `run` and `build` stop with 2; one
-with several has a problem in its code, so they stop with 1.
+A package's program starts at the `main` of its `main` module, as DESIGN.md's
+"Packages" says, and a package compiles to a single program or library, as
+IMPLEMENTATION.md has it. A package without that `main` is a library and
+has no program, so `run` and `build` stop with 2. A function named `main` in
+another module is an ordinary function.
 
 **`truss run`** builds a development program, as CODEGEN.md's "C files and
 optimization" describes, and runs it on the terminal with the arguments, so
@@ -473,7 +495,7 @@ truss rename [--json] FROM TO
 ```
 
 Renames a definition, every version of a method, or a module, and rewrites
-every reference to it in every package of the worktree, whichever directory
+every reference to it in every package of the project, whichever directory
 it is run from. `TO` is a new name, as in `truss
 rename weather::forecast::parse read`, or a full path that keeps the
 definition in its module and a method with its type. Renaming a module, as
@@ -485,7 +507,7 @@ cause any diagnostic, such as for a name that is taken, breaks a naming
 rule, or would hide another, which are the diagnostics a hand-made rename
 would cause. A worktree that already has diagnostics is refused too, since its
 references are found through checked code. References in packages outside
-the worktree cannot be changed, so renaming a public definition changes the
+the project cannot be changed, so renaming a public definition changes the
 package's public interface, which `truss impact` reports like any other
 changed signature. Each edit replaces the name's tokens alone, so the files
 need no formatting afterward. The callers of what was renamed are checked
@@ -501,8 +523,8 @@ cursor's position. The JSON document is `{"format", "diagnostics", "edits",
 truss new NAME
 ```
 
-Makes a directory `NAME` with a `truss.toml` naming the package and a
-`main.truss` with an empty `main`:
+Makes a directory with a `truss.toml` that names the package and the
+toolchain's Truss, and a `main.truss` with an empty `main`:
 
 ```truss
 fn main(arguments: List[String]) -> ExitCode {
@@ -511,8 +533,10 @@ fn main(arguments: List[String]) -> ExitCode {
 ```
 
 A library is a package without `main`, so it needs no flag: delete the
-file. The name must be a `lower_snake_case` name, since it is the first
-part of every module path.
+file. The name must be a package's, a `lower_snake_case` name or an owner
+and a name, such as `acme::weather`, since it starts every module path. The
+directory is named after the package without its owner. Made under a
+project's root, the package is one of the project's.
 
 ## The background process
 
@@ -570,16 +594,13 @@ It is left out of each command's help.
 
 ## Not built
 
-- **Projects, the lock file, and the registry,** which DESIGN.md's
-  "Packages" describes. A command acts on the packages of its git worktree,
-  where it is to act on those of its project, and finds a dependency among
-  them by its name alone. `truss add`, `truss upgrade`, and `truss publish`
-  are not built, no package is fetched, and no `truss.lock` is read.
-- **What a manifest's `truss` and `[project]` mean.** A manifest is read as
-  SYNTAX.md's "Package manifest" writes it, and a mistake in one is reported
-  with its line. But `truss` is not required or compared with the
-  toolchain, a `[project]` table changes nothing, and a test's time limit is
-  its package's, where it is to be its project's.
+- **The lock file and the registry,** which DESIGN.md's "Packages"
+  describes. A dependency is found among the project's packages, and one
+  that is not there is a problem. `truss add`, `truss upgrade`, and
+  `truss publish` are not built, no package is fetched, and no `truss.lock`
+  is read.
+- **A package read as the Truss it names.** There is one version of Truss,
+  so `truss` only says whether the toolchain is new enough.
 - **An unused dependency as an error.**
 - **`truss fmt [--check] [FILE...]`,** which waits for the formatter. It is
   to rewrite the package's files, or the named ones, into the one layout

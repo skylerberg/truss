@@ -788,7 +788,9 @@ let check state =
         | Function { signature; _ }, Function_interface lowered ->
             (match signature.name with
             | Member_name (head, _) -> check_method_location state head
-            | Plain_name name -> if name.text = "main" then check_main state lowered name.span);
+            | Plain_name name ->
+                if name.text = "main" && state.key.module_.modules = [ "main" ] then
+                  check_main state lowered name.span);
             List.iter
               (fun (parameter : parameter) ->
                 match parameter.kind with

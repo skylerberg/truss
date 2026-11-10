@@ -154,6 +154,11 @@ Names live in separate namespaces, which the case rules keep apart:
   prelude. Exactly one can match, because no name may hide another.
 - **A qualified name** `module::name` is looked up in that module. Its
   module is either imported by a `use` or written in full from its package.
+  A full path starts with the name of a package the file may name, its own,
+  `standard`, or one its manifest lists, and that name is two of the path's
+  names when the package has an owner: `acme::geometry::vector` is the
+  module `vector` of `acme::geometry` where the manifest lists that package,
+  and otherwise names a module of a package `acme`.
 - **A member,** after `.`, is not resolved here. Its meaning depends on the
   type before the dot, which only type checking knows. The one exception is
   a name before the dot that resolution already knows is a type, as in
@@ -546,8 +551,9 @@ the definition's interface: the types of its parameters and result, its
   `self`, so `lends` takes no mode or `mut`, and `lends own` is an error.
   The body is checked against the form (see
   [Yielding and lending](#yielding-and-lending)).
-- **`main`** must have exactly the signature
-  `fn main(arguments: List[String]) -> ExitCode`, with any `uses`.
+- **`main`,** in a package's `main` module, must have exactly the signature
+  `fn main(arguments: List[String]) -> ExitCode`, with any `uses`. A
+  function named `main` in another module is an ordinary function.
 
 ### Types
 
@@ -1504,11 +1510,7 @@ the compiler. The prelude holds:
   or its `impl` is used for a bound or made into an `any`.
 - **A grant that names a capability by its path.** A grant is compared with
   the capability's name as it is shown.
-- **A package name of two parts,** an owner and a name, at the start of a
-  path, which a registry package has.
 - **How `write_with` combines errors** is not decided. A writer's lambda may
   fail with its own error type as well as a `FileError`. The standard
   library needs a result type that holds either, and a name for it.
-- **`main` in the `main` module only.** DESIGN.md has a package's program
-  start at the `main` of its `main` module. The checker takes a function
-  named `main` in any module for one.
+

@@ -14,8 +14,7 @@ let packages : (string, package) Query.input = Query.input ~name:"package" ~show
 let file_text : (Path.module_, string) Query.input =
   Query.input ~name:"file_text" ~show:Path.show_module ()
 
-let file_path (module_ : Path.module_) =
-  String.concat "/" (module_.package :: module_.modules) ^ ".truss"
+let file_path (module_ : Path.module_) = String.concat "/" (Path.module_parts module_) ^ ".truss"
 
 type file = {
   source : Source.t;
@@ -42,6 +41,13 @@ let file =
       })
 
 let package database name = Query.find database packages name
+
+let split_path database (names : string list) =
+  match names with
+  | owner :: name :: rest when package database (owner ^ "::" ^ name) <> None ->
+      Some (owner ^ "::" ^ name, rest)
+  | name :: rest when package database name <> None -> Some (name, rest)
+  | _ -> None
 
 let module_exists =
   Query.query ~name:"module_exists" ~phase:Syntax ~saved:true ~show:Path.show_module

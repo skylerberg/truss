@@ -203,7 +203,7 @@ let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
               Compile.run_tests ?results ~rerun
                 ~progress:(fun event -> progress (shifted event))
                 compile
-                ~time_limit:(package.manifest.time_limit * 1000)
+                ~time_limit:(Database.time_limit project.session * 1000)
                 (List.map (fun t -> t.path) own)
             with
             | Ok records -> Ok (done_ @ records)

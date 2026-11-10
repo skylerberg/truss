@@ -23,56 +23,53 @@ let split text = String.split_on_char ':' text |> List.filter (( <> ) "")
 let module_exists (project : Project.t) (module_ : Path.module_) =
   List.mem_assoc module_ project.files
 
-(* The worktree's package [from_] is in, by its first part. *)
-let package_of (project : Project.t) from_ =
+(* The project's package that [from_] starts with the name of, and the
+   names after it. *)
+let in_package (project : Project.t) from_ =
+  let named name = List.exists (fun (p : Project.package) -> p.name = name) project.packages in
   match split from_ with
-  | first :: _ -> (
-      match List.find_opt (fun (p : Project.package) -> p.name = first) project.packages with
-      | Some package -> package
-      | None ->
-          Project.cannot_run
-            "Only the definitions of this worktree's packages can be renamed, and `%s` is not in \
-             one."
-            from_)
+  | owner :: name :: rest when named (owner ^ "::" ^ name) -> (owner ^ "::" ^ name, rest)
+  | name :: rest when named name -> (name, rest)
   | [] -> Project.cannot_run "`%s` names nothing." from_
+  | _ ->
+      Project.cannot_run
+        "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
+        from_
 
 (* What [from_] names. *)
 let what (project : Project.t) from_ =
-  let parts = split from_ in
-  let package = (package_of project from_).name in
-  match parts with
-  | _ :: modules when module_exists project { package; modules } -> Module { package; modules }
-  | _ -> (
-      match List.rev parts with
-      | last :: (_ :: _ as rest)
-        when module_exists project { package; modules = List.tl (List.rev rest) } -> (
-          let module_ : Path.module_ = { package; modules = List.tl (List.rev rest) } in
-          let declared path =
-            List.exists
-              (fun (d : Names.declaration) ->
-                match (d.path, path) with
-                | Method { owner; name; _ }, Path.Method { owner = o; name = n; _ } ->
-                    Path.equal owner o && name = n
-                | p, path -> Path.equal p path)
-              (List.concat_map
-                 (Query.demand project.context Names.declarations)
-                 (Project.modules project))
-          in
-          let path : Path.t =
-            match String.index_opt last '.' with
-            | None -> Top { module_; name = last }
-            | Some dot ->
-                Method
-                  {
-                    owner = Top { module_; name = String.sub last 0 dot };
-                    name = String.sub last (dot + 1) (String.length last - dot - 1);
-                    receiver = Static;
-                  }
-          in
-          match path with
-          | (Top _ | Method _) when declared path -> Definition path
-          | _ -> Project.cannot_run "Nothing named `%s` is defined in %s." from_ package)
-      | _ -> Project.cannot_run "Nothing named `%s` is defined in %s." from_ package)
+  let package, names = in_package project from_ in
+  if module_exists project { package; modules = names } then Module { package; modules = names }
+  else
+    match List.rev names with
+    | last :: rest when module_exists project { package; modules = List.rev rest } -> (
+        let module_ : Path.module_ = { package; modules = List.rev rest } in
+        let declared path =
+          List.exists
+            (fun (d : Names.declaration) ->
+              match (d.path, path) with
+              | Method { owner; name; _ }, Path.Method { owner = o; name = n; _ } ->
+                  Path.equal owner o && name = n
+              | p, path -> Path.equal p path)
+            (List.concat_map
+               (Query.demand project.context Names.declarations)
+               (Project.modules project))
+        in
+        let path : Path.t =
+          match String.index_opt last '.' with
+          | None -> Top { module_; name = last }
+          | Some dot ->
+              Method
+                {
+                  owner = Top { module_; name = String.sub last 0 dot };
+                  name = String.sub last (dot + 1) (String.length last - dot - 1);
+                  receiver = Static;
+                }
+        in
+        match path with
+        | (Top _ | Method _) when declared path -> Definition path
+        | _ -> Project.cannot_run "Nothing named `%s` is defined in %s." from_ package)
+    | _ -> Project.cannot_run "Nothing named `%s` is defined in %s." from_ package
 
 (* The new last name, from a full path or a bare name. A definition keeps
    its module and a method its type, so a full path must say the same
@@ -114,20 +111,20 @@ let plan_definition (project : Project.t) path name =
 let plan_module (project : Project.t) (old_module : Path.module_) to_ =
   let package = old_module.package in
   let modules =
-    match split to_ with
-    | first :: modules when first = package && modules <> [] -> modules
-    | _ ->
+    match in_package project to_ with
+    | named, (_ :: _ as modules) when named = package -> modules
+    | _ | (exception Project.Cannot_run _) ->
         Project.cannot_run "`%s` is not a module path in %s, such as `%s::name`." to_ package
           package
   in
   List.iter
     (fun name ->
-      if not (New_command.valid_name name) then
+      if Type_checker.Manifest.name_parts name <> Some [ name ] then
         Project.cannot_run "`%s` is not a lower_snake_case name, which a module's must be." name)
     modules;
   let new_module : Path.module_ = { package; modules } in
   if module_exists project new_module then Project.cannot_run "`%s` already exists." to_;
-  let full = String.concat "::" (package :: modules) in
+  let full = Path.show_module new_module in
   let last = List.nth modules (List.length modules - 1) in
   let edits =
     List.filter_map
@@ -180,9 +177,12 @@ let trial (project : Project.t) after =
   let engine = Database.trial project.session in
   List.iter
     (fun (package : Project.package) ->
-      Database.load_package ~usize_bits:package.manifest.usize_bits engine ~name:package.name
-        ~dependencies:package.manifest.dependencies
-        (List.filter (fun ((m : Path.module_), _) -> m.package = package.name) after))
+      match Project.manifest project package with
+      | Some manifest ->
+          Database.load_package ~usize_bits:manifest.usize_bits engine ~name:package.name
+            ~dependencies:manifest.dependencies
+            (List.filter (fun ((m : Path.module_), _) -> m.package = package.name) after)
+      | None -> ())
     project.packages;
   engine
 

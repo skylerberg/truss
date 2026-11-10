@@ -1,6 +1,12 @@
 type module_ = { package : string; modules : string list }
 
-let show_module module_ = String.concat "::" (module_.package :: module_.modules)
+let package_parts package =
+  match String.split_on_char ':' package with
+  | [ owner; ""; name ] -> [ owner; name ]
+  | _ -> [ package ]
+
+let module_parts module_ = package_parts module_.package @ module_.modules
+let show_module module_ = String.concat "::" (module_parts module_)
 
 type receiver = Static | Read | Mut | Own
 
