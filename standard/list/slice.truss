@@ -10,33 +10,66 @@ public fn Slice[Element].is_empty(self) -> Bool
 }
 
 public fn Slice[Element].get(self, index: USize) lends Option[Element]
+
+  ensures (result is Some(_)) == (index < self.length())
+  ensures !(result is Some(element) && !identical(element, self.model()[index]))
   cost time O(1)
 {
-  todo
+  if index < self.length() {
+    yield Some(self[index])
+  } else {
+    yield None
+  }
 }
 
 public fn Slice[Element].first(self) lends Option[Element]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  ensures !(result is Some(element) && !identical(element, self.model()[0]))
   cost time O(1)
 {
-  todo
+  if self.length() > 0 {
+    yield Some(self[0])
+  } else {
+    yield None
+  }
 }
 
 public fn Slice[Element].last(self) lends Option[Element]
+
+  ensures (result is Some(_)) == (self.length() > 0)
+  ensures !(result is Some(element) && !identical(element, self.model()[self.length() - 1]))
   cost time O(1)
 {
-  todo
+  if self.length() > 0 {
+    yield Some(self[self.length() - 1])
+  } else {
+    yield None
+  }
 }
 
 public fn Slice[Element].split_first(self) lends Option[list::SplitFirst[Element]]
+
+  ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
-  todo
+  if self.length() > 0 {
+    yield Some(list::SplitFirst(first: self[0], rest: self.slice_range(1, stop: self.length())))
+  } else {
+    yield None
+  }
 }
 
 public fn Slice[Element].split_last(self) lends Option[list::SplitLast[Element]]
+
+  ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
-  todo
+  if self.length() > 0 {
+    yield Some(list::SplitLast(last: self[self.length() - 1], rest: self.slice_range(0, stop: self.length() - 1)))
+  } else {
+    yield None
+  }
 }
 
 public fn Slice[Element].split_at(self, index: USize) -> core::Pair[Slice[Element], Slice[Element]]
@@ -315,16 +348,37 @@ public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
 }
 
 public fn Slice[Element].enumerate(self) yields core::Indexed[Element]
+
+  ensures result.index == yielded.length()
+  ensures identical(result.element, self.model()[yielded.length()])
+  ensures yielded.length() <= self.length()
   ensures finished ==> yielded.length() == self.length()
   cost time O(self.length())
 {
-  todo
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant yielded.length() == index
+    decreases self.length() - index
+  {
+    yield core::Indexed(index: index, element: self[index])
+    index += 1
+  }
 }
 
 public fn Slice[Element].enumerate(mut self) yields mut core::Indexed[Element]
+
   cost time O(self.length())
 {
-  todo
+  var index: USize = 0
+  while index < self.length()
+    invariant self.length() == old(self.length())
+    invariant index <= self.length()
+    decreases self.length() - index
+  {
+    yield core::Indexed(index: index, element: mut self[index])
+    index += 1
+  }
 }
 
 public fn Slice[Element].reversed(self) yields Element
@@ -398,15 +452,39 @@ public fn Slice[Element: Equal].split(self, separator: Element) yields Slice[Ele
 }
 
 public fn Slice[Element].zip[Other](self, other: Slice[Other]) yields core::Pair[Element, Other]
+
+  ensures identical(result.first, self.model()[yielded.length()])
+  ensures identical(result.second, other.model()[yielded.length()])
+  ensures yielded.length() <= self.length()
+  ensures yielded.length() <= other.length()
   cost time O(self.length())
 {
-  todo
+  var index: USize = 0
+  while index < self.length() && index < other.length()
+    invariant index <= self.length()
+    invariant index <= other.length()
+    invariant yielded.length() == index
+    decreases self.length() - index
+  {
+    yield core::Pair(first: self[index], second: other[index])
+    index += 1
+  }
 }
 
 public fn Slice[Element].zip[Other](mut self, other: mut Slice[Other]) yields mut core::Pair[Element, Other]
+
   cost time O(self.length())
 {
-  todo
+  var index: USize = 0
+  while index < self.length() && index < other.length()
+    invariant self.length() == old(self.length())
+    invariant other.length() == old(other.length())
+    invariant index <= self.length()
+    decreases self.length() - index
+  {
+    yield core::Pair(first: mut self[index], second: mut other[index])
+    index += 1
+  }
 }
 
 public fn Slice[Element].swap(mut self, first: USize, second: USize)

@@ -76,3 +76,13 @@ test "take empties an option and replace fills it, each giving what was there" {
   assert replaced == Some("b2")
   assert held == Some("c3")
 }
+
+test "find lends the first element that matches" {
+  let items: List[Int64] = [1, 2, 3, 4]
+  assert items.find(fn(item) { item > 2 }) is Some(found) && found == 3
+  assert items.find(fn(item) { item > 9 }) is None
+  let words: List[String] = ["a${1}", "bb${2}", "cc${3}"]
+  assert words.find(fn(word) { word.length() == 3 }) is Some(word) && word == "bb2"
+  let none: List[String] = []
+  assert none.find(fn(word) { word.is_empty() }) is None
+}
