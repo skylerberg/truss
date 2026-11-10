@@ -89,10 +89,10 @@ let load directory =
             let directory = if relative = "" then root else Filename.concat root relative in
             let manifest =
               try Type_checker.Manifest.parse (read_text (Filename.concat directory manifest_name))
-              with Type_checker.Manifest.Malformed (line, expected) ->
-                cannot_run "%s:%d: expected %s."
+              with Type_checker.Manifest.Malformed (line, message) ->
+                cannot_run "%s:%d: %s"
                   (shown (Filename.concat directory manifest_name))
-                  line expected
+                  line message
             in
             { name; directory; manifest })
           targets

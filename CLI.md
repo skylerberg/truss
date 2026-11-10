@@ -564,16 +564,23 @@ It is left out of each command's help.
 - **A watch mode,** such as `cargo watch` or `vitest --watch`. The
   background process already checks every open worktree as its files
   change, so running a command again does what a watch would, at once.
-- **`truss add`, `truss publish`, and a lock file.** There is no package
-  registry yet. Adding a dependency is a manifest edit that grants
-  capabilities, which is the change DESIGN.md wants reviewers to see, so a
-  command for it should only come with the registry.
 - **Selecting tests by what changed,** as Nx's `affected` does. The cache
   already runs only the tests whose code changed, and exactly those, so a
   selection by files changed could only be less exact.
 
 ## Not built
 
+- **Projects, the lock file, and the registry,** which DESIGN.md's
+  "Packages" describes. A command acts on the packages of its git worktree,
+  where it is to act on those of its project, and finds a dependency among
+  them by its name alone. `truss add`, `truss upgrade`, and `truss publish`
+  are not built, no package is fetched, and no `truss.lock` is read.
+- **What a manifest's `truss` and `[project]` mean.** A manifest is read as
+  SYNTAX.md's "Package manifest" writes it, and a mistake in one is reported
+  with its line. But `truss` is not required or compared with the
+  toolchain, a `[project]` table changes nothing, and a test's time limit is
+  its package's, where it is to be its project's.
+- **An unused dependency as an error.**
 - **`truss fmt [--check] [FILE...]`,** which waits for the formatter. It is
   to rewrite the package's files, or the named ones, into the one layout
   SYNTAX.md describes, and print the names of the files it changed, with no

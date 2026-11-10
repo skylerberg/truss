@@ -1498,11 +1498,17 @@ the compiler. The prelude holds:
   type's fields rebuilds nothing. A shape keeps its fields in the order they
   are written, so reordering them re-checks what reads the shape. Code
   generation's layout already ignores the order.
-- **Checking that grants nest.** A dependency's manifest may grant its own
-  dependencies only what it was granted. Nothing loads a dependency's
-  manifest, since there is no package registry to find dependencies in.
+- **A grant checked wherever a dependency's code is named.** DESIGN.md has
+  a grant checked at every such place. The checker checks one at a call and
+  at a `provide`, and not where a dependency's function is taken as a value,
+  or its `impl` is used for a bound or made into an `any`.
+- **A grant that names a capability by its path.** A grant is compared with
+  the capability's name as it is shown.
+- **A package name of two parts,** an owner and a name, at the start of a
+  path, which a registry package has.
 - **How `write_with` combines errors** is not decided. A writer's lambda may
   fail with its own error type as well as a `FileError`. The standard
   library needs a result type that holds either, and a name for it.
-- **Where `main` lives** is not decided. A package's program starts at a
-  `main`, but no document says which module holds it.
+- **`main` in the `main` module only.** DESIGN.md has a package's program
+  start at the `main` of its `main` module. The checker takes a function
+  named `main` in any module for one.

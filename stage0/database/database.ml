@@ -178,8 +178,8 @@ let apply session (files : (string * file_contents) list) =
             let shown = if directory = "" then "truss.toml" else directory ^ "/truss.toml" in
             match Type_checker.Manifest.parse text with
             | manifest -> Some (directory, manifest)
-            | exception Type_checker.Manifest.Malformed (line, expected) ->
-                problems := Printf.sprintf "%s:%d: expected %s." shown line expected :: !problems;
+            | exception Type_checker.Manifest.Malformed (line, message) ->
+                problems := Printf.sprintf "%s:%d: %s" shown line message :: !problems;
                 None))
       manifests
   in
