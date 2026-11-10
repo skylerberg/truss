@@ -1,13 +1,16 @@
 (* The values of integer constants, worked out exactly where the checker
    needs them: a [USize] in a type argument, as in [Array[UInt8, size]].
-   See TYPECHECKER.md, "Constants". Every other constant is built by code
-   generation. Constants that refer to each other in a cycle have no
-   value. *)
+   Every other constant is built by code generation. Constants that refer to
+   each other in a cycle have no value. *)
 
 open Syntax
 
-let rec expression database resolved (value : expression) : Z.t option =
-  let recurse = expression database resolved in
+(* A constant's value is worked out through the constants it refers to,
+   with the ones on the way kept in [visiting], so that a cycle is found
+   here and gives no value, rather than making the queries ask for each
+   other. *)
+let rec expression database ~visiting resolved (value : expression) : Z.t option =
+  let recurse = expression database ~visiting resolved in
   match value.kind with
   | Integer value -> Some value
   | Parenthesized inner -> recurse inner
@@ -25,28 +28,28 @@ let rec expression database resolved (value : expression) : Z.t option =
       | _ -> None)
   | Name path -> (
       match (resolved : Resolve.resolved).names.(path.last.id) with
-      | Some (Definition path) -> Query.demand database (Lazy.force value_of) path
+      | Some (Definition path) -> evaluate database ~visiting path
       | _ -> None)
   | Member ({ kind = Name owner; _ }, member) -> (
       match resolved.names.(owner.last.id) with
       | Some (Definition owner) ->
-          Query.demand database (Lazy.force value_of)
-            (Member_constant { owner; name = member.text })
+          evaluate database ~visiting (Member_constant { owner; name = member.text })
       | _ -> None)
   | _ -> None
 
-and value_of =
-  lazy
-    (Query.query ~name:"constant_value" ~show:Path.show (fun database path ->
-         match Summary.definition database path with
-         | Some (key, { kind = Constant { value; _ }; _ }) -> (
-             match Query.demand database Resolve.resolved key with
-             | Some resolved -> (
-                 try expression database resolved value with Query.Cycle _ -> None)
-             | None -> None)
-         | _ -> None))
+and evaluate database ~visiting path =
+  if List.exists (Path.equal path) visiting then None
+  else
+    match Summary.definition database path with
+    | Some (key, { kind = Constant { value; _ }; _ }) -> (
+        match Query.demand database Resolve.resolved key with
+        | Some resolved -> expression database ~visiting:(path :: visiting) resolved value
+        | None -> None)
+    | _ -> None
 
-let value_of = Lazy.force value_of
+let value_of =
+  Query.query ~name:"constant_value" ~phase:Interfaces ~saved:true ~show:Path.show
+    (fun database path -> evaluate database ~visiting:[] path)
 
 (* Whether a constant is declared a [USize], as a type argument needs. *)
 let is_usize database path =

@@ -1,5 +1,5 @@
-(** Deterministic CBOR (RFC 8949, section 4.2), the encoding every stored result and every content
-    hash is defined over. See IMPLEMENTATION.md, "Hashing and caching".
+(** Deterministic CBOR (RFC 8949, section 4.2), the encoding exact keys are hashed over: an
+    instance's LIR and a test's key.
 
     Each value has exactly one encoding: integers, lengths, and floats take their shortest form,
     every length is definite, and a map's entries are sorted by the bytes of their encoded keys. The

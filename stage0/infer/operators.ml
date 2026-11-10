@@ -1,5 +1,5 @@
 (* Operators: [?], [with], prefix and binary operators through their traits
-   or built in, and [any]. See TYPECHECKER.md, "Operators". *)
+   or built in, and [any]. *)
 
 open Syntax
 module T = Types

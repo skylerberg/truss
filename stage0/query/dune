@@ -1,2 +1,3 @@
 (library
- (name query))
+ (name query)
+ (libraries incremental path))

@@ -1,0 +1,3 @@
+(executable
+ (name engine_fuzz)
+ (libraries query engine store unix))

@@ -1,5 +1,5 @@
 (* Drop elaboration: deciding, at each point, which places still own a
-   value, and dropping exactly those. See CODEGEN.md, "Drop elaboration".
+   value, and dropping exactly those.
 
    Lowering writes [drop(place)] wherever an owned local goes out of scope,
    on every path out of that scope, including [return] and [?]: it means

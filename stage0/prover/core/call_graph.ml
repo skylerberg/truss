@@ -84,7 +84,7 @@ let impls database (modules : Path.module_ list) =
     modules
 
 let package_impls =
-  Query.query ~name:"package_impls" ~show:Fun.id (fun database package ->
+  Query.query ~phase:Proofs ~name:"package_impls" ~show:Fun.id (fun database package ->
       match Workspace.package database package with
       | Some { modules; _ } -> impls database modules
       | None -> [])
@@ -217,7 +217,7 @@ let build database package =
             (Query.demand database Names.declarations module_))
         modules
 
-let graph = Query.query ~name:"call_graph" ~show:Fun.id build
+let graph = Query.query ~phase:Proofs ~name:"call_graph" ~show:Fun.id build
 
 (* The paths an [impl] edge reaches: every method of the [impl]. *)
 let targets graph = function

@@ -1,7 +1,6 @@
 (* What checking an expression looks up without checking another: names,
    fields, and members; traits' methods and the [impl]s that answer them; a
-   collection's [each]; and finishing a call's record. See TYPECHECKER.md,
-   "Members". *)
+   collection's [each]; and finishing a call's record. *)
 
 open Syntax
 module T = Types

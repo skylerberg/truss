@@ -1,5 +1,4 @@
-(* The tests of the checks across a package. See TYPECHECKER.md, "Traits
-   and impls across a package" and "Recursive types". *)
+(* The tests of the checks across a package. *)
 
 open Harness
 open Support
@@ -141,9 +140,9 @@ let () =
 
 let () =
   test "an impl overlaps an impl in a package it depends on" (fun () ->
-      let database = Query.create () in
-      Type_checker.load_standard database;
-      Type_checker.load_package database ~name:"lib" ~dependencies:[]
+      let database = Engine.context (Engine.create ()) in
+      Database.load_standard (Engine.of_context database);
+      Database.load_package (Engine.of_context database) ~name:"lib" ~dependencies:[]
         [
           ( module_of "lib::vector",
             "public type Vector[Element](items: List[Element])\n\n\
@@ -152,7 +151,7 @@ let () =
             \  fn add(self, right: Element) -> Vector[Element] { todo }\n\
              }\n" );
         ];
-      Type_checker.load_package database ~name:"app"
+      Database.load_package (Engine.of_context database) ~name:"app"
         ~dependencies:[ { package = "lib"; capabilities = [] } ]
         [
           ( module_of "app::main",

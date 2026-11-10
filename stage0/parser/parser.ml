@@ -1,4 +1,4 @@
-(* The parser's entry point. See PARSER.md. *)
+(* The parser's entry point. *)
 
 open Token
 

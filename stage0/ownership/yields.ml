@@ -1,6 +1,5 @@
 (* Yielding and lending: a [lends] method yields once on every path, and
-   which [yields] methods can be pulled as cursors, and why not. See
-   TYPECHECKER.md, "Yielding and lending". *)
+   which [yields] methods can be pulled as cursors, and why not. *)
 
 open Syntax
 module T = Types
@@ -67,7 +66,8 @@ let lends_count context (body : block) ~report_span =
 (* The [yields] methods a method yields through: those a [for] loop in its
    body drives with a [yield] somewhere inside the loop. *)
 let yields_through =
-  Query.query ~name:"yields_through" ~show:Path.show (fun database (path : Path.t) ->
+  Query.query ~name:"yields_through" ~phase:Bodies ~saved:true ~show:Path.show
+    (fun database (path : Path.t) ->
       match Interface.Summary.definition database path with
       | Some (key, { kind = Function { body; _ }; _ }) -> (
           match Query.demand database Infer.checked key with
@@ -116,7 +116,8 @@ type pulling =
           unasked. *)
 
 let pullable =
-  Query.query ~name:"pullable" ~show:Path.show (fun database (path : Path.t) ->
+  Query.query ~name:"pullable" ~phase:Bodies ~saved:true ~show:Path.show
+    (fun database (path : Path.t) ->
       let rec reaches visited = function
         | [] -> false
         | next :: rest ->

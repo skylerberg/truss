@@ -1,5 +1,13 @@
 type dependency = { package : string; capabilities : string list }
-type package = { name : string; dependencies : dependency list; modules : Path.module_ list }
+
+type package = {
+  name : string;
+  dependencies : dependency list;
+  modules : Path.module_ list;
+  usize_bits : int;
+      (** 64 when the manifest says the package runs only on 64-bit targets, and 32 otherwise, so
+          that its code holds for both widths of [USize] *)
+}
 
 let packages : (string, package) Query.input = Query.input ~name:"package" ~show:Fun.id ()
 
@@ -20,7 +28,7 @@ type file = {
 (* A file's [Source.t] holds a table of lines, which equality compares as
    it would anything else; two parses of the same text give equal files. *)
 let file =
-  Query.query ~name:"file" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"file" ~phase:Syntax ~show:Path.show_module (fun database module_ ->
       let text = Query.get database file_text module_ in
       let source = Source.create ~path:(file_path module_) text in
       let tokens, lexer_diagnostics = Lexer.lex source in
@@ -36,7 +44,8 @@ let file =
 let package database name = Query.find database packages name
 
 let module_exists =
-  Query.query ~name:"module_exists" ~show:Path.show_module (fun database (module_ : Path.module_) ->
+  Query.query ~name:"module_exists" ~phase:Syntax ~saved:true ~show:Path.show_module
+    (fun database (module_ : Path.module_) ->
       match package database module_.package with
       | None -> false
       | Some package -> List.mem module_ package.modules)

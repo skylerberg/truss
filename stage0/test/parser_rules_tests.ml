@@ -1,6 +1,6 @@
 (* The parser's tests of whole definitions, precedence and the combinations
    that need parentheses, the checks on a whole definition, recovery, and
-   the habits of other languages it recognizes. See PARSER.md, "Testing". *)
+   the habits of other languages it recognizes. *)
 
 open Harness
 open Parse_support

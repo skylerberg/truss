@@ -1,5 +1,4 @@
-(** The inputs of a build, and the queries that parse them. See TYPECHECKER.md, "One definition at a
-    time, through queries".
+(** The inputs of a build, and the queries that parse them.
 
     The driver sets each package, with its manifest and the modules it has, and the text of each
     module's file. Everything else is a query, so changing one file re-parses that file alone, and a
@@ -9,7 +8,14 @@
 type dependency = { package : string; capabilities : string list }
 (** A dependency from the manifest, with the capabilities it is granted. *)
 
-type package = { name : string; dependencies : dependency list; modules : Path.module_ list }
+type package = {
+  name : string;
+  dependencies : dependency list;
+  modules : Path.module_ list;
+  usize_bits : int;
+      (** 64 when the manifest says the package runs only on 64-bit targets, and 32 otherwise, so
+          that its code holds for both widths of [USize]. *)
+}
 
 val packages : (string, package) Query.input
 val file_text : (Path.module_, string) Query.input
@@ -28,7 +34,7 @@ type file = {
 val file : (Path.module_, file) Query.query
 (** A module's file, lexed and parsed. Raises [Not_found] if the module has no text. *)
 
-val package : Query.database -> string -> package option
+val package : Query.context -> string -> package option
 (** A package, or [None] if there is no such package. *)
 
 val module_exists : (Path.module_, bool) Query.query

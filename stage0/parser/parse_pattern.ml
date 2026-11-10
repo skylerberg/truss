@@ -1,4 +1,4 @@
-(* Patterns. See GRAMMAR.md, "Patterns".
+(* Patterns.
 
    A pattern position is always known from the token before it, and a
    pattern contains no expressions, so this module needs nothing from the

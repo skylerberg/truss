@@ -1,8 +1,9 @@
-(* truss-lex [--json] [--tokens] FILE
-
-   Lexes one file and prints its diagnostics, for people or, with --json,
-   for tools. With --tokens it also prints the tokens, one per line. Exits
-   with status 1 if there are diagnostics. *)
+(* debug tokens|tree [--json] FILE: for working on the compiler, a file's
+   tokens, one a line, or each definition's syntax tree as an S-expression,
+   with its diagnostics on standard error, or with --json, only the
+   diagnostics, on standard output. It exits with 1 when there are
+   diagnostics. Run it with [dune exec stage0/tools/debug/debug.exe]. It is
+   a tool of this repository, and not part of the [truss] command. *)
 
 open Token
 
@@ -64,24 +65,47 @@ let print_tokens source tokens =
   in
   print "" tokens
 
+let show_diagnostics ~json source diagnostics =
+  let shown = Diagnostic.shown diagnostics in
+  if json then print_string (Diagnostic.to_json source shown)
+  else List.iter (fun diagnostic -> prerr_string (Diagnostic.render source diagnostic)) shown;
+  if diagnostics = [] then 0 else 1
+
+let read file =
+  if not (Sys.file_exists file) then begin
+    prerr_endline (file ^ " does not exist.");
+    exit 2
+  end;
+  Source.read_file file
+
+(* Lexes one file and prints its tokens, one per line, unless [json], when
+   it prints only the diagnostics as JSON. *)
+let tokens ~file ~json =
+  let source = read file in
+  let tokens, diagnostics = Lexer.lex source in
+  if not json then print_tokens source tokens;
+  show_diagnostics ~json source diagnostics
+
+(* Lexes and parses one file and prints each definition's tree, unless
+   [json], when it prints only the diagnostics as JSON. *)
+let tree ~file ~json =
+  let source = read file in
+  let tokens, lexer_diagnostics = Lexer.lex source in
+  let tree, parser_diagnostics = Parser.parse source tokens in
+  let diagnostics =
+    List.stable_sort
+      (fun (a : Diagnostic.t) (b : Diagnostic.t) -> compare a.span.start b.span.start)
+      (lexer_diagnostics @ parser_diagnostics)
+  in
+  if not json then print_endline (Syntax_print.file tree);
+  show_diagnostics ~json source diagnostics
+
 let () =
-  let json = ref false and show_tokens = ref false and files = ref [] in
-  Arg.parse
-    [
-      ("--json", Arg.Set json, " Print diagnostics as JSON");
-      ("--tokens", Arg.Set show_tokens, " Print the tokens too");
-    ]
-    (fun file -> files := file :: !files)
-    "truss-lex [--json] [--tokens] FILE";
-  match !files with
-  | [ file ] ->
-      let source = Source.read_file file in
-      let tokens, diagnostics = Lexer.lex source in
-      if !show_tokens then print_tokens source tokens;
-      let shown = Diagnostic.shown diagnostics in
-      if !json then print_string (Diagnostic.to_json source shown)
-      else List.iter (fun diagnostic -> print_string (Diagnostic.render source diagnostic)) shown;
-      exit (if diagnostics = [] then 0 else 1)
+  match List.tl (Array.to_list Sys.argv) with
+  | [ "tokens"; file ] -> exit (tokens ~file ~json:false)
+  | [ "tokens"; "--json"; file ] | [ "tokens"; file; "--json" ] -> exit (tokens ~file ~json:true)
+  | [ "tree"; file ] -> exit (tree ~file ~json:false)
+  | [ "tree"; "--json"; file ] | [ "tree"; file; "--json" ] -> exit (tree ~file ~json:true)
   | _ ->
-      prerr_endline "truss-lex: expected one file";
+      prerr_endline "usage: debug tokens|tree [--json] FILE";
       exit 2

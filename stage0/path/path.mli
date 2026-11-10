@@ -1,6 +1,6 @@
-(** What every definition is named by, across stages: its package, module, and name. See
-    TYPECHECKER.md, "What a name can refer to", and DESIGN.md, "The hash format": results name other
-    definitions by path, never by hash. Code generation's instance keys use the same paths. *)
+(** What every definition is named by, across stages: its package, module, and name. Results name
+    other definitions by path, never by a hash. Code generation's instance keys use the same paths.
+*)
 
 type module_ = { package : string; modules : string list }
 (** [weather::forecast::hourly] is the package [weather] and the modules [forecast; hourly]. A

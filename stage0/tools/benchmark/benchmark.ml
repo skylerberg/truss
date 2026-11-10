@@ -1,5 +1,5 @@
 (* Measuring how fast the lexer and the parser are. This is a tool, not a
-   test. See IMPLEMENTATION.md, "Testing".
+   test.
 
      dune exec stage0/tools/benchmark/benchmark.exe -- FILE...
 

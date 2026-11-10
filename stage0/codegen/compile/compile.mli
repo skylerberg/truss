@@ -1,17 +1,32 @@
 (* Compiling a program or a test run from a database of checked
    definitions: lowering each instance a root reaches, elaborating its
-   drops, building it through the object cache, and running it. See
-   CODEGEN.md, "Instances" and "Tests". *)
+   drops, building it through the object cache, and running it. *)
 
 type t
 
+(* How instances are lowered: for which target, and whether the program
+   checks what the prover would prove. *)
+type lowering
+
+(* The instances whose keys have been asked for, for each way of lowering.
+   Finding the instances that reach each other starts from these, so a
+   driver's [want] adds to this input before a key is asked for. Only the
+   database sets it. *)
+val roots : (lowering, Instance.key list) Query.input
+
 (* With [checks], the default, the program checks at run time what the
    prover would prove: [requires] clauses that can run, integer overflow,
-   and division. Stage0 has no prover, so its builds check, as CODEGEN.md's
-   [--check-proofs] does. *)
+   and division. Stage0's builds keep the checks whether or not the proofs
+   are done. [file_name] names the file of each position the
+   program reports, by its module, and is [Workspace.file_path] unless a
+   driver shows files another way. [want] is told which instances' keys are
+   about to be asked for, and adds them to [roots]; without it, asking for
+   a key is an error. *)
 val create :
   ?checks:bool ->
-  Query.database ->
+  ?file_name:(Path.module_ -> string) ->
+  ?want:(lowering -> Instance.key list -> unit) ->
+  Query.context ->
   Memory_layout.target ->
   Toolchain.t ->
   Build.cache ->
@@ -23,22 +38,79 @@ val create :
    is made once. *)
 val compiled : t -> Instance.key -> Lir.compiled
 
-(* Builds a program that runs the tests, each named by its path, and runs
-   it, returning its exit status and its output, as [Startup.tests_calling]
-   describes it. *)
-(* One test's part of a test run's report: its outcome, as
-   [Startup.tests_calling] names it, and its message and echo output. *)
-type record = { outcome : string; message : string option; echo : string option }
+(* How a test ended, as [Startup.tests_calling] names it. *)
+type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
 
-(* A test run's report, as [run_tests] returns it, one record a test. *)
+(* As the runner names it: ["passed"], ["timed_out"], and so on. *)
+val show_outcome : outcome -> string
+
+(* One test's result: its outcome, its message and echo output, if any, how
+   many microseconds it ran in its worker, and whether it came from the
+   kept results, in which case the duration is that of the run that kept
+   it. *)
+type record = {
+  outcome : outcome;
+  message : string option;
+  echo : string option;
+  microseconds : int;
+  cached : bool;
+}
+
+(* A test program's whole report, as [Startup.tests_calling] describes it,
+   one record a test, in the order of the tests however they ended. *)
 val parse_report : string -> record list
 
-(* With [results], a directory, each test that passes with nothing to show
-   is kept there under the key of the code it can run, as CODEGEN.md's "Test
-   results" says, and is not built or run again until that code changes;
-   the report is the same either way. *)
+(* How a test run is getting on: lowering what the tests reach, compiling
+   the C files that are not cached, out of how many, running the tests that
+   have no kept result, and each test's start and end, by its place in the
+   list given. A test with a kept result is reported as ended before any
+   test runs. *)
+type progress =
+  | Lowering
+  | Compiling of { compiled : int; total : int }
+  | Running of { tests : int }
+  | Started of { test : int }
+  | Ended of { test : int; record : record }
+
+(* Where test results are kept, by the key of the code each test can run.
+   The database keeps them in its store. *)
+type results = { find : string -> string option; add : string -> string -> unit }
+
+(* Builds a program that runs the tests, each named by its path, runs it,
+   and returns each test's record in the order given. With [results], each
+   test that passes with nothing to show is kept there
+   under the key of the code it can run, and is not built or run again until
+   that code changes; with
+   [rerun], every test runs, and passes are kept again. [progress] is told
+   of each step as it happens. *)
 val run_tests :
-  ?results:string -> t -> time_limit:int -> Path.t list -> (int * string, string) result
+  ?results:results ->
+  ?rerun:bool ->
+  ?progress:(progress -> unit) ->
+  t ->
+  time_limit:int ->
+  Path.t list ->
+  (record list, string) result
+
+(* Each test's key: the hash of the code it can run, as "Test results"
+   says, which changes exactly when the test's outcome may. A test that
+   cannot be lowered has none. *)
+val test_keys : t -> Path.t list -> (Path.t * string) list
+
+(* A [todo], or an [echo], that a program can reach, which a build that
+   ships refuses: its file and position, as the program would report them,
+   and the definitions on the way from [main] to the one that holds it. *)
+type unshippable = {
+  failure : [ `Todo | `Echo ];
+  file : string;
+  line : int;
+  column : int;
+  way : Path.t list;
+}
+
+(* Every [todo] the program whose [main] is at that path can reach, and with
+   [echo], every [echo], once each, in order of position. *)
+val unshippable : t -> main:Path.t -> echo:bool -> (unshippable list, string) result
 
 (* Builds the program whose [main] is at that path, and runs it with the
    arguments, and [input] as its standard input if given, returning its exit
@@ -58,14 +130,14 @@ val run_program :
    [from_template]'s clauses that can run, for a template of these literal
    texts and no parts, by its position among the clauses, with whether it
    holds. The prover asks it only of clauses that read the template's
-   literals alone. With [results], a directory, each check's results are
-   kept there under the key of the code that ran, as test results are. A
-   check that runs past [time_limit], in milliseconds, is stopped. See
-   CODEGEN.md, "Code run while compiling". *)
+   literals alone. With [results], each check's results are kept under the
+   key of the code that ran, as test results are. A check that runs past
+   [time_limit], in milliseconds, is stopped. See CODEGEN.md, "Code run
+   while compiling". *)
 type template_check = Ran of (int * bool) list | Ran_too_long
 
 val check_template :
-  ?results:string ->
+  ?results:results ->
   t ->
   time_limit:int ->
   from_template:Path.t ->

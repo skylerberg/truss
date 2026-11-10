@@ -167,8 +167,8 @@ prover has finished, so tests run alongside the prover, and a broken
 contract is a failed test rather than a wrong answer or a memory error.
 The checks do not depend on which proofs passed, so neither do the test
 build's LIR and the test results cached under it. A program is built
-without them, once its proofs are done. Stage0 has no prover yet, so it
-builds programs with the checks too:
+without them, once its proofs are done. Stage0 builds programs with the
+checks too, whether or not their proofs are done:
 - Each `requires` clause that can run is tested on entry to its function,
   and to each inlined lending or yielding body, with the parameters bound.
   It panics with "requirement not met: requires ...". That is how an index
@@ -440,8 +440,8 @@ of any cursors it pulls from inside it. An `own` argument is held as a
 value the cursor owns and drops, whatever its size, since the cursor may
 outlive the statement that made it. Other arguments are held as their
 parameters take them, a view or a pointer to the caller's place. The type has no name in Truss, and
-its layout depends on the method's body. That dependency is recorded in the
-trace of every instance that holds one, as Rust records it for
+its layout depends on the method's body, so every instance that holds one
+reads that body, as Rust's incremental compiler records for
 `impl Iterator`.
 
 ## Calling convention
@@ -723,7 +723,7 @@ and its siblings. Full-width multiplication, used by hashing and
 - **Derived implementations may be inlined into callers even in
   development builds.** Their code comes from the type's shape, which every
   caller already depends on through the layout, so inlining them adds
-  nothing to a trace.
+  no dependency.
 - **`any` calls** load the method from the vtable and call it with the
   value's pointer.
 
@@ -799,8 +799,8 @@ caller's statement or running the caller's loop body there: `continue` goes
 on after the `yield`, and `break` takes the `yield`'s `stop` path, so the
 method's locals are dropped as the loop leaves them. This gives the plain
 loop the C compiler would make of the loop form, and needs no rewriting of
-the caller into continuation-passing style. The caller then depends on the
-method's body, which its trace records. A lending method's `yield` must be
+the caller into continuation-passing style. The caller then reads the
+method's body, and depends on it. A lending method's `yield` must be
 its last statement, which needs the loop form above to lift.
 
 A loop over a yielding method that is already inlined around it, as a
@@ -1033,7 +1033,10 @@ the top of a file changes no generated code below it:
   counts from 0 at the definition's first line, and the column from 1.
 - **An anchor** is an external constant, one per definition, holding the
   file's path and the definition's first line. The generated code only
-  refers to it, so its own C never changes when the definition moves.
+  refers to it, so its own C never changes when the definition moves. The
+  driver names the file: a development build as the current directory
+  reaches it, as diagnostics name it, and a release build from the
+  package's root, so the program is the same wherever it was built.
 - **The anchors are defined in one C file generated at link time** from the
   position table. Moving a definition changes only that file.
 
@@ -1116,34 +1119,57 @@ Truss has no garbage collector and no way to leak a value on purpose, so a
 leak is a bug in code generation, most likely in drop elaboration. Every
 test that compiles Truss is therefore also a check of its drops.
 
-Results are printed in the order of the tests, however the tests were spread
-over workers, each as `test N outcome`, where the outcome is `passed`,
-`failed`, `panicked`, `incomplete`, `timed_out`, or `crashed`, followed by
-an optional `message` block and an optional `echo` block, each giving its
-length in bytes and then its bytes.
+The runner writes a line as it hands each test to a worker, `start N`, and
+each test's result as soon as the test ends, so that `truss test` can show
+progress. A result is an optional `message` block and an optional `echo`
+block, each giving its length in bytes and then its bytes, then the line
+`test N outcome microseconds`, which ends the record, so a reader knows a
+record is whole when that line arrives. `N` is the test's number in the
+table, the outcome is `passed`, `failed`, `panicked`, `incomplete`,
+`timed_out`, or `crashed`, and the duration is the time from handing the
+test to a worker to its end. Results therefore come in the order tests end,
+which depends on the workers, and `Compile.run_tests` puts them back in the
+order of the tests.
 
 ### Test results
 
 A test's result is cached under a key built from all the code it can reach.
 DESIGN.md requires that renaming a definition or moving it to another module
-finds test results already done, so the key contains no names:
+finds test results already done, so the key contains no names. It is
+composed from the instances' own keys, so that an edit changes the keys of
+the tests that can reach the edited code, and costs what can reach it:
 
-- Walk the instances reachable from the test, in the deterministic order of
-  their calls, and number them in the order they are first reached.
-- Hash each instance's LIR with every reference to another instance replaced
-  by that instance's number, and every path, in a type or a position,
-  replaced by a number given in the order paths are first met, since a
-  type's path is a name too.
-- The test's key is the hash of that numbered list, plus the version of code
-  generation.
+- **An instance's own hash** is the hash of its LIR with every reference to
+  another instance replaced by that instance's place in the list of what it
+  refers to, and every path, in a type or a position, replaced by a number
+  given in the order paths are first met, since a type's path is a name too.
+- **The key of everything an instance can reach** is the hash of its own
+  hash and of the key of each instance it refers to, in order.
+- **Instances that reach each other are keyed as a group,** since a key
+  cannot be made of keys that are made of it. The groups are found among
+  everything the wanted tests reach, and an instance of a group is keyed by
+  the whole group, as a walk from the instance reaches it: each of the
+  group's instances as its own hash and what it refers to, a number for an
+  instance of the group and a key for any other. DATABASE.md's "Composed
+  keys" describes the queries.
+- **The test's key** is the key of everything the test's own instance can
+  reach, with the version of code generation and the target. `USize` is a
+  `typedef` in the generated C, so the LIR is the same for 32-bit and 64-bit
+  targets, but results such as `USize.maximum` are not.
 
 Two programs that differ only in names give the same key, and any change to
 what the test can run changes it. A layout change appears in the LIR of
-every instance that uses the layout, so it changes the key too.
+every instance that uses the layout, so it changes the key too. A function
+that a thousand tests reach is hashed once, and an edit to it makes its own
+hash again, and the keys of what reaches it.
 
-`truss test` keeps results in `~/.cache/truss/results`, one file per key,
-and builds and runs only the tests without one. Stage0 keeps only a pass
-with nothing to show. A failure's message and an `echo` give positions,
+`truss test` keeps results in the code database's store, as
+[DATABASE.md](DATABASE.md#exact-keys) describes, and builds and runs only
+the tests without one. Stage0 keeps only a pass with nothing to show, and
+never an external test's, whose result depends on the world, and the
+result holds `passed` and the duration of the run that kept it, which
+`truss test --timings` shows for a cached test. A result in any other form
+counts as none. A failure's message and an `echo` give positions,
 which the key leaves out so that moving code keeps its results, so those
 tests run again, as do tests that ran out of time or crashed, which the
 machine may have caused. A sanitized run keeps nothing.
@@ -1152,12 +1178,16 @@ machine may have caused. A sanitized run keeps nothing.
 
 ### Caching
 
-Each step's output is stored under a key, with a trace of what it depended
-on, as DESIGN.md describes for every stage:
+Lowering is a query, kept current by the code database as DATABASE.md's
+"Lowering" describes, and so are each instance's own hash, what it refers
+to, and its key. Each of these results is kept in the store under what it
+read, so a worktree that reaches an instance another worktree lowered finds
+it done. The steps after lowering are kept under exact keys, the hash of
+exactly the input each consumed:
 
-| Output | Key |
+| Output | Kept by |
 |---|---|
-| An instance's LIR | The instance, the codegen version, and a trace: the checked forms it lowered, the signatures it called, the layouts it used, and the bodies it inlined |
+| An instance's LIR | A query on the instance, which reads the checked forms it lowers, the signatures it calls, the layouts it uses, and the bodies it inlines |
 | An instance's C | The LIR's hash and the emitter's version |
 | An object file | The C's text, the C compiler's identity (its `--version` output and path), and the flags, which name the target |
 | A program | The objects, the anchors file, and the linker's identity |
@@ -1179,13 +1209,16 @@ recompiles objects but invalidates no test result.
   are emitted into the same file as `static` functions, so the C compiler
   can inline them, as DESIGN.md allows for development builds. They are
   chosen by size, and every yielding method is chosen. Each one is recorded
-  in the instance's trace.
+  as a body the instance reads.
 - **A package's own code compiles at `-O1`** in development builds, which is
   fast to compile and avoids the stack traffic of `-O0`.
 - **The standard library and dependencies compile at `-O2`** and are cached,
   so development builds of a project run them at full speed.
-- **Release builds** put each module's instances in one C file at `-O2` and
-  link with ThinLTO, so the C compiler can inline across every definition.
+- **Release builds** compile at `-O2` and optimize across every file as
+  they are linked, with ThinLTO where the C compiler is clang and LTO
+  otherwise, so the C compiler can inline across every definition. They
+  keep one C file per instance, so each object is still cached on its own
+  and compiled in parallel.
 
 One C file per instance means many small compiler runs on a cold build. If
 that is slow, instances can be grouped by definition later. The change
@@ -1193,20 +1226,23 @@ affects only build speed.
 
 ### The command
 
-`truss test DIRECTORY` checks a package, reporting every diagnostic, then
-builds its tests into one test program and runs it. `truss run DIRECTORY
-ARGUMENTS` builds the package's program from its `main` and runs it with
-the arguments, on the terminal's own input and output, so it can prompt and
-read, and exits with its status. A package is a directory with a `truss.toml` naming it, and
-each `.truss` file under it is one of its modules. Object files are cached
-in `~/.cache/truss/objects`.
+`truss test`, `truss run`, and `truss build` drive code generation, as
+[CLI.md](CLI.md) describes: a test run builds the tests into one test
+program, `run` builds the package's program from its `main` for
+development, which the command line runs on its own terminal, and `build`
+builds it for release. Both refuse a program whose `main` can reach a
+`todo`, which `Compile.unshippable` finds by walking the instances `main`
+reaches, as a build does, without compiling them, and `build` refuses an
+`echo` too. Object files are kept in the code database's store.
 
 ### Linking
 
 Stage0 links in full every time, as IMPLEMENTATION.md records: with lld or
 mold on Linux and the system linker on macOS, against the platform's libc.
-The standard library is linked from its cached objects. Making linking
-incremental is deferred.
+The standard library is linked from its cached objects. The linker is given
+the objects' names in a file, since a program of a few thousand instances
+names more objects than a command line can hold. Making linking incremental
+is deferred.
 
 ## Testing
 

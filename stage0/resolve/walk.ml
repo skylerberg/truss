@@ -1,5 +1,4 @@
-(* Resolving the names of one definition. See TYPECHECKER.md, "Name
-   resolution".
+(* Resolving the names of one definition.
 
    The walk keeps a scope of what each name means at each point, and records
    in tables keyed by node id what each name refers to and how each
@@ -58,11 +57,13 @@ let no_specification =
 let in_specification = { no_specification with active = true }
 
 type state = {
-  database : Query.database;
+  database : Query.context;
   module_ : Path.module_;
   names : target option array;
   brackets : bracket option array;
   mutable diagnostics : Diagnostic.t list;
+  mutable holes : (id * (string * value) list) list;
+      (** Each [todo], by its id, with the values in scope there, by name, latest first *)
 }
 
 let report state ?fixes code (span : span) message =
@@ -493,7 +494,12 @@ and check_place state (marked : expression) (inner : expression) =
 
 and expression state scope (value : expression) =
   match value.kind with
-  | Integer _ | Float _ | True | False | Todo | Unreachable | Break | Continue | Self_value
+  | Todo ->
+      state.holes <-
+        ( value.id,
+          List.map (fun (name, (value, _)) -> (name, value)) (String_map.bindings scope.values) )
+        :: state.holes
+  | Integer _ | Float _ | True | False | Unreachable | Break | Continue | Self_value
   | Self_type_value | Expression_error ->
       ()
   | String literal -> string_literal state scope literal

@@ -1,15 +1,13 @@
 (* Lowering written types to [Types.ty], from a definition's resolved
-   form. See TYPECHECKER.md, "Types" and "Checking signatures and
-   definitions". Lowering reports what a type position alone shows to be
-   wrong: a name that is not a type, a wrong number of arguments, an
-   associated type no bound declares. Bounds are checked apart, by
-   [Check]. *)
+   form. Lowering reports what a type position alone shows to be wrong: a name
+   that is not a type, a wrong number of arguments, an associated type no
+   bound declares. Bounds are checked apart, by [Check]. *)
 
 open Syntax
 module T = Types
 
 type context = {
-  database : Query.database;
+  database : Query.context;
   resolved : Resolve.resolved;
   parameters : (id, T.parameter) Hashtbl.t;
       (** Generic parameters, by the id of the name that binds them. *)

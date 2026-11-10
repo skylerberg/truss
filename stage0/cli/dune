@@ -1,0 +1,34 @@
+; The truss command line: its commands, apart from starting the program, so
+; that tests can drive them. See CLI.md.
+
+(library
+ (name cli)
+ (libraries
+  unix
+  cmdliner
+  zarith
+  source
+  diagnostic
+  syntax
+  syntax_walk
+  path
+  query
+  engine
+  workspace
+  resolve
+  types
+  checked
+  infer
+  inspect
+  interface
+  type_checker
+  memory_layout
+  toolchain
+  build
+  instance
+  lir
+  unicode
+  compile
+  solver
+  prover
+  database))

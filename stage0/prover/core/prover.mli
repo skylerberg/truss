@@ -24,7 +24,7 @@ type evaluated = Holds | Fails | Too_long
 
 val diagnostics :
   ?evaluate:(Translate.evaluation -> evaluated option) ->
-  Query.database ->
+  Query.context ->
   Solver.t ->
   Path.module_ ->
   Diagnostic.t list
@@ -32,8 +32,3 @@ val diagnostics :
     the prover could not read, in the file's offsets and in order. [evaluate] decides a clause by
     running compiled code, as code generation's [Compile.check_template] does, where it can; the
     prover does not depend on code generation, so the caller gives it. *)
-
-val holes : Query.database -> Path.module_ -> Source.span list
-(** Each [todo] in a file's theorems, [proof] blocks, and laws' proofs, in the file's offsets and in
-    order: what follows one on its path is not shown, so a build of a program refuses one that can
-    reach it. Holes are not errors; tests run regardless. See PROVER.md, "Holes". *)

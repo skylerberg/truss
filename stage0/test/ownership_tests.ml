@@ -1,5 +1,4 @@
-(* The tests of moves, loans, and views. See TYPECHECKER.md, "Ownership:
-   moves, loans, and views". *)
+(* The tests of moves, loans, and views. *)
 
 open Harness
 open Support

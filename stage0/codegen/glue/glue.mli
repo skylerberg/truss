@@ -1,5 +1,4 @@
-(* The functions the compiler writes for every type: drop and copy. See
-   CODEGEN.md, "Generated functions for each type".
+(* The functions the compiler writes for every type: drop and copy.
 
    Each is an instance of its own, keyed by the type, so it is compiled once
    and shared. Its code follows the type's shape. [Storage[Element]], the
@@ -52,7 +51,7 @@ val any_drop : t -> Ground.ty -> Lir.t
 
 (* The function that writes a value of a type in its binary form to the
    debug buffer: [Instance.Encode ty], taking a read-only pointer to the
-   value. See CODEGEN.md, "Code run while compiling". *)
+   value. *)
 val encode : t -> Ground.ty -> Lir.t
 val encode_signature : t -> Ground.ty -> Lir.signature
 

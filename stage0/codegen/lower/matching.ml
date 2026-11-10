@@ -1,5 +1,5 @@
 (* Patterns: testing whether a value matches, and binding the names a
-   pattern binds. See lower.ml. *)
+   pattern binds. *)
 
 open Definitions
 open Lowering

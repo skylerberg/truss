@@ -22,6 +22,46 @@ let named_program ~entry_name ~helper_name returned =
 
 let lookup instances key = List.find (fun (i : Lir.t) -> Instance.equal i.key key) instances
 
+(* What each instance of a small program refers to. *)
+let references program key =
+  Reachable.compiled_references (shape_env ()) (Lir.Code (lookup program key))
+
+(* The key of everything an instance can reach, composed as the queries of
+   [Compile] compose it. *)
+let reach_key program root =
+  let own key =
+    Reachable.own_hash ~references:(references program key) (Lir.Code (lookup program key))
+  in
+  let groups = Reachable.groups ~edges:(references program) [ root ] in
+  let rec reach key =
+    match Reachable.Keys.find_opt key groups with
+    | None -> Reachable.unit_key ~own:(own key) (List.map reach (references program key))
+    | Some members ->
+        Reachable.group_key
+          ~link:(fun member -> (own member, references program member))
+          ~deep:reach ~members key
+  in
+  reach root
+
+(* A program whose [start] calls [ping], which calls [pong], which calls
+   [ping] and a helper that returns [returned]. *)
+let ping_pong ?(ping = "ping") ?(pong = "pong") returned =
+  let calls name callees =
+    instance name
+      (function_ ~result:(value int32)
+         [ local (Lir.Value int32) ]
+         [
+           block
+             (List.map (fun callee -> call callee [] (Some (at 0))) callees)
+             (Return (Some (copy 0)));
+         ])
+  in
+  let helper =
+    instance "helper"
+      (function_ ~result:(value int32) [] [ block [] (Return (Some (constant_int32 returned))) ])
+  in
+  [ calls "start" [ ping ]; calls ping [ pong ]; calls pong [ ping; "helper" ]; helper ]
+
 let () =
   test "a build reaches each called instance once, in order" (fun () ->
       let program = named_program ~entry_name:"start" ~helper_name:"helper" 1 in
@@ -50,10 +90,7 @@ let () =
       expect_string ~expected:"drop Text"
         (String.concat " " (List.map Instance.to_string references)));
   let test_key ~entry_name ~helper_name returned =
-    let program = named_program ~entry_name ~helper_name returned in
-    Reachable.test_key (shape_env ())
-      ~lookup:(fun k -> Lir.Code (lookup program k))
-      (key entry_name)
+    reach_key (named_program ~entry_name ~helper_name returned) (key entry_name)
   in
   test "renaming the definitions a test reaches keeps its key" (fun () ->
       if
@@ -64,7 +101,38 @@ let () =
       if
         test_key ~entry_name:"start" ~helper_name:"helper" 1
         = test_key ~entry_name:"start" ~helper_name:"helper" 2
-      then fail "the keys are equal")
+      then fail "the keys are equal");
+  test "changing a helper changes its own hash and not its caller's" (fun () ->
+      let own returned name =
+        let program = named_program ~entry_name:"start" ~helper_name:"helper" returned in
+        let compiled = Lir.Code (lookup program (key name)) in
+        Reachable.own_hash
+          ~references:(Reachable.compiled_references (shape_env ()) compiled)
+          compiled
+      in
+      if own 1 "helper" = own 2 "helper" then fail "the helper's hash is the same";
+      if own 1 "start" <> own 2 "start" then fail "the caller's hash changed");
+  test "instances that call each other are one group" (fun () ->
+      let found = Reachable.groups ~edges:(references (ping_pong 1)) [ key "start" ] in
+      let names key = List.map Instance.to_string (Reachable.Keys.find key found) in
+      expect_string ~expected:"test::ping test::pong" (String.concat " " (names (key "ping")));
+      if Reachable.Keys.mem (key "start") found then fail "the caller is in a group");
+  test "an instance that calls only itself is in no group" (fun () ->
+      let again =
+        instance "again"
+          (function_ ~result:(value int32)
+             [ local (Lir.Value int32) ]
+             [ block [ call "again" [] (Some (at 0)) ] (Return (Some (copy 0))) ])
+      in
+      let found = Reachable.groups ~edges:(references [ again ]) [ key "again" ] in
+      if not (Reachable.Keys.is_empty found) then fail "found a group");
+  test "a test that reaches instances that call each other has a key" (fun () ->
+      if reach_key (ping_pong 1) (key "start") = reach_key (ping_pong 2) (key "start") then
+        fail "a change inside the group left the key the same");
+  test "a group's key does not depend on its instances' names" (fun () ->
+      let renamed = List.map (fun (i : Lir.t) -> i) (ping_pong ~ping:"alpha" ~pong:"omega" 1) in
+      if reach_key (ping_pong 1) (key "start") <> reach_key renamed (key "start") then
+        fail "the keys differ")
 
 (* The test runner *)
 
@@ -137,7 +205,7 @@ let () =
                    "test 5 incomplete\nmessage 40\nhole of type Int64\n  at suite.truss:12:3\n";
                    "test 6 panicked\nmessage 45\ncompiler bug: the test left 1 block allocated\n";
                  ])
-            out)
+            (render_records (Compile.parse_report out)))
 
 let () =
   test "a program still running at its time limit is stopped" (fun () ->

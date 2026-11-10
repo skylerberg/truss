@@ -1,5 +1,5 @@
 (* The lowered IR's types, the queries over them, mapping a function's
-   places and blocks, and putting a function in canonical form. See lir.mli. *)
+   places and blocks, and putting a function in canonical form. *)
 
 type local = int
 type block = int
@@ -73,7 +73,7 @@ type binary =
   | Bit_xor
   | Shift_left  (** The amount is masked to the width of the value *)
   | Shift_right  (** Arithmetic on signed integers, logical on unsigned *)
-  | Equal  (** On floats, every NaN equals every NaN, as DESIGN.md's lawful equality says *)
+  | Equal  (** On floats, every NaN equals every NaN *)
   | Not_equal
   | Less  (** On floats, NaN comes after every number *)
   | Less_equal
@@ -83,9 +83,8 @@ type binary =
   | Ieee_less
   | Ieee_less_equal
 
-(* The operations the intrinsic module lowers to directly. See CODEGEN.md,
-   "The system interface". Operating-system calls are added with the
-   standard library's real implementations. *)
+(* The operations the intrinsic module lowers to directly. Operating-system
+   calls are added with the standard library's real implementations. *)
 type intrinsic =
   | Allocate
       (** [(size: USize, alignment: USize) -> pointer]; ends the process when memory runs out *)
@@ -177,7 +176,7 @@ type rvalue =
   | Function_value of { code : function_ref; environment : operand option }
 
 (* A position within the instance's definition, which its anchor turns into
-   a file and line. See CODEGEN.md, "Positions". *)
+   a file and line. *)
 type site = { definition : Path.t; line : int; column : int }
 
 (* Why a [fail] ends the run: a panic, a failed [assert] in a test, or a

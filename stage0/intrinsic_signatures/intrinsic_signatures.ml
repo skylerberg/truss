@@ -1,7 +1,6 @@
-(* The signatures of [standard::intrinsic]'s operations. See CODEGEN.md,
-   "The system interface". Arithmetic and comparison are generic over the
-   built-in number type, which code generation sees after
-   monomorphization. *)
+(* The signatures of [standard::intrinsic]'s operations. Arithmetic and
+   comparison are generic over the built-in number type, which code generation
+   sees after monomorphization. *)
 
 module T = Types
 

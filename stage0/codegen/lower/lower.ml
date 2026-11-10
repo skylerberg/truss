@@ -1,6 +1,5 @@
-(* Lowering: the checked form of one instance to its LIR. See CODEGEN.md,
-   "Lowering expressions". The library's modules, in the order each builds
-   on the ones before it:
+(* Lowering: the checked form of one instance to its LIR. The library's
+   modules, in the order each builds on the ones before it:
 
    - [Definitions]: lowering's context, and finding an instance's code and
      signature
@@ -43,7 +42,7 @@ let () =
   Forward.statement := Statements.statement
 
 type context = Definitions.context = {
-  database : Query.database;
+  database : Query.context;
   env : Memory_layout.env;
   glue : Glue.t;
   monomorphic : Monomorphic.context;
@@ -138,7 +137,9 @@ let pulled context (yielding : Ground.yielding) : Lir.function_ * Lir.local list
       (fun capability -> (capability, local b ~name:"evidence" Convention.evidence))
       (evidence_for code.substitution code.uses)
   in
-  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence;
+  st.evidence <-
+    List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) evidence
+    @ Generated.real_evidence_of context ~user:(Path.show code.anchor) code.real;
   start b (block b);
   Option.iter (fill_defaults st) mask;
   check_requires st;
@@ -327,7 +328,8 @@ let instance context (key : Instance.key) : Lir.t =
       in
       let st = { st with result_local } in
       st.evidence <-
-        List.map (fun (capability, local) -> (capability, Lir.Copy (at local))) evidence;
+        List.map (fun (capability, local) -> (capability, Lir.Copy (at local))) evidence
+        @ Generated.real_evidence_of context ~user:(Path.show code.anchor) code.real;
       start b (block b);
       Option.iter (fill_defaults st) mask;
       let destination =

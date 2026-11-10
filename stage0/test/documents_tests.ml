@@ -3,7 +3,7 @@
    names defined elsewhere, show a definition of the standard library's, or
    redefine a prelude name to show how it is written. Those diagnostics say
    the block is an excerpt, and such a block is skipped. Every other block is
-   a whole program and must check cleanly. See TYPECHECKER.md, "Testing". *)
+   a whole program and must check cleanly. *)
 
 open Harness
 

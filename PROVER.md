@@ -6,7 +6,8 @@ follows the decisions in [DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md),
 reads what [TYPECHECKER.md](TYPECHECKER.md) produces, and states what
 [CODEGEN.md](CODEGEN.md) relies on. It is being built in
 [`stage0/prover/`](stage0/prover); [What is built](#what-is-built) says how
-far it has come, and `truss prove DIRECTORY` runs it over a package.
+far it has come, and `truss check` runs it over a package, as CLI.md's
+"Checking" describes.
 
 ## What the prover does
 
@@ -797,7 +798,7 @@ them, as [Tagged templates](DESIGN.md#tagged-templates) intends:
   worked out and written out. A clause that cannot run, such as one that
   calls a function for specifications only, is left to the solver.
 - **The prover does not depend on code generation.** `Prover.diagnostics`
-  is given the running, and `truss prove` gives it through the compiler it
+  is given the running, and `truss check` gives it through the compiler it
   builds programs with, made only when a template asks for it. So proofs
   stay queries of their own, and what ran is decided only when obligations
   are asked, as the solver's answers are.
@@ -820,8 +821,9 @@ regardless, with their run-time checks.
   and the obligations after it hold trivially. That is sound because a
   hole is never in a program that is built.
 - **Holes are not errors.** Truss has no warnings, so a hole is not a
-  diagnostic: the prover lists each one, and `truss prove` shows them
-  after its errors and fails while any remain.
+  diagnostic: each definition's outcome lists its holes, `truss holes`
+  lists every `todo` with what it blocks, and `truss build` refuses a
+  program whose `main` can reach a definition with a hole in its proofs.
 
 ## Diagnostics
 
@@ -1102,8 +1104,8 @@ It proves, with one canonical, numbered, hashed query per obligation:
 - holes, as [Holes](#holes) describes
 - pruning: each query keeps only the facts that share a symbol with its
   goal, directly or through other kept facts
-- a cache of answers on disk, by each query's key, which `truss prove`
-  keeps in `~/.cache/truss/proofs`
+- a cache of answers on disk, by each query's key, which the command line
+  keeps in the store's `proofs` directory
 - cost clauses, as [Costs](#costs) describes: `time`, `allocations`,
   `allocated_bytes`, and `calls(...)` of a function value, a capability, or
   one of its methods, with `O(...)`, `<=`, and `==` bounds; counting in

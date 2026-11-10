@@ -1,5 +1,5 @@
 (* What lowering reads: its context, and the code, the signature, and the
-   tables of the instance being lowered. See lower.ml. *)
+   tables of the instance being lowered. *)
 
 module S = Syntax
 module C = Checked
@@ -10,7 +10,7 @@ module Environment = Interface.Environment
 let bug format = Printf.ksprintf (fun message -> invalid_arg ("Lower: " ^ message)) format
 
 type context = {
-  database : Query.database;
+  database : Query.context;
   env : Memory_layout.env;
   glue : Glue.t;
   monomorphic : Monomorphic.context;
@@ -80,6 +80,9 @@ type code = {
   parameter_types : (T.mode * T.ty * S.parameter) list;  (** In order, [self] first *)
   substitution : T.substitution;
   uses : T.capability list;
+  real : Path.t list;
+      (** The capabilities the code gets the real implementations of, as [main]'s do: an external
+          test's [uses] *)
   has_defaults : bool;
   requires : S.expression list;  (** The [requires] clauses, which a checked build tests on entry *)
 }
@@ -251,6 +254,7 @@ let code_of context (path : Path.t) type_arguments : code =
       parameter_types = parameter_types interface signature.parameters;
       substitution;
       uses = interface.uses;
+      real = [];
       has_defaults = List.exists (fun (p : T.parameter_info) -> p.has_default) interface.parameters;
       requires =
         List.filter_map
@@ -274,6 +278,11 @@ let code_of context (path : Path.t) type_arguments : code =
             parameter_types = [];
             substitution = [];
             uses = [];
+            real =
+              (match demand context Environment.interface path with
+              | Some (Test_interface uses) ->
+                  List.filter_map (function T.Capability path -> Some path | _ -> None) uses
+              | _ -> []);
             has_defaults = false;
             requires = [];
           }

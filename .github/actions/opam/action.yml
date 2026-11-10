@@ -1,0 +1,64 @@
+name: OCaml and the dependencies
+description: >
+  Restores opam with the OCaml switch and every dependency already built,
+  from a cache keyed by the opam and OCaml versions, the runner's image, and
+  truss.opam. Only a change to one of those builds anything: the opam binary
+  is downloaded and checked against its pinned hash, and the switch and the
+  dependencies are built and cached. Nothing comes from apt, so a slow
+  package mirror cannot slow a run.
+
+inputs:
+  opam-version:
+    required: true
+  opam-sha256:
+    required: true
+  ocaml-version:
+    required: true
+
+outputs:
+  key:
+    description: The cache key, which the dune cache's key starts with
+    value: ${{ steps.key.outputs.key }}
+
+runs:
+  using: composite
+  steps:
+    - id: key
+      shell: bash
+      run: >
+        echo "key=opam-${{ runner.os }}-${{ runner.arch }}-${ImageOS}-${{ inputs.opam-version }}-${{ inputs.ocaml-version }}-${{ hashFiles('truss.opam') }}"
+        >> "$GITHUB_OUTPUT"
+
+    - id: restore
+      uses: actions/cache/restore@v6.1.0
+      with:
+        path: |
+          ~/.opam
+          ~/.local/bin/opam
+        key: ${{ steps.key.outputs.key }}
+
+    - if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        OPAMYES: "1"
+      run: |
+        mkdir -p ~/.local/bin
+        curl -fsSL -o ~/.local/bin/opam \
+          "https://github.com/ocaml/opam/releases/download/${{ inputs.opam-version }}/opam-${{ inputs.opam-version }}-x86_64-linux"
+        echo "${{ inputs.opam-sha256 }}  $HOME/.local/bin/opam" | sha256sum --check
+        chmod +x ~/.local/bin/opam
+        ~/.local/bin/opam init --bare --disable-sandboxing --no-setup
+        ~/.local/bin/opam switch create default "ocaml-base-compiler.${{ inputs.ocaml-version }}"
+        ~/.local/bin/opam install . --deps-only --with-test --with-dev-setup
+        ~/.local/bin/opam clean --all-switches --download-cache --logs
+
+    - if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6.1.0
+      with:
+        path: |
+          ~/.opam
+          ~/.local/bin/opam
+        key: ${{ steps.key.outputs.key }}
+
+    - shell: bash
+      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"

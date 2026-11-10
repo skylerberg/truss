@@ -1,6 +1,5 @@
 (* The tests of capabilities: what code may call, lambdas' uses,
-   capability parameters, provide, and dependency grants. See
-   TYPECHECKER.md, "Capabilities". *)
+   capability parameters, provide, and dependency grants. *)
 
 open Harness
 open Support
@@ -189,11 +188,12 @@ let () =
               "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n" );
           ]
       in
-      Query.set database Workspace.packages "app"
+      Engine.set (Engine.of_context database) Workspace.packages "app"
         {
           name = "app";
           dependencies = [ { package = "clock_library"; capabilities = [] } ];
           modules = [ module_of "app::main" ];
+          usize_bits = 32;
         };
       match codes (check database (module_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
@@ -202,11 +202,12 @@ let () =
 let () =
   let with_grant files granted =
     let database = setup files in
-    Query.set database Workspace.packages "app"
+    Engine.set (Engine.of_context database) Workspace.packages "app"
       {
         name = "app";
         dependencies = [ { package = "clock_library"; capabilities = granted } ];
         modules = [ module_of "app::main" ];
+        usize_bits = 32;
       };
     codes (check database (module_of "app::main"))
   in

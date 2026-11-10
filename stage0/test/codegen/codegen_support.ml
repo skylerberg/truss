@@ -3,8 +3,7 @@
    library and running it. *)
 
 (* Code generation's tests. Each test gives a small input and states one
-   fact about what code generation makes of it. See IMPLEMENTATION.md,
-   "Testing", and CODEGEN.md, "Testing". *)
+   fact about what code generation makes of it. *)
 
 let test = Harness.test
 let fail = Harness.fail
@@ -19,6 +18,21 @@ let contains text part =
 
 let expect_int ~expected actual =
   if expected <> actual then fail "expected %d, got %d" expected actual
+
+(* Test records as text, each test's line with its number and outcome, then
+   its message and echo blocks, leaving out durations, which differ from run
+   to run. *)
+let render_records records =
+  let block label = function
+    | Some content -> Printf.sprintf "%s %d\n%s\n" label (String.length content) content
+    | None -> ""
+  in
+  String.concat ""
+    (List.mapi
+       (fun i (r : Compile.record) ->
+         Printf.sprintf "test %d %s\n" i (Compile.show_outcome r.outcome)
+         ^ block "message" r.message ^ block "echo" r.echo)
+       records)
 
 (* Types for the tests: a few prelude types and types defined by each test,
    with their shapes. *)
@@ -188,16 +202,20 @@ let example : Path.module_ = { package = "example"; modules = [ "main" ] }
 (* A module of Truss source with the standard library, which must check
    cleanly, ready to compile. *)
 let load text =
-  let database = Query.create () in
-  Type_checker.load_standard database;
-  Type_checker.load_package database ~name:"example" ~dependencies:[] [ (example, text) ];
+  let database = Engine.context (Engine.create ()) in
+  Database.load_standard (Engine.of_context database);
+  Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
+    [ (example, text) ];
   let source = (Query.demand database Workspace.file example).source in
   (match Type_checker.diagnostics database example with
   | [] -> ()
   | diagnostics ->
       fail "the source has diagnostics:\n%s"
         (String.concat "" (List.map (Diagnostic.render source) diagnostics)));
-  (database, Compile.create database target_64 (Lazy.force compiler) (Lazy.force cache) settings)
+  ( database,
+    Compile.create
+      ~want:(Database.want_in (Engine.of_context database))
+      database target_64 (Lazy.force compiler) (Lazy.force cache) settings )
 
 (* The paths of a module's tests, in order. *)
 let tests_of database =
@@ -210,7 +228,7 @@ let tests_of database =
 let run_source text =
   let database, compile = load text in
   match Compile.run_tests compile ~time_limit:2000 (tests_of database) with
-  | Ok (_, output) -> output
+  | Ok records -> render_records records
   | Error message -> failwith message
 
 let expect_output text expected = expect_string ~expected (run_source text)
@@ -245,15 +263,17 @@ let drop_shapes =
 
 let standard_database =
   lazy
-    (let database = Query.create () in
+    (let database = Engine.context (Engine.create ()) in
      List.iter
-       (fun (module_, text) -> Query.set database Workspace.file_text module_ text)
+       (fun (module_, text) ->
+         Engine.set (Engine.of_context database) Workspace.file_text module_ text)
        Standard_library.modules;
-     Query.set database Workspace.packages Standard_library.package
+     Engine.set (Engine.of_context database) Workspace.packages Standard_library.package
        {
          name = Standard_library.package;
          dependencies = [];
          modules = List.map fst Standard_library.modules;
+         usize_bits = 64;
        };
      database)
 

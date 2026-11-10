@@ -5,13 +5,16 @@ let module_of text : Path.module_ =
   | package :: modules -> { package; modules }
   | [] -> invalid_arg text
 
+(* The standard library as a fixed base, shared by every test in a run, so
+   that it is checked once. *)
+let standard = lazy (Database.standard_base ())
+
 let setup files =
-  let database = Query.create ~log:true () in
-  Type_checker.load_standard database;
+  let database = Engine.context (Engine.create ~log:true ~bases:[ Lazy.force standard ] ()) in
   let files = List.map (fun (name, text) -> (module_of name, text)) files in
   List.iter
     (fun package ->
-      Type_checker.load_package database ~name:package ~dependencies:[]
+      Database.load_package (Engine.of_context database) ~name:package ~dependencies:[]
         (List.filter (fun ((module_ : Path.module_), _) -> module_.package = package) files))
     (List.sort_uniq compare (List.map (fun ((module_ : Path.module_), _) -> module_.package) files));
   database

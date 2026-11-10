@@ -31,10 +31,9 @@ val is_xid_continue : int -> bool
     as one name, to report it once. *)
 
 val is_forbidden : int -> bool
-(** The characters GRAMMAR.md forbids anywhere in a file: those with [Bidi_Control]; control
-    characters other than tab, line feed, and carriage return, which the scanner handles itself; and
-    every other [Default_Ignorable_Code_Point] except U+200C, U+200D, and the variation selectors.
-*)
+(** The characters forbidden anywhere in a file: those with [Bidi_Control]; control characters other
+    than tab, line feed, and carriage return, which the scanner handles itself; and every other
+    [Default_Ignorable_Code_Point] except U+200C, U+200D, and the variation selectors. *)
 
 val is_bidi_control : int -> bool
 val is_control : int -> bool

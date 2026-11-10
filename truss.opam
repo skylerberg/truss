@@ -5,6 +5,7 @@ depends: [
   "ocaml" {>= "5.5"}
   "dune" {>= "3.24"}
   "zarith" {>= "1.14"}
+  "cmdliner" {>= "2.1.1"}
   "menhir" {with-test & >= "20260209"}
   "ocamlformat" {with-dev-setup & = "0.29.0"}
   "odoc" {with-doc}

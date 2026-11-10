@@ -1,5 +1,5 @@
 (* Instances: one copy of a definition's code, for one set of type arguments
-   and capability sets. See CODEGEN.md, "Instances". *)
+   and capability sets. *)
 
 (** A named function used as a function value: it takes the environment and ignores it *)
 type key =

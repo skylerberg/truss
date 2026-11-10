@@ -1,6 +1,6 @@
 (* Calls: matching arguments to parameters by label and position, with
    defaults, their modes and conversions, and the calls of named functions
-   and constructors. See TYPECHECKER.md, "Calls and arguments". *)
+   and constructors. *)
 
 open Syntax
 module T = Types

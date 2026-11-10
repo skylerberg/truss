@@ -22,9 +22,15 @@ type target = Walk.target =
 
 type bracket = Walk.bracket = Index | Type_arguments | Method_bracket
 
+type value = Walk.value =
+  | Value_local of Syntax.id
+  | Value_generic of Syntax.id
+  | Value_field of string
+
 type resolved = {
   names : target option array;
   brackets : bracket option array;
+  holes : (Syntax.id * (string * value) list) list;
   diagnostics : Diagnostic.t list;
 }
 
@@ -42,7 +48,9 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
   | Impl _ | Test _ | Definition_error _ -> None
 
 let resolved =
-  Query.query ~name:"resolved" ~show:Names.show_key (fun database (key : Names.key) ->
+  Query.query ~name:"resolved" ~phase:Resolution ~show:Names.show_key ~saved:true
+    ~about:(fun (key : Names.key) -> Some { path = key.path; part = Some "resolved" })
+    (fun database (key : Names.key) ->
       match Query.demand database Names.definition key with
       | Some definition ->
           let module_ = key.module_ in
@@ -54,6 +62,7 @@ let resolved =
               names = Array.make size None;
               brackets = Array.make size None;
               diagnostics = [];
+              holes = [];
             }
           in
           Walk.definition state definition;
@@ -90,6 +99,7 @@ let resolved =
             {
               names = state.names;
               brackets = state.brackets;
+              holes = List.rev state.holes;
               diagnostics =
                 List.sort
                   (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
@@ -98,7 +108,8 @@ let resolved =
       | None -> None)
 
 let file_diagnostics =
-  Query.query ~name:"file_diagnostics" ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"file_diagnostics" ~phase:Resolution ~show:Path.show_module ~saved:true
+    (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       (* An import is used when a name followed by [::] spells it anywhere
          outside the [use] lines, read from the tokens, so a use inside a part

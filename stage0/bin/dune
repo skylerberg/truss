@@ -1,20 +1,6 @@
-(executables
- (names truss_lex truss_parse truss_check truss)
- (libraries
-  source
-  diagnostic
-  token
-  lexer
-  syntax
-  syntax_print
-  parser
-  path
-  query
-  workspace
-  type_checker
-  memory_layout
-  toolchain
-  build
-  compile
-  solver
-  prover))
+; The truss command. See CLI.md.
+
+(executable
+ (name truss)
+ (public_name truss)
+ (libraries cli))

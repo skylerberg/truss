@@ -8,14 +8,19 @@ open Codegen_support
 let () =
   test "a passing test's result is kept by its key, and only a changed test runs again" (fun () ->
       incr counter;
-      let results = Filename.concat (Lazy.force scratch) (Printf.sprintf "results%d" !counter) in
+      let table = Hashtbl.create 4 in
+      let results : Compile.results =
+        { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
+      in
       let run text =
         let database, compile = load text in
         match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
-        | Ok (status, output) -> (status, output)
+        | Ok records ->
+            ( (if List.for_all (fun (r : Compile.record) -> r.outcome = Passed) records then 0 else 1),
+              render_records records )
         | Error message -> failwith message
       in
-      let kept () = Array.length (Sys.readdir results) in
+      let kept () = Hashtbl.length table in
       let source =
         {|test "passes" {
   assert 1 + 1 == 2
@@ -36,6 +41,32 @@ test "fails" {
 }
 |} in
       expect_int ~expected:2 (kept ()))
+
+let () =
+  test "an external test gets the real capabilities it uses, and its result is never kept"
+    (fun () ->
+      let table = Hashtbl.create 4 in
+      let results : Compile.results =
+        { find = Hashtbl.find_opt table; add = (fun key value -> Hashtbl.replace table key value) }
+      in
+      let database, compile =
+        load {|test "reads the clock"
+  uses Clock
+{
+  let _ = Clock.now()
+}
+|}
+      in
+      let run () =
+        match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
+        | Ok records -> records
+        | Error message -> failwith message
+      in
+      ignore (run ());
+      match run () with
+      | [ { outcome = Passed; cached = false; _ } ] ->
+          if Hashtbl.length table > 0 then fail "kept a result"
+      | _ -> fail "did not pass, or came from the kept results")
 
 (* Checks a build makes in place of proofs *)
 
@@ -234,9 +265,10 @@ let () =
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
-          let database = Query.create () in
-          Type_checker.load_standard database;
-          Type_checker.load_package database ~name:"example" ~dependencies:[] [ (example, text) ];
+          let database = Engine.context (Engine.create ()) in
+          Database.load_standard (Engine.of_context database);
+          Database.load_package (Engine.of_context database) ~name:"example" ~dependencies:[]
+            [ (example, text) ];
           if Type_checker.diagnostics database example = [] then
             test
               (Printf.sprintf "%s block %d lowers, and its tests pass" name (index + 1))

@@ -1,6 +1,5 @@
-(* The grammar's conflicts are exactly the two GRAMMAR.md explains in
-   "Checking the grammar": `{` after `return`, and `else` after
-   `let pattern = if ...`. Both are resolved by shifting. *)
+(* The grammar's conflicts are exactly two: `{` after `return`, and `else`
+   after `let pattern = if ...`. Both are resolved by shifting. *)
 
 let () =
   let channel = open_in "truss.conflicts" in

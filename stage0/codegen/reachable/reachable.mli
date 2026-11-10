@@ -1,5 +1,4 @@
-(* What a build compiles, and what keys a test's result. See CODEGEN.md,
-   "Instances" and "Test results".
+(* What a build compiles, and what keys a test's result.
 
    A build starts from roots and compiles only what they reach: each
    instance that an instance calls, takes as a function value, reads as a
@@ -17,10 +16,46 @@ val reachable :
   Instance.key list ->
   Lir.compiled list
 
-(* The key of a test's result: the hash of the LIR of everything the test
-   can reach, with every instance and every path replaced by a number given
-   in the order it is first reached, and the version of code generation.
-   Two programs that differ only in the names of definitions give the same
-   key, so renaming or moving a definition finds its tests' results already
-   done, and any change to what the test can run changes the key. *)
-val test_key : Memory_layout.env -> lookup:(Instance.key -> Lir.compiled) -> Instance.key -> string
+(* The same instances in the same order, each with the first way the walk
+   reached it: the keys from a root to the instance, both included. *)
+val reached :
+  Memory_layout.env ->
+  lookup:(Instance.key -> Lir.compiled) ->
+  Instance.key list ->
+  (Lir.compiled * Instance.key list) list
+
+(* What a unit refers to, and its key. *)
+val compiled_key : Lir.compiled -> Instance.key
+val compiled_references : Memory_layout.env -> Lir.compiled -> Instance.key list
+
+(* The hash of what an instance compiles to, by itself: its encoding with
+   each instance it refers to written as that instance's place among
+   [references], itself as a mark, and each path as a number given in the
+   order paths are first met. It holds no name, so renaming or moving a
+   definition changes no hash. *)
+val own_hash : references:Instance.key list -> Lir.compiled -> string
+
+module Keys : Map.S with type key = Instance.key
+
+(* The groups of instances that reach each other, among everything the
+   roots reach through [edges]: for each instance of such a group, the
+   group's instances, in order. An instance that reaches itself only
+   directly is in no group. *)
+val groups :
+  edges:(Instance.key -> Instance.key list) -> Instance.key list -> Instance.key list Keys.t
+
+(* The key of everything an instance that is in no group can reach: its own
+   hash, and the key of each instance it refers to, in order. *)
+val unit_key : own:string -> string list -> string
+
+(* The key of everything an instance of a group can reach: the group's
+   instances in the order a walk from the instance first reaches them, each
+   as its own hash and what it refers to, a number for an instance of the
+   group and the key of everything it can reach for any other. [link] gives
+   an instance's own hash and what it refers to. *)
+val group_key :
+  link:(Instance.key -> string * Instance.key list) ->
+  deep:(Instance.key -> string) ->
+  members:Instance.key list ->
+  Instance.key ->
+  string

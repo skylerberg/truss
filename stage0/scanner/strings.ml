@@ -1,6 +1,5 @@
-(* String literals (LEXER.md, "Strings"): ordinary strings with escapes,
-   raw strings on one line or several, interpolations, and character
-   literals from other languages.
+(* String literals: ordinary strings with escapes, raw strings on one line
+   or several, interpolations, and character literals from other languages.
 
    An interpolation holds tokens, so these functions take [scan], the
    scanner's function for the next item, as an argument. Every function for

@@ -28,12 +28,13 @@ let object_key (toolchain : Toolchain.t) settings text =
              ])))
 
 let write path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
+let object_path cache key = Filename.concat cache.directory (key ^ ".o")
 
 (* Writes the object under a temporary name and renames it into place, so a
    build that stops partway never leaves a broken object in the cache. *)
 let compile_one toolchain cache settings (name, text) =
   let key = object_key toolchain settings text in
-  let output = Filename.concat cache.directory (key ^ ".o") in
+  let output = object_path cache key in
   if Sys.file_exists output then Ok output
   else
     let base = Filename.concat cache.directory (Printf.sprintf "%s.%d" key (Unix.getpid ())) in
@@ -72,8 +73,34 @@ let parallel jobs f =
   List.iter Domain.join domains;
   Array.to_list (Array.map Option.get results)
 
-let objects toolchain cache settings sources =
-  let results = parallel sources (compile_one toolchain cache settings) in
+let objects ?progress toolchain cache settings sources =
+  (* Only the files whose object is not cached count toward progress, since
+     only they cost anything. *)
+  let missing =
+    List.length
+      (List.filter
+         (fun (_, text) ->
+           not (Sys.file_exists (object_path cache (object_key toolchain settings text))))
+         sources)
+  in
+  let compiled = Atomic.make 0 in
+  let lock = Mutex.create () in
+  let report () =
+    match progress with
+    | Some progress -> Mutex.protect lock (fun () -> progress (Atomic.get compiled) missing)
+    | None -> ()
+  in
+  if missing > 0 then report ();
+  let compile source =
+    let cached = Sys.file_exists (object_path cache (object_key toolchain settings (snd source))) in
+    let result = compile_one toolchain cache settings source in
+    if not cached then begin
+      Atomic.incr compiled;
+      report ()
+    end;
+    result
+  in
+  let results = parallel sources compile in
   List.fold_right
     (fun result acc ->
       match (result, acc) with
@@ -81,7 +108,7 @@ let objects toolchain cache settings sources =
       | Error message, _ | _, Error message -> Error message)
     results (Ok [])
 
-let program toolchain cache env settings ~files ~sources ~output =
+let program ?progress toolchain cache env settings ~files ~sources ~output =
   let target = Memory_layout.target env in
   let emitted =
     List.mapi
@@ -97,6 +124,6 @@ let program toolchain cache env settings ~files ~sources ~output =
   in
 
   let runtime = ("the runtime", Startup.runtime target) in
-  match objects toolchain cache settings ((runtime :: emitted) @ sources) with
+  match objects ?progress toolchain cache settings ((runtime :: emitted) @ sources) with
   | Error message -> Error message
   | Ok objects -> Toolchain.link toolchain ~extra:settings.extra ~objects ~output ()

@@ -1,6 +1,5 @@
 (* Reading one definition's tokens, or one interpolation's: the current
-   token, lookahead, and the jumps error recovery makes. See PARSER.md,
-   "Parsing one definition" and "Recovery".
+   token, lookahead, and the jumps error recovery makes.
 
    A parsing function that cannot go on reports one error with [fail], which
    raises [Failed]. The nearest place that can recover catches it, skips to

@@ -1,5 +1,4 @@
 (* Splitting a file into its [use] lines and definitions before parsing them.
-   See PARSER.md, "Splitting a file into definitions".
 
    The lexer balances brackets, so this needs no parsing: a [Newline] outside
    every bracket ends an item, unless a [{] follows it, which opens a body

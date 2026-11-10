@@ -1,5 +1,4 @@
-(* The syntax tree of one file, shared by every stage after the parser. See
-   PARSER.md, "The syntax tree".
+(* The syntax tree of one file, shared by every stage after the parser.
 
    The tree is abstract: it keeps what the program says and each node's span,
    not every token. Each definition records where it starts in the file, its
@@ -32,8 +31,7 @@ type span = Span.t
 (* A node's id: a small integer, unique within its definition, given in the
    order the parser builds the definition's nodes. Later stages record what
    they decide about a node in tables keyed by its id, never by rebuilding
-   the tree. The same tokens give the same ids, and hashing ignores them.
-   See TYPECHECKER.md, "Node identity". *)
+   the tree. The same tokens give the same ids. *)
 type id = int
 type name = { text : string; span : span; id : id }
 
@@ -80,7 +78,7 @@ type quantifier = Forall | Exists
 
 (* A statement, or a member of a trait, an [impl], or a capability: a node
    that also records whether a blank line came before it, which [truss fmt]
-   keeps and hashing ignores. *)
+   keeps. *)
 type 'kind line = { kind : 'kind; span : span; blank_line_before : bool; id : id }
 
 (* Most of the tree is nodes: what a part of the program is, and its span. *)

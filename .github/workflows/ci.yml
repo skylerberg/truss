@@ -5,44 +5,80 @@ on:
   push:
     branches: [main]
 
+# A new push to a pull request cancels the run it replaces. Each push to
+# main runs to the end.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  OPAM_VERSION: 2.6.1
+  OPAM_SHA256: b533d393a6967150d6ef41cb3d71e147e93ecbabeb59e921aa412c0ae79ebe3d
+  OCAML_VERSION: 5.5.2
+  DUNE_CACHE: enabled
+
 jobs:
-  stage0:
+  # The build, the formatting, the opam file, and every test, in one dune
+  # run so that they overlap.
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
 
-      - uses: ocaml/setup-ocaml@v3.9.1
+      - id: opam
+        uses: ./.github/actions/opam
         with:
-          ocaml-compiler: 5.5.2
+          opam-version: ${{ env.OPAM_VERSION }}
+          opam-sha256: ${{ env.OPAM_SHA256 }}
+          ocaml-version: ${{ env.OCAML_VERSION }}
 
-      - name: Install dependencies
-        run: opam install . --deps-only --with-test --with-dev-setup --yes
+      # Pull requests start from main's dune cache, so they build only what
+      # they changed.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/dune
+          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+          restore-keys: dune-${{ steps.opam.outputs.key }}-
 
-      # The prover is pinned to one Z3 release, since another could answer
-      # differently. See PROVER.md, "The solver".
-      - name: Install Z3 5.3.3
-        run: |
-          curl -fsSL -o "$RUNNER_TEMP/z3.zip" https://github.com/Z3Prover/z3/releases/download/z3-5.3.3/z3-5.3.3-x64-glibc-2.39.zip
-          echo "d56f60b06f432f33de5810f7f1a384a339131f361e2d54d08ea83eea14326880  $RUNNER_TEMP/z3.zip" | sha256sum --check
-          unzip -q "$RUNNER_TEMP/z3.zip" -d "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/z3-5.3.3-x64-glibc-2.39/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/z3
 
-      - name: Build
-        run: opam exec -- dune build
-
-      - name: Check formatting
-        run: opam exec -- dune build @fmt
+      - name: Build, check formatting and truss.opam, and test
+        run: opam exec -- dune build @default @install @fmt @runtest
 
       - name: Check that truss.opam matches dune-project
-        run: opam exec -- dune build @install
+        run: git diff --exit-code truss.opam
 
-      - name: Test
-        run: opam exec -- dune test
+      - if: github.event_name == 'push'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/dune
+          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
 
-      # Every codegen test again, with its C built under AddressSanitizer
-      # and UndefinedBehaviorSanitizer: a report is a compiler bug. Leaks
-      # are left to the test runner's own count of live blocks, since the
-      # runner itself frees nothing at exit.
+  # Every codegen test again, with its C built under AddressSanitizer and
+  # UndefinedBehaviorSanitizer: a report is a compiler bug. Leaks are left to
+  # the test runner's own count of live blocks, since the runner itself
+  # frees nothing at exit. It runs beside the check, on a runner of its own.
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - id: opam
+        uses: ./.github/actions/opam
+        with:
+          opam-version: ${{ env.OPAM_VERSION }}
+          opam-sha256: ${{ env.OPAM_SHA256 }}
+          ocaml-version: ${{ env.OCAML_VERSION }}
+
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/dune
+          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+          restore-keys: dune-${{ steps.opam.outputs.key }}-
+
+      # The codegen tests include running the prover on templates.
+      - uses: ./.github/actions/z3
+
       - name: Test generated code under sanitizers
         env:
           TRUSS_SANITIZE: "1"

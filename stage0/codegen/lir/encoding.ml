@@ -1,4 +1,4 @@
-(* The LIR's canonical encoding, in deterministic CBOR, and its hash. See lir.mli. *)
+(* The LIR's canonical encoding, in deterministic CBOR, and its hash. *)
 
 open Ir
 

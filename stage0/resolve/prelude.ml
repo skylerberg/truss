@@ -1,10 +1,9 @@
-(* The prelude: the names in scope in every file without a [use]. See
-   DESIGN.md, "The standard library and prelude", and TYPECHECKER.md, "The
-   prelude". It holds only UpperCamelCase names, so it can clash only with
-   types. It is fixed for a language version, so it is a table here, naming
-   the module of the standard library that defines each name: the built-in
-   types, [Option] and [Result], the core collections and traits, and the
-   standard capabilities with the types their methods take and return. *)
+(* The prelude: the names in scope in every file without a [use]. It holds
+   only UpperCamelCase names, so it can clash only with types. It is fixed for
+   a language version, so it is a table here, naming the module of the
+   standard library that defines each name: the built-in types, [Option] and
+   [Result], the core collections and traits, and the standard capabilities
+   with the types their methods take and return. *)
 
 let standard = "standard"
 let in_standard modules : Path.module_ = { package = standard; modules }

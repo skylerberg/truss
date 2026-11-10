@@ -139,7 +139,7 @@ type cursor = { method_frame : frame; own : part; element : T.ty }
 type received = { another : L.term; element : L.term; through : L.term; advance : frame -> frame }
 
 type context = {
-  database : Query.database;
+  database : Query.context;
   current : Path.t;
   mutable terminates : bool;
       (** Whether the code being proven must end: the definition's [time] clause, or, in a lambda,

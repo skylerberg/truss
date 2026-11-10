@@ -2930,3 +2930,8 @@ http = { version = "4.0", capabilities = ["NetworkClient", "Clock"] }
 A dependency with no `capabilities` list gets none, so it can only do pure
 computation. The build fails if a dependency uses a capability it was not
 granted.
+
+A package is verified for both widths of `USize`, 32 and 64 bits, unless its
+`[package]` table says `usize_bits = 64`. Its code may then rely on 64 bits,
+it cannot be built for a 32-bit target, and only packages that say the same
+can depend on it. See [DESIGN.md](DESIGN.md#integers).

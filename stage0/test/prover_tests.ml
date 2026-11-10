@@ -2060,7 +2060,13 @@ let () =
 (* The number of holes in a file's proofs. *)
 let holes text =
   let database = Support.setup [ ("app::main", text) ] in
-  List.length (Prover.holes database (Support.module_of "app::main"))
+  List.fold_left
+    (fun total declaration ->
+      match Query.demand database Prover.proof (Resolve.Names.key_of declaration) with
+      | Obligations outcome -> total + List.length outcome.holes
+      | Unsupported _ | Not_proven_here -> total)
+    0
+    (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
 
 let () =
   test "a todo in a theorem is a hole, not a failure" (fun () ->

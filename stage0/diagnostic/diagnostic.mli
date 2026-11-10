@@ -294,6 +294,10 @@ val to_json : Source.t -> t list -> string
 val to_json_object : Source.t -> t -> string
 (** One diagnostic as {!to_json} writes it, for a tool's output that gathers several files'. *)
 
+val json_string : string -> string
+(** Text as a JSON string, always valid UTF-8, as {!to_json} writes every string: a byte that is not
+    valid UTF-8 is written as U+FFFD. *)
+
 val quote : string -> string
 (** Text in double quotes, with quotes, backslashes, control characters, and bytes that are not
     valid UTF-8 escaped, so that text in any script stays readable and the result is valid UTF-8. *)

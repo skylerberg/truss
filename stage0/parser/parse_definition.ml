@@ -1,5 +1,5 @@
 (* Top-level definitions, and the members of traits, implementations, and
-   capabilities. See PARSER.md, "Definitions", and GRAMMAR.md.
+   capabilities.
 
    Each definition is chosen by its first token, after its visibility. The
    rules the grammar leaves to a check, such as where [opaque] and [self] may

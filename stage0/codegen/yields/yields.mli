@@ -1,6 +1,5 @@
 (* Yield lowering: turning a yielding method's LIR, with its [yield]
-   terminators, into code with none. See CODEGEN.md, "Lending and yielding
-   methods".
+   terminators, into code with none.
 
    A method that is looped over takes the caller's loop body as its last
    parameter, a function value that returns whether to go on. A method that

@@ -1,8 +1,8 @@
 (* Checking a definition's bodies: a function's body, defaults, and
    clauses; a type's invariants, potential, and field defaults; a trait's
    provided methods and laws; an [impl]'s methods; a constant's value; and
-   the bodies of tests, theorems, and proofs. See TYPECHECKER.md, "Checking
-   bodies". A part the parser did not build as written is not checked. *)
+   the bodies of tests, theorems, and proofs. A part the parser did not
+   build as written is not checked. *)
 
 open Syntax
 module T = Types
@@ -432,11 +432,12 @@ let body_context (context : Lower.context) (interface : Environment.interface) k
 
 let check database (key : Names.key) =
   match
-    ( Query.demand database Names.definition key,
-      Query.demand database Resolve.resolved key,
-      Query.demand database Names.base key )
+    (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
   with
-  | Some definition, Some resolved, Some (module_, _) ->
+  | Some definition, Some resolved ->
+      (* The definition's module is in its key. Where it starts in its file
+         is not read, so a definition that only moved is not checked again. *)
+      let module_ = key.module_ in
       let lowered, context = Environment.lower_definition database key definition resolved in
       let text = Option.value ~default:"" (Query.demand database Names.text key) in
       let binding_spans = Hashtbl.create 64 in
@@ -489,7 +490,10 @@ let check database (key : Names.key) =
         }
   | _ -> None
 
-let checked = Query.query ~name:"checked" ~show:Names.show_key check
+let checked =
+  Query.query ~name:"checked" ~phase:Bodies ~show:Names.show_key ~saved:true
+    ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
+    check
 
 (* Every body error of a file, in its offsets and in order. *)
 let diagnostics database module_ =

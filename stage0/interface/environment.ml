@@ -1,6 +1,4 @@
-(* The interfaces of definitions, as queries. See TYPECHECKER.md, "Checking
-   signatures and definitions" and "One definition at a time, through
-   queries".
+(* The interfaces of definitions, as queries.
 
    [lowered] lowers a definition's outward-facing part and keeps what
    lowering reported. The other queries project one interface out of it by
@@ -318,7 +316,7 @@ let lower_definition database (key : Names.key) (definition : definition)
     context )
 
 let lowered =
-  Query.query ~name:"lowered" ~show:Names.show_key (fun database key ->
+  Query.query ~name:"lowered" ~phase:Interfaces ~show:Names.show_key (fun database key ->
       match
         (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
       with
@@ -328,7 +326,9 @@ let lowered =
 
 (* The interface a path names, from its definition with ordinal 0. *)
 let interface =
-  Query.query ~name:"interface" ~show:Path.show (fun database path ->
+  Query.query ~name:"interface" ~phase:Interfaces ~show:Path.show ~saved:true
+    ~about:(fun path -> Some { Query.path; part = Some "interface" })
+    (fun database path ->
       match Query.demand database Summary.key path with
       | Some key ->
           Option.map (fun lowered -> lowered.interface) (Query.demand database lowered key)
@@ -352,7 +352,9 @@ let builtin_shape builtin : T.type_interface =
    a type, and the [Error] shape for a type whose definition did not
    parse. *)
 let type_interface =
-  Query.query ~name:"type_interface" ~show:Path.show (fun database path ->
+  Query.query ~name:"type_interface" ~phase:Interfaces ~show:Path.show ~saved:true
+    ~about:(fun path -> Some { Query.path; part = Some "shape" })
+    (fun database path ->
       match Intrinsic.builtin_of_path path with
       | Some builtin -> Some (builtin_shape builtin)
       | None -> (
@@ -365,7 +367,9 @@ let type_interface =
 (* The signature of a function or method. For a method of a trait, a
    capability, or an [impl], it is found in the owner's interface. *)
 let signature =
-  Query.query ~name:"signature" ~show:Path.show (fun database (path : Path.t) ->
+  Query.query ~name:"signature" ~phase:Interfaces ~show:Path.show ~saved:true
+    ~about:(fun path -> Some { Query.path; part = Some "signature" })
+    (fun database (path : Path.t) ->
       let from_owner owner name receiver =
         match Query.demand database interface owner with
         | Some (Trait_interface trait) ->
@@ -397,13 +401,13 @@ let signature =
           | _ -> None))
 
 let trait_interface =
-  Query.query ~name:"trait_interface" ~show:Path.show (fun database path ->
+  Query.query ~name:"trait_interface" ~phase:Interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Trait_interface trait) -> Some trait
       | _ -> None)
 
 let impl_interface =
-  Query.query ~name:"impl_interface" ~show:Path.show (fun database path ->
+  Query.query ~name:"impl_interface" ~phase:Interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Impl_interface impl) -> Some impl
       | Some Error_interface ->
@@ -419,7 +423,7 @@ let impl_interface =
       | _ -> None)
 
 let constant_type =
-  Query.query ~name:"constant_type" ~show:Path.show (fun database path ->
+  Query.query ~name:"constant_type" ~phase:Interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Constant_interface constant) -> Some constant.constant_type
       | Some Error_interface -> Some T.Error

@@ -1,5 +1,4 @@
-(* The LIR as C. See emit_c.mli, and CODEGEN.md, "The C that is emitted".
-   The library's modules, each building on the ones before it:
+(* The LIR as C. The library's modules, each building on the ones before it:
 
    - [C_runtime]: the runtime's declarations, and the helpers a file uses
    - [C_types]: a file's context, and the C types of what it names

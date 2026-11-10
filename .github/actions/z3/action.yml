@@ -1,0 +1,15 @@
+name: Z3
+description: >
+  Installs the Z3 release the prover is pinned to, since another could answer
+  differently (see PROVER.md, "The solver"). The release is downloaded and
+  checked against its pinned hash, and put on the path.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        curl -fsSL -o "$RUNNER_TEMP/z3.zip" https://github.com/Z3Prover/z3/releases/download/z3-5.3.3/z3-5.3.3-x64-glibc-2.39.zip
+        echo "d56f60b06f432f33de5810f7f1a384a339131f361e2d54d08ea83eea14326880  $RUNNER_TEMP/z3.zip" | sha256sum --check
+        unzip -q "$RUNNER_TEMP/z3.zip" -d "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/z3-5.3.3-x64-glibc-2.39/bin" >> "$GITHUB_PATH"

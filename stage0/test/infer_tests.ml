@@ -1,6 +1,5 @@
 (* The tests of checking bodies. Each gives a small definition and states
-   one fact: a diagnostic with its fix, or one fact about the checked form.
-   See TYPECHECKER.md, "Checking bodies" and "Testing". *)
+   one fact: a diagnostic with its fix, or one fact about the checked form. *)
 
 open Harness
 open Support
@@ -88,6 +87,15 @@ let () =
       has_type "fn f(count: UInt16) -> UInt16 {\n  count + (60 * 60)\n}\n" "60" "UInt16");
   test "a literal that does not fit its type is an error" (fun () ->
       one_diagnostic "fn f() {\n  let small: UInt8 = 300\n}\n" "types.literal_out_of_range");
+  test "a USize literal must fit in 32 bits, so that the code holds on every target" (fun () ->
+      one_diagnostic "fn f() {\n  let size: USize = 5_000_000_000\n}\n" "types.literal_out_of_range");
+  test "a package that runs only on 64-bit targets may use 64-bit USize literals" (fun () ->
+      let engine = Engine.create ~bases:[ Lazy.force Support.standard ] () in
+      Database.load_package ~usize_bits:64 engine ~name:"app" ~dependencies:[]
+        [ (module_of "app::main", "fn f() {\n  let size: USize = 5_000_000_000\n}\n") ];
+      match check (Engine.context engine) (module_of "app::main") with
+      | [] -> ()
+      | found -> fail "%s" (String.concat "; " (codes found)));
   test "a negated literal is checked after the negation" (fun () ->
       fine "fn f() {\n  let small: Int8 = -128\n}\n");
   test "an integer literal where a float is expected is an error with a fix" (fun () ->
@@ -420,10 +428,10 @@ let () =
       let database = setup [ ("app::main", text "1") ] in
       let module_ = module_of "app::main" in
       ignore (Infer.diagnostics database module_);
-      Query.set database Workspace.file_text module_ (text "2");
-      Query.clear_log database;
+      Engine.set (Engine.of_context database) Workspace.file_text module_ (text "2");
+      Engine.clear_log (Engine.of_context database);
       ignore (Infer.diagnostics database module_);
-      if List.mem "checked(app::main::caller)" (Query.executed database) then
+      if List.mem "checked(app::main::caller)" (Engine.executed (Engine.of_context database)) then
         fail "the caller was checked again");
   test "checking twice gives the same checked form" (fun () ->
       let text =

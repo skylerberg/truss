@@ -1,7 +1,6 @@
 (* The rules that need the whole tree of one definition: where
    specification-only forms, [assert], [proof], [yield], [break],
-   [continue], [return], [?], and [echo] may appear. See PARSER.md, "Checks
-   on a whole definition".
+   [continue], [return], [?], and [echo] may appear.
 
    This is a separate walk with a small context, so the parsing code does
    not thread a context through every call, and each rule is tested on its

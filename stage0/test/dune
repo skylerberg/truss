@@ -6,6 +6,8 @@
   parser_documents_tests
   hashing_tests
   query_tests
+  store_tests
+  database_tests
   resolve_tests
   standard_library_tests
   interface_tests
@@ -17,7 +19,8 @@
   package_checks_tests
   documents_tests
   manifest_tests
-  prover_tests)
+  prover_tests
+  scale_tests)
  (libraries
   harness
   source
@@ -35,10 +38,13 @@
   cbor
   blake3
   query
+  engine
+  database
+  store
+  unix
   path
   workspace
   resolve
-  hash
   standard_library
   support
   logic
@@ -57,4 +63,5 @@
   syntax_walk
   type_checker)
  (deps
-  (glob_files %{workspace_root}/*.md)))
+  (glob_files %{workspace_root}/*.md)
+  (glob_files_rec %{workspace_root}/stage0/**dune)))

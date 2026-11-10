@@ -1,4 +1,4 @@
-(* Checking bodies. See TYPECHECKER.md, "Checking bodies" and "Patterns". *)
+(* Checking bodies. *)
 
 module Members = Members
 

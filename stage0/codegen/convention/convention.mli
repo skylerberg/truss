@@ -1,6 +1,6 @@
-(* How Truss parameters and results become C parameters and results. See
-   CODEGEN.md, "Calling convention". Lowering and the C emitter both follow
-   these rules, so a caller and its callee always agree. *)
+(* How Truss parameters and results become C parameters and results. Lowering
+   and the C emitter both follow these rules, so a caller and its callee
+   always agree. *)
 
 (* Values up to this many bytes are passed and returned by value. *)
 val by_value_limit : int

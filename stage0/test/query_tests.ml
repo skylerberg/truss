@@ -1,220 +1,542 @@
-(* The tests of the query engine: which queries run again after a change.
-   See TYPECHECKER.md, "One definition at a time, through queries". *)
+(* The tests of the engine: which queries are computed again after a change,
+   what a change reaches, phase by phase, and what an engine over a base
+   holds. *)
 
 open Harness
 
-let expect_log database expected =
-  let actual = Query.executed database in
+let expect_log engine expected =
+  let actual = Engine.executed engine in
   if actual <> expected then
     fail "expected [%s], ran [%s]" (String.concat "; " expected) (String.concat "; " actual);
-  Query.clear_log database
+  Engine.clear_log engine
+
+let unit_query ?(phase = Query.Syntax) name compute =
+  Query.query ~name ~phase ~show:(fun () -> "") compute
+
+type build = {
+  files : (string, string) Query.input;
+  length : (string, int) Query.query;
+  parity : (string, int) Query.query;
+  total : (unit, int) Query.query;
+}
 
 (* A small build: two "files" as inputs, a length per file, and a total that
-   reads the lengths. *)
-let setup () =
-  let database = Query.create ~log:true () in
+   reads the lengths' parities. The lengths are of an earlier phase than
+   what reads them. *)
+let build () =
   let files = Query.input ~name:"file" ~show:Fun.id () in
   let length =
-    Query.query ~name:"length" ~show:Fun.id (fun database file ->
+    Query.query ~name:"length" ~phase:Syntax ~show:Fun.id (fun database file ->
         String.length (Query.get database files file))
   in
   let parity =
-    Query.query ~name:"parity" ~show:Fun.id (fun database file ->
+    Query.query ~name:"parity" ~phase:Bodies ~show:Fun.id (fun database file ->
         Query.demand database length file mod 2)
   in
   let total =
-    Query.query ~name:"total"
-      ~show:(fun () -> "")
-      (fun database () ->
+    unit_query ~phase:Bodies "total" (fun database () ->
         let first = Query.demand database parity "a" in
         first + Query.demand database parity "b")
   in
-  Query.set database files "a" "one";
-  Query.set database files "b" "three";
-  (database, files, total)
+  { files; length; parity; total }
+
+let fill engine build =
+  Engine.set engine build.files "a" "one";
+  Engine.set engine build.files "b" "three"
+
+let setup () =
+  let engine = Engine.create ~log:true () in
+  let build = build () in
+  fill engine build;
+  (engine, build.files, build.total)
+
+let labels nodes = List.map Engine.label nodes
 
 let () =
   test "a first demand runs every query it reaches" (fun () ->
-      let database, _, total = setup () in
-      let value = Query.demand database total () in
+      let engine, _, total = setup () in
+      let value = Engine.get engine total () in
       if value <> 2 then fail "total %d" value;
-      expect_log database [ "total()"; "parity(a)"; "length(a)"; "parity(b)"; "length(b)" ]);
+      expect_log engine [ "total()"; "parity(a)"; "length(a)"; "parity(b)"; "length(b)" ]);
   test "a second demand with no change runs nothing" (fun () ->
-      let database, _, total = setup () in
-      ignore (Query.demand database total ());
-      Query.clear_log database;
-      ignore (Query.demand database total ());
-      expect_log database []);
+      let engine, _, total = setup () in
+      ignore (Engine.get engine total ());
+      Engine.clear_log engine;
+      ignore (Engine.get engine total ());
+      expect_log engine []);
   test "a change runs only what read it" (fun () ->
-      let database, files, total = setup () in
-      ignore (Query.demand database total ());
-      Query.clear_log database;
-      Query.set database files "b" "four";
-      let value = Query.demand database total () in
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      Engine.clear_log engine;
+      Engine.set engine files "b" "four";
+      let value = Engine.get engine total () in
       if value <> 1 then fail "total %d" value;
-      expect_log database [ "length(b)"; "parity(b)"; "total()" ]);
+      expect_log engine [ "length(b)"; "parity(b)"; "total()" ]);
   test "a result that comes out the same stops the work above it" (fun () ->
-      let database, files, total = setup () in
-      ignore (Query.demand database total ());
-      Query.clear_log database;
-      Query.set database files "b" "seven";
-      ignore (Query.demand database total ());
-      expect_log database [ "length(b)" ]);
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      Engine.clear_log engine;
+      Engine.set engine files "b" "seven";
+      ignore (Engine.get engine total ());
+      expect_log engine [ "length(b)" ]);
   test "setting an input to the value it has changes nothing" (fun () ->
-      let database, files, total = setup () in
-      ignore (Query.demand database total ());
-      Query.clear_log database;
-      Query.set database files "a" "one";
-      ignore (Query.demand database total ());
-      expect_log database []);
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      Engine.clear_log engine;
+      Engine.set engine files "a" "one";
+      ignore (Engine.get engine total ());
+      expect_log engine []);
   test "reading an input that is not set records it" (fun () ->
-      let database = Query.create ~log:true () in
+      let engine = Engine.create ~log:true () in
       let files = Query.input ~name:"file" ~show:Fun.id () in
       let present =
-        Query.query ~name:"present" ~show:Fun.id (fun database file ->
+        Query.query ~name:"present" ~phase:Syntax ~show:Fun.id (fun database file ->
             Option.is_some (Query.find database files file))
       in
-      if Query.demand database present "a" then fail "present before it was set";
-      Query.set database files "a" "";
-      if not (Query.demand database present "a") then fail "absent after it was set";
-      Query.remove database files "a";
-      if Query.demand database present "a" then fail "present after it was removed");
+      if Engine.get engine present "a" then fail "present before it was set";
+      Engine.set engine files "a" "";
+      if not (Engine.get engine present "a") then fail "absent after it was set";
+      Engine.remove engine files "a";
+      if Engine.get engine present "a" then fail "present after it was removed")
+
+(* Pushing *)
+
+let () =
+  test "stabilizing brings kept results up to date" (fun () ->
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      ignore (Engine.stabilize engine);
+      Engine.set engine files "b" "four";
+      let change = Engine.stabilize engine in
+      if labels change.computed <> [ "length(b)"; "parity(b)"; "total()" ] then
+        fail "computed [%s]" (String.concat "; " (labels change.computed));
+      if labels change.changed <> [ "length(b)"; "parity(b)"; "total()" ] then
+        fail "changed [%s]" (String.concat "; " (labels change.changed));
+      Engine.clear_log engine;
+      if Engine.get engine total () <> 1 then fail "stale total";
+      expect_log engine []);
+  test "a change computes nothing that cannot read it" (fun () ->
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      ignore (Engine.stabilize engine);
+      Engine.set engine files "a" "two";
+      let change = Engine.stabilize engine in
+      if List.mem "length(b)" (labels change.computed) then fail "computed length(b)";
+      if labels change.changed <> [] then
+        fail "changed [%s]" (String.concat "; " (labels change.changed)));
+  test "a query that stops reading an input is not computed when it changes" (fun () ->
+      let engine = Engine.create ~log:true () in
+      let switch = Query.input ~name:"switch" ~show:(fun () -> "") () in
+      let value = Query.input ~name:"value" ~show:(fun () -> "") () in
+      let reader =
+        unit_query "reader" (fun database () ->
+            if Query.get database switch () then Query.get database value () else 0)
+      in
+      Engine.set engine switch () true;
+      Engine.set engine value () 1;
+      ignore (Engine.get engine reader ());
+      Engine.set engine switch () false;
+      ignore (Engine.get engine reader ());
+      Engine.clear_log engine;
+      Engine.set engine value () 2;
+      ignore (Engine.stabilize engine);
+      expect_log engine []);
+  test "a result nothing reads any more is dropped" (fun () ->
+      let engine, _, total = setup () in
+      ignore (Engine.get engine total ());
+      Engine.release engine total ();
+      let left =
+        labels (List.filter (fun node -> Engine.reads engine node <> []) (Engine.nodes engine))
+      in
+      if left <> [] then fail "kept [%s]" (String.concat "; " left));
+  test "readers and reads are the edges in both directions" (fun () ->
+      let engine, _, total = setup () in
+      ignore (Engine.get engine total ());
+      let node label = List.find (fun n -> Engine.label n = label) (Engine.nodes engine) in
+      if labels (Engine.reads engine (node "total()")) <> [ "parity(a)"; "parity(b)" ] then
+        fail "reads";
+      if labels (Engine.readers engine (node "length(a)")) <> [ "parity(a)" ] then fail "readers")
+
+(* Phases *)
+
+(* [count] results of a later phase that all read one result of an earlier
+   phase, which comes out the same whatever the input is. *)
+let fan count =
+  let engine = Engine.create () in
+  let source = Query.input ~name:"source" ~show:(fun () -> "") () in
+  let hub =
+    unit_query ~phase:Syntax "hub" (fun database () -> Query.get database source () / 1000)
+  in
+  let reader =
+    Query.query ~name:"reader" ~phase:Bodies ~show:string_of_int (fun database index ->
+        Query.demand database hub () + index)
+  in
+  Engine.set engine source () 1;
+  for index = 1 to count do
+    ignore (Engine.get engine reader index)
+  done;
+  (engine, source)
+
+(* The work one change of the input costs. *)
+let work (engine, source) =
+  let before = Engine.counters engine in
+  Engine.set engine source () 2;
+  ignore (Engine.stabilize engine);
+  let after = Engine.counters engine in
+  ( after.marked - before.marked,
+    after.confirmed - before.confirmed,
+    after.computed - before.computed )
+
+let () =
+  test "a result that comes out the same marks nothing in a later phase" (fun () ->
+      let marked, confirmed, computed = work (fan 10) in
+      if (marked, confirmed, computed) <> (1, 0, 1) then
+        fail "marked %d, confirmed %d, computed %d" marked confirmed computed);
+  test "a change that changes nothing costs the same with ten readers and with a thousand"
+    (fun () ->
+      let few = work (fan 10) and many = work (fan 1000) in
+      if few <> many then fail "the work grew with the readers");
+  test "a result that changes marks what reads it in a later phase" (fun () ->
+      let engine, source = fan 10 in
+      let before = Engine.counters engine in
+      Engine.set engine source () 5000;
+      ignore (Engine.stabilize engine);
+      let after = Engine.counters engine in
+      if after.computed - before.computed <> 11 then
+        fail "computed %d" (after.computed - before.computed));
+  test "a query cannot read one of a later phase" (fun () ->
+      let engine = Engine.create () in
+      let late = unit_query ~phase:Bodies "late" (fun _ () -> 1) in
+      let early =
+        unit_query ~phase:Syntax "early" (fun database () -> Query.demand database late ())
+      in
+      match Engine.get engine early () with
+      | _ -> fail "read a later phase"
+      | exception Invalid_argument _ -> ());
+  test "a marked result whose reads did not change is confirmed without being computed" (fun () ->
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      let before = Engine.counters engine in
+      (* The length is the same, so its parity is marked and then confirmed. *)
+      Engine.set engine files "b" "seven";
+      ignore (Engine.stabilize engine);
+      let after = Engine.counters engine in
+      if after.computed - before.computed <> 1 then
+        fail "computed %d" (after.computed - before.computed);
+      if after.marked - before.marked <> 1 then fail "marked %d" (after.marked - before.marked))
+
+(* Dropping *)
+
+let () =
+  test "a result a running query has read is not dropped before the query ends" (fun () ->
+      (* [n] reads [x] and then [y]. [y] used to read [x] and no longer
+         does, and nothing else reads [x], so while [n] is computed again
+         [x] loses its last reader before [n] counts as one. *)
+      let engine = Engine.create () in
+      let flag = Query.input ~name:"flag" ~show:(fun () -> "") () in
+      let value = Query.input ~name:"value" ~show:(fun () -> "") () in
+      let x = unit_query "x" (fun database () -> Query.get database value ()) in
+      let y =
+        unit_query "y" (fun database () ->
+            if Query.get database flag () then Query.demand database x () else 0)
+      in
+      let n =
+        unit_query "n" (fun database () ->
+            if Query.get database flag () then Query.demand database y ()
+            else
+              let direct = Query.demand database x () in
+              direct + Query.demand database y ())
+      in
+      Engine.set engine flag () true;
+      Engine.set engine value () 1;
+      ignore (Engine.get engine n ());
+      Engine.set engine flag () false;
+      ignore (Engine.stabilize engine);
+      Engine.set engine value () 99;
+      let result = Engine.get engine n () in
+      if result <> 99 then fail "n is %d" result);
+  test "a result is dropped once the query that stopped reading it has ended" (fun () ->
+      let engine = Engine.create () in
+      let flag = Query.input ~name:"flag" ~show:(fun () -> "") () in
+      let helper = unit_query "helper" (fun _ () -> 1) in
+      let reader =
+        unit_query "reader" (fun database () ->
+            if Query.get database flag () then Query.demand database helper () else 0)
+      in
+      Engine.set engine flag () true;
+      ignore (Engine.get engine reader ());
+      Engine.set engine flag () false;
+      ignore (Engine.get engine reader ());
+      if List.mem "helper()" (labels (Engine.nodes engine)) then fail "kept the helper");
+  test "an input that is set is kept when nothing reads it" (fun () ->
+      let engine = Engine.create () in
+      let switch = Query.input ~name:"switch" ~show:(fun () -> "") () in
+      let value = Query.input ~name:"value" ~show:(fun () -> "") () in
+      let reader =
+        unit_query "reader" (fun database () ->
+            if Query.get database switch () then Query.get database value () else 0)
+      in
+      Engine.set engine switch () true;
+      Engine.set engine value () 7;
+      ignore (Engine.get engine reader ());
+      Engine.set engine switch () false;
+      ignore (Engine.get engine reader ());
+      Engine.set engine switch () true;
+      if Engine.get engine reader () <> 7 then fail "the input lost its value")
+
+let made = ref None
+
+let[@inline never] make_and_forget () =
+  let engine, _, total = setup () in
+  ignore (Engine.get engine total ());
+  let weak = Weak.create 1 in
+  Weak.set weak 0 (Some engine);
+  made := Some weak
+
+let () =
+  test "an engine nothing refers to is freed with everything it held" (fun () ->
+      make_and_forget ();
+      Gc.full_major ();
+      match !made with
+      | Some weak -> if Weak.check weak 0 then fail "the engine is still held"
+      | None -> fail "no engine was made")
+
+(* Cycles and exceptions *)
+
+let () =
   test "a query that asks for itself is a cycle naming each query on it" (fun () ->
-      let database = Query.create ~log:true () in
+      let engine = Engine.create ~log:true () in
       let rec first =
         lazy
-          (Query.query ~name:"first" ~show:Fun.id (fun database key ->
+          (Query.query ~name:"first" ~phase:Syntax ~show:Fun.id (fun database key ->
                Query.demand database (Lazy.force second) key))
       and second =
         lazy
-          (Query.query ~name:"second" ~show:Fun.id (fun database key ->
+          (Query.query ~name:"second" ~phase:Syntax ~show:Fun.id (fun database key ->
                Query.demand database (Lazy.force first) key + 1))
       in
-      match Query.demand database (Lazy.force first) "k" with
+      match Engine.get engine (Lazy.force first) "k" with
       | _ -> fail "no cycle"
       | exception Query.Cycle labels ->
           if labels <> [ "first(k)"; "second(k)" ] then
             fail "cycle [%s]" (String.concat "; " labels));
-  test "a query that catches a cycle runs again at the next revision" (fun () ->
-      let database = Query.create ~log:true () in
-      let toggle = Query.input ~name:"toggle" ~show:(fun () -> "") () in
+  test "a query that catches a cycle still has the cycle as its result" (fun () ->
+      let engine = Engine.create () in
       let rec looped =
         lazy
-          (Query.query ~name:"looped"
-             ~show:(fun () -> "")
-             (fun database () ->
-               if Query.get database toggle () then Query.demand database (Lazy.force looped) ()
-               else 0))
+          (unit_query "looped" (fun database () -> Query.demand database (Lazy.force guarded) ()))
+      and guarded =
+        lazy
+          (unit_query "guarded" (fun database () ->
+               try Query.demand database (Lazy.force looped) () with Query.Cycle _ -> -1))
       in
-      let guarded =
-        Query.query ~name:"guarded"
-          ~show:(fun () -> "")
-          (fun database () ->
-            try Query.demand database (Lazy.force looped) () with Query.Cycle _ -> -1)
+      match Engine.get engine (Lazy.force guarded) () with
+      | _ -> fail "the cycle was caught"
+      | exception Query.Cycle _ -> ());
+  test "a cycle that is removed leaves results that are current" (fun () ->
+      let engine = Engine.create () in
+      let toggle = Query.input ~name:"toggle" ~show:(fun () -> "") () in
+      let rec first =
+        lazy
+          (unit_query "first" (fun database () ->
+               if Query.get database toggle () then Query.demand database (Lazy.force second) () + 1
+               else 5))
+      and second =
+        lazy
+          (unit_query "second" (fun database () -> Query.demand database (Lazy.force first) () + 1))
       in
-      Query.set database toggle () true;
-      if Query.demand database guarded () <> -1 then fail "no cycle while toggled";
-      Query.set database toggle () false;
-      if Query.demand database guarded () <> 0 then fail "cycle kept after it was removed")
-
-let unit_query name compute = Query.query ~name ~show:(fun () -> "") compute
-
-let () =
-  test "a query that raises keeps its trace, so a caller that caught it runs again" (fun () ->
-      let database = Query.create ~log:true () in
-      let value = Query.input ~name:"value" ~show:(fun () -> "") () in
-      let inner = unit_query "inner" (fun database () -> Query.get database value ()) in
-      let outer =
-        unit_query "outer" (fun database () ->
-            try Query.demand database inner () with Not_found -> 0)
-      in
-      if Query.demand database outer () <> 0 then fail "unset input read as a value";
-      Query.set database value () 5;
-      let result = Query.demand database outer () in
-      if result <> 5 then fail "stale result %d after the input was set" result);
-  test "a query that raised is not run again in the same revision" (fun () ->
-      let database = Query.create ~log:true () in
-      let value = Query.input ~name:"value" ~show:(fun () -> "") () in
-      let inner = unit_query "inner" (fun database () -> Query.get database value ()) in
-      let attempt () = try Query.demand database inner () with Not_found -> 0 in
-      ignore (attempt ());
-      ignore (attempt ());
-      expect_log database [ "inner()" ]);
-  test "an exception while a trace is checked reaches the query that handles it" (fun () ->
-      let database = Query.create ~log:true () in
-      let value = Query.input ~name:"value" ~show:(fun () -> "") () in
-      let inner = unit_query "inner" (fun database () -> Query.get database value ()) in
-      let outer =
-        unit_query "outer" (fun database () ->
-            try Query.demand database inner () with Not_found -> 0)
-      in
-      Query.set database value () 5;
-      ignore (Query.demand database outer ());
-      Query.remove database value ();
-      let result = Query.demand database outer () in
-      if result <> 0 then fail "result %d after the input was removed" result);
-  test "a cycle that appears at a later revision reaches the query that catches it" (fun () ->
-      let database = Query.create ~log:true () in
+      Engine.set engine toggle () true;
+      (match Engine.get engine (Lazy.force second) () with
+      | _ -> fail "no cycle"
+      | exception Query.Cycle _ -> ());
+      Engine.set engine toggle () false;
+      let value = Engine.get engine (Lazy.force second) () in
+      if value <> 6 then fail "second is %d" value);
+  test "a cycle that appears later reaches every query on it" (fun () ->
+      let engine = Engine.create () in
       let toggle = Query.input ~name:"toggle" ~show:(fun () -> "") () in
       let rec d =
         lazy
           (unit_query "d" (fun database () ->
                if Query.get database toggle () then Query.demand database (Lazy.force e) () else 1))
       and e = lazy (unit_query "e" (fun database () -> Query.demand database (Lazy.force d) ())) in
-      let c =
-        unit_query "c" (fun database () ->
-            try Query.demand database (Lazy.force d) () with Query.Cycle _ -> -1)
+      Engine.set engine toggle () false;
+      if Engine.get engine (Lazy.force e) () <> 1 then fail "no value before the cycle";
+      Engine.set engine toggle () true;
+      match Engine.get engine (Lazy.force e) () with
+      | _ -> fail "no cycle once it appeared"
+      | exception Query.Cycle _ -> ());
+  test "a query that raises is computed again when what it read changes" (fun () ->
+      let engine = Engine.create ~log:true () in
+      let value = Query.input ~name:"value" ~show:(fun () -> "") () in
+      let inner = unit_query "inner" (fun database () -> Query.get database value ()) in
+      let outer =
+        unit_query "outer" (fun database () ->
+            try Query.demand database inner () with Not_found -> 0)
       in
-      Query.set database toggle () false;
-      if Query.demand database c () <> 1 then fail "no value before the cycle";
-      Query.set database toggle () true;
-      let result = Query.demand database c () in
-      if result <> -1 then fail "result %d once the cycle appeared" result);
-  test "a cycle is named the same whether it is found by running or by checking a trace" (fun () ->
-      let database = Query.create ~log:true () in
-      let tick = Query.input ~name:"tick" ~show:(fun () -> "") () in
-      let rec a = lazy (unit_query "a" (fun database () -> Query.demand database (Lazy.force b) ()))
-      and b =
-        lazy
-          (unit_query "b" (fun database () ->
-               ignore (Query.get database tick ());
-               try Query.demand database (Lazy.force a) ()
-               with Query.Cycle labels -> List.length labels))
-      in
-      Query.set database tick () 0;
-      let first = Query.demand database (Lazy.force a) () in
-      Query.set database tick () 1;
-      let second = Query.demand database (Lazy.force a) () in
-      if first <> 2 || second <> 2 then fail "cycle lengths %d and %d" first second);
-  test "checking a trace stops at its first change" (fun () ->
-      let database = Query.create ~log:true () in
+      if Engine.get engine outer () <> 0 then fail "unset input read as a value";
+      Engine.set engine value () 5;
+      let result = Engine.get engine outer () in
+      if result <> 5 then fail "stale result %d after the input was set" result);
+  test "a query that raised is not computed again with no change" (fun () ->
+      let engine = Engine.create ~log:true () in
+      let value = Query.input ~name:"value" ~show:(fun () -> "") () in
+      let inner = unit_query "inner" (fun database () -> Query.get database value ()) in
+      let attempt () = try Engine.get engine inner () with Not_found -> 0 in
+      ignore (attempt ());
+      ignore (attempt ());
+      expect_log engine [ "inner()" ]);
+  test "checking what a result read stops at its first change" (fun () ->
+      let engine = Engine.create ~log:true () in
       let switch = Query.input ~name:"switch" ~show:(fun () -> "") () in
       let expensive = unit_query "expensive" (fun _ () -> 7) in
       let reader =
         unit_query "reader" (fun database () ->
             if Query.get database switch () then Query.demand database expensive () else 0)
       in
-      Query.set database switch () true;
-      ignore (Query.demand database reader ());
-      Query.set database switch () false;
-      Query.clear_log database;
-      ignore (Query.demand database reader ());
-      expect_log database [ "reader()" ]);
-  test "databases do not share results" (fun () ->
+      Engine.set engine switch () true;
+      ignore (Engine.get engine reader ());
+      Engine.set engine switch () false;
+      Engine.clear_log engine;
+      ignore (Engine.get engine reader ());
+      expect_log engine [ "reader()" ]);
+  test "engines do not share results" (fun () ->
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
       let read = unit_query "read" (fun database () -> Query.get database value ()) in
-      let first = Query.create () and second = Query.create () in
-      Query.set first value () 1;
-      Query.set second value () 2;
-      let one = Query.demand first read () in
-      let two = Query.demand second read () in
+      let first = Engine.create () and second = Engine.create () in
+      Engine.set first value () 1;
+      Engine.set second value () 2;
+      let one = Engine.get first read () in
+      let two = Engine.get second read () in
       if one <> 1 || two <> 2 then fail "read %d and %d" one two);
   test "an input cannot change while a query runs" (fun () ->
-      let database = Query.create () in
+      let engine = Engine.create () in
+      (* The query changes an engine, so it is no function of what it reads. *)
+      Engine.skip_audit engine;
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
-      let writer = unit_query "writer" (fun database () -> Query.set database value () 1) in
-      match Query.demand database writer () with
+      let writer = unit_query "writer" (fun _ () -> Engine.set engine value () 1) in
+      match Engine.get engine writer () with
       | () -> fail "the input changed"
       | exception Invalid_argument _ -> ())
+
+(* Bases *)
+
+(* A base holding the small build with its total computed, and an engine
+   over it. *)
+let over_base () =
+  let build = build () in
+  let base = Engine.create () in
+  fill base build;
+  ignore (Engine.get base build.total ());
+  Engine.freeze base;
+  (base, Engine.create ~log:true ~bases:[ base ] (), build)
+
+let () =
+  test "an engine reads its base's results without computing them" (fun () ->
+      let _, engine, build = over_base () in
+      if Engine.get engine build.total () <> 2 then fail "another total";
+      expect_log engine [];
+      if Engine.count engine <> 0 then fail "holds %d nodes of its own" (Engine.count engine));
+  test "a change over a base computes only what read it, and leaves the base as it was" (fun () ->
+      let base, engine, build = over_base () in
+      Engine.set engine build.files "b" "four";
+      if Engine.get engine build.total () <> 1 then fail "a stale total";
+      expect_log engine [ "length(b)"; "parity(b)"; "total()" ];
+      if Engine.get base build.total () <> 2 then fail "the base changed");
+  test "an engine over a base holds only what its change reached" (fun () ->
+      let _, engine, build = over_base () in
+      Engine.set engine build.files "b" "four";
+      ignore (Engine.get engine build.total ());
+      let held = List.sort compare (labels (Engine.differing engine)) in
+      if held <> [ "file(b)"; "length(b)"; "parity(b)"; "total()" ] then
+        fail "holds [%s]" (String.concat "; " held));
+  test "a result over a base that comes out the same is the last one copied" (fun () ->
+      let _, engine, build = over_base () in
+      (* The same length, so nothing of the later phase is reached. *)
+      Engine.set engine build.files "b" "seven";
+      if Engine.get engine build.total () <> 2 then fail "another total";
+      let held = List.sort compare (labels (Engine.differing engine)) in
+      if held <> [ "file(b)"; "length(b)" ] then fail "holds [%s]" (String.concat "; " held));
+  test "two engines over one base each see only their own changes" (fun () ->
+      let build = build () in
+      let base = Engine.create () in
+      fill base build;
+      ignore (Engine.get base build.total ());
+      Engine.freeze base;
+      let first = Engine.create ~bases:[ base ] () and second = Engine.create ~bases:[ base ] () in
+      Engine.set first build.files "a" "four";
+      Engine.set second build.files "b" "four";
+      let one = Engine.get first build.total () and two = Engine.get second build.total () in
+      if (one, two) <> (1, 1) then fail "totals %d and %d" one two;
+      Engine.set first build.files "b" "four";
+      if Engine.get first build.total () <> 0 then fail "the first missed its second change";
+      if Engine.get second build.total () <> 1 then fail "the second saw the first's change");
+  test "a change after a result over a base was read still reaches it" (fun () ->
+      let _, engine, build = over_base () in
+      if Engine.get engine build.total () <> 2 then fail "another total";
+      Engine.set engine build.files "a" "four";
+      if Engine.get engine build.total () <> 1 then fail "a stale total");
+  test "a new result over a base is told when what it read of the base changes" (fun () ->
+      let _, engine, build = over_base () in
+      let doubled =
+        unit_query ~phase:Bodies "doubled" (fun database () ->
+            2 * Query.demand database build.total ())
+      in
+      if Engine.get engine doubled () <> 4 then fail "another result";
+      Engine.set engine build.files "a" "four";
+      if Engine.get engine doubled () <> 2 then fail "a stale result");
+  test "an input removed over a base is seen as not set" (fun () ->
+      let files = Query.input ~name:"file" ~show:Fun.id () in
+      let present =
+        Query.query ~name:"present" ~phase:Syntax ~show:Fun.id (fun database file ->
+            Option.is_some (Query.find database files file))
+      in
+      let base = Engine.create () in
+      Engine.set base files "a" "";
+      if not (Engine.get base present "a") then fail "absent in the base";
+      Engine.freeze base;
+      let engine = Engine.create ~bases:[ base ] () in
+      Engine.remove engine files "a";
+      if Engine.get engine present "a" then fail "still present";
+      if not (Engine.get base present "a") then fail "the base changed");
+  test "a frozen engine cannot change" (fun () ->
+      let base, _, build = over_base () in
+      match Engine.set base build.files "a" "four" with
+      | () -> fail "the base changed"
+      | exception Invalid_argument _ -> ());
+  test "an engine over a base cannot be made before the base is frozen" (fun () ->
+      let base = Engine.create () in
+      match Engine.create ~bases:[ base ] () with
+      | _ -> fail "made over an engine that can still change"
+      | exception Invalid_argument _ -> ())
+
+(* Checking the engine *)
+
+let () =
+  test "an audit finds nothing in an engine whose queries are functions of what they read"
+    (fun () ->
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      Engine.set engine files "b" "four";
+      match Engine.audit engine with
+      | [] -> ()
+      | problems -> fail "found [%s]" (String.concat "; " problems));
+  test "an audit finds a result that depends on something the query did not read" (fun () ->
+      let engine = Engine.create () in
+      let hidden = ref 1 in
+      let impure = unit_query "impure" (fun _ () -> !hidden) in
+      ignore (Engine.get engine impure ());
+      hidden := 2;
+      (match Engine.audit engine with
+      | [ _ ] -> ()
+      | problems -> fail "found [%s]" (String.concat "; " problems));
+      hidden := 1);
+  test "an audit over a base compares with an engine that has no base" (fun () ->
+      let _, engine, build = over_base () in
+      Engine.set engine build.files "b" "four";
+      ignore (Engine.get engine build.total ());
+      match Engine.audit ~flat:true engine with
+      | [] -> ()
+      | problems -> fail "found [%s]" (String.concat "; " problems))
 
 let () = finish ()

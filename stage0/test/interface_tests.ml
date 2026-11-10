@@ -1,7 +1,6 @@
 (* The tests of checking interfaces: signatures, types, traits, [impl]s, the
    properties of types, and finding [impl]s. Each gives a few definitions
-   and states one fact. See TYPECHECKER.md, "Checking signatures and
-   definitions" and "Testing". *)
+   and states one fact. *)
 
 open Harness
 open Support
@@ -341,18 +340,18 @@ let () =
       let database = setup [ ("app::main", base) ] in
       let point = Types.named (app "Point") [] in
       let asker =
-        Query.query ~name:"asker"
+        Query.query ~name:"asker" ~phase:Bodies
           ~show:(fun () -> "")
           (fun database () ->
             Option.is_some
               (Interface.Impls.implements database ~bounds:(fun _ -> []) point (trait "Equal" [])))
       in
       if not (Query.demand database asker ()) then fail "no impl of Equal";
-      Query.set database Workspace.file_text (module_of "app::main")
+      Engine.set (Engine.of_context database) Workspace.file_text (module_of "app::main")
         (base ^ "\nimpl Hash for Point {\n  fn hash(self, hasher: mut Hasher) {}\n}\n");
-      Query.clear_log database;
+      Engine.clear_log (Engine.of_context database);
       ignore (Query.demand database asker ());
-      if List.mem "asker()" (Query.executed database) then fail "asked again")
+      if List.mem "asker()" (Engine.executed (Engine.of_context database)) then fail "asked again")
 
 (* What the review of interfaces found *)
 

@@ -1,88 +1,247 @@
 module Names = Resolve.Names
 
-type t = {
-  database : Query.database;
-  context : Lower.context;
-  toolchain : Toolchain.t;
-  cache : Build.cache;
-  settings : Build.settings;
-  mutable done_ : (Instance.key * Lir.compiled) list;
-  mutable pulled : (Ground.yielding * (Lir.function_ * Lir.local list)) list;
-      (** Each pulled method, with its drops elaborated *)
-}
+(* Lowering is a query: what each instance compiles to, for a target and
+   whether the program checks what the prover would prove, kept current by
+   the code database like any other result.
 
-(* A pulled method's version with its drops elaborated, made once. *)
-let pulled t yielding =
-  match List.find_opt (fun (y, _) -> Ground.equal (Cursor y) (Cursor yielding)) t.pulled with
-  | Some (_, made) -> made
-  | None ->
-      let f, owned = Lower.pulled t.context yielding in
-      let glue = t.context.glue in
-      let made =
-        ( Drops.elaborate t.context.env
-            ~needs_drop:(fun ty -> not (Glue.trivial glue ty))
-            ~environment:(fun _ -> [])
-            f,
-          owned )
-      in
-      t.pulled <- (yielding, made) :: t.pulled;
-      made
+   Each computation makes a lowering context of its own from the query's
+   reads, so a layout or a piece of glue worked out on the way is read
+   through this query and never cached where another could miss the
+   dependency. A pulled method's cursor is a query too. A constant whose value
+   must be worked out by running code is the one result a query cannot make,
+   since running code is not a function of reads: the query says so, and the
+   driver runs its [Evaluator], whose own code is lowered by the query. *)
+
+type lowering = { target : Memory_layout.target; checks : bool }
+
+let show_lowering lowering =
+  Printf.sprintf "%d-bit%s" (lowering.target.usize_bytes * 8)
+    (if lowering.checks then ", checked" else "")
+
+exception Needs_evaluation of Path.t * Ground.ty
+
+type lowered_outcome = Compiled of Lir.compiled | Evaluate of Path.t * Ground.ty
 
 let environment (instance : Lir.t) n = instance.nested.(n).environment
 
-let make t (key : Instance.key) : Lir.compiled =
-  let glue = t.context.glue in
-  let code instance =
-    let needs_drop ty = not (Glue.trivial glue ty) in
-    let elaborate f =
-      Drops.elaborate t.context.env ~needs_drop ~environment:(environment instance) f
-    in
-    Lir.Code
-      (Lir.canonical_instance
-         {
-           instance with
-           main = elaborate instance.main;
-           nested = Array.map elaborate instance.nested;
-         })
-  in
+let elaborate_code (context : Lower.context) (instance : Lir.t) =
+  let needs_drop ty = not (Glue.trivial context.glue ty) in
+  let elaborate f = Drops.elaborate context.env ~needs_drop ~environment:(environment instance) f in
+  Lir.Code
+    (Lir.canonical_instance
+       {
+         instance with
+         main = elaborate instance.main;
+         nested = Array.map elaborate instance.nested;
+       })
+
+let rec fresh_context lowering database =
+  let context = Lower.context ~checks:lowering.checks database lowering.target in
+  (context.cursor_fields :=
+     fun yielding ->
+       Yields.cursor_fields context.env
+         (fst (Query.demand database (Lazy.force pulled) (lowering, yielding))));
+  (context.evaluate := fun path ty -> raise (Needs_evaluation (path, ty)));
+  context
+
+(* A pulled method's version, with its drops elaborated. *)
+and pulled =
+  lazy
+    (Query.query ~name:"pulled" ~phase:Lowering ~saved:true ~portable:true
+       ~show:(fun (lowering, yielding) ->
+         show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
+       (fun database (lowering, yielding) ->
+         let context = fresh_context lowering database in
+         let f, owned = Lower.pulled context yielding in
+         ( Drops.elaborate context.env
+             ~needs_drop:(fun ty -> not (Glue.trivial context.glue ty))
+             ~environment:(fun _ -> [])
+             f,
+           owned )))
+
+let make (context : Lower.context) lowering database (key : Instance.key) : Lir.compiled =
+  let glue = context.glue in
+  let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
   match key with
   | Code _ -> (
-      try code (Lower.instance t.context key)
+      try elaborate_code context (Lower.instance context key)
       with Invalid_argument message ->
         invalid_arg (message ^ ", lowering " ^ Instance.to_string key))
-  | Constant path -> Data (Lower.constant t.context path)
+  | Constant path -> Data (Lower.constant context path)
   | Drop (Cursor yielding as cursor) ->
-      let f, owned = pulled t yielding in
+      let f, owned = pulled yielding in
       Code
         (Lir.canonical_instance
-           { key; main = Yields.cursor_drop t.context.env ~cursor ~owned f; nested = [||] })
+           { key; main = Yields.cursor_drop context.env ~cursor ~owned f; nested = [||] })
   | Cursor_next yielding ->
-      let f, _ = pulled t yielding in
+      let f, _ = pulled yielding in
       let cursor = Ground.Cursor yielding in
-      let result = Lower.cursor_result t.context yielding in
+      let result = Lower.cursor_result context yielding in
       Code
         (Lir.canonical_instance
-           { key; main = Yields.cursor_next t.context.env ~cursor ~result f; nested = [||] })
-  | Drop ty -> code (Glue.drop glue ty)
-  | Copy ty -> code (Glue.copy glue ty)
-  | Debug ty -> code (Glue.debug glue ty)
-  | Encode ty -> code (Glue.encode glue ty)
-  | Any_drop ty -> code (Glue.any_drop glue ty)
-  | Evaluator path -> code (Lower.evaluator t.context path)
+           { key; main = Yields.cursor_next context.env ~cursor ~result f; nested = [||] })
+  | Drop ty -> elaborate_code context (Glue.drop glue ty)
+  | Copy ty -> elaborate_code context (Glue.copy glue ty)
+  | Debug ty -> elaborate_code context (Glue.debug glue ty)
+  | Encode ty -> elaborate_code context (Glue.encode glue ty)
+  | Any_drop ty -> elaborate_code context (Glue.any_drop glue ty)
+  | Evaluator path -> elaborate_code context (Lower.evaluator context path)
   | Template_check { from_template; texts } ->
-      code (Lower.template_check t.context key ~from_template ~texts)
-  | Entry _ | Program_main _ | Any_entry _ | Adapter _ -> code (Lower.instance t.context key)
-  | Any_table _ -> Table (Lower.any_table t.context key)
-  | Table _ -> Table (Lower.table t.context key)
-  | Real_evidence capability -> Evidence (Lower.real_evidence t.context capability)
+      elaborate_code context (Lower.template_check context key ~from_template ~texts)
+  | Entry _ | Program_main _ | Any_entry _ | Adapter _ ->
+      elaborate_code context (Lower.instance context key)
+  | Any_table _ -> Table (Lower.any_table context key)
+  | Table _ -> Table (Lower.table context key)
+  | Real_evidence capability -> Evidence (Lower.real_evidence context capability)
+
+let lowered =
+  Query.query ~name:"lowered_instance" ~phase:Lowering ~saved:true ~portable:true
+    ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
+    (fun database (lowering, key) ->
+      let context = fresh_context lowering database in
+      match make context lowering database key with
+      | compiled -> Compiled compiled
+      | exception Needs_evaluation (path, ty) -> Evaluate (path, ty))
+
+(* Keys. A test's result is kept under the key of everything its code can
+   reach, which is composed from the instances' own keys, so that an edit
+   changes the keys of what can reach the edited code and of nothing else. *)
+
+let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_string key
+
+(* What an instance refers to, and the hash of its own code. A constant
+   worked out by running code refers to the evaluator that works it out,
+   whose code is what decides its value. *)
+let linked =
+  Query.query ~name:"linked" ~phase:Linking ~show:show_instance (fun database (lowering, key) ->
+      match Query.demand database lowered (lowering, key) with
+      | Evaluate (path, _) ->
+          (Blake3.hash "a constant worked out by its evaluator", [ Instance.Evaluator path ])
+      | Compiled compiled ->
+          let context = fresh_context lowering database in
+          let references = Reachable.compiled_references context.env compiled in
+          (Reachable.own_hash ~references compiled, references))
+
+let own_hash =
+  Query.query ~name:"own_hash" ~phase:Linking ~saved:true ~portable:true ~show:show_instance
+    (fun database key -> fst (Query.demand database linked key))
+
+let references =
+  Query.query ~name:"references" ~phase:Linking ~saved:true ~portable:true ~show:show_instance
+    (fun database key -> snd (Query.demand database linked key))
+
+(* The tests and programs whose keys have been asked for. The instances
+   they reach are those searched for groups that reach each other, so this
+   is an input: a driver says what it wants keys for before it asks for
+   them, and nothing is lowered for a test nobody asked about. *)
+let roots : (lowering, Instance.key list) Query.input =
+  Query.input ~name:"roots" ~show:show_lowering ()
+
+(* The groups of instances that reach each other, among what the roots
+   reach. It reads what every such instance refers to, and comes out the
+   same unless a group forms or changes, so only then does it cost anything
+   after it. *)
+let recursion =
+  Query.query ~name:"recursion" ~phase:Recursion ~show:show_lowering
+    ~equal:(Reachable.Keys.equal (List.equal Instance.equal))
+    (fun database lowering ->
+      let wanted = Option.value (Query.find database roots lowering) ~default:[] in
+      let edges key =
+        match Query.demand database references (lowering, key) with
+        | found -> found
+        | exception _ -> []
+      in
+      Reachable.groups ~edges wanted)
+
+(* The group an instance is in, if it is in one. *)
+let group =
+  Query.query ~name:"group" ~phase:Keys ~saved:true ~portable:true ~show:show_instance
+    (fun database (lowering, key) ->
+      Reachable.Keys.find_opt key (Query.demand database recursion lowering))
+
+(* The key of everything an instance can reach: its own hash and the keys
+   of what it refers to, or for an instance of a group, the group as a
+   walk from the instance reaches it. *)
+let rec reach =
+  lazy
+    (Query.query ~name:"reach" ~phase:Keys ~saved:true ~portable:true ~show:show_instance
+       (fun database (lowering, key) ->
+         let reach_of other = Query.demand database (Lazy.force reach) (lowering, other) in
+         match Query.demand database group (lowering, key) with
+         | None ->
+             Reachable.unit_key
+               ~own:(Query.demand database own_hash (lowering, key))
+               (List.map reach_of (Query.demand database references (lowering, key)))
+         | Some members ->
+             Reachable.group_key
+               ~link:(fun member ->
+                 ( Query.demand database own_hash (lowering, member),
+                   Query.demand database references (lowering, member) ))
+               ~deep:reach_of ~members key))
+
+(* What a test's result is kept under: the key of everything its code can
+   reach, the version of code generation, and the target, since [USize] is
+   a [typedef] in the C, so the LIR is the same for every width while
+   results such as [USize.maximum] are not. *)
+let test_key_query =
+  Query.query ~name:"test_key" ~phase:Keys ~saved:true ~portable:true
+    ~show:(fun (lowering, path) -> show_lowering lowering ^ " " ^ Path.show path)
+    (fun database (lowering, path) ->
+      match Query.demand database (Lazy.force reach) (lowering, Lower.test_key path) with
+      | key ->
+          Some
+            (Blake3.hash
+               (Cbor.encode
+                  (Cbor.Array
+                     [
+                       Text "truss test";
+                       Cbor.int Lir.version;
+                       Cbor.Array
+                         [
+                           Cbor.int lowering.target.pointer_bytes;
+                           Cbor.int lowering.target.usize_bytes;
+                         ];
+                       Bytes key;
+                     ])))
+      | exception Invalid_argument _ -> None)
+
+type t = {
+  database : Query.context;
+  lowering : lowering;
+  want : lowering -> Instance.key list -> unit;
+      (** Says which instances' keys are about to be asked for *)
+  context : Lower.context;  (** For laying out and emitting what the queries lowered *)
+  toolchain : Toolchain.t;
+  cache : Build.cache;
+  settings : Build.settings;
+  file_name : Path.module_ -> string;  (** The file a position names, which the program reports *)
+  mutable evaluated : (Path.t * Lir.static_value) list;
+      (** Each constant worked out by running code, in this build *)
+}
+
+(* A test's key, once it has been said to be wanted. A test whose code
+   cannot be lowered has none. *)
+let key_of t test =
+  match Query.demand t.database test_key_query (t.lowering, test) with
+  | key -> key
+  | exception _ -> None
+
+let evaluate_hook : (t -> Path.t -> Ground.ty -> Lir.static_value) ref =
+  ref (fun _ _ _ -> invalid_arg "Compile: no evaluator")
 
 let compiled t key =
-  match List.find_opt (fun (k, _) -> Instance.equal k key) t.done_ with
-  | Some (_, instance) -> instance
-  | None ->
-      let instance = make t key in
-      t.done_ <- (key, instance) :: t.done_;
-      instance
+  match Query.demand t.database lowered (t.lowering, key) with
+  | Compiled compiled -> compiled
+  | Evaluate (path, ty) ->
+      let value =
+        match List.find_opt (fun (p, _) -> Path.equal p path) t.evaluated with
+        | Some (_, value) -> value
+        | None ->
+            let value = !evaluate_hook t path ty in
+            t.evaluated <- (path, value) :: t.evaluated;
+            value
+      in
+      Data { data_key = Constant path; ty; value }
 
 (* The definitions an instance's positions are relative to. *)
 let anchored (instance : Lir.t) =
@@ -105,11 +264,11 @@ let anchor t (path : Path.t) : Positions.anchor option =
       | Some (module_, base) ->
           let file = Query.demand t.database Workspace.file module_ in
           let line, _ = Source.position file.source base in
-          Some { definition = path; path = Source.path file.source; first_line = line })
+          Some { definition = path; path = t.file_name module_; first_line = line })
 
 (* Builds what the roots reach into a program at [output], with the given
    startup code. *)
-let build t ~roots ~startup ~output =
+let build ?progress t ~roots ~startup ~output =
   match Reachable.reachable t.context.env ~lookup:(compiled t) roots with
   | exception Invalid_argument message -> Error message
   | units ->
@@ -118,7 +277,7 @@ let build t ~roots ~startup ~output =
       let anchors = List.filter_map (anchor t) paths in
       let target = Memory_layout.target t.context.env in
       let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
-      Build.program t.toolchain t.cache t.context.env t.settings
+      Build.program ?progress t.toolchain t.cache t.context.env t.settings
         ~files:(List.map (fun unit -> [ unit ]) units)
         ~sources ~output
 
@@ -136,156 +295,335 @@ let build_and_run ?input ?time_limit t ~roots ~startup ~arguments =
       (try Sys.remove output with Sys_error _ -> ());
       Ok result
 
-(* One test's part of the runner's report: its outcome, and its message
-   and its echo output, if any. *)
-type record = { outcome : string; message : string option; echo : string option }
+type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
 
-let parse_report text =
-  let length = String.length text in
-  let line_at position =
-    match String.index_from_opt text position '\n' with
-    | Some stop -> (String.sub text position (stop - position), stop + 1)
-    | None -> invalid_arg "Compile: a test report that ends in a line"
-  in
-  (* A block is its label and length on a line, then that many bytes and a
-     newline. *)
-  let rec blocks position record =
-    if position >= length then (position, record)
-    else
-      let line, after = line_at position in
+let outcomes =
+  [
+    ("passed", Passed);
+    ("failed", Failed);
+    ("panicked", Panicked);
+    ("incomplete", Incomplete);
+    ("timed_out", Timed_out);
+    ("crashed", Crashed);
+  ]
+
+let show_outcome outcome = fst (List.find (fun (_, o) -> o = outcome) outcomes)
+
+(* One test's result: its outcome, its message and echo output, if any, how
+   long it ran, and whether it came from the kept results. *)
+type record = {
+  outcome : outcome;
+  message : string option;
+  echo : string option;
+  microseconds : int;
+  cached : bool;
+}
+
+(* Reads the runner's report as it arrives. Each record's blocks come
+   before the line that names its test, so a record is whole when its line
+   arrives, and is handed to [on_record] with the test's number then. *)
+type reader = {
+  pending : Buffer.t;  (** Text not yet read as whole lines and blocks *)
+  mutable message : string option;
+  mutable echo : string option;
+  on_start : int -> unit;
+  on_record : int -> record -> unit;
+}
+
+let reader ?(on_start = ignore) on_record =
+  { pending = Buffer.create 1024; message = None; echo = None; on_start; on_record }
+
+let malformed text = invalid_arg ("Compile: a test report that cannot be read: " ^ text)
+
+(* Takes every whole record out of the pending text. *)
+let rec drain reader =
+  let text = Buffer.contents reader.pending in
+  match String.index_opt text '\n' with
+  | None -> ()
+  | Some stop -> (
+      let line = String.sub text 0 stop in
+      let consume count =
+        Buffer.clear reader.pending;
+        Buffer.add_string reader.pending (String.sub text count (String.length text - count))
+      in
       match String.split_on_char ' ' line with
       | [ (("message" | "echo") as label); count ] ->
-          let count = int_of_string count in
-          let content = String.sub text after count in
-          let record =
-            if label = "message" then { record with message = Some content }
-            else { record with echo = Some content }
-          in
-          blocks (after + count + 1) record
-      | _ -> (position, record)
-  in
-  let rec records position acc =
-    if position >= length then List.rev acc
-    else
-      let line, after = line_at position in
-      match String.split_on_char ' ' line with
-      | [ "test"; _; outcome ] ->
-          let position, record = blocks after { outcome; message = None; echo = None } in
-          records position (record :: acc)
-      | _ -> invalid_arg ("Compile: a test report line " ^ line)
-  in
-  records 0 []
+          let count = match int_of_string_opt count with Some n -> n | None -> malformed line in
+          (* The block is its bytes and a newline after the line. *)
+          if String.length text >= stop + 1 + count + 1 then begin
+            let content = String.sub text (stop + 1) count in
+            if label = "message" then reader.message <- Some content
+            else reader.echo <- Some content;
+            consume (stop + 1 + count + 1);
+            drain reader
+          end
+      | [ "start"; number ] -> (
+          match int_of_string_opt number with
+          | Some number ->
+              consume (stop + 1);
+              reader.on_start number;
+              drain reader
+          | None -> malformed line)
+      | [ "test"; number; outcome; microseconds ] -> (
+          match
+            ( int_of_string_opt number,
+              List.assoc_opt outcome outcomes,
+              int_of_string_opt microseconds )
+          with
+          | Some number, Some outcome, Some microseconds ->
+              let record =
+                {
+                  outcome;
+                  message = reader.message;
+                  echo = reader.echo;
+                  microseconds;
+                  cached = false;
+                }
+              in
+              reader.message <- None;
+              reader.echo <- None;
+              consume (stop + 1);
+              reader.on_record number record;
+              drain reader
+          | _ -> malformed line)
+      | _ -> malformed line)
 
-let render_report records =
-  let block label = function
-    | Some content -> Printf.sprintf "%s %d\n%s\n" label (String.length content) content
-    | None -> ""
-  in
-  String.concat ""
-    (List.mapi
-       (fun i r ->
-         Printf.sprintf "test %d %s\n" i r.outcome ^ block "message" r.message ^ block "echo" r.echo)
-       records)
+let feed reader text =
+  Buffer.add_string reader.pending text;
+  drain reader
+
+let parse_report text =
+  let found = ref [] in
+  let reader = reader (fun number record -> found := (number, record) :: !found) in
+  feed reader text;
+  if Buffer.length reader.pending > 0 || reader.message <> None || reader.echo <> None then
+    malformed "it ends partway through a record";
+  List.map snd (List.sort (fun (a, _) (b, _) -> compare a b) !found)
 
 (* The results that are kept: a pass with nothing to show. A failure's
    message and any echo give positions, which the key leaves out so that
    moving code keeps its results, and a time limit or a crash may come from
    the machine, so those tests run again. *)
-let keep record = record.outcome = "passed" && record.message = None && record.echo = None
+let keep record = record.outcome = Passed && record.message = None && record.echo = None
 
-let rec ensure_directory directory =
-  if not (Sys.file_exists directory) then begin
-    ensure_directory (Filename.dirname directory);
-    try Unix.mkdir directory 0o755 with Unix.Unix_error (EEXIST, _, _) -> ()
-  end
+(* Where test results are kept, by the key of the code each test can run.
+   The database keeps them in its store. *)
+type results = { find : string -> string option; add : string -> string -> unit }
 
-(* A key, which is a hash's bytes, as a file name. *)
-let file_name key =
-  String.concat ""
-    (List.map (Printf.sprintf "%02x") (List.map Char.code (List.of_seq (String.to_seq key))))
+(* A kept result is [passed] and the microseconds of the run that kept it.
+   A result in any other form, such as one an earlier version wrote, counts
+   as none, so its test runs again and replaces it. *)
+let stored results key =
+  match Option.map (String.split_on_char ' ') (results.find key) with
+  | Some [ "passed"; microseconds ] ->
+      Option.map
+        (fun microseconds ->
+          { outcome = Passed; message = None; echo = None; microseconds; cached = true })
+        (int_of_string_opt microseconds)
+  | _ -> None
 
-(* What is kept under a key: a test's outcome, or a template check's
-   results. *)
-let stored_text directory key =
-  let path = Filename.concat directory (file_name key) in
-  if Sys.file_exists path then Some (In_channel.with_open_bin path In_channel.input_all) else None
+let store results key record = results.add key (Printf.sprintf "passed %d" record.microseconds)
 
-(* Writes what is kept under a key, whole or not at all. *)
-let store_text directory key text =
-  ensure_directory directory;
-  let path = Filename.concat directory (file_name key) in
-  let temporary = Printf.sprintf "%s.%d" path (Unix.getpid ()) in
-  Out_channel.with_open_bin temporary (fun channel -> output_string channel text);
-  Sys.rename temporary path
+type progress =
+  | Lowering
+  | Compiling of { compiled : int; total : int }
+  | Running of { tests : int }
+  | Started of { test : int }
+  | Ended of { test : int; record : record }
 
-let stored directory key =
-  Option.map (fun outcome -> { outcome; message = None; echo = None }) (stored_text directory key)
+(* Whether a test is external: it declares [uses], so it gets the real
+   implementations of those capabilities, and its result depends on the
+   world, so it is never kept and runs every time. *)
+let external_test t test =
+  match Query.demand t.database Interface.Environment.interface test with
+  | Some (Test_interface (_ :: _)) -> true
+  | _ -> false
 
-(* Writes a kept result, a pass with nothing to show. *)
-let store directory key record = store_text directory key record.outcome
-
-let run_tests ?results t ~time_limit tests =
+let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests =
   let roots = List.map Lower.test_key tests in
-  let run roots =
-    match
-      build_and_run t ~roots
-        ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
-        ~arguments:[]
-    with
-    | Error message -> Error message
-    | Ok (status, out, _) -> Ok (status, out)
-  in
-  match results with
-  | None -> run roots
-  | Some directory -> (
-      (* Each test's result is kept under its key, which changes with any
-         code it can run, and a test is run again only when it changes. *)
-      match
-        List.map
-          (fun root -> (root, Reachable.test_key t.context.env ~lookup:(compiled t) root))
-          roots
-      with
-      | exception Invalid_argument message -> Error message
-      | keyed -> (
-          let known = List.map (fun (root, key) -> (root, key, stored directory key)) keyed in
-          let missing =
-            List.filter_map
-              (fun (root, key, r) -> if r = None then Some (root, key) else None)
-              known
+  progress Lowering;
+  let keyed test = results <> None && not (external_test t test) in
+  match
+    t.want t.lowering
+      (List.filter_map
+         (fun (test, root) -> if keyed test then Some root else None)
+         (List.combine tests roots));
+    List.map2
+      (fun test root ->
+        if keyed test then
+          match key_of t test with
+          | Some key -> (root, Some key)
+          | None -> invalid_arg ("Compile: cannot lower " ^ Path.show test)
+        else (root, None))
+      tests roots
+  with
+  | exception Invalid_argument message -> Error message
+  | keyed -> (
+      let known =
+        List.mapi
+          (fun index (root, key) ->
+            let kept =
+              match (results, key) with
+              | Some results, Some key when not rerun -> stored results key
+              | _ -> None
+            in
+            (index, root, key, kept))
+          keyed
+      in
+      (* Kept results are reported first, as ended, so progress counts
+         them, and then each test that runs as it ends. *)
+      List.iter
+        (fun (index, _, _, kept) ->
+          Option.iter (fun record -> progress (Ended { test = index; record })) kept)
+        known;
+      let missing = List.filter (fun (_, _, _, kept) -> kept = None) known in
+      let fresh = Array.make (List.length missing) None in
+      let ran =
+        if missing = [] then Ok ()
+        else
+          let missing = Array.of_list missing in
+          let roots = Array.to_list (Array.map (fun (_, root, _, _) -> root) missing) in
+          let output =
+            Filename.concat (Filename.get_temp_dir_name ())
+              (Printf.sprintf "truss-tests-%d" (Unix.getpid ()))
           in
-          let fresh =
-            if missing = [] then Ok []
-            else
-              match run (List.map fst missing) with
-              | Error message -> Error message
-              | Ok (_, out) -> (
-                  match parse_report out with
-                  | records when List.length records = List.length missing ->
-                      List.iter2
-                        (fun (_, key) record -> if keep record then store directory key record)
-                        missing records;
-                      Ok records
-                  | _ -> Error ("Compile: a test report that is not one record a test:\n" ^ out))
+          let built =
+            build t ~roots
+              ~startup:(Startup.tests_calling ~time_limit (List.map Instance.symbol roots))
+              ~output
+              ~progress:(fun compiled total -> progress (Compiling { compiled; total }))
           in
-          match fresh with
+          match built with
           | Error message -> Error message
-          | Ok fresh ->
-              let rest = ref fresh in
-              let records =
-                List.map
-                  (fun (_, _, record) ->
-                    match record with
-                    | Some r -> r
-                    | None -> (
-                        match !rest with
-                        | r :: more ->
-                            rest := more;
-                            r
-                        | [] -> invalid_arg "Compile: fewer results than tests"))
-                  known
+          | Ok () -> (
+              progress (Running { tests = Array.length missing });
+              let index_of number =
+                if number < 0 || number >= Array.length missing then
+                  malformed (Printf.sprintf "a test numbered %d" number);
+                let index, _, _, _ = missing.(number) in
+                index
               in
-              let status = if List.for_all (fun r -> r.outcome = "passed") records then 0 else 1 in
-              Ok (status, render_report records)))
+              let reader =
+                reader
+                  ~on_start:(fun number -> progress (Started { test = index_of number }))
+                  (fun number record ->
+                    ignore (index_of number);
+                    let index, _, key, _ = missing.(number) in
+                    fresh.(number) <- Some record;
+                    (match (results, key) with
+                    | Some results, Some key when keep record -> store results key record
+                    | _ -> ());
+                    progress (Ended { test = index; record }))
+              in
+              match Toolchain.run ~on_output:(feed reader) output [] with
+              | exception Invalid_argument message ->
+                  (try Sys.remove output with Sys_error _ -> ());
+                  Error message
+              | _, report, errors ->
+                  (try Sys.remove output with Sys_error _ -> ());
+                  if Array.exists Option.is_none fresh then
+                    Error
+                      ("Compile: the test program ended before reporting every test:\n" ^ report
+                     ^ errors)
+                  else Ok ())
+      in
+      match ran with
+      | Error message -> Error message
+      | Ok () ->
+          let fresh = ref (List.map Option.get (Array.to_list fresh)) in
+          Ok
+            (List.map
+               (fun (_, _, _, kept) ->
+                 match kept with
+                 | Some record -> record
+                 | None -> (
+                     match !fresh with
+                     | record :: rest ->
+                         fresh := rest;
+                         record
+                     | [] -> invalid_arg "Compile: fewer results than tests"))
+               known))
+
+(* Code that cannot ship: a [todo] or an [echo] a program can reach. *)
+type unshippable = {
+  failure : [ `Todo | `Echo ];
+  file : string;
+  line : int;
+  column : int;
+  way : Path.t list;  (** The definitions from [main] to the one that holds it *)
+}
+
+let unshippable t ~main ~echo =
+  let root = Instance.Program_main main in
+  match Reachable.reached t.context.env ~lookup:(compiled t) [ root ] with
+  | exception Invalid_argument message -> Error message
+  | reached ->
+      let definitions keys =
+        List.fold_left
+          (fun acc (key : Instance.key) ->
+            match key with
+            | Code { path; _ } -> (
+                match acc with last :: _ when Path.equal last path -> acc | _ -> path :: acc)
+            | _ -> acc)
+          [ main ] keys
+        |> List.rev
+      in
+      let found =
+        List.concat_map
+          (fun (compiled, keys) ->
+            match compiled with
+            | Lir.Code instance ->
+                let sites =
+                  List.concat_map
+                    (fun (f : Lir.function_) ->
+                      Array.to_list f.blocks
+                      |> List.concat_map (fun (b : Lir.basic_block) ->
+                          (if echo then
+                             List.filter_map
+                               (function Lir.Echo { site; _ } -> Some (`Echo, site) | _ -> None)
+                               b.statements
+                           else [])
+                          @
+                          match b.terminator with
+                          | Fail { failure = Todo; site; _ } -> [ (`Todo, site) ]
+                          | _ -> []))
+                    (instance.main :: Array.to_list instance.nested)
+                in
+                List.filter_map
+                  (fun (failure, (site : Lir.site)) ->
+                    match anchor t site.definition with
+                    | None -> None
+                    | Some anchor ->
+                        Some
+                          {
+                            failure;
+                            file = anchor.path;
+                            line = anchor.first_line + site.line;
+                            column = site.column;
+                            way = definitions keys;
+                          })
+                  sites
+            | _ -> [])
+          reached
+      in
+      (* One report for each place, however many instances hold it. *)
+      Ok
+        (List.sort_uniq
+           (fun a b ->
+             compare (a.file, a.line, a.column, a.failure) (b.file, b.line, b.column, b.failure))
+           found
+        |> List.fold_left
+             (fun acc u ->
+               match acc with
+               | last :: _ when (last.file, last.line, last.column) = (u.file, u.line, u.column) ->
+                   acc
+               | _ -> u :: acc)
+             []
+        |> List.rev)
+
+let test_keys t tests =
+  t.want t.lowering (List.map Lower.test_key tests);
+  List.filter_map (fun path -> Option.map (fun key -> (path, key)) (key_of t path)) tests
 
 let run_program ?input t ~main ~arguments =
   let root = Instance.Program_main main in
@@ -394,18 +732,34 @@ let evaluate t path ty =
 (* Works out a tagged template's check: each of the tag's [from_template]'s
    clauses that can run, for a template of these literal texts, by its
    position among the clauses, with whether it holds. Results are kept for
-   the compiler's run. *)
+   the compiler's run, and, with [results], under the key of the code that
+   ran, as test results are, which the texts are part of. *)
 type template_check = Ran of (int * bool) list | Ran_too_long
 
 let checked_templates : (Instance.key, template_check) Hashtbl.t = Hashtbl.create 8
 
+let check_key t root =
+  t.want t.lowering [ root ];
+  match Query.demand t.database (Lazy.force reach) (t.lowering, root) with
+  | key ->
+      Some
+        (Blake3.hash
+           (Cbor.encode
+              (Cbor.Array
+                 [
+                   Text "truss template check";
+                   Cbor.int Lir.version;
+                   Cbor.Array
+                     [
+                       Cbor.int t.lowering.target.pointer_bytes;
+                       Cbor.int t.lowering.target.usize_bytes;
+                     ];
+                   Bytes key;
+                 ])))
+  | exception _ -> None
+
 let check_template ?results t ~time_limit ~from_template ~texts =
   let root = Instance.Template_check { from_template; texts } in
-  let run () =
-    build_and_run t ~time_limit ~roots:[ root ]
-      ~startup:(Startup.evaluator_calling (Instance.symbol root))
-      ~arguments:[]
-  in
   match Hashtbl.find_opt checked_templates root with
   | Some found -> Ok found
   | None -> (
@@ -413,26 +767,23 @@ let check_template ?results t ~time_limit ~from_template ~texts =
       | exception Invalid_argument message -> Error message
       | [] -> Ok (Ran [])
       | positions -> (
-          (* Results are kept under the key of the code that ran, which its
-             texts are part of, so a check runs again only when they or its
-             code change. *)
           let key =
             match results with
-            | Some directory -> (
-                match Reachable.test_key t.context.env ~lookup:(compiled t) root with
-                | key -> Some (directory, key)
-                | exception Invalid_argument _ -> None)
+            | Some results -> Option.map (fun key -> (results, key)) (check_key t root)
             | None -> None
           in
           let output =
-            match Option.bind key (fun (directory, key) -> stored_text directory key) with
+            match Option.bind key (fun (results, key) -> results.find key) with
             | Some output -> Ok (0, output, "")
-            | None -> run ()
+            | None ->
+                build_and_run t ~time_limit ~roots:[ root ]
+                  ~startup:(Startup.evaluator_calling (Instance.symbol root))
+                  ~arguments:[]
           in
           match output with
           | Error message -> Error message
           | Ok (0, output, _) when String.length output = List.length positions ->
-              Option.iter (fun (directory, key) -> store_text directory key output) key;
+              Option.iter (fun (results, key) -> results.add key output) key;
               let found =
                 Ran
                   (List.mapi (fun index position -> (position, output.[index] <> '\000')) positions)
@@ -448,19 +799,22 @@ let check_template ?results t ~time_limit ~from_template ~texts =
                 (Printf.sprintf "Compile: checking a template of %s ended with status %d: %s"
                    (Path.show from_template) status errors)))
 
-let create ?(checks = true) database target toolchain cache settings =
-  let t =
-    {
-      database;
-      context = Lower.context ~checks database target;
-      toolchain;
-      cache;
-      settings;
-      done_ = [];
-      pulled = [];
-    }
-  in
-  (t.context.cursor_fields :=
-     fun yielding -> Yields.cursor_fields t.context.env (fst (pulled t yielding)));
-  (t.context.evaluate := fun path ty -> evaluate t path ty);
-  t
+let no_keys _ _ =
+  invalid_arg "Compile: keys were asked for, and nothing was given to say which are wanted"
+
+let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys) database target
+    toolchain cache settings =
+  let lowering = { target; checks } in
+  {
+    database;
+    lowering;
+    want;
+    context = fresh_context lowering database;
+    toolchain;
+    cache;
+    settings;
+    file_name;
+    evaluated = [];
+  }
+
+let () = evaluate_hook := evaluate

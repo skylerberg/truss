@@ -1,6 +1,5 @@
 (* What code may call: capabilities at each point, what lambdas use,
-   capability parameters, [provide], and what a dependency is granted. See
-   TYPECHECKER.md, "Capabilities".
+   capability parameters, [provide], and what a dependency is granted.
 
    This runs once a definition's bodies are checked, over the checked form,
    and records in it what each capability parameter stands for at each call

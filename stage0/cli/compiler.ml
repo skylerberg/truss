@@ -1,0 +1,44 @@
+(* Code generation as the commands that build use it. *)
+
+type build = Development | Release
+
+(* [--sanitize] builds with AddressSanitizer and UndefinedBehaviorSanitizer,
+   for testing the compiler: a report from either is a bug in it. *)
+let sanitizers =
+  [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
+
+let toolchain () =
+  match Toolchain.find () with
+  | Ok toolchain -> toolchain
+  | Error message -> Project.cannot_run "%s" message
+
+(* A development build compiles the package at -O1, one C file an
+   instance. A release build compiles at -O2 and optimizes across every
+   file as they are linked. Stage0's builds check at run time what the
+   prover will prove, so both keep those checks. *)
+let create ?(sanitize = false) (project : Project.t) build =
+  let toolchain = toolchain () in
+  let extra = if sanitize then sanitizers else [] in
+  let settings : Build.settings =
+    match build with
+    | Development -> { build = Development; optimization = O1; extra }
+    | Release ->
+        {
+          build = Release;
+          optimization = O2;
+          extra = Toolchain.link_time_optimization toolchain @ extra;
+        }
+  in
+  (* A development build reports positions in files as the current
+     directory reaches them, as diagnostics do. A release build names them
+     from the package's root, so the program is the same wherever it was
+     built. *)
+  let file_name module_ =
+    match (build, List.assoc_opt module_ project.files) with
+    | Development, Some file -> Project.shown file
+    | _ -> Workspace.file_path module_
+  in
+  Compile.create ~file_name ~want:(Database.want project.session) project.context
+    Memory_layout.target_64 toolchain
+    (Build.cache (Database.objects_directory ()))
+    settings

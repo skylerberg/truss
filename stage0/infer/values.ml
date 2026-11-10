@@ -1,6 +1,5 @@
 (* Values built from parts: strings and tagged templates, collection
-   literals, lambdas, [if], and [match]. See TYPECHECKER.md, "Tagged
-   templates and collection literals". *)
+   literals, lambdas, [if], and [match]. *)
 
 open Syntax
 module T = Types

@@ -1,6 +1,5 @@
 (* Number literals. A number is scanned wide and then checked, so that `3u8`,
-   `0xFG`, `1_`, and `0b102` each become one token with one precise error
-   (LEXER.md, "Numbers").
+   `0xFG`, `1_`, and `0b102` each become one token with one precise error.
 
    A literal with several problems gets one diagnostic, for the leftmost
    problem, and its fix corrects all of them at once, so that applying it
@@ -28,9 +27,8 @@ let is_radix_prefix text start =
   && text.[start] = '0'
   && match text.[start + 1] with 'x' | 'X' | 'b' | 'B' | 'o' | 'O' -> true | _ -> false
 
-(* The end of the number that starts at [start], following LEXER.md's
-   steps. The run also takes in name characters outside ASCII, so that `3é`
-   is one token with one error. *)
+(* The end of the number that starts at [start]. The run also takes in name
+   characters outside ASCII, so that `3é` is one token with one error. *)
 let scan_end text start =
   let length = String.length text in
   let rec run position =

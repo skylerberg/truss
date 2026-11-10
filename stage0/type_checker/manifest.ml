@@ -1,14 +1,24 @@
 (* Reading a package's manifest, [truss.toml]: the subset of TOML a
-   manifest uses. See SYNTAX.md, "Package manifest".
+   manifest uses.
 
      [package]
      name = "weather"
      version = "0.3.0"
 
      [dependencies]
-     http = { version = "4.0", capabilities = ["NetworkClient", "Clock"] } *)
+     http = { version = "4.0", capabilities = ["NetworkClient", "Clock"] }
 
-type t = { name : string; dependencies : Workspace.dependency list }
+     [test]
+     time_limit = 10 *)
+
+type t = {
+  name : string;
+  dependencies : Workspace.dependency list;
+  usize_bits : int;
+  time_limit : int;
+}
+
+let default_time_limit = 10
 
 exception Malformed of int * string
 
@@ -76,7 +86,8 @@ let without_comment line =
   String.sub line 0 !stop
 
 let parse text =
-  let section = ref "" and name = ref None and dependencies = ref [] in
+  let section = ref "" and name = ref None and dependencies = ref [] and usize_bits = ref 32 in
+  let time_limit = ref default_time_limit in
   List.iteri
     (fun index raw ->
       let line = index + 1 in
@@ -90,7 +101,15 @@ let parse text =
             let key = trim (String.sub text 0 equals)
             and value = String.sub text (equals + 1) (String.length text - equals - 1) in
             match !section with
-            | "[package]" -> if key = "name" then name := Some (unquote line value)
+            | "[package]" -> (
+                match key with
+                | "name" -> name := Some (unquote line value)
+                | "usize_bits" -> (
+                    match trim value with
+                    | "64" -> usize_bits := 64
+                    | "32" -> usize_bits := 32
+                    | _ -> raise (Malformed (line, "`usize_bits = 64`")))
+                | _ -> ())
             | "[dependencies]" ->
                 let entries = table line value in
                 let capabilities =
@@ -99,9 +118,19 @@ let parse text =
                   | None -> []
                 in
                 dependencies := { Workspace.package = key; capabilities } :: !dependencies
+            | "[test]" when key = "time_limit" -> (
+                match int_of_string_opt (trim value) with
+                | Some seconds when seconds > 0 -> time_limit := seconds
+                | _ -> raise (Malformed (line, "a whole number of seconds, more than 0")))
             (* Other sections, such as a build profile, are read past. *)
             | _ -> ()))
     (String.split_on_char '\n' text);
   match !name with
-  | Some name -> { name; dependencies = List.rev !dependencies }
+  | Some name ->
+      {
+        name;
+        dependencies = List.rev !dependencies;
+        usize_bits = !usize_bits;
+        time_limit = !time_limit;
+      }
   | None -> raise (Malformed (1, "a [package] section with a name"))

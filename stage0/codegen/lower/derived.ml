@@ -1,5 +1,5 @@
 (* Derived implementations of Equal, Ordered, Hash, and Default, from a
-   type's shape. See lower.ml. *)
+   type's shape. *)
 
 open Definitions
 open Lowering
@@ -62,6 +62,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
       parameter_types = [];
       substitution = bind signature.generics type_arguments;
       uses = [];
+      real = [];
       has_defaults = false;
       requires = [];
     }

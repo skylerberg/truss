@@ -61,7 +61,7 @@ and the language server depend on it without depending on the parser:
 |---|---|
 | `Syntax` | The tree types, shared by every later stage |
 | `Syntax_walk` | Visits the expressions of a tree, for checks that look at every one |
-| `Syntax_print` | Prints a tree as a compact S-expression, for tests and `truss-parse --tree` |
+| `Syntax_print` | Prints a tree as a compact S-expression, for tests and `stage0/tools/debug` |
 
 The parser is one dune library, which depends on `Token`, `Source`,
 `Diagnostic`, and the tree, and holds:
@@ -95,8 +95,9 @@ other: a statement has a type annotation, a function type in parentheses can
 carry a `cost` clause, and a clause holds expressions. Patterns contain none
 of them, and are their own module.
 
-`stage0/bin/truss_parse.ml` builds `truss-parse`, which prints a file's
-diagnostics, as JSON with `--json`, and its tree with `--tree`.
+`stage0/tools/debug`, a tool of this repository that is not part of the
+`truss` command, prints a file's trees and its diagnostics with `tree FILE`,
+or with `--json`, only the diagnostics, as JSON.
 
 ### Splitting a file into definitions
 

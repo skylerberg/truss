@@ -1,6 +1,5 @@
 (* The combinations of operators that Truss's partial order of precedence
-   leaves out. See PARSER.md, "Precedence and combinations that need
-   parentheses".
+   leaves out.
 
    The parser builds every expression with a total order. This walk then
    checks each operation against its operands, and reports a combination

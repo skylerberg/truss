@@ -1,7 +1,6 @@
 (* Exhaustiveness and reachability, by Maranget's usefulness algorithm
    ("Warnings for pattern matching", 2007), over the matched values as a
-   vector, so a [match] over several values is checked as one. See
-   TYPECHECKER.md, "Exhaustiveness and reachability".
+   vector, so a [match] over several values is checked as one.
 
    Constructors are the variants of a sum type, a record's one shape,
    [true] and [false], and for integers and [Character] the intervals that
@@ -28,7 +27,7 @@ type constructor =
 type space = Wild | Constructed of constructor * space list | Alternatives of space list
 
 type context = {
-  database : Query.database;
+  database : Query.context;
   package : string;
   checked : C.t;
   mutable diagnostics : Diagnostic.t list;
@@ -210,7 +209,7 @@ and constant_value context (resolved : Resolve.resolved) type_ seen (value : exp
   | False -> Some (Constructed (Boolean false, []))
   | String { tag = None; rest = []; first; _ } -> Some (Constructed (Text first.value, []))
   | Integer _ | Prefix (Negate, _) | Binary _ -> (
-      match Interface.Constants.expression context.database resolved value with
+      match Interface.Constants.expression context.database ~visiting:[] resolved value with
       | Some number -> Some (Constructed (Interval (number, number), []))
       | None -> None)
   | Name path -> (
@@ -696,7 +695,8 @@ let check_definition context ~text (definition : definition) =
   Syntax_walk.definition ~statement expression definition
 
 let definition_diagnostics =
-  Query.query ~name:"pattern_diagnostics" ~show:Resolve.Names.show_key (fun database key ->
+  Query.query ~name:"pattern_diagnostics" ~phase:Bodies ~saved:true ~show:Resolve.Names.show_key
+    (fun database key ->
       match
         ( Query.demand database Resolve.Names.definition key,
           Infer.clean database key,
