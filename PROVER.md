@@ -769,7 +769,12 @@ removes them in two steps:
 1. **Count in units.** Each callee's `O(g)` is counted as `g + 1` with its
    arguments, or 1 where `g` is below zero, each step as 1, and each call
    through a function value `visit` as `time(visit)`, which is at least 1,
-   and 1 when its type has an `O(...)` bound. Every callee's real cost is at
+   and 1 when its type has an `O(...)` bound. A call of a trait's method
+   that promises only that it ends, as `Equal.equal` does, is counted as
+   `time(T.method)` for the type `T` it is called on: the longest any one
+   call of it takes in the run, a constant of the run, which a bound states
+   as `time(Element.equal)`. It is one term for each method and type, so a
+   callee's bound and its caller's are about the same term. Every callee's real cost is at
    most `C` times what is counted, where `C` is the largest of the callees'
    constants and 1. That `C` is a fixed number, though unknown, so a bound
    `counted <= c' * f + d'` proves the real cost is at most
@@ -794,7 +799,10 @@ pair that proves all of them is taken. So binary search's
 `1 + c' * log(n / 2) + d' <= c' * log(n) + d'` holds because
 `log(n / 2) == log(n) - 1` for every `n` at least 1, one of the facts the
 prover gives the solver about `log`. That fact is exact because DESIGN.md
-rounds `log(n)` as it does. A tree's `O(size)` walk needs `c' > d'`, and
+rounds `log(n)` as it does. `log` of a number is its bit length, `power`
+of two numbers is their power, and `log` of a value of a bounded integer
+type is at most the bit length of the type's largest value, so a bound of
+`O(64)` can pay for `log` of any `UInt64`. A tree's `O(size)` walk needs `c' > d'`, and
 merge sort's `O(n * log(n))` needs `c'` large enough to pay for the merge,
 which the first pair gives both.
 
