@@ -229,21 +229,15 @@ let constant_of st ty (literal : C.literal) : Lir.operand =
 let string_value st ty text =
   match Monomorphic.shape st.context.monomorphic ty with
   | Record [ (field, Typed storage) ] ->
-      let storage_value =
-        Lir.Build
-          {
-            ty = storage;
-            variant = None;
-            fields =
-              [
-                ("buffer", Constant (Bytes text));
-                ("length", usize (String.length text));
-                ("capacity", usize 0);
-              ];
-          }
-      in
-      (field, storage, storage_value)
+      ( field,
+        storage,
+        Storage.static storage ~elements:(Constant (Bytes text))
+          ~length:(usize (String.length text)) )
   | _ -> bug "%s is not a record of storage" (Ground.to_string ty)
+
+(* A view, of a view type, of a literal's bytes, which are static. *)
+let text_view view text =
+  Storage.view view ~elements:(Constant (Bytes text)) ~length:(usize (String.length text))
 
 (* What a yielding method yields, in an instance. *)
 let cursor_element context (yielding : Ground.yielding) =

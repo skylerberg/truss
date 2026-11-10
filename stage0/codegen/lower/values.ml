@@ -449,18 +449,7 @@ and interpolate st (literal : S.string_literal) destination =
       let slice = temporary st slice_ty in
       (match Monomorphic.shape st.context.monomorphic slice_ty with
       | Record [ (field, Typed view) ] ->
-          emit st.b
-            (Assign
-               ( slice / Field field,
-                 Build
-                   {
-                     ty = view;
-                     variant = None;
-                     fields =
-                       [
-                         ("elements", Constant (Bytes text)); ("length", usize (String.length text));
-                       ];
-                   } ))
+          emit st.b (Assign (slice / Field field, text_view view text))
       | _ -> bug "a StringSlice that is not a view");
       call (method_ "write" Mut)
         [ (Mut, builder_ty, builder); (Read, slice_ty, slice) ]

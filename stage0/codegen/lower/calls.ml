@@ -95,19 +95,13 @@ and convert st (argument : C.argument) place ty =
           with
           | Record [ (storage_field, _) ], Record [ (view_field, Typed view) ] ->
               let viewed = temporary st view_ty in
+              let storage = place / Field storage_field in
               emit st.b
                 (Assign
                    ( viewed / Field view_field,
-                     Build
-                       {
-                         ty = view;
-                         variant = None;
-                         fields =
-                           [
-                             ("elements", Copy (place / Field storage_field / Field "buffer"));
-                             ("length", Copy (place / Field storage_field / Field "length"));
-                           ];
-                       } ));
+                     Storage.view view
+                       ~elements:(Copy (Storage.buffer storage))
+                       ~length:(Copy (Storage.length storage)) ));
               (viewed, view_ty)
           | _ -> bug "a view of %s" (Ground.to_string ty))
       | _ -> bug "a view of %s" (Ground.to_string ty))
@@ -426,11 +420,9 @@ and call_with ?evaluated st (call_ : C.call) ~(expressions : S.expression list)
         let intrinsic_arguments =
           List.map
             (fun (_, mode, ty, place) ->
-              match (Monomorphic.kind st.context.monomorphic ty, mode) with
-              | Storage _, _ -> Intrinsics.Place place
-              | _, T.Mut -> Intrinsics.Place place
-              | Shape (Record [ ("elements", _); ("length", _) ]), _ -> Intrinsics.Place place
-              | _ -> Intrinsics.Value (if mode = T.Own then owned st place ty else Copy place))
+              if mode = T.Mut || Storage.elements_of ty <> None || Storage.viewed ty <> None then
+                Intrinsics.Place place
+              else Intrinsics.Value (if mode = T.Own then owned st place ty else Copy place))
             in_order
         in
         match

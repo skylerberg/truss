@@ -27,18 +27,7 @@ and string_place st ty text =
       match Monomorphic.shape st.context.monomorphic ty with
       | Record [ (field, Typed view) ] ->
           let bytes = temporary st view in
-          emit st.b
-            (Assign
-               ( bytes,
-                 Build
-                   {
-                     ty = view;
-                     variant = None;
-                     fields =
-                       [
-                         ("elements", Constant (Bytes text)); ("length", usize (String.length text));
-                       ];
-                   } ));
+          emit st.b (Assign (bytes, text_view view text));
           emit st.b
             (Assign (place, Build { ty; variant = None; fields = [ (field, Lir.Copy bytes) ] }))
       | _ -> bug "a string pattern on %s" (Ground.to_string ty)));

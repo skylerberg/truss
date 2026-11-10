@@ -577,11 +577,21 @@ so they are compiled once and shared:
   is `Copyable`; handles and the types that hold one have none. A trivial
   type is a memory copy. A copy function takes the value as a read-only
   parameter and returns the copy, by the
-  [calling convention](#calling-convention). `Storage` with capacity 0, as
-  static bytes have, or with no elements, is shared, not copied, so a
-  static `String` is shared. Otherwise its copy is one allocation of
-  exactly its length, and for trivial elements one memory copy, the fast
-  path DESIGN.md mentions; other elements are copied one by one.
+  [calling convention](#calling-convention). A `Storage` is in one of
+  three states, which its capacity and length say, and its copy follows
+  the state:
+  - *empty*, with capacity 0 and no elements, and *static*, with capacity
+    0 and elements it does not own, as a string literal has: it owns no
+    buffer, so it is shared, not copied
+  - *owning*, with a capacity that is not 0: it owns a buffer on the heap,
+    which is never shared, since both would free it. With no elements its
+    copy is empty. Otherwise its copy is one allocation of exactly its
+    length, and for trivial elements one memory copy, the fast path
+    DESIGN.md mentions; other elements are copied one by one.
+
+  One module defines the two built-in types that hold a buffer, `Storage`
+  and `View`: their fields, these states, and how each is built. Nothing
+  else in code generation names their fields.
 - **Debug output:** the built-in debug output every type has, used by
   `echo`, failed `assert`s, and the test runner, and to write out values
   computed while compiling. A debug function takes a read-only pointer to
