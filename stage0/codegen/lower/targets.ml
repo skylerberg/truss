@@ -8,9 +8,9 @@ open Lir_builder
 
 (* Calls *)
 
-(* The instance a trait method's call reaches, once the types are known. *)
-let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type ~type_arguments
-    ~(evidence : C.evidence) =
+(* The [impl] that evidence stands for in this instance, with the type
+   arguments for the [impl]'s generic parameters. *)
+let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : C.evidence) =
   let substitute = T.substitute st.frame.code.substitution in
   let impl, arguments =
     match evidence with
@@ -44,6 +44,12 @@ let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type 
         | None -> bug "the impl's parameter %s is not bound" generic.generic.name)
       impl_interface.impl_generics
   in
+  (impl, impl_arguments)
+
+(* The instance a trait method's call reaches, once the types are known. *)
+let trait_method_key st ~(trait : T.trait_reference) ~name ~receiver ~self_type ~type_arguments
+    ~(evidence : C.evidence) =
+  let impl, impl_arguments = resolve_impl st ~trait ~self_type ~evidence in
   Instance.Code
     {
       path = Method { owner = impl; name; receiver };
@@ -194,6 +200,56 @@ let evidence_of st capability =
           in
           implementation_evidence st ~impl ~type_arguments ~implementation
       | _ -> missing ())
+
+(* Writes an [any] value to [destination]: the value at [value], moved into
+   a heap block of its own, with the method table of its type's [impl]. *)
+let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lir.place) destination =
+  let block = local st.b (Raw (Pointer Opaque)) in
+  if zero_size st inner_ty then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
+  else begin
+    emit st.b
+      (Call
+         {
+           target = Intrinsic Allocate;
+           arguments = [ Constant (Size_of inner_ty); Constant (Alignment_of inner_ty) ];
+           result = Returned (at block);
+         });
+    let typed = local st.b (Pointer { target = Value inner_ty; writable = true }) in
+    emit st.b (Assign (at typed, Use (Copy (at block))));
+    emit st.b
+      (Assign ({ root = Local typed; projections = [ Deref ] }, Use (owned st value inner_ty)))
+  end;
+  emit st.b
+    (Assign
+       ( destination,
+         Build
+           {
+             ty = any_ty;
+             variant = None;
+             fields =
+               [
+                 ("value", Copy (at block));
+                 ("vtable", Constant (Symbol_address (Any_table { impl; type_arguments })));
+               ];
+           } ))
+
+(* The evidence that a [provide] adds for one implementation: for each
+   capability its type provides, the [impl]'s table with a pointer to the
+   implementation. *)
+let provided_evidence st ~(implementation : Lir.operand) provides =
+  List.map
+    (fun (capability, impl, (arguments : T.substitution)) ->
+      let type_arguments =
+        List.map
+          (fun (g : T.generic) ->
+            match List.assoc_opt g.generic arguments with
+            | Some a ->
+                Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution a
+            | None -> bug "an unbound parameter of %s" (Path.show impl))
+          (impl_interface st.context impl).impl_generics
+      in
+      (capability, implementation_evidence st ~impl ~type_arguments ~implementation))
+    provides
 
 let call_instance st key ~(signature : T.signature) ~substitution
     ~(arguments : (T.mode * Ground.ty * Lir.place) list) ~mask ~destination =
