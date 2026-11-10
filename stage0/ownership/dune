@@ -5,6 +5,8 @@
   path
   types
   checked
+  core
+  core_walk
   infer
   interface
   resolve
