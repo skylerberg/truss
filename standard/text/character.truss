@@ -31,6 +31,9 @@ internal fn Character.at_scalar_index(index: UInt32) -> Character
 
 public fn Character.utf8_length(self) -> USize
   ensures 1 <= result && result <= 4
+  ensures (result == 1) == (self.code() < 128)
+  ensures (result == 2) == (128 <= self.code() && self.code() < 2048)
+  ensures (result == 3) == (2048 <= self.code() && self.code() < 65536)
   cost time O(1)
 {
   let code = self.code()
