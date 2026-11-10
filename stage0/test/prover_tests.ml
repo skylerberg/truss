@@ -2917,6 +2917,21 @@ let () =
       let text = triggered (Forall ([ ("i", Int) ], equal (f i) (Apply ("+", [ g i; int 1 ])))) in
       if (not (contains text ":pattern ((x0 b0)))")) || contains text ":pattern ((x1" then
         fail "%s" text);
+  let query fact =
+    {
+      declarations =
+        [ Function ("f", [ Int ], Int); Function ("g", [ Int ], Int); Constant ("n", Int) ];
+      facts = [ fact ];
+      goal = Apply (">", [ Apply ("f", [ Symbol "n" ]); int 0 ]);
+    }
+  in
+  test "a quantified fact with no trigger is told apart" (fun () ->
+      if
+        not
+          (untriggered (query (Forall ([ ("i", Int) ], positive (f (Apply ("+", [ i; int 1 ])))))))
+      then fail "a fact on f(i + 1) alone has no trigger";
+      if untriggered (query (Forall ([ ("i", Int) ], positive (f i)))) then
+        fail "a fact on f(i) has one");
   test "variables named by no one application share a trigger" (fun () ->
       expect
         (Forall ([ ("i", Int); ("j", Int) ], Apply ("<", [ f i; g j ])))

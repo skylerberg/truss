@@ -725,7 +725,9 @@ prover chooses them, as Dafny does, and states them in the query:
   definition, is triggered by its left side alone.
 
 When no trigger is found, the query states none and the solver chooses its
-own.
+own. A query with such a fact that runs out of steps says so in its
+diagnostic, since naming the term the fact is needed for, in an `assert`,
+can be what the solver lacks.
 
 A value made inside a quantifier, such as a call's result, is a function of
 the quantifier's bound names in the logic, since it can differ for each of
@@ -1214,10 +1216,6 @@ test the prover itself:
   library's maps state nested quantifiers over calls, each call's facts
   are about values made for every combination of bound names, and with
   them the solver runs out of steps even with triggers chosen.
-- **A diagnostic for a quantifier with no trigger.** When no set of
-  applications names every bound name, the solver chooses its own
-  triggers; the prover does not yet say so where a proof needed such a
-  fact.
 - **A lambda inside a quantifier, or with a functional lambda inside it,**
   whose body is not functional is applied as a function the solver knows
   nothing more about: inside a quantifier its arguments are not alone in

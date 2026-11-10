@@ -594,8 +594,13 @@ let definition_states ?running database solver (key : Names.key) =
                     failed (counterexample (Logic.members obligation.query) obligation values)
                 | Solved Out_of_steps ->
                     failed
-                      " The solver ran out of steps, so it may hold but needs help: a `proof` \
-                       block or a theorem.");
+                      (" The solver ran out of steps, so it may hold but needs help: a `proof` \
+                        block or a theorem."
+                      ^
+                      if Logic.untriggered obligation.query then
+                        " A quantified fact it may need has no term for the solver to use it by, \
+                         so an `assert` that names the term it is needed for may be enough."
+                      else ""));
             },
             obligation.cited ))
         (answers ?running solver outcome.obligations)
