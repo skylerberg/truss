@@ -173,9 +173,7 @@ let lender context (call : expression) =
         (fun (argument : C.argument) ->
           Option.bind (Hashtbl.find_opt context.nodes argument.expression)
             (fun (receiver : expression) ->
-              let receiver =
-                match receiver.kind with Mode (_, inner) -> inner | _ -> receiver
-              in
+              let receiver = match receiver.kind with Mode (_, inner) -> inner | _ -> receiver in
               Option.map
                 (fun place -> (place, if argument.mode = T.Mut then T.Mut else T.Read))
                 (place_of context receiver)))

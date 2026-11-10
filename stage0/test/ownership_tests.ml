@@ -527,4 +527,137 @@ let () =
       in
       if found <> 1 then fail "%d obligations" found)
 
+(* Lending: a call of a lending method is a part, lent for the rest of the
+   statement, and the place it is lent from is lent whole for as long. *)
+
+let grid =
+  "type Cell(name: String)\n\n\
+   type Grid(cells: List[Cell])\n\n\
+   fn Cell.visit(mut self) {\n\
+  \  self.name = \"seen\"\n\
+   }\n\n\
+   fn Grid.cell(self, index: USize) lends Cell {\n\
+  \  yield self.cells[index]\n\
+   }\n\n\
+   fn Grid.cell(mut self, index: USize) lends mut Cell {\n\
+  \  yield mut self.cells[index]\n\
+   }\n\n"
+
+let counter =
+  "type Counter(count: Int64)\n\n\
+   fn Counter.current(self) lends Int64 {\n\
+  \  yield self.count\n\
+   }\n\n\
+   fn Counter.step(mut self) {\n\
+  \  self.count = 3\n\
+   }\n\n"
+
+let tally =
+  "type Tally(cells: List[Int64])\n\n\
+   impl Index for Tally {\n\
+  \  type Key = USize\n\
+  \  type Output = Int64\n\n\
+  \  fn at(self, key: USize) lends Int64 {\n\
+  \    yield self.cells[key]\n\
+  \  }\n\n\
+  \  fn at(mut self, key: USize) lends mut Int64 {\n\
+  \    yield mut self.cells[key]\n\
+  \  }\n\
+   }\n\n\
+   fn bump(first: mut Int64, second: mut Int64) {\n\
+  \  first = 1\n\
+  \  second = 2\n\
+   }\n\n"
+
+let () =
+  test "a part lent `mut` is changed through its `mut self` method, with no mark of its own"
+    (fun () -> fine (grid ^ "fn f(grid: mut Grid) {\n  mut grid.cell(0).visit()\n}\n"));
+  test "a part lent `mut` is assigned to" (fun () ->
+      fine (grid ^ "fn f(grid: mut Grid) {\n  mut grid.cell(0).name = \"new\"\n}\n"));
+  test "a part lent read-only is not assigned to" (fun () ->
+      one_diagnostic
+        (grid ^ "fn f(grid: mut Grid) {\n  grid.cell(0).name = \"new\"\n}\n")
+        "types.not_assignable");
+  test "a part lent read-only is not passed `mut`" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn change(cell: mut Cell) {}\n\nfn f(grid: mut Grid) {\n  change(grid.cell(0))\n}\n")
+        "types.wrong_mark");
+  test "a part that is lent cannot be given up" (fun () ->
+      one_diagnostic
+        (grid ^ "fn take(cell: own Cell) {}\n\nfn f(grid: Grid) {\n  take(grid.cell(0))\n}\n")
+        "types.missing_mark");
+  test "a part that is lent cannot be returned" (fun () ->
+      one_diagnostic
+        (grid ^ "fn f(grid: Grid) -> Cell {\n  grid.cell(0)\n}\n")
+        "ownership.not_owned");
+  test "a name cannot keep a part that is lent" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn look(cell: Cell) {}\n\n\
+          fn f(grid: Grid) {\n\
+         \  let kept = grid.cell(0)\n\
+         \  look(kept)\n\
+          }\n")
+        "ownership.keeps_lent_part");
+  test "a name copies a `Plain` part that is lent" (fun () ->
+      fine (counter ^ "fn f(counter: Counter) -> Int64 {\n  let now = counter.current()\n  now\n}\n"));
+  test "matching a part that is lent binds views of it, which cannot be given up" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn take(name: own String) {}\n\n\
+          fn f(grid: Grid) {\n\
+         \  match grid.cell(0) {\n\
+         \    (name) => take(own name)\n\
+         \  }\n\
+          }\n")
+        "ownership.not_owned");
+  test "a place is lent whole, so two parts of it are not lent `mut` in one statement" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn touch(first: mut Cell, second: mut Cell) {}\n\n\
+          fn f(grid: mut Grid) {\n\
+         \  touch(mut grid.cell(0), second: mut grid.cell(1))\n\
+          }\n")
+        "ownership.conflicting_loan");
+  test "a place and a part it lends `mut` do not go to one call" (fun () ->
+      one_diagnostic
+        (grid
+       ^ "fn both(grid: Grid, cell: mut Cell) {}\n\n\
+          fn f(grid: mut Grid) {\n\
+         \  both(grid, cell: mut grid.cell(0))\n\
+          }\n")
+        "ownership.conflicting_loan");
+  test "a place lent read-only is not changed in the same statement" (fun () ->
+      one_diagnostic
+        (tally ^ "fn f(tally: mut Tally) {\n  tally[0] = tally[1]\n}\n")
+        "ownership.changed_while_viewed");
+  test "two parts of a place are lent read-only in one statement" (fun () ->
+      fine (tally ^ "fn f(tally: Tally) -> Int64 {\n  tally[0] + tally[1]\n}\n"));
+  test "a lend ends with its statement" (fun () ->
+      fine
+        (grid
+       ^ "fn f(grid: mut Grid) -> USize {\n  mut grid.cell(0).visit()\n  grid.cells.length()\n}\n"));
+  test "what a `while` loop's test lends goes back before its body" (fun () ->
+      fine
+        (counter
+       ^ "fn f(counter: mut Counter) {\n\
+         \  while counter.current() < 3 {\n\
+         \    mut counter.step()\n\
+         \  }\n\
+          }\n"));
+  test "two indexes of a user's collection are not lent `mut` together" (fun () ->
+      one_diagnostic
+        (tally ^ "fn f(tally: mut Tally) {\n  bump(mut tally[0], second: mut tally[1])\n}\n")
+        "ownership.conflicting_loan");
+  test "two indexes of a list are lent `mut` together, for the prover to show apart" (fun () ->
+      fine
+        "fn bump(first: mut Int64, second: mut Int64) {\n\
+        \  first = 1\n\
+        \  second = 2\n\
+         }\n\n\
+         fn f(items: mut List[Int64]) {\n\
+        \  bump(mut items[0], second: mut items[1])\n\
+         }\n")
+
 let () = finish ()

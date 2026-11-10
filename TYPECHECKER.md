@@ -740,9 +740,9 @@ The keyword at a call site must agree with the parameter:
 
 | Parameter | Argument |
 |---|---|
-| read-only | a place, unmarked, which the callee views; or a temporary |
-| `mut` | `mut place`. A missing mark is an error with a fix that adds it. |
-| `own` | `own place`, which moves it; `place.copy()`; a temporary, unmarked; or a `Plain` place, unmarked, which is copied |
+| read-only | a place, unmarked, which the callee views; a part that is lent; or a temporary |
+| `mut` | `mut place`, or a part that is lent `mut`. A missing mark is an error with a fix that adds it. |
+| `own` | `own place`, which moves it; `place.copy()`; a temporary, unmarked; or a `Plain` place or lent part, unmarked, which is copied |
 
 - **Marks are never redundant.** An argument marked `own` that is a `Plain`
   place, or any mark on a temporary, is an error with a fix that removes the
@@ -755,6 +755,14 @@ The keyword at a call site must agree with the parameter:
   read-only version, and `mut` and `own` choose theirs. On a temporary, the
   `own` version is chosen if there is one, and the read-only one otherwise.
   A missing version is an error that names the versions there are.
+- **A part that is lent is neither a place nor a temporary.** What a call
+  of a lending method gives, and each field and element of it, is lent
+  read-only or `mut`, as the method's signature says. It takes no mark: the
+  mark that chose the method's `mut` version is the one before the place it
+  is lent from. A part lent `mut` goes to a `mut` parameter, has its
+  `mut self` methods chosen, and can be assigned to; one lent read-only
+  cannot. Neither is ever given up to an `own` parameter or an `own self`
+  method, unless it is `Plain` and so copied.
 
 ### Members
 
@@ -911,8 +919,11 @@ body, and needs only the body and the interfaces of what it calls.
 ### Places
 
 A place is a local, a parameter, `self`, or a constant, followed by fields
-and indexes. An index whose value the checker cannot compare, such as
-`items[i]`, stands for *some element* of `items`.
+and by indexes of a `List`, a `Slice`, or an `Array`. An index whose value
+the checker cannot compare, such as `items[i]`, stands for *some element* of
+`items`. An index of any other collection is not a place: it is a call of
+the collection's `at`, a lending call (see
+[Yielding and lending](#yielding-and-lending)).
 
 Two places *overlap* when one is a prefix of the other. `config.servers` and
 `config.clients` do not overlap. `items[i]` and `items[j]` may, and so may
@@ -951,7 +962,7 @@ A *loan* is a period during which a place is lent. Each is shared or `mut`:
 | A `mut` argument or receiver | `mut` | the call |
 | A `let` of a place | shared | the binding is live |
 | A value of a view type, such as a slice, a cursor, or a lambda that captures | shared | the value is live |
-| The part a `lends` method gives out | shared or `mut` | the rest of the statement |
+| What a lending call is called on | shared, or `mut` when the method takes `mut self` | the rest of the statement |
 | A `for` loop's variable | shared or `mut` | the iteration |
 | A `provide` of a place | shared or `mut` | the `provide` block |
 
@@ -1014,10 +1025,22 @@ with `copy()`, unless it is `Plain`. Otherwise the error offers both fixes.
 
 - **A `lends` method yields exactly once on every path,** as Swift checks
   its `_read` and `_modify` accessors. The checker finds a path with no
-  `yield` or with two, and reports it. The part it yields is a place of
-  `self`, or a part reached through one, with the mode the signature states.
-  At the call, the part is lent for the rest of the caller's statement, and
-  a `lends` method cannot drive a `for` loop or be pulled.
+  `yield` or with two, and reports it. What it yields has the mode the
+  signature states, and may be a part of `self` or a value the method made.
+  A `lends` method cannot drive a `for` loop or be pulled.
+- **A lending call lends the whole place it is called on,** for the rest of
+  the caller's statement, read-only or `mut` as the method takes `self`. A
+  `while` loop's test is a statement of its own for this, so what the test
+  lends goes back before the body runs. Until then, a use of a place lent
+  `mut`, or a change of one lent read-only, is an error, and so is passing a
+  place to a call beside a part it lends when either is `mut`. An index of
+  a collection other than a `List`, a `Slice`, or an `Array` is such a call,
+  so two indexes of a user's collection are never lent `mut` in one
+  statement, and `grid[a] = grid[b]` needs the right side in a `let` first.
+- **A part that is lent goes back.** Returning it, storing it, or giving it
+  to an `own` parameter is an error unless it is `Plain`, and so is binding
+  it with `let`, since the name would outlast the statement. Matching one
+  binds views of its parts, or `mut` access to them when it is lent `mut`.
 - **A `yields` method may yield any number of times.** Calling it as a
   `for` loop's expression drives the loop. Calling it anywhere else makes a
   cursor, which is a view of the receiver when the method takes `self`, and
@@ -1249,6 +1272,7 @@ needs to work anything out from the syntax tree again:
 - **each pattern's variants and fields,** and the order of arms
 - **every move,** whole and partial, which `Ownership`'s result for the
   definition holds beside the checked form, since it is found after it
+- **each call of a lending method,** with how the part it gives is lent
 - **the capability set** at each call, the capability parameters solved, and
   the evidence each `provide` builds, for each capability its
   implementations implement

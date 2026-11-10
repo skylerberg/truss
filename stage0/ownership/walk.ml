@@ -168,8 +168,7 @@ and compound state flow (value : expression) : flow =
       match stop with Some stop -> expression state flow stop | None -> flow)
   | Member (base, _) -> expression state flow base
   | Bracket (base, _)
-    when Option.is_some context.checked.calls.(value.id) && not (storage (type_of context base))
-    ->
+    when Option.is_some context.checked.calls.(value.id) && not (storage (type_of context base)) ->
       call state flow value base
   | Bracket (base, items) ->
       let flow = expression state flow base in
@@ -350,11 +349,10 @@ and call state flow (value : expression) (callee : expression) =
                       then
                         report context Conflicting_loan written.span
                           (Printf.sprintf
-                             "This call is given `%s`, and a part that `%s` lends, and one of \
-                              them is `mut`. A place is lent whole, for the rest of the \
-                              statement, when a part of it is lent."
-                             (show_place context.names place)
-                             (show_place context.names lent)))
+                             "This call is given `%s`, and a part that `%s` lends, and one of them \
+                              is `mut`. A place is lent whole, for the rest of the statement, when \
+                              a part of it is lent."
+                             (show_place context.names place) (show_place context.names lent)))
                     placed
               | _ -> ())
           | _ -> ())
@@ -393,8 +391,8 @@ and statement_parts state (flow : flow) (written : statement) : flow =
            when (not (plain context (type_of context value)))
                 || is_view context (type_of context value) ->
              report context Keeps_lent_part value.span ~fixes:(copy_fix context value)
-               "This part is lent only for this statement, so a name cannot keep it. Use it \
-                in this statement, or copy it."
+               "This part is lent only for this statement, so a name cannot keep it. Use it in \
+                this statement, or copy it."
          | _ -> ());
       (* What a binding views, for as long as it is in use. A cursor views
          what its call's read-only arguments view, as a view would. *)
@@ -489,8 +487,7 @@ and loop state flow body ?(bound = []) ~held ~held_mode ?condition () =
      body may change it, and with [mut], nothing may use it at all. *)
   let loans_before = state.loans in
   state.loans <-
-    List.map (fun lent -> { lent; lent_mode = held_mode; lent_to = To_loop }) held
-    @ loans_before;
+    List.map (fun lent -> { lent; lent_mode = held_mode; lent_to = To_loop }) held @ loans_before;
   let rec iterate entry count =
     frame.continues <- None;
     let after = block state (rebound entry bound) body in

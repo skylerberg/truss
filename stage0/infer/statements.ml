@@ -356,8 +356,8 @@ and check_assignable state env (written : expression) =
   | `Lent ->
       report state Not_assignable written.span
         ~fixes:[ fix "Mark it `mut`." [ insert written.span.start "mut " ] ]
-        "This part is lent read-only, so it cannot change. Mark the place it is lent from \
-         `mut`, so that it is lent `mut`."
+        "This part is lent read-only, so it cannot change. Mark the place it is lent from `mut`, \
+         so that it is lent `mut`."
   | `Not_a_place ->
       report state Not_assignable written.span
         "Only a place, such as a variable, a field, or an element, can be assigned."

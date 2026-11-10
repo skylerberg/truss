@@ -51,8 +51,7 @@ let lent_mut_message context (loan : loan) =
   | To_loop -> Printf.sprintf "`%s` is lent `mut` to the loop, so its body cannot use it." place
   | To_statement ->
       Printf.sprintf
-        "`%s` is lent `mut` for the rest of this statement, so the statement cannot use it \
-         again."
+        "`%s` is lent `mut` for the rest of this statement, so the statement cannot use it again."
         place
 
 (* The edits that copy where a place was moved: [.copy()] after it, and
@@ -111,7 +110,8 @@ let changed state (place : place) (span : span) ~what =
             (Printf.sprintf
                (match loan.lent_to with
                | To_loop -> format_of_string "`%s` cannot %s while the loop goes over it."
-               | To_statement -> "`%s` cannot %s while a part of it is lent, which lasts this statement.")
+               | To_statement ->
+                   "`%s` cannot %s while a part of it is lent, which lasts this statement.")
                (show_place context.names place) what))
     state.loans;
   (* Each iteration of a [parallel for] runs at once with the others, so it
