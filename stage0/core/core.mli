@@ -96,7 +96,8 @@ and operand =
   | Value of expression
       (** A value. An [own] parameter takes ownership of it. A read-only parameter borrows it for
           the call. A [mut] parameter receives a [Value] only when the value is a {!Slice}, which is
-          a mutable view of part of a place. *)
+          a mutable view of part of a place. As the scrutinee of a [match], [is], or [let], the
+          pattern's bindings own the parts of the value: every binding has the mode [Own]. *)
 
 (** A memory location. Every place has a type: [Local], [Constant], and [Field] carry it, and a
     [Lent] or [Temporary] place has the type of its expression. [Core_walk.place_type] returns it.
@@ -212,6 +213,10 @@ and kind =
   | Break
   | Continue
   | Todo
+      (** [todo]: stops the program. A [todo] with no expected type has the type [Never]. The type
+          checker does not resolve an operation on such a [todo], or on a local bound to one, so the
+          core form replaces the operation: it evaluates the operands and ends in a [Todo]. A use of
+          such a local is a [Todo], and a pattern that would bind it is a {!Wildcard}. *)
   | Unreachable
   | Echo of expression
   (* Specification-only expressions *)
