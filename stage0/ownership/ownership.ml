@@ -34,7 +34,10 @@ let check database (key : Resolve.Names.key) : result option =
           kinds = Hashtbl.create 32;
           types = Hashtbl.create 32;
           parameters = [];
-          mut_parameters = [];
+          yields =
+            (match lowered.interface with
+            | Function_interface { output = Yields _; _ } -> true
+            | _ -> false);
           variables = [];
           diagnostics = [];
           moves = [];

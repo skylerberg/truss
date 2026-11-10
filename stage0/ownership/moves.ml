@@ -51,11 +51,6 @@ let verdict context (place : Place.t) ~type_ ~returned ~captured : verdict =
         refuse
           (Printf.sprintf "`%s` is a view, not owned here, so it cannot be moved. Copy it instead."
              shown)
-    | Mut_access, _ when place.steps = [] ->
-        refuse
-          (Printf.sprintf
-             "`%s` is lent `mut`, so it cannot be moved away; a field of it can, if it is put back."
-             shown)
     | (Owned | Mut_access), _ -> Moves
 
 (* A moved place, with the point that moved it. *)
@@ -66,13 +61,13 @@ let transfer verdicts (index : int) (point : point) (before : moved list) : move
   | Move { place; _ } when verdicts.(index) = Some Moves ->
       if List.mem (place, index) before then before else (place, index) :: before
   | Assign place -> List.filter (fun (moved, _) -> not (Place.is_prefix place moved)) before
-  | Bind locals ->
+  | Bind locals | Ends locals ->
       List.filter
         (fun ((moved : Place.t), _) ->
           match moved.root with Local local -> not (List.mem local locals) | Constant _ -> true)
         before
-  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Hold _ | Store _ | Return_view _
-  | Views_temporary _ | Keeps_lent_part _ | Write_through _ | Arguments _ ->
+  | Enter | Read _ | Move _ | Take_lent _ | Mutate _ | Exit | Suspend | Hold _ | Store _
+  | Return_view _ | Views_temporary _ | Keeps_lent_part _ | Write_through _ | Arguments _ ->
       before
 
 (* The places that may have been moved before each point. *)
@@ -138,6 +133,31 @@ let check context (graph : Graph.t) =
           (Printf.sprintf "`%s` is used after it was moved." shown)
     | _ -> ()
   in
+  (* A place that is lent [mut] goes back to its owner, so what is moved
+     out of it must be given a value again before it goes back. [roots]
+     says which of the moved places go back at the point. *)
+  let unrestored = Hashtbl.create 8 in
+  let restored index ~roots ~at message =
+    List.iter
+      (fun ((moved : Place.t), moved_at) ->
+        if
+          kind context moved.root = Mut_access
+          && roots moved.root
+          && not (Hashtbl.mem unrestored moved)
+        then begin
+          Hashtbl.replace unrestored moved ();
+          let moved_span = span context points.(moved_at).origin in
+          report context Field_not_restored
+            (Option.value ~default:moved_span at)
+            ~notes:(if at = None then [] else [ (moved_span, "It is moved out here.") ])
+            (message (show context moved) (show_root context moved.root))
+        end)
+      before.(index)
+  in
+  let bound locals : Place.root -> bool = function
+    | Local local -> List.mem local locals
+    | Constant _ -> false
+  in
   Array.iteri
     (fun index (point : point) ->
       let at = span context point.origin in
@@ -167,21 +187,32 @@ let check context (graph : Graph.t) =
           | Some (moved, _) -> used index moved
           | None -> ())
       | Exit ->
-          (* A field moved out of a [mut] parameter must be assigned again
-             before the function returns. *)
-          List.iter
-            (fun ((moved : Place.t), moved_at) ->
-              match moved.root with
-              | Local local when List.mem local context.mut_parameters ->
-                  report context Field_not_restored at
-                    ~notes:[ (span context points.(moved_at).origin, "It is moved out here.") ]
-                    (Printf.sprintf
-                       "`%s` belongs to the caller, so it must be given a value again before the \
-                        function returns."
-                       (show context moved))
-              | _ -> ())
-            before.(index)
-      | Enter | Bind _ | Hold _ | Store _ | Return_view _ | Views_temporary _ | Keeps_lent_part _
+          restored index
+            ~roots:(fun _ -> true)
+            ~at:(Some at)
+            (fun moved _ ->
+              Printf.sprintf
+                "`%s` belongs to the caller, so it must be given a value again before the function \
+                 returns."
+                moved)
+      | Suspend ->
+          if context.yields then
+            restored index
+              ~roots:(fun _ -> true)
+              ~at:(Some at)
+              (fun moved _ ->
+                Printf.sprintf
+                  "`%s` must be given a value again before this `yield`, because a loop may stop \
+                   the method here."
+                  moved)
+      | Bind locals | Ends locals ->
+          restored index ~roots:(bound locals) ~at:None (fun moved root ->
+              Printf.sprintf
+                "`%s` is moved out here and is not given a value again. `%s` is lent `mut`, so \
+                 every part of it must have a value when its loop iteration, its `match` arm, or \
+                 its lambda ends."
+                moved root)
+      | Enter | Hold _ | Store _ | Return_view _ | Views_temporary _ | Keeps_lent_part _
       | Write_through _ | Arguments _ ->
           ())
     points

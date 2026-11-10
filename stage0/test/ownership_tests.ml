@@ -361,6 +361,101 @@ let () =
         \  take(own config.name)\n\
          }\n"
         "ownership.field_not_restored");
+  test "a name that a value is moved into does not view the place it came from" (fun () ->
+      fine
+        "fn f(first: own List[Int64]) -> List[Int64] {\n\
+        \  var items = own first\n\
+        \  let taken = own items\n\
+        \  items = [1]\n\
+        \  mut items.push(2)\n\
+        \  taken\n\
+         }\n");
+  (let holder = "type Holder(items: List[Int64], count: USize)\n\n" in
+   let accepted name body = test name (fun () -> fine (holder ^ body)) in
+   let rejected name body code = test name (fun () -> one_diagnostic (holder ^ body) code) in
+   accepted "a field of a place lent `mut` can be moved out and put back"
+     "fn Holder.take_items(mut self) -> List[Int64] {\n\
+     \  let taken = own self.items\n\
+     \  self.items = []\n\
+     \  taken\n\
+      }\n";
+   rejected "a field moved out of `mut self` must be put back"
+     "fn Holder.take_items(mut self) -> List[Int64] {\n  let taken = own self.items\n  taken\n}\n"
+     "ownership.field_not_restored";
+   accepted "a place lent `mut` can be moved out whole and put back"
+     "fn take[Value](slot: mut Option[Value]) -> Option[Value] {\n\
+     \  let taken = own slot\n\
+     \  slot = None\n\
+     \  taken\n\
+      }\n\n\
+      fn replace[Value](slot: mut Option[Value], value: own Value) -> Option[Value] {\n\
+     \  let previous = own slot\n\
+     \  slot = Some(own value)\n\
+     \  previous\n\
+      }\n";
+   rejected "a place lent `mut` that is moved out whole must be put back"
+     "fn f(holder: mut Holder) -> Holder {\n  let taken = own holder\n  taken\n}\n"
+     "ownership.field_not_restored";
+   rejected "a place lent `mut` must be put back on every path"
+     "fn f(holder: mut Holder, keep: Bool) -> List[Int64] {\n\
+     \  let taken = own holder.items\n\
+     \  if keep {\n\
+     \    holder.items = []\n\
+     \  }\n\
+     \  taken\n\
+      }\n"
+     "ownership.field_not_restored";
+   rejected "a place lent `mut` cannot be used while it is moved out"
+     "fn f(holder: mut Holder) -> USize {\n\
+     \  let taken = own holder\n\
+     \  let count = holder.count\n\
+     \  holder = own taken\n\
+     \  count\n\
+      }\n"
+     "ownership.use_after_move";
+   accepted "a `mut` loop variable can be moved out and put back in the iteration"
+     "fn f(holders: mut List[Holder]) {\n\
+     \  for holder in mut holders {\n\
+     \    let items = own holder.items\n\
+     \    holder.items = own items\n\
+     \  }\n\
+      }\n";
+   rejected "what is moved out of a `mut` loop variable must be put back in the iteration"
+     "fn f(holders: mut List[Holder]) -> USize {\n\
+     \  var total: USize = 0\n\
+     \  for holder in mut holders {\n\
+     \    let items = own holder.items\n\
+     \    total = total + items.length()\n\
+     \  }\n\
+     \  total\n\
+      }\n"
+     "ownership.field_not_restored";
+   rejected "what is moved out of a `mut` binding of a `match` must be put back in the arm"
+     "fn f(slot: mut Option[Holder]) -> USize {\n\
+     \  match mut slot {\n\
+     \    Some(holder) => {\n\
+     \      let items = own holder.items\n\
+     \      items.length()\n\
+     \    }\n\
+     \    None => 0\n\
+     \  }\n\
+      }\n"
+     "ownership.field_not_restored";
+   rejected "a yielding method cannot yield while a place of its caller is moved out"
+     "fn Holder.each_item(mut self) yields mut Int64 {\n\
+     \  var items = own self.items\n\
+     \  for item in mut items {\n\
+     \    yield mut item\n\
+     \  }\n\
+     \  self.items = own items\n\
+      }\n"
+     "ownership.field_not_restored";
+   accepted "a lending method can yield while a place of its caller is moved out"
+     "fn Holder.lend_items(mut self) lends mut List[Int64] {\n\
+     \  var items = own self.items\n\
+     \  yield mut items\n\
+     \  self.items = own items\n\
+      }\n");
   test "one place cannot be lent mut twice to one call" (fun () ->
       one_diagnostic
         "fn swap(first: mut Int64, second: mut Int64) {}\n\n\

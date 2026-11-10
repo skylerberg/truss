@@ -40,6 +40,10 @@ type action =
   | Mutate of Place.t  (** The place is borrowed [mut]. *)
   | Assign of Place.t
   | Bind of Core.local list  (** A pattern binds these locals to new values. *)
+  | Ends of Core.local list
+      (** These locals stop being bound: a loop's variables when the loop ends, an arm's names after
+          the arm, and a lambda's parameters at the end of its body. *)
+  | Suspend  (** A [yield]. A loop may stop a yielding method here. *)
   | Exit  (** The function returns. *)
   | Hold of { holders : Core.local list; views : Place.t list }
       (** A [let] binds names to a value that views these places, and whatever the roots of these
@@ -309,10 +313,9 @@ let rec expression builder frontier (node : Core.expression) : int list =
         List.map (fun (capture : Core.capture) -> capture.local) captures @ captured;
       let entry = add builder Enter node.origin in
       builder.entries <- entry :: builder.entries;
-      let inside =
-        emit builder [ entry ] (Bind (List.concat_map pattern_locals parameters)) node.origin
-      in
-      ignore (block builder inside body);
+      let bound = List.concat_map pattern_locals parameters in
+      let inside = emit builder [ entry ] (Bind bound) node.origin in
+      ignore (emit builder (block builder inside body) (Ends bound) node.origin);
       builder.loops <- loops;
       builder.loans <- loans;
       builder.captured <- captured;
@@ -379,13 +382,12 @@ and construct builder frontier (mode : T.mode) fields =
 and arms_ builder frontier (arms : Core.arm list) ~body =
   List.concat_map
     (fun (arm : Core.arm) ->
-      let frontier =
-        emit builder frontier (Bind (List.concat_map pattern_locals arm.patterns)) arm.origin
-      in
+      let bound = List.concat_map pattern_locals arm.patterns in
+      let frontier = emit builder frontier (Bind bound) arm.origin in
       let frontier =
         match arm.guard with Some guard -> expression builder frontier guard | None -> frontier
       in
-      body frontier arm.body)
+      emit builder (body frontier arm.body) (Ends bound) arm.origin)
     arms
 
 (* A call: its arguments in order, then what the call means for the places
@@ -627,7 +629,7 @@ and statement builder frontier (node : Core.statement) =
   builder.loans <- loans;
   frontier
 
-and statement_parts builder frontier (node : Core.statement) =
+and statement_kind builder frontier (node : Core.statement) =
   match node.kind with
   | Let { pattern; value; else_ } -> let_ builder frontier node pattern value else_
   | Evaluate value -> expression builder frontier value
@@ -717,6 +719,10 @@ and statement_parts builder frontier (node : Core.statement) =
       else frontier
   | Yield { mode; part } -> operand builder frontier mode part
 
+and statement_parts builder frontier (node : Core.statement) =
+  let frontier = statement_kind builder frontier node in
+  match node.kind with Yield _ -> emit builder frontier Suspend node.origin | _ -> frontier
+
 (* A [let]: its value, then what its names come to view. *)
 and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (value : Core.operand)
     else_ =
@@ -724,11 +730,6 @@ and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (valu
   Option.iter (fun else_ -> ignore (block builder frontier else_)) else_;
   let type_ = operand_type value in
   let mutable_ = match pattern.kind with Bind { mutable_; _ } -> mutable_ | _ -> false in
-  let is_place =
-    match value with
-    | Place found | Value { kind = Use found; _ } -> Option.is_some (Place.of_core found)
-    | Value _ -> false
-  in
   let lent_part = match value with Place found -> Place.is_lent_part found | Value _ -> false in
   let origin =
     match value with Place found -> Core_walk.place_origin found | Value value -> value.origin
@@ -742,10 +743,16 @@ and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (valu
     else frontier
   in
   let holds_views = builder.is_view type_ || match type_ with T.Cursor _ -> true | _ -> false in
+  (* A name bound to a place views the place. A name bound to a value views
+     what the value views, if its type can hold views. A value that is
+     moved into the name is the name's own, so the name views nothing. *)
   let views =
-    if mutable_ && is_place then []
-    else if (is_place && not (builder.plain type_)) || holds_views then viewed_operand builder value
-    else []
+    match value with
+    | Place found
+      when holds_views || (Option.is_some (Place.of_core found) && not (builder.plain type_)) ->
+        viewed_place builder found
+    | Value value when holds_views -> viewed builder value
+    | Place _ | Value _ -> []
   in
   let frontier =
     if holds_views then
@@ -791,7 +798,8 @@ and loop builder frontier ~bound ~held ~condition ~parallel (body : Core.block) 
       builder.loans <- loans;
       builder.loops <- List.tl builder.loops;
       link builder (body_end @ !continues) head;
-      tested @ !breaks
+      let ended = tested @ !breaks in
+      if bound = [] then ended else emit builder ended (Ends bound) origin
 
 (* The graph of a definition, or [None] if the definition has no body to
    check: only a function, a test, and a law's proof have one. *)
