@@ -206,7 +206,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
                  [ input ~mode:Mut name (storage (libc_scalar scalar)) ]
              | Written (scalar, names) ->
                  List.map (fun name -> input ~mode:Mut name (libc_scalar scalar)) names
-             | Always _ | Fixed _ | Environment -> [])
+             | Always _ | Fixed _ -> [])
            parameters
         @ found)
   | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []

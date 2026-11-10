@@ -640,17 +640,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                       names;
                     Address { place = at structure; writable = true }
                 | Always number -> usize number
-                | Fixed number -> number_constant number
-                | Environment ->
-                    let environment = local b (Raw (Pointer Opaque)) in
-                    emit b
-                      (Call
-                         {
-                           target = Intrinsic Environment;
-                           arguments = [];
-                           result = Returned (at environment);
-                         });
-                    Copy (at environment))
+                | Fixed number -> number_constant number)
               parameters
           in
           let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).system function_) in

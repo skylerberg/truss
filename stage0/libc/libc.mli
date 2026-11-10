@@ -79,6 +79,11 @@ type number =
   | Utime_omit
   | Path_max
   | F_dupfd_cloexec
+  | F_setfd
+  | Fd_cloexec
+  | Spawn_file_actions_size  (** How many bytes a [posix_spawn_file_actions_t] takes *)
+  | Sigusr1
+  | Sigusr2
 
 (** How many elements a function reads or writes through an address it is given. The prover holds
     every call to it: a view has that many elements, and storage has room for that many. *)
@@ -111,8 +116,6 @@ type passes =
   | Fixed of number
       (** A number of the system that is no argument of the Truss call, such as the request that a
           row of [fcntl] is for *)
-  | Environment
-      (** The environment the process was started with, which is no argument of the Truss call *)
 
 type result =
   | Returns of scalar
@@ -183,6 +186,12 @@ type function_ =
   | Getpid
   | Proc_pidpath  (** Only macOS has it *)
   | Fcntl_dupfd_cloexec  (** [fcntl] with the request [F_DUPFD_CLOEXEC] *)
+  | Fcntl_setfd_cloexec  (** [fcntl] with the request [F_SETFD] and the flag [FD_CLOEXEC] *)
+  | Posix_spawn_file_actions_init
+  | Posix_spawn_file_actions_destroy
+  | Posix_spawn_file_actions_adddup2
+  | Posix_spawn_file_actions_addopen
+  | Posix_spawn_file_actions_addchdir  (** [posix_spawn_file_actions_addchdir_np] *)
 
 val functions : function_ list
 
