@@ -200,7 +200,7 @@ let rec reach =
 
 (* What a test's result is kept under: the key of everything its code can
    reach, the version of code generation, and the target, since [USize] is
-   a [typedef] in the C, so the LIR is the same for every width while
+   a [typedef] in the C, so the LIR can be the same for two widths while
    results such as [USize.maximum] are not. *)
 let test_key_query =
   Query.query ~name:"test_key" ~phase:Keys ~saved:true ~portable:true
