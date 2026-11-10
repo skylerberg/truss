@@ -285,6 +285,17 @@ let () =
     \  mut grid.cell(0).state = 4\n\
      }\n"
     "{ lent app::main::Grid.cell(mut self)(mut place grid, 0) lends mut.state = 4 }";
+  expect_body
+    "a `mut self` method called on an indexed element indexes with the `mut self` version of `at`"
+    "type Worker(count: Int64)\n\n\
+     fn Worker.reset(mut self) {\n\
+    \  self.count = 0\n\
+     }\n\n\
+     fn g(workers: mut List[Worker], index: USize) {\n\
+    \  mut workers[index].reset()\n\
+     }\n"
+    "{ app::main::Worker.reset(mut self)(mut place lent Index.at for List[Worker] by \
+     standard::list::impl Index for List[Element](mut place workers, place index) lends mut) }";
   test "a `lends mut` method yields a mutable place" (fun () ->
       let found =
         printed_body
