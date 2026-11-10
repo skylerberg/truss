@@ -151,19 +151,19 @@ let pulled context (yielding : Ground.yielding) :
    clauses that can run, each worked out and written out as a [Bool], in
    order. A clause that reads the template's parts is not asked of it; the
    prover asks only those that read its literals. *)
-let check_state context from_template =
-  let code = code_of context from_template [] in
-  (enter context (frame_of code ~inlined:[ from_template ]), code)
+let code_state context path =
+  let code = code_of context path [] in
+  (enter context (frame_of code ~inlined:[ path ]), code)
 
 (* The positions, among a tag's [from_template]'s clauses, of those a
    template check works out. *)
 let template_checked context from_template =
-  let st, code = check_state context from_template in
+  let st, code = code_state context from_template in
   List.concat
     (List.mapi (fun index clause -> if executable st clause then [ index ] else []) code.requires)
 
 let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
-  let st, code = check_state context from_template in
+  let st, code = code_state context from_template in
   start st.b (block st.b);
   in_scope st (fun () ->
       (match code.parameter_types with
@@ -185,6 +185,45 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
               context.bool holds
           end)
         code.requires;
+      Constants.write_output st output);
+  { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
+
+(* Code run while compiling, for a call whose arguments are known: the
+   function, which is not generic, called with each argument a constant,
+   and its result written out. *)
+let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
+  let st, _ = code_state context function_ in
+  start st.b (block st.b);
+  let signature = signature_of context function_ in
+  in_scope st (fun () ->
+      let passed =
+        List.map2
+          (fun (mode, ty) value ->
+            let ty = ground st ty in
+            let place = temporary st ty in
+            let constant =
+              match scalar_of st ty with
+              | Integer integer -> constant_int integer value
+              | Bool -> Lir.Constant (Bool (not (Z.equal value Z.zero)))
+              | _ -> bug "an evaluated call's argument of type %s" (Ground.to_string ty)
+            in
+            emit st.b (Assign (place, Use constant));
+            (mode, ty, place))
+          (interface_parameters signature) arguments
+      in
+      let result_ty =
+        match signature.output with
+        | Returns ty -> ground st ty
+        | _ -> bug "an evaluated call that does not return"
+      in
+      let result = temporary st result_ty in
+      call_instance st
+        (Code { path = function_; type_arguments = [] })
+        ~signature ~substitution:[] ~arguments:passed ~mask:0 ~destination:result;
+      let output = Constants.begin_output st in
+      Glue.encode_call context.glue st.b
+        ~output:(Address { place = output; writable = true })
+        result_ty result;
       Constants.write_output st output);
   { key; main = finish_function st ~first:[] ~rest:[] (); nested = nested_functions st }
 

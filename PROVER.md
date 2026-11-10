@@ -187,7 +187,28 @@ and `reads` clauses):
 - **Integers are mathematical integers.** Each value of a built-in integer
   type comes with its range as a fact, and each operation on one becomes
   an exact operation and an obligation that the result is in range, as in
-  Dafny and Verus.
+  Dafny and Verus. The intrinsic module's integer operations mean what the
+  compiler makes them do: arithmetic that stops the program on overflow or
+  a zero divisor gives the exact result when it returns, wrapping
+  arithmetic gives the exact result brought into range by a remainder,
+  and the overflow tests, the comparisons, `fits`, and `convert` of a
+  value that fits are exact. The standard library's integer methods each
+  have a `time` clause, so `wrapping_add`, `saturating_add`,
+  `checked_add`, `try_from`, and the rest are definitions their callers
+  unfold.
+- **A storage and a view are sequences.** Each is known by its model, a
+  `Sequence` of its elements whose length fits a `USize`, which
+  `storage_model` and `view_model`, intrinsics for specifications only,
+  name, so `List`, `Slice`, `String`, and `StringSlice` define `model()`
+  over their buffers. Each operation reads or changes that sequence as the
+  compiler makes it do: `storage_push` appends, `storage_insert` shifts
+  what follows, `view_slice` is a run of its view, and reading bytes
+  appends what it says it read; `compare_bytes` is a total lexicographic
+  order on its views' bytes, zero exactly when they are the same. An
+  operation that stops the program on a
+  bad index says what holds when it returns. A part `storage_at_mut` lends
+  changes nothing until the lend ends, where the storage takes back what
+  the caller left in it.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts, such
   as `0 <= a & b <= a` for unsigned values. That proves the bounds most bit
@@ -232,7 +253,11 @@ solvers and versions, and its decision procedures are a common source of
 unstable proofs.
 
 - **A `Sequence`** has a length, indexing, `append`, `concatenate`,
-  `update`, and `contains`.
+  `update`, `contains`, and `sum`, which adds up a measure of each
+  element: a function value that ends and uses no capabilities. Its laws
+  are in the contracts of `append`, `concatenate`, and `update`, and a
+  loop's `yielded` meets `append`'s, so a loop's cost can be a sum of what
+  its iterations spend.
 - **A `FiniteSet` and a `FiniteMap`** have membership, a size, inserting,
   and, for a map, the value under each key and its keys; a set can also
   remove. A `Multiset` has a count of each value so far.
@@ -291,7 +316,8 @@ decides when a body is a definition. In the solver:
   function with a `time` clause, which changes none of its arguments, is a
   function in the logic, applied to its arguments, wherever it is called,
   in code as in specifications, so `let sorted = is_sorted(items)` and
-  `ensures is_sorted(items)` mean the same term.
+  `ensures is_sorted(items)` mean the same term. An `impl`'s method has a
+  `time` clause when its trait's method does, since it keeps the trait's.
 - **Its contract is known at each call.** Where a call's arguments meet the
   `requires`, the `ensures` holds of its result. That is sound because the
   function terminates, and is defined, wherever the `requires` holds.
@@ -309,11 +335,19 @@ decides when a body is a definition. In the solver:
 - **Every other function is a fresh result.** A call to a function that is
   not pure, or has no `time` clause, gives a new value about which its
   `ensures` is known, and two calls are not known to agree.
-- **A function value is known by its type.** A lambda, or a function named
-  as a value, is a value of its function type, and a call through it gives
-  a fresh result. A lambda is proven where it is written, with fresh
-  arguments, and must end exactly when its function type has a `time`
-  clause.
+- **A function value is a value of the logic.** A call through a value
+  whose function type has a `time` clause, uses no capabilities, and
+  changes none of its arguments is the value applied to its arguments, so
+  two calls with the same arguments agree. A call through any other
+  function value gives a fresh result.
+- **Applied, a function value is what it names.** A pure function named
+  as a value is that function applied, or its body where its definition
+  holds for every argument. A lambda with a functional body is its body
+  applied to its arguments, and two lambdas with the same body over the
+  same captured values are the same value, so a bound and a loop's bound
+  that both write `fn(row) { row.length() }` mean the same sum. A lambda
+  is proven where it is written, with fresh arguments, and must end
+  exactly when its function type has a `time` clause.
 - **A lambda passed where a parameter's type has a `requires`** is
   checked with that `requires` assumed of its arguments, with the call's
   arguments in place of the callee's parameters. In
@@ -351,7 +385,10 @@ is a term, every fact is guarded by the condition of the path it holds on,
 and where paths join, each local that differs gets a fresh symbol that each
 path defines. So what a body gives its queries grows with the body, not
 with its number of paths. No step goes around a loop: each loop is cut at
-its head by its invariant, as below.
+its head by its invariant, as below. The right side of `&&`, `||`, or
+`==>` runs on only one path, so when it changes a local, as a call with a
+`mut` argument does, that path joins the one where it did not run, as the
+two arms of an `if` do.
 
 An `assert` makes one query: the facts gathered before it, and its fact as
 the goal, guarded by its path. Once made, it is a fact for the rest of the
@@ -418,10 +455,11 @@ call uses the capability method's contract.
 ### Lending and yielding methods
 
 - **In the method's own body,** each `yield` asserts the clauses that
-  mention `result`, with the part as `result`. For a `mut` part, the part's
-  place then takes a fresh value that meets the part's type invariant,
-  since the caller may have changed it, and the part is appended to
-  `yielded`. In a yielding method, each `yield` also asserts the clauses
+  mention `result`, with the part as `result`. For a `mut` part, the part
+  then takes a fresh value that meets its type invariant, since the caller
+  may have changed it, which is stored back into its place, through a
+  collection's `lends mut` index for an element, and the part is appended
+  to `yielded`. In a yielding method, each `yield` also asserts the clauses
   that hold where the method ends, with `finished` false, and the invariant
   of `self`, since a loop may stop there. At the end of the body, those
   clauses are asserted with `finished` true.
@@ -467,6 +505,11 @@ invariants and the validity of its fields.
 - **Functions in an invariant are definitions or contracts like any
   others,** so a type's validity may unfold `is_sorted` or rely on its
   contract.
+- **Another package's opaque type** has a validity that is a predicate the
+  prover never unfolds there: a value of the type comes from its own
+  package, which shows the invariant, so elsewhere validity is assumed
+  where a value arrives and shown where one leaves, which the facts it
+  arrived with already do.
 
 ### Specifications
 
@@ -541,9 +584,13 @@ of it.
 
 A query holds only the facts that can matter to it. Starting from the
 symbols of the obligation, each fact that mentions one of them is kept,
-with its symbols, until nothing more is added. Dropping a fact is always
-sound, and a fact about symbols the obligation never reaches cannot help to
-prove it. A change to a function that no kept fact mentions leaves the
+with its symbols, until nothing more is added. A quantified equation whose
+left side names every bound name, such as a lambda's definition or the sum
+over a longer sequence, waits until every symbol of its left side is kept,
+since the solver can use it only where a term of that shape is; this also
+keeps quantifiers out of queries that do not need them, which the solver
+decides by other means. Dropping a fact is always sound, and a fact about
+symbols the obligation never reaches cannot help to prove it. A change to a function that no kept fact mentions leaves the
 query's text, and so its kept answer, alone.
 
 ### The canonical form
@@ -632,6 +679,8 @@ The prover adds a ghost counter for each resource that has a cost clause:
 | `allocated_bytes` | The bytes of each allocation, and each callee's `allocated_bytes` |
 | `calls(target)` | Each call to the target, and each callee's count for it |
 
+- **A specification spends nothing.** A `requires`, an `ensures`, an
+  invariant, or a bound never runs, so what it calls is not counted.
 - **A counter is an `Integer` on each path,** increased at each call and
   each iteration, so costs are proven by the same verification conditions
   as everything else. Where paths join, a counter is what the path taken
@@ -648,11 +697,13 @@ The prover adds a ghost counter for each resource that has a cost clause:
 - **Allocations are counted where DESIGN.md says they happen:** building an
   `indirect` variant is one allocation, of a fixed size that is not known
   to the prover, and so is any callee's allocation.
-- **The intrinsic module's operations** each take a fixed number of steps
-  and allocate nothing, or are known by no bound, as the compiler declares
-  them: arithmetic and reading or swapping in place are the first kind,
-  growing storage, copying runs of bytes, and reaching the system the
-  second.
+- **The intrinsic module's operations** each take a fixed number of steps,
+  steps in proportion to a buffer's length, or are known by no bound, as
+  the compiler declares them: arithmetic and reading or swapping in place
+  are the first kind; inserting into or removing from a storage, and
+  comparing runs of bytes, the second; growing storage and reaching the
+  system the third. Only the first kind never allocates, with removing and
+  comparing.
 - **A `calls(target)` counter** counts each call through a function value
   or of a capability's method. A callee that is passed the function value,
   or uses the capability, counts what its own `calls` clause about it says;
@@ -757,7 +808,12 @@ plus what happens before and after:
   potentials of its parts, as DESIGN.md defines it. In the logic it is a
   function of the value, whose definition is unfolded once for each value
   it is asked of, so a recursive type's potential is never unfolded
-  forever.
+  forever. A growable buffer, a storage or a type whose model is the
+  sequence of the storage it holds, such as a `List` or a `String`, holds
+  what it saved for growing, which is between zero and its length, and the
+  sum of its elements' potentials over its model, as `Sequence.sum` gives
+  it. `storage_push` takes one step, amortized, paid out of that saving, so
+  pushing `count` times costs `O(count + items.length())`.
 - **Potential is counted in a unit of its type's own,** one unknown constant
   for each type with a potential, the same for every method of the type, so
   that potential saved by one method pays for another's work. Since every
@@ -803,8 +859,20 @@ plus what happens before and after:
 Some obligations are about values known when compiling. The check of a
 tagged template, `requires is_valid_pattern(template.literals)`, applies a
 function to literal text, which no solver can decide by reasoning about a
-regular-expression parser. Stage0 decides a tagged template's checks by
-running them, as [Tagged templates](DESIGN.md#tagged-templates) intends:
+regular-expression parser. Stage0 runs two kinds of code while proving.
+
+- **A call whose arguments are all known:** a pure function with a `time`
+  clause, compiled rather than for specifications only, not generic,
+  reached directly rather than through a bound, with every argument an
+  integer or `Bool` literal and a result of one of those. Each such call a
+  query mentions is run, as a `Call_evaluation` instance (see CODEGEN.md,
+  "Code run while compiling"), and its result is a fact of the query, so
+  `count_up(7)` is known to be `7` though nothing in `count_up`'s contract
+  says so. A call that cannot be built, or runs past the test time limit,
+  is left as the solver knows it.
+
+It also decides a tagged template's checks by running them, as
+[Tagged templates](DESIGN.md#tagged-templates) intends:
 
 - **A clause of a tag's `from_template` that reads its template only as
   `template.literals`** is decided by running it, for an `impl` that is not
@@ -898,9 +966,13 @@ A proof is as trustworthy as:
   are extensional, what `log` and `power` are, the few facts about bitwise
   operations, and what a derived `Equal` means
 - the contracts of `standard::specification`, which say what the
-  mathematical collections are
-- the standard library's contracts whose bodies end in an intrinsic, which
-  the prover knows only by its type, so they are relied on and not proven
+  mathematical collections are, so its definitions are not proven
+- what the prover knows of the intrinsic module's integer operations, its
+  storage and views, and reading and writing bytes, and the costs the
+  compiler declares for each intrinsic
+- the standard library's contracts whose bodies end in any other
+  intrinsic, which the prover knows only by its type, so they are relied
+  on and not proven
 - compiled code, for the checks that are run
 
 Everything else is proven. The run-time checks of every test build, and
@@ -920,14 +992,16 @@ sanitized runs, test the trusted base against real executions.
 
 ## Not built
 
-- **Contracts for the intrinsic module.** The compiler is to declare a
-  contract for each intrinsic, and the standard library is to be proven
-  against them, `List`'s `model()` as a definition over its buffer, so
-  that nothing above the intrinsic module is trusted. A call of an
-  intrinsic gives a value known only by its type. So the standard
-  library's contracts are relied on without proof, and what it states no
-  contract for, such as `wrapping_add` and the `ieee_` comparisons, is
-  known only by its type.
+- **A trait's provided methods proven on their own.** A provided body is
+  proven only where an `impl` replaces it, which shows its result is the
+  body's. A body that every `impl` keeps is not proven against the trait's
+  clauses: it is to be proven once, with `Self` a type parameter bounded by
+  the trait.
+- **Contracts for the intrinsic module's floats and system calls.** Only
+  the integer operations, storage, views, and reading and writing bytes
+  have meanings. A call of any other intrinsic gives a value known only by
+  its type, and what the standard library states no contract for, such as
+  the `ieee_` comparisons, is known only by its type.
 - **Obligations and facts under a quantifier.** An obligation that names a
   quantifier's bound name, such as the bounds of an index on it, is not
   made, so nothing checks that a quantifier's body is well defined. A fact
@@ -944,13 +1018,13 @@ sanitized runs, test the trusted base against real executions.
   of applications, indexes, and fields that together mention every bound
   name, with pruning then keeping a fact by its triggers' symbols, and a
   diagnostic that says so when a proof needed a fact that has none. Stage0
-  states no triggers, and the solver chooses its own.
-- **A function value applied in the logic.** A named function passed as a
-  value is to be known to be the function it names, and a lambda with a
-  functional body to be its body where it is applied, so that a contract
-  such as `List.map`'s `ensures result[i] == transform(self[i])` gives the
-  caller facts about its own lambda. A call through a function value gives
-  a result known only by its type.
+  states no triggers, and the solver chooses its own; pruning reads only a
+  quantified equation's left side as its trigger.
+- **A function value's contract in the logic.** A lambda whose body is not
+  functional, or a named function with a `requires`, is applied as a
+  function the solver knows nothing more about, so a contract such as
+  `List.map`'s `ensures result[i] == transform(self[i])` gives the caller
+  facts about its own lambda only when the lambda's body is functional.
 - **A derived ordering's definition.** A derived `Ordered` is to be defined
   by variant and then field by field, as a derived `Equal` is field by
   field. An ordering on a type that is not built in is known only by the
@@ -963,21 +1037,14 @@ sanitized runs, test the trusted base against real executions.
   collection is to be smaller than the collection, as Dafny orders its
   sequences, so that recursion over a tree whose children are a list ends
   without a `decreases`. Only fields are ranked.
-- **The potential of a collection's elements.** A value's potential is to
-  include that of the elements of a standard collection it holds, through
-  the collection's model. A potential that needs them is reported as one
-  the prover cannot read.
-- **Running any call whose arguments are known.** When an obligation
-  mentions a call to a pure function with a `time` clause, which is
-  compiled rather than for specifications only, and whose arguments are
-  all known values, the compiled function is to be run, within the
-  project's test time limit, and its result added as a fact. Only a tagged
-  template's checks are run.
+- **The potential of a set's or a map's elements.** A value's potential is
+  to include that of the elements of a `Set` or a `Map` it holds, through
+  its model, as it does for a collection modeled by a sequence. The
+  specification module has no sum over a finite set or map, so a
+  potential that needs one is reported as one the prover cannot read.
 - **Code the prover cannot read yet.** Among what is reported as
-  `prover.unsupported`: a quantifier over a collection whose elements a
-  pattern takes apart, a loop over a cursor that is not in a local, a
-  local changed on the right of `&&`, `||`, or `==>`, and a string pattern
-  with a tag or interpolations.
+  `prover.unsupported`: a loop over a cursor that is not in a local, and a
+  string pattern with a tag or interpolations.
 - **More in a diagnostic.** A note at the clause an obligation comes from,
   the branches a counterexample's path takes, listed by position, the
   values of locals, and a fix that adds an obligation about parameters
@@ -994,8 +1061,6 @@ sanitized runs, test the trusted base against real executions.
   which would keep reading Truss apart from the logic. One walk does both.
 - **Proof states in the language server:** each obligation's state at its
   position, and the counterexample of each one that failed.
-- **The documents' examples proven,** each as a test of its own, once the
-  standard library has its contracts.
 - **A fuzzer of proofs, and a benchmark of solving.** The fuzzer is to
   mutate the documents' examples and check that no obligation the prover
   proves fails its run-time check when the mutated program runs. The

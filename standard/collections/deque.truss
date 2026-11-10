@@ -5,7 +5,7 @@ public fn collections::Deque[Element].new() -> collections::Deque[Element]
   cost time O(1)
   cost allocations == 0
 {
-  collections::Deque(front: [], back: [])
+  todo
 }
 
 public fn collections::Deque[Element].with_capacity(capacity: USize) -> collections::Deque[Element]
@@ -131,6 +131,12 @@ public fn collections::Deque[Element].extend[Source: Cursor[Element = Element]](
 impl Index for collections::Deque[Element] {
   type Key = USize
   type Output = Element
+
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < self.length()
+  }
 
   fn at(self, key: USize) lends Element
     requires key < self.length()

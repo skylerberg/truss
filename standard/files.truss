@@ -149,6 +149,7 @@ public type FileKind = File | Directory | SymbolicLink | Other
 
 public opaque type Permissions(mode: UInt32)
   derives Plain, Equal, Hash
+  invariant mode <= 0o7777
 
 public fn Permissions.from_mode(mode: UInt32) -> Permissions
   requires mode <= 0o7777

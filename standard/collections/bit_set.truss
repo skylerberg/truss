@@ -132,6 +132,12 @@ impl Index for collections::BitSet {
   type Key = USize
   type Output = Bool
 
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < self.length()
+  }
+
   fn at(self, key: USize) lends Bool
     requires key < self.length()
     cost time O(1)

@@ -84,9 +84,7 @@ let impls database (modules : Path.module_ list) =
 
 let package_impls =
   Query.query ~phase:Proofs ~name:"package_impls" ~show:Fun.id (fun database package ->
-      match Workspace.package database package with
-      | Some { modules; _ } -> impls database modules
-      | None -> [])
+      impls database (Query.demand database Workspace.modules package))
 
 (* The [impl]s of a package that a value of a type, given where one of
    these traits is needed, could use. Matched by the type's head, which may
@@ -176,32 +174,29 @@ let expression_ids (written : block) =
   (List.rev !ids, List.rev !anys)
 
 let build database package =
-  match Workspace.package database package with
-  | None -> []
-  | Some { modules; _ } ->
-      let impls = Query.demand database package_impls package in
-      ignore modules;
+  let modules = Query.demand database Workspace.modules package in
+  let impls = Query.demand database package_impls package in
+  List.concat_map
+    (fun module_ ->
       List.concat_map
-        (fun module_ ->
-          List.concat_map
-            (fun (declaration : Names.declaration) ->
-              let key = Names.key_of declaration in
-              match (Query.demand database Names.definition key, Infer.clean database key) with
-              | Some definition, Some checked -> (
-                  let node path body =
-                    let ids, anys = expression_ids body in
-                    (path, edges database impls checked ids @ any_edges database impls checked anys)
-                  in
-                  match definition.kind with
-                  (* A trait's own method is reached through an [impl], as
+        (fun (declaration : Names.declaration) ->
+          let key = Names.key_of declaration in
+          match (Query.demand database Names.definition key, Infer.clean database key) with
+          | Some definition, Some checked -> (
+              let node path body =
+                let ids, anys = expression_ids body in
+                (path, edges database impls checked ids @ any_edges database impls checked anys)
+              in
+              match definition.kind with
+              (* A trait's own method is reached through an [impl], as
                      it always was, and is no node of its own. *)
-                  | Function { body; _ } when not (in_trait database key) ->
-                      [ node declaration.path body ]
-                  | Theorem { body; _ } -> [ node declaration.path body ]
-                  | _ -> [])
+              | Function { body; _ } when not (in_trait database key) ->
+                  [ node declaration.path body ]
+              | Theorem { body; _ } -> [ node declaration.path body ]
               | _ -> [])
-            (Query.demand database Names.declarations module_))
-        modules
+          | _ -> [])
+        (Query.demand database Names.declarations module_))
+    modules
 
 let graph = Query.query ~phase:Proofs ~name:"call_graph" ~show:Fun.id build
 

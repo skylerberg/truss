@@ -32,3 +32,7 @@ val solve : t -> ?values:string list -> Logic.query -> answer
 (** Runs one query. [values] are the prover's symbols whose values a counterexample should give;
     those the query does not mention are left out. Results are cached by {!key} for the life of the
     process, and solving the same text twice gives the same answer. *)
+
+val solved : t -> int
+(** How many queries this solver has run itself, leaving out those answered from a cache: what
+    incremental work's tests count. *)

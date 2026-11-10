@@ -136,7 +136,9 @@ let build ~directory ~output ~json =
       stop_at_diagnostics ~proofs:true ~json project;
       let main = main project in
       refuse_holes ~json project main;
-      let compile = Compiler.create project Release in
+      (* Every proof the program reaches is done, the standard library's
+         included, so what they show is not checked again at run time. *)
+      let compile = Compiler.create ~checks:false project Release in
       refuse_unshippable ~json ~echo:true project compile main;
       let output = Project.normalize (Option.value output ~default:package.name) in
       match Compile.build_program compile ~main ~output with

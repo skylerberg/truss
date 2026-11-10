@@ -1,4 +1,6 @@
 public opaque type Set[Element: Hash + Ordered](elements: List[Element])
+  invariant forall i in 0..elements.length() => forall j in 0..elements.length() =>
+    i < j ==> elements.model()[i] < elements.model()[j]
   derives Copyable
 
 impl Model for Set[Element: Hash + Ordered] {
@@ -7,8 +9,14 @@ impl Model for Set[Element: Hash + Ordered] {
   fn model(self) -> FiniteSet[Element]
     cost time finite
   {
-    todo
+    self.elements.model().elements()
   }
+}
+
+public fn contains_equal[Element: Equal](set: FiniteSet[Element], value: Element) -> Bool
+  cost time finite
+{
+  exists other: Element => set.contains(other) && other == value
 }
 
 public fn Set[Element: Hash + Ordered].length(self) -> USize
@@ -19,18 +27,33 @@ public fn Set[Element: Hash + Ordered].length(self) -> USize
 }
 
 public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
-  ensures result == self.model().contains(element)
+  ensures result == contains_equal(self.model(), value: element)
 {
   let position = self.elements.partition_point(fn(existing) { existing < element })
+  proof {
+    if position < self.elements.length() {
+      assert self.model().contains(self.elements.model()[position])
+    }
+  }
   position < self.elements.length() && self.elements[position] == element
 }
 
 public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
-  ensures identical(self.model(), old(self.model()).insert(element))
+  ensures contains_equal(self.model(), value: element)
+  ensures forall other: Element => old(self.model()).contains(other) ==> self.model().contains(other)
+  ensures forall other: Element =>
+    self.model().contains(other) ==> old(self.model()).contains(other) || identical(other, element)
+  ensures contains_equal(old(self.model()), value: element) ==> identical(self.model(), old(self.model()))
 {
   let position = self.elements.partition_point(fn(existing) { existing < element })
   if !(position < self.elements.length() && self.elements[position] == element) {
+    proof {
+      assert forall k in position..self.elements.length() => element < self.elements.model()[k]
+    }
     mut self.elements.insert_at(position, item: own element)
+    proof {
+      assert self.elements.model().elements().contains(self.elements.model()[position])
+    }
   }
 }
 

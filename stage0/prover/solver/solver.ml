@@ -3,7 +3,7 @@
 let version = "5.3.3"
 let steps = 2_000_000
 
-type t = { program : string; cache : string option }
+type t = { program : string; cache : string option; mutable solved : int }
 
 let find ?cache () =
   let program = Option.value (Sys.getenv_opt "TRUSS_Z3") ~default:"z3" in
@@ -19,7 +19,7 @@ let find ?cache () =
       if
         String.length output >= String.length expected
         && String.sub output 0 (String.length expected) = expected
-      then Ok { program; cache }
+      then Ok { program; cache; solved = 0 }
       else
         Error
           (Printf.sprintf
@@ -134,6 +134,7 @@ let solve solver ?(values = []) query =
         if requested = [] then ""
         else Printf.sprintf "(get-value (%s))\n" (String.concat " " (List.map snd requested))
       in
+      solver.solved <- solver.solved + 1;
       let _, output, _ = Toolchain.run ~input solver.program [ "-in"; "-smt2" ] in
       let answer =
         match parse_sexps output with
@@ -180,3 +181,5 @@ let solve solver ?(values = []) query =
           with Sys_error _ -> ())
       | None -> ());
       answer
+
+let solved solver = solver.solved

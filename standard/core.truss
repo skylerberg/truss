@@ -22,25 +22,51 @@ public fn Ordering.then(self, next: Ordering) -> Ordering
 
 public trait Equal {
   fn equal(self, other: Self) -> Bool
+    cost time finite
 
-  fn not_equal(self, other: Self) -> Bool {
+  fn not_equal(self, other: Self) -> Bool
+    cost time finite
+  {
     !self.equal(other)
+  }
+
+  law reflexive(value: Self) {
+    value == value
+  }
+
+  law symmetric(first: Self, second: Self)
+    requires first == second
+  {
+    second == first
+  }
+
+  law transitive(first: Self, second: Self, third: Self)
+    requires first == second
+    requires second == third
+  {
+    first == third
   }
 }
 
 public trait Ordered: Equal {
   fn compare(self, other: Self) -> Ordering
+    cost time finite
 
-  fn max(own self, other: own Self) -> Self {
+  fn max(own self, other: own Self) -> Self
+    cost time finite
+  {
     if self.compare(other) == Ordering.Less { other } else { self }
   }
 
-  fn min(own self, other: own Self) -> Self {
+  fn min(own self, other: own Self) -> Self
+    cost time finite
+  {
     if self.compare(other) == Ordering.Greater { other } else { self }
   }
 
   fn clamp(own self, low: own Self, high: own Self) -> Self
     requires low <= high
+    cost time finite
   {
     if self.compare(low) == Ordering.Less {
       low
@@ -49,6 +75,21 @@ public trait Ordered: Equal {
     } else {
       self
     }
+  }
+
+  law agrees_with_equal(first: Self, second: Self) {
+    (first.compare(second) == Ordering.Equal) == (first == second)
+  }
+
+  law antisymmetric(first: Self, second: Self) {
+    (first.compare(second) == Ordering.Less) == (second.compare(first) == Ordering.Greater)
+  }
+
+  law transitive(first: Self, second: Self, third: Self)
+    requires first < second
+    requires second < third
+  {
+    first < third
   }
 }
 
@@ -140,8 +181,15 @@ public trait Model {
 public trait Index {
   type Key
   type Output
+
+  fn contains_key(self, key: Self.Key) -> Bool
+    cost time finite
+
   fn at(self, key: Self.Key) lends Self.Output
+    requires self.contains_key(key)
+
   fn at(mut self, key: Self.Key) lends mut Self.Output
+    requires self.contains_key(key)
 }
 
 public trait Iterable {

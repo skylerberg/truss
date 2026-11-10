@@ -59,7 +59,7 @@ public fn standard_deviation(values: Slice[Float64]) -> Option[Float64]
 public type Division[Number](quotient: Number, remainder: Number)
 
 public opaque type BigInteger(negative: Bool, magnitude: List[UInt64])
-  derives Copyable
+  derives Copyable, Equal, Hash
 
 public fn BigInteger.zero() -> BigInteger
   cost time O(1)
@@ -247,20 +247,8 @@ impl Negate for BigInteger {
   }
 }
 
-impl Equal for BigInteger {
-  fn equal(self, other: BigInteger) -> Bool {
-    self.negative == other.negative && self.magnitude == other.magnitude
-  }
-}
-
 impl Ordered for BigInteger {
   fn compare(self, other: BigInteger) -> Ordering {
-    todo
-  }
-}
-
-impl Hash for BigInteger {
-  fn hash(self, hasher: mut Hasher) {
     todo
   }
 }
@@ -313,7 +301,7 @@ public fn Decimal.zero() -> Decimal
 public fn Decimal.coefficient(self) -> BigInteger
   cost time O(self.coefficient.bit_length())
 {
-  self.coefficient.copy()
+  todo
 }
 
 public fn Decimal.scale(self) -> Int32

@@ -1,9 +1,9 @@
 use standard::text
 
-public opaque type Uuid(bytes: Array[UInt8, 16])
+public opaque type Uuid(high: UInt64, low: UInt64)
   derives Plain, Equal, Hash, Ordered
 
-public let Uuid.nil: Uuid = Uuid(bytes: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+public let Uuid.nil: Uuid = Uuid(high: 0, low: 0)
 
 public type ParseError =
   | InvalidLength
@@ -37,13 +37,13 @@ public fn from_name(namespace: Uuid, name: Slice[UInt8]) -> Uuid
 public fn Uuid.from_bytes(bytes: Array[UInt8, 16]) -> Uuid
   cost time O(1)
 {
-  Uuid(bytes: bytes)
+  todo
 }
 
 public fn Uuid.bytes(self) -> Array[UInt8, 16]
   cost time O(1)
 {
-  self.bytes
+  todo
 }
 
 public fn Uuid.version(self) -> UInt8

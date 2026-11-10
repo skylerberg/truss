@@ -44,7 +44,7 @@ public fn List[Element: Equal].contains(self, item: Element) -> Bool
   ensures result == (exists i in 0..self.length() => self[i] == item)
   cost time O(self.length())
 {
-  self.slice().contains(item)
+  todo
 }
 
 public fn List[Element: Equal].index_of(self, item: Element) -> Option[USize]
@@ -54,7 +54,7 @@ public fn List[Element: Equal].index_of(self, item: Element) -> Option[USize]
   }
   cost time O(self.length())
 {
-  self.slice().index_of(item)
+  todo
 }
 
 public fn List[Element: Equal].last_index_of(self, item: Element) -> Option[USize]
@@ -64,7 +64,7 @@ public fn List[Element: Equal].last_index_of(self, item: Element) -> Option[USiz
   }
   cost time O(self.length())
 {
-  self.slice().last_index_of(item)
+  todo
 }
 
 public fn List[Element].find_index(self, matching: (fn(Element) -> Bool cost time finite)) -> Option[USize]
@@ -113,7 +113,7 @@ public fn List[Element: Ordered].binary_search(self, target: Element) -> Option[
   }
   cost time O(log(self.length()))
 {
-  self.slice().binary_search(target)
+  todo
 }
 
 public fn List[Element: Ordered].minimum(self) lends Option[Element]
@@ -147,7 +147,7 @@ public fn List[Element: Ordered + Copyable].sorted(self) -> List[Element]
   ensures result.is_sorted()
   cost time O(self.length() * log(self.length()))
 {
-  self.slice().sorted()
+  todo
 }
 
 public fn List[Element: Copyable].repeated(self, times: USize) -> List[Element]
@@ -229,14 +229,14 @@ public fn List[Element].swap(mut self, first: USize, second: USize)
   ensures self.length() == old(self.length())
   cost time O(1)
 {
-  mut self[..].swap(first, second)
+  todo
 }
 
 public fn List[Element].reverse(mut self)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].reverse()
+  todo
 }
 
 public fn List[Element].rotate_left(mut self, by: USize)
@@ -244,7 +244,7 @@ public fn List[Element].rotate_left(mut self, by: USize)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].rotate_left(by)
+  todo
 }
 
 public fn List[Element].rotate_right(mut self, by: USize)
@@ -252,14 +252,14 @@ public fn List[Element].rotate_right(mut self, by: USize)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].rotate_right(by)
+  todo
 }
 
 public fn List[Element: Copyable].fill(mut self, value: Element)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].fill(value)
+  todo
 }
 
 public fn List[Element: Copyable].copy_from(mut self, source: Slice[Element])
@@ -267,7 +267,7 @@ public fn List[Element: Copyable].copy_from(mut self, source: Slice[Element])
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].copy_from(source)
+  todo
 }
 
 public fn List[Element].update_each[capability Granted](
@@ -279,7 +279,7 @@ public fn List[Element].update_each[capability Granted](
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))
 {
-  mut self[..].update_each(change)
+  todo
 }
 
 public fn List[Element: Ordered].sort(mut self)
@@ -287,19 +287,19 @@ public fn List[Element: Ordered].sort(mut self)
   ensures self.is_sorted()
   cost time O(self.length() * log(self.length()))
 {
-  mut self[..].sort()
+  todo
 }
 
 public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
-  mut self[..].sort_by(compare)
+  todo
 }
 
 public fn List[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(key))
 {
-  mut self[..].sort_by_key(key)
+  todo
 }

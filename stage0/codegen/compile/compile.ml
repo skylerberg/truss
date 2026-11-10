@@ -108,6 +108,8 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
   | Evaluator path -> code (Lower.evaluator context path)
   | Template_check { from_template; texts } ->
       code (Lower.template_check context key ~from_template ~texts)
+  | Call_evaluation { function_; arguments } ->
+      code (Lower.call_evaluation context key ~function_ ~arguments)
   | Any_table _ -> Compiled (Table (Lower.any_table context key))
   | Table _ -> Compiled (Table (Lower.table context key))
 
@@ -224,6 +226,7 @@ let test_key_query =
               ])))
 
 type template_check = Ran of (int * bool) list | Ran_too_long
+type evaluated_call = Returned of Lir.static_value | Call_ran_too_long
 
 type t = {
   database : Query.context;
@@ -242,6 +245,8 @@ type t = {
       (** Each constant worked out by running code, in this build *)
   checked : (string, template_check) Hashtbl.t;
       (** Each template check done in this build, by the key of the code that ran *)
+  called : (string, evaluated_call) Hashtbl.t;
+      (** Each call worked out in this build, by the key of the code that ran *)
 }
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
@@ -831,13 +836,15 @@ let build_program t ~main ~output =
    position among the clauses, with whether it holds. Results are kept for
    the compiler's run, and, with [results], under the key of the code that
    ran, as test results are, which the texts are part of. *)
-let check_key t root =
+(* What a run of code while compiling is kept under: the key of everything
+   its root can reach, which its inputs are part of. *)
+let run_key t root =
   t.want t.lowering [ root ];
   Blake3.hash
     (Cbor.encode
        (Cbor.Array
           [
-            Text "truss template check";
+            Text "truss code run while compiling";
             Cbor.int Lir.version;
             target_key t.lowering.target;
             Bytes (Query.demand t.database (Lazy.force reach) (t.lowering, root));
@@ -849,7 +856,7 @@ let check_template ?results t ~time_limit ~from_template ~texts =
   | [] -> Ran []
   | positions -> (
       let root = Instance.Template_check { from_template; texts } in
-      let key = check_key t root in
+      let key = run_key t root in
       match Hashtbl.find_opt t.checked key with
       | Some found -> found
       | None ->
@@ -877,6 +884,43 @@ let check_template ?results t ~time_limit ~from_template ~texts =
           Hashtbl.replace t.checked key found;
           found)
 
+(* Works out a call whose arguments are known, by running it: its result as
+   static data, or that it ran past [time_limit]. *)
+let evaluate_call ?results t ~time_limit ~function_ ~arguments =
+  reporting t @@ fun () ->
+  match Query.demand t.database Interface.Environment.signature function_ with
+  | Some { output = Returns result; _ } -> (
+      let ty = Monomorphic.ground t.context.monomorphic [] result in
+      let root = Instance.Call_evaluation { function_; arguments } in
+      let key = run_key t root in
+      match Hashtbl.find_opt t.called key with
+      | Some found -> found
+      | None ->
+          let status, output, errors =
+            match Option.bind results (fun (results : results) -> results.find key) with
+            | Some output -> (0, output, "")
+            | None ->
+                build_and_run t ~time_limit ~roots:[ root ]
+                  ~startup:(Startup.evaluator_calling (Instance.symbol root))
+                  ~arguments:[]
+          in
+          let found =
+            match status with
+            | 0 ->
+                let value = decode t ty output in
+                Option.iter (fun (results : results) -> results.add key output) results;
+                Returned value
+            | 137 ->
+                (* Killed at its time limit. *)
+                Call_ran_too_long
+            | status ->
+                cannot_build "Working out a call of %s ended with status %d: %s"
+                  (Path.show function_) status errors
+          in
+          Hashtbl.replace t.called key found;
+          found)
+  | _ -> bug "%s has no result to work out" (Path.show function_)
+
 let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"
 
 let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
@@ -894,4 +938,5 @@ let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
     worked_on;
     evaluated = [];
     checked = Hashtbl.create 8;
+    called = Hashtbl.create 8;
   }

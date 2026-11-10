@@ -491,13 +491,13 @@ impl Decode for String {
 
 impl Encode for Value {
   fn to_json(self) -> Value {
-    self.copy()
+    todo
   }
 }
 
 impl Decode for Value {
   fn from_json(value: Value) -> Result[Value, DecodeError] {
-    Ok(value.copy())
+    todo
   }
 }
 

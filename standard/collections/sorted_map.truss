@@ -182,6 +182,12 @@ impl Index for collections::SortedMap[Key: Ordered, Value] {
   type Key = Key
   type Output = Value
 
+  fn contains_key(self, key: Key) -> Bool
+    cost time O(log(self.length()))
+  {
+    self.contains(key)
+  }
+
   fn at(self, key: Key) lends Value
     requires self.contains(key)
     cost time O(log(self.length()))

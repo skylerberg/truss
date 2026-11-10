@@ -26,12 +26,18 @@ public fn Array[Element, count: USize].slice(self) -> Slice[Element]
   ensures result.length() == count
   cost time O(1)
 {
-  self[..]
+  todo
 }
 
 impl Index for Array[Element, count: USize] {
   type Key = USize
   type Output = Element
+
+  fn contains_key(self, key: USize) -> Bool
+    cost time O(1)
+  {
+    key < count
+  }
 
   fn at(self, key: USize) lends Element
     requires key < count
@@ -85,24 +91,24 @@ public fn Array[Element, count: USize].map_each[Output, capability Granted](
 
 impl Equal for Array[Element: Equal, count: USize] {
   fn equal(self, other: Array[Element, count]) -> Bool {
-    self[..] == other[..]
+    todo
   }
 }
 
 impl Ordered for Array[Element: Ordered, count: USize] {
   fn compare(self, other: Array[Element, count]) -> Ordering {
-    self[..].compare(other[..])
+    todo
   }
 }
 
 impl Hash for Array[Element: Hash, count: USize] {
   fn hash(self, hasher: mut Hasher) {
-    self[..].hash(mut hasher)
+    todo
   }
 }
 
 impl Display for Array[Element: Display, count: USize] {
   fn display(self, output: mut TextBuilder) {
-    self[..].display(mut output)
+    todo
   }
 }

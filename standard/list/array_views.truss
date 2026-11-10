@@ -5,7 +5,7 @@ public fn Array[Element, count: USize].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
   cost time O(1)
 {
-  self.slice().is_empty()
+  todo
 }
 
 public fn Array[Element, count: USize].get(self, index: USize) lends Option[Element]
@@ -44,14 +44,14 @@ public fn Array[Element, count: USize].split_at(self, index: USize) -> core::Pai
   ensures result.second.length() == self.length() - index
   cost time O(1)
 {
-  self.slice().split_at(index)
+  todo
 }
 
 public fn Array[Element: Equal, count: USize].contains(self, item: Element) -> Bool
   ensures result == (exists i in 0..self.length() => self[i] == item)
   cost time O(self.length())
 {
-  self.slice().contains(item)
+  todo
 }
 
 public fn Array[Element: Equal, count: USize].index_of(self, item: Element) -> Option[USize]
@@ -61,7 +61,7 @@ public fn Array[Element: Equal, count: USize].index_of(self, item: Element) -> O
   }
   cost time O(self.length())
 {
-  self.slice().index_of(item)
+  todo
 }
 
 public fn Array[Element: Equal, count: USize].last_index_of(self, item: Element) -> Option[USize]
@@ -71,7 +71,7 @@ public fn Array[Element: Equal, count: USize].last_index_of(self, item: Element)
   }
   cost time O(self.length())
 {
-  self.slice().last_index_of(item)
+  todo
 }
 
 public fn Array[Element, count: USize].find_index(self, matching: (fn(Element) -> Bool cost time finite)) -> Option[USize]
@@ -81,19 +81,19 @@ public fn Array[Element, count: USize].find_index(self, matching: (fn(Element) -
   }
   cost time O(self.length() * time(matching))
 {
-  self.slice().find_index(matching)
+  todo
 }
 
 public fn Array[Element: Equal, count: USize].starts_with(self, prefix: Slice[Element]) -> Bool
   cost time O(prefix.length())
 {
-  self.slice().starts_with(prefix)
+  todo
 }
 
 public fn Array[Element: Equal, count: USize].ends_with(self, suffix: Slice[Element]) -> Bool
   cost time O(suffix.length())
 {
-  self.slice().ends_with(suffix)
+  todo
 }
 
 public fn Array[Element: Equal, count: USize].find_slice(self, needle: Slice[Element]) -> Option[USize]
@@ -103,13 +103,13 @@ public fn Array[Element: Equal, count: USize].find_slice(self, needle: Slice[Ele
   }
   cost time O(self.length() + needle.length())
 {
-  self.slice().find_slice(needle)
+  todo
 }
 
 public fn Array[Element: Ordered, count: USize].is_sorted(self) -> Bool
   cost time O(self.length())
 {
-  self.slice().is_sorted()
+  todo
 }
 
 public fn Array[Element: Ordered, count: USize].binary_search(self, target: Element) -> Option[USize]
@@ -120,14 +120,14 @@ public fn Array[Element: Ordered, count: USize].binary_search(self, target: Elem
   }
   cost time O(log(self.length()))
 {
-  self.slice().binary_search(target)
+  todo
 }
 
 public fn Array[Element, count: USize].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
   ensures result <= self.length()
   cost time O(log(self.length()) * time(before))
 {
-  self.slice().partition_point(before)
+  todo
 }
 
 public fn Array[Element: Ordered, count: USize].minimum(self) lends Option[Element]
@@ -146,14 +146,14 @@ public fn Array[Element: Copyable, count: USize].to_list(self) -> List[Element]
   ensures result.length() == self.length()
   cost time O(self.length())
 {
-  self.slice().to_list()
+  todo
 }
 
 public fn Array[Element: Copyable, count: USize].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
   cost time O(self.length() * time(keep))
 {
-  self.slice().filter(keep)
+  todo
 }
 
 public fn Array[Element: Ordered + Copyable, count: USize].sorted(self) -> List[Element]
@@ -161,20 +161,20 @@ public fn Array[Element: Ordered + Copyable, count: USize].sorted(self) -> List[
   ensures result.is_sorted()
   cost time O(self.length() * log(self.length()))
 {
-  self.slice().sorted()
+  todo
 }
 
 public fn Array[Element: Copyable, count: USize].repeated(self, times: USize) -> List[Element]
   ensures result.length() == self.length() * times
   cost time O(self.length() * times)
 {
-  self.slice().repeated(times)
+  todo
 }
 
 public fn Array[Element: Display, count: USize].join(self, separator: StringSlice) -> String
   cost time finite
 {
-  self.slice().join(separator)
+  todo
 }
 
 public fn Array[Element, count: USize].enumerate(self) yields core::Indexed[Element]
@@ -243,14 +243,14 @@ public fn Array[Element, count: USize].swap(mut self, first: USize, second: USiz
   ensures self.length() == old(self.length())
   cost time O(1)
 {
-  mut self[..].swap(first, second)
+  todo
 }
 
 public fn Array[Element, count: USize].reverse(mut self)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].reverse()
+  todo
 }
 
 public fn Array[Element, count: USize].rotate_left(mut self, by: USize)
@@ -258,7 +258,7 @@ public fn Array[Element, count: USize].rotate_left(mut self, by: USize)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].rotate_left(by)
+  todo
 }
 
 public fn Array[Element, count: USize].rotate_right(mut self, by: USize)
@@ -266,14 +266,14 @@ public fn Array[Element, count: USize].rotate_right(mut self, by: USize)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].rotate_right(by)
+  todo
 }
 
 public fn Array[Element: Copyable, count: USize].fill(mut self, value: Element)
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].fill(value)
+  todo
 }
 
 public fn Array[Element: Copyable, count: USize].copy_from(mut self, source: Slice[Element])
@@ -281,7 +281,7 @@ public fn Array[Element: Copyable, count: USize].copy_from(mut self, source: Sli
   ensures self.length() == old(self.length())
   cost time O(self.length())
 {
-  mut self[..].copy_from(source)
+  todo
 }
 
 public fn Array[Element, count: USize].update_each[capability Granted](
@@ -293,7 +293,7 @@ public fn Array[Element, count: USize].update_each[capability Granted](
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))
 {
-  mut self[..].update_each(change)
+  todo
 }
 
 public fn Array[Element: Ordered, count: USize].sort(mut self)
@@ -301,19 +301,19 @@ public fn Array[Element: Ordered, count: USize].sort(mut self)
   ensures self.is_sorted()
   cost time O(self.length() * log(self.length()))
 {
-  mut self[..].sort()
+  todo
 }
 
 public fn Array[Element, count: USize].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
-  mut self[..].sort_by(compare)
+  todo
 }
 
 public fn Array[Element, count: USize].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(key))
 {
-  mut self[..].sort_by_key(key)
+  todo
 }

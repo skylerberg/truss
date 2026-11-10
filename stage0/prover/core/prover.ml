@@ -39,45 +39,65 @@ let inherited database impl (signature : signature) name =
    law's name, with the proof's source and body. *)
 let law_proofs database package trait (for_type : Types.ty) =
   let head = match for_type with Named { path; _ } -> Some path | _ -> None in
-  match Workspace.package database package with
-  | None -> []
-  | Some { modules; _ } ->
-      List.concat_map
-        (fun module_ ->
-          List.filter_map
-            (fun (declaration : Names.declaration) ->
-              let key = Names.key_of declaration in
-              match
-                ( Query.demand database Names.definition key,
-                  Query.demand database Resolve.resolved key,
-                  Translate.callee_source database key )
-              with
-              | ( Some { kind = Law_proof { trait_; law; type_; body }; _ },
-                  Some resolved,
-                  Some proof_source ) -> (
-                  let named_trait =
-                    match resolved.names.(trait_.path.last.id) with
-                    | Some (Definition (_, path)) -> Path.equal path trait
-                    | _ -> false
-                  in
-                  let named_type =
-                    match (type_.kind, head) with
-                    | Path_type written, Some head -> (
-                        match resolved.names.(written.path.last.id) with
-                        | Some (Definition (_, path)) -> Path.equal path head
-                        | _ -> false)
-                    | _ -> false
-                  in
-                  match (named_trait, named_type) with
-                  | true, true -> Some (law.text, (proof_source, body))
-                  | _ -> None)
+  let modules = Query.demand database Workspace.modules package in
+  List.concat_map
+    (fun module_ ->
+      List.filter_map
+        (fun (declaration : Names.declaration) ->
+          let key = Names.key_of declaration in
+          match
+            ( Query.demand database Names.definition key,
+              Query.demand database Resolve.resolved key,
+              Translate.callee_source database key )
+          with
+          | ( Some { kind = Law_proof { trait_; law; type_; body }; _ },
+              Some resolved,
+              Some proof_source ) -> (
+              let named_trait =
+                match resolved.names.(trait_.path.last.id) with
+                | Some (Definition (_, path)) -> Path.equal path trait
+                | _ -> false
+              in
+              let named_type =
+                match (type_.kind, head) with
+                | Path_type written, Some head -> (
+                    match resolved.names.(written.path.last.id) with
+                    | Some (Definition (_, path)) -> Path.equal path head
+                    | _ -> false)
+                | _ -> false
+              in
+              match (named_trait, named_type) with
+              | true, true -> Some (law.text, (proof_source, body))
               | _ -> None)
-            (Query.demand database Names.declarations module_))
-        modules
+          | _ -> None)
+        (Query.demand database Names.declarations module_))
+    modules
 
-(* An [impl]'s obligation to keep each law of its trait. *)
+(* Whether a method an [impl] writes is not finished: its body holds a
+   [todo]. *)
+let unfinished database (impl : Path.t) (interface : Types.impl_interface) =
+  List.exists
+    (fun (name, receiver, (_ : Types.signature)) ->
+      match Interface.Summary.definition database (Method { owner = impl; name; receiver }) with
+      | Some (_, { kind = Function { body; _ }; _ }) ->
+          let found = ref false in
+          let rec visit (value : expression) =
+            if value.kind = Todo then found := true else Syntax_walk.children visit value
+          in
+          Syntax_walk.block visit body;
+          !found
+      | _ -> false)
+    interface.impl_methods
+
+(* An [impl]'s obligation to keep each law of its trait. The laws of an
+   [impl] with a method that is not written wait for the method, as every
+   contract after a [todo] waits for it: a law is about what the methods
+   return, and one that is not written returns nothing yet. *)
 let impl_laws database (key : Names.key) source (definition : definition) =
   match (Query.demand database Interface.Environment.interface key.path, definition.kind) with
+  | Some (Interface.Environment.Impl_interface interface), Impl _
+    when unfinished database key.path interface ->
+      []
   | Some (Interface.Environment.Impl_interface interface), Impl { trait_; _ } ->
       [
         Translate.laws database source ~impl:key.path ~trait:interface.implements.trait
@@ -89,8 +109,14 @@ let impl_laws database (key : Names.key) source (definition : definition) =
       ]
   | _ -> []
 
+(* [standard::specification]'s contracts say what the mathematical
+   collections are, so they are the trusted base, not obligations. *)
+let specification (key : Names.key) =
+  key.module_ = { package = "standard"; modules = [ "specification" ] }
+
 let prove database (key : Names.key) =
   match (Query.demand database Names.definition key, Translate.callee_source database key) with
+  | _ when specification key -> Not_proven_here
   | Some definition, Some source -> (
       try
         match definition.kind with
@@ -391,7 +417,30 @@ let exactly (query : L.query) =
    same choice for all of them, since a recursive call assumes the bound
    with the constants it is shown with; the first choice that proves them
    all is taken, and if none does, the answers are the first choice's. *)
-let answers ?(evaluate = fun _ -> None) solver (obligations : Translate.obligation list) =
+(* Running compiled code, which the caller gives, since the prover does
+   not depend on code generation: a template's check, and a call whose
+   arguments are known, whose result is a [Bool] as 0 or 1. *)
+type running = {
+  template : Translate.evaluation -> evaluated option;
+  call : Translate.known_call -> Z.t option;
+}
+
+let not_running = { template = (fun _ -> None); call = (fun _ -> None) }
+
+let answers ?(running = not_running) solver (obligations : Translate.obligation list) =
+  (* What running code gives of the calls a query mentions, as facts, which
+     are only as true as the compiled code, which the prover trusts. *)
+  let given (obligation : Translate.obligation) =
+    List.filter_map
+      (fun (known : Translate.known_call) ->
+        Option.map
+          (fun value ->
+            L.equal known.term
+              (if known.result_is_bool then L.Boolean (not (Z.equal value Z.zero))
+               else L.Integer value))
+          (running.call known))
+      obligation.known_calls
+  in
   let solve (obligation : Translate.obligation) choice =
     let pins =
       List.map
@@ -399,11 +448,13 @@ let answers ?(evaluate = fun _ -> None) solver (obligations : Translate.obligati
           Costs.pin constants (List.assoc constants.factor choice))
         obligation.constants
     in
-    let query = { obligation.query with facts = obligation.query.facts @ pins } in
+    let query =
+      { obligation.query with facts = obligation.query.facts @ pins @ given obligation }
+    in
     let values = List.map fst obligation.values in
     (* A clause running code decides is decided so, and the solver never
        asked. *)
-    match Option.bind obligation.evaluation evaluate with
+    match Option.bind obligation.evaluation running.template with
     | Some Holds -> Solved Proven
     | Some Fails -> Ran_false
     | Some Too_long -> Ran_too_long
@@ -449,7 +500,7 @@ let answers ?(evaluate = fun _ -> None) solver (obligations : Translate.obligati
   in
   List.map (fun obligation -> (obligation, solve obligation chosen)) obligations
 
-let definition_diagnostics ?evaluate database solver (key : Names.key) =
+let definition_diagnostics ?running database solver (key : Names.key) =
   let source_span span = source_span (within database key span) in
   match Query.demand database proof key with
   | Not_proven_here -> []
@@ -485,7 +536,7 @@ let definition_diagnostics ?evaluate database solver (key : Names.key) =
                    (obligation.message
                   ^ " The solver ran out of steps, so it may hold but needs help: a `proof` block \
                      or a theorem.")))
-        (answers ?evaluate solver outcome.obligations)
+        (answers ?running solver outcome.obligations)
 
-let diagnostics ?evaluate database solver module_ =
-  Names.per_definition database module_ (definition_diagnostics ?evaluate database solver)
+let diagnostics ?running database solver module_ =
+  Names.per_definition database module_ (definition_diagnostics ?running database solver)
