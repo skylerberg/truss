@@ -12,7 +12,7 @@ impl Model for List[Element] {
   fn model(self) -> Sequence[Element]
     cost time finite
   {
-    todo
+    intrinsic::storage_model(self.storage)
   }
 }
 
@@ -22,7 +22,7 @@ impl Model for Slice[Element] {
   fn model(self) -> Sequence[Element]
     cost time finite
   {
-    todo
+    intrinsic::view_model(self.elements)
   }
 }
 
@@ -71,12 +71,16 @@ public fn List[Element].insert_at(mut self, position: USize, item: own Element)
   intrinsic::storage_insert(mut self.storage, index: position, value: own item)
 }
 
-public fn List[Element].partition_point(self, before: fn(Element) -> Bool) -> USize
-  cost time O(log(self.length()))
+public fn List[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
+  cost time O(log(self.length()) * time(before))
 {
   var low: USize = 0
   var high = self.length()
-  while low < high {
+  while low < high
+    invariant low <= high
+    invariant high <= self.length()
+    decreases high - low
+  {
     let middle = low + (high - low) / 2
     if before(self[middle]) {
       low = middle + 1
@@ -97,13 +101,20 @@ public fn List[Element].slice(self) -> Slice[Element]
 public fn List[Element].each(self) yields Element
   ensures identical(result, self[yielded.length()])
   ensures yielded.length() <= self.length()
-  ensures forall i in 0..yielded.length() => identical(yielded[i], self[i])
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
   ensures finished ==> yielded.length() == self.length()
   ensures finished ==> identical(yielded, self.model())
   cost time O(self.length())
 {
-  for index in 0..self.length() {
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant yielded.length() == index
+    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+    decreases self.length() - index
+  {
     yield self[index]
+    index += 1
   }
 }
 
@@ -135,13 +146,20 @@ public fn Slice[Element].length(self) -> USize
 public fn Slice[Element].each(self) yields Element
   ensures identical(result, self[yielded.length()])
   ensures yielded.length() <= self.length()
-  ensures forall i in 0..yielded.length() => identical(yielded[i], self[i])
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
   ensures finished ==> yielded.length() == self.length()
   ensures finished ==> identical(yielded, self.model())
   cost time O(self.length())
 {
-  for index in 0..self.length() {
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    invariant yielded.length() == index
+    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
+    decreases self.length() - index
+  {
     yield self[index]
+    index += 1
   }
 }
 

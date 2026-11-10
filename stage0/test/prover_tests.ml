@@ -2220,6 +2220,42 @@ let () =
       let second = key_of "fn g(total: UInt8) -> UInt8 {\n  total + 1\n}\n" in
       if first <> second || first = "none" then fail "%s and %s" first second)
 
+(* Short-circuit operators *)
+
+let bump =
+  "fn bump(count: mut UInt8) -> Bool\n\
+  \  requires count < 200\n\
+  \  ensures count == old(count) + 1\n\
+  \  ensures result\n\
+   {\n\
+  \  count += 1\n\
+  \  true\n\
+   }\n\n"
+
+let () =
+  test "a change on the right of && happens only where the left holds" (fun () ->
+      proven
+        (bump
+       ^ "fn f(go: Bool) -> UInt8\n\
+         \  ensures go ==> result == 1\n\
+         \  ensures !go ==> result == 0\n\
+          {\n\
+         \  var count: UInt8 = 0\n\
+         \  let _ = go && bump(mut count)\n\
+         \  count\n\
+          }\n"));
+  test "a change on the right of || is not known to have happened" (fun () ->
+      not_proven
+        (bump
+       ^ "fn f(done: Bool) -> UInt8\n\
+         \  ensures result == 1\n\
+          {\n\
+         \  var count: UInt8 = 0\n\
+         \  let _ = done || bump(mut count)\n\
+         \  count\n\
+          }\n")
+        "prover.ensures")
+
 (* Function values in the logic *)
 
 let apply_function =

@@ -1066,16 +1066,16 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
   | Name path -> name context frame written path
   | Binary { operator = And; left; right; _ } ->
       let frame, left_value = value context frame left in
-      let after, right_value = pure_operand context (restrict frame left_value) right in
-      Some ({ after with condition = frame.condition }, L.( &&& ) left_value right_value)
+      short_circuit context frame right ~runs:left_value ~otherwise:(L.Boolean false) ~binds:true
+        (L.( &&& ) left_value)
   | Binary { operator = Or; left; right; _ } ->
       let frame, left_value = value context frame left in
-      let _, right_value = pure_operand context (restrict frame (L.not_ left_value)) right in
-      Some (frame, L.( ||| ) left_value right_value)
+      short_circuit context frame right ~runs:(L.not_ left_value) ~otherwise:(L.Boolean true)
+        ~binds:false (L.( ||| ) left_value)
   | Binary { operator = Implies; left; right; _ } ->
       let frame, left_value = value context frame left in
-      let _, right_value = pure_operand context (restrict frame left_value) right in
-      Some (frame, L.( ==> ) left_value right_value)
+      short_circuit context frame right ~runs:left_value ~otherwise:(L.Boolean true) ~binds:false
+        (L.( ==> ) left_value)
   | Binary { operator; left; right; _ } -> binary context frame written operator left right
   | Prefix (Not, inner) ->
       let frame, inner_value = value context frame inner in
@@ -1211,9 +1211,30 @@ and expression_kind context frame (written : expression) : (frame * L.term) opti
         (block_value context frame body)
   | Self_type_value | Expression_error -> unsupported written.span "this expression"
 
-(* The right side of [&&], [||], or [==>], which runs only on some paths:
-   it may make obligations there, but not change a local, since the paths
-   would then need joining. *)
+(* The right side of [&&], [||], or [==>], which runs only where [runs]
+   holds. One that changes a local, as a call with a [mut] argument does,
+   joins its path with the one where it did not run, as an [if] would;
+   otherwise the operator is its operands' term, as written, and only
+   [&&] keeps what its right side binds, as an [is] does. *)
+and short_circuit context frame right ~runs ~otherwise ~binds combine =
+  let after, right_value = value context (restrict frame runs) right in
+  let changed =
+    Ids.exists (fun id term -> Ids.find_opt id after.locals <> Some term) frame.locals
+    || after.self <> frame.self
+  in
+  if not changed then
+    Some ((if binds then { after with condition = frame.condition } else frame), combine right_value)
+  else
+    match
+      join context ~value_type:T.bool
+        [ (after, Some right_value); (restrict frame (L.not_ runs), Some otherwise) ]
+    with
+    | Some (joined, Some term) -> Some (joined, term)
+    | Some (joined, None) -> Some (joined, L.Boolean true)
+    | None -> None
+
+(* A guard, which runs only on some paths: it may make obligations there,
+   but not change a local, since the paths would then need joining. *)
 and pure_operand context frame written =
   let after, term = value context frame written in
   (* It may bind names, as an [is] does, but not change a local. *)
@@ -1950,18 +1971,28 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
   | Intrinsic { operation; type_arguments } ->
       let frame = havoc_mut frame in
       let frame = spend context frame (step_amount context frame call_ values) in
-      let operands =
+      let in_order =
         List.sort
           (fun ((a : C.argument), _, _) ((b : C.argument), _, _) -> compare a.parameter b.parameter)
           values
-        |> List.map (fun (_, _, term) -> term)
+      in
+      let operands = List.map (fun (_, _, term) -> term) in_order in
+      (* What each argument holds after the call: a [mut] one read again. *)
+      let changed =
+        List.map
+          (fun ((argument : C.argument), (expression_ : expression), term) ->
+            if argument.mode = T.Mut then
+              try snd (value context { frame with checking = false } expression_)
+              with Unsupported _ | Foreign_unsupported _ -> term
+            else term)
+          in_order
       in
       let types =
         List.filter_map
           (function T.Type ty -> Some (substituted frame ty) | _ -> None)
           type_arguments
       in
-      Some (frame, intrinsic context frame operation types operands result_type)
+      Some (frame, intrinsic context frame operation types operands ~changed result_type)
   | Built_in_operator ->
       let frame = havoc_mut frame in
       ignore source;
@@ -1974,8 +2005,20 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
    result brought into range by a remainder; the overflow tests, the
    comparisons, and [fits] are exact; and [convert] keeps a value that
    fits. Anything else is known by its type alone. *)
-and intrinsic context frame (operation : Intrinsic.operation) types operands result_type =
+and intrinsic context frame (operation : Intrinsic.operation) types operands ~changed result_type =
   let known = arrive context frame "result" result_type in
+  match (operation, types) with
+  | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
+      | Storage_capacity | Storage_reserve | Storage_push | Storage_pop | Storage_insert
+      | Storage_remove | Storage_swap | Storage_at | Storage_view | View_length | View_at
+      | View_slice ),
+      element :: _ ) ->
+      buffer_operation context frame operation element operands ~changed known
+  | (Read_bytes | Handle_read | Write_bytes | Handle_write), _ ->
+      buffer_operation context frame operation (T.builtin UInt8) operands ~changed known
+  | _ -> integer_intrinsic context frame operation types operands known
+
+and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
   let exact operation left right =
     match (operation : Intrinsic.operation) with
@@ -3336,12 +3379,18 @@ and rank context ty term =
 
 (* A variant with no fields, such as [None]. *)
 and variant_value context (written : expression) type_ variant =
-  match declared_fields context type_ (Some variant) with
-  | Some [] ->
-      ignore (sort_of context type_);
-      L.Apply (constructor_name type_ (Some variant), [])
-  | Some _ -> unsupported written.span "a variant used as a function"
-  | None -> unsupported written.span "a variant of `%s`" (T.show type_)
+  if T.equal type_ T.unit then begin
+    (* The one value of [Unit]. *)
+    declare context (L.Constant ("unit.value", sort_of context T.unit));
+    L.Symbol "unit.value"
+  end
+  else
+    match declared_fields context type_ (Some variant) with
+    | Some [] ->
+        ignore (sort_of context type_);
+        L.Apply (constructor_name type_ (Some variant), [])
+    | Some _ -> unsupported written.span "a variant used as a function"
+    | None -> unsupported written.span "a variant of `%s`" (T.show type_)
 
 (* A global used as a value: a constant's value, or a function named as a
    value. *)
@@ -4678,6 +4727,179 @@ and function_value_amount context frame (function_type : T.function_type) callee
 (* [time(f)], the time one call through a function value takes: one unit
    when its type has an [O(...)] bound, at least one otherwise, and for a
    lambda whose calls the prover could bound, that bound. *)
+(* What the intrinsic module's storage and views hold, as the compiler
+   declares it: each is a sequence of its elements, its model, and each
+   operation changes or reads that sequence. An operation that stops the
+   program on a bad index says what holds when it returns. *)
+and buffer_operation context frame (operation : Intrinsic.operation) element operands ~changed known
+    =
+  let length sequence = sequence_length context element sequence in
+  (* A buffer's length always fits a [USize]. *)
+  let model builtin term =
+    let sequence = buffer_model context builtin element term in
+    assume context frame (in_range (T.builtin USize) (length sequence));
+    sequence
+  in
+  let storage = model Intrinsic.Storage and view = model Intrinsic.View in
+  let at sequence index =
+    match sequence_at context element sequence index with
+    | Some term -> term
+    | None -> raise (Foreign_unsupported "the elements of a storage")
+  in
+  let bound () =
+    context.fresh <- context.fresh + 1;
+    Printf.sprintf "index.%d" context.fresh
+  in
+  let within index low high = L.(Apply ("<=", [ low; index ]) &&& Apply ("<", [ index; high ])) in
+  let all name low high body =
+    L.Forall ([ (name, L.Int) ], L.(within (Symbol name) low high ==> body))
+  in
+  let in_bounds index sequence = within index (L.int 0) (length sequence) in
+  let each_sum relation =
+    context.fresh <- context.fresh + 1;
+    let measure = Printf.sprintf "measure.%d" context.fresh in
+    L.Forall
+      ( [ (measure, sort_of context (T.Function (measure_type element))) ],
+        relation
+          (fun sequence -> sequence_sum context element sequence (L.Symbol measure))
+          (fun value -> applied context (measure_type element) (L.Symbol measure) [ value ]) )
+  in
+  let changed_storage () = storage (List.hd changed) in
+  match (operation, operands) with
+  | Storage_model, [ buffer ] -> storage buffer
+  | View_model, [ buffer ] -> view buffer
+  | (Storage_empty | Storage_with_capacity), _ ->
+      assume context frame (L.equal (length (storage known)) (L.int 0));
+      known
+  | Storage_length, [ buffer ] -> length (storage buffer)
+  | View_length, [ buffer ] -> length (view buffer)
+  | Storage_capacity, [ buffer ] ->
+      assume context frame (L.Apply (">=", [ known; length (storage buffer) ]));
+      known
+  | Storage_reserve, buffer :: _ ->
+      assume context frame (L.equal (changed_storage ()) (storage buffer));
+      known
+  | Storage_push, [ buffer; value ] ->
+      let longer = appended context frame element (storage buffer) value in
+      assume context frame (L.equal (changed_storage ()) longer);
+      known
+  | Storage_pop, [ _ ] ->
+      let longer = appended context frame element (changed_storage ()) known in
+      assume context frame (L.equal (storage (List.hd operands)) longer);
+      known
+  | Storage_insert, [ buffer; index; value ] ->
+      let before = storage buffer and after = changed_storage () in
+      let k = bound () in
+      assume context frame
+        (L.conjunction
+           [
+             L.Apply ("<=", [ L.int 0; index ]);
+             L.Apply ("<=", [ index; length before ]);
+             L.equal (length after) (L.Apply ("+", [ length before; L.int 1 ]));
+             L.equal (at after index) value;
+           ]);
+      assume context frame
+        (all k (L.int 0) index (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+      let k = bound () in
+      assume context frame
+        (all k index (length before)
+           (L.equal (at after (L.Apply ("+", [ L.Symbol k; L.int 1 ]))) (at before (L.Symbol k))));
+      assume context frame
+        (each_sum (fun sum measure ->
+             L.equal (sum after) (L.Apply ("+", [ sum before; measure value ]))));
+      known
+  | Storage_remove, [ buffer; index ] ->
+      let before = storage buffer and after = changed_storage () in
+      let k = bound () in
+      assume context frame
+        (L.conjunction
+           [
+             in_bounds index before;
+             L.equal (length after) (L.Apply ("-", [ length before; L.int 1 ]));
+             L.equal known (at before index);
+           ]);
+      assume context frame
+        (all k (L.int 0) index (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+      let k = bound () in
+      assume context frame
+        (all k index (length after)
+           (L.equal (at after (L.Symbol k)) (at before (L.Apply ("+", [ L.Symbol k; L.int 1 ])))));
+      assume context frame
+        (each_sum (fun sum measure ->
+             L.equal (sum before) (L.Apply ("+", [ sum after; measure known ]))));
+      known
+  | Storage_swap, [ buffer; first; second ] ->
+      let before = storage buffer and after = changed_storage () in
+      let k = bound () in
+      assume context frame
+        (L.conjunction
+           [
+             in_bounds first before;
+             in_bounds second before;
+             L.equal (length after) (length before);
+             L.equal (at after first) (at before second);
+             L.equal (at after second) (at before first);
+           ]);
+      assume context frame
+        (all k (L.int 0) (length before)
+           L.(
+             not_ (equal (Symbol k) first)
+             &&& not_ (equal (Symbol k) second)
+             ==> equal (at after (Symbol k)) (at before (Symbol k))));
+      assume context frame (each_sum (fun sum _ -> L.equal (sum after) (sum before)));
+      known
+  | Storage_at, [ buffer; index ] ->
+      assume context frame (in_bounds index (storage buffer));
+      at (storage buffer) index
+  | View_at, [ buffer; index ] ->
+      assume context frame (in_bounds index (view buffer));
+      at (view buffer) index
+  | Storage_view, [ buffer ] ->
+      assume context frame (L.equal (view known) (storage buffer));
+      known
+  | (Write_bytes | Handle_write), [ _; bytes ] ->
+      (* It writes at most what it is given. *)
+      assume context frame (L.Apply ("<=", [ known; length (view bytes) ]));
+      known
+  | (Read_bytes | Handle_read), [ _; buffer; count ] ->
+      (* It appends at most [count] bytes, as many as it says, or nothing
+         when it fails. *)
+      let before = storage buffer and after = storage (List.nth changed 1) in
+      let k = bound () in
+      assume context frame
+        L.(
+          Apply ("<=", [ known; count ])
+          &&& (Apply (">=", [ known; int 0 ])
+              ==> equal (length after) (Apply ("+", [ length before; known ])))
+          &&& (Apply ("<", [ known; int 0 ]) ==> equal after before));
+      assume context frame
+        (all k (L.int 0) (length before) (L.equal (at after (L.Symbol k)) (at before (L.Symbol k))));
+      known
+  | View_slice, [ buffer; start; stop ] ->
+      let whole = view buffer and part = view known in
+      let k = bound () in
+      assume context frame
+        (L.conjunction
+           [
+             L.Apply ("<=", [ L.int 0; start ]);
+             L.Apply ("<=", [ start; stop ]);
+             L.Apply ("<=", [ stop; length whole ]);
+             L.equal (length part) (L.Apply ("-", [ stop; start ]));
+           ]);
+      assume context frame
+        (all k (L.int 0) (length part)
+           (L.equal (at part (L.Symbol k)) (at whole (L.Apply ("+", [ start; L.Symbol k ])))));
+      known
+  | _ -> known
+
+(* The sequence a storage or a view holds, as a function of it. *)
+and buffer_model context (builtin : Intrinsic.builtin) element term =
+  let ty = T.Named { path = Intrinsic.builtin_path builtin; arguments = [ T.Type element ] } in
+  let symbol = "model." ^ type_key ty in
+  declare context
+    (L.Function (symbol, [ sort_of context ty ], sort_of context (sequence_type element)));
+  L.Apply (symbol, [ term ])
+
 (* Whether a call through a value of a function type is a function in the
    logic: it ends, uses no capabilities, changes none of its arguments, and
    returns its result. *)
@@ -4750,7 +4972,26 @@ and step_amount context frame (call_ : C.call) values (counter : Costs.counter) 
   | Intrinsic { operation; _ } -> (
       let cost = Intrinsic_signatures.cost operation in
       match counter.resource with
-      | Time -> if cost.constant_time then Costs.zero else unknown_amount context frame counter
+      | Time -> (
+          match (cost.time, counter.counting) with
+          | Constant_time, _ -> Costs.zero
+          | Linear_in position, Units -> (
+              match
+                List.find_opt
+                  (fun ((argument : C.argument), _, _) -> argument.parameter = position)
+                  values
+              with
+              | Some (argument, expression_, term) -> (
+                  match argument_type frame argument expression_ with
+                  | T.Named { path; arguments = [ T.Type element ] } -> (
+                      match Intrinsic.builtin_of_path path with
+                      | Some ((Storage | View) as builtin) ->
+                          sequence_length context element
+                            (buffer_model context builtin element term)
+                      | _ -> unknown_amount context frame counter)
+                  | _ -> unknown_amount context frame counter)
+              | None -> unknown_amount context frame counter)
+          | (Linear_in _ | Unbounded_time), _ -> unknown_amount context frame counter)
       | Allocations | Allocated_bytes ->
           if cost.allocation_free then Costs.zero else unknown_amount context frame counter
       | Calls _ -> Costs.zero)

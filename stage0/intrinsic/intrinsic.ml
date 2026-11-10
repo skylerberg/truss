@@ -136,6 +136,8 @@ type operation =
   | View_length
   | View_at
   | View_slice
+  | Storage_model
+  | View_model
   | Crash
   | Write_bytes
   | Read_bytes
@@ -207,6 +209,8 @@ let operations =
     View_length;
     View_at;
     View_slice;
+    Storage_model;
+    View_model;
     Crash;
     Write_bytes;
     Read_bytes;
@@ -278,6 +282,8 @@ let operation_name = function
   | View_length -> "view_length"
   | View_at -> "view_at"
   | View_slice -> "view_slice"
+  | Storage_model -> "storage_model"
+  | View_model -> "view_model"
   | Crash -> "crash"
   | Write_bytes -> "write_bytes"
   | Read_bytes -> "read_bytes"

@@ -197,9 +197,12 @@ public fn FileReader.read_line(mut self) -> Result[String, FileError]
   uses FileRead
 {
   var found = false
-  var end: USize = self.start
+  let start = self.start
+  var end: USize = start
   var failed = false
-  while !found && !failed {
+  while !found && !failed
+    invariant start <= end
+  {
     if end < intrinsic::storage_length(self.pending) {
       if intrinsic::view_at(intrinsic::storage_view(self.pending), index: end) == 10 {
         found = true
@@ -221,8 +224,8 @@ public fn FileReader.read_line(mut self) -> Result[String, FileError]
     Err(FileError.Other(code: 5))
   } else {
     let pending = intrinsic::storage_view(self.pending)
-    var line: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(end - self.start)
-    for index in self.start..end {
+    var line: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(end - start)
+    for index in start..end {
       intrinsic::storage_push(mut line, value: intrinsic::view_at(pending, index: index))
     }
     if end < intrinsic::storage_length(self.pending) {

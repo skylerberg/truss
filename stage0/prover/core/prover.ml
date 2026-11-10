@@ -105,8 +105,14 @@ let impl_laws database (key : Names.key) source (definition : definition) =
       ]
   | _ -> []
 
+(* [standard::specification]'s contracts say what the mathematical
+   collections are, so they are the trusted base, not obligations. *)
+let specification (key : Names.key) =
+  key.module_ = { package = "standard"; modules = [ "specification" ] }
+
 let prove database (key : Names.key) =
   match (Query.demand database Names.definition key, Translate.callee_source database key) with
+  | _ when specification key -> Not_proven_here
   | Some definition, Some source -> (
       try
         match definition.kind with

@@ -5,20 +5,28 @@ public type Ordering = Less | Equal | Greater
 
 public trait Equal {
   fn equal(self, other: Self) -> Bool
+    cost time finite
 
-  fn not_equal(self, other: Self) -> Bool {
+  fn not_equal(self, other: Self) -> Bool
+    cost time finite
+  {
     !self.equal(other)
   }
 }
 
 public trait Ordered: Equal {
   fn compare(self, other: Self) -> Ordering
+    cost time finite
 
-  fn max(own self, other: own Self) -> Self {
+  fn max(own self, other: own Self) -> Self
+    cost time finite
+  {
     if self.compare(other) == Ordering.Less { other } else { self }
   }
 
-  fn min(own self, other: own Self) -> Self {
+  fn min(own self, other: own Self) -> Self
+    cost time finite
+  {
     if self.compare(other) == Ordering.Greater { other } else { self }
   }
 }

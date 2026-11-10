@@ -24,7 +24,7 @@ impl Model for String {
   fn model(self) -> Sequence[UInt8]
     cost time finite
   {
-    todo
+    intrinsic::storage_model(self.storage)
   }
 }
 
@@ -34,7 +34,7 @@ impl Model for StringSlice {
   fn model(self) -> Sequence[UInt8]
     cost time finite
   {
-    todo
+    intrinsic::view_model(self.bytes)
   }
 }
 
@@ -44,7 +44,7 @@ impl Model for Literal {
   fn model(self) -> Sequence[UInt8]
     cost time finite
   {
-    todo
+    self.text.model()
   }
 }
 
@@ -66,7 +66,13 @@ public fn String.push(mut self, text: StringSlice)
   ensures identical(self.model(), old(self.model()).concatenate(text.model()))
 {
   intrinsic::storage_reserve(mut self.storage, additional: text.length())
-  for index in 0..text.length() {
+  for index in 0..text.length()
+    invariant self.model().length() == old(self.model()).length() + yielded.length()
+    invariant forall i in 0..old(self.model()).length() =>
+      identical(self.model()[i], old(self.model())[i])
+    invariant forall i in 0..yielded.length() =>
+      identical(self.model()[old(self.model()).length() + i], text.model()[i])
+  {
     intrinsic::storage_push(mut self.storage, value: intrinsic::view_at(text.bytes, index: index))
   }
 }
@@ -133,7 +139,10 @@ fn replaced(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
   fixed
 }
 
-fn utf8_sequence(bytes: intrinsic::View[UInt8], at: USize) -> USize {
+fn utf8_sequence(bytes: intrinsic::View[UInt8], at: USize) -> USize
+  requires at < intrinsic::view_length(bytes)
+  ensures result <= intrinsic::view_length(bytes) - at
+{
   let first = intrinsic::view_at(bytes, index: at)
   let length: USize =
     if first < 128 { 1 } else if (first & 224) == 192 { 2 } else if (first & 240) == 224 { 3 } else if (first & 248) == 240 { 4 } else { 0 }
