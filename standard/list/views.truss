@@ -180,7 +180,15 @@ public fn List[Element].reversed(self) yields Element
   ensures finished ==> yielded.length() == self.length()
   cost time O(self.length())
 {
-  todo
+  var index = self.length()
+  while index > 0
+    invariant index <= self.length()
+    invariant yielded.length() == self.length() - index
+    decreases index
+  {
+    index -= 1
+    yield self[index]
+  }
 }
 
 public fn List[Element].reversed(mut self) yields mut Element
@@ -194,7 +202,9 @@ public fn List[Element].windows(self, size: USize) yields Slice[Element]
   ensures result.length() == size
   cost time O(self.length())
 {
-  todo
+  for window in self.slice().windows(size) {
+    yield window
+  }
 }
 
 public fn List[Element].chunks(self, size: USize) yields Slice[Element]
@@ -202,7 +212,9 @@ public fn List[Element].chunks(self, size: USize) yields Slice[Element]
   ensures result.length() <= size
   cost time O(self.length())
 {
-  todo
+  for chunk in self.slice().chunks(size) {
+    yield chunk
+  }
 }
 
 public fn List[Element: Equal].split(self, separator: Element) yields Slice[Element]

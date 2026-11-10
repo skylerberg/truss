@@ -2388,6 +2388,22 @@ let () =
          \  zero(mut items[..2])\n\
           }\n")
         "prover.ensures");
+  test "a loop that changes a slice of any elements under a cost clause" (fun () ->
+      proven
+        "fn swap_each[Element](part: mut Slice[Element])\n\
+        \  requires part.length() >= 1\n\
+        \  cost time O(part.length())\n\
+         {\n\
+        \  var index: USize = 0\n\
+        \  while index < part.length()\n\
+        \    invariant index <= part.length()\n\
+        \    invariant part.length() == old(part.length())\n\
+        \    decreases part.length() - index\n\
+        \  {\n\
+        \    mut part.swap(0, second: index)\n\
+        \    index += 1\n\
+        \  }\n\
+         }\n");
   test "alternatives bind each name to the part that matched" (fun () ->
       proven
         "type Side =\n\
