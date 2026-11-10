@@ -376,6 +376,13 @@ decides when a body is a definition. In the solver:
   arguments. Each use unfolds one level, as fuel does in Dafny, and a proof
   that needs more calls a theorem or asserts the steps between. A
   definition that is not recursive unfolds as deep as it goes.
+- **A query that runs out of steps is asked again with contracts alone.**
+  Unfolding gives the solver every definition a query reaches, which can
+  be too much for it where the callee's `ensures` already says what is
+  needed, as a caller's bound on a callee that itself unfolds several
+  others' arithmetic. Leaving facts out is always sound, so such a query is
+  asked once more without what unfolding gave, and is proven if that one
+  is.
 - **Every other function is a fresh result.** A call to a function that is
   not pure, or has no `time` clause, gives a new value about which its
   `ensures` is known, and two calls are not known to agree.

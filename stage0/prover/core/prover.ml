@@ -409,15 +409,17 @@ let given running (obligation : Translate.obligation) =
         (running.call known))
     obligation.known_calls
 
-(* An obligation's query with a choice of constants for its bounds. *)
-let query_with running (obligation : Translate.obligation) choice =
+(* An obligation's query, or another of its own, with a choice of
+   constants for its bounds. *)
+let query_with ?query running (obligation : Translate.obligation) choice =
+  let query = Option.value query ~default:obligation.query in
   let pins =
     List.map
       (fun (constants : Costs.constants) ->
         Costs.pin constants (List.assoc constants.factor choice))
       obligation.constants
   in
-  { obligation.query with facts = obligation.query.facts @ pins @ given running obligation }
+  { query with facts = query.facts @ pins @ given running obligation }
 
 (* Every choice of a pair of constants for each bound the obligations
    mention, in the order they are tried. *)
@@ -465,12 +467,23 @@ let answers ?(running = not_running) solver (obligations : Translate.obligation 
     | Some Fails -> Ran_false
     | Some Too_long -> Ran_too_long
     | None -> (
-        match Solver.solve solver ~values query with
-        | Proven -> Solved Proven
-        | first -> (
-            match exactly query with
-            | Some exact -> Solved (Solver.solve solver ~values exact)
-            | None -> Solved first))
+        let asked query =
+          match Solver.solve solver ~values query with
+          | Solver.Proven -> Solver.Proven
+          | first -> (
+              match exactly query with
+              | Some exact -> Solver.solve solver ~values exact
+              | None -> first)
+        in
+        match (asked query, obligation.contracts_alone) with
+        | Solver.Out_of_steps, Some query -> (
+            (* Without its callees' definitions, a query is about their
+               contracts alone, which can be enough where unfolding is too
+               much for the solver. *)
+            match asked (query_with ~query running obligation choice) with
+            | Solver.Proven -> Solved Proven
+            | _ -> Solved Out_of_steps)
+        | answer, _ -> Solved answer)
   in
   let bounded =
     List.filter (fun (obligation : Translate.obligation) -> obligation.constants <> []) obligations

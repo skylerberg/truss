@@ -54,6 +54,10 @@ type obligation = {
   span : span;  (** Relative to the definition being proven. *)
   message : string;
   query : L.query;
+  contracts_alone : L.query option;
+      (** The query without what unfolding callees' definitions gave, where it has any: asked when
+          the query runs out of steps, since a callee's contract can be enough where its definition
+          is too much for the solver. *)
   values : (string * string) list;  (** Each prover symbol a counterexample shows, with its name. *)
   constants : Costs.constants list;
       (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
@@ -182,6 +186,9 @@ type context = {
   mutable declarations : L.declaration list;
   declared : (string, unit) Hashtbl.t;
   mutable facts : L.term list;  (** Reversed. *)
+  unfolded : (L.term, unit) Hashtbl.t;
+      (** The facts that come from unfolding a callee's definition, which a query that runs out of
+          steps is asked again without. *)
   mutable obligations : obligation list;  (** Reversed. *)
   mutable fresh : int;
   mutable values : (string * string) list;  (** For counterexamples. *)
@@ -340,6 +347,16 @@ and make_obligation ?evaluation context frame code span message goal =
         goal = L.( ==> ) frame.condition goal;
       }
   in
+  let contracts_alone =
+    if List.exists (Hashtbl.mem context.unfolded) query.facts then
+      Some
+        (L.prune
+           {
+             query with
+             facts = List.filter (fun fact -> not (Hashtbl.mem context.unfolded fact)) query.facts;
+           })
+    else None
+  in
   let constants =
     List.filter
       (fun (group : Costs.constants) ->
@@ -354,7 +371,17 @@ and make_obligation ?evaluation context frame code span message goal =
         mentioned query.goal || List.exists mentioned query.facts)
       context.known_calls
   in
-  { code; span; message; query; values = context.values; constants; evaluation; known_calls }
+  {
+    code;
+    span;
+    message;
+    query;
+    contracts_alone;
+    values = context.values;
+    constants;
+    evaluation;
+    known_calls;
+  }
 
 (* Whether a term holds another. *)
 and occurs part term =
@@ -4514,13 +4541,15 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     (* The definition, unfolded once, where the [requires] holds. A body
        the prover cannot read is simply not unfolded. *)
     (match contract.definition with
-    | Some (part, body) when not (List.exists (L.mentions after.bound) own_arguments) -> (
+    | Some (part, body) when not (List.exists (L.mentions after.bound) own_arguments) ->
         let unfolding = { (entry_frame part) with condition = after.condition } in
-        try
-          match block_value context unfolding body with
-          | Some (_, defined) -> assume context after (L.( ==> ) required (L.equal result defined))
-          | None -> ()
-        with Unsupported _ | Foreign_unsupported _ -> ())
+        let mark = List.length context.facts in
+        (try
+           match block_value context unfolding body with
+           | Some (_, defined) -> assume context after (L.( ==> ) required (L.equal result defined))
+           | None -> ()
+         with Unsupported _ | Foreign_unsupported _ -> ());
+        List.iter (fun fact -> Hashtbl.replace context.unfolded fact ()) (facts_since context mark)
     | _ -> ());
     (* The [ensures], after, where the [requires] held: [mut] parameters
        have their new values, and [old] the ones they had. *)
@@ -7042,6 +7071,7 @@ let new_context database ~home ~current ~terminates ~measures =
     declarations = [];
     declared = Hashtbl.create 64;
     facts = [];
+    unfolded = Hashtbl.create 64;
     obligations = [];
     fresh = 0;
     values = [];
