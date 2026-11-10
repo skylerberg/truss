@@ -1187,12 +1187,24 @@ variables are read-only inside it.
 
 ### Owned values where they are required
 
-A `var`'s initializer, an `own` argument, a field, a collection element, a
-part of a tagged string, and a returned value must be owned. A place there
-must be marked `own` or copied with `copy()`, unless it is `Plain`.
-Otherwise the error offers both fixes. A tagged string takes its parts
-because each goes into the template its tag is given; a plain string only
-reads what it interpolates.
+A `var`'s initializer, the value of an assignment, an `own` argument, a
+field, a collection element, a part of a tagged string, and a returned value
+must be owned. A place there must be marked `own` or copied with `copy()`,
+unless it is `Plain`. Otherwise the error offers both fixes.
+
+- **The type checker reports a missing mark.** The rule depends on the
+  marks, which only the syntax tree has. In the core form, reading a value
+  out of a place that is not `Plain` is always a move that the source
+  allows.
+- **A returned place needs no mark.** Returning an owned local moves it.
+  Returning a place that is not owned, such as a read-only parameter, is an
+  error with a fix that copies it.
+- **A constant expression is exempt.** The compiler evaluates the value of
+  a constant and a default, so a constant used inside one is not moved at
+  run time.
+- **A tagged string takes its parts,** because each part goes into the
+  template that its tag receives. A plain string only reads the values it
+  interpolates.
 
 ### Yielding and lending
 

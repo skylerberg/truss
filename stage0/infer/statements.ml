@@ -63,6 +63,7 @@ and statement state env (written : statement) ~last : unit =
             annotated
         | None -> expression state env value
       in
+      if mutable_ then check_owned state env value type_;
       (match else_ with
       | Some block -> (
           let else_type = block_value state env block in
@@ -87,7 +88,8 @@ and statement state env (written : statement) ~last : unit =
           register_statement state written (fun () ->
               let target = place_of (build_expression state written_target) in
               Assign { target; value = build_expression state value });
-          check state env value target_type
+          check state env value target_type;
+          check_owned state env value target_type
       | _ -> (
           let right_type = expression state env ~expected:target_type value in
           literal_operands state ~left:target_type ~right:right_type;

@@ -23,7 +23,18 @@ type result = {
 }
 
 let no_output : env =
-  { output = None; specification = false; self = None; self_mode = T.Read; loop_element = None }
+  {
+    output = None;
+    specification = false;
+    self = None;
+    self_mode = T.Read;
+    loop_element = None;
+    compile_time = false;
+  }
+
+(* The environment of a constant expression: the value of a constant, or a
+   default. *)
+let constant_expression : env = { no_output with compile_time = true }
 
 (* A body: each statement settles its own types, and the last is checked
    against the result type. *)
@@ -249,10 +260,11 @@ let check_function state ~broken_body (written : signature) (body_block : block 
       self = Option.map snd signature.receiver;
       self_mode = self_mode signature;
       loop_element = None;
+      compile_time = false;
     }
   in
   declare_parameters state written.parameters signature;
-  check_defaults state no_output written.parameters signature;
+  check_defaults state constant_expression written.parameters signature;
   check_function_type_requires state env written.parameters signature;
   check_clauses state env written.clauses;
   state.form.definition_builder <-
@@ -346,8 +358,8 @@ let check_definition state (lowered : Environment.lowered) =
                       lowered_fields
                   with
                   | Some lowered ->
-                      in_statement state no_output value.span (fun () ->
-                          check state no_output value lowered.field_type);
+                      in_statement state constant_expression value.span (fun () ->
+                          check state constant_expression value lowered.field_type);
                       Constant.check state ~default:true value
                   | None -> ())
               | _ -> ())
@@ -434,8 +446,8 @@ let check_definition state (lowered : Environment.lowered) =
           members
     | Constant { value; _ }, Constant_interface constant ->
         if not (broken Body) then begin
-          in_statement state no_output value.span (fun () ->
-              check state no_output value constant.constant_type);
+          in_statement state constant_expression value.span (fun () ->
+              check state constant_expression value constant.constant_type);
           state.form.definition_builder <- Some (fun () -> Constant (build_expression state value));
           Constant.check state ~default:false value
         end

@@ -213,6 +213,30 @@ let () =
       one_diagnostic "fn f(items: own List[Int64]) {\n  var copy = items\n  mut copy.push(1)\n}\n"
         "ownership.needs_owned"
         ~fixed:"fn f(items: own List[Int64]) {\n  var copy = own items\n  mut copy.push(1)\n}\n");
+  test "an assigned value must be owned" (fun () ->
+      one_diagnostic
+        "fn f(items: own List[Int64]) {\n\
+        \  var held: List[Int64] = []\n\
+        \  held = items\n\
+        \  let _ = held\n\
+         }\n"
+        "ownership.needs_owned"
+        ~fixed:
+          "fn f(items: own List[Int64]) {\n\
+          \  var held: List[Int64] = []\n\
+          \  held = own items\n\
+          \  let _ = held\n\
+           }\n");
+  test "a map literal's keys and values must be owned" (fun () ->
+      one_diagnostic "fn f(name: own String) -> Map[String, Int64] {\n  [name: 1]\n}\n"
+        "ownership.needs_owned");
+  test "a constant's value and a default may hold a constant without a copy" (fun () ->
+      fine
+        "let first: List[Int64] = [1, 2]\n\n\
+         let both: List[List[Int64]] = [first, first]\n\n\
+         fn f(rows: List[List[Int64]] = [first]) -> USize {\n\
+        \  rows.length() + both.length()\n\
+         }\n");
   test "a list element needs an owned value" (fun () ->
       one_diagnostic "fn f(name: String) -> List[String] {\n  [name]\n}\n" "ownership.needs_owned");
   test "a lending method yields on every path" (fun () ->
