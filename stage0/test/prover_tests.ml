@@ -719,6 +719,34 @@ let couple =
 
 let () =
   test "a yielding method keeps its contract at each yield and at its end" (fun () -> proven couple);
+  let tagged ensures =
+    "type Pair(first: Int64, second: Int64)\n\n\
+     type Tagged(tag: Int64, value: Int64)\n\n\
+     fn Pair.tagged(mut self) lends mut Tagged\n" ^ ensures
+    ^ "{\n  yield Tagged(tag: 0, value: mut self.second)\n}\n"
+  in
+  test "a constructor lent `mut` leaves the places it does not lend" (fun () ->
+      proven (tagged "  ensures self.first == old(self.first)\n"));
+  test "a constructor lent `mut` stores the caller's change in the place it lends" (fun () ->
+      not_proven (tagged "  ensures self.second == old(self.second)\n") "prover.ensures");
+  test "a variant lent `mut` stores back only into the place it lends" (fun () ->
+      let maybe ensures =
+        "type Pair(first: Int64, second: Int64)\n\n\
+         fn Pair.maybe(mut self) lends mut Option[Int64]\n" ^ ensures
+        ^ "{\n  yield Some(mut self.second)\n}\n"
+      in
+      proven (maybe "  ensures self.first == old(self.first)\n");
+      not_proven (maybe "  ensures self.second == old(self.second)\n") "prover.ensures");
+  test "a caller of a constructor lent `mut` keeps what the method's contract says" (fun () ->
+      proven
+        (tagged "  ensures self.first == old(self.first)\n"
+        ^ "\n\
+           fn f(pair: mut Pair)\n\
+          \  requires pair.first == 1\n\
+          \  ensures pair.first == 1\n\
+           {\n\
+          \  mut pair.tagged().value = 2\n\
+           }\n"));
   test "a yielding method that hands out more than it promises" (fun () ->
       not_proven
         "type Couple(first: Int64, second: Int64)\n\n\
