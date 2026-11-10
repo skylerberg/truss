@@ -1003,6 +1003,206 @@ test "a slice of a small array reads the array after other calls have used the s
 }
 |}
 
+let () =
+  passes "values that a method builds around places it lends, to read and to change"
+    {|type Bag(items: List[String])
+
+type Numbered(index: USize, value: String)
+
+fn Bag.first(self) lends Option[String] {
+  if self.items.length() > 0 {
+    yield Some(self.items[0])
+  } else {
+    yield None
+  }
+}
+
+fn Bag.numbered(self) yields Numbered {
+  for index in 0..self.items.length() {
+    yield Numbered(index: index, value: self.items[index])
+  }
+}
+
+type Counters(counts: List[Int64], names: List[String])
+
+type Slot(index: USize, count: Int64, name: String)
+
+fn Counters.slots(mut self) yields mut Slot {
+  for index in 0..self.counts.length() {
+    yield Slot(index: index, count: mut self.counts[index], name: mut self.names[index])
+  }
+}
+
+test "values built around lent places" {
+  let bag = Bag(items: ["${1}st", "${2}nd"])
+  if bag.first() is Some(name) {
+    assert name.length() == 3
+  }
+  var lengths: USize = 0
+  for entry in bag.numbered() {
+    lengths += entry.index + entry.value.length()
+  }
+  assert lengths == 7
+  assert bag.items[1].length() == 3
+
+  var counters = Counters(counts: [1, 2, 3], names: ["${1}a", "${2}b", "${3}c"])
+  for slot in mut counters.slots() {
+    slot.count += 10
+    if slot.index == 1 {
+      slot.name = "${slot.index} changed"
+      break
+    }
+  }
+  assert counters.counts[0] == 11
+  assert counters.counts[1] == 12
+  assert counters.counts[2] == 3
+  assert counters.names[1].length() == 9
+  assert counters.names[0].length() == 2
+}
+|}
+
+let () =
+  passes
+    "a lending method that yields on several paths: places, a value it makes, and one built around \
+     places"
+    {|type Names(first: String, second: String, others: List[String])
+
+type Both(left: String, right: String)
+
+fn Names.both(self) lends Option[Both] {
+  if self.others.length() == 0 {
+    yield Some(Both(left: self.first, right: self.second))
+  } else {
+    yield None
+  }
+}
+
+fn Names.either(self, second: Bool) lends String {
+  if second {
+    yield self.second
+  } else {
+    yield self.first
+  }
+}
+
+fn Names.made(self, fresh: Bool) lends String {
+  if fresh {
+    yield "${self.first} and ${self.second}"
+  } else {
+    yield self.first
+  }
+}
+
+type Numbered(index: USize, value: String)
+
+fn Names.numbered(self) yields Numbered {
+  for index in 0..self.others.length() {
+    yield Numbered(index: index, value: self.others[index])
+  }
+}
+
+type Slot(index: USize, name: String)
+
+fn Names.slots(mut self) yields mut Slot {
+  for index in 0..self.others.length() {
+    yield Slot(index: index, name: mut self.others[index])
+  }
+}
+
+fn rename_first(names: mut Names, to: String) -> Bool {
+  for slot in mut names.slots() {
+    slot.name = to.copy()
+    return true
+  }
+  false
+}
+
+test "more shapes of values built around lent places" {
+  let pair = Names(first: "${1}st", second: "${2}nd!", others: [])
+  if pair.both() is Some(both) {
+    assert both.left.length() + both.right.length() == 7
+  }
+  assert pair.either(true).length() == 4
+  assert pair.either(false).length() == 3
+  assert pair.made(true).length() == 12
+  assert pair.made(false).length() == 3
+
+  var many = Names(first: "${1}a", second: "${2}b", others: ["${3}rd", "${4}th!", "${5}th!!"])
+  assert many.both() is None
+  var total: USize = 0
+  for entry in many.numbered() {
+    total += entry.index + entry.value.length()
+  }
+  assert total == 15
+  assert rename_first(mut many, to: "${9} renamed")
+  assert many.others[0].length() == 9
+  assert many.others[1].length() == 4
+}
+|}
+
+let () =
+  passes "a method that yields values built around lent places and loops over itself"
+    {|type Tree =
+  | Leaf
+  | indirect Node(left: Tree, name: String, right: Tree)
+
+type Entry(depth: USize, name: String)
+
+fn Tree.entries(self) yields Entry {
+  match self {
+    Leaf => {}
+    Node(left, name, right) => {
+      for entry in left.entries() {
+        yield Entry(depth: entry.depth + 1, name: entry.name)
+      }
+      yield Entry(depth: 0, name: name)
+      for entry in right.entries() {
+        yield Entry(depth: entry.depth + 1, name: entry.name)
+      }
+    }
+  }
+}
+
+test "a method that yields values around lent places, and loops over itself" {
+  let tree = Tree.Node(
+    left: Tree.Node(left: Tree.Leaf, name: "${1}st", right: Tree.Leaf),
+    name: "${2}nd!",
+    right: Tree.Node(left: Tree.Leaf, name: "${3}rd!!", right: Tree.Leaf),
+  )
+  var lengths: USize = 0
+  var depths: USize = 0
+  for entry in tree.entries() {
+    lengths += entry.name.length()
+    depths += entry.depth
+  }
+  assert lengths == 12
+  assert depths == 2
+}
+|}
+
+let () =
+  passes "a value moved out of a whole place lent mut, which is then given another"
+    {|type Holder(slot: Option[String], count: Int64)
+
+fn take(slot: mut Option[String]) -> Option[String] {
+  let taken = own slot
+  slot = None
+  taken
+}
+
+test "a value moved out of a place lent mut, which is then given another" {
+  var slot: Option[String] = Some("${40 + 2} is the answer")
+  let taken = take(mut slot)
+  assert slot is None
+  assert taken is Some(text) && text.length() == 16
+  assert take(mut slot) is None
+  var holder = Holder(slot: Some("${1}23456789 and more text"), count: 2)
+  let from_field = take(mut holder.slot)
+  assert holder.slot is None
+  assert from_field is Some(text) && text.length() == 23
+}
+|}
+
 (* Checks which of a module's constants fold and which are worked out by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =

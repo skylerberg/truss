@@ -265,6 +265,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : T.resu
         bindings = Hashtbl.copy st.frame.bindings;
         synthetic = Hashtbl.copy st.frame.synthetic;
         on_yield = None;
+        yield_into = None;
         exit = None;
         code =
           (match output with
