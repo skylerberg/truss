@@ -280,7 +280,8 @@ decides when a body is a definition. In the solver:
   function with a `time` clause is a function in the logic, applied to its
   arguments, wherever it is called, in code as in specifications, so
   `let sorted = is_sorted(items)` and `ensures is_sorted(items)` mean the
-  same term.
+  same term. An `impl`'s method has a `time` clause when its trait's
+  method does, since it keeps the trait's.
 - **Its contract is an axiom.** For every argument that meets its
   `requires`, its `ensures` holds of its result. Dafny states the same
   axiom for each function. It is sound because the function terminates,
@@ -998,7 +999,16 @@ It proves, with one canonical, numbered, hashed query per obligation:
   which each iteration, its pull included, decreases.
 - functional bodies as definitions: a pure function with a `time` clause
   and a functional body is unfolded once at each call, where its
-  `requires` holds, unless its body reads what the prover cannot
+  `requires` holds, unless its body reads what the prover cannot. An
+  `impl`'s method has its trait's `time` clause.
+- the intrinsic module's integer operations, as the compiler declares
+  them: arithmetic that stops the program on overflow or a zero divisor
+  gives the exact result when it returns; wrapping arithmetic gives the
+  exact result brought into range by a remainder; the overflow tests, the
+  comparisons, and `fits` are exact; and `convert` keeps a value that
+  fits. The standard library's integer methods each have a `time` clause,
+  so `wrapping_add`, `saturating_add`, `checked_add`, `try_from`, and the
+  rest are definitions their callers unfold.
 - `if`, blocks, `let` and `var` with any pattern that cannot fail,
   assignment and compound assignment to a local, to a field of a place, or
   to an element, `return`, `parallel`
@@ -1132,8 +1142,8 @@ A call whose callee's contract it cannot read, such as one with errors,
 gives a value known only by its type's range, and
 so does building a type whose fields the package cannot see, and `==` on a
 type without structural equality: sound, but it proves little. A
-definition that uses anything else, such as a quantifier over a
-collection whose elements a pattern takes apart, is reported as
+definition that uses anything else, such as changing a variable on the
+right of `&&`, is reported as
 `prover.unsupported` with what stopped it, and none of its obligations
 count as proven.
 

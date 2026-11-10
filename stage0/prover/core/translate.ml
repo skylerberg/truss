@@ -1900,11 +1900,75 @@ and resolved_call ?lent_final context frame (written : expression) (call_ : C.ca
       with_contract
         (Path.Method { owner = capability; name; receiver = Static })
         (capability_contract context.database capability name)
-  | Intrinsic _ | Built_in_operator ->
+  | Intrinsic { operation; type_arguments } ->
+      let frame = havoc_mut frame in
+      let frame = spend context frame (step_amount context frame call_ values) in
+      let operands =
+        List.sort
+          (fun ((a : C.argument), _, _) ((b : C.argument), _, _) -> compare a.parameter b.parameter)
+          values
+        |> List.map (fun (_, _, term) -> term)
+      in
+      let types =
+        List.filter_map
+          (function T.Type ty -> Some (substituted frame ty) | _ -> None)
+          type_arguments
+      in
+      Some (frame, intrinsic context frame operation types operands result_type)
+  | Built_in_operator ->
       let frame = havoc_mut frame in
       ignore source;
       let frame = spend context frame (step_amount context frame call_ values) in
       Some (frame, arrive context frame "result" result_type)
+
+(* What an intrinsic operation on integers gives, as the compiler declares
+   it. Arithmetic that stops the program on overflow or a zero divisor gives
+   the exact result when it returns; wrapping arithmetic gives the exact
+   result brought into range by a remainder; the overflow tests, the
+   comparisons, and [fits] are exact; and [convert] keeps a value that
+   fits. Anything else is known by its type alone. *)
+and intrinsic context frame (operation : Intrinsic.operation) types operands result_type =
+  let known = arrive context frame "result" result_type in
+  let integer = match types with ty :: _ -> bounds ty | [] -> None in
+  let exact operation left right =
+    match (operation : Intrinsic.operation) with
+    | Add | Wrapping_add | Add_overflows -> L.Apply ("+", [ left; right ])
+    | Subtract | Wrapping_subtract | Subtract_overflows -> L.Apply ("-", [ left; right ])
+    | Divide -> L.truncated_divide left right
+    | Remainder -> L.truncated_remainder left right
+    | _ -> L.Apply ("*", [ left; right ])
+  in
+  match (operation, integer, types, operands) with
+  | (Add | Subtract | Multiply | Divide | Remainder), Some _, ty :: _, [ left; right ] ->
+      let result = exact operation left right in
+      if operation = Divide || operation = Remainder then
+        assume context frame (L.not_ (L.equal right (L.int 0)));
+      assume context frame (in_range ty result);
+      result
+  | Negate, Some _, ty :: _, [ value ] ->
+      let result = L.Apply ("-", [ value ]) in
+      assume context frame (in_range ty result);
+      result
+  | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), Some (low, high), _, [ left; right ] ->
+      let modulus = Z.succ (Z.sub high low) in
+      L.Apply
+        ( "+",
+          [
+            L.Integer low;
+            L.Apply
+              ( "mod",
+                [ L.Apply ("-", [ exact operation left right; L.Integer low ]); L.Integer modulus ]
+              );
+          ] )
+  | (Add_overflows | Subtract_overflows | Multiply_overflows), Some _, ty :: _, [ left; right ] ->
+      L.not_ (in_range ty (exact operation left right))
+  | Equal, Some _, _, [ left; right ] -> L.equal left right
+  | Less, Some _, _, [ left; right ] -> L.Apply ("<", [ left; right ])
+  | Fits, Some _, [ _; target ], [ value ] when bounds target <> None -> in_range target value
+  | Convert, Some _, [ _; target ], [ value ] when bounds target <> None ->
+      assume context frame L.(in_range target value ==> equal known value);
+      known
+  | _ -> known
 
 (* Lambdas and callbacks *)
 
@@ -6093,10 +6157,10 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   reject_checker_obligations source;
   let terminates =
     proof
-    || List.exists
-         (fun (clause : clause) ->
-           match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
-         signature.clauses
+    ||
+    match Query.demand database Interface.Environment.signature path with
+    | Some (signature : T.signature) -> signature.terminates
+    | None -> false
   in
   let measures =
     List.concat_map

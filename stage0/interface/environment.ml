@@ -365,12 +365,14 @@ let type_interface =
           | _ -> None))
 
 (* The signature of a function or method. For a method of a trait, a
-   capability, or an [impl], it is found in the owner's interface. *)
+   capability, or an [impl], it is found in the owner's interface. An
+   [impl]'s method ends when its trait's does, since it keeps the trait's
+   [time] clause. *)
 let signature =
   Query.query ~name:"signature" ~phase:Interfaces ~show:Path.show ~saved:true
     ~about:(fun path -> Some { Query.path; part = Some "signature" })
     (fun database (path : Path.t) ->
-      let from_owner owner name receiver =
+      let rec from_owner owner name receiver =
         match Query.demand database interface owner with
         | Some (Trait_interface trait) ->
             List.find_map
@@ -381,8 +383,18 @@ let signature =
               trait.methods
         | Some (Impl_interface impl) ->
             List.find_map
-              (fun (method_name, method_receiver, signature) ->
-                if method_name = name && method_receiver = receiver then Some signature else None)
+              (fun (method_name, method_receiver, (signature : T.signature)) ->
+                if method_name = name && method_receiver = receiver then
+                  Some
+                    {
+                      signature with
+                      terminates =
+                        signature.terminates
+                        || from_owner impl.implements.trait name receiver
+                           |> Option.fold ~none:false ~some:(fun (trait_method : T.signature) ->
+                               trait_method.terminates);
+                    }
+                else None)
               impl.impl_methods
         | _ -> None
       in

@@ -906,6 +906,76 @@ let () =
          \  Item.empty().combine(value) == value\n\
           }\n"))
 
+let () =
+  test "an impl's method keeps its trait's time clause, so its body is its definition" (fun () ->
+      proven
+        (monoid
+       ^ "impl Monoid for Int64 {\n\
+         \  fn empty() -> Int64 {\n\
+         \    0\n\
+         \  }\n\n\
+         \  fn combine(self, other: Int64) -> Int64 {\n\
+         \    self.wrapping_add(other)\n\
+         \  }\n\
+          }\n"))
+
+(* The standard library's integer methods, by the intrinsic operations
+   they call *)
+
+let () =
+  test "wrapping arithmetic is a remainder" (fun () ->
+      proven
+        "fn f(first: Int64, second: Int64, third: Int64) -> Bool\n\
+        \  ensures result\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  first.wrapping_add(second).wrapping_add(third)\n\
+        \    == first.wrapping_add(second.wrapping_add(third))\n\
+         }\n");
+  test "wrapping subtraction wraps below zero" (fun () ->
+      proven
+        "fn f(value: UInt8) -> UInt8\n\
+        \  requires value == 1\n\
+        \  ensures result == 255\n\
+         {\n\
+        \  value.wrapping_subtract(2)\n\
+         }\n");
+  test "saturating addition stops at the bound" (fun () ->
+      proven
+        "fn f(value: Int8) -> Int8\n\
+        \  requires value >= 0\n\
+        \  ensures result == Int8.maximum\n\
+         {\n\
+        \  value.saturating_add(127)\n\
+         }\n");
+  test "saturating addition is exact where it fits" (fun () ->
+      proven
+        "fn f(first: Int8, second: Int8) -> Int8\n\
+        \  requires first + second <= Int8.maximum\n\
+        \  requires first + second >= Int8.minimum\n\
+        \  ensures result == first + second\n\
+         {\n\
+        \  first.saturating_add(second)\n\
+         }\n");
+  test "a checked addition is none exactly when it overflows" (fun () ->
+      proven
+        "fn f(value: UInt8) -> Bool\n\
+        \  ensures result == (value > 0)\n\
+         {\n\
+        \  value.checked_add(255).is_none()\n\
+         }\n");
+  test "a conversion succeeds exactly when the value fits" (fun () ->
+      proven
+        "fn f(value: Int64) -> Bool\n\
+        \  ensures result == (0 <= value && value <= 255)\n\
+         {\n\
+        \  UInt8.try_from(value).is_ok()\n\
+         }\n");
+  test "wrapping is not exact arithmetic" (fun () ->
+      not_proven
+        "fn f(value: UInt8) -> UInt8\n  ensures result > value\n{\n  value.wrapping_add(1)\n}\n"
+        "prover.ensures")
+
 let doubling =
   "trait Doubling {\n\
   \  fn value(self) -> Int64\n\
@@ -2148,5 +2218,98 @@ let () =
       let first = key_of "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
       let second = key_of "fn g(total: UInt8) -> UInt8 {\n  total + 1\n}\n" in
       if first <> second || first = "none" then fail "%s and %s" first second)
+
+(* Incremental work: after an edit, which definitions are proven again,
+   and how many queries reach the solver rather than its cache. Each test's
+   definitions are its own, so no other test has solved its queries. *)
+
+let again before after =
+  let solver =
+    match Solver.find () with Ok solver -> solver | Error message -> failwith message
+  in
+  let database = Support.setup [ ("app::main", before) ] in
+  let module_ = Support.module_of "app::main" in
+  let engine = Engine.of_context database in
+  let prove () =
+    match Type_checker.diagnostics database module_ with
+    | [] -> Prover.diagnostics database solver module_
+    | errors -> errors
+  in
+  (match prove () with
+  | [] -> ()
+  | found -> fail "before the edit: %s" (String.concat "; " (Support.codes found)));
+  Engine.set engine Workspace.file_text module_ after;
+  Engine.clear_log engine;
+  let solved = Solver.solved solver in
+  (match prove () with
+  | [] -> ()
+  | found -> fail "after the edit: %s" (String.concat "; " (Support.codes found)));
+  let prefix = "proof(app::main::" in
+  let proven =
+    List.filter_map
+      (fun name ->
+        let length = String.length prefix in
+        if String.length name > length && String.sub name 0 length = prefix then
+          Some (String.sub name length (String.length name - length - 1))
+        else None)
+      (Engine.executed engine)
+  in
+  (List.sort_uniq compare proven, Solver.solved solver - solved)
+
+let expect_again before after ~proven ~solved =
+  let found, count = again before after in
+  if found <> proven || count <> solved then
+    fail "proven again: [%s], with %d queries solved; expected [%s], with %d"
+      (String.concat ", " found) count (String.concat ", " proven) solved
+
+let () =
+  test "editing a body proves that definition again and no other" (fun () ->
+      let text index =
+        Printf.sprintf
+          "fn last_reading(readings: List[Int32]) -> Int32\n\
+          \  requires readings.length() > 2\n\
+           {\n\
+          \  readings[%s]\n\
+           }\n\n\
+           fn next_reading(reading: UInt16) -> UInt16\n\
+          \  requires reading < 900\n\
+           {\n\
+          \  reading + 7\n\
+           }\n"
+          index
+      in
+      expect_again (text "1") (text "2") ~proven:[ "last_reading" ] ~solved:1);
+  test "renaming a local solves nothing again" (fun () ->
+      let text name =
+        Printf.sprintf
+          "fn first_sample(samples: List[Int16]) -> Int16\n\
+          \  requires samples.length() > 0\n\
+           {\n\
+          \  let %s = samples[0]\n\
+          \  %s\n\
+           }\n"
+          name name
+      in
+      expect_again (text "first") (text "head") ~proven:[ "first_sample" ] ~solved:0);
+  test "editing a callee's ensures proves its callers again" (fun () ->
+      let text ensures =
+        Printf.sprintf
+          "fn halve(amount: UInt32) -> UInt32\n\
+          \  ensures %s\n\
+           {\n\
+          \  amount / 2\n\
+           }\n\n\
+           fn halve_and_add(amount: UInt32) -> UInt32 {\n\
+          \  halve(amount) + 1\n\
+           }\n\n\
+           fn unrelated(level: UInt32) -> UInt32\n\
+          \  requires level < 10\n\
+           {\n\
+          \  level + 1\n\
+           }\n"
+          ensures
+      in
+      expect_again (text "result < 4000000000") (text "result <= amount / 2")
+        ~proven:[ "halve"; "halve_and_add" ] ~solved:2)
 
 let () = finish ()

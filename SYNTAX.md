@@ -2215,7 +2215,9 @@ so `text.graphemes()` gives those as `StringSlice`s.
 ```truss
 trait Monoid: Equal {
   fn empty() -> Self
+    cost time finite
   fn combine(self, other: Self) -> Self
+    cost time finite
 
   law left_identity(value: Self) { Self.empty().combine(value) == value }
   law associative(first: Self, second: Self, third: Self) {
@@ -2231,6 +2233,11 @@ impl Monoid for Int64 {
 
 A `law` is a property every implementation must satisfy. A trait bound on a
 generic parameter is written `[Element: Ordered]`.
+
+A law is about what methods return, so the prover can use it only where
+those methods end and give the same result for the same arguments: methods
+with a `time` clause and no capabilities, as `cost time finite` gives here.
+An `impl`'s method keeps its trait's `time` clause.
 
 A law can have `requires` clauses, as a theorem can. They are its premises:
 the law must hold for every set of values that meets them.
