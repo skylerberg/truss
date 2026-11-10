@@ -3,6 +3,13 @@
 
 open Harness
 
+(* CI proves the library on a runner of its own, beside the other tests. *)
+let () =
+  if Sys.getenv_opt "TRUSS_SKIP_LIBRARY_PROOFS" = Some "1" then begin
+    print_endline "skipped: the library's proofs run in a job of their own";
+    exit 0
+  end
+
 (* Solver answers are kept by the text of the query, the solver's version
    and its limit, so with a directory to keep them in, a run solves only
    the queries that the last run did not. *)
