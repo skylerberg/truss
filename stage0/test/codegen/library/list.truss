@@ -258,6 +258,10 @@ test "a list is displayed with brackets and commas" {
   assert "${none}" == "[]"
   let words: List[String] = ["a${1}", "b${2}"]
   assert "${words}" == "[a1, b2]"
+  let fixed: Array[Int64, 2] = [4, 5]
+  assert "${fixed}" == "[4, 5]"
+  let part = fixed.slice()
+  assert "${part}" == "[4, 5]"
 }
 
 test "to_list copies a slice, and filter copies the elements that pass" {
@@ -275,4 +279,83 @@ test "to_list copies a slice, and filter copies the elements that pass" {
   let copies = words.to_list()
   assert copies.length() == 3
   assert copies[1] == "bb2"
+}
+
+test "get, first, and last lend an element, or nothing when there is none" {
+  let words: List[String] = ["a${1}", "b${2}", "c${3}"]
+  assert words.get(1) is Some(word) && word == "b2"
+  assert words.get(3) is None
+  assert words.first() is Some(word) && word == "a1"
+  assert words.last() is Some(word) && word == "c3"
+  let none: List[String] = []
+  assert none.get(0) is None
+  assert none.first() is None
+  assert none.last() is None
+  assert words[1..].first() is Some(word) && word == "b2"
+  let fixed: Array[Int64, 3] = [7, 8, 9]
+  assert fixed.get(2) is Some(item) && item == 9
+  assert fixed.first() is Some(item) && item == 7
+  assert fixed.last() is Some(item) && item == 9
+  assert words.length() == 3
+}
+
+test "split_first and split_last lend one element and view the rest" {
+  let items: List[Int64] = [1, 2, 3]
+  assert items.split_first() is Some(split) && split.first == 1 && same_items(split.rest, expected: [2, 3])
+  assert items.split_last() is Some(split) && split.last == 3 && same_items(split.rest, expected: [1, 2])
+  let one: List[Int64] = [5]
+  assert one.split_first() is Some(split) && split.first == 5 && split.rest.length() == 0
+  let none: List[Int64] = []
+  assert none.split_first() is None
+  assert none.split_last() is None
+}
+
+test "enumerate yields each element with its index" {
+  let words: List[String] = ["a${1}", "b${2}"]
+  var seen: USize = 0
+  for entry in words.enumerate() {
+    assert entry.index == seen
+    assert entry.element.length() == 2
+    seen += 1
+  }
+  assert seen == 2
+  var items: List[Int64] = [10, 20, 30]
+  for entry in mut items.enumerate() {
+    if entry.index > 0 {
+      entry.element = entry.element + 1
+    }
+  }
+  assert same_items(items, expected: [10, 21, 31])
+}
+
+test "zip yields pairs up to the shorter length, and lends both to change" {
+  let numbers: List[Int64] = [1, 2, 3]
+  let more: List[Int64] = [10, 20]
+  var total = 0
+  var count = 0
+  for pair in numbers.zip(more) {
+    total += pair.first * pair.second
+    count += 1
+  }
+  assert count == 2
+  assert total == 50
+  var left: List[Int64] = [1, 2, 3]
+  var right: List[Int64] = [10, 20, 30]
+  for pair in mut left.zip(mut right[..]) {
+    let kept = pair.first
+    pair.first = pair.second
+    pair.second = kept
+  }
+  assert same_items(left, expected: [10, 20, 30])
+  assert same_items(right, expected: [1, 2, 3])
+}
+
+test "reversed lends elements to change, from the last to the first" {
+  var items: List[Int64] = [1, 2, 3]
+  var next = 100
+  for item in mut items.reversed() {
+    item = next
+    next += 1
+  }
+  assert same_items(items, expected: [102, 101, 100])
 }
