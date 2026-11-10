@@ -79,31 +79,47 @@ public fn Command.argument(own self, argument: StringSlice) -> Command {
 }
 
 public fn Command.arguments(own self, arguments: Slice[String]) -> Command {
-  todo
+  var command = own self
+  for argument in arguments {
+    mut command.arguments.push(argument.copy())
+  }
+  command
 }
 
 public fn Command.variable(own self, name: StringSlice, value: StringSlice) -> Command {
-  todo
+  var command = own self
+  mut command.variables.push(Variable(name: name.to_string(), value: value.to_string()))
+  command
 }
 
 public fn Command.without_inherited_variables(own self) -> Command {
-  todo
+  var command = own self
+  command.clear_variables = true
+  command
 }
 
 public fn Command.directory(own self, directory: own Path) -> Command {
-  todo
+  var command = own self
+  command.directory = Some(own directory)
+  command
 }
 
 public fn Command.input(own self, input: Redirect) -> Command {
-  todo
+  var command = own self
+  command.input = input
+  command
 }
 
 public fn Command.output(own self, output: Redirect) -> Command {
-  todo
+  var command = own self
+  command.output = output
+  command
 }
 
 public fn Command.error_output(own self, error_output: Redirect) -> Command {
-  todo
+  var command = own self
+  command.error_output = error_output
+  command
 }
 
 public fn Command.program(self) -> StringSlice
