@@ -1,59 +1,66 @@
 # Truss Type Checker
 
-This document describes stage0's name resolution and type checking, in
-[`stage0/`](stage0): everything between the parser's trees and the checked
+This document describes name resolution and type checking in stage0, in
+[`stage0/`](stage0): every step between the parser's syntax trees and the core
 form that the prover and code generation read. It follows the decisions in
-[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
-[GRAMMAR.md](GRAMMAR.md), reads the trees described in
-[PARSER.md](PARSER.md), and produces what [CODEGEN.md](CODEGEN.md) expects
-and what the prover in [PROVER.md](PROVER.md) reads. Its queries run on the
-code database, which [DATABASE.md](DATABASE.md) describes.
+[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md).
+Its input is the trees described in [PARSER.md](PARSER.md). Its output is the
+core form that [CODEGEN.md](CODEGEN.md) and [PROVER.md](PROVER.md) consume. Its
+queries run on the code database, which [DATABASE.md](DATABASE.md) describes.
 
 ## What the type checker does
 
-The type checker takes the syntax tree of each definition, the package's
-manifest, and the manifests of its dependencies. For each definition it
-produces a *resolved form*; an *interface*, which is what other definitions
-may depend on; a *core form*, which is what the pattern check, ownership
-checking, the package checks, the prover, and code generation read; and a
-*checked form*, a set of tables that the usage check and the tools read. The
-database records what each result read, and keeps each result under what it
-read, as DATABASE.md describes.
+The type checker's inputs are the syntax tree of each definition, the package's
+manifest, and the manifests of the package's dependencies. For each definition
+it produces four results:
+
+- a *resolved form*: the definition with its names resolved;
+- an *interface*: the part of the definition that other definitions can depend
+  on;
+- a *core form*: the desugared and fully typed definition, which the pattern
+  check, the ownership check, the package checks, the prover, and code
+  generation read;
+- a *checked form*: tables of types, meanings, and calls by syntax node, which
+  the usage check and the tools read.
+
+The database records the dependencies of each result and caches each result
+under them, as DATABASE.md describes.
 
 The type checker:
 
-- resolves every name to what it means, and decides the constructs the
-  parser left open: `name[...]`, a bare name in a pattern, and a place after
-  `mut` or `own`
-- keeps what other definitions read of a definition apart from the rest of
-  it, so that a change to a body re-checks no caller
-- checks every signature, type definition, trait, `impl`, and capability on
-  its own
-- infers the types of every expression in a body, and chooses the method,
-  field, variant, `impl`, and associated type each name means
-- checks the rules on modes, moves, and views, within each function
-- checks that every `match` covers every case and has no unreachable arm,
-  and that every pattern in a `let`, `for`, or lambda cannot fail
-- checks the rules on use: every value, variable, and import is used, and no
-  code is unreachable
-- checks capabilities: what each piece of code may call, what each `provide`
-  provides, and what each dependency was granted
-- checks the rules that span a package: where `impl`s live, that they do not
-  overlap, that recursive types are marked `indirect`, and that generic code
-  has no instantiation cycles
+- resolves every name, and disambiguates the constructs that the parser left
+  ambiguous: `name[...]`, a bare name in a pattern, and a place after `mut` or
+  `own`
+- separates a definition's interface from its body, so that a change to a body
+  re-checks no caller
+- checks every signature, type definition, trait, `impl`, and capability
+  independently
+- infers the type of every expression in a body, and selects the method, field,
+  variant, `impl`, and associated type that each name refers to
+- checks ownership within each function: modes, moves, and views
+- checks that every `match` is exhaustive and has no unreachable arm, and that
+  every pattern in a `let`, a `for`, or a lambda is irrefutable
+- checks usage: every value, variable, and import is used, and no code is
+  unreachable
+- checks capabilities: the capabilities that each piece of code uses, the
+  capabilities that each `provide` provides, and the capabilities that each
+  dependency was granted
+- checks the package-wide rules: where an `impl` may be defined (the orphan
+  rule), that `impl`s do not overlap, that recursive types are marked
+  `indirect`, and that generic code has no instantiation cycle
 
 It does not:
 
-- prove anything. Every fact that needs the solver, such as an index in
-  bounds, an addition that cannot overflow, a `requires` at a call, a type
-  invariant, a cost, termination, or two index ranges that do not overlap,
-  goes to the prover. The core form marks the few obligations that the
-  type checker creates itself (see
-  [Obligations the type checker creates](#obligations-the-type-checker-creates)).
-- run code. Constants are worked out exactly, from literals alone (see
-  [Constants](#constants)). Tagged-template checks are `requires` clauses,
-  which the prover discharges by running compiled code.
-- decide layouts, drops, or anything else about the compiled program
+- prove anything. Every fact that needs the solver goes to the prover: an index
+  in bounds, an addition that cannot overflow, a `requires` at a call, a type
+  invariant, a cost, termination, and two index ranges that are disjoint. The
+  core form marks the few obligations that the type checker itself creates (see
+  [Obligations the type checker
+  creates](#obligations-the-type-checker-creates)).
+- run code. Constants are evaluated exactly, from literals alone (see
+  [Constants](#constants)). The checks of a tagged template are `requires`
+  clauses, which the prover discharges by running compiled code.
+- decide layouts, drops, or any other property of the compiled program
 
 ## Structure
 
@@ -67,99 +74,97 @@ syntax tree ──▶ Resolve ──▶ Interface ──▶ Body ──▶ core 
 
 ### One definition at a time, through queries
 
-The type checker never reads anything about another definition except
-through a query of the code database, which keeps each result current and
-finds what a change reaches, as [DATABASE.md](DATABASE.md) describes. What
-the type checker adds is which results there are, and what each reads:
+The type checker reads another definition only through a query of the code
+database. The database keeps each result up to date and finds the results that
+a change invalidates, as [DATABASE.md](DATABASE.md) describes. The type checker
+defines the queries and their dependencies:
 
-- **Each check is a query** with a key: the resolved form of a definition,
-  its interface, its checked body, the shape of a type, the members of a type
-  with a given name, and so on (see [Dependencies](#dependencies)).
-- **Checking a body asks for the interfaces of what it calls,** which checks
-  those signatures if they have not been checked yet, but never their
-  bodies. A check of a package asks for the checked body of every definition
-  in it.
-- **Each query is of the compiler's phase it belongs to:** a file's trees,
-  what files declare, what names mean, interfaces, bodies, the rules that
-  span a package, and diagnostics. A query reads its own phase and earlier
-  ones.
-- **Cycles between queries are errors or are designed away.** Signatures
-  depend only on other signatures and type shapes, never on bodies, so
-  ordinary mutual recursion between functions never makes a query cycle. The
-  few real cycles are the subject of a rule: constants that refer to each
-  other, types that contain each other (checked for `indirect` by a package
-  check, and with their facts worked out for the whole group in one
-  result), and traits that require each other.
+- **Each check is a query** with a key: the resolved form of a definition, its
+  interface, its checked body, the shape of a type, the members of a type with
+  a given name, and so on (see [Dependencies](#dependencies)).
+- **Checking a body demands the interfaces of its callees.** That checks the
+  callees' signatures if they have not been checked yet, but never their
+  bodies. A check of a package demands the checked body of every definition in
+  the package.
+- **Each query belongs to one phase of the compiler:** a file's trees, a file's
+  declarations, name resolution, interfaces, bodies, the package-wide rules,
+  and diagnostics. A query reads its own phase and earlier phases.
+- **A cycle between queries is an error, or the design rules it out.** A
+  signature depends only on other signatures and on type shapes, never on a
+  body, so mutual recursion between functions never makes a query cycle. Each
+  of the few real cycles has a rule: constants that refer to each other,
+  mutually recursive types (a package check requires `indirect`, and one result
+  computes the facts of the whole group), and traits that require each other.
 
 ### Deterministic results
 
 Every result is canonical, as DATABASE.md requires of a query:
 
-- inference variables are numbered in the order they are created within one
-  statement, and none survive into a stored result
-- every list in a result is in source order, or sorted by a stable key such
-  as a definition's path
+- inference variables are numbered in creation order within one statement, and
+  none remains in a stored result
+- every list in a result is in source order, or sorted by a stable key such as
+  a definition's path
 - the checker never iterates over a hash table to build a result
 - diagnostics are sorted by position, then by code
 
 ### Node identity
 
-Every node the parser builds has an *id*: a small integer, unique within its
-definition, given in the order the parser builds the definition's nodes.
-Later stages never rebuild or copy a tree. Each records what it decided in
-tables keyed by node id: resolution's table says what each name means, and
-the checker's tables give each expression's type, each call's argument
-binding, each pattern's variants, and so on.
+Every node that the parser builds has an *id*: a small integer, unique within
+its definition, assigned in the order in which the parser builds the
+definition's nodes. Later stages never rebuild or copy a tree. Each stage
+records its decisions in tables keyed by node id: resolution's table gives the
+referent of each name, and the checker's tables give each expression's type,
+each call's argument binding, each pattern's variants, and so on.
 
-- **Spans cannot be the key.** They are not unique: a node the lexer or
-  parser made in recovery is zero-width, and a node built for a habit, such
-  as the `from` in the call that `x as Int64` is parsed as, shares its span
-  with another node.
-- **Tables are better than a tree parameterized by its annotations,** as in
-  OCaml's separate typed tree or the "trees that grow" pattern. With such a
-  tree, each stage builds and stores another copy, and every stage's tree
-  has a different type. With tables, the tree is stored once and shared by
-  every stage and tool, a stage that records a new fact adds a table, and a
-  stored result is only what that stage decided. rustc names its nodes the
-  same way, by the item that owns them and a number within it (`HirId`), so
-  that a change to one item renumbers nothing in another.
-- **What the program means is one more tree, built once.** The syntax tree
-  is the program as written, which is what tools and diagnostics need. The
-  stages that run or prove the program need what it means: which method a
-  call calls, what a `?` does, where a value is. That is
-  [the core form](#the-core-form), which the type checker builds as it
-  decides, so that no later stage decides it again. Its nodes name the
-  syntax nodes they came from, and hold no positions.
-- **Ids are deterministic.** The same tokens give the same nodes with the
-  same ids, so a definition that only moved keeps its ids, as it keeps its
-  tree, and every table keyed by them stays valid.
-- **An id means something only within its definition.** A result never
-  names a node in another definition. It names the definition, by path, as
-  every reference across definitions does.
-- **A method is a definition wherever it is written.** One written inside a
-  trait, an `impl`, or a capability has its own tree, its own ids, and its
-  own results, exactly as one written `fn Type.name` has, so editing one
-  method of an `impl` checks only that method again. Its path names what it
-  is written inside, its own name, and how it takes `self`.
-- **A generic parameter is named by what declares it and its name,** not by
-  a node. Resolution records a use of `Element` as the parameter `Element` of
-  `List.push`, or of the `impl` the method is in, which is the same pair a
-  type names it by. So a parameter means the same thing in every tree that
-  can see it, and nothing maps a node to it.
-- **Tables are dense arrays** indexed by id, kept like every other result. A
-  node a stage says nothing about has an empty entry.
+- **A span cannot be the key.** Spans are not unique: a node that the lexer or
+  the parser creates during error recovery has zero width, and a node that the
+  parser synthesizes for a habit, such as the `from` in the call that `x as
+  Int64` is parsed as, shares its span with another node.
+- **Side tables are better than a tree that is parameterized by its
+  annotations,** as in OCaml's separate typed tree or the "trees that grow"
+  pattern. With such a tree, each stage builds and stores another copy, and
+  each stage's tree has a different type. With side tables, the tree is stored
+  once and shared by every stage and tool, a stage that records a new fact adds
+  a table, and a stored result holds only that stage's decisions. rustc
+  identifies its nodes the same way, by the owning item and a number within it
+  (`HirId`), so that a change to one item renumbers nothing in another.
+- **The program's semantics are one more tree, built once.** The syntax tree is
+  the program as written, which tools and diagnostics need. The stages that run
+  or prove the program need its semantics: the callee of each call, the
+  desugaring of each `?`, the place of each value. That is [the core
+  form](#the-core-form). The type checker builds it while it makes these
+  decisions, so no later stage makes them again. Its nodes refer to the syntax
+  nodes that they came from, and hold no positions.
+- **Ids are deterministic.** The same tokens give the same nodes with the same
+  ids. So a definition that only moved keeps its ids, as it keeps its tree, and
+  every table keyed by them stays valid.
+- **An id is meaningful only within its definition.** A result never refers to
+  a node in another definition. It refers to the definition, by path, as every
+  cross-definition reference does.
+- **A method is a definition wherever it is written.** A method written inside
+  a trait, an `impl`, or a capability has its own tree, its own ids, and its
+  own results, exactly as a method written `fn Type.name` has. So an edit to
+  one method of an `impl` re-checks only that method. Its path consists of its
+  enclosing declaration, its own name, and its receiver mode.
+- **A generic parameter is identified by its declaring definition and its
+  name,** not by a node. Resolution records a use of `Element` as the parameter
+  `Element` of `List.push`, or of the method's enclosing `impl`, which is the
+  same pair that a type uses. So a parameter has one identity in every tree
+  that can see it, and no table maps a node to it.
+- **Tables are dense arrays** indexed by id, stored like every other result. A
+  node that a stage records nothing for has an empty entry.
 
 ## Name resolution
 
-`Resolve` turns a definition's syntax tree into its resolved form: a table,
-keyed by the tree's node ids, of what every name refers to. The tree itself is
-unchanged (see [Node identity](#node-identity)). It reads the
-definition's own tree, the file's `use` lines, and the names other files and
-packages make visible, each through a query.
+`Resolve` produces a definition's resolved form: a table, keyed by the tree's
+node ids, of the referent of every name. The tree itself is unchanged (see
+[Node identity](#node-identity)). `Resolve` reads the definition's own tree,
+the file's `use` lines, and the names that other files and packages export,
+each through a query.
 
 ### What a name can refer to
 
-Names live in separate namespaces, which the case rules keep apart:
+Names are in separate namespaces, which the case rules distinguish:
 
 | Namespace | Written | Holds |
 |---|---|---|
@@ -169,206 +174,213 @@ Names live in separate namespaces, which the case rules keep apart:
 | Members | after `.` | fields, methods, variants, constants under a type, associated types |
 
 - **An unqualified name** is looked up among the locals in scope, then the
-  generic parameters, then the definitions in the same file, then the
-  prelude. Exactly one can match, because no name may hide another.
-- **A qualified name** `module::name` is looked up in that module. Its
-  module is either imported by a `use` or written in full from its package.
-  A full path starts with the name of a package the file may name, its own,
-  `standard`, or one its manifest lists, and that name is two of the path's
-  names when the package has an owner: `acme::geometry::vector` is the
-  module `vector` of `acme::geometry` where the manifest lists that package,
-  and otherwise names a module of a package `acme`.
+  generic parameters, then the definitions in the same file, then the prelude.
+  Exactly one can match, because shadowing is not allowed.
+- **A qualified name** `module::name` is looked up in that module. The module
+  is either imported by a `use` or written as a full path from its package. A
+  full path starts with the name of a package that the file can name: its own
+  package, `standard`, or a package that its manifest lists. That name takes
+  two segments of the path when the package has an owner:
+  `acme::geometry::vector` is the module `vector` of the package
+  `acme::geometry` if the manifest lists that package, and otherwise a module
+  of a package `acme`.
 - **A member,** after `.`, is not resolved here. Its meaning depends on the
-  type before the dot, which only type checking knows. The one exception is
-  a name before the dot that resolution already knows is a type, as in
-  `Shape.Circle`, `UInt8.maximum`, or `List[String].with_capacity`: the
-  resolved form records the type, and the type checker looks the member up
+  type of the expression before the dot, which only type checking knows. The
+  one exception is a name before the dot that resolution already knows to be a
+  type, as in `Shape.Circle`, `UInt8.maximum`, or `List[String].with_capacity`:
+  the resolved form records the type, and the type checker looks the member up
   in it.
 
-**What a name refers to is one closed set of cases.** The resolved form
-records each name as a local, a generic parameter that is a type, a
-capability, or a `USize` value, a definition with the kind of definition it
-is, a prelude variant, a module, a field, a specification word, or a name
-that nothing answers, with its report. A later stage matches on those cases
-in full. It never works a kind out again, from how a name is spelled or by
-looking the definition up, so resolution and checking cannot disagree about
-what a name is.
+**The referent of a name is one closed sum type.** The resolved form records
+each name as one of: a local; a generic parameter that is a type, a capability,
+or a `USize` value; a definition, with its kind; a prelude variant; a module; a
+field; a specification word; or an unresolved name, with its diagnostic. A
+later stage matches on these cases exhaustively. It never derives the kind
+again, from the spelling of the name or by looking the definition up, so
+resolution and checking cannot disagree about the kind of a name.
 
-**An expression is read as a name in one way.** `parse`, `(parse)`,
-`parse[Int64]`, and `(parse)[Int64]` all name `parse`, the last two with
-type arguments. That reading is made in one place, which resolution,
-checking a name as a value, checking it as a callee, and reading a type
-written in an expression all use, so each takes parentheses and type
-arguments alike.
+**One function decides how an expression is read as a name.** `parse`,
+`(parse)`, `parse[Int64]`, and `(parse)[Int64]` all name `parse`, the last two
+with type arguments. Resolution, checking a name as a value, checking it as a
+callee, and reading a type that is written in an expression all call that
+function, so each treats parentheses and type arguments the same way.
 
-Definitions are named in the resolved form by package, module path, and
-name, never by a hash, as DESIGN.md requires. A method is named
-by its type and its name, together with its receiver mode, since one name
-can have a version for each mode.
+The resolved form identifies a definition by package, module path, and name,
+never by a hash, as DESIGN.md requires. It identifies a method by its type, its
+name, and its receiver mode, because one name can have a version for each mode.
 
 ### Scopes
 
 - **Every `use` line imports one module.** Two imported modules with the same
-  last name are an error at the second `use`. A module that no name in the
-  file uses is an error, as in Go, with a fix that deletes the line.
-  `standard::intrinsic` can be imported only by the `standard` package. That
-  error is at the `use` line alone: names written through the import
-  resolve as usual.
-- **Locals follow blocks.** A `let` or `var` is in scope for the rest of its
-  block. A name bound by `is` is in scope in the rest of its `&&` chain, in
-  the block of the `if` or `while` whose condition contains it at the top
-  level of its `&&` chain, and in the body of a `match` arm whose guard
-  contains it that way. It is not in scope after `||`, under `!`, or in an
-  `else`. A name bound by `let ... else` is in scope for the rest of the
-  enclosing block. A `let` in a branch of a `parallel` or `concurrent`
-  block is in scope after the block, not in the other branches.
-- **No name hides another.** Binding a name that is already visible in the
+  last name are an error at the second `use`. An imported module that no name
+  in the file uses is an error, as in Go, with a fix that deletes the line.
+  Only the `standard` package can import `standard::intrinsic`. That error is
+  reported at the `use` line only: names written through the import resolve as
+  usual.
+- **Locals are block-scoped.** A `let` or a `var` is in scope for the rest of
+  its block. A name bound by `is` is in scope in the rest of its `&&` chain, in
+  the block of the `if` or `while` whose condition contains it at the top level
+  of its `&&` chain, and in the body of a `match` arm whose guard contains it
+  in the same way. It is not in scope after `||`, under `!`, or in an `else`. A
+  name bound by `let ... else` is in scope for the rest of the enclosing block.
+  A `let` in a branch of a `parallel` or `concurrent` block is in scope after
+  the block, and not in the other branches.
+- **Shadowing is an error.** Binding a name that is already visible in the
   values namespace, whether a local of an enclosing scope, a parameter, or a
-  definition in the same file, is an error that names both. The prelude
-  holds only `UpperCamelCase` names and values are `lower_snake_case`, so
-  only types can clash with the prelude. Generic parameters are checked the
+  definition in the same file, is an error that names both bindings. The
+  prelude holds only `UpperCamelCase` names and values are `lower_snake_case`,
+  so only types can clash with the prelude. Generic parameters are checked the
   same way against the file's types and the prelude.
-- **Specification words** get their meaning by where they are. `result`
-  names the return value inside `ensures` and `cost`; `old(...)` is the
-  value on entry inside specifications and proofs; `log(...)` and
-  `power(...)` are functions on `Integer` inside any specification, unless
-  a local or a definition of the file has the name; `time(...)` and
-  `calls(...)` are the cost of a call and the number of calls inside a
-  `cost` bound;
-  `identical(a, b)` is identity, for two values of one type, inside
-  specifications;
-  `yielded` and `finished` are what a lending or yielding method has handed
-  out and whether it ran to its end, inside its `ensures`, and `yielded` is
-  what a `for` loop's earlier iterations received, inside its `invariant`.
-  Anywhere else, they are ordinary names. Where one has its meaning, a
-  visible variable with the same name would be hidden, which is an error as
-  everywhere else.
+- **A specification word has its special meaning only in certain positions:**
+  - `result` is the return value, inside `ensures` and `cost`.
+  - `old(...)` is the value on entry, inside specifications and proofs.
+  - `log(...)` and `power(...)` are functions on `Integer`, inside any
+    specification, unless a local or a definition of the file has the name.
+  - `time(...)` and `calls(...)` are the cost of a call and the number of
+    calls, inside a `cost` bound.
+  - `identical(a, b)` is identity of two values of one type, inside
+    specifications.
+  - `yielded` and `finished` are the sequence of values that a lending or
+    yielding method has yielded and whether the method ran to completion,
+    inside its `ensures`. `yielded` is also the sequence of values that the
+    earlier iterations of a `for` loop received, inside its `invariant`.
+
+  Anywhere else, these are ordinary names. Where a word has its special
+  meaning, a visible variable with the same name would be shadowed, which is an
+  error as everywhere else.
 
 ### Decisions the parser left open
 
 | Construct | Resolved as |
 |---|---|
-| `name[...]` | Type arguments if `name` is a generic function, a type, or a trait; an index if it is a local, a parameter, or a constant. For a method, as in `items.map[String]`, type checking decides from the receiver's type. |
-| A bare `LOWER_NAME` in a pattern | The constant, if one with that name is visible. Otherwise a new binding. |
-| A place after `mut` or `own` | The expression must start with a local, a parameter, `self`, or a constant, followed by fields and indexes. `mut parse[Int64](text)` starts with a function, so it is an error with a fix that removes `mut`. |
+| `name[...]` | Type arguments if `name` is a generic function, a type, or a trait. An index if it is a local, a parameter, or a constant. For a method, as in `items.map[String]`, type checking decides from the receiver's type. |
+| A bare `LOWER_NAME` in a pattern | The constant, if a constant with that name is visible. Otherwise a new binding. |
+| A place after `mut` or `own` | The expression must start with a local, a parameter, `self`, or a constant, followed by field accesses and indexes. `mut parse[Int64](text)` starts with a function, so it is an error with a fix that removes `mut`. |
 | A `LOWER_NAME` in a type argument | A value generic parameter or a constant of type `USize`, as in `Array[UInt8, digest_size]` |
 
-Matching a bare argument to a parameter needs the callee's signature, and
-for a method the receiver's type, so it is done by type checking (see
-[Calls and arguments](#calls-and-arguments)).
+Binding a bare argument to a parameter needs the callee's signature, and for a
+method the receiver's type, so type checking does it (see [Calls and
+arguments](#calls-and-arguments)).
 
 ### Errors and habits
 
-Resolution reports names that refer to nothing, with a fix to the closest
-visible name when one is near. It also reports the habits from other
-languages that are names, with exact fixes: `null` and `nil` become `None`,
-and `Shape::Circle` becomes `Shape.Circle`.
+Resolution reports each unresolved name, with a fix to the closest visible name
+when one is similar. It also reports the habits from other languages that are
+names, with exact fixes: `null` and `nil` become `None`, and `Shape::Circle`
+becomes `Shape.Circle`.
 
 ### Broken definitions
 
-A definition the parser could not read as written is still registered and
-checked as far as it can be, so that its error is reported once, by the
-parser, and nothing that uses it reports another. PARSER.md states what the
-parser keeps:
+A definition that has a parse error is still registered and checked as far as
+possible. Its error is then reported once, by the parser, and no use of the
+definition reports a second error. PARSER.md states what the parser keeps:
 
-- **A definition whose header did not parse** keeps only its keyword and
-  name, when those could be read.
+- **A definition whose header did not parse** keeps only its keyword and name,
+  if the parser could read them.
 - **Any other broken definition** keeps its whole tree, with an `Error` node
-  for each part that failed, and its signature as written when every
-  diagnostic lies in its body.
-- **The members of a trait, an `impl`, or a capability recover one by one.**
-  A broken associated type or law is an `Error` member, and the members
-  around it are as written. A method is a definition of its own, so what
-  breaks in it is its own.
-- **Nodes built for a habit** lie in the same signature or body as the
+  for each part that failed. It keeps its signature as written when every
+  diagnostic is in its body.
+- **The members of a trait, an `impl`, or a capability recover independently.**
+  A broken associated type or law is an `Error` member, and the other members
+  are as written. A method is a definition of its own, so an error in it
+  affects only that method.
+- **Nodes synthesized for a habit** are in the same signature or body as the
   habit's diagnostic.
 
-**A part is broken only when its tree differs from its source.** The unit is
-one signature, one body, or one type's definition, whether of a definition or
-of a member that a trait or an `impl` holds itself, an associated type or a
-law. The parser lists, on each definition, the spans where it built a
-tree that is not the source as written: where it built an `Error` node or a
-node for a habit, or consumed a closer the lexer inserted. A part is broken
-when one of its definition's recovered spans lies in the part's span: a
-signature runs from the definition's or member's start to its body's start,
-a body is its block, a member is its line, and a type is its definition.
-A recovered span with width lies in every part it overlaps. A zero-width
-one at position `p` lies in the part that starts at `p`, if there is one, even
-when that part is itself zero-width, and otherwise in the part with
-`start <= p < stop`. So a missing body, recorded as a zero-width span at the
-end of the signature, where its kept `Error` body also starts, breaks the
-body and not the signature, and the function keeps its interface. A parser
-diagnostic that only enforces a rule on code it read exactly as written,
-such as a misplaced `assert`, `yield`, `break`, or `echo`, `forall` outside a
-specification, a parameter named `result`, `lends own`, a repeated clause,
-or a misplaced `public` or `opaque`, does not make its part broken. Such a
-part is checked as usual, since checking it cannot report on invented code,
-and an agent then sees its type errors in the same build as the parser's.
-The parser decides which of its diagnostics are recoveries, in one
-exhaustive match over its codes, so a new kind of diagnostic cannot compile
-until it is put on one side, and the type checker never classifies codes.
+**A part is broken only if its tree differs from its source.** A part is one
+signature, one body, or one type definition, either of a definition or of a
+member that a trait or an `impl` holds directly: an associated type or a law.
+The parser lists, on each definition, the *recovered spans*: the spans where
+the tree is not the source as written, because the parser built an `Error` node
+or a node for a habit, or consumed a closing delimiter that the lexer inserted.
+A part is broken if one of its definition's recovered spans is within the
+part's span:
 
-The type checker uses that as follows:
+- a signature extends from the start of the definition or member to the start
+  of its body;
+- a body is its block;
+- a member is its line;
+- a type is its definition.
 
-- **Every broken definition that has a name is registered,** as a
-  definition of its kind, so uses of it resolve. One whose name could not be
-  read registers nothing, and a use of what it meant to define is an
-  unknown name.
-- **A broken part is never checked.** A definition whose header or
-  signature is broken gets the `Error` interface, and a type whose fields or
-  variants are broken gets the `Error` shape. A broken body is not checked.
-  A broken member of a trait, an `impl`, or a capability affects only that
-  member: a trait with one broken method keeps every other method's
-  interface, so uses of those are checked as usual, and only uses of the
-  broken method get `Error`. Nothing written inside a trait, an `impl`, or
-  a capability whose own header is broken is checked, since what it is
-  inside is not known. Since nodes built for a habit lie in a broken part,
-  no invented code is ever checked.
-- **Everything is accepted of an `Error` interface or shape, silently.** A
-  call to such a function takes any arguments and has type `Error`. Building
-  such a type, reading its fields, matching on it, and looking up its
-  members all give `Error`. A trait with the `Error` interface satisfies
-  every bound that names it, and a constant with it has type `Error`. The
-  interface or shape holds the parser's report, which every `Error` made of
-  it hands on (see [Errors carry their report](#errors-carry-their-report)).
-- **A part that is not broken is checked as usual.** A function whose body
-  is broken keeps its interface, so callers are checked against its
-  signature as written, as for any function.
-- **A broken definition is a dependency like any other.** Results that used
-  its `Error` interface read it like any other interface, so when the definition is
-  fixed, exactly they are checked again.
-- **Builds and tests skip what cannot run.** A build refuses a program that
-  can reach a definition with any error, broken or not. A test that can
-  reach one does not run, and is reported as blocked by it; every other test
-  runs as usual. An obligation the prover has not proven, or could not prove,
-  is not an error of this kind for tests: a test build checks every
-  operation that could fail as it runs, as CODEGEN.md describes, so tests run
-  without waiting for proofs. A build of a program still needs every proof.
+A recovered span with nonzero width is within every part that it overlaps. A
+zero-width recovered span at position `p` is within the part that starts at
+`p`, if there is one, even if that part is itself zero-width, and otherwise
+within the part with `start <= p < stop`. So a missing body breaks the body and
+not the signature, and the function keeps its interface: the missing body is
+recorded as a zero-width span at the end of the signature, which is also where
+its `Error` body starts.
+
+Some parser diagnostics only enforce a rule on code that was parsed exactly as
+written: a misplaced `assert`, `yield`, `break`, or `echo`, a `forall` outside
+a specification, a parameter named `result`, `lends own`, a repeated clause, or
+a misplaced `public` or `opaque`. Such a diagnostic does not break its part.
+The part is checked as usual, because checking it cannot report on synthesized
+code, and an agent then sees its type errors in the same build as the parser's.
+The parser classifies each of its diagnostic codes as a recovery or not, in one
+exhaustive match, so a new code does not compile until it is classified, and
+the type checker never classifies codes.
+
+The type checker uses the broken parts as follows:
+
+- **Every broken definition that has a name is registered,** as a definition of
+  its kind, so uses of it resolve. A definition whose name could not be read
+  registers nothing, and a use of the name that it was meant to define is an
+  unresolved name.
+- **A broken part is never checked.** A definition whose header or signature is
+  broken gets the `Error` interface, and a type whose fields or variants are
+  broken gets the `Error` shape. A broken body is not checked. A broken member
+  of a trait, an `impl`, or a capability affects only that member: a trait with
+  one broken method keeps the interface of every other method, so uses of those
+  are checked as usual, and only uses of the broken method get `Error`. No
+  member of a trait, an `impl`, or a capability whose own header is broken is
+  checked, because its enclosing declaration is unknown. Nodes synthesized for
+  a habit are in a broken part, so synthesized code is never checked.
+- **Any use of an `Error` interface or shape is accepted silently.** A call of
+  such a function accepts any arguments and has the type `Error`. Constructing
+  such a type, reading its fields, matching on it, and looking up its members
+  all give `Error`. A trait with the `Error` interface satisfies every bound
+  that names it, and a constant with it has the type `Error`. The interface or
+  shape holds the parser's diagnostic, and every `Error` derived from it
+  carries that diagnostic (see [Errors carry their
+  report](#errors-carry-their-report)).
+- **A part that is not broken is checked as usual.** A function whose body is
+  broken keeps its interface, so its callers are checked against its signature
+  as written, as for any function.
+- **A broken definition is a dependency like any other.** A result that used
+  its `Error` interface depends on that interface as on any other. So when the
+  definition is fixed, exactly those results are re-checked.
+- **Builds and tests skip code that cannot run.** A build rejects a program
+  that can reach a definition with any error, broken or not. A test that can
+  reach such a definition does not run, and is reported as blocked by it. Every
+  other test runs as usual. An obligation that the prover has not proven, or
+  could not prove, does not block a test: a test build checks at run time every
+  operation that could fail, as CODEGEN.md describes, so tests run without
+  waiting for proofs. A build of a program still needs every proof.
 
 ## Parts of a definition
 
-A definition is not one result. What type checking another definition reads
-of it is apart from the rest, so that a change to the rest comes out the
-same there and goes no further:
+A definition is not one result. The part that the checks of other definitions
+read is separate from the rest. A change to the rest leaves that part equal, so
+the change invalidates nothing beyond the definition:
 
-| Definition | What checking others reads | What only its own check reads |
+| Definition | Read by the checks of other definitions | Read only by its own check |
 |---|---|---|
-| Function or method | Its *signature*: generic parameters and bounds, the receiver, parameter names, types, and modes, which parameters have defaults, the result or `yields` or `lends` form, `uses`, and whether it has a `time` clause | Its body, each default, and its `requires`, `ensures`, `decreases`, and `cost` clauses |
-| Type | Its *shape*: generic parameters, fields and variants with their types, which fields have defaults, `indirect` marks, `opaque`, and `derives` | Its invariants, its potential, and its fields' defaults |
-| Trait | Its *interface*: parameters, required traits, associated types, and each method's signature | Its laws |
-| `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and each method's signature | Nothing |
-| A method written inside a trait, an `impl`, or a capability | Its signature, as a function's, read with what the one it is inside says of `Self`, its associated types, and its generic parameters | Its body, if it has one, and its clauses |
-| Constant | Its type, and its value where the checker needs one | Its expression |
+| Function or method | Its *signature*: generic parameters and bounds, the receiver, parameter names, types, and modes, which parameters have defaults, the result or the `yields` or `lends` clause, `uses`, and whether it has a `time` clause | Its body, each default, and its `requires`, `ensures`, `decreases`, and `cost` clauses |
+| Type | Its *shape*: generic parameters, fields and variants with their types, which fields have defaults, `indirect` marks, `opaque`, and `derives` | Its invariants, its potential, and the defaults of its fields |
+| Trait | Its *interface*: parameters, required traits, associated types, and the signature of each method | Its laws |
+| `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and the signature of each method | Nothing |
+| A method written inside a trait, an `impl`, or a capability | Its signature, as for a function, interpreted with the `Self`, the associated types, and the generic parameters of the enclosing declaration | Its body, if it has one, and its clauses |
+| Constant | Its type, and its value where the checker needs the value | Its expression |
 | Test, theorem | Nothing | Its body |
-| Law proof | What it is of: the trait, the law, and the type | Its body |
+| Law proof | Its subject: the trait, the law, and the type | Its body |
 
-- **Type checking a caller reads only the callee's signature.** Changing a
-  body, a default, or an `ensures` type-checks that definition again and no
-  caller. What the prover reads of a callee is PROVER.md's.
-- **A default is apart from the signature,** as DESIGN.md requires: callers
-  read only whether a parameter has one.
-- **A type's invariants are apart from its shape.** Strengthening an
-  invariant re-checks the type, and nothing that uses it.
+- **Type checking a caller reads only the callee's signature.** A change to a
+  body, a default, or an `ensures` re-checks that definition and no caller.
+  PROVER.md states what the prover reads of a callee.
+- **A default is separate from the signature,** as DESIGN.md requires: callers
+  read only whether a parameter has a default.
+- **A type's invariants are separate from its shape.** Strengthening an
+  invariant re-checks the type, and no user of the type.
 
 ## Types
 
@@ -400,336 +412,341 @@ and function_type = {
 }
 ```
 
-- **Built-in types are `Named`** after definitions the compiler provides in
-  the prelude, such as `Int64`, `Bool`, `Unit`, and `Array`. Only `Never` and
-  `Integer` have constructors of their own, because each has rules no
-  definition could state: `Never` converts to every type, and `Integer`
-  exists only in specifications.
-- **Types are nominal.** Two `Named` types are equal when they name the same
-  definition with equal arguments. Function types are compared by
-  structure, what each cost clause counts included: a `calls` clause of a
-  function type counts the calls of a capability or of one of its methods,
-  which is part of the type, so `(fn() cost calls(FileRead) <= 1)` is not a
-  `(fn() cost calls(Clock) <= 1)`. A type cannot name a parameter, whose
-  calls a function's own clauses count. Value arguments are compared by
-  value, after constants are worked out, so `Array[UInt8, digest_size]`
-  equals `Array[UInt8, 32]` when `digest_size` is 32.
-- **Associated types are normalized** whenever their base is known. With no
-  blanket `impl`s, `Projection { base = Named ...; ... }` has at most one
-  `impl` to look in. A projection on a generic parameter stays a projection,
-  equal only to itself or to what a bound fixes, as in
+- **A built-in type is a `Named` type** whose definition the compiler provides
+  in the prelude, such as `Int64`, `Bool`, `Unit`, and `Array`. Only `Never`
+  and `Integer` have constructors of their own, because each has rules that no
+  definition could state: `Never` converts to every type, and `Integer` exists
+  only in specifications.
+- **Types are nominal.** Two `Named` types are equal when they have the same
+  definition and equal arguments. Function types are compared structurally,
+  including the subject of each cost clause: a `calls` clause of a function
+  type counts the calls of a capability or of one of its methods, and that
+  capability or method is part of the type, so `(fn() cost calls(FileRead) <=
+  1)` is not a `(fn() cost calls(Clock) <= 1)`. A function type cannot name a
+  parameter: only a function's own clauses count the calls of a parameter.
+  Value arguments are compared by value, after constants are evaluated, so
+  `Array[UInt8, digest_size]` equals `Array[UInt8, 32]` when `digest_size` is
+  32.
+- **Associated types are normalized** whenever their base is known. There are
+  no blanket `impl`s, so `Projection { base = Named ...; ... }` has at most one
+  candidate `impl`. A projection on a generic parameter stays a projection. It
+  equals only itself, or the type that a bound fixes it to, as in
   `Iterable[Element = Int64]`.
-- **`Variable` and `Literal` exist only while checking.** A stored checked
-  form contains neither. A `Hole` stays where a `todo`'s type was never
-  decided: a `todo` is not an error, so a `Hole` is never turned into one.
+- **`Variable` and `Literal` exist only during checking.** A stored checked
+  form contains neither. A `Hole` stays where the type of a `todo` was never
+  decided: a `todo` is not an error, so a `Hole` never becomes an `Error`.
 
 ### Errors carry their report
 
-`Error` unifies with everything, so that one mistake is reported once. That
-is safe only when the mistake was reported, so an `Error` cannot be made
-without a report: it holds a value that only a report gives, as rustc's
+`Error` unifies with every type, so that one mistake is reported once. That is
+sound only if the mistake was reported. So an `Error` cannot be constructed
+without a report: it holds a value that only a report produces, as rustc's
 `ErrorGuaranteed` does.
 
-- **A report is one of two things:** a diagnostic a stage made, or a place
-  where the parser recorded that it recovered, which it does only where it
-  or the lexer reported an error.
-- **Everything that stands for something wrong holds one:** the `Error`
-  type, the `Error` interface and shape of a broken definition, a broken
-  member of a trait, and a name that resolution found nothing by.
-- **A report is handed on, never made up.** A call of a broken function has
-  the `Error` of that function's report, and a use of an unknown name has
-  the `Error` of the name's. Where a use meets an error that another
-  definition's check reported, as with an `impl` that leaves out an
-  associated type, it reads that definition's diagnostics and takes the
-  first as the report.
-- **Code with no report to hand on reports, or keeps what it cannot work
-  out.** A function that cannot report returns no `Error`. An associated
-  type that no `impl` answers stays a projection, which equals only itself,
-  so code that depends on it is rejected, not accepted.
-- **A pattern that does not fit its type still binds its names,** each with
-  the `Error` of the pattern's report, so no use of a local is without a
-  type.
-- **What cannot happen stops the compiler.** Where resolution, the
-  interfaces, and checking must agree, as that every local has a type and
-  every expression of a checked body has one, a disagreement is a bug in
-  the compiler and raises. Going on would accept code that nothing checked.
+- **A report is one of two things:** a diagnostic that a stage emitted, or a
+  recovered span of the parser, which exists only where the parser or the lexer
+  reported an error.
+- **Every representation of an error holds a report:** the `Error` type, the
+  `Error` interface and shape of a broken definition, a broken member of a
+  trait, and an unresolved name.
+- **A report is propagated, never invented.** A call of a broken function has
+  the `Error` with that function's report, and a use of an unresolved name has
+  the `Error` with the name's report. A use can meet an error that the check of
+  another definition reported, as with an `impl` that omits an associated type.
+  It then reads that definition's diagnostics and takes the first as the
+  report.
+- **Code that has no report to propagate either reports, or keeps the type
+  unresolved.** A function that cannot report returns no `Error`. An associated
+  type that no `impl` defines stays a projection, which equals only itself, so
+  code that depends on it is rejected, not accepted.
+- **A pattern that does not match the type of its scrutinee still binds its
+  names,** each with the `Error` of the pattern's report, so every use of a
+  local has a type.
+- **An internal inconsistency stops the compiler.** Resolution, the interfaces,
+  and checking must agree, for example that every local has a type and that
+  every expression of a checked body has one. A disagreement is a compiler bug
+  and raises an exception. Continuing would accept code that no stage checked.
 
 ### No subtyping
 
-Types are invariant, and there is no subtyping relation. Two types are
-equal or they are not, and function types with other `uses` or other costs
-are other types. Exactly four conversions happen, all decided in the one
-place where a value meets the type expected of it. One made for an argument
-is recorded with the argument in the checked form:
+Types are invariant, and there is no subtyping relation. Two types are equal or
+they are not, and function types with different `uses` or different costs are
+different types. Exactly four conversions exist. All are decided in the one
+function that checks a value against its expected type. A conversion of an
+argument is recorded with the argument in the checked form:
 
 | Conversion | Where |
 |---|---|
 | `Never` to any type | Wherever an expression of type `Never` meets an expected type, such as `None => return Err(error)` in a `match` whose value is an `Int64` |
 | `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type, and the key of an index, which is the argument of `at`. This is DESIGN.md's only implicit conversion. |
-| A function value to a function type with more `uses` or weaker costs | Where a value is passed, bound, returned, assigned, or stored, and where a branch of an `if` or a `match` ends with it. A pure function can be passed as `(fn(Item) uses Clock)`, and a `cost time O(1)` function as `cost time finite`. |
-| A built-in integer to `Integer`, and back | An argument or an index's key, in specifications only (see [Specifications](#specifications)) |
+| A function value to a function type with more `uses` or weaker costs | Where a value is passed, bound, returned, assigned, or stored, and where it is the tail expression of a branch of an `if` or a `match`. A pure function can be passed as `(fn(Item) uses Clock)`, and a `cost time O(1)` function as `cost time finite`. |
+| A built-in integer to `Integer`, and back | An argument or the key of an index, in specifications only (see [Specifications](#specifications)) |
 
-The function-value conversion happens only at the top of an expression, not
-inside a type argument, so `List[fn(Item)]` and
-`List[(fn(Item) uses Clock)]` stay different types, as in Rust.
+The function-value conversion applies only to a whole expression, not inside a
+type argument, so `List[fn(Item)]` and `List[(fn(Item) uses Clock)]` stay
+different types, as in Rust.
 
-- **Every capability the function uses must be one the expected type
-  lists.** A function that `uses Clock` is never a `fn()`, in an argument,
-  a `let`, a `return`, a field, or an assignment. Where the expected type
-  lists a capability parameter of what is being called or built, the
-  parameter comes to stand for what the function uses, as
-  [What code may call](#what-code-may-call) describes.
-- **Costs are weaker when the types' constants show it:** an exact count is
-  within any bound it does not exceed, a count is `O(...)`, and every bound
-  is `finite`. A named function's type has `time finite` exactly when the
-  function has a `time` clause. Costs that the constants do not show to be
-  weaker are the prover's to show. For a function passed to a call the
-  prover reads the argument, as PROVER.md's "Lambdas and function values"
-  describes. Anywhere else the checker records the obligation, with the
-  expression and both function types.
+- **The expected type must list every capability that the function uses.** A
+  function that `uses Clock` is never a `fn()`, in an argument, a `let`, a
+  `return`, a field, or an assignment. Where the expected type lists a
+  capability parameter of the callee or of the constructed type, the parameter
+  is instantiated with the capabilities that the function uses, as [What code
+  may call](#what-code-may-call) describes.
+- **The checker accepts weaker costs that the constants of the two types
+  show:** an exact count is within any bound that it does not exceed, a count
+  is `O(...)`, and every bound is `finite`. The type of a named function has
+  `time finite` exactly when the function has a `time` clause. Any other cost
+  implication is an obligation for the prover. For a function that is passed to
+  a call, the prover reads the argument, as PROVER.md's "Lambdas and function
+  values" describes. Anywhere else the core form marks the conversion with a
+  `Widen` node.
 
 ### Properties of types
 
-Four facts about a type decide what code may do with it. Each is worked out
-from the type's shape, as a condition on its type parameters: `Option[Value]`
-is `Plain` exactly when `Value` is.
+Five properties of a type decide what code can do with a value of it. Each is
+derived from the type's shape, as a condition on its type parameters:
+`Option[Value]` is `Plain` exactly when `Value` is.
 
-| Property | Holds for | Lets code |
+| Property | Holds for | Allows a value to |
 |---|---|---|
-| `Copyable` | every type except the standard library's handles and types that hold one | call `copy()` |
-| `Plain` | integers, floats, `Bool`, `Character`, `Unit`, arrays, records, and sum types made only of `Plain` parts, with no heap data and no handle | copy implicitly. `Plain` requires `Copyable`. |
-| View | `Slice`, `StringSlice`, a cursor from a `self` method, every function type, every `any` type whose trait does not require `Storable`, and anything holding a view anywhere, in a field, a variant, an element, or a type argument | nothing extra; values of view types stay within their function (see [Views](#views)) |
-| `Storable` | every type that is not a view type, whatever its type parameters stand for: a type parameter counts only when it is bounded by `Storable` | be kept where no view can be followed, such as a channel's queue. A generic type that keeps a value there bounds it, as in `Channel[Message: Storable]`. |
-| Structural equality | the built-in integers, `Bool`, `Character`, `Unit`, `String`, the types of specifications, and a type that derives `Equal` whose fields all have it; never floats, a hand-written `Equal`, or, outside its package, an opaque type | be a constant in a pattern; the prover substitutes through `==` |
+| `Copyable` | every type except the standard library's handles and types that hold a handle | be copied with `copy()` |
+| `Plain` | integers, floats, `Bool`, `Character`, `Unit`, arrays, records, and sum types that consist only of `Plain` parts, with no heap data and no handle | be copied implicitly. `Plain` requires `Copyable`. |
+| View | `Slice`, `StringSlice`, a cursor from a `self` method, every function type, every `any` type whose trait does not require `Storable`, and every type that holds a view anywhere: in a field, a variant, an element, or a type argument | nothing more. A value of a view type cannot escape its function (see [Views](#views)). |
+| `Storable` | every type that is not a view type for every instantiation of its type parameters. A type parameter is `Storable` only when it is bounded by `Storable`. | be stored where the ownership check cannot track a view, such as a channel's queue. A generic type that stores a value there bounds it, as in `Channel[Message: Storable]`. |
+| Structural equality | the built-in integers, `Bool`, `Character`, `Unit`, `String`, the types of specifications, and a type that derives `Equal` and whose fields all have structural equality. Never floats, a type with a hand-written `Equal`, or, outside its package, an opaque type. | be a constant in a pattern. The prover substitutes equals for equals through `==`. |
 
 - **`Copyable`, `Plain`, and `Storable` are prelude traits that the compiler
-  implements.** No `impl` of them can be written. A generic parameter has
-  them only when bounded, as in `[Element: Copyable]`, so a plain
-  `[Element]` accepts everything, including handles and views.
-- **`Storable` is worked out from the fields of every type,** opaque or
-  not, as whether a type is a view is. It says that no instance of the type
-  can hold a view: `List[Element]` is `Storable` where `Element` is, and no
-  function type is.
-- **`any Trait` is `Storable` only when `Trait` requires `Storable`,** as
-  with `Copyable`. Every type that implements such a trait holds no view,
-  so the value behind the `any` holds none.
-- **An opaque type has them only when declared** with `derives Copyable` or
-  `derives Plain`. The checker verifies that the fields allow it. Other
-  packages rely on the declaration, so adding a field that cannot be copied
-  is an error at the type and never a surprise elsewhere. Every other type
-  has them by inference, and declaring them on a type that is not opaque is
-  an error with a fix that removes the declaration, since its fields already
-  say it.
-- **A generic opaque type has them under the conditions its fields give,**
-  as any other generic type does. `Slice[Element]` holds a view of its
-  elements, so it is `Plain` whatever `Element` is. `List[Element]` holds
-  its elements, so it is `Copyable` when `Element` is. A type parameter that
-  no field holds, as in `opaque type Id[Entity](value: UInt64)`, is no
-  condition. Swift checks a declared `BitwiseCopyable` against the fields
-  the same way. Rust's `derive` instead requires the property of every type
-  parameter, which is why a `Copy` type with an unused parameter needs a
-  hand-written `impl` there. The cost is that changing a generic opaque
-  type's fields can change which of its type arguments must have the
-  property.
-- **`copy()` is always the compiler's.** It is the method of `Copyable`, and
-  no type can give copying a cost or an effect of its own, as no type can
-  define a destructor.
-- **`any Trait` is `Copyable` only when `Trait` requires `Copyable`,** since
-  the concrete type behind it is unknown.
-- **Whether a type is a view is part of its shape.** Making a type hold a
-  view changes how every user of it is checked, which reaches every reader
-  of the shape like any other change of shape.
+  implements.** No `impl` of them can be written. A generic parameter has one
+  of them only when it is bounded by it, as in `[Element: Copyable]`, so an
+  unbounded `[Element]` accepts every type, including handles and views.
+- **`Storable` is derived from the fields of every type,** opaque or not, as
+  the view property is. It states that no instance of the type can hold a view:
+  `List[Element]` is `Storable` where `Element` is, and no function type is.
+- **`any Trait` is `Storable` only when `Trait` requires `Storable`,** as with
+  `Copyable`. Every type that implements such a trait holds no view, so the
+  value inside the `any` holds none.
+- **An opaque type is `Copyable` or `Plain` only when it declares so** with
+  `derives Copyable` or `derives Plain`. The checker verifies the declaration
+  against the fields. Other packages rely on the declaration, so adding a field
+  that cannot be copied is an error at the type, and never a surprise in
+  another package. Every other type has the two properties by inference.
+  Declaring them on a type that is not opaque is an error with a fix that
+  removes the declaration, because the fields already determine them.
+- **A generic opaque type has the properties under the conditions that its
+  fields give,** as any other generic type does. `Slice[Element]` holds a view
+  of its elements, so it is `Plain` for every `Element`. `List[Element]` owns
+  its elements, so it is `Copyable` when `Element` is. A type parameter that no
+  field uses, as in `opaque type Id[Entity](value: UInt64)`, adds no condition.
+  Swift checks a declared `BitwiseCopyable` against the fields in the same way.
+  Rust's `derive` instead requires the property of every type parameter, which
+  is why a `Copy` type with an unused parameter needs a hand-written `impl` in
+  Rust. The cost is that a change to the fields of a generic opaque type can
+  change which of its type arguments must have the property.
+- **`copy()` is always the compiler's.** It is the method of `Copyable`. No
+  type can give copying a cost or a side effect, as no type can define a
+  destructor.
+- **`any Trait` is `Copyable` only when `Trait` requires `Copyable`,** because
+  the concrete type inside it is unknown.
+- **The view property is part of a type's shape.** Adding a view to a type
+  changes how every use of the type is checked. Like any other change of shape,
+  it invalidates every result that read the shape.
 
-The first three, and what a type holds in place (see
-[Recursive types](#recursive-types)), are *facts of the type's definition*,
-worked out once for each definition and kept as a result of their own:
+`Copyable`, `Plain`, the view property, and the types that a type holds in
+place (see [Recursive types](#recursive-types)) are *facts of the type's
+definition*. They are computed once per definition and stored as a result of
+their own:
 
-- **A fact is a list of conditions.** For `Copyable` and `Plain` it is what
-  must have the property for the type to have it, or that it never does. For
-  a view it is what makes the type one when any of it is, or that it always
-  is. `Option` is `Plain` on the condition `Value`, and a view on the
-  condition `Value`.
-- **A question about a type asks its definition's conditions of its
+- **A fact is a list of conditions.** For `Copyable` and `Plain`, the
+  conditions are the types that must have the property for the type to have it,
+  or the fact is that the type never has it. For the view property, the
+  conditions are the types of which any one makes the type a view, or the fact
+  is that the type always is one. `Option` is `Plain` on the condition `Value`,
+  and a view on the condition `Value`.
+- **A query about a type instantiates its definition's conditions with its
   arguments.** Whether `Option[Option[List[Int64]]]` is `Plain` is `Option`'s
-  condition asked of `Option[List[Int64]]`, then of `List[Int64]`, which never
-  is. No question walks a type's fields, so none can take a type nested in
-  itself for a type that contains itself.
-- **Types that contain each other are worked out together.** Such a type is
-  `Copyable` and `Plain` when nothing in it says otherwise, and is a view, or
-  holds something in place, only when something in it does. So a group
-  starts with the facts of types that have no fields, and each member's
-  facts are worked out from the others' until nothing changes.
-- **An associated type is a condition too.** In
-  `type Kept[Source: Shown](part: Source.Part)` nothing is known of
-  `Source.Part`, so `Kept` is a view on the condition `Source.Part`. Where
-  `Kept[Numbers]` is asked about, the condition is `Numbers`'s `Part`, which
-  the `impl` of `Shown` for `Numbers` chooses. Inside generic code, an
-  associated type of a parameter has a property only when its trait bounds
-  it, as a parameter does. One that no `impl` answers is taken not to be
-  `Copyable` or `Plain`, and to be a view.
+  condition for `Option[List[Int64]]`, then for `List[Int64]`, which is never
+  `Plain`. No query traverses a type's fields, so a type nested in itself
+  cannot be mistaken for a recursive type.
+- **Mutually recursive types are computed together.** Such a type is `Copyable`
+  and `Plain` unless a part of it prevents that, and it is a view, or holds a
+  type in place, only if a part of it does. So the computation is a fixed
+  point: it starts from the facts of the types without fields, and recomputes
+  each member's facts from the others' until none changes.
+- **An associated type is a condition too.** In `type Kept[Source: Shown](part:
+  Source.Part)` nothing is known about `Source.Part`, so `Kept` is a view on
+  the condition `Source.Part`. For `Kept[Numbers]`, the condition is
+  `Numbers`'s `Part`, which the `impl` of `Shown` for `Numbers` defines. Inside
+  generic code, an associated type of a parameter has a property only when its
+  trait bounds it, as for a parameter. An associated type that no `impl`
+  defines is assumed not to be `Copyable` or `Plain`, and to be a view.
 
 ## Checking signatures and definitions
 
-`Interface` checks each definition's outward-facing part on its own, from its
-resolved form and the shapes and interfaces of what it names. Its result is
-the definition's interface: the types of its parameters and result, its
-`uses`, its bounds, and the facts derived from them.
+`Interface` checks the externally visible part of each definition
+independently, from its resolved form and from the shapes and interfaces of the
+definitions that it names. Its result is the definition's interface: the types
+of its parameters and result, its `uses`, its bounds, and the facts derived
+from them.
 
 ### Functions and methods
 
-- **`Self`** is the type a method's head names, the type being defined, a
-  trait's implementing type, or an `impl`'s type. Anywhere else, as in a
-  function that is not a method or in a capability, it is an error.
-  `Self.Name` is an associated type, so it is written only in a trait or in
-  an `impl` of one. Only lowering a written type knows what `Self` stands
-  for, so it alone reports this.
-- **Every type is well-formed:** it has the right number of arguments, value
-  arguments are `USize` constants or value parameters, and every bound the
-  type requires holds. `SortedList[Element]` in a signature needs
+- **`Self`** is the type in a method's head, the type that is being defined,
+  the implementing type of a trait, or the type of an `impl`. Anywhere else, as
+  in a function that is not a method or in a capability, `Self` is an error.
+  `Self.Name` is an associated type, so it can be written only in a trait or in
+  an `impl` of a trait. Only the lowering of a written type knows the meaning
+  of `Self`, so only the lowering reports this error.
+- **Every type is well-formed:** it has the right number of arguments, its
+  value arguments are `USize` constants or value parameters, and every bound
+  that the type requires holds. `SortedList[Element]` in a signature needs
   `Element: Ordered` from the signature's own bounds, as in Rust.
-- **`self`** may only be the first parameter of a method, and a type can have
-  at most one method of each name for each receiver mode. Where there is no
-  method, a `self` parameter gives the function no receiver, and `self` in
-  the body is an error. A method's type
-  must be defined in the same package, and a method of a type private to its
-  file must be in that file.
-- **Defaults** are constant expressions of the parameter's type that name no
+- **`self`** can only be the first parameter of a method, and a type can have
+  at most one method of each name for each receiver mode. A function that is
+  not a method has no receiver even if it declares a `self` parameter, and
+  `self` in its body is an error. The type of a method must be defined in the
+  same package, and a method of a type that is private to its file must be in
+  that file.
+- **A default** is a constant expression of the parameter's type that names no
   parameter. A parameter named `result`, or a function named `old`, is an
   error.
-- **An `own` function-typed parameter** accepts only functions that capture
-  nothing. That is recorded in the interface, for checking callers.
-- **A function-typed parameter's `requires`** is a specification, a `Bool`
-  over the type's named inputs, with the types its inputs have, and the
+- **An `own` parameter of a function type** accepts only functions that capture
+  nothing. The interface records these parameters, and the ownership check of
+  each caller reads them.
+- **The `requires` of a function-typed parameter** is a specification: a `Bool`
+  over the named inputs of the function type, with their types, and over the
   parameters before it. It is not part of the parameter's type: two function
-  types that differ only in it are the same type, and the prover reads it
-  from the signature, both to show the function meets it at each call
-  through the parameter and to give a lambda passed there its facts.
-- **A private type in a public signature is an error,** and so is a private
-  or `internal` type in a public type's visible fields, as in Rust and
-  Swift. Callers in other packages could never name the type.
-- **Clauses are checked in the order written,** each with the clauses
-  before it in scope, as SYNTAX.md describes. `requires`, `ensures`, and
-  `decreases` are specifications (see [Specifications](#specifications)).
-  `uses` names capabilities or capability parameters. Each `cost` clause's
-  bound is an `Integer` expression; `calls(target)` names a parameter that
-  is a function, a capability, or a method the capability has, and anything
-  else is an error. `time(visit)` names a function-typed parameter.
-  `time(Element.equal)` names a method of a trait that bounds a type
-  parameter of the definition, or that bounds `Self` in a trait. It is a
-  bound on the time of any one call of that method. If the bounds have
-  several versions of the method, the term names the read-only version.
-- **`lends` and `yields`** state how the method gives out parts of `self`:
-  `lends` exactly once, `yields` any number of times. A lent part stays with
-  `self`, so `lends` takes no mode or `mut`, and `lends own` is an error.
-  The body is checked against the form (see
-  [Yielding and lending](#yielding-and-lending)).
-- **`main`,** in a package's `main` module, must have exactly the signature
-  `fn main(arguments: List[String]) -> ExitCode`, with any `uses`. A
-  function named `main` in another module is an ordinary function.
+  types that differ only in it are the same type. The prover reads it from the
+  signature, both to show that the function satisfies it at each call through
+  the parameter, and to give its facts to a lambda that is passed for the
+  parameter.
+- **A private type in a public signature is an error,** and so is a private or
+  `internal` type in a visible field of a public type, as in Rust and Swift.
+  Callers in other packages could not name the type.
+- **Clauses are checked in source order,** each with the earlier clauses in
+  scope, as SYNTAX.md describes. `requires`, `ensures`, and `decreases` are
+  specifications (see [Specifications](#specifications)). `uses` names
+  capabilities or capability parameters. The bound of each `cost` clause is an
+  `Integer` expression. `calls(target)` names a parameter of a function type, a
+  capability, or a method of a capability; any other target is an error.
+  `time(visit)` names a function-typed parameter. `time(Element.equal)` names a
+  method of a trait that bounds a type parameter of the definition, or that
+  bounds `Self` in a trait. It is a bound on the time of any one call of that
+  method. If the bounds have several versions of the method, the term names the
+  read-only version.
+- **`lends` and `yields`** state how the method lends parts of `self`: `lends`
+  exactly once, `yields` any number of times. A lent part still belongs to
+  `self`, so `lends` takes no mode or `mut`, and `lends own` is an error. The
+  body is checked against the clause (see [Yielding and
+  lending](#yielding-and-lending)).
+- **`main`,** in a package's `main` module, must have exactly the signature `fn
+  main(arguments: List[String]) -> ExitCode`, with any `uses`. A function named
+  `main` in another module is an ordinary function.
 
 ### Types
 
 - **Fields and variants** are checked like parameters: well-formed types,
-  constant defaults, no two fields or variants with one name.
-- **Invariants and the potential** are specifications, in which `self` names
-  the value and a record's fields are in scope by name. An invariant is a
-  `Bool`; a potential is an `Integer`.
+  constant defaults, and no two fields or variants with the same name.
+- **Invariants and the potential** are specifications, in which `self` is the
+  value and the fields of a record are in scope by name. An invariant is a
+  `Bool`. A potential is an `Integer`.
 - **`derives`** is checked against the shape. Every field must already
-  implement the trait, under the same conditions on the type parameters as
-  the derived `impl`'s, so `Option[Value]` derives `Equal` as
-  `impl Equal for Option[Value: Equal]`. Deriving `Ordered` or `Hash` needs
-  `Equal` to be derived too. Only a record derives `Default`, which is each
-  field's: no variant of a sum type is its default, so that `impl` is
-  written, as Rust asks for a variant to be marked. Each derived `impl`
-  becomes a definition of its own, as DESIGN.md says, named by the type and
-  the trait.
-- **`= todo`** makes a type that can be named and passed but whose contents
-  cannot be used. It has none of the properties above, so it cannot be
-  copied and is not a view, until it is defined.
+  implement the trait, under the same conditions on the type parameters as the
+  derived `impl` has, so `Option[Value]` derives `Equal` as `impl Equal for
+  Option[Value: Equal]`. Deriving `Ordered` or `Hash` requires `Equal` to be
+  derived too. Only a record can derive `Default`, which is the default of each
+  field. No variant of a sum type is its default, so that `impl` must be
+  written by hand; Rust asks for a variant to be marked instead. Each derived
+  `impl` is a definition of its own, as DESIGN.md says, identified by the type
+  and the trait.
+- **`= todo`** declares a type that can be named and passed, but whose contents
+  cannot be used. It has none of the properties above, so it cannot be copied
+  and is not a view, until it is defined.
 
 ### Traits, `impl`s, and capabilities
 
-A trait, an `impl`, or a capability and the methods written inside it are
-checked apart, and neither waits on the other:
+A trait, an `impl`, or a capability is checked separately from the methods
+written inside it, and neither check depends on the other:
 
-- **Its header is its own.** Lowering it gives its generic parameters and
-  their bounds, what `Self` is, the associated types, and for an `impl` its
-  trait, its type, and its `uses`. This reads only its own tree.
-- **Each method is lowered with that header,** which is what `Self`, its
-  associated types, and the generic parameters around the method mean, and
-  gives a signature as any function's. An `impl`'s method is generic over
-  the `impl`'s parameters and then its own, and uses what the `impl` uses,
-  as a method written `fn List[Element].push` is generic over its head's
-  parameters first. A trait's method is generic over its own alone: `Self`
-  and the trait's parameters are given where it is called.
-- **A method an `impl` leaves to its trait has a signature too,** though it
-  is written nowhere of its own, and so has one of a derived `impl`: the
-  trait's method's, with `Self` and the trait's parameters replaced by what
-  the `impl` gives them, generic over the `impl`'s parameters and then its
-  own. Code generation and the prover compile and prove a method at an
-  `impl`, so they ask for this one.
-- **Its interface is put together** from the header and the signature of
-  each method written inside it. A trait's method is provided when it has a
-  body, and one whose own signature is broken is listed as broken.
-- **Each method is checked against what it is inside as a definition of its
-  own:** an `impl`'s against the method its trait declares, and a trait's
-  against the traits it requires. The `impl` itself is checked for what it
-  must give and does not.
+- **The header is lowered alone.** That gives its generic parameters and their
+  bounds, the meaning of `Self`, the associated types, and for an `impl` its
+  trait, its type, and its `uses`. The lowering reads only the header's own
+  tree.
+- **Each method is lowered with that header,** which gives the meaning of
+  `Self`, of its associated types, and of the enclosing generic parameters. The
+  result is a signature like that of any function. A method of an `impl` is
+  generic over the `impl`'s parameters and then its own, and uses the
+  capabilities that the `impl` uses, as a method written `fn
+  List[Element].push` is generic over its head's parameters first. A method of
+  a trait is generic over its own parameters only: `Self` and the trait's
+  parameters are supplied at each call.
+- **A method that an `impl` inherits from its trait has a signature too,**
+  although it is not written in the `impl`, and so does a method of a derived
+  `impl`. The signature is the trait method's, with `Self` and the trait's
+  parameters substituted by the `impl`'s types, generic over the `impl`'s
+  parameters and then its own. Code generation and the prover compile and prove
+  a method per `impl`, so they demand this signature.
+- **The interface is assembled** from the header and the signature of each
+  method written inside. A method of a trait is *provided* when it has a body.
+  A method whose own signature is broken is listed as broken.
+- **Each method is checked against its enclosing declaration as a definition of
+  its own:** a method of an `impl` against the method that its trait declares,
+  and a method of a trait against the traits that the trait requires. The
+  `impl` itself is checked for the members that it must define and does not.
 
-- **A trait's members** are checked like functions, with `Self` standing for
-  the implementing type and `Self.Name` for its associated types. A trait
-  may not redeclare a method of a trait it requires, though it may add a
-  version that takes `self` another way, and traits may not require each
-  other in a cycle.
-- **An `impl` conforms to its trait.** Every method without a body and every
-  associated type is given, and nothing else is. Each method has the trait's
+- **The members of a trait** are checked like functions, with `Self` as the
+  implementing type and `Self.Name` as its associated types. A trait cannot
+  redeclare a method of a trait that it requires, although it can add a version
+  with another receiver mode. Traits cannot require each other in a cycle.
+- **An `impl` conforms to its trait.** It defines every method without a body
+  and every associated type, and nothing else. Each method has the trait's
   parameter names, modes, and types, with `Self` and the associated types
-  substituted; the same result form; generic parameters with no stronger
-  bounds; and `uses` that are a subset of the trait method's. Parameter
-  names must match because they are part of how a method is called, as
-  Swift requires of protocol requirements. Defaults are written only in the
-  trait. A method may add `ensures` and `cost` clauses, and may state a
-  `requires`; the prover shows that its clauses are no weaker than the
-  trait's, as DESIGN.md describes. The `impl`'s clauses are part of its
-  contract, which a call resolved to the `impl` depends on.
-- **The traits a trait requires** must be implemented for the same type,
-  under conditions no stronger than the `impl`'s.
-- **A capability `impl`'s methods** take the capability's parameters plus a
-  receiver, `self` or `mut self`. Only a capability `impl` may have a
-  `uses` clause, and its methods use what it declares and no more: whoever
-  calls a capability holds the capability alone, so a method there has no
-  `uses` of its own to add. A trait `impl`'s methods can use only what the
-  trait's methods declare. Implementing `Panic` is an error.
-- **A law's proof** names a law its trait has and a type that implements
-  the trait.
-- **Methods that replace a provided method** must have its exact signature,
-  and the provided method must be pure, have a `time` clause, and change
-  none of its arguments, which is what lets its body be its definition.
-  That the body is functional, and that the replacement gives the same
-  result, is the prover's job.
+  substituted; the same result clause; generic parameters with bounds that are
+  no stronger; and `uses` that are a subset of the trait method's. Parameter
+  names must match because they are part of how a method is called, as Swift
+  requires of protocol requirements. Defaults are written only in the trait. A
+  method can add `ensures` and `cost` clauses, and can state a `requires`. The
+  prover shows that its clauses are no weaker than the trait's, as DESIGN.md
+  describes. The `impl`'s clauses are part of its contract, on which a call
+  that resolves to the `impl` depends.
+- **The traits that a trait requires** must be implemented for the same type,
+  under conditions that are no stronger than the `impl`'s.
+- **The methods of a capability's `impl`** take the capability's parameters and
+  a receiver, `self` or `mut self`. Only a capability's `impl` can have a
+  `uses` clause, and its methods use the capabilities that it declares and no
+  others: a caller of a capability holds only that capability, so a method of
+  the `impl` cannot add `uses` of its own. The methods of a trait's `impl` can
+  use only the capabilities that the trait's methods declare. An `impl` of
+  `Panic` is an error.
+- **A law's proof** names a law of its trait and a type that implements the
+  trait.
+- **A method that overrides a provided method** must have exactly the provided
+  method's signature. The provided method must be pure, have a `time` clause,
+  and mutate none of its arguments, so that its body can serve as its
+  definition. The prover shows that the body is functional and that the
+  override returns the same result.
 
 ### Recursive types
 
-A type that contains itself in place would be infinitely large. The checker
-finds every cycle of types that contain each other in place, through fields,
-variants, type arguments held in place, and associated types, and reports
-any cycle that does not pass through an `indirect` variant, with a fix that
-adds `indirect` to the variant where the cycle re-enters.
+A type that holds itself in place would have infinite size. The checker finds
+every cycle of types that hold each other in place, through fields, variants,
+type arguments that are held in place, and associated types. It reports each
+cycle that does not pass through an `indirect` variant, with a fix that adds
+`indirect` to the variant where the cycle closes.
 
-Whether a type argument is held in place is a fact of the generic type's
-definition (see [Properties of types](#properties-of-types)): `Option` holds
-its `Value` in place, while `List` holds its elements through a `Buffer`,
+Whether a generic type holds a type argument in place is a fact of the generic
+type's definition (see [Properties of types](#properties-of-types)): `Option`
+holds its `Value` in place, and `List` holds its elements through a `Buffer`,
 which the intrinsic module declares as heap storage. A type that holds an
-associated type of a parameter in place, as
-`type Kept[Source: Shown](part: Source.Part)` does, holds whatever the
-`impl` chooses for each argument, so `type Tree(kept: Kept[Marker])` contains
-itself when `Marker`'s `Part` is `Tree`. This is a package check, over the
-type definitions of one package: packages do not depend on each other in a
-cycle, so neither can their types.
+associated type of a parameter in place, as `type Kept[Source: Shown](part:
+Source.Part)` does, holds the type that the `impl` defines for each argument.
+So `type Tree(kept: Kept[Marker])` is recursive when `Marker`'s `Part` is
+`Tree`. This is a package check, over the type definitions of one package:
+packages cannot depend on each other in a cycle, so their types cannot either.
 
-A generic type that contains itself with different arguments, as in
-`type Nested[Element] = Leaf(value: Element) | indirect Node(inner: Nested[List[Element]])`,
-is an error found by the same walk, as DESIGN.md requires.
+A generic type that contains itself with different arguments, as in `type
+Nested[Element] = Leaf(value: Element) | indirect Node(inner:
+Nested[List[Element]])`, is an error that the same traversal finds, as
+DESIGN.md requires.
 
 ## Checking bodies
 
