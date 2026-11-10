@@ -46,22 +46,29 @@ let file env build ?(data = []) ?(tables = []) ?(evidence = []) (instances : (Li
             Keys.add (Environment (symbol, n)) f.environment context.environments)
         instance.nested)
     instances;
+  let nested_name symbol n = Printf.sprintf "%s_Nested_%d" symbol n in
+  (* Every function of the file is declared before any body, so that a call
+     of a copy sees the copy's declaration, not one made for the call. *)
+  List.iter
+    (fun ((instance : Lir.t), linkage) ->
+      let symbol = Instance.symbol instance.key in
+      Array.iteri
+        (fun n f ->
+          let name = nested_name symbol n in
+          declare_prototype context name
+            (prototype context symbol name ~linkage:Internal (Lir.signature f) ^ ";\n"))
+        instance.nested;
+      declare_prototype context symbol
+        (prototype context symbol symbol ~linkage (Lir.signature instance.main) ^ ";\n"))
+    instances;
   let bodies =
     List.concat_map
       (fun ((instance : Lir.t), linkage) ->
         let symbol = Instance.symbol instance.key in
-        let nested =
-          List.mapi
-            (fun n f ->
-              let name = Printf.sprintf "%s_Nested_%d" symbol n in
-              declare_prototype context name
-                (prototype context symbol name ~linkage:Internal (Lir.signature f) ^ ";\n");
-              function_c context instance.key name ~linkage:Internal f)
-            (Array.to_list instance.nested)
-        in
-        declare_prototype context symbol
-          (prototype context symbol symbol ~linkage (Lir.signature instance.main) ^ ";\n");
-        nested @ [ function_c context instance.key symbol ~linkage instance.main ])
+        List.mapi
+          (fun n f -> function_c context instance.key (nested_name symbol n) ~linkage:Internal f)
+          (Array.to_list instance.nested)
+        @ [ function_c context instance.key symbol ~linkage instance.main ])
       instances
   in
   let data_definitions =
