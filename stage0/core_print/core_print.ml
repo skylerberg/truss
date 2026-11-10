@@ -185,10 +185,7 @@ and operand names = function
 
 and place names = function
   | Local found -> local names found
-  | Field { base; variant; field; _ } ->
-      Printf.sprintf "%s.%s%s" (place names base)
-        (match variant with Some variant -> variant ^ "." | None -> "")
-        field
+  | Field { base; field; _ } -> Printf.sprintf "%s.%s" (place names base) field
   | Lent lending -> "lent " ^ expression names lending
   | Temporary value -> "temporary " ^ expression names value
 
