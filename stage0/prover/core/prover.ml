@@ -14,13 +14,20 @@ let inherited database (path : Path.t) =
   match path with
   | Method { owner = impl; name; receiver } -> (
       match Query.demand database Interface.Environment.interface impl with
-      | Some (Interface.Environment.Impl_interface interface) ->
-          Option.map
-            (fun part ->
-              ( part,
-                Option.value ~default:[] (Interface.Impls.trait_substitution database impl),
-                Translate.provided_body database interface.implements.trait name receiver ))
-            (Translate.trait_part database interface.implements.trait name receiver)
+      | Some (Interface.Environment.Impl_interface interface) -> (
+          let implemented = interface.implements.trait in
+          let substitution =
+            Option.value ~default:[] (Interface.Impls.trait_substitution database impl)
+          in
+          match Translate.trait_part database implemented name receiver with
+          | Some part ->
+              Some (part, substitution, Translate.provided_body database implemented name receiver)
+          | None ->
+              (* A capability's method takes no [self], so it is found with no
+                 receiver. *)
+              Option.map
+                (fun part -> (part, substitution, None))
+                (Translate.capability_part database implemented name))
       | _ -> None)
   | _ -> None
 
