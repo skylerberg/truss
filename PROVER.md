@@ -389,6 +389,14 @@ decides when a body is a definition. In the solver:
   that both write `fn(row) { row.length() }` mean the same sum. A lambda
   is proven where it is written, with fresh arguments, and must end
   exactly when its function type has a `time` clause.
+- **Otherwise, a function value is known by its contract.** A lambda whose
+  body is not functional, as one with a `var` or a loop is, gives what its
+  body showed for its fresh arguments, for every argument meeting what was
+  assumed of them: each value made in the body is a function of the
+  arguments, and on each way the body ends, the lambda applied is the value
+  it ended with. A pure function named as a value that has no definition
+  for every argument, as one with a `requires` has not, gives its `ensures`
+  of every argument that meets its `requires`.
 - **A lambda passed where a parameter's type has a `requires`** is
   checked with that `requires` assumed of its arguments, with the call's
   arguments in place of the callee's parameters. In
@@ -1132,11 +1140,11 @@ sanitized runs, test the trusted base against real executions.
   applications names every bound name, the solver chooses its own
   triggers; the prover does not yet say so where a proof needed such a
   fact.
-- **A function value's contract in the logic.** A lambda whose body is not
-  functional, or a named function with a `requires`, is applied as a
-  function the solver knows nothing more about, so a contract such as
-  `List.map`'s `ensures result[i] == transform(self[i])` gives the caller
-  facts about its own lambda only when the lambda's body is functional.
+- **A lambda inside a quantifier, or with a functional lambda inside it,**
+  whose body is not functional is applied as a function the solver knows
+  nothing more about: inside a quantifier its arguments are not alone in
+  what it can differ by, and a functional lambda's symbol is named after
+  what it captures, which would be one function for every argument.
 - **The potential of a set's or a map's elements.** A value's potential is
   to include that of the elements of a `Set` or a `Map` it holds, through
   its model, as it does for a collection modeled by a sequence. The

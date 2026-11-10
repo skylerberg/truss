@@ -2724,6 +2724,59 @@ let () =
           {\n\
          \  apply(fn(each) { each / 2 }, value: value)\n\
           }\n"));
+  test "a lambda whose body is not its definition gives what its body shows" (fun () ->
+      proven
+        (apply_function
+       ^ "fn f() -> Int64\n\
+         \  ensures result == 4\n\
+          {\n\
+         \  apply(fn(each) { var next = each\n\
+         \    if next < 100 { next += 1 }\n\
+         \    next }, value: 3)\n\
+          }\n"));
+  test "what a lambda's body shows is about its own argument" (fun () ->
+      not_proven
+        (apply_function
+       ^ "fn f() -> Int64\n\
+         \  ensures result == 3\n\
+          {\n\
+         \  apply(fn(each) { var next = each\n\
+         \    if next < 100 { next += 1 }\n\
+         \    next }, value: 3)\n\
+          }\n")
+        "prover.ensures");
+  let halved =
+    "fn apply(measure: (fn(UInt64) -> UInt64 cost time finite), value: UInt64) -> UInt64\n\
+    \  ensures result == measure(value)\n\
+    \  cost time finite\n\
+     {\n\
+    \  measure(value)\n\
+     }\n\n\
+     fn halved(value: UInt64) -> UInt64\n\
+    \  requires value >= 0\n\
+    \  ensures result <= value\n\
+    \  cost time finite\n\
+     {\n\
+    \  value / 2\n\
+     }\n\n"
+  in
+  test "a named function with a requires, as a value, keeps its ensures" (fun () ->
+      proven
+        (halved
+       ^ "fn f(value: UInt64) -> Bool\n\
+         \  ensures result\n\
+          {\n\
+         \  apply(halved, value: value) <= value\n\
+          }\n"));
+  test "a named function, as a value, gives no more than its ensures" (fun () ->
+      not_proven
+        (halved
+       ^ "fn f(value: UInt64) -> Bool\n\
+         \  ensures result\n\
+          {\n\
+         \  apply(halved, value: value) < value\n\
+          }\n")
+        "prover.ensures");
   test "a lambda applied knows what it captures" (fun () ->
       proven
         (apply_function
