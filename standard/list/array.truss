@@ -1,4 +1,5 @@
 use standard::intrinsic
+use standard::list::slice
 
 public fn Array[Element: Copyable, count: USize].filled(value: Element) -> Array[Element, count]
   ensures forall i in 0..count => identical(result.model()[i], value)
@@ -186,9 +187,23 @@ impl Equal for Array[Element: Equal, count: USize] {
 }
 
 impl Ordered for Array[Element: Ordered, count: USize] {
-  fn compare(self, other: Array[Element, count]) -> Ordering {
-    todo
+  fn compare(self, other: Array[Element, count]) -> Ordering
+    ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+  {
+    self.slice().compare(other.slice())
   }
+}
+
+proof Ordered.agrees_with_equal for Array[Element: Ordered, count: USize] {
+  slice::lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.antisymmetric for Array[Element: Ordered, count: USize] {
+  slice::lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.transitive for Array[Element: Ordered, count: USize] {
+  slice::lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
 impl Hash for Array[Element: Hash, count: USize] {

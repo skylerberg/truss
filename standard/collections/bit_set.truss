@@ -105,7 +105,18 @@ fn copy_words(words: mut List[UInt64], source: List[UInt64], count: USize)
 
 type Combination = Union | Intersection | Difference
 
-fn combine_words(words: mut List[UInt64], other: List[UInt64], how: Combination)
+fn combined(word: UInt64, other: UInt64, how: Combination) -> UInt64
+  cost time O(1)
+  cost allocations == 0
+{
+  match how {
+    Union => word | other
+    Intersection => word & other
+    Difference => word & ~other
+  }
+}
+
+fn combine_words(words: mut Slice[UInt64], other: Slice[UInt64], how: Combination)
   requires other.length() == words.length()
   ensures words.length() == old(words.length())
   cost time O(words.length())
@@ -119,12 +130,7 @@ fn combine_words(words: mut List[UInt64], other: List[UInt64], how: Combination)
     cost time O(index)
     cost allocations == 0
   {
-    let word = words[index]
-    words[index] = match how {
-      Union => word | other[index]
-      Intersection => word & other[index]
-      Difference => word & ~other[index]
-    }
+    words[index] = combined(words[index], other: other[index], how: how)
     index += 1
   }
 }
@@ -199,7 +205,6 @@ internal fn collections::BitSet.assign_bit(mut self, index: USize, value: Bool)
   let bit = one << (index % 64)
   let word = self.words[index / 64]
   self.words[index / 64] = if value { word | bit } else { word & ~bit }
-  clear_unused_bits(mut self.words, length: self.length)
 }
 
 public fn collections::BitSet.get(self, index: USize) -> Option[Bool]
@@ -217,7 +222,6 @@ public fn collections::BitSet.flip(mut self, index: USize)
 {
   let one: UInt64 = 1
   self.words[index / 64] = self.words[index / 64] ^ (one << (index % 64))
-  clear_unused_bits(mut self.words, length: self.length)
 }
 
 public fn collections::BitSet.fill(mut self, value: Bool)
@@ -392,8 +396,12 @@ internal fn collections::BitSet.combine(mut self, other: collections::BitSet, ho
   cost time O(self.length)
   cost allocations == 0
 {
-  combine_words(mut self.words, other: other.words, how: how)
-  clear_unused_bits(mut self.words, length: self.length)
+  let count = self.words.length()
+  if count > 0 {
+    let last = count - 1
+    combine_words(mut self.words[..last], other: other.words[..last], how: how)
+    self.words[last] = combined(self.words[last], other: other.words[last], how: how)
+  }
 }
 
 public fn collections::BitSet.unite(mut self, other: collections::BitSet)

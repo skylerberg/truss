@@ -1031,15 +1031,7 @@ impl Display for Weekday {
 }
 
 public opaque type Date(days_since_epoch: Int32)
-  derives Plain, Equal, Hash
-
-impl Ordered for Date {
-  fn compare(self, other: Date) -> Ordering
-    cost time finite
-  {
-    self.days_since_epoch.compare(other.days_since_epoch)
-  }
-}
+  derives Plain, Equal, Hash, Ordered
 
 internal type Civil(year: Int64, month: Int64, day: Int64)
 
