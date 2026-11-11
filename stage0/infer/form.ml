@@ -373,33 +373,91 @@ let checked_template state (literal : string_literal) =
   | Some template -> template
   | None -> bug "the checker recorded no template for a string literal"
 
-(* An untagged string literal: a [String] if it has no interpolation, and
-   an [Interpolated] if it has. *)
-let untagged_string state (literal : string_literal) : Core.kind =
+(* An untagged string literal. Without interpolation it is a [String]. With
+   interpolation it is desugared to a block: make a [TextBuilder], write
+   each piece of text to it, write each value to it with the value's
+   [display], and finish the builder. *)
+let untagged_string state ~origin (literal : string_literal) : Core.kind =
   match literal.rest with
   | [] -> String literal.first.value
   | rest ->
-      let piece (written : Syntax.text) : Core.piece list =
-        if written.value = "" then [] else [ Text written.value ]
+      let make = synthetic_expression state ~origin in
+      let statement kind : Core.statement = { id = fresh_node_id state; origin; kind } in
+      let builder_type = T.named (Well_known.path Text_builder) [] in
+      let builder = fresh_synthetic_local state in
+      let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
+      let call callee arguments : Core.kind = Call { callee; arguments; lends = None; uses = [] } in
+      let let_builder =
+        statement
+          (Let
+             {
+               pattern =
+                 {
+                   id = fresh_node_id state;
+                   origin;
+                   type_ = builder_type;
+                   kind = Bind { local = builder; name = "builder"; mutable_ = true; mode = Own };
+                 };
+               value = Value (make builder_type (call (builder_method "new" Static) []));
+               else_ = None;
+             })
       in
-      let pieces =
-        piece literal.first
-        @ List.concat
-            (List.map2
-               (fun (part, after) (conversion : C.call option) ->
-                 let value = operand Read (build_expression state part) in
-                 match conversion with
-                 | Some call ->
-                     Core.Displayed { value; display = callee call.callee } :: piece after
-                 | None -> bug "an interpolated value has no `display`")
-               rest (checked_template state literal).part_conversions)
+      let write (written : Syntax.text) =
+        if written.value = "" then []
+        else
+          [
+            statement
+              (Evaluate
+                 (make T.unit
+                    (call (builder_method "write" Mut)
+                       [
+                         Passed { mode = Mut; value = Place builder_place };
+                         Passed
+                           {
+                             mode = Read;
+                             value =
+                               Value
+                                 (make
+                                    (T.named (Well_known.path String_slice) [])
+                                    (String written.value));
+                           };
+                       ])));
+          ]
       in
-      Interpolated
+      let display part (conversion : C.call option) =
+        match conversion with
+        | Some recorded ->
+            statement
+              (Evaluate
+                 (make T.unit
+                    (Call
+                       {
+                         callee = callee recorded.callee;
+                         arguments =
+                           [
+                             Passed
+                               { mode = Read; value = operand Read (build_expression state part) };
+                             Passed { mode = Mut; value = Place builder_place };
+                           ];
+                         lends = None;
+                         uses = recorded.uses;
+                       })))
+        | None -> bug "an interpolated value has no `display`"
+      in
+      Block
         {
-          pieces;
-          builder_new = builder_method "new" Static;
-          builder_write = builder_method "write" Mut;
-          builder_finish = builder_method "finish" Own;
+          statements =
+            (let_builder :: write literal.first)
+            @ List.concat
+                (List.map2
+                   (fun (part, after) conversion -> display part conversion :: write after)
+                   rest (checked_template state literal).part_conversions);
+          value =
+            Some
+              (make string_type
+                 (call (builder_method "finish" Own)
+                    [ Passed { mode = Own; value = Value (make builder_type (Use builder_place)) } ]));
+          diverges = false;
         }
 
 (* A list literal, desugared to a block: allocate storage with capacity for

@@ -187,28 +187,6 @@ and into st (value : Core.expression) (destination : Lir.place) =
           fields
       in
       assign (Build { ty; variant; fields })
-  | Interpolated { pieces; builder_new; builder_write; builder_finish } ->
-      (* Each piece is written to one text builder: a literal as it is, and
-         a value through its [Display]. *)
-      let builder = temporary st (result_type st builder_new) in
-      call_with_places st builder_new [] ~destination:builder;
-      let text_type = List.nth (parameter_types st builder_write) 1 in
-      let discarded callee = temporary st (result_type st callee) in
-      List.iter
-        (fun (piece : Core.piece) ->
-          match piece with
-          | Text "" -> ()
-          | Text text ->
-              let slice = temporary st text_type in
-              string_literal st text_type text ~destination:slice;
-              call_with_places st builder_write [ builder; slice ]
-                ~destination:(discarded builder_write)
-          | Displayed { value; display } ->
-              call_with_places st display
-                [ operand_place st value; builder ]
-                ~destination:(discarded display))
-        pieces;
-      call_with_places st builder_finish [ builder ] ~destination
   | Template { call; _ } -> into st call destination
   | Function_value { path; type_arguments } -> (
       (* A named function as a value: an adapter that takes an environment

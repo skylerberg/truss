@@ -55,7 +55,8 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
   in
   match literal.tag with
   | None ->
-      register_expression state value (fun () -> Form.untagged_string state literal);
+      register_expression state value (fun () ->
+          Form.untagged_string state ~origin:value.id literal);
       (* Each interpolated value of an untagged string is converted with its
          [Display]. *)
       List.iteri
