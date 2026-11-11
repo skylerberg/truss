@@ -6414,11 +6414,15 @@ and loop_entry context frame costs =
       | Per_iteration _ -> ())
     costs
 
-(* Whether a term mentions what a value's potential is. *)
+(* Whether a term mentions what a value's potential is: a type's potential,
+   or what a growable buffer has saved, which a type that holds one, as a
+   [String] does in its own package, unfolds to. *)
 and mentions_potential term =
   let rec walk = function
     | L.Apply (name, arguments) ->
-        String.starts_with ~prefix:"potential." name || List.exists walk arguments
+        String.starts_with ~prefix:"potential." name
+        || String.starts_with ~prefix:"slack." name
+        || List.exists walk arguments
     | L.Forall (_, body) | L.Exists (_, body) -> walk body
     | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> false
   in
