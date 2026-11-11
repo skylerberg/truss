@@ -1,8 +1,18 @@
+(library
+ (name ucd)
+ (modules ucd))
+
 (executable
  (name generate)
- (modules generate))
+ (modules generate)
+ (libraries ucd))
+
+(executable
+ (name library_tables)
+ (modules library_tables)
+ (libraries ucd))
 
 (executable
  (name conformance)
  (modules conformance)
- (libraries unicode))
+ (libraries ucd unicode))
