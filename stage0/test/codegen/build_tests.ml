@@ -197,7 +197,7 @@ let () =
       match Compile.build_made_tests compile ~time_limit:300 tests ~output with
       | Error message -> fail "%s" message
       | Ok () ->
-          let status, out, _ = Toolchain.run output [] in
+          let status, out, _ = Process.run output [] in
           expect_int ~expected:1 status;
           expect_string
             ~expected:
@@ -243,8 +243,120 @@ let () =
 let () =
   test "a program still running at its time limit is stopped" (fun () ->
       let started = Unix.gettimeofday () in
-      let status, _, _ = Toolchain.run ~time_limit:100 "/bin/sleep" [ "5" ] in
+      let status, _, _ = Process.run ~time_limit:100 "/bin/sleep" [ "5" ] in
       if status <> 137 then fail "status %d" status;
       if Unix.gettimeofday () -. started > 2. then fail "it was not stopped")
+
+(* The compiler's libraries *)
+
+type form = Word of string | Forms of form list
+
+(* The forms of a dune file. A comment runs from a semicolon to the end of
+   its line, and a string in quotes is one word. *)
+let forms text =
+  let length = String.length text in
+  let rec skip_line i = if i < length && text.[i] <> '\n' then skip_line (i + 1) else i in
+  let rec quoted i =
+    if text.[i] = '\\' then quoted (i + 2) else if text.[i] = '"' then i + 1 else quoted (i + 1)
+  in
+  let rec word i =
+    if i < length && not (List.mem text.[i] [ ' '; '\n'; '\t'; '('; ')'; ';' ]) then word (i + 1)
+    else i
+  in
+  (* The forms from [i] to the closing parenthesis, and where it is. *)
+  let rec several i found =
+    if i >= length then (List.rev found, i)
+    else
+      match text.[i] with
+      | ' ' | '\n' | '\t' -> several (i + 1) found
+      | ';' -> several (skip_line i) found
+      | ')' -> (List.rev found, i + 1)
+      | '(' ->
+          let inner, next = several (i + 1) [] in
+          several next (Forms inner :: found)
+      | '"' ->
+          let next = quoted (i + 1) in
+          several next (Word (String.sub text i (next - i)) :: found)
+      | _ ->
+          let next = word i in
+          several next (Word (String.sub text i (next - i)) :: found)
+  in
+  fst (several 0 [])
+
+let rec dune_files directory =
+  Array.to_list (Sys.readdir directory)
+  |> List.concat_map (fun entry ->
+      let path = Filename.concat directory entry in
+      if Sys.is_directory path then dune_files path else if entry = "dune" then [ path ] else [])
+
+(* Each library under [root]: its name, its directory, and the libraries
+   that it lists. *)
+let libraries root =
+  List.concat_map
+    (fun path ->
+      List.filter_map
+        (function
+          | Forms (Word "library" :: fields) ->
+              let field name =
+                List.find_map
+                  (function
+                    | Forms (Word found :: values) when found = name ->
+                        Some
+                          (List.filter_map
+                             (function Word word -> Some word | Forms _ -> None)
+                             values)
+                    | _ -> None)
+                  fields
+              in
+              Option.map
+                (fun name ->
+                  (name, (Filename.dirname path, Option.value (field "libraries") ~default:[])))
+                (Option.bind (field "name") (fun names -> List.nth_opt names 0))
+          | _ -> None)
+        (forms (In_channel.with_open_bin path In_channel.input_all)))
+    (dune_files root)
+
+let () =
+  (* The prover and the code database do not depend on code generation,
+     and code generation does not depend on the prover. Only a driver sees
+     both: the command line, the library that runs compiled code for the
+     prover, a test, or a tool. *)
+  test "only a driver depends on code generation, which does not depend on the prover" (fun () ->
+      let root = "../../../stage0" in
+      let libraries = libraries root in
+      let directory name = Option.map fst (List.assoc_opt name libraries) in
+      let rec reached found name =
+        List.fold_left
+          (fun found listed ->
+            if List.mem listed found || directory listed = None then found
+            else reached (listed :: found) listed)
+          found
+          (match List.assoc_opt name libraries with Some (_, listed) -> listed | None -> [])
+      in
+      let within part name =
+        match directory name with
+        | Some directory ->
+            let prefix = Filename.concat root part in
+            directory = prefix || String.starts_with ~prefix:(prefix ^ "/") directory
+        | None -> false
+      in
+      let drives name =
+        List.exists (fun part -> within part name) [ "cli"; "running"; "test"; "tools" ]
+      in
+      List.iter
+        (fun (name, _) ->
+          List.iter
+            (fun other ->
+              if within "codegen" name then
+                begin if within "prover" other || drives other then
+                  fail "%s is code generation's, and depends on %s" name other
+                end
+              else if (not (drives name)) && within "codegen" other then
+                fail "%s depends on %s, which is code generation's" name other)
+            (reached [] name))
+        libraries;
+      List.iter
+        (fun name -> if directory name = None then fail "found no library %s" name)
+        [ "compile"; "prover"; "solver"; "database"; "running" ])
 
 let () = Harness.finish ()

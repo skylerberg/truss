@@ -73,6 +73,16 @@ checked definitions
                             └──────────── LIR, cached per instance ────────┘
 ```
 
+Code generation reads what the type checker made of each definition, as
+queries of the code database. It does not depend on the prover, and the
+prover and the code database do not depend on it. Only a driver depends on
+code generation: the command line, a test, a tool, and `stage0/running`,
+the library that runs compiled code for the prover. The table of the C
+library's functions, `stage0/libc`, is beside code generation and not part
+of it, since the type checker and the prover read each function's
+signature from it. A test fails if a library depends on code generation
+that is not a driver.
+
 ### Why C
 
 Truss has no foreign code, so the standard library's hashing, crypto, and

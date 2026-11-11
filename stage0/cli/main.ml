@@ -448,7 +448,7 @@ let finish (outcome : Outcome.t) =
       (* The program runs on this terminal, so it can prompt and read. *)
       Fun.protect
         ~finally:(fun () -> try Sys.remove program with Sys_error _ -> ())
-        (fun () -> Toolchain.run_attached program arguments)
+        (fun () -> Process.run_attached program arguments)
 
 let rec remove path =
   match (Unix.lstat path).st_kind with

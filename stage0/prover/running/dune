@@ -1,6 +1,0 @@
-; Running compiled code for the prover, through code generation, which the
-; prover does not depend on.
-
-(library
- (name running)
- (libraries zarith compile prover))

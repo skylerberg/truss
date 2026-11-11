@@ -52,6 +52,7 @@
   convention
   emit_c
   toolchain
+  process
   startup
   positions
   drops
@@ -86,4 +87,5 @@
   documents)
  (deps
   (glob_files %{workspace_root}/*.md)
-  (glob_files library/*.truss)))
+  (glob_files library/*.truss)
+  (glob_files_rec %{workspace_root}/stage0/**dune)))

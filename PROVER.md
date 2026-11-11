@@ -1219,11 +1219,17 @@ It also decides a tagged template's checks by running them, as
   CODEGEN.md, "Code run while compiling"): each clause that can run is
   worked out and written out. A clause that cannot run, such as one that
   calls a function for specifications only, is left to the solver.
-- **The prover does not depend on code generation.** `Prover.diagnostics`
-  is given the running, and `truss check` gives it through the compiler it
+- **The prover does not depend on code generation,** and code generation
+  does not depend on the prover. `Prover.diagnostics` is given the running
+  as a value of the prover's own type `Prover.running`. The library
+  `stage0/running` depends on both and makes that value from code
+  generation's results, and `truss check` gives it through the compiler it
   builds programs with, made only when a template asks for it. So proofs
   stay queries of their own, and what ran is decided only when obligations
-  are asked, as the solver's answers are.
+  are asked, as the solver's answers are. The solver is run as a child
+  process by `stage0/process`, which the C compiler is run by too. A test
+  of code generation fails if a library of the prover reaches one of code
+  generation's, or the reverse.
 - **A clause that runs true is proven, and one that runs false is an
   error** that says so. A run past the test time limit is an error that
   says the check is not known.

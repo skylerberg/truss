@@ -25,6 +25,7 @@
   cbor
   blake3
   toolchain
+  process
   startup
   positions
   build

@@ -228,7 +228,7 @@ let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : Lir.t lis
       ~files:[ List.map (fun i -> Lir.Code i) instances ]
       ~sources ~output
   with
-  | Ok () -> Toolchain.run ?input output []
+  | Ok () -> Process.run ?input output []
   | Error message -> failwith message
 
 let expect_status ?extra ?anchors expected instances =
