@@ -4535,6 +4535,9 @@ and constant_value context frame path =
       (source_at_key context.database)
   with
   | Some ({ core = { definition = Constant defined; _ }; _ } as constant_source) ->
+      (* A constant is one value, a symbol whose value is stated once, as
+         a fact of mathematics, wherever it is used. *)
+      let symbol = "constant." ^ Path.show path in
       let empty =
         {
           frame with
@@ -4544,9 +4547,17 @@ and constant_value context frame path =
           checking = false;
           self = None;
           updating = None;
+          condition = L.Boolean true;
+          bound = [];
+          binders = [];
         }
       in
-      snd (value context empty defined)
+      once context ("value of " ^ symbol) (fun () ->
+          let ty = type_of context empty defined in
+          declare context (L.Constant (symbol, sort_of context ty));
+          let _, defined_value = specification context (fun () -> value context empty defined) in
+          context.facts <- L.equal (L.Symbol symbol) defined_value :: context.facts);
+      L.Symbol symbol
   | _ -> raise (Foreign_unsupported "a constant with errors")
 
 (* Building a record or a variant: its constructor, with each field given
