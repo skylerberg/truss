@@ -163,26 +163,42 @@ build's LIR and the test results cached under it. `truss build` builds a
 program without them, since it builds only once every proof the program
 reaches, the standard library's included, is done; `truss run` keeps them,
 since it does not wait for proofs:
-- Each `requires` clause that can run is tested on entry to its function,
-  and to each inlined lending or yielding body, with the parameters bound.
-  It panics with "requirement not met: requires ...". That is how an index
-  past a `List`'s end is caught. A clause runs unless it uses the
-  mathematical `Integer`, a quantifier, a conversion to or from one, or a
-  comparison of integers of two types. In a clause that runs, `a ==> b`
-  holds where `a` does not, and `b` is evaluated only where `a` holds,
-  since `b` may be defined only there, as `items[top]` is in
-  `top < items.length() ==> items[top] >= 0`.
+- No `requires` clause is evaluated. The prover shows each one, and a
+  clause can cost more than the function it guards. Each check below is
+  of one primitive operation and takes constant time. A call that breaks
+  a `requires` is caught at the primitive it reaches.
+- An index into a storage, a view, or an array panics with "index out of
+  bounds" where it is not below the length, and so do a removal, a swap,
+  and an insertion past the end. A slice panics with "slice out of
+  bounds". That is how an index past a `List`'s end is caught: the
+  `List`'s `at` is inlined, and its `storage_at` checks.
+- A storage operation checks its own precondition. A push and an
+  insertion need room, a pop needs an element, a new length is within the
+  capacity, and a new capacity is at least the length.
+- A call of the C library checks what the table says of each argument: a
+  view has the elements that the function reads, a storage has the room
+  that the function writes into or the elements that it changes, and
+  elements that the function reads up to a zero end with one.
 - Integer `+`, `-`, and `*` panic with "arithmetic overflow", through
   `__builtin_*_overflow`, and so does negating the least value of a signed
   type. The `wrapping_` operations still wrap.
 - Integer division panics on a zero divisor, and on the least value over
   -1.
+- A shift panics with "shift amount out of range" where the amount is
+  negative or is not below the type's width.
+- A float converted to an integer panics with "conversion out of range"
+  where it is not in the integer type's range, which C leaves undefined.
+  A conversion between integer types keeps the low bits and is not
+  checked: the standard library uses it that way, as where it hashes a
+  negative number.
 
-An overflow or division check reports the operator's position in the
-code that wrote it, since operators on built-in types are lowered where
-they are written. A `requires` check of an inlined lending or
-yielding method, such as the `List` index's, reports the call's position,
-and one of a function called reports the clause's own.
+A check reports the position of the operation in the code that wrote it.
+For the standard library's code that is inlined into a program's, it
+reports the program's call, since the program's author can change the
+call and not the library: an index past the end of a `List` fails in the
+`List`'s `at` and is reported at the program's index. A check that fails
+in a function of the library that is called, such as a slice past the
+end, reports the library's position.
 
 Other flags: `-std=c11 -fno-common -fvisibility=hidden -fno-exceptions
 -fno-asynchronous-unwind-tables`, since nothing unwinds, and
@@ -1901,7 +1917,12 @@ are cached as any others are.
 A tagged template's check has a `Template_check` instance, of the tag's
 `from_template` and the template's literal texts: it builds a template of
 those texts and no parts, works out each of `from_template`'s `requires`
-clauses that can run, and writes each out as a `Bool`. The prover asks it
+clauses that can run, and writes each out as a `Bool`. A clause can run
+unless it uses the mathematical `Integer`, a quantifier, a conversion to
+or from one, or a comparison of integers of two types. In one that runs,
+`a ==> b` holds where `a` does not, and `b` is evaluated only where `a`
+holds, since `b` may be defined only there. This is the one place where
+a clause is evaluated, and it is while compiling. The prover asks it
 only of a clause that reads the template's literals alone, which its parts
 cannot change (see PROVER.md, "Running code while proving"). It runs with
 the test time limit, and its results are kept under the key of the code
@@ -2174,9 +2195,10 @@ a command line can hold.
 
 ## Not built
 
-- **A `requires` check that reports its caller's position.** One of a
-  function called reports the clause's own. Rust's `#[track_caller]` does
-  this by passing the caller's location.
+- **A check that reports its caller's position.** A check that fails in a
+  function that is called, not inlined, reports the function's own
+  position. Rust's `#[track_caller]` reports the caller's by passing its
+  location.
 - **A constant's value kept between runs.** It is worked out again in each
   run of the compiler.
 - **Checkers shipped compiled.** The standard library's are to ship already

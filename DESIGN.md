@@ -1207,20 +1207,28 @@ never become runtime checks.
 
 **Tests do not wait for proofs.** A program is built only once every
 obligation it can reach is proven, but a test build checks at run time
-every operation that could fail: each `requires` that can run, which covers
-every index, since indexing is a call whose `requires` bounds it, and each
-operation that could overflow, each division, shift, and `unreachable`.
+every primitive operation that could fail: each index and slice, each
+operation that could overflow, each division, shift, and `unreachable`, and
+each call of the C library.
 Generated code never has undefined behavior, even where a proof is still
 running or has failed, so tests run as soon as the code type-checks,
 alongside the prover rather than after it. A failed check ends the test and
 names the operation, which tells an agent at once whether a failed proof is
-a real bug or a prover that needs a hint. `ensures` clauses and invariants
-are not checked, since a specification need not be executable and they
-guard no operation. Because a test build checks every operation whether or
-not it was proven, its code and its cached results do not depend on the
-state of any proof. Rust and Swift check indexes and
+a real bug or a prover that needs a hint. Because a test build checks every
+operation whether or not it was proven, its code and its cached results do
+not depend on the state of any proof. Rust and Swift check indexes and
 overflow at run time in every build; Truss does so only where a check is
 still useful, in tests, and proves them away in the programs it ships.
+
+**No clause is evaluated when a program runs.** A `requires` clause, an
+`ensures` clause, and an invariant are the prover's to show. Running a
+`requires` would pay for its proof a second time, at whatever the clause
+costs: a test build would make `binary_search` linear by checking that its
+list is sorted. Each check that a test build makes takes constant time. A
+call that breaks a `requires` is caught where it reaches a primitive, as an
+index past the end of a list is, and otherwise by the prover alone. A
+SPARK build does the same by default: it keeps the language's own checks
+and leaves contracts to the prover.
 
 `unreachable` has only the first fix: it must be proven unreachable, or the
 code does not compile. Code that says a point can't be reached must not
