@@ -2997,6 +2997,28 @@ let () =
         \  made\n\
          }\n")
 
+(* Definitions under a quantifier *)
+
+let () =
+  test "a derived ordering of a one-field record is its field's, for every value" (fun () ->
+      proven
+        "type Day(count: Int32)\n\
+        \  derives Equal, Ordered\n\n\
+         theorem days_order_as_their_counts()\n\
+        \  ensures forall first: Day => forall second: Day =>\n\
+        \    (first < second) == (first.count < second.count)\n\
+         {\n\
+         }\n");
+  test "a derived ordering compares fields in order, for every value" (fun () ->
+      proven
+        "type Pair(first: Int64, second: Int64)\n\
+        \  derives Equal, Ordered\n\n\
+         theorem pairs_order_by_first_then_second()\n\
+        \  ensures forall a: Pair => forall b: Pair =>\n\
+        \    (a < b) == (a.first < b.first || (a.first == b.first && a.second < b.second))\n\
+         {\n\
+         }\n")
+
 (* Concurrent code *)
 
 let early_return ensures =

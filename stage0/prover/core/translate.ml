@@ -5180,6 +5180,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
   let own_bound = bindings own in
   let own_arguments = List.filter_map snd own_bound in
   let result_type = type_of context frame node in
+  let applied_as = ref None in
   let result =
     if
       contract.pure && contract.result_kind <> `Yields
@@ -5207,6 +5208,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                (T.substitute (substitution_of own) self.type_))
             ~model:result_type symbol
       | _ -> ());
+      applied_as := Some (symbol, sorts);
       let term = L.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
       note_known_call context call_ path term own_arguments;
@@ -5264,6 +5266,29 @@ and contract_call context frame (node : expression) (call_ : call) path contract
            | None -> ()
          with Unsupported _ | Foreign_unsupported _ -> ());
         List.iter (fun fact -> Hashtbl.replace context.unfolded fact ()) (facts_since context mark)
+    | Some (part, body) when part.requires = [] -> (
+        (* Called on a quantifier's bound values, the definition is stated
+           once for every argument, so that it holds for each of them. *)
+        match !applied_as with
+        | Some (symbol, sorts) ->
+            once context ("definition of " ^ symbol) (fun () ->
+                let parameters =
+                  List.mapi (fun index sort -> (Printf.sprintf "defined.%d" index, sort)) sorts
+                in
+                let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
+                let outside = { after with bound = []; binders = []; condition = L.Boolean true } in
+                match
+                  body_over context outside parameters body (fun inside ->
+                      part_frame inside part
+                        ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+                        ~substitution:(substitution_of part))
+                with
+                | Some defined ->
+                    context.facts <-
+                      L.Forall (parameters, L.equal (L.Apply (symbol, inputs)) defined)
+                      :: context.facts
+                | None -> ())
+        | None -> ())
     | _ -> ());
     (* The [ensures], after, where the [requires] held: [mut] parameters
        have their new values, and [old] the ones they had. *)
