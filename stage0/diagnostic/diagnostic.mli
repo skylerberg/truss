@@ -92,7 +92,6 @@ module Code : sig
     | Pipe_operator
     | Lambda_annotation
     | Impl_parameters
-    | Not_before_is
     | Null_coalescing
     | Specification_only
     | Misplaced_assert

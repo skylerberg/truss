@@ -233,7 +233,7 @@ let recovers : Diagnostic.Code.parser -> bool = function
   | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
   | Loop_cost_bound | Function_type_names | Misplaced_requires | Specification_only
   | Misplaced_assert | Misplaced_proof | Misplaced_yield | Misplaced_loop_exit | Leaves_parallel
-  | Echo_in_specification | Reserved_name | Not_before_is ->
+  | Echo_in_specification | Reserved_name ->
       false
 
 let report cursor ?notes ?fixes code span message =

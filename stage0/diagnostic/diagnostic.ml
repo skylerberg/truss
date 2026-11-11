@@ -84,7 +84,6 @@ module Code = struct
     | Pipe_operator
     | Lambda_annotation
     | Impl_parameters
-    | Not_before_is
     | Null_coalescing
     | Specification_only
     | Misplaced_assert
@@ -336,7 +335,6 @@ module Code = struct
     | Pipe_operator -> "pipe_operator"
     | Lambda_annotation -> "lambda_annotation"
     | Impl_parameters -> "impl_parameters"
-    | Not_before_is -> "not_before_is"
     | Null_coalescing -> "null_coalescing"
     | Specification_only -> "specification_only"
     | Misplaced_assert -> "misplaced_assert"

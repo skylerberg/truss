@@ -261,22 +261,21 @@ let rec expression ?context cursor (value : expression) =
       let group = binary_group operator in
       operand group ~right:false left;
       operand group ~right:true right
-  | Is { value = left; pattern; _ } ->
-      (match (left.kind, pattern.kind) with
-      (* [!response is Ok(_)]: [!] binds tighter than [is], so it negates
-         [response], and a negated value is a [Bool], which no variant
-         matches. *)
-      | Prefix (Not, _), Variant _ ->
+  | Is { value = left; operator_span; _ } ->
+      (match left.kind with
+      (* [!value is Pattern]: Python negates the test, and C#, Kotlin,
+         Swift, and JavaScript negate the value, so [!] and [is] have no
+         relative precedence. *)
+      | Prefix (Not, _) ->
           let whole = Cursor.absolute cursor value.span in
-          Cursor.report cursor Not_before_is
-            (Source.span whole.start (whole.start + 1))
-            "`!` binds tighter than `is`, so this negates the value before the pattern is tested. \
-             To negate the test, put it in parentheses."
-            ~fixes:
-              [
-                Diagnostic.fix "Negate the test"
-                  [ Diagnostic.insert (whole.start + 1) "("; Diagnostic.insert whole.stop ")" ];
-              ]
+          report cursor operator_span
+            "`!` and `is` have no relative precedence. Add parentheses to say whether the test or \
+             the value is negated."
+            [
+              fix cursor value.span
+                [ Diagnostic.insert (whole.start + 1) "("; Diagnostic.insert whole.stop ")" ];
+              fix cursor value.span (parentheses cursor left.span left.span);
+            ]
       | _ -> ());
       operand Comparison ~right:false left
   | Range { start; stop; _ } ->

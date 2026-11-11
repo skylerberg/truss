@@ -208,7 +208,7 @@ rather than read as something else:
 | `a ?? b`, `a ?: b` | The fix writes `a.unwrap_or(b)`. |
 | `fn(x: Int64) { ... }` | A lambda has no annotations. The fix writes `fn(x) { ... }`. |
 | `impl<T> Trait for Box[T]` | An `impl` has no parameters of its own. The fix writes `impl Trait for Box[T]`. |
-| `!response is Ok(_)` | `!` binds tighter than `is`. The fix writes `!(response is Ok(_))`. |
+| `!response is Ok(_)` | `!` and `is` have no relative precedence. The fixes write `!(response is Ok(_))` or `(!response) is Ok(_)`. |
 | `“text”`, `≤`, a no-break space | Characters that look like ASCII punctuation. The fix writes the ASCII spelling. |
 | `x as Int64` | The fix writes `Int64.from(x)`, or `Int64.try_from(x)` when the conversion can lose information. |
 | `null`, `nil` | The fix suggests `None`. |
@@ -1954,7 +1954,7 @@ Operators bind in this order, tightest first:
 |---|---|
 | `.` `()` `[]` `?` `with (...)` | `a.b()?.c()`. `with` applies to the expression directly before it. |
 | `mut` `own` `any` | Apply to the whole postfix expression after them, such as `mut config.servers.sort()`. See [Parameter modes](#parameter-modes) for which place they mark. |
-| `-` `!` `~` | `-x.abs()` is `-(x.abs())`. `!is_ready == expected` is `(!is_ready) == expected`. |
+| `-` `!` `~` | `-x.abs()` is `-(x.abs())`. `!is_ready == expected` is `(!is_ready) == expected`. `!` directly before the left operand of `is` needs parentheses: `!(response is Ok(_))`. |
 | `*` `/` `%` | |
 | `+` `-` | |
 | `..` `..=` | `0..count - 1` is `0..(count - 1)`. |
