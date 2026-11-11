@@ -1210,8 +1210,11 @@ and the interfaces of the definition's callees.
 The check builds a control-flow graph of the body. Each point of the graph
 performs one action on one place: a read, a move, a `mut` borrow, an
 assignment, or a binding of new locals. The edges follow evaluation order, and
-a loop has a back edge. A lambda's body is a separate entry point, because it
-runs when the lambda is called. Three dataflow analyses run on the graph:
+a loop has a back edge. The right operand of `&&` is reached only from where
+the left operand is true, and the right operand of `||` only from where it is
+false, so each operand has an edge to the operand after it and an edge to the
+code after the expression. A lambda's body is a separate entry point, because
+it runs when the lambda is called. Three dataflow analyses run on the graph:
 
 - forward: the places that may have been moved before each point;
 - forward: the views that each holder may store at each point, where a holder
