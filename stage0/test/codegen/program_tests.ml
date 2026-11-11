@@ -1010,6 +1010,42 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  (* A refusal can arrive before the first system call after [connect]. On
+     macOS a [setsockopt] then fails, so a connect that set an option
+     before it read its result reported that failure for some of these. *)
+  test "every connection to a port that nothing listens on is refused" (fun () ->
+      let status, output, _ =
+        run_main
+          {|use standard::network
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, NetworkServer, NetworkClient, Handles
+{
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  var unused: UInt16 = 0
+  if NetworkServer.listen(loopback) is Ok(opened) {
+    let listener = own opened
+    unused = listener.local_address().port
+  }
+  let closed = network::SocketAddress(address: network::IpAddress.loopback, port: unused)
+  var refused = 0
+  for attempt in 0..2000 {
+    let limit = if attempt % 2 == 0 { None } else { Some(Duration.nanoseconds(2000000000)) }
+    if NetworkClient.connect(closed, timeout: limit) is Err(error) {
+      if error == SystemError.ConnectionRefused {
+        refused += 1
+      }
+    }
+  }
+  Console.print_line("refused ${refused} of 2000")
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string ~expected:"refused 2000 of 2000\n" output)
+
+let () =
   test "a program finds a host's addresses by its name" (fun () ->
       (* Only names the system answers by itself, so that the test asks no
          server: addresses, [localhost], and a name too long to be asked
