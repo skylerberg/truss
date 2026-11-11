@@ -308,9 +308,9 @@ let standard_database =
        (fun (module_, text) ->
          Engine.set (Engine.of_context database) Workspace.file_text module_ text)
        Standard_library.modules;
-     Engine.set (Engine.of_context database) Workspace.packages Standard_library.package
+     Engine.set (Engine.of_context database) Workspace.packages Path.standard_package
        {
-         name = Standard_library.package;
+         name = Path.standard_package;
          dependencies = [];
          modules = List.map fst Standard_library.modules;
          usize_bits = 64;
@@ -328,8 +328,7 @@ let standard_context : Monomorphic.context =
   }
 
 let standard module_ name ?(arguments = []) () =
-  Ground.Named
-    { path = Top { module_ = { package = "standard"; modules = [ module_ ] }; name }; arguments }
+  Ground.Named { path = Path.standard [ module_ ] name; arguments }
 
 let standard_layout ty =
   Memory_layout.to_string

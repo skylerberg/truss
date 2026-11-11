@@ -424,13 +424,7 @@ let debug_signature t ty : Lir.signature =
    output, each in [standard::writing]: it takes the output, and a value of
    [ty] to write, which is at [place]. *)
 let write t b ~output name ty (place : Lir.place) =
-  let key =
-    Instance.Code
-      {
-        path = Top { module_ = { package = "standard"; modules = [ "writing" ] }; name };
-        type_arguments = [];
-      }
-  in
+  let key = Instance.Code { path = Path.standard [ "writing" ] name; type_arguments = [] } in
   let parameter, written =
     match Convention.parameter t.env Read ty with
     | Some (Pointer _ as parameter) -> (parameter, Lir.Address { place; writable = false })

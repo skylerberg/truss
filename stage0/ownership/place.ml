@@ -56,18 +56,8 @@ let is_prefix prefix place =
 (* A [List], a [Slice], or an [Array]. An element of one of these is a
    place. An index of any other collection is a call of the collection's
    [at], which lends the element. *)
-let is_storage (type_ : T.ty) =
-  match type_ with
-  | T.Named
-      {
-        path =
-          Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" | "Slice" };
-        _;
-      } ->
-      true
-  | _ -> T.is_builtin Array type_
-
-let index_trait = Path.core "Index"
+let is_storage type_ =
+  T.is_well_known List type_ || T.is_well_known Slice type_ || T.is_builtin Array type_
 
 (* If the expression is an index of a [List], a [Slice], or an [Array],
    the collection that is indexed. *)
@@ -79,7 +69,7 @@ let storage_index (value : Core.expression) : Core.place option =
         arguments = Passed { value = Place collection; _ } :: _;
         _;
       }
-    when Path.equal trait.trait index_trait && is_storage self_type ->
+    when Well_known.is Index trait.trait && is_storage self_type ->
       Some collection
   | _ -> None
 
@@ -100,18 +90,9 @@ let rec of_core (place : Core.place) : t option =
       | None -> None)
   | Temporary _ -> None
 
-let slice_path : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "Slice" }
-
-let string_slice_path : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "text" ] }; name = "StringSlice" }
-
 (* A [Slice] or a [StringSlice]: a view that an owned collection converts
    to, and through which the collection's elements can be mutated. *)
-let is_slice_type (type_ : T.ty) =
-  match type_ with
-  | T.Named { path; _ } -> Path.equal path slice_path || Path.equal path string_slice_path
-  | _ -> false
+let is_slice_type type_ = T.is_well_known Slice type_ || T.is_well_known String_slice type_
 
 (* The slice that a mutation of a place writes through, if there is one:
    the innermost place of a slice type on the way to the mutated place.

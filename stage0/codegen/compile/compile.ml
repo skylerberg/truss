@@ -413,17 +413,7 @@ let small_callees ~find ~worked_on (instance : Lir.t) =
 
 (* The standard library's test runner, which a test program's [main]
    calls. *)
-let test_runner : Instance.key =
-  Code
-    {
-      path =
-        Top
-          {
-            module_ = { package = "standard"; modules = [ "system"; "test_runner" ] };
-            name = "run";
-          };
-      type_arguments = [];
-    }
+let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_arguments = [] }
 
 (* Builds what the roots reach into a program at [output], with the given
    startup code, once the instances agree with one another. An instance
@@ -966,7 +956,8 @@ let evaluate_call ?results t ~time_limit ~function_ ~arguments =
 let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"
 
 let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
-    ?(worked_on = fun package -> package <> "standard") database target toolchain cache settings =
+    ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain cache
+    settings =
   let lowering = { target; checks } in
   {
     database;

@@ -27,9 +27,7 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 open State
 
-let panic : T.capability =
-  Capability
-    (Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Panic" })
+let panic : T.capability = Capability (Well_known.path Panic)
 
 (* The capability that [concurrent] code uses, because its behavior can
    depend on task scheduling. *)

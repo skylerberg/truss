@@ -538,7 +538,7 @@ let string_literal st (ty : Ground.ty) text ~(destination : Lir.place) =
     emit st.b (Assign (destination, Build { ty; variant = None; fields = [ (field, operand) ] }))
   in
   match (ty, Monomorphic.shape st.context.monomorphic ty) with
-  | Named { path = Top { name = "String"; _ }; _ }, Record [ (field, Typed storage) ] ->
+  | Named { path; _ }, Record [ (field, Typed storage) ] when Well_known.is String path ->
       let bytes = temporary st storage in
       emit st.b (Assign (bytes, Storage.static storage ~elements:(Constant (Bytes text)) ~length));
       build field (Move bytes)
@@ -632,11 +632,7 @@ let cursor_element context (yielding : Ground.yielding) =
 
 (* What a cursor's [next] returns: an [Option] of what it yields. *)
 let cursor_result context yielding : Ground.ty =
-  Named
-    {
-      path = Top { module_ = { package = "standard"; modules = [ "option" ] }; name = "Option" };
-      arguments = [ Type (cursor_element context yielding) ];
-    }
+  Named { path = Well_known.path Option; arguments = [ Type (cursor_element context yielding) ] }
 
 (* Calls [next] on a cursor: the pulled method's state machine. *)
 let call_next st (yielding : Ground.yielding) cursor destination =

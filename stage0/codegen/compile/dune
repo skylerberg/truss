@@ -4,6 +4,7 @@
   compiler_bug
   verify
   path
+  well_known
   query
   resolve
   interface

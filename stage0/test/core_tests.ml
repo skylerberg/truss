@@ -815,7 +815,7 @@ let printed_derived text type_name trait name receiver =
           Derived
             {
               type_ = Top { module_ = module_of "app::main"; name = type_name };
-              trait = Path.core trait;
+              trait = Path.standard [ "core" ] trait;
             };
         name;
         receiver;
@@ -889,7 +889,7 @@ let () =
               Derived
                 {
                   type_ = Top { module_ = module_of "app::main"; name = "Later" };
-                  trait = Path.core "Equal";
+                  trait = Well_known.path Equal;
                 };
             name = "equal";
             receiver = Read;
@@ -901,7 +901,7 @@ let () =
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-          (Query.demand database Interface.Impls.index "standard")
+          (Query.demand database Interface.Impls.index Path.standard_package)
       in
       if derived = [] then fail "the standard library derives nothing";
       List.iter
@@ -998,7 +998,7 @@ let () =
       | found, substitution -> fail "found %s with [%s]" found (String.concat "; " substitution));
   test "a method of a derived impl has the generated core form" (fun () ->
       let database = setup [ ("app::main", text) ] in
-      let owner : Path.t = Derived { type_ = both; trait = Path.core "Equal" } in
+      let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
       match
         ( Query.demand database Infer.core_of_path
             (Method { owner; name = "equal"; receiver = Read }),

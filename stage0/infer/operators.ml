@@ -29,7 +29,7 @@ let rec try_ state env (value : expression) (inner : expression) =
   match (inner_type, output) with
   | ( T.Named { path; arguments = [ T.Type ok; T.Type error ] },
       Some (T.Named { path = output_path; arguments = [ _; T.Type output_error ] }) )
-    when Path.equal path result_path && Path.equal output_path result_path ->
+    when Well_known.is Result path && Well_known.is Result output_path ->
       if not (unify state error output_error) then
         report state Wrong_try value.span
           (Printf.sprintf
@@ -38,7 +38,7 @@ let rec try_ state env (value : expression) (inner : expression) =
              (show state output_error) (show state error));
       ok
   | T.Named { path; arguments = [ T.Type some ] }, Some (T.Named { path = output_path; _ })
-    when Path.equal path option_path && Path.equal output_path option_path ->
+    when Well_known.is Option path && Well_known.is Option output_path ->
       some
   | (T.Error _ | T.Hole), _ -> inner_type
   | _ ->
@@ -188,7 +188,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
             operator_call
               ~operands:
                 [ { C.expression = inner.id; parameter = 0; mode = T.Read; conversion = None } ]
-              state value ~trait:(core "Negate") ~method_:"negate" ~left:type_ ~right:None
+              state value ~trait:(Well_known.path Negate) ~method_:"negate" ~left:type_ ~right:None
           end)
 
 (* An operator that resolves to a trait method. The [impl] is found once the
@@ -306,7 +306,7 @@ and operands_hole state env (left : expression) (right : expression) =
 
 and is_string state type_ =
   let type_ = normalize state type_ in
-  is_named string_path type_ || is_named string_slice_path type_
+  T.is_well_known String type_ || T.is_well_known String_slice type_
 
 and binary state env ?expected (value : expression) operator (left : expression)
     (right : expression) =
@@ -399,8 +399,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
            [Ordering]. *)
         let trait, method_, result =
           match operator with
-          | Equal | Not_equal -> (core "Equal", "equal", T.bool)
-          | _ -> (core "Ordered", "compare", T.named (core "Ordering") [])
+          | Equal | Not_equal -> (Well_known.path Equal, "equal", T.bool)
+          | _ -> (Well_known.path Ordered, "compare", T.named (Well_known.path Ordering) [])
         in
         state.tables.calls.(value.id) <-
           Some
@@ -497,11 +497,11 @@ and binary state env ?expected (value : expression) operator (left : expression)
           in
           let trait, method_ =
             match operator with
-            | Add -> (core "Add", "add")
-            | Subtract -> (core "Subtract", "subtract")
-            | Multiply -> (core "Multiply", "multiply")
-            | Divide -> (core "Divide", "divide")
-            | _ -> (core "Remainder", "remainder")
+            | Add -> (Well_known.path Add, "add")
+            | Subtract -> (Well_known.path Subtract, "subtract")
+            | Multiply -> (Well_known.path Multiply, "multiply")
+            | Divide -> (Well_known.path Divide, "divide")
+            | _ -> (Well_known.path Remainder, "remainder")
           in
           if
             (T.is_integer_type (normalize state left_type)
@@ -531,7 +531,7 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
     ~left_type ~right_type =
   let left_type = normalize state left_type and right_type = normalize state right_type in
   if T.is_integer_type left_type && T.is_integer_type right_type then begin
-    let from = trait_reference ~arguments:[ T.Type right_type ] (core "From") in
+    let from = trait_reference ~arguments:[ T.Type right_type ] (Well_known.path From) in
     let fixes =
       if Option.is_some (implements state left_type from) then
         [
@@ -545,7 +545,7 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
       else if
         Option.is_some
           (implements state right_type
-             (trait_reference ~arguments:[ T.Type left_type ] (core "From")))
+             (trait_reference ~arguments:[ T.Type left_type ] (Well_known.path From)))
       then
         [
           fix

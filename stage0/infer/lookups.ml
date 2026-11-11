@@ -123,7 +123,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
         | _ -> None
       in
       match part with
-      | Some part -> T.Named { path = sequence_path; arguments = [ T.Type part ] }
+      | Some part -> T.Named { path = Well_known.path Sequence; arguments = [ T.Type part ] }
       | None -> bug "`yielded` is named where nothing is handed out")
   | Finished ->
       state.tables.meanings.(value.id) <- Some Specification_value;

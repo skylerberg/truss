@@ -9,9 +9,7 @@ type context = {
 
 let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
 let builtin builtin = Ground.Named { path = Intrinsic.builtin_path builtin; arguments = [] }
-
-let panic_capability : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Panic" }
+let panic_capability = Well_known.path Panic
 
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
   match context.normalize (Types.substitute substitution ty) with
@@ -187,22 +185,9 @@ let kind context ty : Glue.kind =
   | None, _ -> Shape (shape context ty)
 
 let debug_form : Ground.ty -> Glue.debug_form = function
-  | Named
-      {
-        path =
-          Top
-            {
-              module_ = { package = "standard"; modules = [ "text" ] };
-              name = "String" | "StringSlice";
-            };
-        _;
-      } ->
-      Text
-  | Named
-      {
-        path =
-          Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" | "Slice" };
-        _;
-      } ->
-      Sequence
+  | Named { path; _ } -> (
+      match Well_known.of_path path with
+      | Some (String | String_slice) -> Text
+      | Some (List | Slice) -> Sequence
+      | _ -> Structure)
   | _ -> Structure

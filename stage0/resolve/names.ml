@@ -139,7 +139,7 @@ let packages database (module_ : Path.module_) =
       (fun (dependency : Workspace.dependency) -> dependency.package)
       (Query.demand database Workspace.dependencies module_.package)
   in
-  List.sort_uniq compare (module_.package :: Prelude.standard :: dependencies)
+  List.sort_uniq compare (module_.package :: Path.standard_package :: dependencies)
 
 (* The module that a full path denotes, written in a file of [from]. The
    path starts with a package's name, which takes two segments when the

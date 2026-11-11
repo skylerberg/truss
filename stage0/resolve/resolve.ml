@@ -181,7 +181,7 @@ let file_diagnostics =
              let span = Source.span item.base (item.base + String.length item.text) in
              let used_module = Names.used_module database ~from:module_ item.value in
              let last = Names.last_name used_module in
-             if used_module = Intrinsic.module_ && module_.package <> Prelude.standard then
+             if used_module = Intrinsic.module_ && module_.package <> Path.standard_package then
                report Intrinsic_import span
                  "Only the `standard` package can use `standard::intrinsic`."
              else if not (Names.module_exists database used_module) then

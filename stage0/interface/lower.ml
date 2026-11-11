@@ -417,9 +417,7 @@ let generics context owner (written : generic_parameter list) : T.generic list =
 (* The types that exist only in specifications: [Integer], and the
    mathematical collections of [standard::specification]. *)
 let specification_type (path : Path.t) =
-  match path with
-  | Top { module_ = { package = "standard"; modules = [ "specification" ] }; _ } -> true
-  | _ -> false
+  match path with Top { module_; _ } -> module_ = Well_known.specification | _ -> false
 
 let rec mentions_integer = function
   | T.Integer -> true
@@ -498,8 +496,7 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
     terminates;
     specification_only =
       (* [Model]'s method returns a mathematical value. *)
-      Path.equal owner (Path.core "Model")
-      || mentions_integer result_type
+      Well_known.is Model owner || mentions_integer result_type
       || List.exists
            (fun (parameter : T.parameter_info) -> mentions_integer parameter.type_)
            parameters;

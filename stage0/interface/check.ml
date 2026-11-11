@@ -166,22 +166,16 @@ let check_main state (signature : T.signature) span =
      {
        name = "arguments";
        mode = Read;
-       type_ =
-         Named
-           {
-             path = Top { name = "List"; module_ };
-             arguments = [ Type (Named { path = Top { name = "String"; _ }; arguments = [] }) ];
-           };
+       type_ = Named { path = list; arguments = [ Type (Named { path = string; arguments = [] }) ] };
        has_default = false;
      };
     ] ->
-        module_.package = "standard"
+        Well_known.is List list && Well_known.is String string
     | _ -> false
   in
   let exit_code =
     match signature.output with
-    | Returns (Named { path = Top { name = "ExitCode"; module_ }; arguments = [] }) ->
-        module_.package = "standard"
+    | Returns (Named { path; arguments = [] }) -> Well_known.is Exit_code path
     | _ -> false
   in
   if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
@@ -204,11 +198,6 @@ let field_names (fields : field list) =
     (fun (field : field) ->
       match field.kind with Field_declaration { name; _ } -> Some name | Field_error -> None)
     fields
-
-let trait_named (path : Path.t) name =
-  match path with
-  | Top { name = found; module_ } -> found = name && module_.package = "standard"
-  | _ -> false
 
 (* The edit that removes one trait from a [derives] clause, or the whole
    clause when it is the only one. *)
@@ -266,15 +255,15 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                   let shown = Names.spell_path written.path in
                   if
                     not
-                      (Impls.derivable trait || trait_named trait "Copyable"
-                     || trait_named trait "Plain")
+                      (Impls.derivable trait || Well_known.is Copyable trait
+                     || Well_known.is Plain trait)
                   then
                     report state Not_derivable written.span
                       (Printf.sprintf
                          "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, and `Plain` can \
                           be derived, not `%s`."
                          shown)
-                  else if trait_named trait "Copyable" || trait_named trait "Plain" then
+                  else if Well_known.is Copyable trait || Well_known.is Plain trait then
                     begin if not interface.opaque then
                       report state Derives_inferred written.span
                         ~fixes:
@@ -290,7 +279,7 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                       let property_holds =
                         List.for_all
                           (fun type_ ->
-                            if trait_named trait "Plain" then
+                            if Well_known.is Plain trait then
                               Impls.plain state.database ~bounds:(derived_bounds trait) type_
                             else Impls.copyable state.database ~bounds:(derived_bounds trait) type_)
                           field_types
@@ -301,7 +290,7 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                             List.exists (fun (variant : T.variant) -> variant.indirect) variants
                         | _ -> false
                       in
-                      if (not property_holds) || (trait_named trait "Plain" && allocates) then
+                      if (not property_holds) || (Well_known.is Plain trait && allocates) then
                         report state Cannot_derive written.span
                           (Printf.sprintf "A field of this type is not `%s`, so the type cannot be."
                              shown)
@@ -309,7 +298,7 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                   else begin
                     (* A derived [Default] is each field's, which only a
                        record has: no variant of a sum is its default. *)
-                    (if trait_named trait "Default" then
+                    (if Well_known.is Default trait then
                        match interface.shape with
                        | Sum _ ->
                            report state Cannot_derive written.span
@@ -317,13 +306,8 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                               derive it: no variant of this type is its default. Write the `impl`, \
                               which says which variant is."
                        | Record _ | Todo_type | Builtin_type _ | Error_shape _ -> ());
-                    if trait_named trait "Ordered" || trait_named trait "Hash" then
-                      if
-                        not
-                          (List.exists
-                             (fun derived -> trait_named derived "Equal")
-                             interface.derives)
-                      then
+                    if Well_known.is Ordered trait || Well_known.is Hash trait then
+                      if not (List.exists (Well_known.is Equal) interface.derives) then
                         report state Cannot_derive written.span
                           (Printf.sprintf
                              "Deriving `%s` needs `Equal` to be derived too, so that the two agree."
@@ -402,9 +386,6 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
   | None -> ()
 
 (* [impl]s *)
-
-let panic_path : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Panic" }
 
 let show_signature (signature : T.signature) =
   let mode = function T.Read -> "" | Mut -> "mut " | Own -> "own " in
@@ -486,7 +467,7 @@ let impl_view database ~bounds (impl : T.impl_interface) (trait_path : path_type
     | Some { kind = Type_generic bounds; _ } -> bounds
     | _ -> bounds parameter
   in
-  if Path.equal impl.implements.trait panic_path || compiler_implements impl then None
+  if Well_known.is Panic impl.implements.trait || compiler_implements impl then None
   else
     Option.map
       (fun (trait : T.trait_interface) ->
@@ -533,7 +514,7 @@ let impl_view database ~bounds (impl : T.impl_interface) (trait_path : path_type
 let check_impl state (written_members : impl_member line list) (impl : T.impl_interface)
     (trait_path : path_type) =
   let database = state.database in
-  if Path.equal impl.implements.trait panic_path then
+  if Well_known.is Panic impl.implements.trait then
     report state Implements_panic trait_path.span
       "Nothing can implement `Panic`, since a panic cannot be caught."
   else if compiler_implements impl then

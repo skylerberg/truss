@@ -13,10 +13,9 @@ module Names = Resolve.Names
 
 (* The outermost path of a type, which an [impl] is chosen by. *)
 let head = function T.Named { path; _ } -> Some path | _ -> None
-let derivable_names = [ "Equal"; "Hash"; "Ordered"; "Default" ]
 
 let derivable (trait : Path.t) =
-  match Path.core_name trait with Some name -> List.mem name derivable_names | None -> false
+  match Well_known.of_path trait with Some (Equal | Hash | Ordered | Default) -> true | _ -> false
 
 (* Every [impl] of a package, written or derived, by trait and type
    constructor. *)
@@ -56,11 +55,10 @@ let real_implementation database (capability : Path.t) : Path.t option =
     List.filter_map
       (fun ((trait, _), (impl : Path.t)) ->
         match impl with
-        | Impl { module_ = { package = "standard"; modules = "system" :: _ }; _ }
-          when Path.equal trait capability ->
+        | Impl { module_; _ } when Well_known.in_system module_ && Path.equal trait capability ->
             Some impl
         | _ -> None)
-      (Query.demand database index "standard")
+      (Query.demand database index Path.standard_package)
   with
   | [] -> None
   | [ impl ] -> Some impl
@@ -93,7 +91,7 @@ let impls_in =
         (fun (indexed_trait, impl) -> if Path.equal indexed_trait trait then Some impl else None)
         (impls_for database type_ package))
 
-let cursor_trait = Path.core "Cursor"
+let cursor_trait = Well_known.path Cursor
 
 (* The cursor of a yielding function or method implements [Cursor], and no
    [impl] is written for it. Its [impl] is a derived one, named by the

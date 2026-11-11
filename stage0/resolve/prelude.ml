@@ -5,9 +5,6 @@
    [Result], the core collections and traits, and the standard capabilities
    with the types their methods take and return. *)
 
-let standard = "standard"
-let in_standard modules : Path.module_ = { package = standard; modules }
-
 (* Types, traits, and capabilities, each with the module that defines it. *)
 let types =
   List.filter_map
@@ -17,7 +14,7 @@ let types =
       | _ -> Some (Intrinsic.builtin_name builtin, Intrinsic.module_))
     Intrinsic.builtins
   @ List.concat_map
-      (fun (modules, names) -> List.map (fun name -> (name, in_standard modules)) names)
+      (fun (modules, names) -> List.map (fun name -> (name, Path.standard_module modules)) names)
       [
         ([ "option" ], [ "Option" ]);
         ([ "result" ], [ "Result" ]);

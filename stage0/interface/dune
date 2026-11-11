@@ -4,6 +4,7 @@
   compiler_bug
   query
   path
+  well_known
   intrinsic
   types
   workspace

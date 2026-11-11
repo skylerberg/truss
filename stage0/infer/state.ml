@@ -1,7 +1,7 @@
 (* The state of the type checker while it checks one definition, and the
    helpers that every part of the checker uses: reporting diagnostics,
-   recording types, unification, the paths of standard library types,
-   places, instantiation of signatures, and argument modes. [Expressions]
+   recording types, unification, places, instantiation of signatures, and
+   argument modes. [Expressions]
    describes the checking algorithm. *)
 
 open Syntax
@@ -502,30 +502,10 @@ let evidence_of = function
   | Impls.From_any -> C.Dynamic
   | Impls.Built_in | Impls.Accepted _ -> C.Built_in
 
-(* Standard paths *)
-
-let standard = Path.standard
-let core = Path.core
-let option_path = standard [ "option" ] "Option"
-let result_path = standard [ "result" ] "Result"
-let list_path = standard [ "list" ] "List"
-let slice_path = standard [ "list" ] "Slice"
-let string_path = standard [ "text" ] "String"
-let string_slice_path = standard [ "text" ] "StringSlice"
-let set_path = standard [ "set" ] "Set"
-let sequence_path = standard [ "specification" ] "Sequence"
-let finite_set_path = standard [ "specification" ] "FiniteSet"
-let finite_map_path = standard [ "specification" ] "FiniteMap"
-let map_path = standard [ "map" ] "Map"
-let range_path = core "Range"
-
 let trait_reference ?(arguments = []) trait : T.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
-let string_type = T.Named { path = string_path; arguments = [] }
-
-let is_named path type_ =
-  match type_ with T.Named named -> Path.equal named.path path | _ -> false
+let string_type = T.Named { path = Well_known.path String; arguments = [] }
 
 (* Statements *)
 
@@ -957,7 +937,10 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
          && List.exists
               (fun (owned, view) ->
                 Path.equal given_named.path owned && Path.equal wanted_named.path view)
-              [ (list_path, slice_path); (string_path, string_slice_path) ] ->
+              [
+                (Well_known.path List, Well_known.path Slice);
+                (Well_known.path String, Well_known.path String_slice);
+              ] ->
       if not (Unify.unify_arguments state.unifier wanted_named.arguments given_named.arguments) then
         mismatch state span ~expected ~found;
       Some Owned_to_view
