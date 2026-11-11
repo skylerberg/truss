@@ -438,6 +438,30 @@ public trait Countable: Ordered + Plain {
 
   fn steps_to(self, other: Self) -> Option[USize]
     cost time O(1)
+
+  law steps_to_follows_order(start: Self, stop: Self) {
+    (start.steps_to(stop) is None) == (stop < start)
+  }
+
+  law advanced_stays_before(start: Self, stop: Self, by: USize) {
+    match start.steps_to(stop) {
+      Some(count) => by >= count || (match start.advanced(by) {
+        Some(value) => start <= value && value < stop
+        None => false
+      })
+      None => true
+    }
+  }
+
+  law retreated_stays_within(start: Self, stop: Self, by: USize) {
+    match start.steps_to(stop) {
+      Some(count) => by == 0 || by > count || (match stop.retreated(by) {
+        Some(value) => start <= value && value < stop
+        None => false
+      })
+      None => true
+    }
+  }
 }
 
 public type Range[Value](start: Value, stop: Value, inclusive: Bool)

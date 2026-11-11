@@ -19,7 +19,26 @@ impl Iterable for Range[Value: core::Countable] {
     ensures self.contains(result)
     cost time finite
   {
-    todo
+    match self.start.steps_to(self.stop) {
+      Some(count) => {
+        var offset: USize = 0
+        while offset < count
+          decreases count - offset
+        {
+          match self.start.advanced(offset) {
+            Some(value) => {
+              yield value
+            }
+            None => {}
+          }
+          offset += 1
+        }
+        if self.inclusive {
+          yield self.stop
+        }
+      }
+      None => {}
+    }
   }
 }
 
@@ -27,7 +46,27 @@ public fn Range[Value: core::Countable].reversed(self) yields Value
   ensures self.contains(result)
   cost time finite
 {
-  todo
+  match self.start.steps_to(self.stop) {
+    Some(count) => {
+      if self.inclusive {
+        yield self.stop
+      }
+      var left = count
+      while left > 0
+        invariant left <= count
+        decreases left
+      {
+        match self.stop.retreated(count - left + 1) {
+          Some(value) => {
+            yield value
+          }
+          None => {}
+        }
+        left -= 1
+      }
+    }
+    None => {}
+  }
 }
 
 public fn Range[Value: core::Countable].step_by(self, step: USize) yields Value
@@ -35,11 +74,41 @@ public fn Range[Value: core::Countable].step_by(self, step: USize) yields Value
   ensures self.contains(result)
   cost time finite
 {
-  todo
+  match self.start.steps_to(self.stop) {
+    Some(count) => {
+      var offset: USize = 0
+      var lands_on_stop = count == 0
+      while offset < count
+        invariant offset <= count
+        decreases count - offset
+      {
+        match self.start.advanced(offset) {
+          Some(value) => {
+            yield value
+          }
+          None => {}
+        }
+        let room = count - offset
+        if step < room {
+          offset += step
+        } else {
+          lands_on_stop = step == room
+          offset = count
+        }
+      }
+      if self.inclusive && lands_on_stop {
+        yield self.stop
+      }
+    }
+    None => {}
+  }
 }
 
 public fn Range[Value: core::Countable].length(self) -> Option[USize]
   cost time O(1)
 {
-  todo
+  match self.start.steps_to(self.stop) {
+    Some(count) => if self.inclusive { count.checked_add(1) } else { Some(count) }
+    None => Some(0)
+  }
 }
