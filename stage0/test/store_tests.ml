@@ -365,7 +365,8 @@ let () =
       Engine.set second pair_input () (String.make 3 'a', String.make 3 'a');
       ignore (Engine.get second pair_length ());
       if (Engine.counters second).adopted <> 1 then fail "not found as a fact");
-  test "a result that is not kept comes out the same when an opened state computes it again"
+  test
+    "a result whose bytes are not stored comes out the same when an opened state computes it again"
     (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let engine = attached store in
@@ -398,14 +399,14 @@ let defaulted =
       Option.value (Query.find database maybe_input ()) ~default:7)
 
 let () =
-  test "a result dropped since the whole state was written is not read from it" (fun () ->
+  test "a result collected since the whole state was written is not read from it" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let engine = attached store in
       Engine.set engine switch_input () true;
       Engine.set engine value_input () 1;
       if Engine.get engine top () <> 1 then fail "another result";
       ignore (Engine.write engine);
-      (* The leaf is dropped, and the input it read changes after. *)
+      (* The leaf is collected, and the input it read changes after. *)
       Engine.set engine switch_input () false;
       if Engine.get engine top () <> 0 then fail "another result without the leaf";
       Engine.set engine value_input () 5;
@@ -449,7 +450,7 @@ let () =
       let again = opened store (Engine.write engine) in
       let value = Engine.get again doubled () in
       if value <> 8 then fail "read the earlier difference's result: %d" value);
-  test "a result a request kept after it was written is current in a state opened later" (fun () ->
+  test "a result made a root after it was written is current in a state opened later" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let engine = attached store in
       Engine.set engine switch_input () false;

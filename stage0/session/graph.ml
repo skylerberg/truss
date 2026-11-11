@@ -78,16 +78,16 @@ let compare_nodes mine theirs =
   in
   let seen = Hashtbl.create 256 in
   let found = ref [] in
-  let consider node =
+  let add node =
     let identity = Engine.identity node in
     if not (Hashtbl.mem seen identity) then begin
       Hashtbl.replace seen identity ();
       found := node :: !found
     end
   in
-  List.iter consider (Engine.unshared mine theirs);
+  List.iter add (Engine.unshared mine theirs);
   List.iter
-    (fun other -> Option.iter consider (Engine.current_in other mine))
+    (fun other -> Option.iter add (Engine.current_in other mine))
     (Engine.unshared theirs mine);
   List.rev_map (fun node -> (node, differs node)) !found
 
