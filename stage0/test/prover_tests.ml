@@ -3295,23 +3295,6 @@ let () =
         \  ensures forall i in 0..items.length() => (items[i] & 255) <= 255\n\
          {\n\
          }\n");
-  test "an assumed exists gives its body's facts for its witness" (fun () ->
-      proven
-        "fn ranged(items: List[UInt32]) -> Bool\n\
-        \  requires exists i in 0..items.length() => items[i].count_ones() == 40\n\
-        \  ensures items.length() == 99\n\
-         {\n\
-        \  true\n\
-         }\n");
-  test "an assumed exists's body facts prove nothing false" (fun () ->
-      not_proven
-        "fn honest(items: List[UInt32]) -> Bool\n\
-        \  requires exists i in 0..items.length() => items[i].count_ones() == 3\n\
-        \  ensures items.length() == 99\n\
-         {\n\
-        \  true\n\
-         }\n"
-        "prover.ensures");
   test "a fact made in a quantifier's body proves nothing false" (fun () ->
       not_proven
         "fn counted(items: List[UInt32]) -> Bool\n\

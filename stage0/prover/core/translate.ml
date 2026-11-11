@@ -384,58 +384,53 @@ let scope_facts context names =
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     context.scopes
 
-(* A term with the facts of each quantifier in it that the solver
-   skolemizes: a [forall] the query holds negated, as a goal's, and an
-   [exists] the query holds, as a fact's. A fact holds for every value of
-   the bound names, so [forall x => p] and [forall x => facts ==> p] mean
-   the same, as [exists x => p] and [exists x => facts && p] do.
-   Skolemized, the bound names are constants, so the facts cost the solver
-   no instantiation. A quantifier the solver instantiates gets none: there
-   the facts are instantiated with it, and the standard library's nested
-   quantifiers then make the solver run out of steps. A value made in a
-   body is a function of every quantifier around it, so a fact can name an
-   outer quantifier's symbol that the quantifier's own term does not; it
-   is stated only where that symbol is bound, by a quantifier the term is
-   in or by [binders], which an obligation is closed over. *)
-let with_quantifier_facts ?(binders = []) context ~holds term =
+(* A goal with the facts of each quantifier it skolemizes as hypotheses:
+   each [forall] where the goal holds it, and each [exists] where it holds
+   it negated. The facts hold for every value, so the goal means the same.
+   A value made in a body is a function of every quantifier around it, so
+   a fact can name an outer quantifier's symbol that the quantifier's own
+   term does not; it is added only where every quantifier symbol it names
+   is bound, by a quantifier the goal is in or by [binders], which the
+   obligation is closed over. *)
+let with_quantifier_facts ?(binders = []) context term =
   let stated bound fact =
     List.for_all
       (fun name -> List.mem name bound || not (L.mentions [ name ] fact))
       context.quantifier_symbols
   in
-  let rec walk ~holds ~bound term =
-    let inside symbols body =
+  let rec walk positive bound term =
+    let facts symbols =
       let bound = List.map fst symbols @ bound in
-      let body = walk ~holds ~bound body in
-      let skolemized = match term with L.Forall _ -> not holds | _ -> holds in
-      match
+      ( bound,
         List.filter (stated bound)
-          (Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term))
-      with
-      | facts when skolemized && facts <> [] ->
-          if holds then L.( &&& ) (L.conjunction facts) body
-          else L.( ==> ) (L.conjunction facts) body
-      | _ -> body
+          (Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term)) )
     in
     match term with
-    | L.Forall (symbols, body) -> L.Forall (symbols, inside symbols body)
-    | L.Exists (symbols, body) -> L.Exists (symbols, inside symbols body)
+    | L.Forall (symbols, body) when positive ->
+        let bound, facts = facts symbols in
+        let body = walk positive bound body in
+        L.Forall
+          (symbols, match facts with [] -> body | facts -> L.( ==> ) (L.conjunction facts) body)
+    | L.Exists (symbols, body) when not positive ->
+        let bound, facts = facts symbols in
+        let body = walk positive bound body in
+        L.Exists
+          (symbols, match facts with [] -> body | facts -> L.( &&& ) (L.conjunction facts) body)
     | L.Apply ((("and" | "or") as operator), parts) ->
-        L.Apply (operator, List.map (walk ~holds ~bound) parts)
+        L.Apply (operator, List.map (walk positive bound) parts)
     | L.Apply ("=>", [ premise; conclusion ]) ->
-        L.Apply ("=>", [ walk ~holds:(not holds) ~bound premise; walk ~holds ~bound conclusion ])
-    | L.Apply ("not", [ inner ]) -> L.Apply ("not", [ walk ~holds:(not holds) ~bound inner ])
+        L.Apply ("=>", [ walk (not positive) bound premise; walk positive bound conclusion ])
+    | L.Apply ("not", [ inner ]) -> L.Apply ("not", [ walk (not positive) bound inner ])
     | term -> term
   in
-  walk ~holds ~bound:binders term
+  walk true binders term
 
 (* A fact of mathematics, true on every path. One that names a bound
    symbol is not stated for every value of it, since a body's calls give
    many such facts and the solver spends its steps on them, but kept with
    its quantifier. *)
 let fact context frame term =
-  if not (L.mentions frame.bound term) then
-    context.facts <- with_quantifier_facts context ~holds:true term :: context.facts
+  if not (L.mentions frame.bound term) then context.facts <- term :: context.facts
   else in_scope context frame term
 
 (* A fact is guarded by its path's condition, and kept with its
@@ -446,7 +441,7 @@ let assume context frame term =
   | _ ->
       let guarded = L.( ==> ) frame.condition term in
       if not (L.mentions frame.bound term || L.mentions frame.bound frame.condition) then
-        context.facts <- with_quantifier_facts context ~holds:true guarded :: context.facts
+        context.facts <- guarded :: context.facts
       else in_scope context frame guarded
 
 (* An obligation is shown by its own query, and is a fact for what comes
@@ -545,7 +540,7 @@ let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message 
     obligation_at ?evaluation context frame code span message
       (with_quantifier_facts
          ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
-         context ~holds:false goal)
+         context goal)
   with
   | Some obligation ->
       (* Without a fix of its own, a goal about the parameters alone is

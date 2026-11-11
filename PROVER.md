@@ -861,22 +861,17 @@ is about one result for each `i`, not one result for all of them.
 
 What is known of such a value, as the range of `items[i].count_ones()`, is
 a fact about the bound names, which is not stated for every value of them:
-as quantified facts of their own, each with its own triggers, the
-standard library's nested quantifiers made the solver run out of steps.
-It is a hypothesis instead, inside each quantifier the solver skolemizes,
-where the bound names are constants and the facts cost no instantiation.
-A fact holds for every value of the bound names, so each form means what
-the quantifier alone means:
-
-| Quantifier | Where | Form |
-|---|---|---|
-| `forall i => p` | an obligation's goal | `forall i => facts ==> p` |
-| `exists i => p` | a fact, such as a `requires` | `exists i => facts && p` |
-
-An obligation in a quantifier's body is closed over the quantifiers around
-it with their facts as hypotheses. A fact can name an outer quantifier's
-bound name, since a value made in a body is a function of every
-quantifier around it, so it is added only where that name is bound.
+the standard library's maps state nested quantifiers, and with a fact for
+every combination of bound names the solver runs out of steps. It is a
+hypothesis instead, inside each quantifier that the solver skolemizes: a
+`forall` in an obligation's goal where the goal holds it, an `exists` where
+the goal holds it negated, and the quantifiers around an obligation in a
+quantifier's body. Skolemized, the bound names are constants, so the
+facts are about them alone and cost the solver no instantiation. A fact
+holds for every value of the bound names, so `forall i in 0..n => p` and
+`forall i in 0..n => facts ==> p` mean the same. A value made in a body
+is a function of every quantifier around it, so a fact can name an outer
+quantifier's bound name; it is added only where that name is bound.
 
 ### The canonical form
 
@@ -1503,11 +1498,16 @@ test the prover itself:
   on `USize` are 64-bit code, so a 32-bit translation would read facts
   that contradict its own ranges. Code generation builds only for 64-bit
   targets, so no program runs with a width its proofs did not assume.
-- **Facts under an instantiated quantifier.** A `forall` that is a fact,
-  such as a `requires` or a callee's `ensures`, and an `exists` that is a
-  goal, carry none of their body's facts. Inside the quantifier, they would
-  be instantiated with it, and the standard library's invariants over
-  nested maps then make the solver run out of steps.
+- **Facts under an assumed quantifier.** A quantifier that is a fact,
+  such as a `requires`, a callee's `ensures`, or an obligation shown before,
+  has no hypotheses from its body: stated for every value of the bound
+  names, they are the facts that make the solver run out of steps. Stated
+  inside the quantifier, as `forall i => facts && p`, they are instantiated
+  with it, and the standard library's invariants over nested maps run out
+  of steps all the same; inside an `exists` that is a fact, which the
+  solver skolemizes, they push a binary search's cost bound past its
+  steps. A pure callee's contract and definition are stated once for every
+  argument either way.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.
