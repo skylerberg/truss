@@ -247,7 +247,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Compare { comparison; left; right } ->
       assign (Binary (binary comparison, operand st left, operand st right))
   | Not inner -> assign (Unary (Not, operand st inner))
-  | And _ | Or _ | Matches _ ->
+  | And _ | Or _ | Implies _ | Matches _ ->
       (* A condition used as a value: true on the path to [yes], and false
          on the path to [no]. *)
       in_scope st (fun () ->
@@ -393,8 +393,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
           assign (Use (Constant (Bool deciding)));
           break_loop st;
           start st.b goes_on)
-  | Implies _ | Result | Old _ | Yielded | Finished | Identical _ | Specification_function _
-  | Method_time _ ->
+  | Result | Old _ | Yielded | Finished | Identical _ | Specification_function _ | Method_time _ ->
       bug "a specification-only expression in code that runs"
   | Task_exit { tasks; exit } ->
       (* The task evaluates the return value into a temporary of its own
@@ -1478,6 +1477,14 @@ and branch st (condition : Core.expression) ~yes ~no =
   | Or (left, right) ->
       let middle = block st.b in
       branch st left ~yes ~no:middle;
+      start st.b middle;
+      branch st right ~yes ~no
+  | Implies (left, right) ->
+      (* A [requires] clause or an [assert] that can run may hold [==>]. It
+         holds where [left] does not, and [right] is evaluated only where
+         [left] holds, since [right] may be defined only there. *)
+      let middle = block st.b in
+      branch st left ~yes:middle ~no:yes;
       start st.b middle;
       branch st right ~yes ~no
   | Not inner -> branch st inner ~yes:no ~no:yes

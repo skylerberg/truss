@@ -381,6 +381,34 @@ test "breaks" {
         "test 0 panicked\n\
          message 65\n\
          requirement not met: requires by > 0\n\
+        \  at example/main.truss:2:12\n");
+  test "a requires clause with ==> runs, and its right side only where its left side holds"
+    (fun () ->
+      expect_output
+        {|fn settle(items: List[Int64], limit: USize, top: USize) -> USize
+  requires top < items.length() ==> items[top] >= 0
+  requires (limit > 3 ==> top > 3) == (top > 3 || limit <= 3)
+{
+  limit
+}
+
+test "the left side does not hold" {
+  assert settle([1, 2], limit: 5, top: 9) == 5
+}
+
+test "both sides hold" {
+  assert settle([1, 2], limit: 0, top: 1) == 0
+}
+
+test "the right side does not hold" {
+  let _ = settle([1, -2], limit: 5, top: 1)
+}
+|}
+        "test 0 passed\n\
+         test 1 passed\n\
+         test 2 panicked\n\
+         message 99\n\
+         requirement not met: requires top < items.length() ==> items[top] >= 0\n\
         \  at example/main.truss:2:12\n")
 
 let () =
