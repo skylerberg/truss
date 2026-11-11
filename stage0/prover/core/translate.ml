@@ -252,13 +252,13 @@ type context = {
   mutable unfinished : L.term list;
       (** The condition of each path a [todo] ends in the [proof] block being read. *)
   mutable call_targets : (L.term * Core.local) list;
-  mutable passed_values : int list;
-      (** Each named function passed straight to a parameter, which the call checks against
-          what the parameter promises. *)
-  mutable reading_callback : bool;
-      (** Reading a function-typed parameter to call it or pass it, where its [requires] is
-          checked, not lost. *)
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
+  mutable passed_values : int list;
+      (** Each named function passed straight to a parameter, which the call checks against what the
+          parameter promises. *)
+  mutable reading_callback : bool;
+      (** Reading a function-typed parameter to call it or pass it, where its [requires] is checked,
+          not lost. *)
   ranking : bool;
       (** Whether the definition proven may show a recursive call ends by being on a part of its
           parameters, the one use of the order of parts, which is stated only then. *)
@@ -1347,8 +1347,8 @@ and escaping_callback context frame local =
     ( List.find_opt (fun (parameter : Core.parameter) -> parameter.local = local) context.parameters,
       local_type context frame local )
   with
-  | Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ },
-    Some (T.Function function_type)
+  | ( Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ },
+      Some (T.Function function_type) )
     when List.length inputs = List.length function_type.inputs ->
       let arguments =
         List.map
@@ -1359,8 +1359,9 @@ and escaping_callback context frame local =
             term)
           function_type.inputs
       in
-      check_callback_contract context frame (span_of frame.source (List.hd requires).origin) ~name
-        inputs requires arguments ~promised:(L.Boolean true)
+      check_callback_contract context frame
+        (span_of frame.source (List.hd requires).origin)
+        ~name inputs requires arguments ~promised:(L.Boolean true)
         ~why:"is used as a value whose type promises nothing of its arguments"
   | _ -> ()
 
@@ -2212,7 +2213,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                   check_named_callback context frame call_ passed named path contract values
               | None -> ())
           | _ -> ())
-      | Some (Place (Local { local; _ })) -> check_forwarded_callback context frame node call_ passed local values
+      | Some (Place (Local { local; _ })) ->
+          check_forwarded_callback context frame node call_ passed local values
       | _ -> ())
     values;
   (* An index read, which the ownership check may have paired with
@@ -2314,7 +2316,9 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       (fun impl ->
         let reaches_here =
           List.exists
-            (fun method_ -> Call_graph.reaches context.database ~package:(Path.package context.current) ~from:method_ ~target:context.current)
+            (fun method_ ->
+              Call_graph.reaches context.database ~package:(Path.package context.current)
+                ~from:method_ ~target:context.current)
             (Call_graph.impl_methods context.database impl)
         in
         if reaches_here then
@@ -2991,8 +2995,9 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
           (fun ((exit_ : frame), returned) ->
             (match (returned, function_type.output) with
             | Some term, Returns output ->
-                check_valid context exit_ span (substituted context frame output) term ~deep:true
-                  ~when_:"for the value this lambda returns"
+                check_valid context exit_ span
+                  (substituted context frame output)
+                  term ~deep:true ~when_:"for the value this lambda returns"
             | _ -> ());
             List.iter2
               (fun (pattern : pattern) (mode, input) ->
@@ -4271,7 +4276,8 @@ and global_value context frame (node : expression) path type_arguments =
 and named_function context frame (node : expression) path type_arguments contract =
   if
     context.terminates && frame.checking
-    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path ~target:context.current
+    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
+         ~target:context.current
   then
     oblige context frame Termination (at frame node)
       (Printf.sprintf
@@ -5048,9 +5054,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
      measure, at the call's arguments, is below the caller's on entry. *)
   if
     context.terminates && frame.checking
-    && (match call_.callee with
-       | Trait_method _ -> Call_graph.dispatched call_.callee
-       | _ -> true)
+    && (match call_.callee with Trait_method _ -> Call_graph.dispatched call_.callee | _ -> true)
     && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
          ~target:context.current
   then
@@ -5574,7 +5578,8 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
   let assumed =
     if
       counter.counting = Units
-      && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path ~target:context.current
+      && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
+           ~target:context.current
     then
       match List.assoc_opt (Costs.key counter) context.own_constants with
       | Some constants ->
