@@ -209,6 +209,7 @@ module Code = struct
     | Overlapping_impls
     | Method_name_clash
     | Needs_indirect
+    | Not_strictly_positive
     | Growing_type
     | Instantiation_cycle
     | Duplicate_test
@@ -433,6 +434,7 @@ module Code = struct
     | Overlapping_impls -> "overlapping_impls"
     | Method_name_clash -> "method_name_clash"
     | Needs_indirect -> "needs_indirect"
+    | Not_strictly_positive -> "not_strictly_positive"
     | Growing_type -> "growing_type"
     | Instantiation_cycle -> "instantiation_cycle"
     | Duplicate_test -> "duplicate_test"
