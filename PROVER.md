@@ -368,7 +368,9 @@ unstable proofs.
 - **A derived `Equal` that is not structural** is defined field by field
   with each field's own `==`, unfolded once for each two values compared,
   so a `Point` of floats is equal exactly when its coordinates are, by the
-  lawful float comparison.
+  lawful float comparison. A field whose type has a written `impl` of
+  `Equal` is compared by a call of that `impl`'s `equal`, the same term as
+  `==` on the field, so the `impl`'s contract applies to it.
 - **Every other derived method is its derived body.** A derived `compare`
   orders by variant and then field by field, and a derived `hash` or
   `default` is what the derivation writes, so each is pure and functional,
@@ -558,7 +560,8 @@ checker resolved to an `impl` reads the `impl`'s clauses with its trait's,
 and the `impl`'s own `requires` when it states any. A call through a bound
 or through `any` reads the trait's, and a call through a bound on `Self`,
 read where `Self` is a known type, reaches that type's `impl`, written or
-derived. A capability
+derived, when the bounds on the `impl`'s parameters hold under the bounds
+of the definition proven. A capability
 call uses the capability method's contract.
 
 - **A tagged template is a call** of its tag's `from_template` with the

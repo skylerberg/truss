@@ -1722,49 +1722,83 @@ and equal_of context frame (ty : T.ty) a b =
   if structural context ty then L.equal a b
   else if float_format ty <> None then float_equal a b
   else
-    let sort = sort_of context ty in
-    let symbol = "equal." ^ type_key ty in
-    declare context (L.Function (symbol, [ sort; sort ], L.Bool));
-    let equal = L.Apply (symbol, [ a; b ]) in
-    (match (visible_type context ty, constructors context ty) with
-    | Some (interface, _), Some shape
-      when List.exists is_standard_equal interface.derives
-           && (not (List.mem equal context.equalities))
-           && not (L.mentions frame.bound equal) ->
-        context.equalities <- equal :: context.equalities;
-        let fields_equal (variant, fields) =
-          L.conjunction
-            (List.map
-               (fun (field, field_type) ->
-                 let selector = selector_name ty variant field in
-                 let a = L.Apply (selector, [ a ]) and b = L.Apply (selector, [ b ]) in
-                 if structural context field_type then L.equal a b
-                 else if float_format field_type <> None then float_equal a b
-                 else
-                   (* Unfolded only when it is compared itself. *)
-                   let symbol = "equal." ^ type_key field_type in
-                   declare context
-                     (L.Function
-                        (symbol, [ sort_of context field_type; sort_of context field_type ], L.Bool));
-                   L.Apply (symbol, [ a; b ]))
-               fields)
-        in
-        let defined =
-          match shape with
-          | [ ((None, _) as record) ] -> fields_equal record
-          | variants ->
-              L.disjunction
-                (List.map
-                   (fun ((variant, _) as one) ->
-                     let is_variant term =
-                       L.Apply (L.tester (constructor_name ty variant), [ term ])
-                     in
-                     L.(is_variant a &&& is_variant b &&& fields_equal one))
-                   variants)
-        in
-        fact context frame (L.equal equal defined)
-    | _ -> ());
-    equal
+    match written_equal context ty a b with
+    | Some equal -> equal
+    | None -> derived_equal context frame ty a b
+
+(* [==] on a type whose [impl] of [Equal] is written: the term a call of its
+   [equal] is, so that what the [impl]'s contract says of a call holds of
+   it. *)
+and written_equal context ty a b =
+  match concrete_impl context { trait = equal_trait; trait_arguments = []; associated = [] } ty with
+  | Some (((Impl _ : Path.t) as impl), arguments) -> (
+      let evidence : evidence = Impl { impl; arguments } in
+      match
+        method_contract context.database
+          { trait = equal_trait; trait_arguments = []; associated = [] }
+          "equal" Read evidence
+      with
+      | Some contract when contract.pure ->
+          let symbol =
+            "function."
+            ^ Path.show (Path.Method { owner = impl; name = "equal"; receiver = Read })
+            ^ "[" ^ type_key ty ^ "]"
+          in
+          let sort = sort_of context ty in
+          declare context (L.Function (symbol, [ sort; sort ], L.Bool));
+          Some (L.Apply (symbol, [ a; b ]))
+      | _ -> None)
+  | _ -> None
+
+and derived_equal context frame (ty : T.ty) a b =
+  let sort = sort_of context ty in
+  let symbol = "equal." ^ type_key ty in
+  declare context (L.Function (symbol, [ sort; sort ], L.Bool));
+  let equal = L.Apply (symbol, [ a; b ]) in
+  (match (visible_type context ty, constructors context ty) with
+  | Some (interface, _), Some shape
+    when List.exists is_standard_equal interface.derives
+         && (not (List.mem equal context.equalities))
+         && not (L.mentions frame.bound equal) ->
+      context.equalities <- equal :: context.equalities;
+      let fields_equal (variant, fields) =
+        L.conjunction
+          (List.map
+             (fun (field, field_type) ->
+               let selector = selector_name ty variant field in
+               let a = L.Apply (selector, [ a ]) and b = L.Apply (selector, [ b ]) in
+               if structural context field_type then L.equal a b
+               else if float_format field_type <> None then float_equal a b
+               else
+                 match written_equal context field_type a b with
+                 | Some equal -> equal
+                 | None ->
+                     (* Unfolded only when it is compared itself. *)
+                     let symbol = "equal." ^ type_key field_type in
+                     declare context
+                       (L.Function
+                          ( symbol,
+                            [ sort_of context field_type; sort_of context field_type ],
+                            L.Bool ));
+                     L.Apply (symbol, [ a; b ]))
+             fields)
+      in
+      let defined =
+        match shape with
+        | [ ((None, _) as record) ] -> fields_equal record
+        | variants ->
+            L.disjunction
+              (List.map
+                 (fun ((variant, _) as one) ->
+                   let is_variant term =
+                     L.Apply (L.tester (constructor_name ty variant), [ term ])
+                   in
+                   L.(is_variant a &&& is_variant b &&& fields_equal one))
+                 variants)
+      in
+      fact context frame (L.equal equal defined)
+  | _ -> ());
+  equal
 
 (* An operation the solver knows only by the range of its result. *)
 and opaque_operation context frame ty name arguments =
@@ -3449,28 +3483,26 @@ and updating_helper context (call_ : call) =
   | _ -> false
 
 (* The [impl] of a trait for a known type, with what its generic parameters
-   stand for there. An [impl] whose parameters have bounds is taken only in
-   its own proofs, where they are what is assumed: elsewhere this cannot
-   tell whether they hold. The [impl] is of the trait with these arguments,
-   so a type with an [impl] of [Scale[Int64]] and one of [Scale[Bool]]
-   reaches each by its own. A derived [impl] is found as a written one is. *)
+   stand for there: one written or derived, whose parameters' bounds hold
+   under the bounds of the definition proven, or the definition's own
+   [impl]. The [impl] is of the trait with these arguments, so a type with
+   an [impl] of [Scale[Int64]] and one of [Scale[Bool]] reaches each by its
+   own. *)
 and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
   match ty with
   | Named { path; _ } ->
+      let own impl =
+        Path.equal impl context.current
+        || match context.current with Method { owner; _ } -> Path.equal owner impl | _ -> false
+      in
+      let bounds = current_bounds context in
       let packages = List.sort_uniq compare [ Path.package context.current; Path.package path ] in
       List.find_map
         (fun package ->
           List.find_map
             (fun impl ->
               match Interface.Impls.impl_interface context.database impl with
-              | Some interface
-                when Path.equal impl context.current
-                     || (match context.current with
-                       | Method { owner; _ } -> Path.equal owner impl
-                       | _ -> false)
-                     || List.for_all
-                          (fun (generic : T.generic) -> generic.kind = Type_generic [])
-                          interface.impl_generics -> (
+              | Some interface -> (
                   let variables =
                     List.map (fun (generic : T.generic) -> generic.generic) interface.impl_generics
                   in
@@ -3480,12 +3512,49 @@ and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
                         Interface.Impls.match_arguments ~variables arguments
                           interface.implements.trait_arguments trait.trait_arguments)
                   with
-                  | Some arguments -> Some (impl, arguments)
-                  | None -> None)
-              | _ -> None)
+                  | Some arguments
+                    when own impl
+                         || List.for_all
+                              (fun (argument, bound) ->
+                                Option.is_some
+                                  (Interface.Impls.implements context.database ~bounds argument
+                                     bound))
+                              (Interface.Impls.required interface.impl_generics arguments) ->
+                      Some (impl, arguments)
+                  | _ -> None)
+              | None -> None)
             (Query.demand context.database Interface.Impls.impls_in (trait.trait, path, package)))
         packages
   | _ -> None
+
+(* The bounds on the generic parameters of the definition proven, and of
+   the [impl] it is in. *)
+and current_bounds context : Interface.Impls.bounds =
+  let impl_generics path =
+    match Interface.Impls.impl_interface context.database path with
+    | Some interface -> interface.impl_generics
+    | None -> []
+  in
+  let generics =
+    match context.current with
+    | Method { owner; _ } -> (
+        impl_generics owner
+        @
+        match Interface.Impls.signature context.database context.current with
+        | Some signature -> signature.generics
+        | None -> [])
+    | current -> (
+        match Interface.Impls.signature context.database current with
+        | Some signature -> signature.generics
+        | None -> impl_generics current)
+  in
+  fun parameter ->
+    List.concat_map
+      (fun (generic : T.generic) ->
+        match generic.kind with
+        | Type_generic bounds when generic.generic = parameter -> bounds
+        | _ -> [])
+      generics
 
 (* A trait's laws, and those of the traits it requires, as facts about a
    type, each quantified over its parameters. A law is shown for each
