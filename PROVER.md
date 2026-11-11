@@ -480,7 +480,14 @@ its head by its invariant, as below. The right side of `&&`, `||`, or
 `mut` argument does, that path joins the one where it did not run, as the
 two arms of an `if` do. A `match` arm's guard runs only where its patterns matched, so
 the next arm is tried where they did not, joined with where they did and
-the guard, which may change locals the same way, was false.
+the guard, which may change locals the same way, was false. A binding
+that a pattern lends `mut` is a local of the arm. Wherever the arm ends,
+by its end or by a `return`, `break`, or `continue`, what the binding holds
+is stored back into the part of the scrutinee it was lent from.
+
+A `mut` slice argument's bounds are the values computed for the argument,
+and what the callee changes is stored back through them, so the bounds
+are not evaluated a second time after the call.
 
 A `parallel` block's branches change disjoint places, so they are read
 one after another. A `concurrent` block's are too: they change disjoint
@@ -536,8 +543,10 @@ call uses the capability method's contract.
   entry, every place the body may change is havocked, the invariants are
   assumed, and the body runs once from there, after which the invariants
   are asserted again. The places a body may change are the locals, or
-  `self`, that it assigns to, passes `mut`, or loops over `mut`, so nothing
-  else loses what was known about it.
+  `self`, that it assigns to, passes `mut`, loops over `mut`, or matches
+  with a pattern that binds part of it `mut`, so nothing else loses what
+  was known about it. The condition runs at the head of each iteration,
+  so what it changes is in that set, and what it spends is the iteration's.
 - **Validity is an invariant of every loop.** Each value a loop changes
   that is valid on entry is valid at the head of each iteration, and is
   asserted valid at the end of each one. A body may break a value's
@@ -859,9 +868,11 @@ cycle can only be seen across definitions:
   a `decreases` clause proves that it decreases on every iteration and
   stays at or above zero. Without one, the prover tries one measure, which
   is the simple case DESIGN.md mentions: for a condition `a < b` or
-  `a <= b`, the measure `b - a`, and for `a > b` or `a >= b`, `a - b`. If
-  that measure does not work, the loop needs a `decreases` clause, which
-  the error says.
+  `a <= b`, the measure `b - a`, and for `a > b` or `a >= b`, `a - b`. The
+  measure is read again at the end of each iteration, so it is tried only
+  when `a` and `b` are functional: a call with a `mut` argument in either
+  would run twice. If that measure does not work, the loop needs a
+  `decreases` clause, which the error says.
 
 ## Costs
 

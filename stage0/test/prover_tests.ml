@@ -2654,6 +2654,155 @@ let () =
          }\n"
         "prover.invariant")
 
+(* Each expression runs once, and its changes are kept *)
+
+let () =
+  test "a guessed measure is not read from a condition with a mut argument" (fun () ->
+      not_proven
+        "fn take(count: mut Int64) -> Int64\n\
+        \  requires count > -1000\n\
+        \  ensures count == old(count) - 1\n\
+        \  ensures result == old(count)\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  count -= 1\n\
+        \  count + 1\n\
+         }\n\n\
+         fn f()\n\
+        \  cost time finite\n\
+         {\n\
+        \  var i: Int64 = 0\n\
+        \  while take(mut i) < 10\n\
+        \    invariant i > -100\n\
+        \  {\n\
+        \    i += 1\n\
+        \  }\n\
+         }\n"
+        "prover.termination");
+  test "a mut slice's bounds are evaluated once" (fun () ->
+      not_proven
+        "fn set(items: mut Slice[Int64])\n\
+        \  requires items.length() >= 1\n\
+        \  ensures items[0] == 7\n\
+         {\n\
+        \  items[0] = 7\n\
+         }\n\n\
+         fn f(items: mut List[Int64])\n\
+        \  requires items.length() >= 4\n\
+        \  ensures items[1] == old(items[1])\n\
+         {\n\
+        \  var k: USize = 0\n\
+        \  set(mut items[{\n\
+        \    k += 1\n\
+        \    k\n\
+        \  }..3])\n\
+         }\n"
+        "prover.ensures");
+  test "a while condition's mut argument changes the loop's state" (fun () ->
+      not_proven
+        "fn step(count: mut Int64) -> Bool {\n\
+        \  count = count.saturating_add(1)\n\
+        \  count < 3\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 0\n\
+         {\n\
+        \  var value: Int64 = 0\n\
+        \  while step(mut value) {}\n\
+        \  value\n\
+         }\n"
+        "prover.ensures");
+  test "a match mut binding is written back to the scrutinee" (fun () ->
+      not_proven
+        "fn f() -> Int64\n\
+        \  ensures result == 1\n\
+         {\n\
+        \  var option: Option[Int64] = Some(1)\n\
+        \  match mut option {\n\
+        \    Some(value) => { value = 5 }\n\
+        \    None => {}\n\
+        \  }\n\
+        \  option.unwrap_or(0)\n\
+         }\n"
+        "prover.ensures");
+  test "a while condition's cost is the iteration's" (fun () ->
+      not_proven
+        "capability Hits {\n\
+        \  fn hit()\n\
+        \    cost time finite\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl Hits for Counter {\n\
+        \  fn hit(mut self) {\n\
+        \    self.count = self.count.saturating_add(1)\n\
+        \  }\n\
+         }\n\n\
+         fn f(count: UInt32, visit: (fn() -> Bool uses Hits cost time finite))\n\
+        \  uses Hits\n\
+        \  cost calls(visit) <= 1\n\
+         {\n\
+        \  var index: UInt32 = 0\n\
+        \  while index < count && visit()\n\
+        \    invariant index <= count\n\
+        \    decreases count - index\n\
+        \  {\n\
+        \    index = index + 1\n\
+        \  }\n\
+         }\n"
+        "prover.cost");
+  test "the right operand of || spends what it spends" (fun () ->
+      not_proven
+        "capability Hits {\n\
+        \  fn hit()\n\
+        \    cost time finite\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl Hits for Counter {\n\
+        \  fn hit(mut self) {\n\
+        \    self.count = self.count.saturating_add(1)\n\
+        \  }\n\
+         }\n\n\
+         fn f(flag: Bool, visit: (fn() -> Bool uses Hits cost time finite)) -> Bool\n\
+        \  uses Hits\n\
+        \  cost calls(visit) == 0\n\
+         {\n\
+        \  flag || visit()\n\
+         }\n"
+        "prover.cost");
+  test "a call through an alias of a function value counts as a call of it" (fun () ->
+      not_proven
+        "capability Hits {\n\
+        \  fn hit()\n\
+        \    cost time finite\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl Hits for Counter {\n\
+        \  fn hit(mut self) {\n\
+        \    self.count = self.count.saturating_add(1)\n\
+        \  }\n\
+         }\n\n\
+         fn f(flag: Bool, visit: (fn() uses Hits cost time finite), other: (fn() uses Hits cost \
+         time finite))\n\
+        \  uses Hits\n\
+        \  cost calls(visit) == 0\n\
+         {\n\
+        \  let g = if flag { visit } else { other }\n\
+        \  g()\n\
+         }\n"
+        "prover.cost");
+  test "a match mut binding's new value is in the scrutinee after the arm" (fun () ->
+      proven
+        "fn f() -> Int64\n\
+        \  ensures result == 5\n\
+         {\n\
+        \  var option: Option[Int64] = Some(1)\n\
+        \  match mut option {\n\
+        \    Some(value) => { value = 5 }\n\
+        \    None => {}\n\
+        \  }\n\
+        \  option.unwrap_or(0)\n\
+         }\n")
+
 (* Concurrent code *)
 
 let early_return ensures =
