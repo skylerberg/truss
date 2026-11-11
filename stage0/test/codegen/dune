@@ -75,7 +75,6 @@
   monomorphic
   lir_builder
   intrinsics
-  infer
   resolve
   diagnostic
   lower

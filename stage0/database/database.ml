@@ -520,9 +520,14 @@ let apply ?(text = fun _ -> None) session (files : (string * file_contents) list
     old.files;
   let present = Hashtbl.create (List.length modules) in
   List.iter (fun (_, module_, _) -> Hashtbl.replace present module_ ()) modules;
+  (* A module that is gone has no diagnostics to maintain, so they are no
+     longer a root. *)
   List.iter
     (fun (_, module_) ->
-      if not (Hashtbl.mem present module_) then Engine.remove engine Workspace.file_text module_)
+      if not (Hashtbl.mem present module_) then begin
+        Engine.remove engine Workspace.file_text module_;
+        Engine.unroot engine Type_checker.file_diagnostics module_
+      end)
     old.modules;
   List.iter
     (fun (_, name) -> if named name = None then Engine.remove engine Workspace.packages name)
@@ -816,8 +821,8 @@ let flush_store = Session.flush
 let sessions = Session.sessions
 
 (* Graph questions. The worktree is checked first, so that every
-   definition's results are there to read and to compare; kept results make
-   this cheap. *)
+   definition's results are there to read and to compare. Each file's
+   diagnostics are a root, so this is cheap after the first time. *)
 
 let check_all session = ignore (diagnostics_of session (layout_of session).packages)
 
@@ -836,7 +841,8 @@ let all_declarations session =
     (fun (_, name) ->
       List.concat_map
         (fun module_ ->
-          try Engine.get (Session.engine session) Resolve.Names.declarations module_ with _ -> [])
+          try Query.demand (Session.observer session) Resolve.Names.declarations module_
+          with _ -> [])
         (package_modules session name))
     lay.packages
 

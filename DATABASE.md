@@ -20,9 +20,9 @@ makes both possible. It:
 
 - holds the inputs of every project being worked on: its packages, their
   manifests, and the text of every module
-- keeps the results that have been asked for current as inputs change, by
-  pushing each change, one phase of the compiler at a time, to the results
-  that read what really changed
+- maintains each result a driver demanded, and every result that one
+  reads, as inputs change, by pushing each change, one phase of the
+  compiler at a time, to the results that read what really changed
 - gives every result a fingerprint, and keeps each saved result as a fact
   under the key of what it read, so that another worktree, a commit, a
   branch gone back to, or a new process finds it instead of computing it
@@ -206,12 +206,20 @@ it marks, finds current, computes, finds as facts, and copies, and tests
 compare those counts for the same edit in a small package and a large one
 (see [Checking the engine](#checking-the-engine)).
 
-- **A result that has been asked for is kept current.** Once a request asks
-  for it, every later change that reaches it brings it up to date, so asking
-  for it again costs nothing.
-- **A result nobody has asked for is computed when first asked for,** by
-  running its query, which asks for what it needs in turn. So nothing is
-  computed that nobody wants.
+- **A result a driver demands becomes a root, and the engine maintains
+  every necessary result.** A *root* is a result that a driver, such as a
+  command, demanded through a session's context. A result is *necessary* if
+  it is a root or a necessary result reads it, the term Jane Street's
+  Incremental uses. Every later change that reaches a necessary result
+  brings it up to date, so demanding a root again costs nothing.
+- **An unnecessary result is not computed.** A result is computed when it
+  is first demanded, by running its query, which demands what it reads in
+  turn.
+- **A driver can observe a result without making it a root.** A read
+  through `Engine.observer` computes the result if the state has none, and
+  the result is collected again unless something else makes it necessary.
+  Comparing two states, and finding a definition by name, observe: a
+  question about a state does not change what the state maintains.
 - **A read made outside any query first brings the engine up to date
   through the phase of what it reads,** so a driver never sees a result that
   a change has not reached yet. Later phases keep what is queued for them
@@ -272,19 +280,27 @@ share structure between versions in the same way.
 - **An engine that nothing refers to is freed,** with everything it holds:
   each engine owns its nodes, and nothing else keeps them.
 
-### Dropping
+### Collecting unnecessary results
 
-A result of the engine's own that nothing reads, and no request kept, is
-dropped, but only once nothing is running: a query that is still running
-has read results that do not yet count it as a reader. An input that is set
-is never dropped, and neither is a copy of a base's result, since the base's
-readers may read it; copies go when the state is next written whole.
+A result of the engine's own that is unnecessary is *collected*: removed
+from the state, with each result that only it read. Collection waits until
+no query is running, since a running query has read results that do not
+yet count it as a reader. Three kinds of node are never collected:
+
+- a root, until `Engine.unroot` makes it no longer one, as the database
+  does for the diagnostics of a module that is removed
+- an input that is set
+- a copy of a base's result, since the base's readers may read it; copies
+  go when the state is next written whole
 
 So once a state is brought up to date, every result it holds is current. A
-result that a change reached is brought up to date if something reads it or
-a request kept it, and is dropped otherwise, never left as it was: a state
-written with such a result in it would be opened with that result taken for
-current.
+result that a change reached is brought up to date if it is necessary, and
+collected otherwise, never left as it was: a state written with such a
+result in it would be opened with that result taken for current.
+
+A root in a base is copied into the engine when a driver demands it, so
+that being a root is part of the engine's own state, and is written with
+it.
 
 ### Cycles
 
@@ -304,8 +320,8 @@ A stage declares each query with its name, the types of its key and its
 value, and the function that computes it, and says:
 
 - **Its phase.** A query that left it out would not compile.
-- **Whether its results' bytes are kept,** which makes each a fact that
-  other states find. See [What keeps its bytes](#what-keeps-its-bytes).
+- **Whether its results' bytes are stored,** which makes each a fact that
+  other states find. See [Which results are stored](#which-results-are-stored).
 - **Whether a state that never held the result looks for it too.** See
   [Facts](#facts).
 - **What it is about:** a definition and a part of it, such as the interface
@@ -459,7 +475,7 @@ everything its own code can reach, which the database computes like any
 other key, so that a change to the compiler leaves exactly the facts its
 changed code could not have made.
 
-### What keeps its bytes
+### Which results are stored
 
 A stage marks a query as saved where reading its result back is cheaper than
 computing it: what a lookup found, each definition's tree, resolved form,
@@ -482,14 +498,14 @@ different, everything that read it would be checked again.
 A state is written as an *artifact*, which is a value in the store, named by
 its hash like any other:
 
-- **A whole state** holds every node the state's kept results and set inputs
+- **A whole state** holds every node the state's roots and set inputs
   reach, apart from those of its fixed bases: each node's name and key, its
-  fingerprint, what it read, as places in a table of names, and whether a
-  request kept it.
+  fingerprint, what it read, as places in a table of names, and whether it
+  is a root.
 - **A difference** names an earlier artifact and holds what the engine
   itself holds and changed since: the nodes it computed, found as facts, or
-  set, those a request began or stopped keeping, and the names of those it
-  dropped.
+  set, those that became or stopped being roots, and the names of those it
+  collected.
 
 An artifact never changes, so one names a state for good, and many states
 can be differences over one artifact.
@@ -515,7 +531,7 @@ from:
   opened from it, in one process. It is held weakly, so one no engine uses
   is freed.
 - **The differences after it are the engine's own.** Each node is the last
-  the chain holds for its name and key. A node a difference dropped keeps
+  the chain holds for its name and key. A node a difference collected keeps
   its place, with nothing in it, where the whole state holds it too, so that
   the whole state's result, which is of an earlier state, is never read in
   its stead.
@@ -539,7 +555,7 @@ what it changed.
 
 A chain of differences is folded into one whole state when its differences
 hold more than half as many nodes as the whole state, and more than 256. The
-state is written whole, without what its kept results no longer reach, and
+state is written whole, without what its roots no longer reach, and
 the session is opened again from it. So what a session holds itself, and
 what is read to open a state, stay within a constant of what changed, and
 the total written stays a constant multiple of what changed.
@@ -921,8 +937,8 @@ path and part, and files relative to the worktree's root, never nodes.
 | What a build keeps | `truss test`, `truss run`, `truss build` | Where test results, object files, and programs to run are kept, in the store, and saying which tests' keys are wanted |
 | The background process | `truss status`, `truss stop` | The background process's sessions, and ending it |
 
-Results asked for are kept current from then on, and the command line saves
-each session it opened when its command is done. A test runs only when
+A result a command demands is a root from then on, and the command line
+saves each session it opened when its command is done. A test runs only when
 asked.
 
 A question about the graph first checks every package of the sessions it
@@ -1020,7 +1036,7 @@ with the same inputs.
   functions of what they read: a query that read something it did not go
   through its context for would come out different in the new engine.
 - **Counts of work.** The engine counts what it marks, finds current,
-  computes, finds as facts, copies, and drops. Tests make the same edit in a
+  computes, finds as facts, copies, and collects. Tests make the same edit in a
   package of four modules and in one of forty, and assert that the counts
   are equal: for a body, a local, a signature's layout, and a new
   definition. They compare counts, never times, so they are the same on
@@ -1117,10 +1133,10 @@ with the same inputs.
   at a time, and a test run holds it until the run ends. States never change
   each other and a base never changes, so sessions can be brought up to date
   in parallel with no change to any stage.
-- **Letting go of kept results.** A result a request asked for is kept until
-  its state is folded and nothing reaches it. Nothing lets go of a result
-  that is still reached and no longer asked for, such as the key of a test
-  that was deleted.
+- **Unrooting every stale root.** The diagnostics of a module that is
+  removed stop being a root. Other roots stay until a driver unroots them:
+  the key of a test that was deleted is still a root, and is still
+  maintained.
 - **A fingerprint summary written in O(change).** A pointer holds every
   file's fingerprint, and is written whole when any file changed.
 - **The rules that span a package as many results.** A package's checks are

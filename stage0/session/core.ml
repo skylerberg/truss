@@ -48,6 +48,7 @@ let store () = (current ()).store
 let identity () = (current ()).identity
 let engine session = session.engine
 let context session = Engine.context session.engine
+let observer session = Engine.observer session.engine
 let key session = session.key
 let attachment session = session.attachment
 let attach session attachment = session.attachment <- attachment

@@ -6,12 +6,10 @@
   path
   workspace
   diagnostic
-  source
   resolve
   interface
   infer
   patterns
   usage
   ownership
-  package_checks
-  standard_library))
+  package_checks))

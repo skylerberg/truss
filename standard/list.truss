@@ -185,6 +185,7 @@ public fn List[Element].swap(mut self, first: USize, second: USize)
   ensures forall i in 0..self.length() =>
     i == first || i == second || identical(self.model()[i], old(self.model())[i])
   cost time O(1)
+  cost amortized time O(1)
   cost allocations == 0
 {
   intrinsic::storage_swap(mut self.storage, first: first, second: second)

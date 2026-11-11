@@ -3,4 +3,4 @@
 
 (library
  (name running)
- (libraries zarith lir compile prover))
+ (libraries zarith compile prover))
