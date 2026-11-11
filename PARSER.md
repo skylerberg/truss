@@ -89,8 +89,8 @@ definition keyword in column 0 (see [LEXER.md](LEXER.md#brackets)), a missing
 
 A method declared inside a trait, an `impl`, or a capability is a separate
 definition. The function that parses the trait, the `impl`, or the
-capability parses its header and its other members: an associated type or a
-law. Where a member starts with `fn`, it records the method's token range,
+capability parses its header and its other members: an associated type, an
+associated capability set, or a law. Where a member starts with `fn`, it records the method's token range,
 found by the rule that splits a file, and skips those tokens. Each method
 is then parsed from its own tokens, with a new `Cursor`, like any other
 definition.
