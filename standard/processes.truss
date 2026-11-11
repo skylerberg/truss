@@ -1,3 +1,4 @@
+use standard::map
 use standard::streams
 use standard::text
 
@@ -45,20 +46,109 @@ impl From[Int64] for Argument {
   }
 }
 
+fn is_separator(byte: UInt8) -> Bool
+  cost time O(1)
+{
+  byte == 32 || byte == 9 || byte == 10 || byte == 13
+}
+
+fn finish_word(words: mut List[String], word: mut String) {
+  mut words.push(map::exchange(mut word, value: ""))
+}
+
+fn split_into_words(words: mut List[String], word: mut String, in_word: Bool, text: StringSlice) -> Bool {
+  var inside = in_word
+  var start: USize = 0
+  var position: USize = 0
+  while position < text.length()
+    invariant start <= position
+    invariant position <= text.length()
+    decreases text.length() - position
+  {
+    if is_separator(text.byte(position)) {
+      if position > start {
+        mut word.push(text.part(start, to: position))
+        inside = true
+      }
+      if inside {
+        finish_word(mut words, word: mut word)
+        inside = false
+      }
+      start = position + 1
+    }
+    position += 1
+  }
+  if text.length() > start {
+    mut word.push(text.part(start, to: text.length()))
+    inside = true
+  }
+  inside
+}
+
 impl FromTemplate for Command {
   type Part = Argument
 
   fn from_template(template: Template[Argument]) -> Command
     requires is_valid_command(template.literals)
   {
-    todo
+    var words: List[String] = []
+    var word = ""
+    var in_word = false
+    var index: USize = 0
+    while index < template.literals.length()
+      invariant index <= template.literals.length()
+      decreases template.literals.length() - index
+    {
+      in_word = split_into_words(mut words, word: mut word, in_word: in_word, text: template.literals[index].text())
+      if index < template.parts.length() {
+        mut word.push(template.parts[index].text.slice())
+        in_word = true
+      }
+      index += 1
+    }
+    if in_word {
+      finish_word(mut words, word: mut word)
+    }
+    if words.is_empty() {
+      return Command.new("")
+    }
+    var command = Command.new(words[0].slice())
+    var next: USize = 1
+    while next < words.length()
+      invariant 1 <= next
+      decreases words.length() - next
+    {
+      command = own command.argument(words[next].slice())
+      next += 1
+    }
+    command
   }
 }
 
 public fn is_valid_command(literals: Slice[text::Literal]) -> Bool
   cost time finite
 {
-  todo
+  if literals.length() == 0 {
+    return false
+  }
+  let first = literals[0].text()
+  var index: USize = 0
+  while index < first.length() && is_separator(first.byte(index))
+    invariant index <= first.length()
+    decreases first.length() - index
+  {
+    index += 1
+  }
+  if index == first.length() {
+    return false
+  }
+  while index < first.length() && !is_separator(first.byte(index))
+    invariant index <= first.length()
+    decreases first.length() - index
+  {
+    index += 1
+  }
+  index < first.length() || literals.length() == 1
 }
 
 public fn Command.new(program: StringSlice) -> Command {

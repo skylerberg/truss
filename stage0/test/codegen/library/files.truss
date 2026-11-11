@@ -543,3 +543,12 @@ test "find lists the paths below a directory that a glob matches" {
     assert files::Glob.parse("*") is Ok(star) && star.find(path_of("/none")) is Err(NotFound)
   }
 }
+
+test "a glob written as a template is the glob that parse gives" {
+  let sources = files::Glob"src/**/*.truss"
+  assert sources.matches(path_of("src/list/slice.truss"))
+  assert sources.matches(path_of("src/core.truss"))
+  assert !sources.matches(path_of("docs/core.truss"))
+  assert files::Glob"/tmp/[a-c]?".matches(path_of("/tmp/b1"))
+  assert !files::Glob"/tmp/[a-c]?".matches(path_of("/tmp/d1"))
+}
