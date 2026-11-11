@@ -208,7 +208,6 @@ type function_ =
   | Utimensat
   | Readlink
   | Realpath
-  | Nanosleep
   | Getcwd
   | Gethostname
   | Getpid
@@ -241,6 +240,9 @@ type function_ =
   | Fcntl_setfl
   | Addresses_of_host
   | Signals_wait
+  | Descriptor_watch
+  | Descriptor_wait
+  | Sleep
   | Tasks_open
   | Tasks_join
   | Tasks_cancel
@@ -290,7 +292,6 @@ let functions =
     Utimensat;
     Readlink;
     Realpath;
-    Nanosleep;
     Getcwd;
     Gethostname;
     Getpid;
@@ -323,6 +324,9 @@ let functions =
     Fcntl_setfl;
     Addresses_of_host;
     Signals_wait;
+    Descriptor_watch;
+    Descriptor_wait;
+    Sleep;
     Tasks_open;
     Tasks_join;
     Tasks_cancel;
@@ -372,7 +376,6 @@ let function_name = function
   | Utimensat -> "utimensat"
   | Readlink -> "readlink"
   | Realpath -> "realpath"
-  | Nanosleep -> "nanosleep"
   | Getcwd -> "getcwd"
   | Gethostname -> "gethostname"
   | Getpid -> "getpid"
@@ -405,6 +408,9 @@ let function_name = function
   | Fcntl_setfl -> "fcntl_setfl"
   | Addresses_of_host -> "addresses_of_host"
   | Signals_wait -> "signals_wait"
+  | Descriptor_watch -> "descriptor_watch"
+  | Descriptor_wait -> "descriptor_wait"
+  | Sleep -> "sleep"
   | Tasks_open -> "tasks_open"
   | Tasks_join -> "tasks_join"
   | Tasks_cancel -> "tasks_cancel"
@@ -483,13 +489,16 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Close ->
-      row (everywhere "int") (Returns Int32)
-        [ ("descriptor", Value Int32, everywhere "int") ]
-        ~headers:[ "unistd.h" ]
+      (* The runtime's function, which calls the C library's. The runtime
+         keeps which descriptors it has registered for waiting, and a closed
+         descriptor's number is given to the next one that is opened. *)
+      row (everywhere "int32_t") (Returns Int32)
+        [ ("descriptor", Value Int32, everywhere "int32_t") ]
+        ~symbol:(everywhere "t_runtime_close") ~headers:[]
   | Errno ->
       (* The runtime's function, and not the C library's own, which a
          compiler may assume returns the same address on every call. A task
-         that has parked may go on on another thread, where the address
+         that has parked may resume on another thread, where the address
          differs. *)
       row (everywhere "int *") (Points_at Int32) [] ~symbol:(everywhere "t_runtime_errno")
         ~headers:[]
@@ -756,15 +765,6 @@ let describe function_ =
           ("resolved", Room (UInt8, Number Path_max), everywhere "char *");
         ]
         ~headers:[ "stdlib.h"; "limits.h" ]
-  | Nanosleep ->
-      row (everywhere "int") (Returns Int32)
-        [
-          ("duration", Elements (Int64, Exactly 2), everywhere "const struct timespec *");
-          ( "remaining",
-            Written (Int64, [ "remaining_seconds"; "remaining_nanoseconds" ]),
-            everywhere "struct timespec *" );
-        ]
-        ~headers:[ "time.h" ]
   | Getcwd ->
       (* The path is written into the room given, and the address returned
          is that room's. *)
@@ -1105,6 +1105,36 @@ let describe function_ =
           ("count", Value USize, size);
         ]
         ~headers:[]
+  | (Descriptor_watch | Descriptor_wait) as waiting ->
+      (* The runtime's. A socket that tasks wait for does not block: a call
+         that would block fails with [EAGAIN]. The caller takes a ticket
+         before the call and waits on it after [EAGAIN], so that it does
+         not miss the descriptor becoming ready between the two. The wait
+         returns 1 when the call is to be made again. It returns 0 when it
+         is not, and sets [errno]: to [EINTR] if the calling task is
+         cancelled, and to [EAGAIN] if the time limit that the program set
+         on the socket passed. *)
+      let descriptor = ("descriptor", Value Int32, everywhere "int32_t") in
+      let writing = ("writing", Value Int32, everywhere "int32_t") in
+      if waiting = Descriptor_watch then
+        row
+          ~symbol:(everywhere "t_runtime_descriptor_watch")
+          (everywhere "uint64_t") (Returns UInt64) [ descriptor; writing ] ~headers:[]
+      else
+        row
+          ~symbol:(everywhere "t_runtime_descriptor_wait")
+          (everywhere "int32_t") (Returns Int32)
+          [ descriptor; writing; ("ticket", Value UInt64, everywhere "uint64_t") ]
+          ~headers:[]
+  | Sleep ->
+      (* The runtime's. It waits for the time and returns 0, or returns 1 as
+         soon as the calling task is cancelled. *)
+      row ~symbol:(everywhere "t_runtime_sleep") (everywhere "int32_t") (Returns Int32)
+        [
+          ("seconds", Value Int64, everywhere "int64_t");
+          ("nanoseconds", Value Int64, everywhere "int64_t");
+        ]
+        ~headers:[]
   | ( Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait
     | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ) as task -> (
       (* The runtime's task functions. A group, a key, a ticket, and a
@@ -1128,9 +1158,9 @@ let available system function_ = (describe function_).on system.os
 
 (* Every function is named, so that a new row says whether it blocks. *)
 let blocks = function
-  | Write | Read | Pread | Pwrite | Open | Fsync | Waitpid | Poll | Nanosleep | Connect | Accept
-  | Sendto | Recvfrom | Addresses_of_host ->
-      true
+  | Write | Read | Pread | Pwrite | Open | Fsync | Waitpid | Poll | Addresses_of_host -> true
+  (* The standard library's sockets do not block. *)
+  | Connect | Accept | Sendto | Recvfrom -> false
   | Close | Errno | Clock_gettime | Getentropy | Getenv | Posix_spawnp | Snprintf | Strtod | Strtof
   | Fork | Pipe | Kill | Sysconf | Exit | Lseek | Ftruncate | Fstat | Stat | Lstat | Mkdir | Remove
   | Rename | Symlink | Link | Chmod | Utimensat | Readlink | Realpath | Getcwd | Gethostname
@@ -1143,13 +1173,15 @@ let blocks = function
       false
   (* The runtime's own functions that wait park the calling task, or count
      its thread as blocked, themselves. *)
-  | Signals_wait | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch
-  | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ->
+  | Signals_wait | Descriptor_watch | Descriptor_wait | Sleep | Tasks_open | Tasks_join
+  | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock
+  | Tasks_unlock | Tasks_yield ->
       false
 
 let of_the_runtime = function
-  | Addresses_of_host | Signals_wait | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled
-  | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ->
+  | Addresses_of_host | Signals_wait | Descriptor_watch | Descriptor_wait | Sleep | Tasks_open
+  | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock
+  | Tasks_unlock | Tasks_yield ->
       true
   | _ -> false
 

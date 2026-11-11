@@ -245,7 +245,6 @@ type function_ =
   | Utimensat
   | Readlink
   | Realpath
-  | Nanosleep
   | Getcwd
   | Gethostname
   | Getpid
@@ -280,6 +279,13 @@ type function_ =
   | Signals_wait
       (** The runtime's: blocks until one of the signals arrives and returns its number, or 0 if the
           calling task is cancelled first *)
+  | Descriptor_watch
+      (** The runtime's: returns a ticket for a descriptor and a direction, which is reading or
+          writing, for a later [Descriptor_wait] *)
+  | Descriptor_wait
+      (** The runtime's: waits until the descriptor has become ready in the direction since the
+          ticket was issued *)
+  | Sleep  (** The runtime's: waits for a time, or until the calling task is cancelled *)
   | Tasks_open
       (** The runtime's task functions, which the real [Tasks] implementation calls. This one
           creates a task group and returns its handle. *)
@@ -305,13 +311,15 @@ val of_the_runtime : function_ -> bool
     library's. The standard library calls it [runtime_] and its name. *)
 
 val blocks : function_ -> bool
-(** Whether a call of the function can block its thread for long: it waits for input, for a
-    connection, for a process, for a storage device, or for time to pass. Lowering brackets such a
-    call with the runtime's blocking functions, so that a spare thread can run tasks in place of the
-    blocked thread, and so that the runtime can interrupt the call if its task is cancelled. A
-    function that reads or changes only what the system keeps about a file, such as [stat], is not
-    counted: it returns quickly on a local file system, and a spare thread for each call would cost
-    more than the wait. *)
+(** Whether a call of the function can block its thread for long: it waits for input, for a process,
+    or for a storage device. Lowering brackets such a call with the runtime's blocking functions, so
+    that a spare thread can run tasks in place of a thread whose call lasts, and so that the runtime
+    can interrupt the call if its task is cancelled. Three kinds of function are not counted. A call
+    on a socket does not block, because the standard library's sockets fail with [EAGAIN] where they
+    would. A function that reads or changes only what the system keeps about a file, such as [stat],
+    returns quickly on a local file system, and the standard library does not expect every such call
+    to be interrupted. The runtime's own functions that wait park the calling task, or count its
+    thread as blocked, themselves. *)
 
 val available : system -> function_ -> bool
 (** Whether the system's C library has the function. A program built for a system never calls one
