@@ -1131,12 +1131,14 @@ plus what happens before and after:
   change in potential of what it changed, so a caller with a plain bound
   pays for the potential it consumed from what it was given: a function
   that pushes `count` times can promise `O(count + items.length())`.
-- **A callee with a plain and an amortized bound** on the same resource,
-  such as `List.pop`, is counted by the one of the kind the caller
-  promises. A plain bound on a call says nothing of the potential the call
-  leaves in what it changes, which an amortized caller pays for, so such a
-  caller counts the amortized one; a plain caller counts the plain one,
-  which the potential the call takes does not raise.
+- **A plain and an amortized bound on one resource** count on counters of
+  their own. A callee with both, such as `List.pop`, is counted on each
+  counter by the clause of the counter's kind. A plain bound on a call
+  says nothing of the potential the call leaves in what it changes, which
+  an amortized bound pays for, so an amortized counter counts the
+  amortized clause; a plain counter counts the plain one, which the
+  potential the call takes does not raise. So a definition can state both,
+  and each is proven, its recursive calls included, by its own counting.
 - **A loop that spends or saves potential** is bounded by what it has spent
   plus the potential the values it changes hold, which is what telescopes:
   each iteration's bound is on what it spends plus the growth of that
