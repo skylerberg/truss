@@ -10,6 +10,7 @@ module Code = struct
     | Unexpected_character
     | Strict_equality
     | Character_literal
+    | String_prefix
     | Name_case
     | Name_not_ascii
     | Number_suffix
@@ -67,6 +68,11 @@ module Code = struct
     | Trailing_lambda
     | As_conversion
     | Elif
+    | Angle_brackets
+    | Path_separator
+    | Qualified_variant
+    | Macro_call
+    | Tuple
     | Specification_only
     | Misplaced_assert
     | Misplaced_proof
@@ -240,6 +246,7 @@ module Code = struct
     | Unexpected_character -> "unexpected_character"
     | Strict_equality -> "strict_equality"
     | Character_literal -> "character_literal"
+    | String_prefix -> "string_prefix"
     | Name_case -> "name_case"
     | Name_not_ascii -> "name_not_ascii"
     | Number_suffix -> "number_suffix"
@@ -298,6 +305,11 @@ module Code = struct
     | Trailing_lambda -> "trailing_lambda"
     | As_conversion -> "as_conversion"
     | Elif -> "elif"
+    | Angle_brackets -> "angle_brackets"
+    | Path_separator -> "path_separator"
+    | Qualified_variant -> "qualified_variant"
+    | Macro_call -> "macro_call"
+    | Tuple -> "tuple"
     | Specification_only -> "specification_only"
     | Misplaced_assert -> "misplaced_assert"
     | Misplaced_proof -> "misplaced_proof"

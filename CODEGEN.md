@@ -2257,9 +2257,6 @@ a command line can hold.
   task's stack is a mapping with a guard page. Linux allows a process
   about sixty-five thousand mappings by default, which is about thirty
   thousand tasks.
-- **The seeded `Tasks`.** It is to run each task as a coroutine, one at a
-  time, and pick the next by its seed at each capability call that blocks,
-  spawns a task, or locks a mutex.
 - **Keeping an instance's C and a linked program.** The C is emitted again
   for each build, and found as an object by its text. It could be kept by
   the LIR's hash and the emitter's version, and a program by its objects,

@@ -226,7 +226,7 @@ let recovers : Diagnostic.Code.parser -> bool = function
   | Open_range | Interpolation_not_allowed | Float_pattern | Nesting_too_deep | Cost_word
   | Misplaced_potential | Increment | Double_negation | Match_arm_comma | Conditional_operator
   | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish | Trailing_lambda | As_conversion
-  | Elif ->
+  | Elif | Angle_brackets | Path_separator | Qualified_variant | Macro_call | Tuple ->
       true
   | Use_after_definition | Let_else_brace | Misplaced_opaque | Misplaced_transparent
   | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time

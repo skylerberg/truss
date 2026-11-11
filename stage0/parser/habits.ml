@@ -130,6 +130,91 @@ let turbofish cursor ~(colons : Token.t) ~(less : Token.t) ~(greater : Token.t) 
       Diagnostic.replace greater.span "]";
     ]
 
+(* [List<String>] and [fn first<T>]. [angles] are the [<], [>], and [>>]
+   tokens. *)
+let angle_brackets cursor ~(angles : Token.t list) =
+  report cursor Angle_brackets (List.hd angles).span
+    "Type arguments and generic parameters go in square brackets: `List[String]`, `fn \
+     first[Element](...)`."
+    "Use square brackets"
+    (List.map
+       (fun (token : Token.t) ->
+         Diagnostic.replace token.span
+           (match token.kind with
+           | Punctuation Less -> "["
+           | Punctuation Shift_right -> "]]"
+           | _ -> "]"))
+       angles)
+
+(* [Shape::Circle] and [Vec::new]: [::] follows only a module's name. *)
+let path_separator cursor ~(separator : Token.t) =
+  report cursor Path_separator separator.span
+    "`::` follows only the name of a module. A variant, a constant, or a function of a type is \
+     named with `.`, as in `Shape.Circle`."
+    "Write `.`"
+    [ Diagnostic.replace separator.span "." ]
+
+(* [Shape.Circle(radius)] and [Shape::Circle(radius)] in a pattern, where
+   the qualifier runs from [qualifier_start] to the variant's name. *)
+let qualified_variant cursor ~qualifier_start ~(variant : Token.t) =
+  report cursor Qualified_variant
+    (Source.span qualifier_start variant.span.start)
+    (Printf.sprintf
+       "A pattern names a variant without its type: `%s`. The type of the scrutinee says which \
+        type's variant it is."
+       (Cursor.text cursor variant.span))
+    "Remove the type"
+    [ Diagnostic.delete (Source.span qualifier_start variant.span.start) ]
+
+(* What to write in place of a macro of another language, by its name. *)
+let macro_advice = function
+  | "println" | "print" | "eprintln" | "eprint" ->
+      " Print with `Console.print_line(text)`, and build the text with `${...}` in a string."
+  | "format" -> " Build text with `${...}` in a string."
+  | "vec" -> " A list is written `[first, second]`."
+  | "assert" | "assert_eq" | "assert_ne" | "debug_assert" ->
+      " An assertion is a statement, `assert condition`, in a test, a theorem, or a proof."
+  | "dbg" -> " `echo value` prints a value while debugging."
+  | "panic" -> " Code that cannot be reached is `unreachable`, and a failure is a `Result`."
+  | _ -> ""
+
+(* [println!(...)] and [vec![...]]. Only [vec![...]] has an exact fix. *)
+let macro_call cursor ~(name : name) ~(bang : Token.t) ~(opening : Token.t) =
+  let message =
+    Printf.sprintf "Truss has no macros, so `%s!` is not a call.%s" name.text
+      (macro_advice name.text)
+  in
+  match (name.text, opening.kind) with
+  | "vec", Punctuation (Open Square) ->
+      report cursor Macro_call bang.span message "Write a list"
+        [ Diagnostic.delete (Source.span (Cursor.absolute cursor name.span).start bang.span.stop) ]
+  | _ -> Cursor.report cursor Macro_call bang.span message
+
+(* [todo!()] and [unreachable!()]: the keyword alone is the expression. With
+   arguments, removing them would lose what they say, so there is no fix. *)
+let keyword_macro cursor ~(bang : Token.t) ~(closing : Token.t) ~empty =
+  let message = "Truss has no macros. `todo` and `unreachable` are written without `!()`." in
+  if empty then
+    report cursor Macro_call bang.span message "Remove `!()`"
+      [ Diagnostic.delete (Source.span bang.span.start closing.span.stop) ]
+  else Cursor.report cursor Macro_call bang.span message
+
+let no_tuples =
+  "Truss has no tuples. Values that belong together go in a record, whose fields have names, such \
+   as `Pair(first: a, second: b)`."
+
+(* [(a, b)] as an expression, and [(Int64, String)] as a type. *)
+let tuple cursor ~(opening : Token.t) =
+  Cursor.report cursor Tuple opening.span no_tuples;
+  raise Cursor.Failed
+
+(* [pair.0]. *)
+let tuple_field cursor ~(field : Token.t) =
+  Cursor.report cursor Tuple field.span
+    "Truss has no tuples, so a value has no numbered fields. A record's fields have names, as in \
+     `pair.first`.";
+  raise Cursor.Failed
+
 (* The singular of a plural English noun whose plural is regular: [items]
    and [entries], but not [statuses] or [classes]. *)
 let singular word =
