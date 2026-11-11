@@ -378,6 +378,14 @@ the change invalidates nothing beyond the definition:
 - **Type checking a caller reads only the callee's signature.** A change to a
   body, a default, or an `ensures` re-checks that definition and no caller.
   PROVER.md states what the prover reads of a callee.
+- **A function's specification is separate from its body.** The specification
+  is the core form of the parameters and the contract. It has the body only
+  when a caller's proof can read the body: the body of a function in the
+  logic, which is the function's definition, and the body that a trait
+  provides for a method, which an `impl`'s method that replaces it is compared
+  with. The parameters and the contract are built before the body, so their
+  nodes are numbered the same whatever the body is. Editing a body that the
+  specification leaves out leaves the specification equal.
 - **A default is separate from the signature,** as DESIGN.md requires: callers
   read only whether a parameter has a default.
 - **A type's invariants are separate from its shape.** Strengthening an
@@ -2431,9 +2439,8 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **A contract as a result of its own.** In DESIGN.md, callers' proofs read a
-  function's contract, separately from its interface and its body. Today the
-  contract is type-checked with the body, and the prover reads it from the
-  callee's tree. So a change to a callee's body invalidates its callers'
-  proofs, which then find the answer to each solver query in the cache, keyed
-  by the query's text.
+- **Callers' proofs that read the specification.** The prover still loads a
+  callee's whole core form and its source text, so a change to a callee's
+  body runs its callers' proofs again, and they find the answer to each
+  solver query in the cache, keyed by the query's text. It will load the
+  callee's specification, and the callee's text only to report an error.
