@@ -6,7 +6,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -17,26 +17,26 @@ module Lower = Interface.Lower
 type local = { type_ : T.ty; mutable_ : bool; mode : T.mode }
 
 (* The context of the code that is being checked. *)
-(* What is around a piece of code, up to the enclosing function or lambda:
-   a loop, or a task of [concurrent] code. An iteration of a
-   [concurrent for] is both. *)
+(* An enclosing construct that an early exit can leave: a loop, or a task
+   of [concurrent] code. An iteration of a [concurrent for] is both. *)
 type enclosing = Loop | Task of Core.task
 type exit = Return_exit | Break_exit | Continue_exit
 
-(* The tasks that an exit ends early, innermost first. A [return] ends
-   every task around it. A [break] or a [continue] ends the tasks inside
-   its loop. A [break] of a [concurrent for] also ends its own iteration
-   early, and a [continue] of one does not: it only ends its iteration. *)
-let left_by (exit : exit) (around : enclosing list) : Core.task list =
+(* The tasks that an early exit terminates, innermost first, given the
+   enclosing constructs. A [return] terminates every enclosing task. A
+   [break] or a [continue] terminates the tasks between it and its loop. A
+   [break] in a [concurrent for] also terminates the task of its own
+   iteration. A [continue] in one does not: the iteration ends normally. *)
+let tasks_exited_by (exit : exit) (enclosing : enclosing list) : Core.task list =
   match exit with
-  | Return_exit -> List.filter_map (function Task task -> Some task | Loop -> None) around
+  | Return_exit -> List.filter_map (function Task task -> Some task | Loop -> None) enclosing
   | Break_exit | Continue_exit ->
       let rec within_loop = function
         | [] | Loop :: _ -> []
         | Task (Iteration _ as task) :: _ -> if exit = Break_exit then [ task ] else []
         | Task (Branch _ as task) :: rest -> task :: within_loop rest
       in
-      within_loop around
+      within_loop enclosing
 
 type env = {
   output : T.result option;
@@ -53,9 +53,9 @@ type env = {
   compile_time : bool;
       (** The expression is a constant expression, which the compiler evaluates: the value of a
           constant, or a default. *)
-  around : enclosing list;
-      (** The loops and the [concurrent] tasks around the code, innermost first, up to the enclosing
-          function or lambda. *)
+  enclosing : enclosing list;
+      (** The enclosing loops and [concurrent] tasks, innermost first, up to the enclosing function
+          or lambda. *)
 }
 
 (* Whether an expression runs in the compiled program. A specification
@@ -123,7 +123,6 @@ type state = {
   text : string;  (** The definition's source text, for fixes. *)
   mutable tables : C.t;
   form : form;
-  mutable obligations : C.obligation list;
   mutable diagnostics : Diagnostic.t list;
   unifier : Unify.t;
   locals : (id, local) Hashtbl.t;
@@ -138,7 +137,7 @@ type state = {
       (** Where each name of the definition is, for lambdas' captures. *)
   mutable lambdas : span list;  (** The lambdas being checked, innermost first. *)
   mutable unsolved : Diagnostic.reported option;
-      (** The report of the first statement whose types could not be worked out. *)
+      (** The report of the first statement whose types could not be inferred. *)
   mutable capability_constraints : subset_constraint list;
   mutable capability_solution : (int, T.capability list) Hashtbl.t option;
       (** The set each capability variable was solved to. [None] until the constraints are solved. A
@@ -176,8 +175,8 @@ let fresh_node_id state =
   state.form.next_node_id <- id + 1;
   id
 
-(* A core expression that desugaring introduces. It has no syntax node of
-   its own, so the caller gives its origin and type. *)
+(* A core expression that desugaring introduces. It has no syntax node, so
+   the caller supplies its origin and type. *)
 let synthetic_expression state ~origin type_ kind : Core.expression =
   { id = fresh_node_id state; origin; type_; kind }
 
@@ -436,10 +435,10 @@ let unify state left right =
   Unify.unify state.unifier (normalize left) (normalize right)
 
 (* Unifies a call's result type with the expected type before the call's
-   arguments are checked, so that the type arguments this infers are known
-   while the arguments are checked. Capability sets are left out: a
-   function value may be widened to a type with more [uses], and [convert]
-   compares the capability sets when it checks the value. *)
+   arguments are checked, so that the type arguments inferred here are known
+   while the arguments are checked. Capability sets are excluded: a function
+   value may be widened to a type with more [uses], and [convert] compares
+   the capability sets when it checks the value. *)
 let unify_as_hint state found expected =
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in
   ignore (unify state found expected);
@@ -740,7 +739,7 @@ let default_literal state type_ =
   | T.Literal (Float_literal, _) -> decide (T.builtin Float64)
   | _ -> type_
 
-(* What a name expression refers to, as name resolution decided. *)
+(* The referent of a name expression, as name resolution decided. *)
 let head state (value : expression) = Resolve.head state.resolved value
 
 (* A member name that starts with a capital letter is a variant. *)
@@ -962,8 +961,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
       if not (Unify.unify_arguments state.unifier wanted_named.arguments given_named.arguments) then
         mismatch state span ~expected ~found;
       Some Owned_to_view
-  | T.Integer, _, Some expression when argument && env.specification && T.is_integer_type wanted ->
-      state.obligations <- Integer_fits { expression; type_ = wanted } :: state.obligations;
+  | T.Integer, _, Some _ when argument && env.specification && T.is_integer_type wanted ->
       Some From_integer
   (* In a specification, a built-in integer converts to [Integer]. *)
   | _, T.Integer, _ when env.specification && T.is_integer_type given -> Some To_integer
@@ -999,13 +997,6 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
                   mismatch state span ~expected:(final state expected) ~found:(final state found));
             }
             :: state.capability_constraints;
-        Option.iter
-          (fun expression ->
-            if not (proven || argument) then
-              state.obligations <-
-                Costs_imply { expression; given = given_function; expected = wanted_function }
-                :: state.obligations)
-          expression;
         Some Function_widening
       end
       else refused ()
@@ -1257,13 +1248,12 @@ let rec is_slice (value : expression) =
 let borrowed state (value : expression) =
   (is_place state value || Option.is_some (lent state value)) && not (is_slice value)
 
-(* The mode with which the bindings of a pattern hold the parts of the
-   scrutinee of a [match] or an [is]. A scrutinee marked [own] or [mut]
-   gives that mode. An unmarked place or lent part is borrowed, so the
-   bindings are [Read]. Any other scrutinee is a value that the match
-   consumes, so the bindings are [Own]. A mark that belongs to the receiver
-   of a method call, as in [mut cursor.next()], is not a mark on the
-   scrutinee. *)
+(* The mode in which a pattern's bindings bind the parts of the scrutinee of
+   a [match] or an [is]. A scrutinee marked [own] or [mut] has that mode. An
+   unmarked place or lent part is borrowed, so the bindings are [Read]. Any
+   other scrutinee is a value that the match consumes, so the bindings are
+   [Own]. A mark that belongs to the receiver of a method call, as in [mut
+   cursor.next()], is not a mark on the scrutinee. *)
 let scrutinee_mode state (scrutinee : expression) : T.mode =
   match scrutinee.kind with
   | Mode (Own, inner) when Option.is_none (marked_call state inner) -> Own
@@ -1278,7 +1268,7 @@ type immutable =
       (** The place is, or is part of, a [let] binding, a parameter that is not [mut], a constant,
           or [self] in a method that does not take [mut self]. *)
   | Captured of string  (** Inside a lambda, the place belongs to the enclosing function. *)
-  | Lent_read_only  (** The place is part of what a call lends read-only. *)
+  | Lent_read_only  (** The place is a part that a lending call lent read-only. *)
   | Not_a_place
 
 (* Why a place cannot be mutated, or [None] if it can. Only a [var], a

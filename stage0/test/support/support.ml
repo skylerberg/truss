@@ -373,6 +373,37 @@ let check_module_core_invariants database (module_ : Path.module_) =
     0
     (Query.demand database Resolve.Names.declarations module_)
 
+type core_nodes = {
+  expressions : Core.expression list;
+  statements : Core.statement list;
+  patterns : Core.pattern list;
+}
+
+let core_nodes database (key : Resolve.Names.key) : core_nodes =
+  match Query.demand database Infer.core key with
+  | None -> failwith (Printf.sprintf "%s has no core form" (Resolve.Names.show_key key))
+  | Some form ->
+      let expressions = ref [] and statements = ref [] and patterns = ref [] in
+      Core_walk.definition
+        {
+          Core_walk.ignore_all with
+          expression = (fun node -> expressions := node :: !expressions);
+          statement = (fun node -> statements := node :: !statements);
+          pattern = (fun node -> patterns := node :: !patterns);
+        }
+        form.definition;
+      {
+        expressions = List.rev !expressions;
+        statements = List.rev !statements;
+        patterns = List.rev !patterns;
+      }
+
+let first_core_nodes text =
+  let database = setup [ ("app::main", text) ] in
+  core_nodes database
+    (Resolve.Names.key_of
+       (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main"))))
+
 (* Fails the test unless every file checks without a diagnostic and every
    core form satisfies [check_core_invariants]. *)
 let no_diagnostics ~check files =

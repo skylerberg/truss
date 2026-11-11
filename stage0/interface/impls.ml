@@ -1,11 +1,11 @@
-(* Finding the [impl] of a trait for a type, and normalizing associated
+(* Resolving the [impl] of a trait for a type, and normalizing associated
    types.
 
-   An [impl] lives in the package of its trait, of its type, or of the
-   outermost type of one of the trait's arguments, so finding one looks in
-   those packages only. Each package's [impl]s are indexed once, by trait
-   and type, and each question is a query over that index, so adding an
-   [impl] re-checks only the definitions whose question's answer
+   By the orphan rule, an [impl] is defined in the package of its trait, of
+   its type, or of the outermost type of one of the trait's arguments, so
+   resolution searches only those packages. The [impl]s of each package are
+   indexed once, by trait and type. Each lookup is a query over that index,
+   so adding an [impl] re-checks only the definitions whose lookup result
    changed. *)
 
 module T = Types
@@ -52,8 +52,8 @@ let index =
             | _ -> [])
         (Query.demand database Names.package_declarations package))
 
-(* The real implementation of a capability: the one [impl] of it that
-   [standard::system] holds, which a program's start gives its [main]. *)
+(* The system implementation of a capability: its one [impl] in
+   [standard::system], which the program's entry point provides to [main]. *)
 let real_implementation database (capability : Path.t) : Path.t option =
   match
     List.filter_map
@@ -112,10 +112,10 @@ let cursor_of_impl : Path.t -> Path.t option = function
   | _ -> None
 
 (* The interface of a cursor's [impl]. Its generic parameters are the
-   yielding method's, its [Element] is what the method yields, and its
-   methods are the trait's with [Self] replaced. The trait gives every
-   method but [next] a body. [next] is the method's own code, run to its
-   next [yield]. *)
+   yielding method's, its [Element] is the method's yielded type, and its
+   methods are the trait's methods with [Self] substituted. Every method
+   except [next] is a provided method of the trait. [next] runs the method's
+   own code up to its next [yield]. *)
 let cursor_interface database ~method_ =
   match
     ( Query.demand database Environment.signature method_,
@@ -195,10 +195,11 @@ let impl_interface database (path : Path.t) =
   | Derived { type_; trait } -> derived_interface database ~type_ ~trait
   | _ -> Query.demand database Environment.impl_interface path
 
-(* What a trait's [Self] and parameters stand for in an [impl] of it, in
-   terms of the [impl]'s own generic parameters. A method the trait gives a
-   body is read with this for an [impl] that leaves the method to it, and so
-   are the trait's clauses that an [impl]'s method keeps. *)
+(* The substitution for an [impl] of a trait: the types that the trait's
+   [Self] and parameters are instantiated with, in terms of the [impl]'s own
+   generic parameters. It applies to a provided method that the [impl]
+   inherits from the trait, and to the trait's clauses that a method of the
+   [impl] inherits. *)
 let trait_substitution database (impl : Path.t) =
   Option.bind (impl_interface database impl) (fun (interface : T.impl_interface) ->
       Option.map
@@ -206,11 +207,11 @@ let trait_substitution database (impl : Path.t) =
           Properties.trait_substitution trait ~self:interface.for_type interface.implements)
         (Query.demand database Environment.trait_interface interface.implements.trait))
 
-(* The signature of a function or a method at a path, for every path that
-   code is compiled or proven at. A method that an [impl] leaves to its
-   trait, or that a derived [impl] has, is written nowhere of its own: its
-   signature is the trait's method's, with [Self] and the trait's parameters
-   standing for what the [impl] gives them, inside that [impl]. *)
+(* The signature of the function or method at a path, for every path at
+   which code is compiled or proven. A method that an [impl] inherits from
+   its trait, or a method of a derived [impl], is not written in the [impl]:
+   its signature is the trait method's, with [Self] and the trait's
+   parameters substituted by the [impl]'s types, inside that [impl]. *)
 let signature database (path : Path.t) =
   match (Query.demand database Environment.signature path, path) with
   | Some signature, _ -> Some signature
@@ -278,9 +279,9 @@ type evidence =
   | From_any  (** [any Trait] implements its trait. *)
   | Built_in  (** [Copyable] and [Plain], which the compiler implements. *)
   | Accepted of T.ty
-      (** Everything is accepted of this type: an [Error], a [Hole], or a type the statement has not
-          worked out yet. A trait whose definition did not parse is accepted of every type, as the
-          [Error] of its report. *)
+      (** This type satisfies every bound: it is an [Error], a [Hole], or a type that the statement
+          has not inferred yet. A trait whose definition did not parse is satisfied by every type,
+          with the [Error] of its report. *)
 
 (* Whether a trait's method can be called through an [any] value, and if
    not, why. An [any] value has one compiled version of each method, for
@@ -321,8 +322,8 @@ let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
   then Names_self
   else Callable
 
-(* What a pulled yielding method's cursor gives: what the method yields,
-   with the method's type arguments. *)
+(* The element type of a pulled yielding method's cursor: the method's
+   yielded type, with the method's type arguments substituted. *)
 let cursor_element database (method_ : Path.t) arguments =
   match Query.demand database Environment.signature method_ with
   | Some ({ output = Yields (_, element); _ } as signature) ->
@@ -338,8 +339,8 @@ let plain_path = Properties.plain_trait
    bounds, as the definition asking declares them. *)
 type bounds = T.parameter -> T.trait_reference list
 
-(* What a definition's bounds ask of what stands for its generic
-   parameters: each type, with a bound it must meet. *)
+(* The obligations of a definition's bounds for given type arguments: each
+   type argument, with a bound that it must satisfy. *)
 let required (generics : T.generic list) (substitution : T.substitution) =
   List.concat_map
     (fun (generic : T.generic) ->
@@ -349,11 +350,12 @@ let required (generics : T.generic list) (substitution : T.substitution) =
       | _ -> [])
     generics
 
-(* The evidence that a type implements a trait. Without [conditions] it is
-   the [impl] that answers for the type, whether or not the bounds on its
-   parameters hold, which is what an associated type is read from: a bound
-   that does not hold is reported where the trait is asked for, and reading
-   the type asks nothing more of the type's arguments. *)
+(* The evidence that a type implements a trait. Without [conditions], it is
+   the [impl] whose head matches the type, whether or not the bounds on the
+   [impl]'s parameters hold. An associated type is read from that [impl]: a
+   bound that does not hold is reported where the trait is required, and
+   normalizing the associated type reads nothing more about the type's
+   arguments. *)
 let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : T.ty)
     (wanted : T.trait_reference) : evidence option =
   let arguments_match given_arguments =
@@ -368,8 +370,9 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
            | _ -> false)
          wanted.trait_arguments given_arguments
   in
-  (* The associated types the answer fixes must be the ones the question
-     asks for. One a bound leaves open is the projection of the type. *)
+  (* The associated types that the [impl] defines must equal the ones that
+     the wanted trait reference fixes. An associated type that the reference
+     leaves open is the projection on the type. *)
   let associated_match ~base fixed =
     List.for_all
       (fun (name, wanted_type) ->
@@ -400,6 +403,12 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
     if
       (not conditions)
       || Properties.has database ~bounds ~normalize:(normalize database ~bounds) property type_
+    then Some Built_in
+    else None
+  else if Path.equal wanted.trait Properties.storable_trait then
+    if
+      (not conditions)
+      || Properties.storable database ~bounds ~normalize:(normalize database ~bounds) type_
     then Some Built_in
     else None
   else
@@ -512,16 +521,17 @@ and associated_type database ~bounds type_ (trait : T.trait_reference) name =
           | _ -> None)
       (* [Copyable] and [Plain] have no associated types. *)
       | Some Built_in -> None
-      (* An associated type of an [Error] or a [Hole] is one too; of a type
-         not worked out yet, it is not known. *)
+      (* An associated type of an [Error] or a [Hole] is an [Error] or a
+         [Hole] too. An associated type of a type that is not inferred yet
+         is unknown. *)
       | Some (Accepted (T.Variable _)) -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
 
-(* Replaces every projection whose base is known by what the [impl]
-   chooses. A projection on a generic parameter stays, unless a bound fixes
-   it, and so does one no [impl] answers, which then equals nothing but
-   itself. *)
+(* Normalizes a type: replaces every projection whose base is known by the
+   [impl]'s definition of the associated type. A projection on a generic
+   parameter stays, unless a bound fixes it. So does a projection that no
+   [impl] defines, which then equals only itself. *)
 and normalize database ~bounds (type_ : T.ty) : T.ty =
   T.map
     (function
@@ -543,8 +553,7 @@ and normalize database ~bounds (type_ : T.ty) : T.ty =
     type_
 
 (* Whether a type is [Copyable], [Plain], or a view, with each associated
-   type that its definition's facts turn on replaced by what its [impl]
-   chooses. *)
+   type that its definition's facts depend on normalized. *)
 let has property database ~bounds type_ =
   Properties.has database ~bounds ~normalize:(normalize database ~bounds) property type_
 

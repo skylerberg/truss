@@ -138,7 +138,7 @@ let () =
         \    _ => false\n\
         \  }\n\
          }\n");
-  test "guards covered by unreachable record an obligation" (fun () ->
+  test "a match whose guards are covered by unreachable is marked for the prover" (fun () ->
       let text =
         "fn f(count: Int64) -> Int64 {\n\
         \  match count {\n\
@@ -148,14 +148,15 @@ let () =
         \  }\n\
          }\n"
       in
-      let database = setup [ ("app::main", text) ] in
-      let key =
-        Resolve.Names.key_of
-          (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main")))
-      in
-      match Query.demand database Infer.checked key with
-      | Some { checked = { obligations = [ Guards_cover _ ]; _ }; _ } -> ()
-      | _ -> fail "no obligation")
+      if
+        not
+          (List.exists
+             (fun (node : Core.expression) ->
+               match node.kind with
+               | Match { guards_exhaustive; _ } -> guards_exhaustive
+               | _ -> false)
+             (first_core_nodes text).expressions)
+      then fail "the match is not marked for the prover")
 
 (* Constants in patterns *)
 
@@ -227,7 +228,7 @@ let () =
         \  }\n\
          }\n"
         []);
-  test "a constant whose value is not worked out covers nothing else" (fun () ->
+  test "a constant whose value is not evaluated at compile time covers only itself" (fun () ->
       expect
         "let made: Int64 = 3 << 0\n\n\
          fn f(n: Int64) -> Int64 {\n\

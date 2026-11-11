@@ -1,12 +1,14 @@
-(** Moves, loans, and views, within each function. *)
+(** The ownership check: moves, loans, and views, within each function. It prevents use after move,
+    dangling views, mutation of a borrowed place, and data races. *)
 
 type result = {
   diagnostics : Diagnostic.t list;  (** In the definition's own offsets. *)
   moves : Core.id list;  (** The [Use] nodes of the core form that move a place. *)
-  obligations : Checked.obligation list;
+  disjoint : (Core.origin * Core.origin) list;
       (** The [Disjoint] obligations: pairs of index calls or slices of one collection, by origin,
-          that must select different elements. They come from places passed to one call and from the
-          branches of a [parallel] or [concurrent] block. The prover shows that they hold. *)
+          that must select disjoint elements. They come from arguments of one call that may alias,
+          and from the branches of a [parallel] or [concurrent] block. The prover discharges them.
+      *)
 }
 
 val ownership : (Resolve.Names.key, result option) Query.query
@@ -20,9 +22,9 @@ type pulling =
       (** The method yields through itself, as a tree's [each] that loops over its subtrees. Its
           cursor would need a stack of its own. *)
   | Yields_places
-      (** The method yields read-only views of places, such as [self[index]]. A pull hands out an
-          owned value, so only a [Plain] element can be pulled. A pull of any other element is
-          reported where it happens. *)
+      (** The method yields read-only views of places, such as [self[index]]. A pull returns an
+          owned value, so only a [Plain] element can be pulled. A cursor over any other element is
+          reported where the cursor is created. *)
 
 val pullable : (Path.t, pulling) Query.query
 

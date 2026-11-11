@@ -4,7 +4,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls

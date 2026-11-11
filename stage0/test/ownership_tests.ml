@@ -23,7 +23,7 @@ let () =
   in
   List.iter
     (fun (what, text) ->
-      test (what ^ " cannot be changed through a slice") (fun () ->
+      test (what ^ " cannot be written through a slice") (fun () ->
           one_diagnostic (bump ^ text) "ownership.read_only_view"))
     [
       ( "a read-only parameter",
@@ -52,7 +52,7 @@ let () =
         \  bump(mut window.rest)\n\
          }\n" );
     ];
-  test "a `var` and a `mut` parameter can be changed through a slice" (fun () ->
+  test "a `var` and a `mut` parameter can be written through a slice" (fun () ->
       fine
         (bump
        ^ "type Window(rest: Slice[Int64])\n\n\
@@ -88,13 +88,15 @@ let () =
     test name (fun () ->
         one_diagnostic (functions ^ "fn f(items: mut List[Int64]) {\n" ^ body ^ "}\n") code)
   in
-  rejected "a view cannot be passed after a `mut` borrow of what it views"
+  rejected "a view cannot be passed after a `mut` borrow of the place that it views"
     "  var part = items.slice()\n  take(mut items, view: part)\n" "ownership.conflicting_loan";
-  rejected "a view cannot be passed before a `mut` borrow of what it views"
+  rejected "a view cannot be passed before a `mut` borrow of the place that it views"
     "  var part = items.slice()\n  give(part, items: mut items)\n" "ownership.conflicting_loan";
   rejected "a slice of a place cannot be passed with a `mut` borrow of the place"
     "  take(mut items, view: items[..1])\n" "ownership.conflicting_loan";
-  test "a view of another place, and a value read from the place, can be passed with it" (fun () ->
+  test
+    "a view of another place, and a value copied out of the place, can be passed with its `mut` \
+     borrow" (fun () ->
       fine
         (functions
        ^ "fn f(items: mut List[Int64], others: List[Int64]) {\n\
@@ -102,20 +104,20 @@ let () =
          \  take(mut items, view: part)\n\
          \  measure(mut items, count: items.length())\n\
           }\n"));
-  rejected "a later argument cannot change a place that an earlier argument borrows"
+  rejected "a later argument cannot mutate a place that an earlier argument borrows"
     "  show(items[0], count: grow(mut items))\n" "ownership.changed_while_viewed";
-  rejected "a later argument cannot change a place that an earlier argument borrows `mut`"
+  rejected "a later argument cannot mutate a place that an earlier argument borrows `mut`"
     "  change(mut items[0], count: grow(mut items))\n" "ownership.changed_while_viewed";
-  rejected "a later argument cannot change what an earlier argument views"
+  rejected "a later argument cannot mutate the place that an earlier argument views"
     "  count_of(items[..1], count: grow(mut items))\n" "ownership.changed_while_viewed";
-  rejected "a later argument cannot change what a view passed earlier views"
+  rejected "a later argument cannot mutate the place that an earlier view argument views"
     "  var part = items.slice()\n  count_of(part, count: grow(mut items))\n"
     "ownership.changed_while_viewed";
-  rejected "an index key cannot change the collection that is indexed"
-    "  let _ = items[grow(mut items)]\n" "ownership.changed_while_viewed";
-  rejected "a bound of a slice cannot change the collection that is sliced"
+  rejected "an index key cannot mutate the indexed collection" "  let _ = items[grow(mut items)]\n"
+    "ownership.changed_while_viewed";
+  rejected "a slice bound cannot mutate the sliced collection"
     "  let _ = items[..grow(mut items)]\n" "ownership.changed_while_viewed";
-  test "a later field cannot change what an earlier field views" (fun () ->
+  test "a later field cannot mutate the place that an earlier field views" (fun () ->
       one_diagnostic
         (functions
        ^ "type Counted(view: Slice[Int64], count: USize)\n\n\
@@ -123,7 +125,7 @@ let () =
          \  let _ = Counted(view: items[..1], count: grow(mut items))\n\
           }\n")
         "ownership.changed_while_viewed");
-  test "an operand that is a copy does not lend its place" (fun () ->
+  test "an operand that is a copy does not borrow its place" (fun () ->
       fine
         (functions
        ^ "fn sum(first: own USize, second: USize) {}\n\n\
@@ -177,7 +179,7 @@ let () =
       fine
         (lends "tagged" "(self) lends Tagged"
            "  let tag = \"new\".copy()\n  yield Tagged(tag: tag, book: self.books[0])\n"));
-  test "a yielded constructor that lends a place takes no owned value" (fun () ->
+  test "a yielded constructor that lends a place cannot hold an owned value" (fun () ->
       one_diagnostic
         (lends "tagged" "(self) lends Tagged"
            "  yield Tagged(tag: \"new\".copy(), book: self.books[0])\n")
@@ -211,7 +213,7 @@ let () =
         (lends "both" "(mut self) lends mut Both"
            "  yield Both(first: mut self.books, second: mut self.books)\n")
         "ownership.conflicting_loan");
-  test "a method that yields a constructor that lends places is not pulled" (fun () ->
+  test "a method that yields a constructor of lent places cannot be pulled" (fun () ->
       one_diagnostic
         (lends "numbered" "(self) yields Numbered"
            "  var index: USize = 0\n\
@@ -250,25 +252,56 @@ let () =
     \  fn(value) { value + extra }\n\
      }\n"
     "ownership.view_escapes";
-  rejected "a lambda that captures cannot be returned through a name"
+  rejected "a capturing lambda cannot be returned through a local"
     "fn adder(amount: Int64) -> fn(Int64) -> Int64 {\n\
     \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
     \  add\n\
      }\n"
     "ownership.view_escapes";
-  rejected "a record that holds a lambda that captures cannot be returned"
+  rejected "a record that stores a capturing lambda cannot be returned"
     "fn build(amount: Int64) -> Handlers {\n  Handlers(first: fn(value) { value + amount })\n}\n"
     "ownership.view_escapes";
-  rejected "a lambda that captures cannot be put in what the caller keeps"
+  rejected "a capturing lambda cannot be stored in a `mut` parameter"
     "fn keep(handlers: mut Handlers, amount: Int64) {\n\
     \  handlers.first = fn(value) { value + amount }\n\
      }\n"
     "ownership.view_escapes";
-  rejected "a lambda that captures cannot be given to an `own` parameter"
+  rejected "a capturing lambda cannot be passed to an `own` function-typed parameter"
     "fn give(amount: Int64) {\n  take(fn(value) { value + amount })\n}\n" "ownership.view_escapes";
-  rejected "a function value that is not owned cannot be given to an `own` parameter"
+  rejected
+    "a function value that is not owned cannot be passed to an `own` function-typed parameter"
     "fn relay(handler: fn(Int64) -> Int64) {\n  take(handler)\n}\n" "ownership.view_escapes";
-  accepted "a function that captures nothing can be returned, kept, and given up"
+  (* A generic [own] parameter is not declared with a function type, so the
+     view rules track a capturing lambda that is passed to one. *)
+  accepted
+    "a capturing lambda can be stored in a local list and passed to a generic `own` parameter"
+    "fn same[Value](value: own Value) -> Value {\n\
+    \  value\n\
+     }\n\n\
+     fn local(amount: Int64) -> Int64 {\n\
+    \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
+    \  var handlers = [add]\n\
+    \  mut handlers.push(add)\n\
+    \  let again = same(add)\n\
+    \  let first = handlers[0]\n\
+    \  again(first(amount))\n\
+     }\n";
+  rejected "a list that stores a capturing lambda cannot be returned"
+    "fn escape(amount: Int64) -> List[fn(Int64) -> Int64] {\n\
+    \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
+    \  [add]\n\
+     }\n"
+    "ownership.view_escapes";
+  rejected "a capturing lambda returned through a generic `own` parameter cannot be returned"
+    "fn same[Value](value: own Value) -> Value {\n\
+    \  value\n\
+     }\n\n\
+     fn escape(amount: Int64) -> fn(Int64) -> Int64 {\n\
+    \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
+    \  same(add)\n\
+     }\n"
+    "ownership.view_escapes";
+  accepted "a function that captures nothing can be returned, stored, and moved"
     "fn plain() -> fn(Int64) -> Int64 {\n\
     \  fn(value) { double(value) }\n\
      }\n\n\
@@ -285,7 +318,7 @@ let () =
      fn relay(handler: own fn(Int64) -> Int64) {\n\
     \  take(handler)\n\
      }\n";
-  accepted "a lambda that captures can be passed down and held in a local record"
+  accepted "a capturing lambda can be passed to a call and stored in a local record"
     "fn f(amount: Int64) -> Int64 {\n\
     \  let handlers = Handlers(first: fn(value) { value + amount })\n\
     \  apply(handlers.first, to: 1) + apply(fn(value) { value + amount }, to: 2)\n\
@@ -314,7 +347,7 @@ let () =
   in
   let rejected name body code = test name (fun () -> one_diagnostic (types ^ body) code) in
   let accepted name body = test name (fun () -> fine (types ^ body)) in
-  rejected "a borrow of a value that owns data and holds a view views the value"
+  rejected "a borrow of a value that owns data and stores a view views the value"
     "fn f(items: List[Int64]) -> USize {\n\
     \  var labeled = Labeled(view: items[..], name: \"a\".copy())\n\
     \  let borrowed = labeled\n\
@@ -322,7 +355,7 @@ let () =
     \  borrowed.name.length()\n\
      }\n"
     "ownership.changed_while_viewed";
-  rejected "a slice of a part of a value that owns data and holds a view views the value"
+  rejected "a slice of a part of a value that owns data and stores a view views the value"
     "fn f(items: List[Int64]) -> USize {\n\
     \  var labeled = Labeled(view: items[..], name: \"a\".copy())\n\
     \  let name = labeled.name.slice()\n\
@@ -330,18 +363,18 @@ let () =
     \  name.length()\n\
      }\n"
     "ownership.changed_while_viewed";
-  rejected "a reference into a parameter that the function owns cannot be returned"
+  rejected "a borrow of an `own` parameter cannot be returned"
     "fn f(labeled: own Labeled) -> StringSlice {\n  labeled.name.slice()\n}\n"
     "ownership.view_escapes";
-  accepted "a view taken out of a parameter that the function owns can be returned"
+  accepted "a view copied out of an `own` parameter can be returned"
     "fn f(labeled: own Labeled) -> Slice[Int64] {\n  labeled.view\n}\n";
-  rejected "an `any` that holds a view of a local cannot be returned"
+  rejected "an `any` that stores a view of a local cannot be returned"
     "fn f() -> any Runner {\n\
     \  let items: List[Int64] = [1, 2, 3]\n\
     \  any Window(view: items[..])\n\
      }\n"
     "ownership.view_escapes";
-  rejected "what an `any` views cannot change while the `any` is in use"
+  rejected "the place that an `any` views cannot be mutated while the `any` is live"
     "fn f(items: mut List[Int64]) -> USize {\n\
     \  let runner: any Runner = any Window(view: items[..])\n\
     \  mut items.push(4)\n\
@@ -350,20 +383,20 @@ let () =
     "ownership.changed_while_viewed";
   accepted "an `any` made from owned data can be returned"
     "fn f() -> any Runner {\n  any Owner(items: [1, 2, 3])\n}\n";
-  rejected "a lambda that captures cannot be returned as a wider function type"
+  rejected "a capturing lambda cannot be returned as a wider function type"
     "fn adder(amount: Int64) -> (fn(Int64) -> Int64 uses Clock) {\n\
     \  let add: fn(Int64) -> Int64 = fn(value) { value + amount }\n\
     \  add\n\
      }\n"
     "ownership.view_escapes";
-  rejected "the value of an `if` views what its branches' values view"
+  rejected "the value of an `if` has the views of its branches' tail expressions"
     "fn f(items: mut List[Int64], first: Bool) -> USize {\n\
     \  let part = if first { items[..1] } else { items[1..] }\n\
     \  mut items.push(1)\n\
     \  part.length()\n\
      }\n"
     "ownership.changed_while_viewed";
-  rejected "the value of a `match` views what its arms' values view"
+  rejected "the value of a `match` has the views of its arms' tail expressions"
     "fn f(items: mut List[Int64], pick: Option[USize]) -> USize {\n\
     \  let part = match pick {\n\
     \    Some(count) => items[..count]\n\
@@ -373,7 +406,7 @@ let () =
     \  part.length()\n\
      }\n"
     "ownership.changed_while_viewed";
-  rejected "the value of a block views what its last expression views"
+  rejected "the value of a block has the views of its tail expression"
     "fn f(items: mut List[Int64]) -> USize {\n\
     \  let part = {\n\
     \    let all = items[..]\n\
@@ -383,14 +416,14 @@ let () =
     \  part.length()\n\
      }\n"
     "ownership.changed_while_viewed";
-  rejected "a view of a local cannot be returned through an `if` and a name"
+  rejected "a view of a local cannot be returned through an `if` and a local"
     "fn f(first: Bool) -> Slice[Int64] {\n\
     \  let items: List[Int64] = [1, 2, 3]\n\
     \  let part = if first { items[..1] } else { items[1..] }\n\
     \  part\n\
      }\n"
     "ownership.view_escapes";
-  rejected "a copy of a view views what the view does"
+  rejected "a copy of a view has the same views"
     "fn f(items: mut List[Int64]) -> USize {\n\
     \  let all = items[..]\n\
     \  let part = all.copy()\n\
@@ -398,7 +431,7 @@ let () =
     \  part.length()\n\
      }\n"
     "ownership.changed_while_viewed";
-  rejected "a record made by `with` views what the new fields view"
+  rejected "a record built by `with` has the views of its new fields"
     "type Sized(view: Slice[Int64], count: USize)\n\n\
      fn f(items: mut List[Int64], other: List[Int64]) -> USize {\n\
     \  let sized = Sized(view: other[..], count: 0)\n\
@@ -407,7 +440,7 @@ let () =
     \  changed.view.length()\n\
      }\n"
     "ownership.changed_while_viewed";
-  rejected "a view copied out of a loop variable views what the loop goes over"
+  rejected "a view copied out of a loop variable views the collection that the loop iterates over"
     "fn f(data: mut List[Int64], other: List[Int64]) -> USize {\n\
     \  var parts: List[Slice[Int64]] = []\n\
     \  mut parts.push(data[..])\n\
@@ -419,7 +452,7 @@ let () =
     \  kept.length()\n\
      }\n"
     "ownership.changed_while_viewed";
-  accepted "a `Plain` loop variable is a copy, so what the loop went over can change after it"
+  accepted "a `Plain` loop variable is a copy, so the collection can be mutated after the loop"
     "fn f(data: List[Int64], other: List[Int64]) -> USize {\n\
     \  var parts: List[Slice[Int64]] = []\n\
     \  mut parts.push(data[..])\n\
@@ -430,7 +463,7 @@ let () =
     \  mut parts.clear()\n\
     \  kept.length()\n\
      }\n";
-  rejected "a place cannot change while a name that a `match` on it binds is in use"
+  rejected "a place cannot be mutated while a `match` binding of it is live"
     "fn f() -> USize {\n\
     \  var slot: Option[String] = Some(\"a\".copy())\n\
     \  match slot {\n\
@@ -442,7 +475,7 @@ let () =
     \  }\n\
      }\n"
     "ownership.changed_while_viewed";
-  accepted "a place can change in an arm once the names the `match` binds are not used"
+  accepted "a place can be mutated in an arm once the `match` bindings are dead"
     "fn f() -> USize {\n\
     \  var slot: Option[String] = Some(\"a\".copy())\n\
     \  match slot {\n\
@@ -489,7 +522,8 @@ let () =
      \  yield self.buffer[..]\n\
       }\n\n"
    in
-   rejected "a view from one step of a loop that is lent `mut` is not used in a later step"
+   rejected
+     "a view from one iteration of a loop that borrows `mut` cannot be used in a later iteration"
      (chunks
     ^ "fn f(reader: mut Reader, other: List[Int64]) -> USize {\n\
       \  var kept: Slice[Int64] = other[..]\n\
@@ -499,7 +533,7 @@ let () =
       \  kept.length()\n\
        }\n")
      "ownership.changed_while_viewed";
-   accepted "a view from a step of a loop that is lent `mut` can be used in that step"
+   accepted "a view from an iteration of a loop that borrows `mut` can be used in that iteration"
      (chunks
     ^ "fn f(reader: mut Reader) -> USize {\n\
       \  var total: USize = 0\n\
@@ -509,7 +543,7 @@ let () =
       \  }\n\
       \  total\n\
        }\n"));
-  accepted "a view from a loop over a read-only source can be kept after the loop"
+  accepted "a view from a loop over a read-only source can be used after the loop"
     "fn Reader.windows(self) yields Slice[Int64] {\n\
     \  yield self.buffer[..1]\n\
     \  yield self.buffer[1..]\n\
@@ -548,7 +582,7 @@ let () =
     \  Counter.next()\n\
      }\n\n"
   in
-  test "the body of a `provide` cannot use a place that the block is given `mut`" (fun () ->
+  test "the body of a `provide` cannot use a place that the block borrows `mut`" (fun () ->
       one_diagnostic
         (counter
        ^ "fn f() -> USize {\n\
@@ -559,7 +593,7 @@ let () =
          \  }\n\
           }\n")
         "ownership.conflicting_loan");
-  test "the body of a `provide` cannot change a place that the block is given" (fun () ->
+  test "the body of a `provide` cannot mutate a place that the block borrows" (fun () ->
       one_diagnostic
         (counter
        ^ "fn f() -> USize {\n\
@@ -570,7 +604,7 @@ let () =
          \  }\n\
           }\n")
         "ownership.changed_while_viewed");
-  test "the body of a `provide` can read a place that the block is given read-only" (fun () ->
+  test "the body of a `provide` can read a place that the block borrows read-only" (fun () ->
       fine
         (counter
        ^ "fn f() -> USize {\n\
@@ -579,7 +613,7 @@ let () =
          \    count() + fixed.value\n\
          \  }\n\
           }\n"));
-  test "a place given to a `provide` block is free again after the block" (fun () ->
+  test "a place that a `provide` block borrows is usable again after the block" (fun () ->
       fine
         (counter
        ^ "fn f() -> USize {\n\
@@ -593,7 +627,8 @@ let () =
 (* Views in the branches of a [parallel] block *)
 
 let () =
-  test "one branch of a `parallel` block cannot change what another branch's view views" (fun () ->
+  test "one branch of a `parallel` block cannot mutate the place that another branch's view views"
+    (fun () ->
       one_diagnostic
         "fn f(items: mut List[Int64]) -> USize {\n\
         \  let part = items[..]\n\
@@ -619,11 +654,11 @@ let () =
 
 let () =
   let make = "fn make() -> List[Int64] {\n  [1, 2, 3]\n}\n\n" in
-  test "a copy of a view of a temporary cannot be kept" (fun () ->
+  test "a copy of a view of a temporary cannot be bound" (fun () ->
       one_diagnostic
         (make ^ "fn f() -> USize {\n  let part = make().slice().copy()\n  part.length()\n}\n")
         "ownership.views_temporary");
-  test "a record made by `with` cannot keep a view of a temporary" (fun () ->
+  test "a record built by `with` cannot store a view of a temporary" (fun () ->
       one_diagnostic
         (make
        ^ "type Sized(view: Slice[Int64], count: USize)\n\n\
@@ -638,14 +673,15 @@ let () =
 
 let () =
   let grow = "fn grow(items: mut List[Int64]) -> Bool {\n  mut items.push(1)\n  true\n}\n\n" in
-  test "the body of a quantifier in code cannot change what the quantifier goes over" (fun () ->
+  test "the body of an executable quantifier cannot mutate the collection that it iterates over"
+    (fun () ->
       one_diagnostic
         (grow
        ^ "fn f(items: mut List[Int64]) -> Bool {\n\
          \  exists item in items => grow(mut items) && item < 0\n\
           }\n")
         "ownership.changed_while_viewed");
-  test "a quantifier in code reads what it goes over" (fun () ->
+  test "an executable quantifier reads the collection that it iterates over" (fun () ->
       fine
         "fn f(items: List[Int64]) -> Bool {\n\
         \  (forall i in 0..items.length() => items[i] > 0) && (exists item in items => item < 0)\n\
@@ -662,7 +698,7 @@ let () =
     \  limit\n\
      }\n\n"
   in
-  test "a view given `mut` beside a place that is only lent does not come to view the place"
+  test "a `mut` view argument does not store a view of a borrowed argument that is not a view"
     (fun () ->
       fine
         (reader
@@ -687,14 +723,14 @@ let () =
         \  let taken = items.each().take(1).count()\n\
         \  skipped + taken + text.characters().skip(1).count()\n\
          }\n");
-  test "a cursor that would copy its elements cannot be given to generic code" (fun () ->
+  test "a cursor that would copy its elements cannot be passed to generic code" (fun () ->
       one_diagnostic
         "fn f(names: List[String]) -> List[String] {\n  List.collect(names.each())\n}\n"
         "ownership.not_pullable");
   test "a cursor that would copy its elements cannot be used through the trait's methods" (fun () ->
       one_diagnostic "fn f(names: List[String]) -> List[String] {\n  names.each().to_list()\n}\n"
         "ownership.not_pullable");
-  test "a cursor over `Plain` elements can be given to generic code" (fun () ->
+  test "a cursor over `Plain` elements can be passed to generic code" (fun () ->
       fine "fn f(items: List[Int64]) -> List[Int64] {\n  List.collect(items.each())\n}\n")
 
 (* Views and a capability's implementation *)
@@ -704,7 +740,7 @@ let () =
     "capability Journal {\n  fn write(text: StringSlice)\n  fn last() -> StringSlice\n}\n\n"
   in
   let rejected name body code = test name (fun () -> one_diagnostic (journal ^ body) code) in
-  rejected "a capability's implementation cannot keep a view that a method is given"
+  rejected "a capability's implementation cannot store a view argument"
     "type Keeper(kept: StringSlice)\n\n\
      impl Journal for Keeper {\n\
     \  fn write(mut self, text: StringSlice) {\n\
@@ -715,7 +751,7 @@ let () =
     \  }\n\
      }\n"
     "ownership.view_crosses_capability";
-  rejected "a capability's method cannot return a view of the implementation's own parts"
+  rejected "a capability's method cannot return a view of the implementation's state"
     "type Lines(text: String)\n\n\
      impl Journal for Lines {\n\
     \  fn write(mut self, text: StringSlice) {\n\
@@ -726,7 +762,8 @@ let () =
     \  }\n\
      }\n"
     "ownership.view_crosses_capability";
-  test "an implementation can keep a copy and return a view that it was built with" (fun () ->
+  test "an implementation can store a copy and return a view that it was constructed with"
+    (fun () ->
       fine
         (journal
        ^ "type Labelled(text: String, label: StringSlice)\n\n\
@@ -738,7 +775,8 @@ let () =
          \    self.label\n\
          \  }\n\
           }\n"));
-  test "a method that is not a capability's can keep a view and return a view of its parts"
+  test
+    "a method outside a capability's `impl` can store a view argument and return a view of `self`"
     (fun () ->
       fine
         "type Keeper(kept: StringSlice, text: String)\n\n\
@@ -754,14 +792,14 @@ let () =
 let () =
   let url = "type Url(scheme: String, user: Option[String])\n\n" in
   let accepted name body = test name (fun () -> fine (url ^ body)) in
-  accepted "a view of what a `match` on a parameter binds can be returned"
+  accepted "a view of a `match` binding of a parameter can be returned"
     "fn Url.user(self) -> Option[StringSlice] {\n\
     \  match self.user {\n\
     \    Some(found) => Some(found.slice())\n\
     \    None => None\n\
     \  }\n\
      }\n";
-  accepted "a view of what an `is` test on a parameter binds can be returned"
+  accepted "a view of an `is` binding of a parameter can be returned"
     "fn Url.user(self) -> Option[StringSlice] {\n\
     \  if self.user is Some(found) {\n\
     \    Some(found.slice())\n\
@@ -769,16 +807,16 @@ let () =
     \    None\n\
     \  }\n\
      }\n";
-  accepted "a view of a name that a `let` binds to a part of a parameter can be returned"
+  accepted "a view of a `let` alias of a part of a parameter can be returned"
     "fn Url.scheme(self) -> StringSlice {\n  let scheme = self.scheme\n  scheme.slice()\n}\n";
-  accepted "a view of a loop's element of a parameter can be returned"
+  accepted "a view of a loop variable over a parameter can be returned"
     "fn first(names: List[String]) -> Option[StringSlice] {\n\
     \  for name in names {\n\
     \    return Some(name.slice())\n\
     \  }\n\
     \  None\n\
      }\n";
-  test "a view of what a `match` on a local binds cannot be returned" (fun () ->
+  test "a view of a `match` binding of a local cannot be returned" (fun () ->
       one_diagnostic
         "fn f() -> Option[StringSlice] {\n\
         \  let user: Option[String] = Some(\"a\".copy())\n\
@@ -788,7 +826,7 @@ let () =
         \  }\n\
          }\n"
         "ownership.view_escapes");
-  test "a place cannot change while a view of what a `match` on it binds is in use" (fun () ->
+  test "a place cannot be mutated while a view of its `match` binding is live" (fun () ->
       one_diagnostic
         "fn f() -> USize {\n\
         \  var user: Option[String] = Some(\"a\".copy())\n\
@@ -819,7 +857,7 @@ let () =
     test name (fun () -> one_diagnostic ?says (helpers ^ body) code)
   in
   let accepted name body = test name (fun () -> fine (helpers ^ body)) in
-  rejected "one branch of a `concurrent` block cannot change a place that another uses"
+  rejected "one branch of a `concurrent` block cannot mutate a place that another branch uses"
     ~says:"`concurrent` block"
     "fn f(items: mut List[Int64]) -> USize\n\
     \  uses Tasks\n\
@@ -831,7 +869,7 @@ let () =
     \  length\n\
      }\n"
     "ownership.data_race";
-  rejected "an iteration of a `concurrent for` changes only its own element and locals"
+  rejected "an iteration of a `concurrent for` can mutate only its own element and locals"
     ~says:"`concurrent for`"
     "fn f(items: List[Int64], total: mut Int64)\n\
     \  uses Tasks\n\
@@ -841,7 +879,7 @@ let () =
     \  }\n\
      }\n"
     "ownership.data_race";
-  rejected "a branch puts back what it takes out of a place that is lent `mut`"
+  rejected "a `concurrent` branch must reinitialize a place that it moves out of a `mut` borrow"
     "fn f(holder: mut Holder) -> Result[USize, USize]\n\
     \  uses Tasks, Clock\n\
      {\n\
@@ -853,7 +891,7 @@ let () =
     \  Ok(waited)\n\
      }\n"
     "ownership.not_reinitialized";
-  accepted "a branch may take a value out of a place that is lent `mut` and put one back"
+  accepted "a `concurrent` branch can move a value out of a `mut` borrow and reinitialize it"
     "fn f(holder: mut Holder) -> Result[USize, USize]\n\
     \  uses Tasks, Clock\n\
      {\n\
@@ -866,7 +904,8 @@ let () =
     \  }\n\
     \  Ok(waited)\n\
      }\n";
-  rejected "what is moved out before a `concurrent` block must be back where a branch returns"
+  rejected
+    "a place moved out before a `concurrent` block must be reinitialized where a branch returns"
     "fn f(holder: mut Holder) -> Result[USize, USize]\n\
     \  uses Tasks, Clock\n\
      {\n\
@@ -878,13 +917,118 @@ let () =
     \  holder.items = own taken\n\
     \  Ok(first + second)\n\
      }\n"
-    "ownership.not_reinitialized"
+    "ownership.not_reinitialized";
+  (* A [concurrent for] over a yielding method that does not yield by
+     position: its body is not a single loop over a range. *)
+  let pair =
+    "type Pair(first: List[Int64], second: List[Int64], text: String)\n\n\
+     fn look[Value](value: Value) {}\n\n"
+  in
+  let rejected_loop name ~says method_ loop =
+    test name (fun () ->
+        one_diagnostic ~says
+          (pair ^ method_ ^ "\nfn f(pair: mut Pair)\n  uses Tasks\n{\n" ^ loop ^ "}\n")
+          "ownership.task_outlives_yield")
+  in
+  rejected_loop "a `concurrent for` cannot iterate over a method that yields `mut` borrows"
+    ~says:"`mut` borrows"
+    "fn Pair.each(mut self) yields mut List[Int64] {\n\
+    \  yield mut self.first\n\
+    \  yield mut self.second\n\
+     }\n"
+    "  concurrent for list in mut pair.each() {\n    look(list)\n  }\n";
+  rejected_loop "a task cannot borrow a place inside a `mut` parameter of the yielding method"
+    ~says:"`self.first`"
+    "fn Pair.each(mut self) yields List[Int64] {\n\
+    \  yield self.first\n\
+    \  mut self.first.clear()\n\
+    \  yield self.second\n\
+     }\n"
+    "  concurrent for list in mut pair.each() {\n    look(list)\n  }\n";
+  rejected_loop "a task cannot borrow a local of the yielding method" ~says:"`local`"
+    "fn Pair.each(self) yields List[Int64] {\n\
+    \  let local: List[Int64] = [1]\n\
+    \  yield local\n\
+    \  yield self.second\n\
+     }\n"
+    "  concurrent for list in pair.each() {\n    look(list)\n  }\n";
+  rejected_loop "a task cannot keep a view of a place inside a `mut` parameter" ~says:"`self.text`"
+    "fn Pair.words(mut self) yields own StringSlice {\n\
+    \  yield self.text.slice()\n\
+    \  mut self.text.clear()\n\
+     }\n"
+    "  concurrent for word in mut pair.words() {\n    look(word)\n  }\n";
+  test "a task can borrow and view places inside a read-only parameter" (fun () ->
+      fine
+        (pair
+       ^ "fn Pair.each(self) yields List[Int64] {\n\
+         \  yield self.first\n\
+         \  yield self.second\n\
+          }\n\n\
+          fn Pair.words(self) yields own StringSlice {\n\
+         \  yield self.text.slice()\n\
+          }\n\n\
+          fn f(pair: Pair, names: List[String], parts: List[Slice[Int64]])\n\
+         \  uses Tasks\n\
+          {\n\
+         \  concurrent for list in pair.each() {\n\
+         \    look(list)\n\
+         \  }\n\
+         \  concurrent for word in pair.words() {\n\
+         \    look(word)\n\
+         \  }\n\
+         \  concurrent for name in names {\n\
+         \    look(name)\n\
+         \  }\n\
+         \  concurrent for part in parts {\n\
+         \    look(part)\n\
+         \  }\n\
+          }\n"));
+  test "a `concurrent for` cannot iterate over a cursor of views" (fun () ->
+      one_diagnostic ~says:"`Slice[Int64]` is a view"
+        (pair
+       ^ "fn f(parts: List[Slice[Int64]])\n\
+         \  uses Tasks\n\
+          {\n\
+         \  var cursor = parts.each()\n\
+         \  concurrent for part in cursor {\n\
+         \    look(part)\n\
+         \  }\n\
+          }\n")
+        "ownership.task_outlives_yield");
+  test "a `concurrent for` can iterate over owned values and Plain copies" (fun () ->
+      fine
+        (pair
+       ^ "fn Pair.lengths(self) yields own USize {\n\
+         \  yield self.first.length()\n\
+         \  yield self.second.length()\n\
+          }\n\n\
+          fn f(pair: Pair, numbers: List[Int64])\n\
+         \  uses Tasks\n\
+          {\n\
+         \  concurrent for length in pair.lengths() {\n\
+         \    look(length)\n\
+         \  }\n\
+         \  concurrent for number in numbers {\n\
+         \    look(number)\n\
+         \  }\n\
+          }\n"));
+  test "a `concurrent for` can iterate over a method that yields by position" (fun () ->
+      fine
+        (pair
+       ^ "fn f(rows: mut List[List[Int64]])\n\
+         \  uses Tasks\n\
+          {\n\
+         \  concurrent for row in mut rows {\n\
+         \    look(row)\n\
+         \  }\n\
+          }\n"))
 
 (* Guards *)
 
 let () =
   let bump = "fn bump(count: mut Int64) -> Bool {\n  count = 1\n  false\n}\n\n" in
-  test "a guard cannot change what the `match` matches" (fun () ->
+  test "a guard cannot mutate the scrutinee" (fun () ->
       one_diagnostic
         (bump
        ^ "fn f() -> Int64 {\n\
@@ -896,7 +1040,7 @@ let () =
          \  }\n\
           }\n")
         "ownership.changed_while_viewed");
-  test "a guard can change another place, and an arm's body can change what was matched" (fun () ->
+  test "a guard can mutate another place, and an arm's body can mutate the scrutinee" (fun () ->
       fine
         (bump
        ^ "fn f() -> Int64 {\n\
@@ -982,7 +1126,7 @@ let () =
         (keep ^ "fn f(items: own List[Int64]) {\n  keep(own items)\n  look(items)\n}\n")
         "ownership.use_after_move"
         ~fixed:(keep ^ "fn f(items: own List[Int64]) {\n  keep(items.copy())\n  look(items)\n}\n"));
-  test "a tagged string takes its parts, and a plain one reads them" (fun () ->
+  test "a tagged string moves its parts, and a plain string reads them" (fun () ->
       let shout =
         "type Shout(text: String)\n\n\
          impl FromTemplate for Shout {\n\
@@ -996,9 +1140,9 @@ let () =
       fine (shout ^ "fn f(name: String) -> Shout {\n  Shout\"hey ${name.copy()}\"\n}\n");
       fine (shout ^ "fn f(name: own String) -> Shout {\n  Shout\"hey ${own name}\"\n}\n");
       fine "fn f(name: String) -> String {\n  \"hey ${name}\"\n}\n");
-  test "a place that copies implicitly is copied, not moved" (fun () ->
+  test "a `Plain` place is copied, not moved" (fun () ->
       fine "fn take(count: own Int64) {}\n\nfn f(count: Int64) {\n  take(count)\n  take(count)\n}\n");
-  test "a place moved on one path cannot be used after the paths meet" (fun () ->
+  test "a place moved on one path cannot be used after the paths join" (fun () ->
       one_diagnostic
         (keep
        ^ "fn f(items: own List[Int64], ready: Bool) {\n\
@@ -1027,7 +1171,7 @@ let () =
          \  current = []\n\
          \  look(current)\n\
           }\n"));
-  test "a field can be moved out on its own" (fun () ->
+  test "a field can be moved out by itself" (fun () ->
       fine
         "type Config(name: String, port: UInt16)\n\n\
          fn take(name: own String) {}\n\n\
@@ -1039,7 +1183,7 @@ let () =
       one_diagnostic
         (keep ^ "fn f(items: List[Int64]) {\n  keep(own items)\n}\n")
         "ownership.not_owned");
-  test "a mut parameter's field moved out must be put back" (fun () ->
+  test "a field moved out of a `mut` parameter must be reinitialized" (fun () ->
       one_diagnostic
         "type Config(name: String, port: UInt16)\n\n\
          fn take(name: own String) {}\n\n\
@@ -1047,7 +1191,7 @@ let () =
         \  take(own config.name)\n\
          }\n"
         "ownership.not_reinitialized");
-  test "a name that a value is moved into does not view the place it came from" (fun () ->
+  test "a local that a value is moved into has no view of the moved place" (fun () ->
       fine
         "fn f(first: own List[Int64]) -> List[Int64] {\n\
         \  var items = own first\n\
@@ -1059,16 +1203,16 @@ let () =
   (let holder = "type Holder(items: List[Int64], count: USize)\n\n" in
    let accepted name body = test name (fun () -> fine (holder ^ body)) in
    let rejected name body code = test name (fun () -> one_diagnostic (holder ^ body) code) in
-   accepted "a field of a place lent `mut` can be moved out and put back"
+   accepted "a field of a `mut` borrow can be moved out and reinitialized"
      "fn Holder.take_items(mut self) -> List[Int64] {\n\
      \  let taken = own self.items\n\
      \  self.items = []\n\
      \  taken\n\
       }\n";
-   rejected "a field moved out of `mut self` must be put back"
+   rejected "a field moved out of `mut self` must be reinitialized"
      "fn Holder.take_items(mut self) -> List[Int64] {\n  let taken = own self.items\n  taken\n}\n"
      "ownership.not_reinitialized";
-   accepted "a place lent `mut` can be moved out whole and put back"
+   accepted "a `mut` borrow can be moved out whole and reinitialized"
      "fn take[Value](slot: mut Option[Value]) -> Option[Value] {\n\
      \  let taken = own slot\n\
      \  slot = None\n\
@@ -1079,10 +1223,10 @@ let () =
      \  slot = Some(own value)\n\
      \  previous\n\
       }\n";
-   rejected "a place lent `mut` that is moved out whole must be put back"
+   rejected "a `mut` borrow that is moved out whole must be reinitialized"
      "fn f(holder: mut Holder) -> Holder {\n  let taken = own holder\n  taken\n}\n"
      "ownership.not_reinitialized";
-   rejected "a place lent `mut` must be put back on every path"
+   rejected "a `mut` borrow must be reinitialized on every path"
      "fn f(holder: mut Holder, keep: Bool) -> List[Int64] {\n\
      \  let taken = own holder.items\n\
      \  if keep {\n\
@@ -1091,7 +1235,7 @@ let () =
      \  taken\n\
       }\n"
      "ownership.not_reinitialized";
-   rejected "a place lent `mut` cannot be used while it is moved out"
+   rejected "a `mut` borrow cannot be used while it is moved out"
      "fn f(holder: mut Holder) -> USize {\n\
      \  let taken = own holder\n\
      \  let count = holder.count\n\
@@ -1099,14 +1243,14 @@ let () =
      \  count\n\
       }\n"
      "ownership.use_after_move";
-   accepted "a `mut` loop variable can be moved out and put back in the iteration"
+   accepted "a `mut` loop variable can be moved out and reinitialized in the iteration"
      "fn f(holders: mut List[Holder]) {\n\
      \  for holder in mut holders {\n\
      \    let items = own holder.items\n\
      \    holder.items = own items\n\
      \  }\n\
       }\n";
-   rejected "what is moved out of a `mut` loop variable must be put back in the iteration"
+   rejected "a `mut` loop variable that is moved out must be reinitialized in the iteration"
      "fn f(holders: mut List[Holder]) -> USize {\n\
      \  var total: USize = 0\n\
      \  for holder in mut holders {\n\
@@ -1116,7 +1260,7 @@ let () =
      \  total\n\
       }\n"
      "ownership.not_reinitialized";
-   rejected "what is moved out of a `mut` binding of a `match` must be put back in the arm"
+   rejected "a `mut` binding of a `match` that is moved out must be reinitialized in the arm"
      "fn f(slot: mut Option[Holder]) -> USize {\n\
      \  match mut slot {\n\
      \    Some(holder) => {\n\
@@ -1142,7 +1286,7 @@ let () =
      \  yield mut items\n\
      \  self.items = own items\n\
       }\n");
-  test "one place cannot be lent mut twice to one call" (fun () ->
+  test "one place cannot be borrowed `mut` twice by one call" (fun () ->
       one_diagnostic
         "fn swap(first: mut Int64, second: mut Int64) {}\n\n\
          fn f() {\n\
@@ -1150,7 +1294,7 @@ let () =
         \  swap(mut first, second: mut first)\n\
          }\n"
         "ownership.conflicting_loan");
-  test "a place cannot change while a view of it is in use" (fun () ->
+  test "a place cannot be mutated while a view of it is live" (fun () ->
       one_diagnostic
         "fn f() -> USize {\n\
         \  var items: List[Int64] = [1, 2, 3, 4, 5]\n\
@@ -1159,7 +1303,7 @@ let () =
         \  middle.length()\n\
          }\n"
         "ownership.changed_while_viewed");
-  test "a place can change once the view of it is no longer used" (fun () ->
+  test "a place can be mutated once the view of it is dead" (fun () ->
       fine
         "fn f() -> USize {\n\
         \  var items: List[Int64] = [1, 2, 3, 4, 5]\n\
@@ -1180,7 +1324,7 @@ let () =
         \  Holder(Holder(items[0..2]))\n\
          }\n"
         "ownership.view_escapes");
-  test "a function cannot return a view of its local kept as an associated type" (fun () ->
+  test "a function cannot return a view of its local stored as an associated type" (fun () ->
       one_diagnostic
         "trait Shown {\n\
         \  type Part\n\
@@ -1201,7 +1345,7 @@ let () =
         "ownership.view_escapes");
   test "a function can return a view of its parameter" (fun () ->
       fine "fn f(items: List[Int64]) -> Slice[Int64] {\n  items[0..2]\n}\n");
-  test "a var needs an owned value, with fixes that give up or copy the place" (fun () ->
+  test "a `var` needs an owned value, with fixes that move or copy the place" (fun () ->
       one_diagnostic "fn f(items: own List[Int64]) {\n  var copy = items\n  mut copy.push(1)\n}\n"
         "ownership.needs_owned"
         ~fixed:"fn f(items: own List[Int64]) {\n  var copy = own items\n  mut copy.push(1)\n}\n");
@@ -1240,7 +1384,27 @@ let () =
         \  }\n\
          }\n"
         "ownership.lends_count");
-  test "a yielding method that yields through recursion cannot be pulled" (fun () ->
+  (let grid = "type Grid(cells: List[Int64], count: USize)\n\n" in
+   test "a lending method can yield in one branch of a `parallel` block" (fun () ->
+       fine
+         (grid
+        ^ "fn Grid.cell(self) lends Int64 {\n\
+          \  parallel {\n\
+          \    yield self.cells[0]\n\
+          \    let _ = self.count\n\
+          \  }\n\
+           }\n"));
+   test "a lending method cannot yield in two branches of a `parallel` block" (fun () ->
+       one_diagnostic
+         (grid
+        ^ "fn Grid.cell(self) lends Int64 {\n\
+          \  parallel {\n\
+          \    yield self.cells[0]\n\
+          \    yield self.cells[1]\n\
+          \  }\n\
+           }\n")
+         "ownership.lends_count"));
+  test "a method that yields recursively cannot be pulled" (fun () ->
       one_diagnostic
         "type Tree =\n\
         \  | Leaf\n\
@@ -1270,7 +1434,7 @@ let () =
         \  var cursor = items.each()\n\
         \  mut cursor.next()\n\
          }\n");
-  test "a parallel branch cannot change what another uses" (fun () ->
+  test "a `parallel` branch cannot mutate a place that another branch uses" (fun () ->
       one_diagnostic
         "fn bump(count: mut Int64) {}\n\n\
          fn f() -> Int64 {\n\
@@ -1325,7 +1489,8 @@ let () =
 (* Loans held for a stretch of code *)
 
 let () =
-  test "a loop's body cannot change what it goes over, even inside a branch" (fun () ->
+  test "a loop body cannot mutate the collection that the loop iterates over, even inside a branch"
+    (fun () ->
       one_diagnostic
         "fn f(ready: Bool) {\n\
         \  var items: List[Int64] = [1, 2]\n\
@@ -1336,7 +1501,7 @@ let () =
         \  }\n\
          }\n"
         "ownership.changed_while_viewed");
-  test "a loop's body cannot lend mut what it goes over" (fun () ->
+  test "a loop body cannot borrow `mut` the collection that the loop iterates over" (fun () ->
       one_diagnostic
         "fn f() {\n\
         \  var items: List[Int64] = [1, 2]\n\
@@ -1345,7 +1510,7 @@ let () =
         \  }\n\
          }\n"
         "ownership.changed_while_viewed");
-  test "a parallel for cannot lend mut a place from outside it" (fun () ->
+  test "a `parallel for` cannot borrow `mut` a place from outside the loop" (fun () ->
       one_diagnostic
         "fn f(items: List[Int64]) {\n\
         \  var total: List[Int64] = []\n\
@@ -1354,7 +1519,8 @@ let () =
         \  }\n\
          }\n"
         "ownership.data_race");
-  test "a parallel for cannot assign a place from outside it, even inside a branch" (fun () ->
+  test "a `parallel for` cannot assign a place from outside the loop, even inside a branch"
+    (fun () ->
       one_diagnostic
         "fn f(ready: Bool) {\n\
         \  var total = 0\n\
@@ -1365,7 +1531,7 @@ let () =
         \  }\n\
          }\n"
         "ownership.data_race");
-  test "a parallel for may change its own element and locals" (fun () ->
+  test "a `parallel for` can mutate its own element and locals" (fun () ->
       fine
         "fn f(items: mut List[Int64]) {\n\
         \  parallel for item in mut items {\n\
@@ -1374,7 +1540,7 @@ let () =
         \    item = doubled\n\
         \  }\n\
          }\n");
-  test "a call cannot view a place another of its arguments moves" (fun () ->
+  test "a call cannot take a view of a place that another argument moves" (fun () ->
       one_diagnostic
         "fn both(first: List[Int64], second: own List[Int64]) {}\n\n\
          fn f(items: own List[Int64]) {\n\
@@ -1394,7 +1560,7 @@ let () =
   let tree =
     "type Tree =\n  | Leaf\n  | indirect Node(left: Tree, value: Int64, right: Tree)\n\n"
   in
-  test "a method that yields through itself inside a branch cannot be pulled" (fun () ->
+  test "a method that yields recursively inside a branch cannot be pulled" (fun () ->
       one_diagnostic
         (tree
        ^ "fn Tree.odd(self) yields Int64 {\n\
@@ -1414,7 +1580,7 @@ let () =
          \  mut cursor.next()\n\
           }\n")
         "ownership.not_pullable");
-  test "methods that yield through each other cannot be pulled" (fun () ->
+  test "mutually recursive yielding methods cannot be pulled" (fun () ->
       one_diagnostic
         (tree
        ^ "fn Tree.first(self) yields Int64 {\n\
@@ -1437,7 +1603,7 @@ let () =
          \  mut cursor.next()\n\
           }\n")
         "ownership.not_pullable");
-  test "a call's result does not view a Plain argument it was given" (fun () ->
+  test "a call's result does not view a `Plain` argument" (fun () ->
       fine
         "fn window(items: List[Int64], start: USize) -> Slice[Int64] {\n\
         \  items[start..]\n\
@@ -1446,7 +1612,7 @@ let () =
         \  let start: USize = 1\n\
         \  window(items, start)\n\
          }\n");
-  test "a lending method's path that cannot finish need not yield" (fun () ->
+  test "a diverging path of a lending method need not yield" (fun () ->
       fine
         "type Grid(cells: List[Int64])\n\n\
          fn Grid.cell(self, ready: Bool) lends Int64 {\n\
@@ -1473,7 +1639,7 @@ let () =
          \  var each = same(prefix)\n\
          \  mut each.next()\n\
           }\n"));
-  test "a cursor may view a string literal, which lives in static memory" (fun () ->
+  test "a cursor may view a string literal, which has static storage" (fun () ->
       fine (same ^ "fn f() -> Option[String] {\n  var each = same(\"a\")\n  mut each.next()\n}\n"));
   test "a slice cannot view a temporary list" (fun () ->
       one_diagnostic
@@ -1497,7 +1663,7 @@ let () =
         \  mut each.next()\n\
          }\n"
         "ownership.not_pullable");
-  test "a for loop over a held cursor of String elements is an error too" (fun () ->
+  test "a `for` loop over a stored cursor of `String` elements is an error too" (fun () ->
       one_diagnostic
         "fn f(names: List[String]) {\n\
         \  var each = names.each()\n\
@@ -1583,7 +1749,7 @@ let () =
          \  }\n\
           }\n\n\
           fn keep_found(found: own Option[String]) {}\n"));
-  test "a while loop's is binding may be moved each time round" (fun () ->
+  test "an `is` binding of a `while` condition may be moved in every iteration" (fun () ->
       fine (make ^ "fn f() {\n  while make() is Some(text) {\n    keep(own text)\n  }\n}\n"));
   test "an is binding in an if inside a loop may be moved" (fun () ->
       fine
@@ -1616,18 +1782,13 @@ let disjoint_obligations text =
   List.fold_left
     (fun total declaration ->
       match Query.demand database Ownership.ownership (Resolve.Names.key_of declaration) with
-      | Some result ->
-          total
-          + List.length
-              (List.filter
-                 (function Checked.Disjoint _ -> true | _ -> false)
-                 result.Ownership.obligations)
+      | Some result -> total + List.length result.Ownership.disjoint
       | None -> total)
     0
     (Query.demand database Resolve.Names.declarations module_)
 
 let () =
-  test "two slices of one list lent together are left to the prover" (fun () ->
+  test "two slices of one list borrowed by one call produce a `Disjoint` obligation" (fun () ->
       let found =
         disjoint_obligations
           "fn both(first: mut Slice[Int64], second: mut Slice[Int64]) {}\n\n\
@@ -1636,7 +1797,7 @@ let () =
            }\n"
       in
       if found <> 1 then fail "%d obligations" found);
-  test "parallel branches that change two elements are left to the prover" (fun () ->
+  test "`parallel` branches that mutate two elements produce a `Disjoint` obligation" (fun () ->
       let found =
         disjoint_obligations
           "fn f(items: mut List[Int64], first: USize, second: USize) {\n\
@@ -1647,7 +1808,8 @@ let () =
            }\n"
       in
       if found <> 1 then fail "%d obligations" found);
-  test "a slice lent `mut` beside a slice that is viewed leaves an obligation" (fun () ->
+  test "a `mut` slice argument that may alias a view argument produces a `Disjoint` obligation"
+    (fun () ->
       let found =
         disjoint_obligations
           "fn f(first: mut Slice[Int64], other: Slice[Int64]) {}\n\n\
@@ -1656,7 +1818,8 @@ let () =
            }\n"
       in
       if found <> 1 then fail "%d obligations" found);
-  test "an element lent `mut` beside a slice that is viewed leaves an obligation" (fun () ->
+  test "a `mut` element argument that may alias a view argument produces a `Disjoint` obligation"
+    (fun () ->
       let found =
         disjoint_obligations
           "fn f(first: mut Int64, other: Slice[Int64]) {}\n\n\
@@ -1725,15 +1888,15 @@ let () =
         (grid
        ^ "fn change(cell: mut Cell) {}\n\nfn f(grid: mut Grid) {\n  change(grid.cell(0))\n}\n")
         "types.wrong_mark");
-  test "a part that is lent cannot be given up" (fun () ->
+  test "a lent part cannot be moved" (fun () ->
       one_diagnostic
         (grid ^ "fn take(cell: own Cell) {}\n\nfn f(grid: Grid) {\n  take(grid.cell(0))\n}\n")
         "types.missing_mark");
-  test "a part that is lent cannot be returned" (fun () ->
+  test "a lent part cannot be returned" (fun () ->
       one_diagnostic
         (grid ^ "fn f(grid: Grid) -> Cell {\n  grid.cell(0)\n}\n")
         "ownership.not_owned");
-  test "a name cannot keep a part that is lent" (fun () ->
+  test "a `let` cannot bind a lent part" (fun () ->
       one_diagnostic
         (grid
        ^ "fn look(cell: Cell) {}\n\n\
@@ -1742,9 +1905,9 @@ let () =
          \  look(kept)\n\
           }\n")
         "ownership.keeps_lent_part");
-  test "a name copies a `Plain` part that is lent" (fun () ->
+  test "a `let` copies a `Plain` lent part" (fun () ->
       fine (counter ^ "fn f(counter: Counter) -> Int64 {\n  let now = counter.current()\n  now\n}\n"));
-  test "matching a part that is lent binds views of it, which cannot be given up" (fun () ->
+  test "a `match` on a lent part binds views of it, which cannot be moved" (fun () ->
       one_diagnostic
         (grid
        ^ "fn take(name: own String) {}\n\n\
@@ -1754,7 +1917,9 @@ let () =
          \  }\n\
           }\n")
         "ownership.not_owned");
-  test "a place is lent whole, so two parts of it are not lent `mut` in one statement" (fun () ->
+  test
+    "a lending call borrows its whole receiver, so two parts cannot be lent `mut` in one statement"
+    (fun () ->
       one_diagnostic
         (grid
        ^ "fn touch(first: mut Cell, second: mut Cell) {}\n\n\
@@ -1762,7 +1927,7 @@ let () =
          \  touch(mut grid.cell(0), second: mut grid.cell(1))\n\
           }\n")
         "ownership.conflicting_loan");
-  test "a place and a part it lends `mut` do not go to one call" (fun () ->
+  test "a place and a part that it lends `mut` cannot be passed to one call" (fun () ->
       one_diagnostic
         (grid
        ^ "fn both(grid: Grid, cell: mut Cell) {}\n\n\
@@ -1770,17 +1935,18 @@ let () =
          \  both(grid, cell: mut grid.cell(0))\n\
           }\n")
         "ownership.changed_while_viewed");
-  test "a place lent read-only is not changed in the same statement" (fun () ->
+  test "a receiver that a lending call borrows read-only cannot be mutated in the same statement"
+    (fun () ->
       one_diagnostic
         (tally ^ "fn f(tally: mut Tally) {\n  tally[0] = tally[1]\n}\n")
         "ownership.changed_while_viewed");
   test "two parts of a place are lent read-only in one statement" (fun () ->
       fine (tally ^ "fn f(tally: Tally) -> Int64 {\n  tally[0] + tally[1]\n}\n"));
-  test "a lend ends with its statement" (fun () ->
+  test "a lending call's loan ends with its statement" (fun () ->
       fine
         (grid
        ^ "fn f(grid: mut Grid) -> USize {\n  mut grid.cell(0).visit()\n  grid.cells.length()\n}\n"));
-  test "what a `while` loop's test lends goes back before its body" (fun () ->
+  test "a loan started in a `while` condition ends before the loop body" (fun () ->
       fine
         (counter
        ^ "fn f(counter: mut Counter) {\n\
@@ -1788,11 +1954,11 @@ let () =
          \    mut counter.step()\n\
          \  }\n\
           }\n"));
-  test "two indexes of a user's collection are not lent `mut` together" (fun () ->
+  test "two indexes of a user-defined collection cannot be lent `mut` in one statement" (fun () ->
       one_diagnostic
         (tally ^ "fn f(tally: mut Tally) {\n  bump(mut tally[0], second: mut tally[1])\n}\n")
         "ownership.conflicting_loan");
-  test "two indexes of a list are lent `mut` together, for the prover to show apart" (fun () ->
+  test "two `mut` indexes of a list in one call produce a `Disjoint` obligation" (fun () ->
       fine
         "fn bump(first: mut Int64, second: mut Int64) {\n\
         \  first = 1\n\
@@ -1807,7 +1973,7 @@ let () =
 let window = "type Window(view: Slice[Int64])\n\n"
 
 let () =
-  test "a list given mut views what was passed to the call" (fun () ->
+  test "a `mut` list argument stores the call's view arguments" (fun () ->
       one_diagnostic
         "fn f() -> USize {\n\
         \  var data: List[Int64] = [1, 2, 3]\n\
@@ -1817,7 +1983,7 @@ let () =
         \  views.length()\n\
          }\n"
         "ownership.changed_while_viewed");
-  test "a list given mut no longer views what was passed once it is not used" (fun () ->
+  test "the views stored in a `mut` list argument end when the list is dead" (fun () ->
       fine
         "fn f() -> USize {\n\
         \  var data: List[Int64] = [1, 2, 3]\n\
@@ -1827,7 +1993,7 @@ let () =
         \  mut data.push(4)\n\
         \  count\n\
          }\n");
-  test "a place given mut to a function views what the function was lent" (fun () ->
+  test "a `mut` argument of a function stores the function's view arguments" (fun () ->
       one_diagnostic
         "fn keep(kept: mut List[Slice[Int64]], view: Slice[Int64]) {\n\
         \  mut kept.push(view)\n\
@@ -1840,7 +2006,7 @@ let () =
         \  views.length()\n\
          }\n"
         "ownership.changed_while_viewed");
-  test "a view put in a place inside a branch is still held after it" (fun () ->
+  test "a view stored in a place inside a branch is still stored after the branch" (fun () ->
       one_diagnostic
         "fn f(often: Bool) -> USize {\n\
         \  var data: List[Int64] = [1, 2, 3]\n\
@@ -1852,7 +2018,7 @@ let () =
         \  views.length()\n\
          }\n"
         "ownership.changed_while_viewed");
-  test "a field assigned a view makes its record view what the value does" (fun () ->
+  test "a record whose field is assigned a view has the value's views" (fun () ->
       one_diagnostic
         (window
        ^ "fn f() -> USize {\n\
@@ -1864,7 +2030,7 @@ let () =
          \  window.view.length()\n\
           }\n")
         "ownership.changed_while_viewed");
-  test "a place given mut cannot keep a view of a temporary" (fun () ->
+  test "a `mut` argument cannot store a view of a temporary" (fun () ->
       one_diagnostic
         "fn make() -> List[Int64] {\n\
         \  [1, 2, 3]\n\
@@ -1875,32 +2041,34 @@ let () =
         \  views.length()\n\
          }\n"
         "ownership.views_temporary");
-  test "a mut parameter cannot be given a view of a local" (fun () ->
+  test "a view of a local cannot be stored in a `mut` parameter" (fun () ->
       one_diagnostic
         "fn f(kept: mut List[Slice[Int64]]) {\n\
         \  let local: List[Int64] = [1, 2, 3]\n\
         \  mut kept.push(local[0..2])\n\
          }\n"
         "ownership.view_escapes");
-  test "a mut parameter can be given a view that the function was given" (fun () ->
+  test "a view argument can be stored in a `mut` parameter" (fun () ->
       fine
         "fn f(kept: mut List[Slice[Int64]], source: Slice[Int64]) {\n\
         \  mut kept.push(source[0..2])\n\
          }\n");
-  test "a mut parameter cannot be given a view of a parameter that is only lent" (fun () ->
+  test "a view of a borrowed parameter that is not a view cannot be stored in a `mut` parameter"
+    (fun () ->
       one_diagnostic
         "fn f(kept: mut List[Slice[Int64]], source: List[Int64]) {\n\
         \  mut kept.push(source[0..2])\n\
          }\n"
         "ownership.view_escapes");
-  test "what a mut parameter views cannot be changed in the rest of the function" (fun () ->
+  test "a place that a `mut` parameter views cannot be mutated in the rest of the function"
+    (fun () ->
       one_diagnostic
         "fn f(kept: mut List[Slice[Int64]], source: mut Slice[Int64]) {\n\
         \  mut kept.push(source[0..2])\n\
         \  source = source[1..]\n\
          }\n"
         "ownership.changed_while_viewed");
-  test "a mut self method cannot put a view of a local in self" (fun () ->
+  test "a `mut self` method cannot store a view of a local in `self`" (fun () ->
       one_diagnostic
         (window
        ^ "fn Window.narrow(mut self) {\n\
@@ -1908,21 +2076,23 @@ let () =
          \  self.view = local[0..1]\n\
           }\n")
         "ownership.view_escapes");
-  test "a mut self method can put a view that it was given in self" (fun () ->
+  test "a `mut self` method can store a view argument in `self`" (fun () ->
       fine
         (window ^ "fn Window.widen(mut self, data: Slice[Int64]) {\n  self.view = data[0..2]\n}\n"));
-  test "a mut self method cannot put a view of a parameter that is only lent in self" (fun () ->
+  test
+    "a `mut self` method cannot store in `self` a view of a borrowed parameter that is not a view"
+    (fun () ->
       one_diagnostic
         (window ^ "fn Window.widen(mut self, data: List[Int64]) {\n  self.view = data[0..2]\n}\n")
         "ownership.view_escapes");
-  test "a mut self method cannot put a view of a part of self in self" (fun () ->
+  test "a `mut self` method cannot make `self` self-referential" (fun () ->
       one_diagnostic
         "type Cached(items: List[Int64], recent: Slice[Int64])\n\n\
          fn Cached.refresh(mut self) {\n\
         \  self.recent = self.items[0..1]\n\
          }\n"
         "ownership.self_referential");
-  test "a view that a mut self method was given is viewed by what it was called on" (fun () ->
+  test "the receiver of a `mut self` method stores the method's view arguments" (fun () ->
       one_diagnostic
         (window
        ^ "fn Window.widen(mut self, data: Slice[Int64]) {\n\
@@ -1937,7 +2107,7 @@ let () =
          \  window.view.length()\n\
           }\n")
         "ownership.changed_while_viewed");
-  test "a result views what was lent mut to its call" (fun () ->
+  test "a call's result views its `mut` arguments" (fun () ->
       one_diagnostic
         "fn first(data: mut List[Int64]) -> Slice[Int64] {\n\
         \  data[0..1]\n\
@@ -1949,10 +2119,10 @@ let () =
         \  view.length()\n\
          }\n"
         "ownership.changed_while_viewed");
-  test "a function cannot return a view of a parameter it owns" (fun () ->
+  test "a function cannot return a view of an `own` parameter" (fun () ->
       one_diagnostic "fn f(data: own List[Int64]) -> Slice[Int64] {\n  data[0..1]\n}\n"
         "ownership.view_escapes");
-  test "a function can return a view it was given to own" (fun () ->
+  test "a function can return a view that it received as an `own` argument" (fun () ->
       fine "fn f(view: own Slice[Int64]) -> Slice[Int64] {\n  view\n}\n");
   test "a function can return a local that views its parameter" (fun () ->
       fine

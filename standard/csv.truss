@@ -1,3 +1,4 @@
+use standard::intrinsic
 use standard::streams
 
 public type Options(delimiter: Character = Character",", quote: Character = Character"\"", trim: Bool = false)
@@ -9,8 +10,16 @@ public type ParseError(kind: ParseErrorKind, line: USize, column: USize)
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self.kind {
+      UnterminatedQuote => mut output.write("a quoted field that is never closed, opened")
+      UnexpectedQuote => mut output.write("a quote inside a field that is not quoted,")
+    }
+    mut output.write(" at line ")
+    self.line.display(mut output)
+    mut output.write(", column ")
+    self.column.display(mut output)
   }
 }
 
@@ -20,35 +29,258 @@ public type ReadError =
   derives Equal
 
 impl Display for ReadError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      System(error) => error.display(mut output)
+      Parse(error) => error.display(mut output)
+    }
   }
 }
 
-public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[List[String]], ParseError]
-  cost time O(text.length())
+fn is_blank(character: Character) -> Bool
+  cost time O(1)
+  cost allocations == 0
 {
-  todo
+  character == Character" " || character == Character"\t"
+}
+
+fn append_field(row: mut List[String], field: own String, trimmed_length: USize, trim: Bool)
+  requires trimmed_length <= field.length()
+  cost amortized time O(1)
+{
+  var trimmed = own field
+  if trim {
+    intrinsic::storage_shorten(mut trimmed.storage, length: trimmed_length)
+  }
+  mut row.push(own trimmed)
+}
+
+type ParserState(
+  rows: List[List[String]],
+  row: List[String],
+  field: String,
+  trimmed_length: USize,
+  quoted: Bool,
+  quote_closed: Bool,
+  row_started: Bool,
+  line: USize,
+  column: USize,
+  quote_line: USize,
+  quote_column: USize,
+)
+  invariant trimmed_length <= field.length()
+
+fn advance(state: mut ParserState, text: StringSlice, index: USize, options: Options) -> Result[USize, ParseError]
+  requires index < text.length()
+  ensures !(result is Ok(next) && (next <= index || next > text.length()))
+  cost time finite
+{
+  let decoded = text.decode(index)
+  let character = decoded.character
+  var next = index + decoded.length
+  let newline = character == Character"\n" || character == Character"\r"
+  if state.quoted {
+    if character != options.quote {
+      mut state.field.push_character(character)
+      state.trimmed_length = state.field.length()
+    } else if next < text.length() && text.decode(next).character == options.quote {
+      mut state.field.push_character(character)
+      state.trimmed_length = state.field.length()
+      next = next + text.decode(next).length
+      state.column = state.column.saturating_add(1)
+    } else {
+      state.quoted = false
+      state.quote_closed = true
+    }
+  } else if character == options.quote {
+    if state.quote_closed || state.field.length() > 0 {
+      return Err(ParseError(kind: ParseErrorKind.UnexpectedQuote, line: state.line, column: state.column))
+    }
+    state.quoted = true
+    state.row_started = true
+    state.quote_line = state.line
+    state.quote_column = state.column
+  } else if character == options.delimiter {
+    append_field(
+      mut state.row,
+      field: own state.field,
+      trimmed_length: state.trimmed_length,
+      trim: options.trim && !state.quote_closed,
+    )
+    state.field = ""
+    state.trimmed_length = 0
+    state.quote_closed = false
+    state.row_started = true
+  } else if newline {
+    if state.row_started {
+      append_field(
+        mut state.row,
+        field: own state.field,
+        trimmed_length: state.trimmed_length,
+        trim: options.trim && !state.quote_closed,
+      )
+      state.field = ""
+      state.trimmed_length = 0
+    }
+    mut state.rows.push(own state.row)
+    state.row = []
+    state.quote_closed = false
+    state.row_started = false
+    if character == Character"\r" && next < text.length() && text.decode(next).character == Character"\n" {
+      next = next + text.decode(next).length
+    }
+  } else {
+    let ignored = options.trim && is_blank(character) && (state.quote_closed || state.field.length() == 0)
+    if state.quote_closed && !ignored {
+      return Err(ParseError(kind: ParseErrorKind.UnexpectedQuote, line: state.line, column: state.column))
+    }
+    state.row_started = true
+    if !ignored {
+      mut state.field.push_character(character)
+      if !is_blank(character) {
+        state.trimmed_length = state.field.length()
+      }
+    }
+  }
+  if newline {
+    state.line = state.line.saturating_add(1)
+    state.column = 1
+  } else {
+    state.column = state.column.saturating_add(1)
+  }
+  Ok(next)
+}
+
+public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[List[String]], ParseError]
+  cost time finite
+{
+  var state = ParserState(
+    rows: [],
+    row: [],
+    field: "",
+    trimmed_length: 0,
+    quoted: false,
+    quote_closed: false,
+    row_started: false,
+    line: 1,
+    column: 1,
+    quote_line: 1,
+    quote_column: 1,
+  )
+  var index: USize = 0
+  while index < text.length()
+    invariant index <= text.length()
+    invariant state.trimmed_length <= state.field.length()
+    decreases text.length() - index
+  {
+    index = advance(mut state, text: text, index: index, options: options)?
+  }
+  if state.quoted {
+    return Err(ParseError(
+      kind: ParseErrorKind.UnterminatedQuote,
+      line: state.quote_line,
+      column: state.quote_column,
+    ))
+  }
+  if state.row_started {
+    append_field(
+      mut state.row,
+      field: own state.field,
+      trimmed_length: state.trimmed_length,
+      trim: options.trim && !state.quote_closed,
+    )
+    mut state.rows.push(own state.row)
+  }
+  Ok(own state.rows)
+}
+
+fn needs_quotes(field: StringSlice, options: Options) -> Bool
+  cost time finite
+{
+  if field.length() == 0 {
+    return false
+  }
+  var index: USize = 0
+  while index < field.length()
+    invariant index <= field.length()
+    decreases field.length() - index
+  {
+    let decoded = field.decode(index)
+    let character = decoded.character
+    let special = character == options.delimiter || character == options.quote
+    if special || character == Character"\n" || character == Character"\r" {
+      return true
+    }
+    index += decoded.length
+  }
+  is_blank(field.decode(0).character) || field.byte(field.length() - 1) == 32 || field.byte(field.length() - 1) == 9
+}
+
+fn push_field(text: mut String, field: StringSlice, options: Options, alone: Bool)
+  cost time finite
+{
+  if !(needs_quotes(field, options: options) || (alone && field.length() == 0)) {
+    mut text.push(field)
+    return
+  }
+  mut text.push_character(options.quote)
+  var index: USize = 0
+  while index < field.length()
+    invariant index <= field.length()
+    decreases field.length() - index
+  {
+    let decoded = field.decode(index)
+    if decoded.character == options.quote {
+      mut text.push_character(options.quote)
+    }
+    mut text.push_character(decoded.character)
+    index += decoded.length
+  }
+  mut text.push_character(options.quote)
+}
+
+fn push_row(text: mut String, fields: Slice[String], options: Options)
+  cost time finite
+{
+  for index in 0..fields.length() {
+    if index > 0 {
+      mut text.push_character(options.delimiter)
+    }
+    push_field(mut text, field: fields[index].slice(), options: options, alone: fields.length() == 1)
+  }
 }
 
 public fn format(rows: Slice[List[String]], options: Options = Options()) -> String
   cost time finite
 {
-  todo
+  var text = ""
+  for index in 0..rows.length() {
+    push_row(mut text, fields: rows[index].slice(), options: options)
+    mut text.push("\n")
+  }
+  text
 }
 
 public fn format_row(fields: Slice[String], output: mut TextBuilder, options: Options = Options())
   cost time finite
 {
-  todo
+  var text = ""
+  push_row(mut text, fields: fields, options: options)
+  mut output.write(text.slice())
 }
 
 public type Table(header: List[String], rows: List[List[String]])
 
 public fn parse_table(text: StringSlice, options: Options = Options()) -> Result[Table, ParseError]
-  cost time O(text.length())
+  cost time finite
 {
-  todo
+  var rows = parse(text, options: options)?
+  if rows.length() == 0 {
+    return Ok(Table(header: [], rows: []))
+  }
+  let header = mut rows.remove_at(0)
+  Ok(Table(header: own header, rows: own rows))
 }
 
 public fn Table.column(self, name: StringSlice) -> Option[USize]
@@ -56,37 +288,133 @@ public fn Table.column(self, name: StringSlice) -> Option[USize]
     Some(index) => index < self.header.length()
     None => true
   }
-  cost time O(self.header.length())
+  cost time O(self.header.length() * (1 + name.length()))
 {
-  todo
+  var index: USize = 0
+  while index < self.header.length()
+    invariant index <= self.header.length()
+    decreases self.header.length() - index
+    cost time O(index * (1 + name.length()))
+  {
+    if self.header[index].length() == name.length() && self.header[index].starts_with(name) {
+      return Some(index)
+    }
+    index += 1
+  }
+  None
 }
 
 public fn Table.cell(self, row: USize, name: StringSlice) -> Option[StringSlice]
-  cost time O(self.header.length())
+  cost time O(self.header.length() * (1 + name.length()))
 {
-  todo
+  match self.column(name) {
+    Some(column) => {
+      if row < self.rows.length() && column < self.rows[row].length() {
+        Some(self.rows[row][column].slice())
+      } else {
+        None
+      }
+    }
+    None => None
+  }
 }
 
 public fn Table.format(self, options: Options = Options()) -> String
   cost time finite
 {
-  todo
+  var text = ""
+  push_row(mut text, fields: self.header.slice(), options: options)
+  mut text.push("\n")
+  mut text.push(format(self.rows.slice(), options: options).slice())
+  text
 }
 
 public opaque type RowReader[Source: streams::Reader](source: streams::BufferedReader[Source], options: Options)
 
 public fn RowReader[Source: streams::Reader].new(source: own Source, options: Options = Options()) -> RowReader[Source] {
-  todo
+  RowReader(source: streams::BufferedReader.new(own source), options: options)
+}
+
+fn quotes_in(text: StringSlice, quote: Character) -> USize
+  cost time finite
+{
+  var count: USize = 0
+  var index: USize = 0
+  while index < text.length()
+    invariant index <= text.length()
+    invariant count <= index
+    decreases text.length() - index
+  {
+    let decoded = text.decode(index)
+    if decoded.character == quote {
+      count += 1
+    }
+    index += decoded.length
+  }
+  count
 }
 
 public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option[List[String]], ReadError]
   uses Handles
 {
-  todo
+  var record = ""
+  var in_quotes = false
+  var more = true
+  var has_line = false
+  while more
+    invariant self.source.start <= self.source.pending.length()
+    invariant self.source.room > 0
+  {
+    match mut self.source.read_line() {
+      Ok(Some(line)) => {
+        if has_line {
+          mut record.push("\n")
+        }
+        has_line = true
+        if quotes_in(line.slice(), quote: self.options.quote) % 2 == 1 {
+          in_quotes = !in_quotes
+        }
+        mut record.push(line.slice())
+        more = in_quotes
+      }
+      Ok(None) => {
+        more = false
+      }
+      Err(error) => return Err(ReadError.System(error: error))
+    }
+  }
+  if !has_line {
+    return Ok(None)
+  }
+  match parse(record.slice(), options: self.options) {
+    Ok(rows) => {
+      var read = own rows
+      if read.length() == 0 {
+        return Ok(Some([]))
+      }
+      Ok(Some(mut read.remove_at(0)))
+    }
+    Err(error) => Err(ReadError.Parse(error: error))
+  }
 }
 
 public fn RowReader[Source: streams::Reader].rows(mut self) yields own Result[List[String], ReadError]
   uses Handles
 {
-  todo
+  var more = true
+  while more
+    invariant self.source.start <= self.source.pending.length()
+    invariant self.source.room > 0
+  {
+    match mut self.next_row() {
+      Ok(Some(row)) => yield Ok(own row)
+      Ok(None) => {
+        more = false
+      }
+      Err(error) => {
+        more = false
+        yield Err(error)
+      }
+    }
+  }
 }

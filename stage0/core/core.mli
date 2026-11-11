@@ -295,17 +295,17 @@ and conversion =
       (** An [Integer] converted to a built-in integer type. Specifications only. The prover checks
           that the value fits. *)
 
-(** The variable a quantifier binds, and what it ranges over. *)
+(** The variable that a quantifier binds, and its range. *)
 and binder =
   | Over_type of { local : local; name : string; type_ : Types.ty }  (** [value: Int64] *)
   | Over_range of { pattern : pattern; start : expression; stop : expression; inclusive : bool }
   | Over_collection of { pattern : pattern; collection : expression }
       (** The elements of a collection, in a specification. *)
   | Over_each of { pattern : pattern; call : expression }
-      (** The elements of a collection, in code that runs. [call] is the read-only {!Call} of the
-          collection's [each] that a [for] loop over the collection makes, so the quantifier runs as
-          that loop does and stops at the first answer. The collection is the call's one argument.
-      *)
+      (** The elements of a collection, in executable code. [call] is the read-only {!Call} of the
+          collection's [each], the same call that a [for] loop over the collection makes, so the
+          quantifier runs as that loop and stops at the first counterexample or witness. The
+          collection is the call's one argument. *)
 
 and implementation = {
   origin : origin;
@@ -373,7 +373,7 @@ and task =
   | Iteration of { loop : origin }
       (** An iteration of the [concurrent for] loop with the origin [loop]. *)
 
-(** What a [for] loop iterates over. *)
+(** The iteration of a [for] loop. *)
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
       (** A range of built-in integers or characters. *)
@@ -388,7 +388,8 @@ and iteration =
 and loop_clause =
   | Invariant of expression
   | Decreases of expression list
-  | Cost of cost  (** A bound on what the loop has spent so far, checked at every iteration. *)
+  | Cost of cost
+      (** A bound on the cost that the loop has incurred so far, checked at every iteration. *)
 
 and cost = {
   origin : origin;  (** The [cost] clause. *)
@@ -397,10 +398,10 @@ and cost = {
   bound : bound;
 }
 
-(** What a [cost] clause counts. *)
+(** The quantity that a [cost] clause bounds. *)
 and resource = Time | Allocations | Allocated_bytes | Calls of calls_target
 
-(** What a [calls(...)] clause counts calls of. *)
+(** The callee whose calls a [calls(...)] clause counts. *)
 and calls_target =
   | Function_parameter of local  (** Calls through a function-typed parameter. *)
   | Capability of Path.t  (** Calls of any method of a capability. *)

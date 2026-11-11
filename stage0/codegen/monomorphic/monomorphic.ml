@@ -10,6 +10,9 @@ type context = {
 let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
 let builtin builtin = Ground.Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 
+let panic_capability : Path.t =
+  Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Panic" }
+
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
   match context.normalize (Types.substitute substitution ty) with
   | Named { path; arguments } ->
@@ -61,12 +64,14 @@ and ground_function context substitution (f : Types.function_type) : Ground.func
     result = ground_result f.output;
     uses =
       List.sort_uniq Path.compare
-        (List.concat_map
-           (function
-             | Types.Capability path -> [ path ]
-             | Capability_parameter p -> context.capabilities p
-             | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
-           f.uses);
+        (List.filter
+           (fun path -> not (Path.equal path panic_capability))
+           (List.concat_map
+              (function
+                | Types.Capability path -> [ path ]
+                | Capability_parameter p -> context.capabilities p
+                | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
+              f.uses));
   }
 
 let usize = builtin USize
@@ -147,6 +152,7 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
       | Some Storage, [ Type element ] -> Storage.shape ~usize element
       | Some View, [ Type element ] -> Storage.view_shape ~usize element
       | Some Handle, [] -> Record [ ("descriptor", Raw (Integer Int32)) ]
+      | Some Shared, [ Type _ ] -> Record [ ("value", Raw (Pointer Opaque)) ]
       | Some Integer, _ -> bug "Integer exists only in specifications"
       | Some _, _ -> bug "a built-in type with the wrong arguments: %s" (Ground.to_string ty)
       | None, _ -> (
@@ -175,6 +181,9 @@ let kind context ty : Glue.kind =
   | Some element, _ -> Storage element
   | None, Ground.Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle ->
       Handle
+  | None, Ground.Named { path; arguments = [ Type value ] }
+    when Intrinsic.builtin_of_path path = Some Shared ->
+      Shared value
   | None, _ -> Shape (shape context ty)
 
 let debug_form : Ground.ty -> Glue.debug_form = function

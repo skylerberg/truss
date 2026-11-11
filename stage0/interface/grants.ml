@@ -1,8 +1,7 @@
-(* What a package's manifest grants each dependency, and what code of a
-   dependency uses that the grant does not cover. A grant is checked
-   wherever the dependency's code is named: where it is called, where a
-   function of it is taken as a value, and where an [impl] of it meets a
-   bound. *)
+(* The capabilities that a package's manifest grants to each dependency, and
+   the capabilities that a dependency's code uses beyond its grant. A grant
+   is checked wherever the dependency's code is referenced: at a call, at a
+   function value, and where an [impl] of the dependency satisfies a bound. *)
 
 module T = Types
 module Names = Resolve.Names
@@ -48,8 +47,8 @@ type grant = {
   unknown : string list;  (** The entries that name no capability *)
 }
 
-(* What a package's manifest grants a dependency, or [None] for a package it
-   does not list. *)
+(* The capabilities that a package's manifest grants to a dependency, or
+   [None] for a package that the manifest does not list. *)
 let granted =
   Query.query ~name:"granted" ~phase:Interfaces ~saved:true
     ~show:(fun (package, dependency) -> Printf.sprintf "%s to %s" package dependency)
@@ -68,10 +67,10 @@ let granted =
            (fun (entry : Workspace.dependency) -> entry.package = dependency)
            (Query.demand database Workspace.dependencies package)))
 
-(* The capabilities, of those some code of the package [of_] uses, that
-   [package]'s manifest does not grant it. A package's own code and the
-   standard library's need no grant, and a capability parameter stands for
-   what the caller passes, which is the caller's own. *)
+(* The capabilities that some code of the package [of_] uses and that
+   [package]'s manifest does not grant to it. A package's own code and the
+   standard library need no grant. A capability parameter is instantiated by
+   the caller with the caller's own capabilities, so it needs none either. *)
 let missing database ~package ~of_ (uses : T.capability list) =
   if of_ = package || of_ = Resolve.Prelude.standard then []
   else
@@ -93,9 +92,9 @@ let message ~what ~of_ capability =
      for `%s` in `truss.toml`."
     what (written capability) of_ (written capability) of_
 
-(* What the [impl]s that meet a bound may use: the [impl] found, and the
-   [impl]s that meet its own bounds in turn, each with the capabilities of
-   its methods. *)
+(* The capabilities that the [impl]s satisfying a bound can use: the
+   resolved [impl] and, recursively, the [impl]s that satisfy its own
+   bounds, each with the capabilities of its methods. *)
 let rec evidence_uses database ~bounds ?(depth = 0) (evidence : Impls.evidence) =
   match evidence with
   | From_impl { impl; substitution } when depth < 16 -> (
@@ -117,8 +116,8 @@ let rec evidence_uses database ~bounds ?(depth = 0) (evidence : Impls.evidence) 
                (Impls.required interface.impl_generics substitution))
   | _ -> []
 
-(* The sentences for what such [impl]s use and are not granted, in code of
-   [package]. *)
+(* The diagnostic messages for the capabilities that such [impl]s use
+   without a grant, in code of [package]. *)
 let messages database ~package impls =
   List.concat_map
     (fun (impl, (interface : T.impl_interface), uses) ->

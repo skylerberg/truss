@@ -198,6 +198,74 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Handle_release ->
       make ~output:(Returns (T.builtin Int32)) [ input ~mode:Own "handle" (T.builtin Handle) ]
   | Run_test -> make [ input "index" (T.builtin UInt32) ]
+  | Coroutine_start ->
+      let item = T.builtin UInt64 in
+      let work : T.function_type =
+        { inputs = [ (Read, item) ]; output = Returns T.unit; uses = []; costs = [] }
+      in
+      {
+        (make ~output:(Returns usize)
+           [ input ~mode:Own "work" (T.Function work); input "item" item ])
+        with
+        stores_functions = [ "work" ];
+      }
+  | Tasks_spawn ->
+      let item = T.builtin UInt64 in
+      let work : T.function_type =
+        { inputs = [ (Read, item) ]; output = Returns T.unit; uses = []; costs = [] }
+      in
+      {
+        (make ~output:(Returns bool)
+           [ input "group" item; input ~mode:Own "work" (T.Function work); input "item" item ])
+        with
+        stores_functions = [ "work" ];
+      }
+  | Shared_new | Shared_update | Shared_key -> (
+      let storable : T.trait_reference =
+        {
+          trait =
+            Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Storable" };
+          trait_arguments = [];
+          associated = [];
+        }
+      in
+      let bounded name =
+        { T.generic = parameter operation name; kind = Type_generic [ storable ] }
+      in
+      let shared = T.Named { path = Intrinsic.builtin_path Shared; arguments = [ T.Type value ] } in
+      match operation with
+      | Shared_new ->
+          {
+            (make ~output:(Returns shared) [ input ~mode:Own "value" value ]) with
+            generics = [ bounded "Value" ];
+          }
+      | Shared_update ->
+          let change : T.function_type =
+            {
+              inputs = [ (Mut, value); (Own, p "Input") ];
+              output = Returns (p "Result");
+              uses = [];
+              costs = [];
+            }
+          in
+          {
+            (make
+               ~output:(Returns (p "Result"))
+               [
+                 input "shared" shared;
+                 input ~mode:Own "input" (p "Input");
+                 input "change" (T.Function change);
+               ])
+            with
+            generics = [ bounded "Value"; generic "Input"; bounded "Result" ];
+          }
+      | _ ->
+          {
+            (make ~output:(Returns (T.builtin UInt64)) [ input "shared" shared ]) with
+            generics = [ bounded "Value" ];
+          })
+  | Coroutine_resume -> make ~output:(Returns bool) [ input "coroutine" usize ]
+  | Coroutine_suspend -> make []
   | Report_tests_to -> make [ input "descriptor" (T.builtin Int32) ]
   | Live_blocks -> make ~output:(Returns usize) []
   | Environment_entry ->
@@ -261,4 +329,6 @@ let cost (operation : Intrinsic.operation) =
   | Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
   | Storage_with_capacity -> { time = Constant_time; allocations = One_if_positive (Argument 0) }
   | Storage_from_array -> { time = Constant_time; allocations = One_if_positive (Generic "count") }
-  | Run_test | Libc _ -> { time = Unbounded_time; allocations = Unknown_allocations }
+  | Run_test | Libc _ | Coroutine_start | Coroutine_resume | Coroutine_suspend | Tasks_spawn
+  | Shared_new | Shared_update | Shared_key ->
+      { time = Unbounded_time; allocations = Unknown_allocations }

@@ -265,17 +265,21 @@ let definition visit found = definition_children (deep visit) found
 let tasks_capability : Path.t =
   Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Tasks" }
 
-(* Whether code can use [Tasks]: it has [concurrent] code, or a call in it
-   uses [Tasks] or a capability parameter, which may stand for [Tasks]. The
-   calls of an implementation that is provided [mut] around such code take
-   turns. [solved] gives what a capability variable stands for, for a core
-   form whose capability variables are not solved yet. *)
-let can_use_tasks ?(solved = fun (_ : int) : Types.capability list -> []) (body : block) : bool =
-  let found = ref false in
+(* How code can use [Tasks]. *)
+type tasks_use =
+  | Uses_tasks  (** It contains [concurrent] code, or a call in it uses [Tasks]. *)
+  | Through_parameter
+      (** A call in it uses a capability parameter, which may be instantiated with [Tasks]. *)
+  | No_tasks
+
+(* How code can use [Tasks]. [solved] gives the solution of a capability
+   variable, for a core form whose capability variables are not solved yet. *)
+let tasks_use ?(solved = fun (_ : int) : Types.capability list -> []) (body : block) : tasks_use =
+  let found = ref No_tasks in
   let rec used (capability : Types.capability) =
     match capability with
-    | Capability path -> if Path.equal path tasks_capability then found := true
-    | Capability_parameter _ -> found := true
+    | Capability path -> if Path.equal path tasks_capability then found := Uses_tasks
+    | Capability_parameter _ -> if !found = No_tasks then found := Through_parameter
     | Capability_variable variable -> List.iter used (solved variable)
   in
   block
@@ -287,8 +291,34 @@ let can_use_tasks ?(solved = fun (_ : int) : Types.capability list -> []) (body 
          statement =
            (fun node ->
              match node.kind with
-             | Concurrent _ | For { mode = Concurrent_loop; _ } -> found := true
+             | Concurrent _ | For { mode = Concurrent_loop; _ } -> found := Uses_tasks
              | _ -> ());
        })
     body;
   !found
+
+(* Whether code can use [Tasks]. An implementation that is provided [mut]
+   around such code is a monitor. *)
+let can_use_tasks ?solved (body : block) : bool = tasks_use ?solved body <> No_tasks
+
+(* Whether a yielding method yields by position: its body is one [for] loop
+   over a range of integers, and the loop body is one [yield]. The
+   iterations share no state, so a [parallel for] or a [concurrent for] over
+   the method can run the range loop's iterations at the same time. *)
+let yields_by_position (body : block) : bool =
+  match (body.statements, body.value) with
+  | ( [
+        {
+          kind =
+            For
+              {
+                iteration = Integer_range _;
+                body = { statements = [ { kind = Yield _; _ } ]; value = None; _ };
+                _;
+              };
+          _;
+        };
+      ],
+      None ) ->
+      true
+  | _ -> false

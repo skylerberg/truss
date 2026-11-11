@@ -1,14 +1,13 @@
-(* The values of integer constants, worked out exactly where the checker
+(* The values of integer constants, evaluated exactly where the checker
    needs them: a [USize] in a type argument, as in [Array[UInt8, size]].
-   Every other constant is built by code generation. Constants that refer to
+   Code generation evaluates every other constant. Constants that refer to
    each other in a cycle have no value. *)
 
 open Syntax
 
-(* A constant's value is worked out through the constants it refers to,
-   with the ones on the way kept in [visiting], so that a cycle is found
-   here and gives no value, rather than making the queries ask for each
-   other. *)
+(* Evaluates a constant through the constants that it refers to. [visiting]
+   holds the constants on the current path, so that a cycle is detected here
+   and gives no value, instead of becoming a query cycle. *)
 let rec expression database ~visiting resolved (value : expression) : Z.t option =
   let recurse = expression database ~visiting resolved in
   match value.kind with

@@ -56,6 +56,14 @@ let expression_at text written occurrence =
   | Some found -> found
   | None -> failwith (Printf.sprintf "no expression at %S" written)
 
+(* Whether the core form of the first definition has an integer literal
+   with this value. *)
+let has_integer text value =
+  List.exists
+    (fun (node : Core.expression) ->
+      match node.kind with Integer found -> Z.equal found (Z.of_int value) | _ -> false)
+    (first_core_nodes text).expressions
+
 let has_type text written ?(occurrence = 1) expected =
   let value, checked = expression_at text written occurrence in
   match checked.types.(value.id) with
@@ -141,7 +149,7 @@ let () =
           | Some _ -> fail "`%s` is another call" written
           | None -> fail "`%s` has no call" written)
         [ "first < second"; "second < third"; "first < third" ]);
-  test "an operand may be what an operator's method gives" (fun () ->
+  test "an operand can be the result of an operator's method" (fun () ->
       fine "fn f(left: Int64, right: Int64) -> Int64 {\n  left + right.multiply(2)\n}\n");
   test "a type without the operator's trait is an error" (fun () ->
       one_diagnostic "type Point(x: Int64)\n\nfn f(point: Point) -> Point {\n  point + point\n}\n"
@@ -173,7 +181,7 @@ let () =
          ^ "fn f(source: Int64, destination: Int64) {\n  copy_file(source, destination)\n}\n"));
   test "a missing argument is an error" (fun () ->
       one_diagnostic (functions ^ "fn f() {\n  copy_file(1)\n}\n") "types.missing_argument");
-  test "a parameter with a default may be left out" (fun () ->
+  test "an argument for a parameter with a default can be omitted" (fun () ->
       let text = "fn connect(host: Int64, port: UInt16 = 443) {}\n\nfn f() {\n  connect(1)\n}\n" in
       let value, checked = expression_at text "connect(1)" 1 in
       match checked.calls.(value.id) with
@@ -389,7 +397,7 @@ let () =
       fine "fn f() {\n  var names: List[String] = []\n}\n");
   test "a body's value must have the result type" (fun () ->
       one_diagnostic "fn f() -> Int64 {\n  true\n}\n" "types.mismatch");
-  test "an arm of type Never is left out of the match's type" (fun () ->
+  test "an arm of type Never does not contribute to the type of the match" (fun () ->
       fine
         "fn f(found: Option[Int64]) -> Int64 {\n\
         \  match found {\n\
@@ -523,7 +531,7 @@ let () =
      \  Sessions.touch(session)\n\
       }\n\n"
    in
-   test "a capability whose calls take turns has no method that takes a function that uses one"
+   test "a capability implemented by a monitor has no method with a callback that uses a capability"
      (fun () ->
        one_diagnostic
          (sessions
@@ -538,8 +546,9 @@ let () =
           \    }\n\
           \  }\n\
            }\n")
-         "capabilities.function_in_turn");
-   test "calls take no turns where the code inside the `provide` cannot use `Tasks`" (fun () ->
+         "capabilities.callback_may_deadlock");
+   test "an implementation is not a monitor if the body of its `provide` cannot use `Tasks`"
+     (fun () ->
        fine
          (sessions
         ^ "fn f() {\n\
@@ -547,6 +556,97 @@ let () =
           \  provide mut table {\n\
           \    serve(1)\n\
           \    serve(2)\n\
+          \  }\n\
+           }\n"));
+   let tally =
+     "capability Counter {\n\
+     \  fn bump()\n\
+      }\n\n\
+      type Tally(count: USize)\n\n\
+      impl Counter for Tally {\n\
+     \  fn bump(mut self) {\n\
+     \    self.count = 1\n\
+     \  }\n\
+      }\n\n\
+      type Scheduler(turn: UInt64)\n\n\
+      impl Tasks for Scheduler {\n\
+     \  fn open(self) -> UInt64 {\n\
+     \    0\n\
+     \  }\n\n\
+     \  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {\n\
+     \    false\n\
+     \  }\n\n\
+     \  fn join(self, task_group: UInt64) {}\n\n\
+     \  fn cancel(self, task_group: UInt64) -> Bool {\n\
+     \    false\n\
+     \  }\n\n\
+     \  fn cancelled(self) -> Bool {\n\
+     \    false\n\
+     \  }\n\n\
+     \  fn watch(self, key: UInt64) -> UInt64 {\n\
+     \    0\n\
+     \  }\n\n\
+     \  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {}\n\n\
+     \  fn wake(self, key: UInt64) {}\n\n\
+     \  fn lock(self, mutex: UInt64) {}\n\n\
+     \  fn unlock(self, mutex: UInt64) {}\n\n\
+     \  fn yield_now(self) {}\n\
+      }\n\n\
+      fn count_once()\n\
+     \  uses Counter\n\
+      {\n\
+     \  Counter.bump()\n\
+      }\n\n"
+   in
+   test "a monitor needs `Tasks` at its `provide`, not only in a nested one" (fun () ->
+       one_diagnostic
+         (tally
+        ^ "fn f() {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  let scheduler = Scheduler(turn: 0)\n\
+          \  provide mut tally {\n\
+          \    provide scheduler {\n\
+          \      concurrent {\n\
+          \        count_once()\n\
+          \        count_once()\n\
+          \      }\n\
+          \    }\n\
+          \  }\n\
+           }\n")
+         "capabilities.monitor_needs_tasks");
+   test
+     "a monitor can lock through `Tasks` of its `provide`, an enclosing one, or a capability \
+      parameter" (fun () ->
+       fine
+         (tally
+        ^ "fn same() {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  let scheduler = Scheduler(turn: 0)\n\
+          \  provide mut tally, scheduler {\n\
+          \    concurrent {\n\
+          \      count_once()\n\
+          \      count_once()\n\
+          \    }\n\
+          \  }\n\
+           }\n\n\
+           fn enclosing() {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  let scheduler = Scheduler(turn: 0)\n\
+          \  provide scheduler {\n\
+          \    provide mut tally {\n\
+          \      concurrent {\n\
+          \        count_once()\n\
+          \        count_once()\n\
+          \      }\n\
+          \    }\n\
+          \  }\n\
+           }\n\n\
+           fn through_parameter[capability Granted](run: (fn() uses Granted))\n\
+          \  uses Granted\n\
+           {\n\
+          \  var tally = Tally(count: 0)\n\
+          \  provide mut tally {\n\
+          \    run()\n\
           \  }\n\
            }\n")));
   test "an assignment through an index of a map takes the key as an owned value" (fun () ->
@@ -565,6 +665,63 @@ let () =
         "types.missing_mark";
       one_diagnostic "fn f(ports: Map[String, Int64]) {\n  ports[\"ftp\"] = 21\n}\n"
         "types.not_assignable");
+  (let keep =
+     "type Labeled(view: Slice[Int64], name: String)\n\n\
+      type Boxed[Value](value: Value)\n\n\
+      fn keep[Value: Storable](value: own Value) {}\n\n\
+      fn double(value: Int64) -> Int64 {\n\
+     \  value\n\
+      }\n\n\
+      trait Job: Storable {\n\
+     \  fn run(self) -> Int64\n\
+      }\n\n\
+      trait Task {\n\
+     \  fn run(self) -> Int64\n\
+      }\n\n\
+      type Count(value: Int64)\n\n\
+      impl Job for Count {\n\
+     \  fn run(self) -> Int64 {\n\
+     \    self.value\n\
+     \  }\n\
+      }\n\n\
+      impl Task for Count {\n\
+     \  fn run(self) -> Int64 {\n\
+     \    self.value\n\
+     \  }\n\
+      }\n\n"
+   in
+   test "a type that holds no view is Storable" (fun () ->
+       fine
+         (keep
+        ^ "fn f[Element: Storable](names: own List[String], element: own Element) {\n\
+          \  keep(5)\n\
+          \  keep(own names)\n\
+          \  keep(Boxed(value: \"a\".copy()))\n\
+          \  keep(own element)\n\
+           }\n"));
+   test "an any type is Storable when its trait requires Storable" (fun () ->
+       fine (keep ^ "fn f() {\n  let job: any Job = any Count(value: 1)\n  keep(own job)\n}\n"));
+   test "a trait that requires Storable cannot be implemented for a view type" (fun () ->
+       one_diagnostic
+         (keep ^ "impl Job for Labeled {\n  fn run(self) -> Int64 {\n    0\n  }\n}\n")
+         "types.missing_required_impl");
+   List.iter
+     (fun (name, body) ->
+       test name (fun () -> one_diagnostic (keep ^ body) "types.unsatisfied_bound"))
+     [
+       ("a slice is not Storable", "fn f(items: List[Int64]) {\n  keep(items[..])\n}\n");
+       ( "a record that holds a slice is not Storable",
+         "fn f(items: List[Int64]) {\n  keep(Labeled(view: items[..], name: \"a\".copy()))\n}\n" );
+       ( "a generic type is not Storable where its argument is not",
+         "fn f(items: List[Int64]) {\n  keep(Boxed(value: items[..]))\n}\n" );
+       ("a function type is not Storable", "fn f() {\n  keep(double)\n}\n");
+       ( "an any type is not Storable when its trait does not require it",
+         "fn f() {\n  let task: any Task = any Count(value: 1)\n  keep(own task)\n}\n" );
+       ( "a type parameter is Storable only when it is bounded",
+         "fn f[Element](element: own Element) {\n  keep(own element)\n}\n" );
+     ];
+   test "no impl of Storable can be written" (fun () ->
+       one_diagnostic (keep ^ "impl Storable for Labeled {}\n") "types.implements_built_in"));
   test "the body of a concurrent block gets its types" (fun () ->
       has_type
         "fn g(count: UInt16) {}\n\n\
@@ -580,11 +737,15 @@ let () =
         \  items.map(fn(item) { item + step })\n\
          }\n"
       in
-      let value, checked = expression_at text "fn(item)" 1 in
-      match checked.captures.(value.id) with
-      | Some [ _ ] -> ()
-      | Some found -> fail "%d captures" (List.length found)
-      | None -> fail "none recorded")
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match node.kind with Lambda { captures; _ } -> Some captures | _ -> None)
+          (first_core_nodes text).expressions
+      with
+      | [ [ _ ] ] -> ()
+      | [ found ] -> fail "%d captures" (List.length found)
+      | found -> fail "%d lambdas" (List.length found))
 
 (* Strings and collections *)
 
@@ -617,20 +778,13 @@ let () =
 let () =
   test "a for loop over a range of integers is a counted loop" (fun () ->
       let text = "fn f(count: USize) {\n  for i in 0..count {\n    let _ = i\n  }\n}\n" in
-      let database = setup [ ("app::main", text) ] in
-      let key =
-        Resolve.Names.key_of
-          (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main")))
-      in
-      match Query.demand database Infer.checked key with
-      | Some result ->
-          if
-            not
-              (Array.exists
-                 (function Some (Checked.Integer_range _) -> true | _ -> false)
-                 result.checked.loops)
-          then fail "no counted loop"
-      | None -> fail "not checked");
+      if
+        not
+          (List.exists
+             (fun (node : Core.statement) ->
+               match node.kind with For { iteration = Integer_range _; _ } -> true | _ -> false)
+             (first_core_nodes text).statements)
+      then fail "no counted loop");
   test "a for loop over a list drives its each" (fun () ->
       fine
         "fn f(items: List[Int64]) -> Int64 {\n\
@@ -963,7 +1117,7 @@ let () =
   test "a loop variable's type comes from the loop's header" (fun () ->
       one_diagnostic "fn f() {\n  for i in 0..10 {\n    let small: UInt8 = i\n  }\n}\n"
         "types.mismatch");
-  test "a mistake is not reported again as a type that cannot be worked out" (fun () ->
+  test "a mistake is not reported again as a type that cannot be inferred" (fun () ->
       let database =
         setup
           [ ("app::main", "fn f(items: List[Int64]) {\n  let _ = items.map(undefined_thing)\n}\n") ]
@@ -973,33 +1127,30 @@ let () =
   test "a Float32 literal too large is an error" (fun () ->
       one_diagnostic "fn f() {\n  let large: Float32 = 3.5e38\n}\n" "types.literal_out_of_range");
   test "a Float32 literal is rounded once, from its decimal" (fun () ->
-      let value, checked =
-        expression_at "fn f() {\n  let value: Float32 = 1.0000000596046447754\n}\n"
-          "1.0000000596046447754" 1
-      in
-      match checked.literals.(value.id) with
-      | Some (Float_value rounded) ->
+      match
+        List.filter_map
+          (fun (node : Core.expression) ->
+            match node.kind with Float rounded -> Some rounded | _ -> None)
+          (first_core_nodes "fn f() {\n  let value: Float32 = 1.0000000596046447754\n}\n")
+            .expressions
+      with
+      | [ rounded ] ->
           if rounded <> Float.of_string "0x1.000002p+0" then fail "rounded to %h" rounded
       | _ -> fail "no value");
-  test "each end of a range pattern records its own value" (fun () ->
-      let value, checked =
-        expression_at "fn f(n: Int64) -> Int64 {\n  match n {\n    1..=5 => 1\n    _ => 2\n  }\n}\n"
-          "match" 1
-      in
-      match value.kind with
-      | Match
-          {
-            arms = { patterns = [ { kind = Pattern_range { start; stop; _ }; id; _ } ]; _ } :: _;
-            _;
-          } -> (
-          match
-            (checked.literals.(start.id), checked.literals.(stop.id), checked.literals.(id))
-          with
-          | Some (Integer_value low), Some (Integer_value high), None
-            when Z.equal low (Z.of_int 1) && Z.equal high (Z.of_int 5) ->
-              ()
-          | _ -> fail "the ends are not recorded each by its own id")
-      | _ -> fail "not a match on a range");
+  test "a range pattern has the values of its two bounds" (fun () ->
+      match
+        List.filter_map
+          (fun (node : Core.pattern) ->
+            match node.kind with
+            | Range { start = { kind = Integer low; _ }; stop = { kind = Integer high; _ }; _ } ->
+                Some (Z.to_int low, Z.to_int high)
+            | _ -> None)
+          (first_core_nodes
+             "fn f(n: Int64) -> Int64 {\n  match n {\n    1..=5 => 1\n    _ => 2\n  }\n}\n")
+            .patterns
+      with
+      | [ (1, 5) ] -> ()
+      | _ -> fail "the range pattern does not have the bounds 1 and 5");
   test "a range pattern on a type that is not an integer or Character is an error" (fun () ->
       one_diagnostic
         "fn f(ready: Bool) -> Int64 {\n  match ready {\n    true..=false => 1\n    _ => 2\n  }\n}\n"
@@ -1018,17 +1169,9 @@ let () =
          }\n");
   test "a Character literal is a tagged string holding its scalar value" (fun () ->
       has_type "fn f() -> Character {\n  Character\"é\"\n}\n" "Character\"é\"" "Character";
-      let value, checked =
-        expression_at "fn f() -> Character {\n  Character\"é\"\n}\n" "Character\"é\"" 1
-      in
-      match checked.literals.(value.id) with
-      | Some (Integer_value scalar) when Z.equal scalar (Z.of_int 0xE9) -> ()
-      | _ -> fail "no value");
+      if not (has_integer "fn f() -> Character {\n  Character\"é\"\n}\n" 0xE9) then fail "no value");
   test "a UInt8 literal holds its ASCII character's value" (fun () ->
-      let value, checked = expression_at "fn f() -> UInt8 {\n  UInt8\"\\n\"\n}\n" "UInt8" 2 in
-      match checked.literals.(value.id) with
-      | Some (Integer_value byte) when Z.equal byte (Z.of_int 10) -> ()
-      | _ -> fail "no value");
+      if not (has_integer "fn f() -> UInt8 {\n  UInt8\"\\n\"\n}\n" 10) then fail "no value");
   test "a Character literal of two scalar values is an error" (fun () ->
       one_diagnostic "fn f() -> Character {\n  Character\"ab\"\n}\n" "types.bad_character");
   test "a UInt8 literal of a character that is not ASCII is an error" (fun () ->
@@ -1053,7 +1196,7 @@ let () =
   test "the string + fix keeps escapes" (fun () ->
       one_diagnostic "fn f(name: String) -> String {\n  \"a\\\"b\" + name\n}\n"
         "types.string_addition" ~fixed:"fn f(name: String) -> String {\n  \"a\\\"b${name}\"\n}\n");
-  test "a lambda cannot change what it captures" (fun () ->
+  test "a lambda cannot mutate a captured variable" (fun () ->
       one_diagnostic
         "fn f(items: List[Int64]) {\n\
         \  var count = 0\n\
@@ -1183,7 +1326,7 @@ let () =
          \  let _ = check\n\
           }\n")
         "types.unsatisfied_bound");
-  test "an `is` test settles the type of what it tests before its pattern is checked" (fun () ->
+  test "the scrutinee of an `is` is inferred before its pattern is checked" (fun () ->
       fine
         "type Span(ticks: Int64)\n\n\
          impl Divide[Int64] for Span {\n\
@@ -1195,7 +1338,7 @@ let () =
          fn f(span: Span) -> Bool {\n\
         \  span / 0 is None\n\
          }\n");
-  test "a `for` over a call to `each` binds what the call yields" (fun () ->
+  test "a `for` over a call of `each` binds the yielded elements" (fun () ->
       fine
         "fn total(items: List[Int64]) -> Int64 {\n\
         \  var sum = 0\n\
@@ -1305,15 +1448,16 @@ let () =
       fine (lists "Console");
       one_diagnostic (lists "Clock") "types.mismatch";
       one_diagnostic (lists "Console.print_line") "types.mismatch");
-  test "what a function type's calls counts is a capability, or one of its methods" (fun () ->
+  test "the target of `calls` in a function type is a capability or one of its methods" (fun () ->
       one_diagnostic "type Point(x: Int64)\n\nfn f(run: (fn() cost calls(Point) <= 1)) {}\n"
         "types.not_a_capability";
       one_diagnostic "fn f(run: (fn() uses Clock cost calls(Clock.later) <= 1)) {}\n"
         "types.unknown_member";
       one_diagnostic "fn f(visit: fn(), run: (fn() cost calls(visit) <= 1)) {}\n"
         "types.not_a_capability");
-  test "what a clause's calls counts is a function parameter, a capability, or its method"
-    (fun () ->
+  test
+    "the target of `calls` in a clause is a function parameter, a capability, or a capability's \
+     method" (fun () ->
       let clause counted =
         "type Point(x: Int64)\n\n\
          fn f(count: Int64, visit: (fn() cost time finite))\n\
@@ -1326,7 +1470,7 @@ let () =
       one_diagnostic (clause "count") "types.not_callable";
       one_diagnostic (clause "Point") "types.not_a_capability";
       one_diagnostic (clause "Clock.later") "types.unknown_member");
-  test "a method with generic parameters of its own cannot be called through any" (fun () ->
+  test "a method with generic parameters is not object-safe" (fun () ->
       one_diagnostic
         "trait Visitor {\n\
         \  fn visit[Other](self, other: Other) -> Int64\n\

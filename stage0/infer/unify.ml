@@ -4,8 +4,8 @@ module T = Types
 
 type t = {
   mutable next : int;
-  types : (int, T.ty) Hashtbl.t;  (** What each solved type variable or literal is. *)
-  values : (int, T.value) Hashtbl.t;  (** What each solved value variable is. *)
+  types : (int, T.ty) Hashtbl.t;  (** The solution of each solved type variable or literal. *)
+  values : (int, T.value) Hashtbl.t;  (** The solution of each solved value variable. *)
   mutable capability_variable_count : int;  (** The number of capability variables created. *)
   mutable deferred_capability_equalities : (T.capability list * T.capability list) list;
       (** Pairs of capability sets that unification found in the same position of two types, where
@@ -34,11 +34,11 @@ let fresh_value unifier =
   unifier.next <- unifier.next + 1;
   T.Value_variable unifier.next
 
-(* A fresh capability variable, as a one-element capability set. It
-   stands for the argument of a capability parameter at one use of a
-   generic function or type. It is solved after the whole definition is
-   checked, not per statement: its solution is the smallest set that
-   satisfies every subset constraint on it. *)
+(* A fresh capability variable, as a one-element capability set. It is the
+   instantiation of a capability parameter at one use of a generic function
+   or type. It is solved after the whole definition is checked, not per
+   statement: its solution is the smallest set that satisfies every subset
+   constraint on it. *)
 let fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
   [ T.Capability_variable unifier.capability_variable_count ]
@@ -188,21 +188,21 @@ let argument_unknowns unifier = function
 (* Unifies two types, solving inference variables in either. An error or a
    hole unifies with any type, so one mistake is reported once. Unification
    is equality: function types with different [uses] or costs do not unify.
-   Implicit conversions happen where a value meets an expected type, not
-   here. *)
+   Implicit conversions are applied where a value is checked against an
+   expected type, not here. *)
 let rec unify unifier (left : T.ty) (right : T.ty) =
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
-  (* A variable that meets an error or a hole is solved as that error or
-     hole, so the mistake is not reported again as a type that cannot be
-     inferred. *)
+  (* A variable that is unified with an error or a hole is solved as that
+     error or hole, so the mistake is not reported again as a type that
+     cannot be inferred. *)
   | (T.Variable index | T.Literal (_, index)), ((T.Error _ | T.Hole) as unknown)
   | ((T.Error _ | T.Hole) as unknown), (T.Variable index | T.Literal (_, index)) ->
       Hashtbl.replace unifier.types index unknown;
       true
   | ((T.Error _ | T.Hole) as unknown), other | other, ((T.Error _ | T.Hole) as unknown) ->
-      (* Every variable inside a type that meets an error is solved as that
-         error too, so none of them is reported as unsolved. *)
+      (* Every variable inside a type that is unified with an error is
+         solved as that error too, so none of them is reported as unsolved. *)
       List.iter
         (function
           | Unknown_type index | Unknown_literal (_, index) ->

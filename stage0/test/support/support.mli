@@ -24,6 +24,19 @@ val check_module_core_invariants : Query.context -> Path.module_ -> int
 (** Runs {!check_core_invariants} on every definition of a module that has a core form. Returns the
     number of such definitions. *)
 
+type core_nodes = {
+  expressions : Core.expression list;
+  statements : Core.statement list;
+  patterns : Core.pattern list;
+}
+
+val core_nodes : Query.context -> Resolve.Names.key -> core_nodes
+(** Every node of a definition's core form, at any depth. Raises [Failure] if the definition has no
+    core form. *)
+
+val first_core_nodes : string -> core_nodes
+(** {!core_nodes} of the first definition of [app::main], with the given text. *)
+
 val no_diagnostics :
   check:(Query.context -> Path.module_ -> Diagnostic.t list) -> (string * string) list -> unit
 (** Fails the running test if a given module does not parse, has a diagnostic, or has a definition

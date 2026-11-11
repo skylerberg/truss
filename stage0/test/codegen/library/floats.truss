@@ -1,3 +1,5 @@
+use standard::core
+
 test "a float says whether it is finite, infinite, or negative" {
   let one: Float64 = 1.0
   let negative_zero: Float64 = -0.0
@@ -534,4 +536,115 @@ test "a single goes through the trigonometric functions too" {
   assert (one.cosine() - 0.5403023).absolute() < 0.0000001
   assert (one.arctangent() - 0.7853982).absolute() < 0.0000001
   assert (one.arctangent_2(1.0) - 0.7853982).absolute() < 0.0000001
+}
+
+fn fixed(value: Float64, decimals: USize) -> String {
+  value.to_fixed(decimals)
+}
+
+fn scientific(value: Float64, decimals: USize) -> String {
+  value.to_scientific(decimals)
+}
+
+test "a float is written with a fixed number of decimals" {
+  assert fixed(3.14159, decimals: 2) == "3.14"
+  assert fixed(2.5, decimals: 0) == "2"
+  assert fixed(3.5, decimals: 0) == "4"
+  assert fixed(-0.0, decimals: 2) == "-0.00"
+  assert fixed(1e21, decimals: 1) == "1000000000000000000000.0"
+  assert fixed(0.1, decimals: 20) == "0.10000000000000000555"
+  assert fixed(1.005, decimals: 2) == "1.00"
+  assert fixed(123456.789, decimals: 3) == "123456.789"
+  assert fixed(5e-324, decimals: 3) == "0.000"
+  assert fixed(-1.5, decimals: 1) == "-1.5"
+  assert fixed(0.0, decimals: 0) == "0"
+  assert fixed(Float64.not_a_number, decimals: 2) == "NaN"
+  assert fixed(Float64.infinity, decimals: 2) == "infinity"
+  assert fixed(Float64.negative_infinity, decimals: 2) == "-infinity"
+  let long = fixed(0.5, decimals: 1105)
+  assert long.length() == 1107 && long.starts_with("0.500000") && long.ends_with("0000")
+  let single: Float32 = 0.1
+  assert single.to_fixed(10) == "0.1000000015"
+}
+
+test "a float is written with an exponent" {
+  assert scientific(1234.5678, decimals: 2) == "1.23e+03"
+  assert scientific(0.00012, decimals: 0) == "1e-04"
+  assert scientific(-1.5, decimals: 3) == "-1.500e+00"
+  assert scientific(0.0, decimals: 1) == "0.0e+00"
+  assert scientific(1e100, decimals: 0) == "1e+100"
+  assert scientific(6.02214076e23, decimals: 8) == "6.02214076e+23"
+  assert scientific(5e-324, decimals: 2) == "4.94e-324"
+  assert scientific(Float64.not_a_number, decimals: 2) == "NaN"
+  assert scientific(Float64.negative_infinity, decimals: 2) == "-infinity"
+  let long = scientific(1.5, decimals: 803)
+  assert long.length() == 809 && long.starts_with("1.5000") && long.ends_with("0000e+00")
+  let single: Float32 = 1.5
+  assert single.to_scientific(1) == "1.5e+00"
+}
+
+fn reads(text: StringSlice, bits: UInt64) -> Bool {
+  match Float64.parse(text) {
+    Ok(value) => value.to_bits() == bits
+    Err(_) => false
+  }
+}
+
+test "text is read as the nearest float" {
+  assert reads("0.1", bits: 4591870180066957722)
+  assert reads("1e-7", bits: 4502148214488346440)
+  assert reads("123456789012345678901234567890", bits: 5042042089369253694)
+  assert reads("1.7976931348623157e308", bits: 9218868437227405311)
+  assert reads("1e309", bits: 9218868437227405312)
+  assert reads("4.9e-324", bits: 1)
+  assert reads("2.4703282292062327e-324", bits: 0)
+  assert reads("2.4703282292062328e-324", bits: 1)
+  assert reads("9007199254740993", bits: 4845873199050653696)
+  assert reads("0.30000000000000004", bits: 4599075939470750516)
+  assert reads("-0.0", bits: 9223372036854775808)
+  assert reads(".5", bits: 4602678819172646912)
+  assert reads("5.", bits: 4617315517961601024)
+  assert reads("1E+2", bits: 4636737291354636288)
+  assert reads("+42", bits: 4631107791820423168)
+  assert Float64.parse("infinity") == Ok(Float64.infinity)
+  assert Float64.parse("+infinity") == Ok(Float64.infinity)
+  assert Float64.parse("-infinity") == Ok(Float64.negative_infinity)
+  assert Float64.parse("NaN") is Ok(value) && value.is_nan()
+}
+
+test "text that is not a number says where it stops being one" {
+  assert Float64.parse("") == Err(core::ParseFloatError.Empty)
+  assert Float64.parse("abc") == Err(core::ParseFloatError.Invalid(offset: 0))
+  assert Float64.parse("-") == Err(core::ParseFloatError.Invalid(offset: 1))
+  assert Float64.parse(".") == Err(core::ParseFloatError.Invalid(offset: 0))
+  assert Float64.parse("1.2.3") == Err(core::ParseFloatError.Invalid(offset: 3))
+  assert Float64.parse("1e") == Err(core::ParseFloatError.Invalid(offset: 2))
+  assert Float64.parse("1e+") == Err(core::ParseFloatError.Invalid(offset: 3))
+  assert Float64.parse("12 ") == Err(core::ParseFloatError.Invalid(offset: 2))
+  assert Float64.parse(" 12") == Err(core::ParseFloatError.Invalid(offset: 0))
+  assert Float64.parse("0x10") == Err(core::ParseFloatError.Invalid(offset: 1))
+  assert Float64.parse("inf") == Err(core::ParseFloatError.Invalid(offset: 0))
+  assert Float64.parse("nan") == Err(core::ParseFloatError.Invalid(offset: 0))
+  assert Float64.parse("1_000") == Err(core::ParseFloatError.Invalid(offset: 1))
+}
+
+fn reads_single(text: StringSlice, bits: UInt32) -> Bool {
+  match Float32.parse(text) {
+    Ok(value) => value.to_bits() == bits
+    Err(_) => false
+  }
+}
+
+test "text is read as the nearest Float32, rounding once" {
+  assert reads_single("1.0", bits: 1065353216)
+  assert reads_single("0.1", bits: 1036831949)
+  assert reads_single("1.000000059604644775390625", bits: 1065353216)
+  assert reads_single("1.00000005960464477539062500000001", bits: 1065353217)
+  assert reads_single("3.4028235e38", bits: 2139095039)
+  assert reads_single("1e39", bits: 2139095040)
+  assert reads_single("1e-45", bits: 1)
+  assert reads_single("-0.0", bits: 2147483648)
+  assert Float32.parse("-infinity") == Ok(Float32.negative_infinity)
+  assert Float32.parse("NaN") is Ok(value) && value.is_nan()
+  assert Float32.parse("1.5f") == Err(core::ParseFloatError.Invalid(offset: 3))
 }

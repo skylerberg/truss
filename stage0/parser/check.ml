@@ -27,6 +27,9 @@ type context = {
   loop : loop;
   parallel : bool;
       (** In a [parallel] branch or a [parallel for] body, where [return] and [?] cannot leave *)
+  task : bool;
+      (** In a branch of a [concurrent] block or the body of a [concurrent for]. A [yield] is
+          rejected there, because it would run the caller's loop body as a task. *)
 }
 
 let plain =
@@ -37,6 +40,7 @@ let plain =
     yields = false;
     loop = Outside;
     parallel = false;
+    task = false;
   }
 
 let specification context = { context with specification = true }
@@ -158,7 +162,8 @@ and statement cursor context (statement : statement) =
       let body_context =
         match mode with
         | Parallel_loop -> { context with loop = Parallel_body; parallel = true }
-        | Sequential | Concurrent_loop -> { context with loop = Inside }
+        | Sequential -> { context with loop = Inside }
+        | Concurrent_loop -> { context with loop = Inside; task = true }
       in
       block cursor body_context body
   | While { condition; clauses; body } ->
@@ -168,7 +173,7 @@ and statement cursor context (statement : statement) =
   | Parallel body ->
       let loop = match context.loop with Outside -> Outside | _ -> Branch in
       block cursor { context with parallel = true; loop } body
-  | Concurrent body -> block cursor context body
+  | Concurrent body -> block cursor { context with task = true } body
   | Proof body ->
       if not context.function_body then
         report cursor Misplaced_proof statement.span
@@ -182,7 +187,11 @@ and statement cursor context (statement : statement) =
   | Yield _ ->
       if not context.yields then
         report cursor Misplaced_yield statement.span
-          "`yield` is only allowed in a method whose signature `yields` or `lends`.";
+          "`yield` is only allowed in a method whose signature `yields` or `lends`."
+      else if context.task then
+        report cursor Misplaced_yield statement.span
+          "`yield` is not allowed in a `concurrent` block or a `concurrent for`: the caller's loop \
+           body would run as a task.";
       statement_parts cursor context statement
   | Expression _ | Assignment _ | Statement_error -> statement_parts cursor context statement
 

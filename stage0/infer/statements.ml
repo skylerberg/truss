@@ -1,9 +1,9 @@
-(* Checks blocks and statements: [let], assignment, loops and what they
-   iterate over, and the value of a block. *)
+(* Checks blocks and statements: [let], assignment, loops and their
+   iterations, and the value of a block. *)
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -213,12 +213,12 @@ and statement state env (written : statement) ~last : unit =
                 | Concurrent_loop -> Concurrent_loop);
             });
       (* Each iteration of a [concurrent for] is a task. *)
-      let around =
+      let loop : enclosing =
         match running with
         | Concurrent_loop -> Task (Iteration { loop = written.id })
         | Sequential | Parallel_loop -> Loop
       in
-      loop_body state { env with around = around :: env.around } body
+      loop_body state { env with enclosing = loop :: env.enclosing } body
   | While { condition = test; clauses; body } ->
       in_statement state env test.span (fun () -> check state env test T.bool);
       List.iter (loop_clause state env) clauses;
@@ -226,7 +226,7 @@ and statement state env (written : statement) ~last : unit =
           let condition = build_expression state test in
           let clauses = List.map (Form.loop_clause state) clauses in
           While { condition; clauses; body = build_block state body });
-      loop_body state { env with around = Loop :: env.around } body
+      loop_body state { env with enclosing = Loop :: env.enclosing } body
   | Parallel body | Concurrent body ->
       let concurrent = match written.kind with Concurrent _ -> true | _ -> false in
       register_statement state written (fun () ->
@@ -238,7 +238,7 @@ and statement state env (written : statement) ~last : unit =
         (fun index (branch : statement) ->
           let env =
             if concurrent then
-              { env with around = Task (Branch { block = written.id; index }) :: env.around }
+              { env with enclosing = Task (Branch { block = written.id; index }) :: env.enclosing }
             else env
           in
           in_statement state env branch.span (fun () -> statement state env branch ~last:false))
@@ -368,8 +368,8 @@ and loop_clause state env (clause : loop_clause) =
       | Big_o value | At_most value | Exactly value -> ignore (expression state env value)
       | Finite -> ())
 
-(* What a [for] loop iterates over: a range of built-in integers, a call of
-   a yielding method, a cursor, or the [each] method that the loop's mode
+(* The iteration of a [for] loop: a range of built-in integers, a call of a
+   yielding method, a cursor, or the [each] method that the loop's mode
    selects. *)
 (* Checks the iterable of a [for] loop. Returns the type of the loop
    variable and its mode. *)

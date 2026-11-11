@@ -23,8 +23,9 @@ type ty =
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }
-(** [uses] is sorted, with every capability parameter replaced by the capabilities it stands for.
-    Cost clauses do not change the code, so they are not here. *)
+(** [uses] is the capabilities whose evidence a value of the type is called with. It is sorted, with
+    every capability parameter replaced by the capabilities it is instantiated with, and without
+    [Panic], which has no evidence. Cost clauses do not change the code, so they are not here. *)
 
 and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
 

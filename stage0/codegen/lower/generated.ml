@@ -101,6 +101,112 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
     nested = [||];
   }
 
+(* The entry of a capability's locking table for the method [name]. The
+   evidence it is called with was built by a [provide mut] whose body can
+   use [Tasks]: its implementation pointer is the address of the mutex,
+   its first outer evidence is the implementation's own evidence, and its
+   second is the evidence for [Tasks]. The entry locks the mutex, calls
+   the implementation's entry, and unlocks the mutex, so calls of one
+   implementation by several tasks are mutually exclusive. *)
+let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
+  let slot, capability_signature = capability_method context capability name in
+  let lir_signature, result = entry_signature context capability_signature in
+  let st = generated_state context ~anchor:capability ~substitution:[] in
+  let b = st.b in
+  let evidence = local b ~name:"evidence" Convention.evidence in
+  result_slot st result;
+  let taken =
+    List.map
+      (fun (info : T.parameter_info) ->
+        let ty = Monomorphic.ground context.monomorphic [] info.type_ in
+        (parameter st ~owned:(info.mode = Own) (Monomorphic.mode info.mode) ty, info.mode, ty))
+      capability_signature.parameters
+  in
+  start b (block b);
+  let outer index : Lir.operand =
+    let outer = local b Convention.evidence in
+    emit b
+      (Call
+         {
+           target = Intrinsic Evidence_outer;
+           arguments = [ Copy (at evidence); Constant (Integer (Int32, Z.of_int index)) ];
+           result = Returned (at outer);
+         });
+    Copy (at outer)
+  in
+  let implementation = outer 0 and tasks = outer 1 in
+  let address = local b (Raw (Pointer Opaque)) in
+  emit b
+    (Call
+       {
+         target = Intrinsic Evidence_implementation;
+         arguments = [ Copy (at evidence) ];
+         result = Returned (at address);
+       });
+  let mutex = at (local b ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
+  emit b (Assign (mutex, Convert (Copy (at address), Integer UInt64)));
+  let tasks_call name =
+    let slot, signature = capability_method context Core_walk.tasks_capability name in
+    emit b
+      (Call
+         {
+           target =
+             Evidence_call
+               {
+                 evidence = tasks;
+                 capability = Core_walk.tasks_capability;
+                 slot;
+                 signature = fst (entry_signature context signature);
+               };
+           arguments = [ Copy mutex ];
+           result = Discarded;
+         })
+  in
+  let result_ty =
+    match capability_signature.output with
+    | Returns ty -> Monomorphic.ground context.monomorphic [] ty
+    | _ -> bug "a capability method that yields"
+  in
+  tasks_call "lock";
+  emit b
+    (Call
+       {
+         target =
+           Evidence_call { evidence = implementation; capability; slot; signature = lir_signature };
+         arguments = List.filter_map (fun ((_, place), mode, ty) -> pass st mode ty place) taken;
+         result = Convention.destination result (passed_on st result_ty);
+       });
+  tasks_call "unlock";
+  {
+    key;
+    main =
+      finish_function st
+        ~returns:(capability_signature.output <> Returns Never)
+        ~first:[ evidence ]
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken)
+        ();
+    nested = [||];
+  }
+
+(* A capability's locking table: a locking entry for each of the
+   capability's methods, in the capability's order. *)
+let locked_table context (key : Instance.key) ~capability : Lir.table =
+  let interface =
+    match demand context Environment.trait_interface capability with
+    | Some interface -> interface
+    | None -> bug "no interface for %s" (Path.show capability)
+  in
+  {
+    table_key = key;
+    capability = Some capability;
+    entries =
+      List.map
+        (fun (m : T.trait_method) ->
+          ( Instance.Locked_entry { capability; name = m.method_name },
+            fst (entry_signature context m.method_signature) ))
+        interface.methods;
+  }
+
 (* A capability [impl]'s table: an entry for each of the capability's
    methods, in the capability's order. *)
 let table context (key : Instance.key) : Lir.table =

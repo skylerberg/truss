@@ -2225,10 +2225,36 @@ fn serve(listener: network::Listener)
 }
 ```
 
-It works with every form of `for`. The body may read any place but may only
-change its own element and its own variables. `break` leaves the loop and
-cancels the iterations that are still running, and `continue` ends one
-iteration.
+The body may read any place but may only change its own element and its
+own variables. `break` leaves the loop and cancels the iterations that are
+still running, and `continue` ends one iteration.
+
+An iteration keeps running after the loop has gone on to the next value,
+so what it is given must stay valid until the loop ends:
+
+- A range, a cursor, and a method that `yields own` values give each task
+  a value of its own.
+- A method that yields read-only values may lend a place inside a
+  parameter that it takes read-only, such as `yield self[index]` in the
+  `each(self)` of a `List`. The method cannot change that parameter, so
+  each task borrows its element for the whole loop. `concurrent for item
+  in items` works this way for any element type.
+- A method may yield a value that it computes for the `yield`. The task
+  owns it.
+- A `Plain` value may be yielded from any place. The task gets a copy.
+- A method that yields `mut` access works when its body is one `for` over
+  a range whose body is one `yield`, as the `each(mut self)` methods of
+  `List`, `Slice`, and `Array` are. Each task then runs one iteration of
+  that loop and changes its own element.
+
+Any other `concurrent for` is rejected with
+`ownership.task_outlives_yield`. A place in a local of the method or in a
+`mut` parameter, and a view of one, could change or be freed when the
+method resumes, while a task still uses it.
+
+`yield` is not allowed in a `concurrent` block or a `concurrent for`. The
+caller's loop body would run as a task, and it is checked as sequential
+code.
 
 A time limit is a function. Each of its two branches returns from the
 function when it finishes, which cancels the other:
@@ -2279,22 +2305,34 @@ fn total_size(paths: Slice[Path]) -> USize
 }
 ```
 
-- A message is owned: sending it moves it. Its type is a record or a sum
-  type of owned data, and never a view, a function, or an `any` type.
+- A message is owned: sending it moves it. Its type is `Storable`: a
+  record or a sum type of owned data, and never a view or a function. An
+  `any Trait` can be sent only when `Trait` requires `Storable`.
 - A channel's methods take `self` read-only, so every branch can use a
-  channel that is declared before the block.
+  channel that is declared before the block. `channel.copy()` is another
+  reference to the same queue.
+- `Channel[Message].new()` makes a channel of capacity 0, which holds no
+  message: `send` returns when another task has received the message.
+- `send` returns `Err(SendError.Closed)` on a closed channel. `receive`
+  returns the messages that a closed channel still holds, and then `None`.
+  `try_receive` never waits: it returns `None` when the channel is empty.
+- In a cancelled task, a `send` that would wait returns
+  `Err(SendError.Cancelled)`, and a `receive` that would wait returns
+  `None`.
 - A task that waits for several kinds of message receives a sum type from
   one channel.
-- `tasks::Limiter` bounds how many tasks do something at once:
+- `tasks::Limiter` bounds how many tasks do something at once.
   `limiter.hold(work)` runs `work` when one of the limiter's permits is
-  free.
+  free, and returns `Some` of its output. In a task that is cancelled
+  while it waits for a permit, `hold` returns `None` and does not run
+  `work`.
 
 ### Shared state
 
 State that several tasks change belongs to a capability implementation.
 When the code inside a `provide mut` can use `Tasks`, calls of the
-implementation's methods take turns: each runs from start to end before the
-next begins.
+implementation's methods are mutually exclusive: each call holds the
+implementation's mutex from start to end.
 
 ```truss
 capability Sessions {
@@ -2329,12 +2367,13 @@ fn run(listener: network::Listener)
 
 - A check and the change that depends on it go in one method, since other
   tasks' calls can come between two calls.
-- An implementation whose calls take turns has no method with a parameter
-  that can hold a function, or an `any` value, that uses a capability.
+- An implementation whose calls are mutually exclusive has no method with
+  a parameter that can hold a function, or an `any` value, that uses a
+  capability. Calling it while holding the mutex could deadlock.
 - A capability's method keeps no view that it is given and returns no view
   of its implementation's state.
-- An implementation provided without `mut` is only read, so calls into it
-  do not take turns.
+- An implementation provided without `mut` is only read, so it has no
+  mutex.
 
 ### Testing concurrent code
 
@@ -2344,9 +2383,10 @@ same result on every run:
 
 ```truss
 test "two deposits both arrive" {
-  for seed in 0..64 {
+  let seeds: UInt64 = 64
+  for seed in 0..seeds {
     var bank = Bank.new()
-    provide mut bank, tasks::SeededTasks(seed: seed) {
+    provide mut bank, tasks::SeededTasks.new(seed) {
       concurrent {
         Accounts.deposit(alice, amount: 10)
         Accounts.deposit(alice, amount: 5)
@@ -2805,6 +2845,14 @@ conditions its fields give: `Slice[Element]` is `Plain` for every `Element`,
 because the view it holds is. Generic code that copies says so with a bound,
 as in `[Element: Copyable]`.
 
+`Storable` is a third. Every type that is not a view type has it (see
+[DESIGN.md](DESIGN.md#views)), and no type declares it: the compiler works
+it out from the fields of every type, opaque or not. A type parameter has
+it only when bounded, so `List[Element]` is `Storable` where `Element` is,
+and `any Trait` has it only when `Trait` requires it.
+Generic code that keeps a value past the function that made it says so with
+a bound, as in `Channel[Message: Storable]`.
+
 Every type also has debug output, which tools such as the test runner use to
 show values, as in a failed `assert`. Nothing needs to be derived for it. To
 use a value in `${...}` interpolation, its type must implement `Display` by
@@ -3238,9 +3286,9 @@ never clash with variable or function names:
 - `Option` (`Some`, `None`) and `Result` (`Ok`, `Err`)
 - the core collections: `List`, `Slice`, `Map`, and `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
-  `Copyable`, `Plain`, `Index`, `Iterable`, `Cursor`, `FromTemplate`, `Model`,
-  and the arithmetic traits `Add`, `Subtract`, `Multiply`, `Divide`,
-  `Remainder`, and `Negate`
+  `Copyable`, `Plain`, `Storable`, `Index`, `IndexAssign`, `Iterable`,
+  `Cursor`, `FromTemplate`, `Model`, and the arithmetic traits `Add`,
+  `Subtract`, `Multiply`, `Divide`, `Remainder`, and `Negate`
 - `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`, for
   specifications
 - the standard capabilities, such as `Console`, `FileRead`, and `Panic`, and

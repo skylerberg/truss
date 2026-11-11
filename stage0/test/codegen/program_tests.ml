@@ -884,10 +884,10 @@ let () =
             run_main
               {|use standard::processes
 
-fn name_of(signal: processes::Signal) -> String {
-  if signal == processes::Signal.User1 {
+fn name_of(arrived: Option[processes::Signal]) -> String {
+  if arrived is Some(signal) && signal == processes::Signal.User1 {
     "user 1".copy()
-  } else if signal == processes::Signal.Terminate {
+  } else if arrived is Some(signal) && signal == processes::Signal.Terminate {
     "terminate".copy()
   } else {
     "another".copy()
@@ -1362,5 +1362,53 @@ let () =
                       | [ "test"; _; outcome ] -> fail "a test %s" outcome
                       | _ -> ())))
         (Documents.truss_blocks (Documents.read (Filename.concat root name))))
+
+let () =
+  test "a function value whose type uses Panic is called without evidence for Panic" (fun () ->
+      let source =
+        {|fn fail(message: StringSlice)
+  uses Panic
+{
+  Panic.crash(message)
+}
+
+fn report(count: USize) -> USize
+  uses Console, Panic
+{
+  if count > 5 {
+    Panic.crash("too many to report")
+  }
+  Console.print_line("counted ${count}")
+  count
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Panic
+{
+  let crash = fail
+  let counted = report
+  let checked: (fn(USize) -> USize uses Panic) = fn(count) {
+    if count > 9 {
+      Panic.crash("far too many")
+    }
+    count + 1
+  }
+  let total = counted(arguments.length()) + checked(arguments.length())
+  if arguments.length() > 3 {
+    crash("many arguments")
+  }
+  Console.print_line("done ${total}")
+  ExitCode.success
+}
+|}
+      in
+      (match run_main source with
+      | 0, output, _ -> expect_string ~expected:"counted 1\ndone 3\n" output
+      | status, _, errors -> fail "ended with status %d: %s" status errors);
+      match run_main ~arguments:[ "a"; "b"; "c"; "d" ] source with
+      | 101, output, errors ->
+          expect_string ~expected:"counted 5\n" output;
+          if not (contains errors "many arguments") then fail "panicked with %S" errors
+      | status, _, errors -> fail "ended with status %d: %s" status errors)
 
 let () = Harness.finish ()

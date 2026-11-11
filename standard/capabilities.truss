@@ -120,10 +120,20 @@ public capability Processes {
 }
 
 public capability Signals {
-  fn wait(signals: Slice[processes::Signal]) -> processes::Signal
+  fn wait(signals: Slice[processes::Signal]) -> Option[processes::Signal]
 }
 
 public capability Tasks {
+  fn open() -> UInt64
+  fn spawn(task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool
+  fn join(task_group: UInt64)
+  fn cancel(task_group: UInt64) -> Bool
+  fn cancelled() -> Bool
+  fn watch(key: UInt64) -> UInt64
+  fn wait(key: UInt64, ticket: UInt64, reason: StringSlice)
+  fn wake(key: UInt64)
+  fn lock(mutex: UInt64)
+  fn unlock(mutex: UInt64)
   fn yield_now()
 }
 
@@ -147,6 +157,7 @@ public type SystemError =
   | InvalidData
   | UnexpectedEnd
   | Interrupted
+  | Cancelled
   | TimedOut
   | BrokenPipe
   | NothingWritten
@@ -179,6 +190,7 @@ impl Display for SystemError {
       InvalidData => mut output.write("invalid data")
       UnexpectedEnd => mut output.write("the input ended early")
       Interrupted => mut output.write("interrupted")
+      Cancelled => mut output.write("cancelled")
       TimedOut => mut output.write("timed out")
       BrokenPipe => mut output.write("the other end is closed")
       NothingWritten => mut output.write("nothing could be written")

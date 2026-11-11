@@ -177,6 +177,7 @@ module Code = struct
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Task_outlives_yield
 
   type capabilities =
     | Not_available
@@ -184,7 +185,8 @@ module Code = struct
     | Not_granted
     | Provide_mark
     | Not_an_implementation
-    | Function_in_turn
+    | Callback_may_deadlock
+    | Monitor_needs_tasks
 
   type prover =
     | Overflow
@@ -413,6 +415,7 @@ module Code = struct
     | Keeps_lent_part -> "keeps_lent_part"
     | Read_only_view -> "read_only_view"
     | Owned_beside_lent -> "owned_beside_lent"
+    | Task_outlives_yield -> "task_outlives_yield"
 
   let capabilities_name code =
     match code with
@@ -421,7 +424,8 @@ module Code = struct
     | Not_granted -> "not_granted"
     | Provide_mark -> "provide_mark"
     | Not_an_implementation -> "not_an_implementation"
-    | Function_in_turn -> "function_in_turn"
+    | Callback_may_deadlock -> "callback_may_deadlock"
+    | Monitor_needs_tasks -> "monitor_needs_tasks"
 
   let package_name code =
     match code with

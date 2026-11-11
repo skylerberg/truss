@@ -18,7 +18,7 @@ type interface =
   | Test_interface of T.capability list
   | Theorem_interface of T.signature
   | Law_proof_interface of { trait : T.trait_reference; law : string; for_type : T.ty }
-      (** What a law's proof is of: the law of a trait, as a type's [impl] keeps it. *)
+      (** The subject of a law's proof: a law of a trait, for a type's [impl]. *)
   | Error_interface of Diagnostic.reported
       (** A definition whose header did not parse: everything is accepted of it. *)
 
@@ -93,8 +93,8 @@ let fields context (written : field list) =
       | Field_error -> None)
     written
 
-(* What a trait, an [impl], or a capability says for itself, apart from the
-   methods written inside it. *)
+(* The header of a trait, an [impl], or a capability: its own declarations,
+   without the methods written inside it. *)
 type container =
   | Trait_parts of {
       trait_generics : T.generic list;
@@ -108,11 +108,11 @@ type container =
       for_type : T.ty;
       impl_uses : T.capability list;
     }
-  | Broken of Diagnostic.reported  (** An [impl] of what is no trait. *)
+  | Broken of Diagnostic.reported  (** An [impl] whose trait name does not resolve to a trait. *)
 
-(* A trait's, an [impl]'s, or a capability's own parts, and the context
-   what is written inside it is lowered in: what [Self] and its associated
-   types mean there, and its generic parameters' bounds. *)
+(* The header of a trait, an [impl], or a capability, and the context in
+   which its members are lowered: the meaning of [Self] and of its
+   associated types, and the bounds of its generic parameters. *)
 let lower_container (context : Lower.context) (path : Path.t) (definition : definition) =
   match definition.kind with
   | Trait { generics; requires; members; _ } ->
@@ -170,17 +170,18 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
             context ))
   | _ -> (Capability_parts, context)
 
-(* What a trait, an [impl], or a capability gives each method written
-   inside it, or the report of why it gives nothing, when its own header
-   did not parse or it is an [impl] of what is no trait. *)
+(* The context that a trait, an [impl], or a capability gives to each method
+   written inside it. It is a report instead when the header of the
+   enclosing declaration did not parse, or when it is an [impl] whose trait
+   name does not resolve to a trait. *)
 type header = {
   self_type : T.ty option;
   self_trait : T.trait_reference option;
   self_associated : (string * T.ty) list;
   header_bounds : (T.parameter * T.trait_reference list) list;
   header_generics : T.generic list;
-      (** An [impl]'s own generic parameters, which come before those of a method written inside it.
-          A trait's are given where its method is called, with [Self]. *)
+      (** The generic parameters of an [impl], which precede those of a method written inside it. A
+          trait's parameters are supplied at each call of its method, with [Self]. *)
   header_uses : T.capability list;  (** An [impl]'s [uses], which are each of its methods' too. *)
 }
 
@@ -217,7 +218,7 @@ let header =
                        })))
       | _ -> None)
 
-(* [interface_of] gives the interface of a method written inside the
+(* [interface_of] returns the interface of a method written inside the
    definition, by its key. *)
 let lower_definition database ~interface_of (key : Names.key) (definition : definition)
     (resolved : Resolve.resolved) =
@@ -261,8 +262,9 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         match interface with Error_interface report -> Some (name, report) | _ -> None)
       (methods ())
   in
-  (* Each kind of definition gives its interface, and the context its bodies
-     are checked in: what [Self] and its associated types mean there. *)
+  (* Lowers each kind of definition to its interface and to the context in
+     which its bodies are checked: the meaning of [Self] and of its
+     associated types. *)
   let interface, context =
     match
       ( Resolve.Parts.reported definition Header,
@@ -442,10 +444,11 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
     },
     context )
 
-(* A definition lowered, with the context its bodies are checked in. A
-   trait's, an [impl]'s, or a capability's interface is put together from
-   its own parts and the interface of each method written inside it, which
-   reads only the header, so neither waits on the other. *)
+(* The lowered form of a definition, with the context in which its bodies
+   are checked. The interface of a trait, an [impl], or a capability is
+   assembled from its header and from the interface of each method written
+   inside it. Each method's interface reads only the header, so neither
+   query depends on the other. *)
 let rec lowered =
   lazy
     (Query.query ~name:"lowered" ~phase:Interfaces ~show:Names.show_key (fun database key ->
@@ -487,6 +490,21 @@ let builtin_shape builtin : T.type_interface =
     | Array ->
         [ { generic = element; kind = Type_generic [] }; { generic = count; kind = Value_generic } ]
     | Storage | View -> [ { generic = element; kind = Type_generic [] } ]
+    | Shared ->
+        let storable : T.trait_reference =
+          {
+            trait =
+              Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Storable" };
+            trait_arguments = [];
+            associated = [];
+          }
+        in
+        [
+          {
+            generic = { owner = Intrinsic.builtin_path builtin; name = "Value" };
+            kind = Type_generic [ storable ];
+          };
+        ]
     | _ -> []
   in
   { type_generics; shape = Builtin_type builtin; opaque = true; derives = [] }

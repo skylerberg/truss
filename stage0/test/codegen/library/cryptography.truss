@@ -1,5 +1,6 @@
 use standard::cryptography
 use standard::hex
+use standard::random
 
 fn letters(count: USize) -> List[UInt8] {
   List.filled(97, count: count)
@@ -144,4 +145,215 @@ test "bytes compare equal only when they are the same bytes" {
   assert !cryptography::constant_time_equal("secret".bytes(), second: "secre".bytes())
   assert !cryptography::constant_time_equal("xecret".bytes(), second: "secret".bytes())
   assert cryptography::constant_time_equal("".bytes(), second: "".bytes())
+}
+
+fn pattern(count: USize) -> List[UInt8] {
+  List.generate(count, make: fn(index) { pattern_byte(index) })
+}
+
+fn pattern_byte(index: USize) -> UInt8 {
+  let small = index % 251
+  match UInt8.try_from(small) {
+    Ok(byte) => byte
+    Err(_) => 0
+  }
+}
+
+fn blake3_of(bytes: Slice[UInt8]) -> String {
+  let digest = cryptography::blake3(bytes)
+  hex::encode(digest[..])
+}
+
+test "BLAKE3 of the published test vectors" {
+  assert blake3_of(pattern(0)) == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
+  assert blake3_of(pattern(1)) == "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213"
+  assert blake3_of(pattern(1024)) == "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7"
+  assert blake3_of(pattern(1025)) == "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444"
+  assert blake3_of("abc".bytes()) == "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+}
+
+test "BLAKE3 at block and chunk boundaries" {
+  assert blake3_of(pattern(63)) == "e9bc37a594daad83be9470df7f7b3798297c3d834ce80ba85d6e207627b7db7b"
+  assert blake3_of(pattern(64)) == "4eed7141ea4a5cd4b788606bd23f46e212af9cacebacdc7d1f4c6dc7f2511b98"
+  assert blake3_of(pattern(65)) == "de1e5fa0be70df6d2be8fffd0e99ceaa8eb6e8c93a63f2d8d1c30ecb6b263dee"
+  assert blake3_of(pattern(1023)) == "10108970eeda3eb932baac1428c7a2163b0e924c9a9e25b35bba72b28f70bd11"
+  assert blake3_of(pattern(2048)) == "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a"
+  assert blake3_of(pattern(2049)) == "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030"
+  assert blake3_of(pattern(3072)) == "b98cb0ff3623be03326b373de6b9095218513e64f1ee2edd2525c7ad1e5cffd2"
+  assert blake3_of(pattern(4097)) == "9b4052b38f1c5fc8b1f9ff7ac7b27cd242487b3d890d15c96a1c25b8aa0fb995"
+  assert blake3_of(pattern(7169)) == "a003fc7a51754a9b3c7fae0367ab3d782dccf28855a03d435f8cfe74605e7817"
+  assert blake3_of(pattern(16384)) == "f875d6646de28985646f34ee13be9a576fd515f76b5b0a26bb324735041ddde4"
+}
+
+fn keyed_blake3_of(bytes: Slice[UInt8]) -> String {
+  let key = "whats the Elvish word for friend".to_bytes()
+  var words: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count {
+    words[index] = key[index]
+  }
+  var hasher = cryptography::Blake3.keyed(words)
+  mut hasher.update(bytes)
+  let digest = own hasher.finish()
+  hex::encode(digest[..])
+}
+
+test "keyed BLAKE3 of the published test vectors" {
+  assert keyed_blake3_of(pattern(0)) == "92b2b75604ed3c761f9d6f62392c8a9227ad0ea3f09573e783f1498a4ed60d26"
+  assert keyed_blake3_of(pattern(65)) == "c0a4edefa2d2accb9277c371ac12fcdbb52988a86edc54f0716e1591b4326e72"
+  assert keyed_blake3_of(pattern(2049)) == "9f29700902f7c86e514ddc4df1e3049f258b2472b6dd5267f61bf13983b78dd5"
+}
+
+test "BLAKE3 in pieces is BLAKE3 of the whole, and its output extends" {
+  let bytes = pattern(2049)
+  var hasher = cryptography::Blake3.new()
+  mut hasher.update(bytes[..1])
+  mut hasher.update(bytes[1..1000])
+  mut hasher.update(bytes[1000..1030])
+  mut hasher.update(bytes[1030..])
+  let digest = own hasher.finish()
+  assert hex::encode(digest[..]) == "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030"
+  var long = cryptography::Blake3.new()
+  mut long.update(pattern(1025))
+  let extended = own long.finish_extended(131)
+  assert hex::encode(extended) == "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444f4c4a22b4b399155358a994e52bf255de60035742ec71bd08ac275a1b51cc6bfe332b0ef84b409108cda080e6269ed4b3e2c3f7d722aa4cdc98d16deb554e5627be8f955c98e1d5f9565a9194cad0c4285f93700062d9595adb992ae68ff12800ab67a"
+  let empty = cryptography::Blake3.new()
+  assert hex::encode(own empty.finish_extended(70)) == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262e00f03e7b69af26b7faaf09fcd333050338ddfe085b8cc869ca98b206c08243a26f5487789e8"
+  let none = cryptography::Blake3.new()
+  assert (own none.finish_extended(0)).length() == 0
+}
+
+fn sealing_key() -> cryptography::SecretKey {
+  cryptography::SecretKey.from_bytes([
+    128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+    144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+  ])
+}
+
+fn sealing_nonce() -> cryptography::Nonce {
+  cryptography::Nonce(bytes: [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75])
+}
+
+fn associated_byte(index: USize) -> UInt8 {
+  match UInt8.try_from(160 + index % 7) {
+    Ok(byte) => byte
+    Err(_) => 0
+  }
+}
+
+fn associated(count: USize) -> List[UInt8] {
+  List.generate(count, make: fn(index) { associated_byte(index) })
+}
+
+fn seal_pattern(cipher: cryptography::Cipher, plain: USize, data: USize) -> List[UInt8] {
+  cryptography::seal(
+    sealing_key(),
+    nonce: sealing_nonce(),
+    plaintext: pattern(plain),
+    associated_data: associated(data),
+    cipher: cipher,
+  )
+}
+
+fn sealed_text(cipher: cryptography::Cipher, plain: USize, data: USize) -> String {
+  hex::encode(seal_pattern(cipher, plain: plain, data: data))
+}
+
+fn sealed_digest(cipher: cryptography::Cipher, plain: USize, data: USize) -> String {
+  sha256_of(seal_pattern(cipher, plain: plain, data: data))
+}
+
+test "ChaCha20-Poly1305 seals to the bytes OpenSSL produces" {
+  let cipher = cryptography::Cipher.ChaCha20Poly1305
+  assert sealed_text(cipher, plain: 0, data: 0) == "4968bfa6ac4c53184fac3d9c8e0d17c4"
+  assert sealed_text(cipher, plain: 1, data: 13) == "5d8fa1d73a31170e23ca7f37885694bb8d"
+  assert sealed_text(cipher, plain: 15, data: 14) == "5d8150399a1c3df221a6117ac8d4097b9b47e6fc6ba5d4ebb46e426694e6c6"
+  assert sealed_text(cipher, plain: 16, data: 0) == "5d8150399a1c3df221a6117ac8d4096a35f7b85046059a5730faa95f6c5c368e"
+  assert sealed_text(cipher, plain: 17, data: 16) == "5d8150399a1c3df221a6117ac8d4096a076ed2e332ba875071ede94c5be8455ff2"
+  assert sealed_text(cipher, plain: 63, data: 17)
+    == "5d8150399a1c3df221a6117ac8d4096a07099c51cac1d49dc3be0fe3379196df183f9019426f3c837f12e0f0ae3f1cdf7fe51906637278c02860d336d93c65c594d473510300900a690beaa25a57db"
+  assert sealed_text(cipher, plain: 64, data: 0)
+    == "5d8150399a1c3df221a6117ac8d4096a07099c51cac1d49dc3be0fe3379196df183f9019426f3c837f12e0f0ae3f1cdf7fe51906637278c02860d336d93c658f6a5c88992cebb4a0cbe9c2fc2581e2fd"
+  assert sealed_text(cipher, plain: 65, data: 19)
+    == "5d8150399a1c3df221a6117ac8d4096a07099c51cac1d49dc3be0fe3379196df183f9019426f3c837f12e0f0ae3f1cdf7fe51906637278c02860d336d93c658f2c96ef336c5b5e91382881a44bbed515d5"
+  assert sealed_digest(cipher, plain: 114, data: 20) == "3ebfeb423e818bafe97dd5801ac01087957ddb955a442e08f807407e4d77bfd1"
+  assert sealed_digest(cipher, plain: 300, data: 0) == "1278a79c23fb23caaa25aabb9b7b5dcc2bf3bb3487525b5351f4e88808e4d620"
+}
+
+test "AES-256-GCM seals to the bytes OpenSSL produces" {
+  let cipher = cryptography::Cipher.Aes256Gcm
+  assert sealed_text(cipher, plain: 0, data: 0) == "fdcf33bb6f37f3a12b3fc5eeeff1ed47"
+  assert sealed_text(cipher, plain: 1, data: 13) == "d967882cb12ee59bfae106f4377a1271da"
+  assert sealed_text(cipher, plain: 15, data: 14) == "d9cb034537e0b86d70f8db7233a3157b0357880a4ac59b988468ca602cd816"
+  assert sealed_text(cipher, plain: 16, data: 0) == "d9cb034537e0b86d70f8db7233a31532f7d2efac00d10cb88cb7933433d2a13b"
+  assert sealed_text(cipher, plain: 17, data: 16) == "d9cb034537e0b86d70f8db7233a31532608a6926fb553883561f08911fa05fc920"
+  assert sealed_text(cipher, plain: 63, data: 17)
+    == "d9cb034537e0b86d70f8db7233a315326072052dfe54dbbe2a52a04872f424940d940096bdba9b16fd8ad7e6d9c669dc6260b6214211ffff6676ce6cdb911e95bb598120fb578f2dad701f69ce4a95"
+  assert sealed_text(cipher, plain: 64, data: 0)
+    == "d9cb034537e0b86d70f8db7233a315326072052dfe54dbbe2a52a04872f424940d940096bdba9b16fd8ad7e6d9c669dc6260b6214211ffff6676ce6cdb911ee5f086dffac72b5c8828783901d9dc2895"
+  assert sealed_text(cipher, plain: 65, data: 19)
+    == "d9cb034537e0b86d70f8db7233a315326072052dfe54dbbe2a52a04872f424940d940096bdba9b16fd8ad7e6d9c669dc6260b6214211ffff6676ce6cdb911ee5cf07827a99fb5524ee3f9ac99509f1bc2b"
+  assert sealed_digest(cipher, plain: 114, data: 20) == "ada9ee032a351086783ac20eb4dc180566719dd878cadf120c7c254d900b5b3e"
+  assert sealed_digest(cipher, plain: 300, data: 0) == "f07eb869e75d33553f8185ebeedbb018f3df2b0e078a4bc128b87cd01713007c"
+}
+
+fn opens(cipher: cryptography::Cipher, sealed: Slice[UInt8], data: USize) -> Option[List[UInt8]] {
+  match cryptography::open(
+    sealing_key(),
+    nonce: sealing_nonce(),
+    sealed: sealed,
+    associated_data: associated(data),
+    cipher: cipher,
+  ) {
+    Ok(plaintext) => Some(own plaintext)
+    Err(_) => None
+  }
+}
+
+fn open_round_trips(cipher: cryptography::Cipher) -> Bool {
+  var box = seal_pattern(cipher, plain: 100, data: 9)
+  if opens(cipher, sealed: box, data: 9) != Some(pattern(100)) {
+    return false
+  }
+  if opens(cipher, sealed: box, data: 10) is Some(_) {
+    return false
+  }
+  box[3] = box[3] ^ 1
+  if opens(cipher, sealed: box, data: 9) is Some(_) {
+    return false
+  }
+  box[3] = box[3] ^ 1
+  box[115] = box[115] ^ 128
+  if opens(cipher, sealed: box, data: 9) is Some(_) {
+    return false
+  }
+  box[115] = box[115] ^ 128
+  opens(cipher, sealed: box[..15], data: 9) is None && opens(cipher, sealed: box, data: 9) is Some(_)
+}
+
+test "open returns what was sealed and rejects anything that was changed" {
+  assert open_round_trips(cryptography::Cipher.ChaCha20Poly1305)
+  assert open_round_trips(cryptography::Cipher.Aes256Gcm)
+  let empty = seal_pattern(cryptography::Cipher.ChaCha20Poly1305, plain: 0, data: 0)
+  assert opens(cryptography::Cipher.ChaCha20Poly1305, sealed: empty, data: 0) == Some([])
+  assert opens(cryptography::Cipher.Aes256Gcm, sealed: empty, data: 0) is None
+}
+
+test "keys and nonces are drawn from the random capability" {
+  provide random::SeededRandom.new(11) {
+    let first = cryptography::SecretKey.generate()
+    let second = cryptography::SecretKey.generate()
+    assert first.expose() != second.expose()
+    let nonce = cryptography::Nonce.generate()
+    let other = cryptography::Nonce.generate()
+    assert nonce != other
+  }
+  provide random::SeededRandom.new(11) {
+    let again = cryptography::SecretKey.generate()
+    provide random::SeededRandom.new(11) {
+      assert again.expose() == cryptography::SecretKey.generate().expose()
+    }
+  }
 }

@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 18
+let version = 24
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x
@@ -152,6 +152,16 @@ let intrinsic_tag = function
   | Report_tests_to -> 52
   | Live_blocks -> 53
   | Terminated_length -> 50
+  | Coroutine_start -> 54
+  | Coroutine_resume -> 55
+  | Coroutine_suspend -> 56
+  | Tasks_spawn -> 57
+  | Shared_allocate -> 58
+  | Shared_retain -> 59
+  | Shared_release -> 60
+  | Shared_free -> 61
+  | Shared_lock -> 62
+  | Shared_unlock -> 63
 
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
@@ -231,6 +241,8 @@ let encode_statement instance = function
   | Region { fork; region = Branch } -> tagged 5 [ Cbor.int fork ]
   | Region { fork; region = Chunk { first; last } } ->
       tagged 6 [ Cbor.int fork; Cbor.int first; Cbor.int last ]
+  | Region { fork; region = Task { function_value; item } } ->
+      tagged 10 [ Cbor.int fork; Cbor.int function_value; Cbor.int item ]
   | Regions_end { fork } -> tagged 7 [ Cbor.int fork ]
   | Fork { branches } ->
       tagged 8

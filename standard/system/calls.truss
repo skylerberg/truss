@@ -1,8 +1,12 @@
 use standard::growth
 use standard::intrinsic
 
-internal fn interrupted_by_signal() -> Bool {
-  intrinsic::libc_errno() == intrinsic::libc_eintr()
+internal fn cancelled() -> Bool {
+  intrinsic::runtime_tasks_cancelled() != 0
+}
+
+internal fn retry_after_signal() -> Bool {
+  intrinsic::libc_errno() == intrinsic::libc_eintr() && !cancelled()
 }
 
 internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
@@ -20,7 +24,7 @@ internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Res
       written += count
     } else if wrote == 0 {
       error = intrinsic::libc_eio()
-    } else if !interrupted_by_signal() {
+    } else if !retry_after_signal() {
       error = intrinsic::libc_errno()
     }
   }
@@ -41,7 +45,7 @@ internal fn read_onto_end(
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
   var got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
-  while got < 0 && interrupted_by_signal()
+  while got < 0 && retry_after_signal()
     invariant identical(intrinsic::storage_model(buffer), old(intrinsic::storage_model(buffer)))
     invariant intrinsic::storage_capacity(buffer) >= length + count
     invariant got <= count
@@ -72,7 +76,7 @@ internal fn read_at_onto_end(
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
   var got = intrinsic::libc_pread(descriptor, buffer: mut buffer, count: count, offset: offset)
-  while got < 0 && interrupted_by_signal()
+  while got < 0 && retry_after_signal()
     invariant identical(intrinsic::storage_model(buffer), old(intrinsic::storage_model(buffer)))
     invariant intrinsic::storage_capacity(buffer) >= length + count
     invariant got <= count
@@ -93,7 +97,7 @@ internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Resu
 {
   let length = intrinsic::view_length(bytes)
   var wrote = intrinsic::libc_write(descriptor, bytes: bytes, count: length)
-  while wrote < 0 && interrupted_by_signal()
+  while wrote < 0 && retry_after_signal()
     invariant wrote <= length
   {
     wrote = intrinsic::libc_write(descriptor, bytes: bytes, count: length)
@@ -111,7 +115,7 @@ internal fn write_some_at(descriptor: Int32, bytes: intrinsic::View[UInt8], offs
 {
   let length = intrinsic::view_length(bytes)
   var wrote = intrinsic::libc_pwrite(descriptor, bytes: bytes, count: length, offset: offset)
-  while wrote < 0 && interrupted_by_signal()
+  while wrote < 0 && retry_after_signal()
     invariant wrote <= length
   {
     wrote = intrinsic::libc_pwrite(descriptor, bytes: bytes, count: length, offset: offset)
@@ -131,7 +135,7 @@ internal fn seek(descriptor: Int32, offset: Int64, whence: Int32) -> Result[Int6
 
 internal fn set_length(descriptor: Int32, length: Int64) -> Result[Unit, Int32] {
   var outcome = intrinsic::libc_ftruncate(descriptor, length: length)
-  while outcome < 0 && interrupted_by_signal() {
+  while outcome < 0 && retry_after_signal() {
     outcome = intrinsic::libc_ftruncate(descriptor, length: length)
   }
   if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
@@ -139,7 +143,7 @@ internal fn set_length(descriptor: Int32, length: Int64) -> Result[Unit, Int32] 
 
 internal fn synchronize(descriptor: Int32) -> Result[Unit, Int32] {
   var outcome = intrinsic::libc_fsync(descriptor)
-  while outcome < 0 && interrupted_by_signal() {
+  while outcome < 0 && retry_after_signal() {
     outcome = intrinsic::libc_fsync(descriptor)
   }
   if outcome < 0 { Err(intrinsic::libc_errno()) } else { Ok(Unit) }
@@ -147,7 +151,7 @@ internal fn synchronize(descriptor: Int32) -> Result[Unit, Int32] {
 
 internal fn close(handle: own intrinsic::Handle) -> Result[Unit, Int32] {
   let descriptor = intrinsic::handle_release(own handle)
-  if intrinsic::libc_close(descriptor) < 0 && !interrupted_by_signal() {
+  if intrinsic::libc_close(descriptor) < 0 && !retry_after_signal() {
     Err(intrinsic::libc_errno())
   } else {
     Ok(Unit)
@@ -158,7 +162,7 @@ internal fn status_of_descriptor(descriptor: Int32) -> Result[intrinsic::Storage
   let size = intrinsic::libc_stat_size()
   var status: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
   var outcome = intrinsic::libc_fstat(descriptor, status: mut status)
-  while outcome < 0 && interrupted_by_signal()
+  while outcome < 0 && retry_after_signal()
     invariant intrinsic::storage_length(status) == 0
     invariant intrinsic::storage_capacity(status) == size
   {
@@ -192,7 +196,7 @@ internal fn status_of_path(
   let size = intrinsic::libc_stat_size()
   var status: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
   var outcome = status_into(intrinsic::storage_view(name), follow_links: follow_links, status: mut status)
-  while outcome < 0 && interrupted_by_signal()
+  while outcome < 0 && retry_after_signal()
     invariant intrinsic::storage_length(status) == 0
     invariant intrinsic::storage_capacity(status) == size
   {
@@ -312,7 +316,7 @@ internal fn sleep(seconds: Int64, nanoseconds: Int64) {
       remaining_seconds: mut left_seconds,
       remaining_nanoseconds: mut left_nanoseconds,
     )
-    if outcome == 0 || !interrupted_by_signal() {
+    if outcome == 0 || !retry_after_signal() {
       sleeping = false
     }
   }
@@ -352,7 +356,7 @@ internal fn open_file(path: intrinsic::View[UInt8], flags: Int32) -> Result[intr
   let name = ended_with_zero_byte(path)?
   let closed_in_programs_it_runs = flags | intrinsic::libc_o_cloexec()
   var descriptor = intrinsic::libc_open(intrinsic::storage_view(name), flags: closed_in_programs_it_runs, mode: 438)
-  while descriptor < 0 && interrupted_by_signal() {
+  while descriptor < 0 && retry_after_signal() {
     descriptor = intrinsic::libc_open(intrinsic::storage_view(name), flags: closed_in_programs_it_runs, mode: 438)
   }
   if descriptor < 0 {
@@ -371,7 +375,7 @@ internal fn close_descriptor(descriptor: Int32) {
 internal fn wait_for(process: Int32) -> Result[Int32, Int32] {
   var status: Int32 = 0
   var waited = intrinsic::libc_waitpid(process, status: mut status, options: 0)
-  while waited < 0 && interrupted_by_signal() {
+  while waited < 0 && retry_after_signal() {
     waited = intrinsic::libc_waitpid(process, status: mut status, options: 0)
   }
   if waited < 0 { Err(intrinsic::libc_errno()) } else { Ok(status) }

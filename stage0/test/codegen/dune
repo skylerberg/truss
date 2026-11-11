@@ -14,6 +14,8 @@
   owning_tests
   libc_tests
   parallel_tests
+  concurrent_tests
+  shared_tests
   core_form_tests
   library_tests)
  (modules
@@ -32,6 +34,8 @@
   owning_tests
   libc_tests
   parallel_tests
+  concurrent_tests
+  shared_tests
   core_form_tests
   library_tests)
  (libraries

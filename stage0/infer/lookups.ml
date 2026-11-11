@@ -4,7 +4,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -30,7 +30,7 @@ and literal_type state ~expected kind =
   | Some expected when Unify.literal_fits kind expected -> expected
   | _ -> Unify.fresh_literal state.unifier kind
 
-(* The type of a name used as a value, by what the name resolves to. *)
+(* The type of a name that is used as a value, according to its referent. *)
 and named state env (value : expression) ({ name; target; type_arguments } : Resolve.head) =
   let text = name.text in
   match target with
@@ -113,7 +113,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       error state Not_a_value value.span
         (Printf.sprintf "`%s` is applied to what it is about, as in `%s(...)`." text text)
   | Yielded -> (
-      (* The parts handed out so far, in order. *)
+      (* The sequence of the parts yielded so far. *)
       state.tables.meanings.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Yielded);
       let part =
@@ -482,10 +482,10 @@ and versions state receiver_type name :
              (List.assoc_opt receiver (own @ from_traits)))
          [ Read; Mut; Own ])
 
-(* When a call to a trait's yielding method resolves to a known [impl]
-   that defines the method, the callee is the [impl]'s method. The cursor's
-   type and a loop's contract then come from that method, which a trait's
-   method cannot give: it does not know what [Self.Element] is. *)
+(* When a call of a trait's yielding method resolves to a known [impl] that
+   defines the method, the callee is the [impl]'s method. The cursor's type
+   and a loop's contract then come from that method. The trait's method
+   cannot provide them, because [Self.Element] is abstract there. *)
 and impl_method_if_resolved state type_ (version : version) =
   match version with
   | Trait_version (trait, ({ method_signature = { output = Yields _; _ }; _ } as method_)) -> (

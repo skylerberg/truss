@@ -6,37 +6,38 @@ type root =
   | Local of Core.local
   | Constant of Path.t
   | Environment
-      (** What a lambda captures, as the lambda holds it: a record that is a local of the function
-          the lambda is written in. Every lambda that captures views it. *)
+      (** A lambda's environment record, which stores the lambda's captures. It is a local of the
+          enclosing function. Every capturing lambda views it. *)
 
-(* [Element] names the index call or the slice that selects the elements,
-   by its node id and its origin. The check does not compare indexes, so an
-   [Element] step stands for some elements of the collection. *)
+(* [Element] identifies the index call or the slice that selects the
+   elements, by its node id and its origin. The check does not compare index
+   values, so an [Element] step denotes an unknown subset of the
+   collection's elements. *)
 type step = Field of string | Element of { node : Core.id; origin : Core.origin }
 type t = { root : root; steps : step list }
 
 type overlap =
-  | Apart
-  | Overlap
-  | Maybe_apart of Core.origin * Core.origin
-      (** The places are different elements of one collection if the two index calls or slices,
-          named by their origins, select different elements. The prover decides. *)
+  | Disjoint
+  | Overlapping
+  | Maybe_disjoint of Core.origin * Core.origin
+      (** The places are disjoint if the two index calls or slices, identified by their origins,
+          select disjoint elements of one collection. The prover decides. *)
 
 (* Two places overlap if one is a prefix of the other. *)
 let overlap left right =
-  if left.root <> right.root then Apart
+  if left.root <> right.root then Disjoint
   else
     let rec go left right =
       match (left, right) with
-      | [], _ | _, [] -> Overlap
+      | [], _ | _, [] -> Overlapping
       | Field first :: left, Field second :: right ->
-          if first = second then go left right else Apart
+          if first = second then go left right else Disjoint
       | Element first :: left, Element second :: right -> (
           if first.node = second.node then go left right
           else
             match go left right with
-            | Apart -> Apart
-            | _ -> Maybe_apart (first.origin, second.origin))
+            | Disjoint -> Disjoint
+            | _ -> Maybe_disjoint (first.origin, second.origin))
       | _ :: left, _ :: right -> go left right
     in
     go left.steps right.steps
@@ -107,7 +108,7 @@ let string_slice_path : Path.t =
   Top { module_ = { package = "standard"; modules = [ "text" ] }; name = "StringSlice" }
 
 (* A [Slice] or a [StringSlice]: a view that an owned collection converts
-   to, and through which the collection's elements can be changed. *)
+   to, and through which the collection's elements can be mutated. *)
 let is_slice_type (type_ : T.ty) =
   match type_ with
   | T.Named { path; _ } -> Path.equal path slice_path || Path.equal path string_slice_path
@@ -141,8 +142,8 @@ let of_slice (slice : Core.expression) : t option =
         (of_core base)
   | _ -> None
 
-(* Whether a core place is part of what a call lends, and is not a tracked
-   place. *)
+(* Whether a core place is a part that a lending call lent, and so is not a
+   tracked place. *)
 let rec is_lent_part (place : Core.place) =
   match place with
   | Lent index -> Option.is_none (storage_index index)
