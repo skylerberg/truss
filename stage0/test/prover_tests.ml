@@ -2986,7 +2986,16 @@ let () =
       proven "fn f() -> String\n  ensures identical(result, \"a\")\n{\n  \"a\"\n}\n");
   test "two literals with different text are different values" (fun () ->
       not_proven "fn f() -> String\n  ensures identical(result, \"b\")\n{\n  \"a\"\n}\n"
-        "prover.ensures")
+        "prover.ensures");
+  test "a map built with a literal key contains the same literal" (fun () ->
+      proven
+        "fn built() -> Map[String, Int64]\n\
+        \  ensures result.contains(\"a\")\n\
+         {\n\
+        \  var made: Map[String, Int64] = [:]\n\
+        \  mut made.insert(\"a\", value: 1)\n\
+        \  made\n\
+         }\n")
 
 (* Concurrent code *)
 
