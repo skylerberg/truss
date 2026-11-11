@@ -27,6 +27,16 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `brew install z3` on macOS, or from the release's archive, and put it on
   the path or name it in `TRUSS_Z3`. CI downloads that release and checks
   its hash.
+- **The Unicode tables are generated.** `standard/text/unicode_data.truss`
+  holds the tables of character properties and case mappings, and nothing
+  else. `stage0/unicode_tables` writes it from five files of the Unicode
+  character database: `UnicodeData.txt`, `DerivedCoreProperties.txt`,
+  `SpecialCasing.txt`, `CaseFolding.txt`, and `EastAsianWidth.txt`. To move
+  to a new version of Unicode, download those files of that version into
+  one directory and run
+  `dune exec stage0/unicode_tables/unicode_tables.exe -- DIRECTORY > standard/text/unicode_data.truss`.
+  The functions that search the tables are written by hand, in
+  `standard/text/unicode_tables.truss`.
 - **`dune build`** builds everything, **`dune test`** runs the tests, and
   **`dune fmt`** formats the code with the ocamlformat version that
   `.ocamlformat` pins.

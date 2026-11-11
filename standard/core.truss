@@ -130,6 +130,7 @@ public trait Default {
 
 public trait Display {
   fn display(self, output: mut TextBuilder)
+    cost time finite
 }
 
 public trait From[Source] {

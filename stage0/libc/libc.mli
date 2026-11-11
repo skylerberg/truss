@@ -304,6 +304,15 @@ val of_the_runtime : function_ -> bool
 (** Whether the function is the runtime's own, written in C beside the generated code, and not the C
     library's. The standard library calls it [runtime_] and its name. *)
 
+val blocks : function_ -> bool
+(** Whether a call of the function can block its thread for long: it waits for input, for a
+    connection, for a process, for a storage device, or for time to pass. Lowering brackets such a
+    call with the runtime's blocking functions, so that a spare thread can run tasks in place of the
+    blocked thread, and so that the runtime can interrupt the call if its task is cancelled. A
+    function that reads or changes only what the system keeps about a file, such as [stat], is not
+    counted: it returns quickly on a local file system, and a spare thread for each call would cost
+    more than the wait. *)
+
 val available : system -> function_ -> bool
 (** Whether the system's C library has the function. A program built for a system never calls one
     that the system lacks: the call is a failure, so the standard library asks first which system it

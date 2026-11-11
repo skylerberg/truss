@@ -1,0 +1,51 @@
+use standard::console
+use standard::unicode
+
+test "fold_case removes the differences of case" {
+  assert unicode::fold_case("Hello WÖRLD") == "hello wörld"
+  assert unicode::fold_case("Straße") == "strasse"
+  assert unicode::fold_case("ΟΔΥΣΣΕΥΣ") == "οδυσσευσ"
+  assert unicode::fold_case("ﬃ") == "ffi"
+  assert unicode::fold_case("中文 123") == "中文 123"
+}
+
+test "equal_ignoring_case compares folded text" {
+  assert unicode::equal_ignoring_case("Straße", second: "STRASSE")
+  assert unicode::equal_ignoring_case("ΟΔΥΣΣΕΥΣ", second: "οδυσσευς")
+  assert unicode::equal_ignoring_case("", second: "")
+  assert !unicode::equal_ignoring_case("résumé", second: "resume")
+  assert !unicode::equal_ignoring_case("a", second: "ab")
+}
+
+test "a character has one general category" {
+  assert unicode::category(Character"a") == unicode::Category.Letter
+  assert unicode::category(Character"中") == unicode::Category.Letter
+  assert unicode::category(Character"\u{301}") == unicode::Category.Mark
+  assert unicode::category(Character"7") == unicode::Category.Number
+  assert unicode::category(Character"½") == unicode::Category.Number
+  assert unicode::category(Character"!") == unicode::Category.Punctuation
+  assert unicode::category(Character"€") == unicode::Category.Symbol
+  assert unicode::category(Character" ") == unicode::Category.Separator
+  assert unicode::category(Character"\n") == unicode::Category.Control
+  assert unicode::category(Character"\u{200D}") == unicode::Category.Format
+  assert unicode::category(Character"\u{E000}") == unicode::Category.PrivateUse
+  assert unicode::category(Character"\u{F0000}") == unicode::Category.PrivateUse
+  assert unicode::category(Character"\u{378}") == unicode::Category.Unassigned
+  assert unicode::category(Character"\u{10FFFF}") == unicode::Category.Unassigned
+}
+
+test "a character is as wide as zero, one, or two columns" {
+  assert unicode::display_width(Character"a") == 1
+  assert unicode::display_width(Character"é") == 1
+  assert unicode::display_width(Character"中") == 2
+  assert unicode::display_width(Character"ｱ") == 1
+  assert unicode::display_width(Character"Ａ") == 2
+  assert unicode::display_width(Character"😀") == 2
+  assert unicode::display_width(Character"\u{301}") == 0
+  assert unicode::display_width(Character"\u{200D}") == 0
+  assert unicode::display_width(Character"\n") == 0
+  assert console::display_width("abc") == 3
+  assert console::display_width("日本語") == 6
+  assert console::display_width("e\u{301}") == 1
+  assert console::display_width("") == 0
+}

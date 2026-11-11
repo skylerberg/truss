@@ -95,6 +95,12 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
       in
       declare_prototype context symbol (Printf.sprintf "%s%s(%s);\n" result symbol parameters);
       symbol ^ "(" ^ all ^ ")"
+  | (Blocking_begin | Blocking_end) as blocking ->
+      let symbol =
+        if blocking = Blocking_begin then "t_runtime_blocking_begin" else "t_runtime_blocking_end"
+      in
+      declare_prototype context symbol (Printf.sprintf "void %s(void);\n" symbol);
+      symbol ^ "()"
   | Report_tests_to -> "t_runtime_report_tests_to(" ^ all ^ ")"
   | Live_blocks -> "t_runtime_live_blocks()"
   | Environment ->
