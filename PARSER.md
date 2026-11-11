@@ -45,10 +45,11 @@ depends on the rest of the file. GOALS.md's "incremental everything" needs
 this property from the parser: a definition that only moved has exactly the
 same tree as before, so no result computed from the tree is computed again.
 
-The parsing functions cannot break this property by reading the file's line
-structure. A cursor holds the tokens, the file's text for slicing by a
-token's span, and the definition's base. It does not hold the `Source.t`,
-so it has no line table.
+The parsing functions cannot break this property by reading the rest of the
+file. A cursor holds the definition's tokens, its base, and its source text,
+the bytes from its first token to the end of its last. It holds no other
+part of the file's text and no line table, so a fix or a message can quote
+only the definition's own bytes.
 
 ## Structure
 

@@ -258,7 +258,7 @@ let rec next cursor =
           position = cursor.length;
           first_line_break = cursor.first_line_break;
           blank_line = cursor.blank_line;
-          unterminated = cursor.unterminated_at_end;
+          ends_unterminated = cursor.unterminated_at_end;
         }
   | Token { kind; start; ending } ->
       let first_line_break = cursor.first_line_break and blank_line = cursor.blank_line in
@@ -271,5 +271,5 @@ let rec next cursor =
           span = span start cursor.position;
           first_line_break;
           blank_line;
-          unterminated = ending = Unterminated;
+          unterminated_string = ending = Unterminated;
         }
