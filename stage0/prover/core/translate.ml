@@ -1020,8 +1020,8 @@ let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
                  | Named { path; _ }, Some head -> Path.equal path head
                  | _ -> false -> (
               match source_at_key database (Names.key_of declaration) with
-              | Some ({ core = { definition = Law_proof { body; _ }; _ }; _ } as source) ->
-                  Some (proven.law, (source, body))
+              | Some ({ core = { definition = Law_proof { parameters; body }; _ }; _ } as source) ->
+                  Some (proven.law, (source, parameters, body))
               | _ -> None)
           | _ -> None)
         (Query.demand database Names.declarations module_))
@@ -1046,7 +1046,7 @@ let law_unshown database (impl : Path.t) (trait : T.trait_reference) for_type na
   | Some key ->
       impl_unfinished database key
       || List.exists
-           (fun (law, (_, body)) -> law = name && holds_todo body)
+           (fun (law, (_, _, body)) -> law = name && holds_todo body)
            (law_proofs database (Path.package impl) trait for_type)
   | None -> false
 
@@ -8681,23 +8681,36 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
               term)
             types
         in
+        let inside = law_frame start law_source ~substitution law terms in
+        List.iter
+          (fun clause -> assume context start (snd (clause_value context inside clause)))
+          law.requires;
         (* A [proof]'s statements are hints: its calls' postconditions are
            facts where their preconditions hold, which is all a proof
-           needs. *)
+           needs. Its parameters are bound by position to the law's
+           arguments, and the law's [requires] are assumed. *)
         let start =
           List.fold_left
-            (fun start ((proof_source : source), (body : block)) ->
+            (fun start ((proof_source : source), (parameters : Core.parameter list), (body : block))
+               ->
+              let locals, types =
+                List.fold_left2
+                  (fun (locals, types) (parameter : Core.parameter) term ->
+                    ( Locals.add parameter.local term locals,
+                      Locals.add parameter.local parameter.type_ types ))
+                  (start.locals, start.types) parameters
+                  (List.filteri (fun index _ -> index < List.length parameters) terms)
+              in
               restrict start
-                (L.not_ (ghost context { start with source = proof_source; checking = false } body)))
+                (L.not_
+                   (ghost context
+                      { start with source = proof_source; checking = false; locals; types }
+                      body)))
             start
             (List.filter_map
                (fun (name, proof) -> if name = law.name then Some proof else None)
                proofs)
         in
-        let inside = law_frame start law_source ~substitution law terms in
-        List.iter
-          (fun clause -> assume context start (snd (clause_value context inside clause)))
-          law.requires;
         match specification context (fun () -> block_value context inside law.body) with
         | Some (_, holds) ->
             oblige context start Law at
