@@ -396,6 +396,11 @@ decides when a body is a definition. In the solver:
   reads what the prover cannot, such as an opaque type's fields from
   another package, is not unfolded, and the function is known by its
   contract alone.
+- **Called on a quantifier's bound values,** a definition with no
+  `requires` is stated once, for every argument, since a fact about one
+  call would name the bound values. So `forall a: Pair => forall b: Pair
+  => (a < b) == ...` unfolds a derived `compare`, which has a body as a
+  written one would.
 - **Recursive definitions unfold once per use.** A definition that
   unfolded itself forever would never be finished, so a call to a function
   inside its own unfolding is left as the function applied to its
