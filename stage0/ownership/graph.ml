@@ -111,19 +111,20 @@ type point = {
   mutable successors : int list;
 }
 
-type simultaneous_block = { keyword : string; branches : range list }
-(** A [parallel] or [concurrent] block. Its branches may run at the same time. [keyword] is
-    "parallel" or "concurrent", for error messages. *)
+type fork_join_block = { keyword : string; branches : range list }
+(** A [parallel] or [concurrent] block: a fork-join of its branches, which may run at the same time.
+    [keyword] is "parallel" or "concurrent", for error messages. *)
 
-type simultaneous_loop = { keyword : string; body : range; bound : Core.local list }
-(** A [parallel for] or [concurrent for]. Its iterations may run at the same time. [body] is the
-    points of the loop body, and [bound] is the locals that the loop's pattern binds. *)
+type fork_join_loop = { keyword : string; body : range; bound : Core.local list }
+(** A [parallel for] or [concurrent for]: a fork-join of its iterations, which may run at the same
+    time. [body] is the points of the loop body, and [bound] is the locals that the loop's pattern
+    binds. *)
 
 type t = {
   points : point array;
   entries : int list;  (** The [Enter] points: the definition's body first, then each lambda. *)
-  simultaneous_blocks : simultaneous_block list;
-  simultaneous_loops : simultaneous_loop list;
+  fork_join_blocks : fork_join_block list;
+  fork_join_loops : fork_join_loop list;
 }
 
 type builder = {
@@ -135,8 +136,8 @@ type builder = {
           that [continue] it. *)
   mutable captured : Core.local list;  (** The captures of the enclosing lambdas. *)
   mutable loans : loan list;
-  mutable simultaneous_blocks : simultaneous_block list;
-  mutable simultaneous_loops : simultaneous_loop list;
+  mutable fork_join_blocks : fork_join_block list;
+  mutable fork_join_loops : fork_join_loop list;
   plain : T.ty -> bool;
   is_view : T.ty -> bool;
   stores_function : Core.callee -> int -> bool;
@@ -248,7 +249,7 @@ let rec views_of builder (value : Core.expression) : view list =
      listed, so that adding a kind to the core form forces a decision here. *)
   | Integer _ | Float _ | Boolean _ | String _ | Interpolated _ | Function_value _
   | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _ | Or _ | Implies _
-  | Matches _ | Return _ | Break | Continue | Leaving _ | Todo | Unreachable | Result | Old _
+  | Matches _ | Return _ | Break | Continue | Task_exit _ | Todo | Unreachable | Result | Old _
   | Current_target | Quantified _ | Yielded | Finished | Identical _ | Specification_function _
   | Method_time _ ->
       []
@@ -324,7 +325,7 @@ let rec viewed_temporaries builder (value : Core.expression) : Core.expression l
   | Copy (Place _)
   | Cursor_next _ | Lambda _ | Integer _ | Float _ | Boolean _ | String _ | Interpolated _
   | Function_value _ | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _
-  | Or _ | Implies _ | Matches _ | Return _ | Break | Continue | Leaving _ | Todo | Unreachable
+  | Or _ | Implies _ | Matches _ | Return _ | Break | Continue | Task_exit _ | Todo | Unreachable
   | Result | Old _ | Current_target | Quantified _ | Yielded | Finished | Identical _
   | Specification_function _ | Method_time _ ->
       []
@@ -404,7 +405,7 @@ let rec expression builder frontier (node : Core.expression) : int list =
   (* An early exit from a [concurrent] task transfers control to the exit's
      target. The sibling tasks have finished by then, and each is modeled by
      its own control flow. *)
-  | Leaving { exit; _ } -> expression builder frontier exit
+  | Task_exit { exit; _ } -> expression builder frontier exit
   | Unreachable -> []
   | Break ->
       (match builder.loops with (breaks, _) :: _ -> breaks := frontier @ !breaks | [] -> ());
@@ -552,7 +553,7 @@ and quantified builder frontier (node : Core.expression) (binder : Core.binder)
   let run frontier (pattern : Core.pattern) ~views ~loan =
     loop builder frontier ~bound:(pattern_locals pattern) ~views ~loan ~condition:None
       { statements = []; value = Some body; diverges = false }
-      node.origin ~simultaneous:None
+      node.origin ~fork_join:None
   in
   match binder with
   | Over_type _ | Over_collection _ -> frontier
@@ -922,14 +923,14 @@ and statement_actions builder frontier (node : Core.statement) =
       in
       loop builder frontier ~bound:(pattern_locals pattern) ~views ~loan ~condition:None body
         node.origin
-        ~simultaneous:
+        ~fork_join:
           (match node.kind with
           | For { mode = Parallel_loop; _ } -> Some "parallel"
           | For { mode = Concurrent_loop; _ } -> Some "concurrent"
           | _ -> None)
   | While { condition; body; _ } ->
       loop builder frontier ~bound:[] ~views:[] ~loan:None ~condition:(Some condition) body
-        node.origin ~simultaneous:None
+        node.origin ~fork_join:None
   | Parallel branches | Concurrent branches ->
       let concurrent = match node.kind with Concurrent _ -> true | _ -> false in
       let frontier, ranges =
@@ -945,9 +946,9 @@ and statement_actions builder frontier (node : Core.statement) =
             (frontier, { first; limit } :: ranges))
           (frontier, []) branches
       in
-      builder.simultaneous_blocks <-
+      builder.fork_join_blocks <-
         { keyword = (if concurrent then "concurrent" else "parallel"); branches = List.rev ranges }
-        :: builder.simultaneous_blocks;
+        :: builder.fork_join_blocks;
       frontier
   | Proof _ -> frontier
   | Assert { value; _ } -> expression builder frontier value
@@ -1039,7 +1040,7 @@ and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (valu
    evaluates its condition after the head. Control leaves the loop from the
    head, from the condition, and from each [break]. A loop over a place
    borrows the place for the body. *)
-and loop builder frontier ~bound ~views ~loan ~condition ~simultaneous (body : Core.block) origin =
+and loop builder frontier ~bound ~views ~loan ~condition ~fork_join (body : Core.block) origin =
   match frontier with
   | [] -> []
   | _ ->
@@ -1072,10 +1073,9 @@ and loop builder frontier ~bound ~views ~loan ~condition ~simultaneous (body : C
       let body_end = block builder entered body in
       Option.iter
         (fun keyword ->
-          builder.simultaneous_loops <-
-            { keyword; body = { first; limit = builder.count }; bound }
-            :: builder.simultaneous_loops)
-        simultaneous;
+          builder.fork_join_loops <-
+            { keyword; body = { first; limit = builder.count }; bound } :: builder.fork_join_loops)
+        fork_join;
       builder.loans <- loans;
       builder.loops <- List.tl builder.loops;
       link builder (body_end @ !continues) head;
@@ -1101,8 +1101,8 @@ let of_definition ~plain ~is_view ~stores_function (definition : Core.definition
           loops = [];
           captured = [];
           loans = [];
-          simultaneous_blocks = [];
-          simultaneous_loops = [];
+          fork_join_blocks = [];
+          fork_join_loops = [];
           plain;
           is_view;
           stores_function;
@@ -1120,7 +1120,7 @@ let of_definition ~plain ~is_view ~stores_function (definition : Core.definition
       {
         points = Array.init builder.count (Hashtbl.find builder.table);
         entries = entry :: List.rev builder.entries;
-        simultaneous_blocks = List.rev builder.simultaneous_blocks;
-        simultaneous_loops = List.rev builder.simultaneous_loops;
+        fork_join_blocks = List.rev builder.fork_join_blocks;
+        fork_join_loops = List.rev builder.fork_join_loops;
       })
     body

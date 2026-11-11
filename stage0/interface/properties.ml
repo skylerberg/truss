@@ -12,10 +12,9 @@
 
 module T = Types
 
-let core name : Path.t = Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
-let copyable_trait = core "Copyable"
-let plain_trait = core "Plain"
-let storable_trait = core "Storable"
+let copyable_trait = Path.core "Copyable"
+let plain_trait = Path.core "Plain"
+let storable_trait = Path.core "Storable"
 
 (* The substitution for a trait reference: the types that the trait's [Self]
    and parameters are instantiated with. A reference with the wrong number

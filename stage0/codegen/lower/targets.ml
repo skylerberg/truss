@@ -697,8 +697,6 @@ let boxed_cursor st (yielding : Ground.yielding) : Lir.place =
 
 (* Calls a trait's method on a value of a ground type, through the [impl]
    the type has, with arguments that are places. *)
-(* A trait of the standard library's [core] module. *)
-let core name : Path.t = Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
 
 let trait_call st ~trait ~name ~(receiver : Path.receiver) ~self ~arguments ~destination =
   match

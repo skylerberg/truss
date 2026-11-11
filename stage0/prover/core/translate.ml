@@ -532,10 +532,7 @@ let is_standard_equal (path : Path.t) =
   | Top { module_ = { package = "standard"; _ }; name = "Equal" } -> true
   | _ -> false
 
-let core_trait name : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
-
-let equal_trait = core_trait "Equal"
+let equal_trait = Path.core "Equal"
 
 (* A type's interface, when it is a type whose fields this package sees. *)
 let visible_type context (ty : T.ty) =
@@ -1492,7 +1489,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Specification_function { function_; arguments } ->
       specification_function context frame node function_ arguments
   | Method_time callee -> Some (frame, method_time context frame callee)
-  | Leaving { tasks; exit } -> (
+  | Task_exit { tasks; exit } -> (
       (* The exit is where the block it leaves ends, after the other
          branches, so here it is only recorded. *)
       match tasks with
@@ -3283,9 +3280,7 @@ and measure_type element : T.function_type =
 
 and sequence_at context element term index =
   let sequence = sequence_type element in
-  let index_trait : Path.t =
-    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Index" }
-  in
+  let index_trait = Path.core "Index" in
   match
     Call_graph.impls_for
       (Query.demand context.database Call_graph.package_impls "standard")
@@ -3715,9 +3710,7 @@ and model_function context (ty : T.ty) ~(model : T.ty) =
       found
 
 and find_model_function context (ty : T.ty) ~(model : T.ty) =
-  let model_trait : Path.t =
-    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" }
-  in
+  let model_trait = Path.core "Model" in
   match
     Call_graph.impls_for
       (Query.demand context.database Call_graph.package_impls "standard")
@@ -3766,8 +3759,7 @@ and model_ranked context (ty : T.ty) ~(model : T.ty) symbol =
 
 (* Cursors. A cursor carries what it has handed out and whether it has
    ended as ghost parts of its value. *)
-and cursor_trait : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
+and cursor_trait : Path.t = Path.core "Cursor"
 
 and cursor_yielded context cursor_type element cursor =
   let sort = sort_of context cursor_type in

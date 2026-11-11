@@ -232,7 +232,7 @@ and kind =
   | Return of expression option
   | Break
   | Continue
-  | Leaving of { tasks : task list; exit : expression }
+  | Task_exit of { tasks : task list; exit : expression }
       (** An early exit from [concurrent] code. [exit] is the {!Return}, {!Break}, or {!Continue},
           and [tasks] are the tasks that it ends early, innermost first. The other tasks of each
           block or loop that it leaves are cancelled and run to their ends, and then the exit takes
@@ -355,7 +355,7 @@ and statement_kind =
   | Concurrent of statement list
       (** A [concurrent] block. Each statement is a branch, which runs as a task with the
           capabilities that are available around the block. The block ends when every branch has
-          ended. A branch is named by the block's id and its index, from 0 (see {!Leaving}). *)
+          ended. A branch is named by the block's id and its index, from 0 (see {!Task_exit}). *)
   | Proof of block
   | Assert of condition
   | Yield of { mode : Types.mode; part : operand }
@@ -365,7 +365,7 @@ and statement_kind =
     but [Panic], or as tasks. *)
 and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
-(** A task that an early exit ends (see {!Leaving}). The block or the loop is named by its
+(** A task that an early exit ends (see {!Task_exit}). The block or the loop is named by its
     statement's origin, which no other statement of the definition has. *)
 and task =
   | Branch of { block : origin; index : int }

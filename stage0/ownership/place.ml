@@ -67,8 +67,7 @@ let is_storage (type_ : T.ty) =
       true
   | _ -> T.is_builtin Array type_
 
-let index_trait : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Index" }
+let index_trait = Path.core "Index"
 
 (* If the expression is an index of a [List], a [Slice], or an [Array],
    the collection that is indexed. *)
