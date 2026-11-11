@@ -140,8 +140,12 @@ let yields (f : Lir.function_) =
       | _ -> None)
     (List.init (Array.length f.blocks) Fun.id)
 
-(* The parameters, and every local live where a [yield] resumes or stops. *)
-let kept (f : Lir.function_) =
+(* The parameters, and every local live where a [yield] resumes or stops,
+   but the parameters in [evidence]. A cursor holds no evidence: [next]
+   takes it from its caller. A cursor that held the evidence it was made
+   with could use an implementation after the [provide] block that
+   provided it had ended, which is a use after free. *)
+let kept ~evidence (f : Lir.function_) =
   let live = live_in f in
   let keep = Array.make (Array.length f.locals) false in
   List.iter (fun p -> keep.(p) <- true) f.parameters;
@@ -151,6 +155,7 @@ let kept (f : Lir.function_) =
         (fun b -> Array.iteri (fun i v -> if v then keep.(i) <- true) live.(b))
         (resume :: Option.to_list stop))
     (yields f);
+  List.iter (fun local -> keep.(local) <- false) evidence;
   List.filter (fun i -> keep.(i)) (List.init (Array.length f.locals) Fun.id)
 
 (* A kept local's field of the cursor: a parameter's is named by its place
@@ -168,9 +173,9 @@ let member : Lir.ty -> Memory_layout.member = function
 
 let state_ty = Lir.Raw (Integer UInt32)
 
-let cursor_fields _env (f : Lir.function_) =
+let cursor_fields _env ~evidence (f : Lir.function_) =
   (Convention.cursor_state, Memory_layout.Raw (Integer UInt32))
-  :: List.map (fun local -> (field_name f local, member f.locals.(local).ty)) (kept f)
+  :: List.map (fun local -> (field_name f local, member f.locals.(local).ty)) (kept ~evidence f)
 
 (* The state machine *)
 
@@ -178,8 +183,8 @@ let cursor_fields _env (f : Lir.function_) =
    every kept local moved into the cursor that local [cursor] points at,
    every other local shifted by [base], and each [yield] and [return] given
    to [yield_] and [return_]. *)
-let state_machine (f : Lir.function_) ~cursor ~base ~yield_ ~return_ =
-  let kept = kept f in
+let state_machine (f : Lir.function_) ~evidence ~cursor ~base ~yield_ ~return_ =
+  let kept = kept ~evidence f in
   let place (p : Lir.place) =
     match p.root with
     | Local local when List.mem local kept ->
@@ -226,7 +231,7 @@ let entry_switch cursor cases ~default : Lir.basic_block =
         };
   }
 
-let cursor_next env ~cursor ~result (f : Lir.function_) =
+let cursor_next env ~cursor ~result ~evidence (f : Lir.function_) =
   let convention = Convention.result env result in
   let through_pointer = match convention with Through_pointer _ -> true | _ -> false in
   let cursor_local = if through_pointer then 1 else 0 in
@@ -246,7 +251,7 @@ let cursor_next env ~cursor ~result (f : Lir.function_) =
   let none = Lir.Build { ty = result; variant = Some "None"; fields = [] } in
   let finished = List.length (yields f) + 1 in
   let blocks, _ =
-    state_machine f ~cursor:cursor_local ~base
+    state_machine f ~evidence ~cursor:cursor_local ~base
       ~yield_:(fun ~state ~value ~resume:_ ~stop:_ ->
         let statements, terminator = give (some value) in
         (set_state cursor_local state :: statements, terminator))
@@ -263,7 +268,8 @@ let cursor_next env ~cursor ~result (f : Lir.function_) =
   let cursor_ty = Lir.Pointer { target = Value cursor; writable = true } in
   let result_pointer = match convention with Through_pointer ty -> [ ty ] | _ -> [] in
   {
-    Lir.parameters = (if through_pointer then [ 0; 1 ] else [ 0 ]);
+    Lir.parameters =
+      (if through_pointer then [ 0; 1 ] else [ 0 ]) @ List.map (fun local -> local + base) evidence;
     written_result = (if through_pointer then Some 0 else None);
     result = (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None);
     returns = true;
@@ -285,9 +291,19 @@ let cursor_next env ~cursor ~result (f : Lir.function_) =
     environment = [];
   }
 
-let cursor_drop _env ~cursor ~owned (f : Lir.function_) =
+let cursor_drop _env ~cursor ~owned ~evidence (f : Lir.function_) =
+  (* A drop is given no evidence, so no [stop] path may read any. *)
+  let live = live_in f in
+  List.iter
+    (fun (_, _, stop) ->
+      Option.iter
+        (fun stop ->
+          if List.exists (fun local -> live.(stop).(local)) evidence then
+            bug "a pulled method uses a capability where it ends early")
+        stop)
+    (yields f);
   let blocks, count =
-    state_machine f ~cursor:0 ~base:1
+    state_machine f ~evidence ~cursor:0 ~base:1
       ~yield_:(fun ~state:_ ~value:_ ~resume:_ ~stop:_ -> ([], Unreachable))
       ~return_:(fun () -> ([], Return None))
   in

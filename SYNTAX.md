@@ -1446,8 +1446,8 @@ A yielding method gives out parts one after another:
   `break` does. A cursor from an `own self` method owns what it iterates
   over. A cursor from a `self` method is a view. Cursors are how `zip`,
   merging sorted sequences, and looking ahead with `peek` are written.
-- **A cursor's type has no name,** as with Rust's closures, but every cursor
-  implements the prelude trait `Cursor`:
+- **A cursor's type has no name,** as with Rust's closures, but a cursor of a
+  method without a `uses` clause implements the prelude trait `Cursor`:
 
   ```truss
   trait Cursor {
@@ -1464,6 +1464,13 @@ A yielding method gives out parts one after another:
   allocates once. Usually a yielding method is simpler than returning a
   cursor. A hand-written cursor, such as one that keeps an explicit stack,
   implements `Cursor` too.
+- **A cursor of a method with a `uses` clause needs those capabilities at each
+  `next`,** and in a `for` loop over it, because `next` runs the method's
+  code. Each `next` uses the implementation that is provided where `next`
+  is called, not the one that was provided where the cursor was made. It
+  is not a `Cursor`: `Cursor.next` uses no capability, so generic
+  code such as `zip` could not give the cursor what it needs. Pull it, or
+  loop over it, where the capabilities are available.
 - A method that yields `mut` access cannot be pulled, because a cursor would
   have to store the access. To change two collections side by side, use
   indexes, or the standard `zip` for indexable collections:

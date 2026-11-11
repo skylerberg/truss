@@ -116,8 +116,17 @@ val open_ : ?log:bool -> Store.t -> version:string -> bases:t list -> string -> 
     from is a frozen base, shared by every engine opened from it. [None] if the store no longer has
     the chain. *)
 
-val values_in : Store.t -> string -> string list
-(** Every name an artifact's chain refers to in the store, for collecting it. *)
+exception Lost of string
+(** The store no longer has the value of an input a state holds, as after another process collected
+    the store. The state cannot be used, and its session starts again from its files. *)
+
+val inputs_stored : t -> bool
+(** Whether the store still has the value of every input of the state, apart from its fixed bases'.
+*)
+
+val values_in : Store.t -> version:string -> string -> string list
+(** Every name an artifact's chain refers to in the store, for collecting it; none for a chain that
+    another version wrote, which only that version can read. *)
 
 val forget_bases : unit -> unit
 

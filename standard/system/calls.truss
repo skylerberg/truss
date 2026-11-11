@@ -9,11 +9,25 @@ internal fn retry_after_signal() -> Bool {
   intrinsic::libc_errno() == intrinsic::libc_eintr() && !cancelled()
 }
 
+internal fn watch(descriptor: Int32, writing: Bool) -> UInt64 {
+  intrinsic::runtime_descriptor_watch(descriptor, writing: if writing { 1 } else { 0 })
+}
+
+internal fn retry_when_ready(descriptor: Int32, writing: Bool, ticket: UInt64) -> Bool {
+  let error = intrinsic::libc_errno()
+  if error == intrinsic::libc_eagain() {
+    intrinsic::runtime_descriptor_wait(descriptor, writing: if writing { 1 } else { 0 }, ticket: ticket) != 0
+  } else {
+    error == intrinsic::libc_eintr() && !cancelled()
+  }
+}
+
 internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
   let length = intrinsic::view_length(bytes)
   var written: USize = 0
   var error: Int32 = 0
   while error == 0 && written < length {
+    let ticket = watch(descriptor, writing: true)
     let wrote = intrinsic::libc_write(
       descriptor,
       bytes: intrinsic::view_slice(bytes, start: written, stop: length),
@@ -24,7 +38,7 @@ internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Res
       written += count
     } else if wrote == 0 {
       error = intrinsic::libc_eio()
-    } else if !retry_after_signal() {
+    } else if !retry_when_ready(descriptor, writing: true, ticket: ticket) {
       error = intrinsic::libc_errno()
     }
   }
@@ -44,12 +58,14 @@ internal fn read_onto_end(
 {
   growth::reserve(mut buffer, additional: count)
   let length = intrinsic::storage_length(buffer)
+  var ticket = watch(descriptor, writing: false)
   var got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
-  while got < 0 && retry_after_signal()
+  while got < 0 && retry_when_ready(descriptor, writing: false, ticket: ticket)
     invariant identical(intrinsic::storage_model(buffer), old(intrinsic::storage_model(buffer)))
     invariant intrinsic::storage_capacity(buffer) >= length + count
     invariant got <= count
   {
+    ticket = watch(descriptor, writing: false)
     got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
   }
   if got < 0 {
@@ -96,10 +112,12 @@ internal fn write_some(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Resu
   ensures !(result is Ok(count) && count > intrinsic::view_length(bytes))
 {
   let length = intrinsic::view_length(bytes)
+  var ticket = watch(descriptor, writing: true)
   var wrote = intrinsic::libc_write(descriptor, bytes: bytes, count: length)
-  while wrote < 0 && retry_after_signal()
+  while wrote < 0 && retry_when_ready(descriptor, writing: true, ticket: ticket)
     invariant wrote <= length
   {
+    ticket = watch(descriptor, writing: true)
     wrote = intrinsic::libc_write(descriptor, bytes: bytes, count: length)
   }
   if wrote < 0 {
@@ -304,22 +322,7 @@ internal fn resolve(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[U
 }
 
 internal fn sleep(seconds: Int64, nanoseconds: Int64) {
-  var left_seconds = seconds
-  var left_nanoseconds = nanoseconds
-  var sleeping = true
-  while sleeping {
-    var duration: intrinsic::Storage[Int64] = intrinsic::storage_with_capacity(2)
-    intrinsic::storage_push(mut duration, value: left_seconds)
-    intrinsic::storage_push(mut duration, value: left_nanoseconds)
-    let outcome = intrinsic::libc_nanosleep(
-      intrinsic::storage_view(duration),
-      remaining_seconds: mut left_seconds,
-      remaining_nanoseconds: mut left_nanoseconds,
-    )
-    if outcome == 0 || !retry_after_signal() {
-      sleeping = false
-    }
-  }
+  let _ = intrinsic::runtime_sleep(seconds, nanoseconds: nanoseconds)
 }
 
 internal fn ends_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Bool

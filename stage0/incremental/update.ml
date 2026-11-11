@@ -79,7 +79,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   let outcome =
     match query.compute { engine; frame = Some frame } cell.key with
     | value -> Value value
-    | exception ((Out_of_memory | Stack_overflow) as fatal) ->
+    | exception ((Out_of_memory | Stack_overflow | Lost _) as fatal) ->
         finish ();
         raise fatal
     | exception exception_ -> Raised exception_

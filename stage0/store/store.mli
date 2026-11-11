@@ -74,6 +74,10 @@ val pointers : t -> string list
 
 (** {1 Collection} *)
 
+val compact : t -> unit
+(** Gathers small segments that no running process is writing into this process's segment, once
+    there are many, so that a lookup searches fewer. Every record is kept. *)
+
 val size : t -> int
 (** The bytes the store's segments take. *)
 

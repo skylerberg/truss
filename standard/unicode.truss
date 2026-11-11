@@ -18,16 +18,190 @@ public type Category =
   | Unassigned
   derives Equal, Hash
 
-public fn normalize(text: StringSlice, form: Form = Form.Composed) -> String
-  cost time O(text.length())
+fn is_compatibility(form: Form) -> Bool
+  cost time O(1)
 {
-  todo
+  match form {
+    Composed => false
+    Decomposed => false
+    CompatibilityComposed => true
+    CompatibilityDecomposed => true
+  }
+}
+
+fn is_composed(form: Form) -> Bool
+  cost time O(1)
+{
+  match form {
+    Composed => true
+    Decomposed => false
+    CompatibilityComposed => true
+    CompatibilityDecomposed => false
+  }
+}
+
+fn first_changed_code(form: Form) -> UInt32
+  cost time O(1)
+{
+  match form {
+    Composed => 768
+    Decomposed => 192
+    CompatibilityComposed => 160
+    CompatibilityDecomposed => 160
+  }
+}
+
+fn is_below(text: StringSlice, limit: UInt32) -> Bool
+  cost time finite
+{
+  for character in text.characters() {
+    if character.code() >= limit {
+      return false
+    }
+  }
+  true
+}
+
+fn append_decomposition(codes: mut List[UInt32], code: UInt32, compatible: Bool)
+  cost time finite
+{
+  if code < 160 {
+    mut codes.push(code)
+  } else if code >= 44032 && code < 55204 {
+    let syllable = code - 44032
+    mut codes.push(4352 + syllable / 588)
+    mut codes.push(4449 + syllable % 588 / 28)
+    if syllable % 28 != 0 {
+      mut codes.push(4519 + syllable % 28)
+    }
+  } else {
+    var found = false
+    if compatible {
+      found = unicode_tables::append_compatibility_decomposition(mut codes, code: code)
+    }
+    if !found {
+      found = unicode_tables::append_canonical_decomposition(mut codes, code: code)
+    }
+    if !found {
+      mut codes.push(code)
+    }
+  }
+}
+
+fn with_combining_classes(codes: Slice[UInt32]) -> List[UInt32]
+  cost time finite
+{
+  var entries: List[UInt32] = []
+  for index in 0..codes.length() {
+    let code = codes[index] % 2097152
+    mut entries.push(unicode_tables::combining_class_of(code) % 256 * 2097152 + code)
+  }
+  entries
+}
+
+fn reorder(entries: mut List[UInt32])
+  ensures entries.length() == old(entries.length())
+  cost time finite
+{
+  var position: USize = 1
+  while position < entries.length()
+    invariant entries.length() == old(entries.length())
+    decreases entries.length() - position
+  {
+    var at = position
+    while at > 0 && entries[at] >= 2097152 && entries[at - 1] / 2097152 > entries[at] / 2097152
+      invariant at <= position
+      invariant position < entries.length()
+      invariant entries.length() == old(entries.length())
+      decreases at
+    {
+      mut entries.swap(at - 1, second: at)
+      at -= 1
+    }
+    position += 1
+  }
+}
+
+fn composite_of(first: UInt32, second: UInt32) -> Option[UInt32]
+  cost time O(1)
+{
+  if first >= 4352 && first < 4371 && second >= 4449 && second < 4470 {
+    Some(44032 + ((first - 4352) * 21 + (second - 4449)) * 28)
+  } else if first >= 44032 && first < 55204 && (first - 44032) % 28 == 0 && second > 4519 && second < 4547 {
+    Some(first + (second - 4519))
+  } else {
+    unicode_tables::composition_of(first, second: second)
+  }
+}
+
+fn compose(entries: Slice[UInt32]) -> List[UInt32]
+  cost time finite
+{
+  var output: List[UInt32] = []
+  var starter: USize = 0
+  var has_starter = false
+  var last_class: UInt32 = 0
+  for position in 0..entries.length()
+    invariant !has_starter || starter < output.length()
+  {
+    let code = entries[position] % 2097152
+    let class = entries[position] / 2097152
+    var composed = false
+    if has_starter && (last_class < class || last_class == 0) {
+      match composite_of(output[starter], second: code) {
+        Some(composite) => {
+          output[starter] = composite
+          composed = true
+        }
+        None => {}
+      }
+    }
+    if !composed {
+      if class == 0 {
+        starter = output.length()
+        has_starter = true
+      }
+      last_class = class
+      mut output.push(code)
+    }
+  }
+  output
+}
+
+fn encoded(codes: Slice[UInt32]) -> String
+  cost time finite
+{
+  var output = ""
+  for index in 0..codes.length() {
+    string_slice::push_scalar(mut output, code: codes[index] % 2097152)
+  }
+  output
+}
+
+public fn normalize(text: StringSlice, form: Form = Form.Composed) -> String
+  cost time finite
+{
+  if is_below(text, limit: first_changed_code(form)) {
+    return text.to_string()
+  }
+  let compatible = is_compatibility(form)
+  var codes: List[UInt32] = []
+  for character in text.characters() {
+    append_decomposition(mut codes, code: character.code(), compatible: compatible)
+  }
+  var entries = with_combining_classes(codes.slice())
+  reorder(mut entries)
+  if is_composed(form) {
+    encoded(compose(entries.slice()).slice())
+  } else {
+    encoded(entries.slice())
+  }
 }
 
 public fn is_normalized(text: StringSlice, form: Form = Form.Composed) -> Bool
-  cost time O(text.length())
+  cost time finite
 {
-  todo
+  is_below(text, limit: first_changed_code(form)) || normalize(text, form: form).slice() == text
 }
 
 public fn fold_case(text: StringSlice) -> String

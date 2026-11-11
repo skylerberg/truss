@@ -143,3 +143,18 @@ let same_outcome engine (left : node) other (right : node) =
               | _ -> false))
       | _ -> false)
   | Unfilled -> false
+
+(* Whether the store still has the value of every input of the state,
+   apart from its fixed bases'. *)
+let inputs_stored engine =
+  List.for_all
+    (fun (holder : t) ->
+      Hashtbl.fold
+        (fun _ (node : node) stored ->
+          stored
+          &&
+          match node.cell with
+          | Input (_, { slot = Stored; _ }) -> stored_bytes holder node <> None
+          | Input _ | Result _ | Unfilled -> true)
+        holder.own true)
+    (engine :: List.filter (fun (base : t) -> not base.fixed) engine.bases)

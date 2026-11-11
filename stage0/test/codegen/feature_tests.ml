@@ -66,6 +66,73 @@ test "counted" {
   assert mut each.next() == None
 }
 |};
+  (* A cursor that held the evidence it was made with would read the
+     [Table]'s list after the first block had dropped it. *)
+  passes "a cursor's next uses the implementation provided where it is called"
+    {|capability Meter {
+  fn read() -> Int64
+}
+
+type Table(values: List[Int64])
+
+impl Meter for Table {
+  fn read(self) -> Int64 {
+    var sum = 0
+    for value in self.values {
+      sum += value
+    }
+    sum
+  }
+}
+
+fn readings(count: Int64) yields Int64
+  uses Meter
+{
+  var index = 0
+  while index < count {
+    yield Meter.read() + index
+    index += 1
+  }
+}
+
+fn total(count: Int64) -> Int64
+  uses Meter
+{
+  var cursor = readings(count)
+  var sum = 0
+  while mut cursor.next() is Some(reading) {
+    sum += reading
+  }
+  sum
+}
+
+test "a cursor that outlives the block it was made in" {
+  var cursor = provide Table(values: [1, 2, 4]) {
+    var made = readings(4)
+    assert mut made.next() == Some(7)
+    own made
+  }
+  provide Table(values: [100]) {
+    assert mut cursor.next() == Some(101)
+    assert total(3) == 303
+  }
+  provide Table(values: [10, 10]) {
+    assert mut cursor.next() == Some(22)
+    var seen = 0
+    for reading in own cursor {
+      seen += reading
+    }
+    assert seen == 23
+  }
+  provide Table(values: [1]) {
+    var inner = readings(3)
+    provide Table(values: [2]) {
+      assert mut inner.next() == Some(2)
+    }
+    assert mut inner.next() == Some(2)
+  }
+}
+|};
   passes "a lending method goes on after its caller's statement"
     {|type Counted(value: Int64, reads: Int64)
 

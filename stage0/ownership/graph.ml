@@ -247,11 +247,10 @@ let rec views_of builder (value : Core.expression) : view list =
   | If _ | Match _ | Block _ | Provide _ -> List.concat_map (views_of builder) (tail_values value)
   (* These produce a value that has no views, or no value. Every kind is
      listed, so that adding a kind to the core form forces a decision here. *)
-  | Integer _ | Float _ | Boolean _ | String _ | Interpolated _ | Function_value _
-  | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _ | Or _ | Implies _
-  | Matches _ | Return _ | Break | Continue | Task_exit _ | Todo | Unreachable | Result | Old _
-  | Current_target | Quantified _ | Yielded | Finished | Identical _ | Specification_function _
-  | Method_time _ ->
+  | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _
+  | Map_literal _ | Operator _ | Compare _ | Not _ | And _ | Or _ | Implies _ | Matches _ | Return _
+  | Break | Continue | Task_exit _ | Todo | Unreachable | Result | Old _ | Current_target
+  | Quantified _ | Yielded | Finished | Identical _ | Specification_function _ | Method_time _ ->
       []
 
 (* The views of a subexpression, if it has a view type. *)
@@ -323,11 +322,11 @@ let rec viewed_temporaries builder (value : Core.expression) : Core.expression l
      here. *)
   | Use _
   | Copy (Place _)
-  | Cursor_next _ | Lambda _ | Integer _ | Float _ | Boolean _ | String _ | Interpolated _
-  | Function_value _ | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _
-  | Or _ | Implies _ | Matches _ | Return _ | Break | Continue | Task_exit _ | Todo | Unreachable
-  | Result | Old _ | Current_target | Quantified _ | Yielded | Finished | Identical _
-  | Specification_function _ | Method_time _ ->
+  | Cursor_next _ | Lambda _ | Integer _ | Float _ | Boolean _ | String _ | Function_value _
+  | Value_parameter _ | Map_literal _ | Operator _ | Compare _ | Not _ | And _ | Or _ | Implies _
+  | Matches _ | Return _ | Break | Continue | Task_exit _ | Todo | Unreachable | Result | Old _
+  | Current_target | Quantified _ | Yielded | Finished | Identical _ | Specification_function _
+  | Method_time _ ->
       []
 
 and owned_temporary builder (found : Core.operand) : Core.expression list =
@@ -415,13 +414,6 @@ let rec expression builder frontier (node : Core.expression) : int list =
       | (_, continues) :: _ -> continues := frontier @ !continues
       | [] -> ());
       []
-  | Interpolated { pieces; _ } ->
-      List.fold_left
-        (fun frontier (piece : Core.piece) ->
-          match piece with
-          | Text _ -> frontier
-          | Displayed { value; _ } -> operand builder frontier Read value)
-        frontier pieces
   | Template { call; _ } -> expression builder frontier call
   | Use found -> use builder frontier node found ~returned:false
   | Copy value -> operand builder frontier Read value

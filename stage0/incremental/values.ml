@@ -33,20 +33,26 @@ let fingerprint engine (node : node) =
 let key_part engine (node : node) =
   match node.cell with Input (_, { slot = Unset; _ }) -> Some unset | _ -> fingerprint engine node
 
+let stored_bytes engine (node : node) =
+  match (node.fingerprint, engine.store) with
+  | Some fingerprint, Some store -> store.get fingerprint
+  | _ -> None
+
+(* An input's value, [None] for one that is not set. An input is what the
+   database gave, and cannot be computed again, so one whose value the store
+   no longer has raises [Lost]: read as not set, it would give wrong
+   results, which would be kept as facts. *)
 let input_value engine (cell : ('key, 'value) input_cell) : 'value option =
   match cell.slot with
   | Unset -> None
   | Set value -> Some value
   | Stored -> (
-      match (cell.input_node.fingerprint, engine.store) with
-      | Some fingerprint, Some store -> (
-          match store.get fingerprint with
-          | Some bytes ->
-              let value = unmarshal bytes in
-              cell.slot <- Set value;
-              Some value
-          | None -> None)
-      | _ -> None)
+      match stored_bytes engine cell.input_node with
+      | Some bytes ->
+          let value = unmarshal bytes in
+          cell.slot <- Set value;
+          Some value
+      | None -> raise (Lost (label cell.input_node)))
 
 (* The outcome in memory, reading a stored one. [None] when there is none,
    or the store no longer has it. *)

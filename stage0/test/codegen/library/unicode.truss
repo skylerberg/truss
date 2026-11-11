@@ -49,3 +49,75 @@ test "a character is as wide as zero, one, or two columns" {
   assert console::display_width("e\u{301}") == 1
   assert console::display_width("") == 0
 }
+
+test "normalize composes and decomposes canonical equivalents" {
+  assert unicode::normalize("e\u{301}") == "\u{E9}"
+  assert unicode::normalize("\u{E9}", form: unicode::Form.Decomposed) == "e\u{301}"
+  assert unicode::normalize("A\u{30A}") == "\u{C5}"
+  assert unicode::normalize("\u{212B}") == "\u{C5}"
+  assert unicode::normalize("\u{212B}", form: unicode::Form.Decomposed) == "A\u{30A}"
+  assert unicode::normalize("\u{2126}", form: unicode::Form.Decomposed) == "\u{3A9}"
+  assert unicode::normalize("\u{1F600}e\u{301}") == "\u{1F600}\u{E9}"
+  assert unicode::normalize("plain text") == "plain text"
+  assert unicode::normalize("") == ""
+}
+
+test "normalize orders combining marks by their class" {
+  assert unicode::normalize("a\u{301}\u{323}", form: unicode::Form.Decomposed) == "a\u{323}\u{301}"
+  assert unicode::normalize("a\u{301}\u{323}") == "\u{1EA1}\u{301}"
+  assert unicode::normalize("a\u{315}\u{300}\u{5AE}b", form: unicode::Form.Decomposed) == "a\u{5AE}\u{300}\u{315}b"
+  assert unicode::normalize("a\u{315}\u{300}\u{5AE}b") == "\u{E0}\u{5AE}\u{315}b"
+  assert unicode::normalize("\u{3A9}\u{301}\u{345}") == "\u{38F}\u{345}"
+  assert unicode::normalize("\u{301}a") == "\u{301}a"
+}
+
+test "normalize leaves a character that composition excludes decomposed" {
+  assert unicode::normalize("\u{958}") == "\u{915}\u{93C}"
+  assert unicode::normalize("\u{958}", form: unicode::Form.Decomposed) == "\u{915}\u{93C}"
+}
+
+test "normalize composes two starters" {
+  assert unicode::normalize("\u{CC6}\u{CD5}") == "\u{CC7}"
+  assert unicode::normalize("\u{CC6}\u{CD5}", form: unicode::Form.Decomposed) == "\u{CC6}\u{CD5}"
+}
+
+test "normalize decomposes and composes Hangul syllables by arithmetic" {
+  assert unicode::normalize("\u{D55C}", form: unicode::Form.Decomposed) == "\u{1112}\u{1161}\u{11AB}"
+  assert unicode::normalize("\u{1112}\u{1161}\u{11AB}") == "\u{D55C}"
+  assert unicode::normalize("\u{AC00}", form: unicode::Form.Decomposed) == "\u{1100}\u{1161}"
+  assert unicode::normalize("\u{AC00}\u{11A8}") == "\u{AC01}"
+  assert unicode::normalize("\u{1100}\u{1161}\u{11A8}") == "\u{AC01}"
+}
+
+test "normalize replaces compatibility characters only in the compatibility forms" {
+  assert unicode::normalize("\u{FB01}") == "\u{FB01}"
+  assert unicode::normalize("\u{FB01}", form: unicode::Form.Decomposed) == "\u{FB01}"
+  assert unicode::normalize("\u{FB01}", form: unicode::Form.CompatibilityComposed) == "fi"
+  assert unicode::normalize("\u{FB01}", form: unicode::Form.CompatibilityDecomposed) == "fi"
+  assert unicode::normalize("\u{2460}", form: unicode::Form.CompatibilityComposed) == "1"
+  assert unicode::normalize("\u{BD}", form: unicode::Form.CompatibilityComposed) == "1\u{2044}2"
+  assert unicode::normalize("\u{FF76}\u{FF9E}", form: unicode::Form.CompatibilityComposed) == "\u{30AC}"
+  assert unicode::normalize("\u{FF76}\u{FF9E}", form: unicode::Form.CompatibilityDecomposed) == "\u{30AB}\u{3099}"
+  assert unicode::normalize("\u{FDFA}", form: unicode::Form.CompatibilityDecomposed).slice().characters().count() == 18
+}
+
+test "the four forms of one string differ" {
+  assert unicode::normalize("\u{1E9B}\u{323}") == "\u{1E9B}\u{323}"
+  assert unicode::normalize("\u{1E9B}\u{323}", form: unicode::Form.Decomposed) == "\u{17F}\u{323}\u{307}"
+  assert unicode::normalize("\u{1E9B}\u{323}", form: unicode::Form.CompatibilityComposed) == "\u{1E69}"
+  assert unicode::normalize("\u{1E9B}\u{323}", form: unicode::Form.CompatibilityDecomposed) == "s\u{323}\u{307}"
+}
+
+test "is_normalized tells whether normalize would change the text" {
+  assert unicode::is_normalized("plain text")
+  assert unicode::is_normalized("")
+  assert unicode::is_normalized("\u{E9}")
+  assert !unicode::is_normalized("e\u{301}")
+  assert unicode::is_normalized("e\u{301}", form: unicode::Form.Decomposed)
+  assert !unicode::is_normalized("\u{E9}", form: unicode::Form.Decomposed)
+  assert unicode::is_normalized("\u{FB01}")
+  assert !unicode::is_normalized("\u{FB01}", form: unicode::Form.CompatibilityComposed)
+  assert !unicode::is_normalized("a\u{301}\u{323}", form: unicode::Form.Decomposed)
+  assert unicode::is_normalized("\u{D55C}")
+  assert !unicode::is_normalized("\u{D55C}", form: unicode::Form.CompatibilityDecomposed)
+}

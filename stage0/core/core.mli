@@ -129,16 +129,10 @@ and kind =
   | Integer of Z.t  (** A literal of a built-in integer type, of [Integer], or of [Character]. *)
   | Float of float  (** A float literal, already rounded to the precision of its type. *)
   | Boolean of bool
-  | String of string  (** A string literal without interpolation. *)
-  | Interpolated of {
-      pieces : piece list;
-      builder_new : callee;  (** [TextBuilder.new] *)
-      builder_write : callee;  (** [TextBuilder.write], used for each {!Text} piece. *)
-      builder_finish : callee;  (** [TextBuilder.finish] *)
-    }
-      (** A string literal with interpolation. The result is the concatenation of the pieces. This
-          node will be desugared into the builder calls once the standard library gives them [time]
-          clauses. *)
+  | String of string
+      (** A string literal without interpolation. One with interpolation is a {!Block} of calls: of
+          [TextBuilder.new], of [TextBuilder.write] for each piece of text, of the [display] of each
+          value, and of [TextBuilder.finish]. *)
   | Template of { literals : string list; call : expression }
       (** A tagged string, such as [Sql"select ${column}"]. [call] is the call of the tag's
           [from_template] that produces the value; its argument is the constructed [Template]
@@ -270,13 +264,6 @@ and kind =
 and capture = { local : local; type_ : Types.ty }
 and specification_function = Log | Power | Time | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
-
-(** One piece of an interpolated string. *)
-and piece =
-  | Text of string
-  | Displayed of { value : operand; display : callee }
-      (** An interpolated value, converted to text by [display] (its [Display.display]). The value
-          is only borrowed. *)
 
 (** How a collection literal is constructed. *)
 and construction =

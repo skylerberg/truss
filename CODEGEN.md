@@ -475,8 +475,9 @@ capture nothing, so storing one never stores a pointer into a stack.
 
 A cursor is the state machine of one pulled yielding method (see
 [Cursors](#cursors-1)). Its layout is a state number, the method's
-parameters, and the locals that are live across a `yield`, with the states
-of any cursors it pulls from inside it. A parameter's field is named by its
+parameters but its evidence, and the locals that are live across a
+`yield`, with the states of any cursors it pulls from inside it. A
+parameter's field is named by its
 place among the parameters that have a size, in `Convention`, which is how
 the code that makes a cursor and the method's state machine agree on it. An `own` argument is held as a
 value the cursor owns and drops, whatever its size, since the cursor may
@@ -1032,18 +1033,30 @@ compile iterators:
 1. Number each `yield` as a state, from 1 in the order of the blocks. State
    0 is the start, and the state after the last is the end.
 2. Find the locals live where a `yield` resumes or stops, by liveness over
-   the LIR. They and the parameters become the cursor's fields, beside the
-   state number; everything else stays in C locals. A kept local reads and
-   writes its field through the cursor, so a `yield` stores nothing.
+   the LIR. They and the parameters, but the evidence, become the cursor's
+   fields, beside the state number; everything else stays in C locals. A
+   kept local reads and writes its field through the cursor, so a `yield`
+   stores nothing.
 3. `next()` switches on the state and jumps to the block after that
    `yield`. Each `yield` sets the state and returns `Some` of the value.
    Reaching the end sets the end state and returns `None`, as `next()` does
-   ever after.
+   ever after. `next()` takes the method's evidence as parameters after
+   the cursor, and each call passes the evidence that its own code has,
+   as a call of a function value whose type has `uses` does.
 4. In the version lowered for pulling, a `for` loop or a pulled cursor
    inside the method is an explicit cursor and calls to its `next()`, rather
    than a loop body, since a loop body cannot stop partway. The inner cursor
    is live across the outer `yield`s, so it becomes a field of the outer
    cursor.
+
+A cursor holds no evidence. The evidence that a method is given where it
+is pulled is in the frame of a `provide`, and a cursor is a value that can
+outlive that frame. A cursor that held the evidence would then call an
+implementation that had been dropped, which is a use after free. So the
+type checker requires the method's capabilities at each `next`, and each
+`next` uses the implementation that is provided where it is called. The
+drop function is given no evidence and has none to read: code generation
+reports a compiler bug if a `stop` path reads any.
 
 A `for` over a value of a type that implements `Cursor` is the same loop
 with the type's own `next`: it is called until it gives `None`, and the
@@ -1058,9 +1071,12 @@ the end it drops nothing. A method whose yields go through a recursive call has
 no fixed-size state, so the type checker reports any pull of it, as
 DESIGN.md says.
 
-Every cursor implements the prelude's `Cursor` trait, by an `impl` that the
-compiler derives for the yielding function. A call of that `impl`'s `next`,
-which generic code reaches through a bound, is a call of the state machine.
+A cursor of a method with no `uses` clause implements the prelude's
+`Cursor` trait, by an `impl` that the compiler derives for the yielding
+function. A call of that `impl`'s `next`, which generic code reaches
+through a bound, is a call of the state machine. It passes no evidence,
+which is why the type checker gives a cursor of a method with a `uses`
+clause no such `impl`.
 The methods that the trait gives a body, such as `count` and `skip`, are
 instances of the trait's code for the cursor's type, as for any `impl`. So
 `any Cursor[Element = Int64]` gets an ordinary vtable.
@@ -1161,26 +1177,51 @@ and the pool's threads run the tasks that are ready:
   of the thread's own computation could block for long, and would hold
   that computation up after its wait had ended.
 - **A call that blocks holds its thread.** The C library's rows that can
-  block, such as `read`, `accept`, and `nanosleep`, are named in the
-  table, and lowering brackets each call with `blocking_begin` and
-  `blocking_end`.
+  block, such as `read` of a file or a pipe and `waitpid`, are named in
+  the table, and lowering brackets each call with `blocking_begin` and
+  `blocking_end`. Most such calls return at once, so the bracket only
+  records the tick at which the call began. The monitor, a thread of the
+  runtime that ticks every millisecond while tasks are ready, counts a
+  thread as blocked once its call has lasted a whole tick, as Go's
+  `sysmon` does. A thread that counted as blocked from the start of each
+  call would call a spare thread for every short read.
+- **A sleep and a wait for a socket park the task.** A sleep puts a timer
+  in a heap that is ordered by deadline. A thread of the runtime sleeps
+  until the earliest deadline, then wakes that timer's key. The standard
+  library's sockets do not block: a call that would block fails with
+  `EAGAIN`. The library takes a ticket for the descriptor and direction
+  before the call (`descriptor_watch`) and waits on it after `EAGAIN`
+  (`descriptor_wait`), so it does not miss the descriptor becoming ready
+  between the two. The runtime registers the descriptor at its first
+  wait with the system's poller, `epoll` on Linux and `kqueue` on macOS,
+  edge-triggered and for both directions. A thread of the runtime takes
+  the poller's reports and wakes the key of the descriptor and
+  direction. The time limit that a program sets on a socket
+  (`SO_RCVTIMEO`, `SO_SNDTIMEO`) applies only to a blocking call, so the
+  wait reads it and starts a timer for it. `close` goes through the
+  runtime, which forgets the registration, because the system gives a
+  closed descriptor's number to the next one that is opened.
 - **Spare threads run tasks in place of blocked threads.** A thread is
-  blocked while it is in a bracketed call, while it waits and is not a
-  task, and while it sleeps until a `parallel` branch that another thread
-  took is done. For each blocked thread, one spare thread may run tasks,
+  blocked once the monitor has counted its call, while it waits and is
+  not a task, and while it sleeps until a `parallel` branch that another
+  thread took is done. For each blocked thread, one spare thread may run tasks,
   so a program runs tasks on as many threads as the pool has. A spare
   thread is called or started when a task is ready, no thread of the pool
   is idle, and fewer spare threads run tasks than threads are blocked. It
   sleeps when that no longer holds, and it never exits. On a machine
   with one core the pool has no thread but the first, so a spare thread
   runs the tasks while `main` waits for them.
-- **A task changes threads.** A task that parks goes on on whichever
+- **A task changes threads.** A task that parks resumes on whichever
   thread takes it. What the runtime keeps for each thread follows the
   task: the coroutine that the task is in, and for the sanitizers the
   stack that it left. Generated code reads `errno` through the runtime's
   `t_runtime_errno`. glibc declares its own function for the address of
   `errno` as returning the same address on every call, so a C compiler
   could reuse one thread's address after the task has moved to another.
+  A release build optimizes across the runtime and the generated code,
+  so a function of the runtime that generated code calls reads every
+  thread-local variable, and `errno`, through a function that is not
+  inlined.
 - **A `parallel` block in a task** forks on the queue of the thread that
   runs the task, and a spare thread has such a queue too. A branch may
   use no capability but `Panic`, so a task neither parks nor yields
@@ -1189,25 +1230,30 @@ and the pool's threads run the tasks that are ready:
 - **A group** counts its tasks that have not ended. `join` waits until the
   count is zero and then frees the group.
 - **Cancellation** is a flag on the group. A task is cancelled when its
-  group, or a group that encloses it, is. `cancel` sets the flag once and
-  makes every waiter ready, so that a cancelled one returns from `wait`.
+  group, or a group that encloses it, is. `cancel` sets the flag once,
+  and makes ready each task of the group, and of the groups that its
+  tasks opened, that is parked in a cancellable wait. A task records
+  where it parks before it reads the flag, and `cancel` sets the flag
+  before it looks, so one of the two sees the other. No other task is
+  woken.
 - **A cancelled task that is blocked in a system call is interrupted.**
   `cancel` hands the group to a thread of the runtime. Every few
   milliseconds, until the group is joined, that thread sends `SIGURG` to
   each thread that runs a blocked task of the group, or of a group that
   its tasks opened. The handler does nothing and is installed without
-  `SA_RESTART`, so a blocked read, accept, or sleep fails with `EINTR`.
+  `SA_RESTART`, so a blocked read or `waitpid` fails with `EINTR`.
   The standard library's retry loops stop retrying in a cancelled task,
   and the error becomes `SystemError.Cancelled`. The interrupt is
   repeated because a task can start a blocking call just after one. The
   runtime reserves `SIGURG`, as Go's runtime does. A host lookup cannot
   be interrupted, so it runs to its end.
 - **Waiting on a key** uses a fixed table of slots. A key hashes to a
-  slot, which counts the wakes of its keys. `watch` returns the count,
-  `wait` parks the caller if the count is unchanged, and `wake`
-  increments it and makes the slot's waiters ready.
-  Two keys can share a slot, so `wait` can return without a wake of its
-  own key, and its caller tests its condition again.
+  slot, which counts the wakes of its keys and holds their waiters.
+  `watch` returns the count, `wait` parks the caller if the count is
+  unchanged, and `wake` increments it and makes the waiters of that key
+  ready. Two keys can share a slot, so a wake of one key can make a
+  `wait` on the other return at once, and its caller tests its condition
+  again.
 - **A mutex** is a `UInt64` that its owner initialized to zero. `lock`
   changes it from 0 to 1 with a compare-and-swap, and a caller that finds
   it locked waits on its address as a key. That wait is not cancellable.
@@ -1215,7 +1261,8 @@ and the pool's threads run the tasks that are ready:
   `spawn` calls the task's function and returns when it returns, so tasks
   run sequentially, in the order they are spawned. A task that calls
   `wait` would deadlock, because the task that would wake it cannot run,
-  so `wait` panics there.
+  so `wait` panics there. A sleep and a wait for a socket block the one
+  thread, in `nanosleep` and `poll`.
 
 ### Mutual exclusion for a `mut` implementation
 
@@ -1668,8 +1715,8 @@ or to update it in place. `SystemFileWrite` makes a directory with
 time of last change with `chmod` and `utimensat`. `SystemFileRead` reads
 where a symbolic link points with `readlink` and resolves a path with
 `realpath`, each into room for the longest path the system allows.
-`SystemClock.sleep` calls `nanosleep`, and sleeps again for the time left
-when a signal interrupts it; the monotonic clock is `clock_gettime` with
+`SystemClock.sleep` calls the runtime's `sleep`, which parks the calling
+task until a timer fires; the monotonic clock is `clock_gettime` with
 `CLOCK_MONOTONIC`. `SystemFileRead.list` opens the directory and reads
 its entries a block at a time through the descriptor, with the call each
 system has for that: `getdents64` on Linux and `getattrlistbulk` on
@@ -2159,12 +2206,12 @@ a command line can hold.
 - **A `parallel for` over any other method at once.** A collection that
   cannot give its parts by position needs a way to split itself in two,
   as Rust's rayon and Java's `Spliterator` have.
-- **An event loop.** A task that blocks in a call of the operating system
-  holds a thread for as long. A socket or a timer is to be registered
-  with the operating system (`kqueue`, `epoll`), so that a task that waits
-  for one parks. A call that the operating system cannot wait for that
-  way, such as reading a file or looking up a host, stays a blocking
-  call.
+- **A wait for a pipe, a terminal, or a file that parks the task.** Only
+  the standard library's sockets do not block. A read of a pipe or of
+  standard input, and a wait for a child process, hold a thread. A read
+  of a file cannot be waited for with `epoll` or `kqueue` at all.
+- **A mutex that wakes one waiter.** `unlock` wakes every task that waits
+  for the mutex, and all but one park again.
 - **More tasks at once than the operating system allows mappings.** Each
   task's stack is a mapping with a guard page. Linux allows a process
   about sixty-five thousand mappings by default, which is about thirty

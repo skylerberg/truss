@@ -98,6 +98,20 @@ let cursor_trait = Well_known.path Cursor
    function. *)
 let cursor_impl (method_ : Path.t) : Path.t = Derived { type_ = method_; trait = cursor_trait }
 
+(* The capabilities that [next] uses on the cursor of a yielding method:
+   the method's, for the cursor's type arguments, since [next] runs the
+   method's code. Any other type has none. *)
+let cursor_uses database (type_ : T.ty) =
+  match type_ with
+  | T.Cursor { method_; arguments } -> (
+      match Query.demand database Environment.signature method_ with
+      | Some signature -> (
+          match T.substitution_of signature.generics arguments with
+          | Some substitution -> (T.substitute_signature substitution signature).uses
+          | None -> signature.uses)
+      | None -> [])
+  | _ -> []
+
 (* The yielding function or method whose cursor an [impl] is for, if the
    [impl] is a cursor's. No type derives [Cursor], so a derived [impl] of it
    is a cursor's. *)

@@ -1426,19 +1426,6 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       | None -> unsupported (at frame node) "a float literal without a float type")
   | Boolean value -> Some (frame, L.Boolean value)
   | String text -> Some (frame, text_value context frame (type_of context frame node) text)
-  | Interpolated { pieces; _ } ->
-      (* A new [String], about which nothing more is known, since each part
-         is written out by its [Display]. *)
-      let frame =
-        List.fold_left
-          (fun frame (piece : piece) ->
-            match piece with
-            | Text _ -> frame
-            | Displayed { value = shown; _ } -> fst (operand_value context frame shown))
-          frame pieces
-      in
-      let frame = spend context frame (unknown_amount context frame) in
-      Some (frame, arrive context frame "string" (type_of context frame node))
   | Template { literals; call = made } -> Some (tagged_template context frame node literals made)
   | Use place -> Some (place_value context frame place)
   | Copy operand -> Some (operand_value context frame operand)
@@ -3972,21 +3959,31 @@ and map_literal context frame (node : expression) entries =
     (L.equal (finite_function context finite "size" L.Int [] model) (L.int (List.length terms)));
   (frame, made)
 
-(* Text as a value whose model is its UTF-8 bytes. *)
+(* Text as a value whose model is its UTF-8 bytes. A literal is one value
+   for its text and type, so two literals with the same text are the same
+   value, as a key written twice is the same key. *)
 and text_value context frame (ty : T.ty) text =
-  let made = arrive context frame "string" ty in
-  let byte = T.builtin UInt8 in
-  (match model_of context ty made ~element:byte with
-  | Some model ->
-      assume context frame
-        (L.equal (sequence_length context byte model) (L.int (String.length text)));
-      String.iteri
-        (fun index character ->
-          match sequence_at context byte model (L.int index) with
-          | Some at -> assume context frame (L.equal at (L.int (Char.code character)))
-          | None -> ())
-        text
-  | None -> ());
+  let symbol = "literal." ^ type_key ty ^ "." ^ Logic.hash text in
+  let made = L.Symbol symbol in
+  once context ("value of " ^ symbol) (fun () ->
+      declare context (L.Constant (symbol, sort_of context ty));
+      assume_valid context
+        { frame with condition = L.Boolean true; bound = []; binders = [] }
+        ty made;
+      let byte = T.builtin UInt8 in
+      match model_of context ty made ~element:byte with
+      | Some model ->
+          context.facts <-
+            L.equal (sequence_length context byte model) (L.int (String.length text))
+            :: context.facts;
+          String.iteri
+            (fun index character ->
+              match sequence_at context byte model (L.int index) with
+              | Some at ->
+                  context.facts <- L.equal at (L.int (Char.code character)) :: context.facts
+              | None -> ())
+            text
+      | None -> ());
   made
 
 (* A value's model, by the standard library's [impl] of [Model] for its
@@ -4548,6 +4545,9 @@ and constant_value context frame path =
       (source_at_key context.database)
   with
   | Some ({ core = { definition = Constant defined; _ }; _ } as constant_source) ->
+      (* A constant is one value, a symbol whose value is stated once, as
+         a fact of mathematics, wherever it is used. *)
+      let symbol = "constant." ^ Path.show path in
       let empty =
         {
           frame with
@@ -4557,9 +4557,17 @@ and constant_value context frame path =
           checking = false;
           self = None;
           updating = None;
+          condition = L.Boolean true;
+          bound = [];
+          binders = [];
         }
       in
-      snd (value context empty defined)
+      once context ("value of " ^ symbol) (fun () ->
+          let ty = type_of context empty defined in
+          declare context (L.Constant (symbol, sort_of context ty));
+          let _, defined_value = specification context (fun () -> value context empty defined) in
+          context.facts <- L.equal (L.Symbol symbol) defined_value :: context.facts);
+      L.Symbol symbol
   | _ -> raise (Foreign_unsupported "a constant with errors")
 
 (* Building a record or a variant: its constructor, with each field given

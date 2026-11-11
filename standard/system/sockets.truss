@@ -33,11 +33,6 @@ internal fn connect(
 ) -> Result[network::Connection, SystemError] {
   let handle = handles::with_file_error(opened(family_of(address), kind: intrinsic::libc_sock_stream()))?
   let descriptor = intrinsic::handle_descriptor(handle)
-  let limit = milliseconds(timeout)
-  let flags = intrinsic::libc_fcntl_getfl(descriptor)
-  if limit >= 0 && flags >= 0 {
-    let _ = intrinsic::libc_fcntl_setfl(descriptor, flags: flags | intrinsic::libc_o_nonblock())
-  }
   let bytes = address_bytes(address)
   let started = intrinsic::libc_connect(
     descriptor,
@@ -49,10 +44,10 @@ internal fn connect(
     if error != intrinsic::libc_einprogress() && error != intrinsic::libc_eintr() {
       return Err(handles::file_error(error))
     }
-    handles::with_file_error(connected(descriptor, limit: limit))?
-  }
-  if limit >= 0 && flags >= 0 {
-    let _ = intrinsic::libc_fcntl_setfl(descriptor, flags: flags)
+    let sending = network::Direction.Sending
+    handles::with_file_error(set_timeout(descriptor, direction: sending, timeout: timeout))?
+    handles::with_file_error(connected(descriptor))?
+    handles::with_file_error(set_timeout(descriptor, direction: sending, timeout: None))?
   }
   let local = handles::with_file_error(local_address(descriptor))?
   Ok(network::Connection(
@@ -65,11 +60,13 @@ internal fn connect(
 internal fn accept(listener: Int32) -> Result[network::Accepted, Int32] {
   var from = room_for_an_address()
   var length: UInt32 = 28
+  var ticket = calls::watch(listener, writing: false)
   var descriptor = intrinsic::libc_accept(listener, address: mut from, length: mut length)
-  while descriptor < 0 && calls::retry_after_signal()
+  while descriptor < 0 && calls::retry_when_ready(listener, writing: false, ticket: ticket)
     invariant intrinsic::storage_length(from) == 28
   {
     length = 28
+    ticket = calls::watch(listener, writing: false)
     descriptor = intrinsic::libc_accept(listener, address: mut from, length: mut length)
   }
   if descriptor < 0 {
@@ -77,6 +74,7 @@ internal fn accept(listener: Int32) -> Result[network::Accepted, Int32] {
   }
   let _ = intrinsic::libc_fcntl_setfd_cloexec(descriptor)
   let handle = handles::of_descriptor(descriptor)
+  without_blocking(descriptor)?
   match address_from(intrinsic::storage_view(from)) {
     Some(peer) => Ok(network::Accepted(handle: own handle, peer: plain(peer)))
     None => Err(intrinsic::libc_einval())
@@ -122,6 +120,7 @@ internal fn send_to(
   address: network::SocketAddress,
 ) -> Result[USize, Int32] {
   let to = address_bytes(address_for(descriptor, address: address))
+  var ticket = calls::watch(descriptor, writing: true)
   var sent = intrinsic::libc_sendto(
     descriptor,
     bytes: bytes,
@@ -130,7 +129,8 @@ internal fn send_to(
     address: intrinsic::storage_view(to),
     length: intrinsic::storage_length(to),
   )
-  while sent < 0 && calls::retry_after_signal() {
+  while sent < 0 && calls::retry_when_ready(descriptor, writing: true, ticket: ticket) {
+    ticket = calls::watch(descriptor, writing: true)
     sent = intrinsic::libc_sendto(
       descriptor,
       bytes: bytes,
@@ -158,6 +158,7 @@ internal fn receive_from(
   let before = intrinsic::storage_length(buffer)
   var from = room_for_an_address()
   var length: UInt32 = 28
+  var ticket = calls::watch(descriptor, writing: false)
   var got = intrinsic::libc_recvfrom(
     descriptor,
     buffer: mut buffer,
@@ -166,13 +167,14 @@ internal fn receive_from(
     address: mut from,
     length: mut length,
   )
-  while got < 0 && calls::retry_after_signal()
+  while got < 0 && calls::retry_when_ready(descriptor, writing: false, ticket: ticket)
     invariant intrinsic::storage_length(buffer) == before
     invariant intrinsic::storage_capacity(buffer) >= before + limit
     invariant intrinsic::storage_length(from) == 28
     invariant got <= limit
   {
     length = 28
+    ticket = calls::watch(descriptor, writing: false)
     got = intrinsic::libc_recvfrom(
       descriptor,
       buffer: mut buffer,
@@ -268,8 +270,18 @@ fn opened(family: Int32, kind: Int32) -> Result[intrinsic::Handle, Int32] {
   if descriptor < 0 {
     return Err(intrinsic::libc_errno())
   }
+  let handle = intrinsic::handle_from(descriptor)
   let _ = intrinsic::libc_fcntl_setfd_cloexec(descriptor)
-  Ok(intrinsic::handle_from(descriptor))
+  without_blocking(descriptor)?
+  Ok(own handle)
+}
+
+fn without_blocking(descriptor: Int32) -> Result[Unit, Int32] {
+  let flags = intrinsic::libc_fcntl_getfl(descriptor)
+  if flags < 0 {
+    return Err(intrinsic::libc_errno())
+  }
+  calls::done(intrinsic::libc_fcntl_setfl(descriptor, flags: flags | intrinsic::libc_o_nonblock()))
 }
 
 fn bound(address: network::SocketAddress, kind: Int32) -> Result[intrinsic::Handle, Int32] {
@@ -312,19 +324,21 @@ fn option(descriptor: Int32, name: Int32, value: intrinsic::View[UInt8]) -> Resu
   )
 }
 
-fn connected(descriptor: Int32, limit: Int32) -> Result[Unit, Int32] {
+fn connected(descriptor: Int32) -> Result[Unit, Int32] {
   var waiting = true
   while waiting {
+    let ticket = calls::watch(descriptor, writing: true)
     var waited_for: intrinsic::Storage[Int32] = intrinsic::storage_with_capacity(2)
     intrinsic::storage_push(mut waited_for, value: descriptor)
     intrinsic::storage_push(mut waited_for, value: intrinsic::libc_pollout())
-    let ready = intrinsic::libc_poll(mut waited_for, count: 1, timeout: limit)
-    if ready == 0 {
-      return Err(intrinsic::libc_etimedout())
-    }
+    let ready = intrinsic::libc_poll(mut waited_for, count: 1, timeout: 0)
     if ready > 0 {
       waiting = false
-    } else if !calls::retry_after_signal() {
+    } else if ready < 0 {
+      if !calls::retry_after_signal() {
+        return Err(intrinsic::libc_errno())
+      }
+    } else if intrinsic::runtime_descriptor_wait(descriptor, writing: 1, ticket: ticket) == 0 {
       return Err(intrinsic::libc_errno())
     }
   }
@@ -347,22 +361,6 @@ fn connected(descriptor: Int32, limit: Int32) -> Result[Unit, Int32] {
     Err(intrinsic::libc_eio())
   } else {
     Err(intrinsic::convert(error))
-  }
-}
-
-fn milliseconds(timeout: Option[Duration]) -> Int32 {
-  match timeout {
-    None => -1
-    Some(limit) => {
-      let whole = limit.total_nanoseconds() / 1000000
-      if whole < 1 {
-        1
-      } else if whole > 2147483647 {
-        2147483647
-      } else {
-        intrinsic::convert(whole)
-      }
-    }
   }
 }
 

@@ -378,6 +378,14 @@ the change invalidates nothing beyond the definition:
 - **Type checking a caller reads only the callee's signature.** A change to a
   body, a default, or an `ensures` re-checks that definition and no caller.
   PROVER.md states what the prover reads of a callee.
+- **A function's specification is separate from its body.** The specification
+  is the core form of the parameters and the contract. It has the body only
+  when a caller's proof can read the body: the body of a function in the
+  logic, which is the function's definition, and the body that a trait
+  provides for a method, which an `impl`'s method that replaces it is compared
+  with. The parameters and the contract are built before the body, so their
+  nodes are numbered the same whatever the body is. Editing a body that the
+  specification leaves out leaves the specification equal.
 - **A default is separate from the signature,** as DESIGN.md requires: callers
   read only whether a parameter has a default.
 - **A type's invariants are separate from its shape.** Strengthening an
@@ -1660,6 +1668,15 @@ the error is fixed.
   clause to be available, after its capability parameters are substituted.
 - **An indirect call** needs the capabilities in the `uses` of the function
   value's type.
+- **The `next` of a yielding method's cursor needs the capabilities in the
+  method's `uses`,** at each call of `next` and at a `for` loop over the
+  cursor, because `next` runs the method's code. Making the cursor needs them
+  as well. `Cursor.next` uses no capability, so such a cursor does not meet a
+  `Cursor` bound and cannot call a method that `Cursor` provides: code that
+  has only the bound has no capability to give to the cursor. This prevents a
+  function without a `uses` clause from running the method's code, and it
+  prevents a use after free: a cursor that kept the implementation it was made
+  with could run after the `provide` block of that implementation had ended.
 - **A call of an intrinsic needs the capabilities that `Intrinsic.uses` lists
   for the operation.** An intrinsic has no signature with a `uses` clause. A
   method of an `impl` of a capability is exempt: it can call an intrinsic
@@ -2102,9 +2119,10 @@ The core form records these decisions:
   already computed: a missing start is `0`, a missing stop is the length of
   the base, and an inclusive stop is `stop + 1`. An array literal is
   constructed in place. A specification's sequence, set, or map is never
-  constructed at run time. An interpolated string records its pieces, the
-  `display` method of each interpolated value, and the methods of the text
-  builder. Widening a function value, and
+  constructed at run time. An interpolated string is a block of calls: of
+  `TextBuilder.new`, of `TextBuilder.write` for each piece of text, of the
+  `display` of each value, and of `TextBuilder.finish`. So each call has the
+  termination and cost obligations of any call. Widening a function value, and
   converting between a built-in integer and `Integer`, are explicit
   conversion nodes.
 - **A cost term over a bound names the trait method.** `time(Element.equal)`
@@ -2430,12 +2448,8 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **An interpolated string as calls.** It is still a node that names the text
-  builder's methods and the `display` of each value. It will be desugared to
-  those calls once they have `time` clauses.
-- **A contract as a result of its own.** In DESIGN.md, callers' proofs read a
-  function's contract, separately from its interface and its body. Today the
-  contract is type-checked with the body, and the prover reads it from the
-  callee's tree. So a change to a callee's body invalidates its callers'
-  proofs, which then find the answer to each solver query in the cache, keyed
-  by the query's text.
+- **Callers' proofs that read the specification.** The prover still loads a
+  callee's whole core form and its source text, so a change to a callee's
+  body runs its callers' proofs again, and they find the answer to each
+  solver query in the cache, keyed by the query's text. It will load the
+  callee's specification, and the callee's text only to report an error.

@@ -215,16 +215,24 @@ let evidence_of st capability =
           implementation_evidence st ~impl ~type_arguments ~implementation
       | _ -> missing ())
 
+(* The capabilities whose evidence the [next] of a cursor over the method
+   takes: the method's own. A cursor holds no evidence. The evidence it
+   was made with is in the frame of a [provide], and a cursor that held it
+   and outlived that frame would use the implementation after it was
+   dropped. *)
+let cursor_evidence context (yielding : Ground.yielding) =
+  let code = code_of context yielding.method_ yielding.type_arguments in
+  evidence_for code.substitution code.uses
+
 (* Writes a cursor over a yielding method to [destination]. The cursor holds
    the call's arguments, in the order of the pulled method's parameters:
-   its own, then the mask of defaults passed, then the evidence. *)
-let cursor_into st ~path ~type_arguments ~(signature : T.signature) ~substitution
+   its own, then the mask of defaults passed. *)
+let cursor_into st ~path ~type_arguments ~(signature : T.signature)
     ~(arguments : (T.mode * Ground.ty * Lir.place) list) ~mask destination =
   let held = List.filter_map (fun (mode, ty, place) -> hold st mode ty place) arguments in
   let mask = if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [] in
-  let evidence = List.map (evidence_of st) (evidence_for substitution signature.uses) in
   let fields =
-    List.mapi (fun i operand -> (Convention.cursor_parameter i, operand)) (held @ mask @ evidence)
+    List.mapi (fun i operand -> (Convention.cursor_parameter i, operand)) (held @ mask)
   in
   emit st.b
     (Assign
@@ -511,7 +519,13 @@ let call_instance st key ~(signature : T.signature) ~substitution
     (if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [])
     @ List.map (evidence_of st) (evidence_for substitution signature.uses)
   in
-  let target = Lir.Direct { function_ = Instance (called key); signature = lir_signature } in
+  let callee = called key in
+  (match callee with
+  | Cursor_next yielding when cursor_evidence st.context yielding <> [] ->
+      bug "next of %s is called through `Cursor`, which passes no evidence"
+        (Ground.to_string (Cursor yielding))
+  | _ -> ());
+  let target = Lir.Direct { function_ = Instance callee; signature = lir_signature } in
   emit st.b
     (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
   if not lir_signature.returns then unreachable_block st
@@ -634,18 +648,24 @@ let cursor_element context (yielding : Ground.yielding) =
 let cursor_result context yielding : Ground.ty =
   Named { path = Well_known.path Option; arguments = [ Type (cursor_element context yielding) ] }
 
-(* Calls [next] on a cursor: the pulled method's state machine. *)
+(* Calls [next] on a cursor: the pulled method's state machine, which takes
+   the method's evidence from this call. *)
 let call_next st (yielding : Ground.yielding) cursor destination =
   let option = cursor_result st.context yielding in
   let cursor_pointer = Lir.Pointer { target = Value (Cursor yielding); writable = true } in
   let target signature = Lir.Direct { function_ = Instance (Cursor_next yielding); signature } in
   let self = Lir.Address { place = cursor; writable = true } in
+  let evidence = List.map (evidence_of st) (cursor_evidence st.context yielding) in
   let convention = Convention.result st.context.env option in
   emit st.b
     (Call
        {
-         target = target (Convention.signature [ cursor_pointer ] convention);
-         arguments = [ self ];
+         target =
+           target
+             (Convention.signature
+                (cursor_pointer :: List.map (fun _ -> Convention.evidence) evidence)
+                convention);
+         arguments = self :: evidence;
          result = Convention.destination convention destination;
        })
 
