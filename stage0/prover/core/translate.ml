@@ -3959,21 +3959,31 @@ and map_literal context frame (node : expression) entries =
     (L.equal (finite_function context finite "size" L.Int [] model) (L.int (List.length terms)));
   (frame, made)
 
-(* Text as a value whose model is its UTF-8 bytes. *)
+(* Text as a value whose model is its UTF-8 bytes. A literal is one value
+   for its text and type, so two literals with the same text are the same
+   value, as a key written twice is the same key. *)
 and text_value context frame (ty : T.ty) text =
-  let made = arrive context frame "string" ty in
-  let byte = T.builtin UInt8 in
-  (match model_of context ty made ~element:byte with
-  | Some model ->
-      assume context frame
-        (L.equal (sequence_length context byte model) (L.int (String.length text)));
-      String.iteri
-        (fun index character ->
-          match sequence_at context byte model (L.int index) with
-          | Some at -> assume context frame (L.equal at (L.int (Char.code character)))
-          | None -> ())
-        text
-  | None -> ());
+  let symbol = "literal." ^ type_key ty ^ "." ^ Logic.hash text in
+  let made = L.Symbol symbol in
+  once context ("value of " ^ symbol) (fun () ->
+      declare context (L.Constant (symbol, sort_of context ty));
+      assume_valid context
+        { frame with condition = L.Boolean true; bound = []; binders = [] }
+        ty made;
+      let byte = T.builtin UInt8 in
+      match model_of context ty made ~element:byte with
+      | Some model ->
+          context.facts <-
+            L.equal (sequence_length context byte model) (L.int (String.length text))
+            :: context.facts;
+          String.iteri
+            (fun index character ->
+              match sequence_at context byte model (L.int index) with
+              | Some at ->
+                  context.facts <- L.equal at (L.int (Char.code character)) :: context.facts
+              | None -> ())
+            text
+      | None -> ());
   made
 
 (* A value's model, by the standard library's [impl] of [Model] for its
