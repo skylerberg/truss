@@ -1456,10 +1456,13 @@ test the prover itself:
   nested quantifiers, each fact is about values made for every
   combination of bound names, and with them the solver runs out of steps
   even with triggers chosen.
-- **A lambda with a functional lambda inside it,** whose body is not
+- **A lambda with a functional lambda inside it that captures what the
+  body made,** such as the outer lambda's argument, whose body is not
   functional, is applied as a function the solver knows nothing more
   about: a functional lambda's symbol is named after what it captures,
-  which would be one function for every argument. A lambda inside a
+  which would be one function for every argument. A functional lambda
+  inside that captures nothing the body made is one function for every
+  argument, and the outer lambda is known by what its body does. A lambda inside a
   quantifier is known by what its body does for every argument: one that
   captures none of the quantifier's bound values is read as it is outside
   it, and one that captures some says what it does for each of them,

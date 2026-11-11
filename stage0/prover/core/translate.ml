@@ -247,6 +247,8 @@ type context = {
       (** A lambda's bound on the time of one call, and the obligations that show it, made only once
           the bound is used. *)
   mutable lambda_captures : (L.term * Core.local list) list;  (** What each lambda captures. *)
+  lambda_definitions : (string, L.term) Hashtbl.t;
+      (** Each functional lambda's definition, by its symbol, which names what it captures. *)
   mutable potentials : L.term list;  (** Each value's potential whose definition is a fact. *)
   models : (string, (L.term -> L.term) option) Hashtbl.t;
       (** Each type's model function, by the types' keys, which reading it takes the standard
@@ -3407,11 +3409,19 @@ and what_a_lambda_does context frame ~capture_free function_type term ~called ~a
       (fun index _ -> index < List.length context.declarations - start_declarations)
       context.declarations
   in
+  (* A functional lambda inside, named after what it captures, is one
+     function for every argument only where it captures nothing the body
+     made, the arguments among them. *)
   let nested_lambda =
     List.exists
       (function
-        | L.Constant (name, _) ->
-            String.starts_with ~prefix:"lambda." name && not (Hashtbl.mem context.fresh_order name)
+        | L.Constant (name, _) -> (
+            String.starts_with ~prefix:"lambda." name
+            && (not (Hashtbl.mem context.fresh_order name))
+            &&
+            match Hashtbl.find_opt context.lambda_definitions name with
+            | Some defined -> made_since context start_fresh defined
+            | None -> true)
         | _ -> false)
       declared_here
   in
@@ -3545,6 +3555,7 @@ and lambda_definition context frame (function_type : T.function_type) parameters
         let application =
           applied context function_type term (List.map (fun (name, _) -> L.Symbol name) bound)
         in
+        Hashtbl.replace context.lambda_definitions symbol defined;
         fact context frame (L.Forall (bound, L.equal application defined));
         (* Its body's value is in the range of the body's type, which may be
            narrower than the function type's [Integer]. *)
@@ -8904,6 +8915,7 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     powers = [];
     lambda_times = [];
     lambda_captures = [];
+    lambda_definitions = Hashtbl.create 8;
     potentials = [];
     models = Hashtbl.create 16;
     holds_potential = Hashtbl.create 16;
