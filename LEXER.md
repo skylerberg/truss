@@ -16,7 +16,7 @@ The lexer:
   forbidden characters
 - splits it into tokens: names, keywords, numbers, strings with their
   interpolations already lexed, and punctuation
-- checks each name on its own: ASCII and the case rules
+- checks each name by its spelling alone: ASCII and the case rules
 - decides which line breaks are `NEWLINE` tokens, and matches brackets
 - recognizes habits from other languages and reports each with an exact fix
 
@@ -27,12 +27,18 @@ It does not:
 - round float literals. The type checker does that once it knows the type.
 
 **The lexer is a pure function of one file's text.** It gets no feedback from
-the parser and has no modes beyond brackets and strings. This is what lets the
-line-break rule be explained by tokens alone, as DESIGN.md promises. It makes
-a file's tokens a function of its text, which the code database keeps, and
-it lets the lexer be ported directly when the compiler is rewritten in Truss. For the same reason the lexer
-has no contextual keywords: the words of `cost` clauses, `result`, and `old`
-are ordinary names to it, and the parser recognizes them by their spelling.
+the parser and has no modes beyond brackets and strings. Three things depend
+on that:
+
+- The line-break rule is stated in terms of tokens alone, as DESIGN.md
+  promises.
+- A file's tokens are a function of its text, so the code database caches
+  them by that text.
+- The lexer can be ported directly when the compiler is rewritten in Truss.
+
+For the same reason the lexer has no contextual keywords: the words of `cost`
+clauses, `result`, and `old` are ordinary names to it, and the parser
+recognizes them by their spelling.
 
 ## Structure
 
@@ -52,30 +58,32 @@ the file:
   the bracket stack, which is all the line-break rule needs, and asks for the
   next raw token only when it is needed. No array of raw tokens is ever built,
   and the bytes are read once.
-- **The lexer's output is one array of final tokens.** Layout appends to it as
-  it goes. The parser receives the whole array rather than pulling tokens
-  through the pipeline, because it is the one buffer the later stages share:
-  the parser's error recovery looks ahead to the next definition, `truss fmt`
-  and the language server reuse the tokens, and an interpolation's tokens are
-  already a nested array. Building it costs one array of tokens per file,
-  which is small next to the syntax tree built from it.
-- **Only a broken file is read twice.** If brackets are still open at the end
-  of the file, the lexer runs again with bracket recovery turned on (see
-  [Brackets](#brackets)). Valid files never pay for this.
+- **The lexer's output is one array of final tokens.** Layout appends each
+  token as it produces it. The parser receives the whole array, not a
+  stream, because the later stages share that one buffer: the parser's
+  error recovery looks ahead to the next definition, `truss fmt` and the
+  language server reuse the tokens, and an interpolation's tokens are
+  already a nested array. The array is small next to the syntax tree built
+  from it.
+- **Only a file with an unclosed bracket is lexed twice.** If brackets are
+  still open at the end of the file, the lexer runs a second time with
+  bracket recovery enabled (see [Brackets](#brackets)). A valid file is
+  lexed once.
 
-Keeping the stages apart still pays even though they run together. The
+The stages are separate modules even though they run as one pipeline. The
 line-break rule is a small function of two adjacent tokens and the bracket
-stack, which can be tested and explained on its own, and the scanner needs no
-lookahead across lines.
+stack, which is tested and explained without the scanner, and the scanner
+needs no lookahead across lines.
 
-The scanner's loop looks at each position once and decides there whether
-it holds trivia or the start of a token, so no second place has to agree
-with it. It stops at every line break: between tokens, the line break is
-trivia, and in an interpolation it is an error. Each scanner for a
+The scanner's loop examines each position once and decides there whether
+it holds trivia or the start of a token, so no other code duplicates that
+decision. It stops at every line break: between tokens, the line break is
+trivia, and in an interpolation it is an error. Each scanning function for a
 construct that must end on its line, such as an interpolation or an
-ordinary string, returns whether it was `Closed` or `Cut_off` by an error
-already reported, and an enclosing construct that must end on its line
-then ends too, without another error.
+ordinary string, returns `Closed` or `Unterminated`. `Unterminated` means
+that the construct has no closing delimiter on its line, an error already
+reported. Every enclosing construct that must end on its line is then
+unterminated too, with no further error.
 
 The scanner uses Layout too: it lays out each interpolation's tokens as it
 reads them, as [Interpolation](#interpolation) asks, so `Layout` defines the
@@ -86,17 +94,17 @@ input both of its uses take.
 A hand-written scanner fits better than one generated by a tool such as
 sedlex:
 
-- **The hard parts are not regular.** Each raw string chooses its own
-  delimiter length. Interpolations nest strings to any depth. A raw string's
-  indentation is known only once its closing delimiter is found. And most
-  errors need an exact fix. In sedlex all of these become hand-written code
-  around the generated matcher anyway.
+- **Much of the lexical grammar is not regular.** Each raw string chooses
+  its own delimiter length. Interpolations nest strings to any depth. A raw
+  string's indentation is known only when its closing delimiter is found.
+  And most errors need an exact fix. With sedlex, all of these would be
+  hand-written code around the generated matcher.
 - **The Unicode version must be the language's.** sedlex's identifier classes
-  come from whatever Unicode version that sedlex release was built with.
+  come from the Unicode version that each sedlex release was built with.
   Truss needs the version the language pins.
-- **It ports to Truss.** The lexer will be rewritten in Truss to bootstrap the
-  compiler. A scanner written as an index moving over a byte string ports
-  line by line. A sedlex specification does not.
+- **It can be ported to Truss.** The lexer will be rewritten in Truss to
+  bootstrap the compiler. A scanner written as an index moving over a byte
+  string translates line by line. A sedlex specification does not.
 - **One fewer dependency, and no ppx.**
 
 The cost is a few hundred more lines than a sedlex specification. They are in
@@ -147,18 +155,18 @@ language does and the rules would have to know every emoji and script.
 - In code, the fix deletes the characters. In an ordinary string, the fix
   replaces each one with its `\u{...}` escape. A raw string has no escapes, so
   its message suggests an ordinary string, with no automatic fix.
-- Otherwise the scanner skips the characters, so lexing goes on as if they
-  were not there.
+- The scanner then skips the characters, and lexes the text after them as
+  if they were absent.
 
 ### Positions
 
 - A span is a pair of byte offsets into the file: the start, included, and
   the end, excluded.
-- Lines and columns are worked out only when a diagnostic is shown, from the
+- Lines and columns are computed only when a diagnostic is shown, from the
   table of line starts. Lines count from 1, and columns count Unicode scalar
   values from 1. JSON diagnostics also carry byte offsets, and fixes are
-  always byte ranges. The language server converts to whatever column
-  encoding its client asks for.
+  always byte ranges. The language server converts to the column encoding
+  its client requests.
 - Spans are absolute within the file. Positions relative to a definition (see
   [DESIGN.md](DESIGN.md#source-code)) are the job of the stage that
   splits a file into definitions. The lexer does not know where definitions
@@ -202,21 +210,21 @@ and text = { value : string; span : span }
 and interpolation = { tokens : token array; span : span }
 ```
 
-- **Literals keep their value.** A literal's spelling is always the source
-  text under its span, which is what `truss fmt` prints back.
+- **A literal token holds its value.** A literal's spelling is always the
+  source text under its span, which `truss fmt` prints unchanged.
 - **Integers are Zarith integers of any size.** Whether one fits its type is
   decided by the type checker.
-- **Floats are kept exact.** A float literal takes its type from context.
-  Rounding a decimal to `Float64` and then to `Float32` can give a different
-  answer from rounding it straight to `Float32`. So the lexer keeps the exact
-  decimal value, and the type checker rounds once, to the type it decides.
+- **Floats are exact decimals.** A float literal takes its type from
+  context. Rounding a decimal to `Float64` and then to `Float32` can differ
+  from rounding it directly to `Float32`. So the token holds the exact
+  decimal value, and the type checker rounds once, to the type it infers.
   The significand has its trailing zeros removed, so `1.50` and `1.5` have
   the same value.
 - **A string's texts and interpolations alternate,** starting and ending
   with a text, which is the shape of a `Template`: `"a${x}b"` has `first`
   `"a"` and `rest` `[(x, "b")]`, and `"${x}"` has two empty texts. The type
   allows no other shape. This holds for untagged strings too.
-- **Types rule out what must not happen.** A span is built only by
+- **Types make invalid values unrepresentable.** A span is built only by
   `Source.span`, which checks `start <= stop`. `Decimal.make` removes
   trailing zeros, and is the only way to build a float's value. Brackets are
   `Open` and `Close` of a `bracket`, so matching them is comparing two
@@ -233,7 +241,7 @@ and interpolation = { tokens : token array; span : span }
 - **`keyword`, `reserved`, `punctuation`, and `foreign` have one constructor
   per item,** each built from a single list in `Token`. A test reads the
   keyword and punctuation blocks in GRAMMAR.md and checks them against these
-  lists, so the documents and the code cannot drift apart.
+  lists, so the documents and the code cannot diverge.
 
 ## Names and keywords
 
@@ -243,7 +251,7 @@ and interpolation = { tokens : token array; span : span }
   scanner reads a word as Unicode defines one, an `XID_Start` character and
   then `XID_Continue` characters, so that `café` is one name with one error,
   not the name `caf` followed by a stray character.
-- `_` on its own is `Underscore`. `_` followed by name characters is an
+- A lone `_` is `Underscore`. `_` followed by name characters is an
   error, since names cannot start with `_`. The fix removes the leading
   underscores.
 - A name is looked up in the keyword table.
@@ -307,8 +315,11 @@ is `1.0`, `.`, `max`.
 | `1__000`, `1_`, `0x_FF` | `_` goes only between digits. The fix removes the stray `_`. |
 | `0755`, `007`, `00` | A leading zero. When every digit is 0 to 7, the fixes write `0o755` or `755`. Otherwise the fix drops the zeros. Digits after the `.` and in an exponent may start with zeros. |
 
-When a number has an error, the token keeps the value of its valid prefix, or
-0, so parsing can go on.
+When a number has an error, the token has the value of its valid prefix, or
+0, so that the parser can continue.
+
+The value of a literal is computed in time linear in its length, so a
+literal with many digits cannot make the lexer quadratic.
 
 ## Strings
 
@@ -323,8 +334,8 @@ When a number has an error, the token keeps the value of its valid prefix, or
   string. A keyword is never a tag: `return"x"` is `return` followed by a
   string.
 - `'a'` is a character literal from another language, and SYNTAX.md gives
-  its fix, `Character"a"`. The lexer emits the tagged string, so parsing goes
-  on.
+  its fix, `Character"a"`. The lexer emits the tagged string, so that the
+  parser can continue.
 
 | Written | From | Fix |
 |---|---|---|
@@ -340,14 +351,16 @@ When a number has an error, the token keeps the value of its valid prefix, or
 ### Ordinary strings
 
 The scanner reads characters up to the closing `"`. A `\` starts an escape. A
-`${` starts an interpolation, and any other `$` is text. A line break or the end of the file before the closing `"`
-makes the string unterminated: the error's fix inserts `"` at the end of the
-line, and the string ends there. Ordinary strings fit on one line, so this
-recovery is almost always right.
+`${` starts an interpolation, and any other `$` is text. A line break or the
+end of the file before the closing `"` makes the string unterminated: the
+error's fix inserts `"` at the end of the line, and the string ends there.
+Ordinary strings fit on one line, so this recovery is almost always right.
 
-The value is the text in UTF-8, with escapes applied. Any other `\` sequence
-is an error.
-| `\u{D800}`, `\u{110000}`, `\u{}`, `\u{1234567}` | Not a Unicode scalar value, so no fix. |
+The value is the text in UTF-8, with escapes applied. The escapes are `\n`,
+`\t`, `\r`, `\0`, `\\`, `\"`, `\${`, and `\u{...}` with 1 to 6 hexadecimal
+digits. Any other `\` sequence is an error. A `\u{...}` escape whose value is
+not a Unicode scalar value, such as `\u{D800}` or `\u{110000}`, is an error
+with no fix.
 
 ### Raw strings
 
@@ -365,7 +378,7 @@ For a raw string opened with *q* quotes and *n* dollar signs:
    *m* = max(*n*, 1). Then the first *k* − *m* `$`s are text. Everything else
    is text.
 3. **A one-line string** must close on its line. A one-line string cannot
-   start with `"`, because the opening run takes in every quote, and it cannot
+   start with `"`, because the opening run includes every quote, and it cannot
    end with `"`, because the closing run would be too long. GRAMMAR.md states
    both rules, and they follow from the rule for runs.
 4. **A multi-line string** must close on a line that holds only whitespace
@@ -381,8 +394,8 @@ For a raw string opened with *q* quotes and *n* dollar signs:
      differs from the indentation and shows tabs and spaces visibly. The fix
      replaces the line's leading whitespace with the indentation, since the
      usual cause is a tab among spaces or the reverse.
-   - The check looks at the text before any interpolation on the line, so an
-     interpolation cannot start inside the indentation.
+   - The check applies to the text before any interpolation on the line, so
+     an interpolation cannot start inside the indentation.
    - The line breaks just after the opening delimiter and just before the
      closing line are not part of the value. Every other line break is a line
      feed.
@@ -406,8 +419,8 @@ value leaves out.
 - A line break inside an interpolation is an error. The message suggests moving
   the expression into a `let`. The interpolation and its string end there.
 - An empty interpolation, `${}` or `${ }`, is an error.
-- Interpolations may nest at most 32 deep. This keeps hostile input from
-  driving the recursion arbitrarily deep, and no real code comes near it.
+- Interpolations may nest at most 32 deep. The limit bounds the scanner's
+  recursion on hostile input, and is far above the nesting in real code.
 - The tokens inside are laid out on their own. With no line breaks, they never
   contain a `NEWLINE`, but their brackets are still matched.
 
@@ -429,13 +442,13 @@ The lexer handles the sequences SYNTAX.md lists: comments, `;`, `===`,
 `!==`, `'`, `` ` ``, `@`, `++`, and `--`. Habits fall into two groups:
 
 - **Local fixes.** The fix depends only on the sequence itself. The lexer
-  reports it, and applies the fix to its own output, so parsing goes on as if
-  the code had been fixed.
+  reports it, and emits the tokens of the fixed code, so that the parser
+  sees no error.
 - **Fixes that need context.** The lexer emits a `Foreign` token, which no
   grammar rule accepts. The parser reports it, because the fix depends on the
   expression around it: `i++` becomes `i += 1`.
 
-| Written | Group | What the lexer emits | Fix |
+| Written | Group | Tokens emitted | Fix |
 |---|---|---|---|
 | `// ...`, `/// ...`, `# ...` | local | Nothing, up to the end of the line | Remove the comment |
 | `/* ... */`, nested | local | Nothing. If the comment spans lines, the next token counts as starting a new line. | Remove the comment. An unterminated one runs to the end of the file and has no fix. |
@@ -453,14 +466,14 @@ The lexer handles the sequences SYNTAX.md lists: comments, `;`, `===`,
   text and the whitespace around it, or the whole line if nothing else is on
   it. Between two tokens it leaves a space, or a line break with the line's
   indentation where the removed text acted as one, so that the tokens stay
-  apart: removing a character from `""`, a character, and `"` must not make
-  `"""`.
+  separate: removing a character from `""`, a character, and `"` must not
+  make `"""`.
 - **`'`.** A character literal from another language, `'a'` or `'\n'`,
   becomes the tagged string `Character"a"`, with a fix. Any other `'` is an
   error without a fix, and is skipped.
 - **`...` in documentation.** `...` lexes as `..` and `.`, which the parser
-  rejects, so the examples in the documents write `todo` for code that is
-  left out, as SYNTAX.md recommends for unwritten bodies.
+  rejects, so the examples in the documents write `todo` for omitted code,
+  as SYNTAX.md recommends for unwritten bodies.
 - **Parser-level habits.** Some foreign habits, such as `|x| x + 1`, `&x`,
   `x ? a : b`, `Shape::Circle`, and `a ?? b`, are made of valid tokens. The
   parser reports them, not the lexer.
@@ -494,15 +507,16 @@ at the end: if the last token can end a statement, emit NEWLINE; then END_OF_FIL
 - A closing `}` cannot begin a statement, so no `NEWLINE` comes before one.
   The parser still skips a `NEWLINE` before a `{` that must open a body.
 - Each interpolation's tokens are a separate array with their own stack. An
-  interpolation cut off by an error the scanner already reported, such as a
-  line break, closes its open brackets without another error.
+  unterminated interpolation, such as one that a line break ended, has its
+  open brackets closed without another error.
 - GRAMMAR.md leaves out the foreign tokens `++` and `--`, which no rule
   accepts. Layout treats them as able both to end and to begin a statement,
-  so that `i++` stays on a line of its own for the parser to report.
+  so that `i++` on a line of its own is a statement of its own, which the
+  parser reports.
 
 ### Brackets
 
-The layout pass matches `(`, `[`, and `{`, and always gives the parser balanced
+The layout pass matches `(`, `[`, and `{`, and its output always has balanced
 brackets:
 
 - **A closer that matches the top of the stack** pops it.
@@ -510,23 +524,30 @@ brackets:
   above it were never closed. Each unclosed opener gets an error, with a note
   at the closer. Zero-width closers are inserted for them at the closer's
   position, and then the matching opener is popped.
-- **A closer that matches nothing** is an error, and is dropped.
-- **Openers still open at the end of the file** make the lexer run again. In
-  that run, a
-  definition keyword in column 0 (`fn`, `type`, `trait`, `impl`,
-  `capability`, `let`, `test`, `theorem`, `proof`, `use`, `public`,
-  `internal`) closes every open bracket. `truss fmt` starts every definition
-  in column 0, so a missing `}` in one definition cannot swallow the
-  definitions after it. The error points at the innermost unclosed opener,
-  and its fix closes every open bracket. Only a broken file runs again, so
-  valid code is never affected, however it is laid out.
+- **A closer that matches no open bracket** is an error, and is dropped.
+  Layout counts the open brackets of each kind, so it finds such a closer
+  without searching the stack.
+- **Openers still open at the end of the file** make the lexer run a second
+  time. In that run, a definition keyword in column 0 (`fn`, `type`,
+  `trait`, `impl`, `capability`, `let`, `test`, `theorem`, `proof`, `use`,
+  `public`, `internal`) closes every open bracket. `truss fmt` starts every
+  definition in column 0, so a missing `}` in one definition cannot make the
+  definitions after it part of that definition. The error points at the
+  innermost unclosed opener, and its fix closes every open bracket. Only a
+  file with an unclosed bracket is lexed a second time, so the layout of
+  valid code never affects its tokens.
 - **A file that ends inside an unterminated comment or raw string** has its
-  open brackets closed without another error. They are part of what the
-  comment or string swallowed, and closing it is the fix that matters. An
-  interpolation cut off by an error closes its brackets the same way.
+  open brackets closed without another error. Their closers are probably
+  inside the comment or string, and terminating it is the fix that matters.
+  An unterminated interpolation has its brackets closed the same way.
 
-Inserted closers are zero-width, so the parser can tell them apart and avoid
-reporting the same mistake again.
+Inserted closers are zero-width, so the parser can distinguish them and
+avoid reporting the same mistake a second time.
+
+Matching brackets and placing every missing closer takes time linear in
+the number of tokens. Layout records the index of each closed opener's
+closer, so the search for a closer's place steps over a nested group
+instead of rescanning it.
 
 **Where a fix puts a missing closer.** The token stream shows where a bracket
 was found unclosed, which is often far from where it was meant to close, as
@@ -534,12 +555,13 @@ in `let x = [1, 2` followed by `g(x)`. As rustc does, the indentation decides
 instead. Among the elements directly inside the bracket, where an element is
 a token or a whole nested group, the closer goes after the last one on a line
 indented more than the opener's line, or else after the last one on the
-opener's line. So `[1, 2` becomes `[1, 2]`, a closer never lands inside a
+opener's line. So `[1, 2` becomes `[1, 2]`, a closer is never placed inside a
 nested group or inside a comment that ends the line, and a `}` goes on a line
-of its own at the opener's indentation. When the bracket's last element is a
-string cut off at the end of its line, the string probably swallowed the
-closer, and the bracket gets no fix: closing the string is the fix that
-matters.
+of its own at the opener's indentation. A nested bracket that was itself
+closed by an inserted closer is such a group, so in `f({[1, 2)` the `}` goes
+after the `[1, 2` group. When the bracket's last element is an unterminated
+string, the string probably contains the closer, and the bracket gets no
+fix: terminating the string is the fix that matters.
 
 ## Diagnostics
 
@@ -567,16 +589,16 @@ type t = {
   lexer. Each fix has a focused test, and the fuzzer checks this for a
   mistake inserted into each document example. Fixes are not checked while
   lexing: that could only show that a fix lexes cleanly, not that it is
-  what the author meant, and it made every change to the lexer keep a subtle
-  argument true. A fix offered for an error that only arises where two
+  what the author meant, and every change to the lexer would have to
+  preserve a subtle invariant. A fix offered for an error that only arises where two
   recoveries meet may leave an error behind; lexing again shows it.
 - An error with no exact fix gets none, even where a guess would usually be
   right: an agent applies fixes without reading them, so a wrong fix is
   worse than none. A closer that matches nothing has no fix, since an extra
   `}` is as often a missing `{`.
-- A file lists at most 200 diagnostics, then gives a count of the rest, so a
-  binary file opened by mistake gives a short report. The lexer keeps every
-  diagnostic, and `Diagnostic.shown` applies the limit when they are
+- A file lists at most 200 diagnostics, followed by a count of the rest, so
+  a binary file opened by mistake produces a short report. The lexer returns
+  every diagnostic, and `Diagnostic.shown` applies the limit when they are
   listed.
 - Messages never copy bytes that are not valid UTF-8; they describe them,
   as in "the byte 0xFF", and JSON output is always valid UTF-8.
@@ -589,9 +611,9 @@ type t = {
 - **A generator in `stage0/tools/unicode/`** downloads the UCD data files of
   that version, checks each against a SHA-256 hash recorded in
   `sources.txt`, and writes `stage0/unicode/unicode_tables.ml`.
-  `regenerate.sh` runs the whole process. Only the generated module, the list of source
-  URLs, and their hashes are checked in, which keeps the repository small and
-  the output reproducible. Building the compiler never downloads anything;
+  `regenerate.sh` runs the whole process. Only the generated module, the
+  list of source URLs, and their hashes are checked in, so the repository
+  stays small and the output is reproducible. Building the compiler never downloads anything;
   only regenerating the tables does.
 - **Tables** are sorted arrays of code point ranges, searched by binary search,
   with a 128-entry table for ASCII.
@@ -602,7 +624,7 @@ type t = {
   combined into one table when the tables are generated.
 - **Names of characters** in messages come from `UnicodeData.txt`, or from
   `NameAliases.txt` for control characters, which `UnicodeData.txt` calls
-  `<control>`. Only the forbidden characters' names are kept.
+  `<control>`. The tables hold names only for the forbidden characters.
 - **Conformance.** After writing the tables, `regenerate.sh` checks each
   property against the data file it came from, for every code point. The
   data files are not checked in, so this runs only when the tables change.
@@ -625,7 +647,7 @@ type t = {
   less time than any later stage, so it does not threaten the O(change)
   goal.
 
-## Left out on purpose
+## Deliberately excluded
 
 The lexer does not do these, because no other language does and each has a
 cost:
@@ -654,7 +676,7 @@ cost:
     | `1'000` | The fix writes `1_000`. |
 
   - **String prefixes.** A `Lower` name followed directly by `"` or `'` would
-    be reported with a fix, and the string lexed as if it had no prefix.
+    be reported with a fix, and the string lexed without the prefix.
     Today `f"..."` lexes as the name `f` followed by a string, which the
     parser rejects.
   - **Escapes:**
@@ -670,7 +692,7 @@ cost:
 
   - **Other sequences:**
 
-    | Written | Group | What the lexer emits | Fix |
+    | Written | Group | Tokens emitted | Fix |
     |---|---|---|---|
     | `#[derive(...)]`, `#![...]` | local | Nothing, up to the end of the line | "Truss has no attributes", pointing to `derives` |
     | `<>` | local | `!=` | `!=` |

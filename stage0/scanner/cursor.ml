@@ -11,9 +11,9 @@ type t = {
   mutable first_line_break : Source.span option;
   mutable blank_line : bool;
   mutable line_is_blank : bool;
-  (* Set when an unterminated comment or multi-line raw string runs to the
-     end of the file, an error already reported. *)
-  mutable ended_inside_error : bool;
+  (* Whether the file ends inside an unterminated comment or multi-line raw
+     string, an error already reported. *)
+  mutable unterminated_at_end : bool;
   (* Each name spelling is checked once per file, and its tokens share one
      string. *)
   names : (string, Names.checked) Hashtbl.t;
@@ -29,19 +29,19 @@ let create source diagnostics =
     first_line_break = None;
     blank_line = false;
     line_is_blank = true;
-    ended_inside_error = false;
+    unterminated_at_end = false;
     names = Hashtbl.create 256;
   }
 
-(* How a construct that must end on its line ended. [Cut_off] means it
-   stopped at the end of its line because of an error already reported, such
-   as an unterminated string, and every enclosing construct that must end on
-   its line ends there too, without another error. The cursor is then always
-   at a line break or the end of the file. *)
-type ending = Closed | Cut_off
+(* How a construct that must end on its line ended. [Unterminated] means
+   that it has no closing delimiter on its line, an error already reported,
+   as for a string with no closing quote. Every enclosing construct that
+   must end on its line is then unterminated too, with no further error.
+   The cursor is then always at a line break or the end of the file. *)
+type ending = Closed | Unterminated
 
-(* What the scanner found next. It always stops at a line break, which the
-   caller treats as trivia or as an error. *)
+(* The next thing in the input. The scanner always stops at a line break,
+   which the caller treats as trivia or as an error. *)
 type item = Token of { kind : Token.kind; start : int; ending : ending } | Line_end | End
 
 let span = Source.span

@@ -165,6 +165,9 @@ and form = Ordinary | Raw of { quotes : int; dollars : int; multi_line : bool }
 and text = { value : string; span : span }
 and interpolation = { tokens : t array; span : span }
 
+val equal_punctuation : punctuation -> punctuation -> bool
+(** Equality on [punctuation] that compares constructors, without a structural comparison. *)
+
 val texts : string_literal -> text array
 val interpolations : string_literal -> interpolation array
 

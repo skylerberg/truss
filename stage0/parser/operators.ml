@@ -1,13 +1,15 @@
 (* The combinations of operators that Truss's partial order of precedence
-   leaves out.
+   excludes.
 
-   The parser builds every expression with a total order. This walk then
+   The parser builds every expression with a total order. This pass then
    checks each operation against its operands, and reports a combination
-   that needs parentheses with the whole expression quoted in its fixes.
-   When the readings of other languages disagree, each is a separate fix,
-   the parser's own reading first, so an agent picks the one it meant
-   instead of trusting a table it may misremember. Every fix inserts only
-   parentheses, except the one for a chained comparison. *)
+   that needs parentheses, with the whole expression quoted in its fixes.
+   A grouping is which of two adjacent operators is applied first. When
+   other languages group a combination differently, each grouping is a
+   separate fix, the parser's own first, so an agent chooses the grouping
+   it meant and does not rely on a precedence table it may misremember.
+   Every fix inserts only parentheses, except the fix for a chained
+   comparison. *)
 
 open Syntax
 
@@ -20,7 +22,7 @@ type group =
   | And_group
   | Or_group
   | Implies_group
-  | Lowest  (** [echo], [return], [forall], and [exists] take everything after them. *)
+  | Lowest  (** [echo], [return], [forall], and [exists] extend as far right as possible. *)
 
 let binary_group = function
   | Multiply | Divide | Remainder | Add | Subtract -> Arithmetic
@@ -48,16 +50,17 @@ let operands (value : expression) =
   | Range { start = Some start; stop = Some stop; _ } -> Some (start.span, stop.span)
   | _ -> None
 
-(* Where an operation's operator is, which is where an error about it
-   points. *)
+(* The span of an operation's operator, which is the span of an error
+   about the operation. *)
 let operator_span (value : expression) =
   match value.kind with
   | Binary { operator_span; _ } | Is { operator_span; _ } | Range { operator_span; _ } ->
       operator_span
   | _ -> value.span
 
-(* How tightly Rust, C, Go, and Swift bind the operators Truss shares with
-   them; higher binds tighter. Truss's total order is Rust's. *)
+(* The precedence that Rust, C, Go, and Swift give the operators that Truss
+   shares with them; a higher level binds tighter. Truss's total order is
+   Rust's. *)
 let level language operator =
   match (language, operator) with
   | _, (And | Or | Implies) -> 0
@@ -88,13 +91,14 @@ let level language operator =
    [(x first y) second z]. Equal levels associate to the left. *)
 let applies_first language ~first ~second = level language first >= level language second
 
-type reading = Left_first | Right_first
+type grouping = Left_first | Right_first
 
 let report cursor (span : span) message fixes =
   Cursor.report cursor Needs_parentheses (Cursor.absolute cursor span) message
     ~fixes:(List.map (fun (title, edits) -> Diagnostic.fix title edits) fixes)
 
-(* A fix, titled with the whole expression as it reads after the fix. *)
+(* A fix whose title is the source text of the whole expression after the
+   fix is applied. *)
 let fix cursor (whole : span) edits =
   let whole_source = Cursor.absolute cursor whole in
   let shifted =
@@ -122,7 +126,7 @@ let is_name_or_literal (value : expression) =
   | Name _ | Integer _ | Float _ | String _ | True | False -> true
   | _ -> false
 
-(* What is wrong with an operand of a group, if anything. *)
+(* Why an operand cannot be an operand of its parent's group. *)
 type problem = Lowest_operand | Chained of string | Mixed of string | Mixed_bitwise
 
 let problem parent child ~right (operand : expression) =
@@ -146,19 +150,19 @@ let problem parent child ~right (operand : expression) =
   | _ when bitwise parent || bitwise child -> Some Mixed_bitwise
   | _ -> Some (Mixed "These operators need parentheses to say which applies first.")
 
-(* The fix that gives [x _ y _ z] one reading. A reading that changes which
-   operator applies last, such as [a & (b == c)] for [a & b == c], may give
-   an operator that the one around the whole expression, its [context],
-   cannot take as an operand, and then the fix puts the whole in
+(* The fix that gives [x _ y _ z] one grouping. A grouping that changes
+   which operator is applied last, such as [a & (b == c)] for [a & b == c],
+   may make the root an operator that the enclosing operator, [context],
+   cannot take as an operand. The fix then puts the whole expression in
    parentheses too. *)
-let reading_fix cursor ?context ~(whole : expression) ~(operand : expression) (x, y, z) ~parsed
-    reading =
+let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression) (x, y, z) ~parsed
+    grouping =
   let edits =
-    match reading with
+    match grouping with
     | Left_first -> parentheses cursor x y
     | Right_first -> parentheses cursor y z
   in
-  let last = if reading = parsed then group whole else group operand in
+  let last = if grouping = parsed then group whole else group operand in
   let wrap =
     match (context, last) with
     | Some (outer, right), Some last -> problem outer last ~right whole <> None
@@ -167,8 +171,8 @@ let reading_fix cursor ?context ~(whole : expression) ~(operand : expression) (x
   fix cursor whole.span (if wrap then edits @ parentheses cursor whole.span whole.span else edits)
 
 (* Reports the combination of [whole] with its operand [operand]. [context]
-   is the operator around [whole], if any, and whether [whole] is its right
-   operand. *)
+   is the group of the operator that encloses [whole], if any, and whether
+   [whole] is its right operand. *)
 let report_problem cursor ?context (whole : expression) (operand : expression) ~right problem =
   (* [x _ y _ z], where [y] is the operand right next to [whole]'s operator.
      On the right, that is the first operand of the chain [operand] starts,
@@ -186,17 +190,17 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
         Option.map (fun y -> (x, y, z)) (first_of_chain operand)
     | _ -> None
   in
-  (* The parser's reading, and the other one. *)
+  (* The parser's grouping, and the other one. *)
   let parsed = if right then Right_first else Left_first in
   let other = if right then Left_first else Right_first in
-  let reading_of pieces = reading_fix cursor ?context ~whole ~operand pieces ~parsed in
-  (* In [x is P & z], the other reading would put [& z] inside the pattern,
-     which has no grouping parentheses. *)
+  let fix_for pieces = grouping_fix cursor ?context ~whole ~operand pieces ~parsed in
+  (* In [x is P & z], the other grouping would put [& z] inside the pattern,
+     and a pattern has no parentheses for grouping. *)
   let other_possible = match operand.kind with Is _ -> right | _ -> true in
   let both () =
     match pieces with
-    | Some pieces when other_possible -> List.map (reading_of pieces) [ parsed; other ]
-    | Some pieces -> [ reading_of pieces parsed ]
+    | Some pieces when other_possible -> List.map (fix_for pieces) [ parsed; other ]
+    | Some pieces -> [ fix_for pieces parsed ]
     | None -> []
   in
   match problem with
@@ -211,15 +215,15 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
         match (whole.kind, operand.kind, pieces) with
         | Binary { operator = outer; _ }, Binary { operator = inner; _ }, Some pieces ->
             let first, second = if right then (outer, inner) else (inner, outer) in
-            let readings =
+            let groupings =
               List.map
                 (fun language ->
                   if applies_first language ~first ~second then Left_first else Right_first)
                 [ `Rust; `C; `Go; `Swift ]
             in
-            (* Rust's reading is the parser's. *)
-            let ordered = if List.mem other readings then [ parsed; other ] else [ parsed ] in
-            List.map (reading_of pieces) ordered
+            (* Rust's grouping is the parser's. *)
+            let ordered = if List.mem other groupings then [ parsed; other ] else [ parsed ] in
+            List.map (fix_for pieces) ordered
         | _ -> both ()
       in
       report cursor (operator_span whole)
@@ -228,10 +232,10 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
       let fixes =
         match (whole.kind, operand.kind) with
         | Binary { operator = Implies; _ }, _ ->
-            (* Dafny's reading of [a ==> b ==> c] first: [a ==> (b ==> c)]. *)
+            (* Dafny's grouping of [a ==> b ==> c] first: [a ==> (b ==> c)]. *)
             List.rev (both ())
         | Binary _, Binary { right = middle; _ } when (not right) && is_name_or_literal middle ->
-            (* Python's reading of [a < b < c]: [a < b && b < c]. *)
+            (* Python's meaning of [a < b < c]: [a < b && b < c]. *)
             let middle_text = Cursor.text cursor (Cursor.absolute cursor middle.span) in
             [
               fix cursor whole.span

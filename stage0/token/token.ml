@@ -135,12 +135,24 @@ end = struct
 
   let ten = Z.of_int 10
 
-  let rec make ~significand ~exponent =
+  (* The zeros are counted in the decimal digits, in one pass. Dividing by
+     ten once for each zero would take time quadratic in the number of
+     digits, which a literal with many zeros would make the lexer pay. *)
+  let make ~significand ~exponent =
     if Z.equal significand Z.zero then { significand = Z.zero; exponent = Z.zero }
     else
-      let quotient, remainder = Z.div_rem significand ten in
-      if Z.equal remainder Z.zero then make ~significand:quotient ~exponent:(Z.succ exponent)
-      else { significand; exponent }
+      let digits = Z.to_string significand in
+      let rec trailing_zeros count =
+        if digits.[String.length digits - 1 - count] = '0' then trailing_zeros (count + 1)
+        else count
+      in
+      let zeros = trailing_zeros 0 in
+      if zeros = 0 then { significand; exponent }
+      else
+        {
+          significand = Z.divexact significand (Z.pow ten zeros);
+          exponent = Z.add exponent (Z.of_int zeros);
+        }
 end
 
 type t = {
@@ -177,6 +189,12 @@ and string_literal = {
 and form = Ordinary | Raw of { quotes : int; dollars : int; multi_line : bool }
 and text = { value : string; span : span }
 and interpolation = { tokens : t array; span : span }
+
+let equal_punctuation (first : punctuation) (second : punctuation) =
+  match (first, second) with
+  | Open first, Open second | Close first, Close second -> first = second
+  | (Open _ | Close _), _ | _, (Open _ | Close _) -> false
+  | _ -> first == second
 
 let texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
 let interpolations literal = Array.map fst literal.rest

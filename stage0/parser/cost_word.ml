@@ -3,7 +3,7 @@
 
 type t = Amortized | Time | Allocations | Allocated_bytes | Calls | O | Finite | Potential
 
-(* The one place each word is spelled. A test checks the list against
+(* The only place each word is spelled. A test checks the list against
    GRAMMAR.md. *)
 let spellings =
   [
@@ -37,16 +37,17 @@ let edit_distance a b =
   done;
   previous.(String.length b)
 
-(* Reports a name where one of the cost words [words] was expected. When
-   exactly one of them is close to it, the fix writes that word, and parsing
-   goes on as if it had been written, so that what follows is checked too. *)
-let misspelled cursor (token : Token.t) written ~words ~what =
+(* Reports the name [name] where one of the cost words [words] was
+   expected. When exactly one of them is within an edit distance of 2, the
+   fix replaces the name with that word, and the function returns the word,
+   so that the rest of the clause is parsed and checked. *)
+let misspelled cursor (token : Token.t) name ~words ~what =
   let message =
     Printf.sprintf "Expected %s, one of %s, found `%s`." what
       (String.concat ", " (List.map (fun word -> "`" ^ spelling word ^ "`") words))
-      written
+      name
   in
-  match List.filter (fun word -> edit_distance written (spelling word) <= 2) words with
+  match List.filter (fun word -> edit_distance name (spelling word) <= 2) words with
   | [ word ] ->
       let spelling = spelling word in
       Cursor.report cursor Diagnostic.Code.Cost_word token.span message
@@ -68,8 +69,8 @@ let expect ?suggested cursor ~accepted ~what ~expected =
   let word =
     match (of_token token.kind, token.kind) with
     | Some word, _ when List.mem word accepted -> word
-    | _, (Lower written | Upper written) ->
-        misspelled cursor token written ~words:(Option.value suggested ~default:accepted) ~what
+    | _, (Lower name | Upper name) ->
+        misspelled cursor token name ~words:(Option.value suggested ~default:accepted) ~what
     | _ -> Cursor.fail cursor expected
   in
   Cursor.advance cursor;

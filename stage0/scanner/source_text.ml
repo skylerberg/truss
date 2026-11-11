@@ -9,7 +9,7 @@ type context = Code | Ordinary_string | Raw_string
    treats like whitespace, such as a comment, a `;`, or forbidden
    characters. The whitespace around it goes too, and the whole line if
    nothing else is on it. Between two tokens it becomes a space, or a line
-   break if it acted as one ([line_break]), so that the tokens stay apart.
+   break if it acted as one ([line_break]), so that the tokens stay separate.
    Every rejected sequence that lexes as whitespace is removed this way. *)
 let remove_trivia cursor ~start ~stop ~line_break =
   let before = spaces_before cursor start in
@@ -95,9 +95,10 @@ let invalid_run cursor =
   report cursor ~code:Invalid_utf8 (span start cursor.position)
     "Source files must be UTF-8, and these bytes are not valid UTF-8."
 
-(* Copies the run of plain ASCII text at the cursor into [buffer] in one go:
-   printable characters and tabs, up to the next byte that needs a closer
-   look. [special] names the bytes the string form treats specially. *)
+(* Copies the run of plain ASCII text at the cursor into [buffer] with one
+   call: printable characters and tabs, up to the next byte that needs
+   decoding or checking. [special] is true of the bytes that the string
+   form gives a meaning, such as a quote. *)
 let copy_plain cursor buffer ~special =
   let start = cursor.position in
   let rec stop index =

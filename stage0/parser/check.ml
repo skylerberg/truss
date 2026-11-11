@@ -196,9 +196,9 @@ and statement cursor context (statement : statement) =
   | Expression _ | Assignment _ | Statement_error -> statement_parts cursor context statement
 
 (* Everything inside a statement whose context does not change it. *)
-and statement_parts cursor context written =
+and statement_parts cursor context (parent : statement) =
   Syntax_walk.statement_parts ~expression:(expression cursor context)
-    ~statement:(statement cursor context) written
+    ~statement:(statement cursor context) parent
 
 (* Definitions *)
 
@@ -240,9 +240,9 @@ let signature cursor (signature : signature) =
   | None -> ());
   clauses cursor signature.clauses
 
-let function_ cursor (written : signature) body =
-  signature cursor written;
-  let yields = match written.result with Some (Yields _ | Lends _) -> true | _ -> false in
+let function_ cursor (declared : signature) body =
+  signature cursor declared;
+  let yields = match declared.result with Some (Yields _ | Lends _) -> true | _ -> false in
   Option.iter (block cursor { plain with function_body = true; yields }) body
 
 let function_definition cursor (definition : function_definition) =
