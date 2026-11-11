@@ -380,18 +380,30 @@ type running = {
 
 let not_running = { template = (fun _ -> None); call = (fun _ -> None) }
 
+(* Which of an obligation's queries is asked: as it was made, or with its
+   bitwise operations defined exactly, and either of those without its
+   callees' definitions. *)
+type variant = Made | Exact | Alone | Alone_exact
+
 (* What the world outside the prover says of a definition's proof: the
-   solver, of a query, and running code, of a template's check or a call's
-   value. A definition's outcome is worked out from what it is told. *)
+   solver, of one of its obligations' queries, by the obligation's index,
+   the choice of constants for its bounds, the variant, and whether a
+   counterexample gives the locals too, which is [None] where that query
+   does not exist; and running code, of a template's check. A definition's
+   outcome is worked out from what it is told. *)
 type teller = {
-  solve : values:string list -> L.query -> Solver.answer;
+  solve :
+    index:int ->
+    choice:(string * (Z.t * Z.t)) list ->
+    variant:variant ->
+    with_locals:bool ->
+    Solver.answer option;
   template : Translate.evaluation -> evaluated option;
-  call : Translate.known_call -> Z.t option;
 }
 
 (* What running code gives of the calls a query mentions, as facts, which
    are only as true as the compiled code, which the prover trusts. *)
-let given (teller : teller) (obligation : Translate.obligation) =
+let given ~call (obligation : Translate.obligation) =
   List.filter_map
     (fun (known : Translate.known_call) ->
       Option.map
@@ -399,12 +411,12 @@ let given (teller : teller) (obligation : Translate.obligation) =
           L.equal known.term
             (if known.result_is_bool then L.Boolean (not (Z.equal value Z.zero))
              else L.Integer value))
-        (teller.call known))
+        (call known))
     obligation.known_calls
 
 (* An obligation's query, or another of its own, with a choice of
    constants for its bounds. *)
-let query_with ?query teller (obligation : Translate.obligation) choice =
+let query_with ?query ~call (obligation : Translate.obligation) choice =
   let query = Option.value query ~default:obligation.query in
   let pins =
     List.map
@@ -414,7 +426,7 @@ let query_with ?query teller (obligation : Translate.obligation) choice =
   in
   (* The same query, not a copy, when nothing is added, so the solver finds
      what it made of it before. *)
-  match pins @ given teller obligation with
+  match pins @ given ~call obligation with
   | [] -> query
   | added -> { query with facts = query.facts @ added }
 
@@ -441,10 +453,18 @@ let choices (obligations : Translate.obligation list) =
   in
   all groups
 
+(* An obligation's query of a variant, with a choice of constants, and
+   with what running code gave of its calls. *)
+let variant_query ~call (obligation : Translate.obligation) choice variant =
+  let made base = query_with ?query:base ~call obligation choice in
+  match variant with
+  | Made -> Some (made None)
+  | Exact -> exactly (made None)
+  | Alone -> Option.map (fun query -> made (Some query)) obligation.contracts_alone
+  | Alone_exact -> Option.bind obligation.contracts_alone (fun query -> exactly (made (Some query)))
+
 let answers (teller : teller) (obligations : Translate.obligation list) =
-  let solve (obligation : Translate.obligation) choice =
-    let query = query_with teller obligation choice in
-    let values = List.map fst obligation.values in
+  let solve index (obligation : Translate.obligation) choice =
     (* A clause running code decides is decided so, and the solver never
        asked. *)
     match Option.bind obligation.evaluation teller.template with
@@ -452,45 +472,49 @@ let answers (teller : teller) (obligations : Translate.obligation list) =
     | Some Fails -> Ran_false
     | Some Too_long -> Ran_too_long
     | None -> (
-        let asked query =
-          match teller.solve ~values query with
-          | Solver.Proven -> Solver.Proven
-          | first -> (
-              match exactly query with Some exact -> teller.solve ~values exact | None -> first)
+        let ask variant ~with_locals = teller.solve ~index ~choice ~variant ~with_locals in
+        let asked made exact =
+          match ask made ~with_locals:false with
+          | Some Solver.Proven -> Solver.Proven
+          | Some first -> (
+              match ask exact ~with_locals:false with Some answer -> answer | None -> first)
+          | None -> Solver.Out_of_steps
         in
-        match (asked query, obligation.contracts_alone) with
-        | Solver.Out_of_steps, Some query -> (
+        match (asked Made Exact, obligation.contracts_alone) with
+        | Solver.Out_of_steps, Some _ -> (
             (* Without its callees' definitions, a query is about their
                contracts alone, which can be enough where unfolding is too
                much for the solver. *)
-            match asked (query_with ~query teller obligation choice) with
+            match asked Alone Alone_exact with
             | Solver.Proven -> Solved Proven
             | _ -> Solved Out_of_steps)
         | Solver.Counterexample _, _ when obligation.locals <> [] -> (
             (* Where a counterexample is, the values of the locals there too,
                asked for only now, so that a query that proves keeps its
                key. *)
-            let values = values @ List.map fst obligation.locals in
-            match teller.solve ~values query with
-            | Solver.Counterexample _ as answer -> Solved answer
-            | _ -> Solved (asked query))
+            match ask Made ~with_locals:true with
+            | Some (Solver.Counterexample _ as answer) -> Solved answer
+            | _ -> Solved (asked Made Exact))
         | answer, _ -> Solved answer)
   in
+  let indexed = List.mapi (fun index obligation -> (index, obligation)) obligations in
   let bounded =
-    List.filter (fun (obligation : Translate.obligation) -> obligation.constants <> []) obligations
+    List.filter (fun (_, (obligation : Translate.obligation)) -> obligation.constants <> []) indexed
   in
   let all_choices = choices obligations in
   let chosen =
     match
       List.find_opt
         (fun choice ->
-          List.for_all (fun obligation -> solve obligation choice = Solved Proven) bounded)
+          List.for_all
+            (fun (index, obligation) -> solve index obligation choice = Solved Proven)
+            bounded)
         all_choices
     with
     | Some choice -> choice
     | None -> List.hd all_choices
   in
-  List.map (fun obligation -> (obligation, solve obligation chosen)) obligations
+  List.map (fun (index, obligation) -> (obligation, solve index obligation chosen)) indexed
 
 (* An obligation's state: where it is, what it asks, and, where it was not
    shown, the diagnostic that says why. *)
@@ -577,38 +601,93 @@ let told : (string, told) Query.input = Query.input ~name:"told" ~show:Fun.id ()
    or what is still to be asked. *)
 type outcome = Decided of (state * (Names.key * Syntax.span) option) list | Waiting of asked list
 
+(* What running code said of a call, where it was told. *)
+let call_told database call =
+  match Query.find database told (asked_key (Run_call call)) with
+  | Some (Call_ran value) -> value
+  | _ -> None
+
+type question = {
+  definition : Names.key;
+  index : int;
+  choice : (string * (Z.t * Z.t)) list;
+  variant : variant;
+  with_locals : bool;
+}
+
+let show_question question =
+  Printf.sprintf "%s #%d" (Names.show_key question.definition) question.index
+
+(* One query an obligation may ask, rendered for the solver: a result of
+   its own, found current when only what the solver said changed, so a
+   definition's outcome is worked out again without rendering anything. *)
+let question_request =
+  Query.query ~name:"question_request" ~phase:Verdicts ~saved:true ~show:show_question
+    (fun database question ->
+      match Query.demand database proof question.definition with
+      | Obligations outcome -> (
+          match List.nth_opt outcome.obligations question.index with
+          | Some obligation ->
+              let values =
+                List.map fst obligation.values
+                @ if question.with_locals then List.map fst obligation.locals else []
+              in
+              Option.map
+                (fun query -> Solver.request ~values query)
+                (variant_query ~call:(call_told database) obligation question.choice
+                   question.variant)
+          | None -> None)
+      | Not_proven_here | Unsupported _ -> None)
+
 (* Each definition's outcome, from its obligations and what the world
    outside was told of them: a saved result, so a definition whose reads have
    not changed is neither translated nor told anything again. What is not
-   told yet is asked for, and the outcome waits for it. *)
+   told yet is asked for, and the outcome waits for it. What running code
+   gives goes into the solver's queries, so while any of it is untold, only
+   it is asked: a query asked without it would be one no later round asks. *)
 let outcome =
   Query.query ~name:"proof_outcome" ~phase:Verdicts ~saved:true ~show:Names.show_key
     (fun database key ->
-      let waiting = ref [] in
+      let running_untold = ref [] and solver_untold = ref [] in
       let tell asked placeholder read =
         match Query.find database told (asked_key asked) with
         | Some said -> read said
         | None ->
+            let waiting = match asked with Solve _ -> solver_untold | _ -> running_untold in
             if not (List.mem asked !waiting) then waiting := asked :: !waiting;
             placeholder
       in
-      let teller =
-        {
-          solve =
-            (fun ~values query ->
-              let request = Solver.request ~values query in
-              tell (Solve request) Solver.Out_of_steps (function
-                | Solver_said canonical -> Solver.read request canonical
-                | _ -> Solver.Out_of_steps));
-          template =
-            (fun evaluation ->
-              tell (Run_template evaluation) None (function Template_ran ran -> ran | _ -> None));
-          call =
-            (fun call -> tell (Run_call call) None (function Call_ran ran -> ran | _ -> None));
-        }
-      in
-      let states = definition_states teller database key in
-      match !waiting with [] -> Decided states | asked -> Waiting (List.rev asked))
+      (match Query.demand database proof key with
+      | Obligations outcome ->
+          List.iter
+            (fun (obligation : Translate.obligation) ->
+              List.iter
+                (fun call -> ignore (tell (Run_call call) () (fun _ -> ())))
+                obligation.known_calls)
+            outcome.obligations
+      | Not_proven_here | Unsupported _ -> ());
+      if !running_untold <> [] then Waiting (List.rev !running_untold)
+      else
+        let teller =
+          {
+            solve =
+              (fun ~index ~choice ~variant ~with_locals ->
+                Option.map
+                  (fun request ->
+                    tell (Solve request) Solver.Out_of_steps (function
+                      | Solver_said canonical -> Solver.read request canonical
+                      | _ -> Solver.Out_of_steps))
+                  (Query.demand database question_request
+                     { definition = key; index; choice; variant; with_locals }));
+            template =
+              (fun evaluation ->
+                tell (Run_template evaluation) None (function Template_ran ran -> ran | _ -> None));
+          }
+        in
+        let states = definition_states teller database key in
+        match (!running_untold, !solver_untold) with
+        | [], [] -> Decided states
+        | [], asked | asked, _ -> Waiting (List.rev asked))
 
 (* Tells each input what the world outside says: the solver, several at
    once, and running code. The driver sets them, so its database can save
