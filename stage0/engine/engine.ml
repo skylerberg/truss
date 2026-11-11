@@ -5,11 +5,12 @@ let create = Incremental.create
 let freeze = Incremental.freeze
 let is_frozen = Incremental.is_frozen
 let context = Incremental.context
+let observer = Incremental.observer
 let of_context = Incremental.engine_of
 let set = Incremental.set
 let remove = Incremental.remove
 let get engine query key = Incremental.demand (Incremental.context engine) query key
-let release = Incremental.release
+let unroot = Incremental.unroot
 
 type node = Incremental.node
 type change = Incremental.change = { computed : node list; changed : node list }
@@ -25,7 +26,7 @@ type counters = Incremental.counters = {
   changed : int;
   adopted : int;
   copied : int;
-  dropped : int;
+  collected : int;
 }
 
 let counters = Incremental.counters

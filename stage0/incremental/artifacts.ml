@@ -57,7 +57,7 @@ type saved_node = {
   saved_key : string;
   saved_value : string option;  (** A fingerprint; [None] for an input that is not set *)
   saved_reads : int list;
-  saved_kept : bool;
+  saved_root : bool;
 }
 
 let artifact_header store = "truss artifact " ^ store.version ^ "\n"
@@ -66,7 +66,7 @@ type artifact = {
   base : string option;
   saved : saved_node list;
   table : (string * string) array;
-  dropped : (string * string) list;
+  collected : (string * string) list;
   whole_size : int;
   difference_size : int;
   difference_count : int;
@@ -82,10 +82,9 @@ let write ?(full = false) engine =
   sweep engine;
   settle engine;
   let full = full || engine.chain = None in
-  let kept (node : node) = node.kept || Hashtbl.mem engine.pinned node.id in
   let candidates =
     if full then begin
-      (* What the kept results and the set inputs reach, apart from the
+      (* What the roots and the set inputs reach, apart from the
          fixed bases. *)
       let reached = Hashtbl.create 1024 in
       let rec reach (node : node) =
@@ -99,7 +98,7 @@ let write ?(full = false) engine =
           let set =
             match node.cell with Input (_, { slot = Set _ | Stored; _ }) -> true | _ -> false
           in
-          if kept node || set then reach node)
+          if node.root || set then reach node)
         (nodes engine);
       by_id (Hashtbl.fold (fun _ node found -> node :: found) reached [])
     end
@@ -135,7 +134,7 @@ let write ?(full = false) engine =
         saved_key = key_bytes node;
         saved_value;
         saved_reads;
-        saved_kept = kept node;
+        saved_root = node.root;
       }
   in
   let save (node : node) =
@@ -151,7 +150,7 @@ let write ?(full = false) engine =
       match node.below with
       | Some base ->
           base.fingerprint = node.fingerprint
-          && base.kept = kept node
+          && base.root = node.root
           && same_reads engine (Lazy.force reads) base
       | None -> false
     in
@@ -188,7 +187,7 @@ let write ?(full = false) engine =
       base = (if full then None else engine.chain);
       saved;
       table = Array.of_list (List.rev !table);
-      dropped = (if full then [] else List.rev engine.gone);
+      collected = (if full then [] else List.rev engine.collected);
       whole_size = (if full then count else engine.whole);
       difference_size = (if full then 0 else engine.differences + count);
       difference_count = (if full then 0 else engine.depth + 1);
@@ -201,7 +200,7 @@ let write ?(full = false) engine =
   engine.differences <- artifact.difference_size;
   engine.depth <- artifact.difference_count;
   Hashtbl.reset engine.unsaved;
-  engine.gone <- [];
+  engine.collected <- [];
   name
 
 type debt = { whole : int; differences : int; depth : int }
@@ -212,7 +211,7 @@ let debt (engine : t) =
 let artifact (engine : t) = engine.chain
 
 let unwritten (engine : t) =
-  engine.chain = None || Hashtbl.length engine.unsaved > 0 || engine.gone <> []
+  engine.chain = None || Hashtbl.length engine.unsaved > 0 || engine.collected <> []
 
 (* An artifact's bytes start with what wrote it. They are marshaled, so
    they mean something only to the same version: read by another, as when
@@ -246,30 +245,30 @@ let values_in store name =
         chain
 
 (* Fills an engine with artifacts' nodes, each the last of its name and key,
-   apart from those dropped after. A node of a query this program does not
+   apart from those collected after. A node of a query this program does not
    declare is left out, and so is one that read a node that cannot be
    found, with everything that read it, since its result could not be
    checked. *)
 let fill engine (artifacts : artifact list) =
   let last : (string * string, saved_node * artifact) Hashtbl.t = Hashtbl.create 1024 in
   let order = ref [] in
-  let gone = Hashtbl.create 16 in
+  let collected = Hashtbl.create 16 in
   List.iter
     (fun (artifact : artifact) ->
       List.iter
         (fun key ->
           Hashtbl.remove last key;
-          Hashtbl.replace gone key ())
-        artifact.dropped;
+          Hashtbl.replace collected key ())
+        artifact.collected;
       List.iter
         (fun (node : saved_node) ->
           let key = (node.saved_name, node.saved_key) in
           if not (Hashtbl.mem last key) then order := key :: !order;
-          Hashtbl.remove gone key;
+          Hashtbl.remove collected key;
           Hashtbl.replace last key (node, artifact))
         artifact.saved)
     artifacts;
-  (* A node that was dropped is not in the state. Where a base holds it, the
+  (* A node that was collected is not in the state. Where a base holds it, the
      engine holds its place with nothing in it, so that it is computed if it
      is asked for, and the base's result, which is of an earlier state, is
      never read. *)
@@ -283,11 +282,11 @@ let fill engine (artifacts : artifact list) =
               | node ->
                   node.written <- true;
                   node.superseding <- true;
-                  node.kept <- false
+                  node.root <- false
               | exception _ -> ())
           | _ | (exception _) -> ())
       | None -> ())
-    gone;
+    collected;
   let made =
     List.filter_map
       (fun key ->
@@ -301,7 +300,7 @@ let fill engine (artifacts : artifact list) =
                 | exception _ -> None
                 | node ->
                     node.fingerprint <- saved.saved_value;
-                    node.kept <- saved.saved_kept;
+                    node.root <- saved.saved_root;
                     node.written <- true;
                     node.superseding <- true;
                     (match node.cell with

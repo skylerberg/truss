@@ -196,7 +196,11 @@ let demand (context : context) (query : ('key, 'value) query) (key : 'key) : 'va
   record context node;
   let result = match value engine query cell with value -> Ok value | exception e -> Error e in
   (match (context.frame, result) with
-  | None, _ -> sweep engine
+  | None, _ ->
+      (* What a driver only observed is collected again, unless something
+         reads it or it is a root. *)
+      if context.observing then defer_collection engine node;
+      sweep engine
   | Some frame, Error (Cycle labels) ->
       (* A cycle is an error wherever it is met: what reads a result that
          is a cycle has the cycle as its own, whether or not it catches it,
@@ -206,11 +210,28 @@ let demand (context : context) (query : ('key, 'value) query) (key : 'key) : 'va
   | Some _, _ -> ());
   match result with Ok value -> value | Error exception_ -> raise exception_
 
+(* A query's node as a driver observes it: brought up to date, or computed,
+   and not made a root. A node that the observation leaves unnecessary is
+   collected as this returns, and still holds its outcome. *)
+let observed_node engine (query : ('key, 'value) query) (key : 'key) : node =
+  settle ~through:query.phase engine;
+  let cell =
+    match find_result engine query key with
+    | Some cell -> cell
+    | None -> make_result engine query key ~below:None
+  in
+  if cell.node.engine == engine then ensure_result engine query cell;
+  (try ignore (value engine query cell) with Lost _ as lost -> raise lost | _ -> ());
+  let node = match find_result engine query key with Some cell -> cell.node | None -> cell.node in
+  defer_collection engine node;
+  sweep engine;
+  node
+
 (* The result a state holds for a query and key, if nothing that changed
    could have reached it. The phases before the query's are brought up to
    date, and what reads their changes within the query's phase is marked,
    so a result that is not marked is current. Nothing of the query's phase
-   is computed, no read is recorded, and the result is not kept. *)
+   is computed, no read is recorded, and the result is not made a root. *)
 let known (context : context) (query : ('key, 'value) query) (key : 'key) : 'value option =
   let engine = context.engine in
   if context.frame <> None then invalid_arg "Incremental.known: called while a query runs";

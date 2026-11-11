@@ -5,14 +5,15 @@ let resolve engine (node : node) =
   if node.engine == engine then node
   else match Hashtbl.find_opt engine.shadows node.id with Some own -> own | None -> node
 
-(* Dropping. A node nothing reads is dropped only once nothing is running:
-   a query that is still running has read nodes that do not yet count it as
-   a reader. A copy of a base's node stays, since the base's readers may
-   read it. *)
+(* Collection. A node is necessary if it is a root or a necessary node reads
+   it; an unnecessary node is collected, with what only it read. That is done
+   only once no query runs: a query that is still running has read nodes
+   that do not yet count it as a reader. A copy of a base's node is never
+   collected, since the base's readers may read it. *)
 
-let consider engine (node : node) =
-  if node.engine == engine && node.below = None && not node.kept then
-    engine.limbo <- node :: engine.limbo
+let defer_collection engine (node : node) =
+  if node.engine == engine && node.below = None && not node.root then
+    engine.candidates <- node :: engine.candidates
 
 let forget engine (node : node) =
   match node.cell with
@@ -26,45 +27,45 @@ let forget engine (node : node) =
       | None -> ())
   | Unfilled -> ()
 
-(* A result can be dropped, and an input only while it is not set: one that
+(* A result is collectable, and an input only while it is not set: one that
    is set holds what the database gave it. *)
-let can_be_dropped (node : node) =
+let collectable (node : node) =
   match node.cell with
   | Input (_, { slot = Unset; _ }) | Result _ -> true
   | Input _ | Unfilled -> false
 
-let rec drop engine (node : node) =
+let rec collect engine (node : node) =
   if
-    node.alive && (not node.kept) && (not node.busy) && node.below = None
+    node.alive && (not node.root) && (not node.busy) && node.below = None
     && Hashtbl.length node.readers = 0
-    && can_be_dropped node
+    && collectable node
   then begin
     node.alive <- false;
     forget engine node;
     Hashtbl.remove engine.own node.id;
     Hashtbl.remove engine.unsaved node.id;
-    if node.written then engine.gone <- (name node, key_bytes node) :: engine.gone;
-    engine.tally.drops <- engine.tally.drops + 1;
+    if node.written then engine.collected <- (name node, key_bytes node) :: engine.collected;
+    engine.tally.collections <- engine.tally.collections + 1;
     let reads = node.reads in
     node.reads <- [];
     List.iter
       (fun read ->
         remove_reader engine read node;
-        drop_or_wait engine read)
+        collect_or_defer engine read)
       reads
   end
 
-and drop_or_wait engine (node : node) =
-  if engine.frames = [] then (if node.engine == engine then drop engine node)
-  else consider engine node
+and collect_or_defer engine (node : node) =
+  if engine.frames = [] then (if node.engine == engine then collect engine node)
+  else defer_collection engine node
 
 let rec sweep engine =
   if engine.frames = [] then
-    match engine.limbo with
+    match engine.candidates with
     | [] -> ()
-    | waiting ->
-        engine.limbo <- [];
-        List.iter (drop engine) waiting;
+    | candidates ->
+        engine.candidates <- [];
+        List.iter (collect engine) candidates;
         sweep engine
 
 (* Replaces a node's reads, adding it to the readers of what it reads now
@@ -79,7 +80,7 @@ let commit_reads engine (node : node) (reads : node list) =
     (fun (read : node) ->
       if not (Hashtbl.mem now read.id) then begin
         remove_reader engine read node;
-        consider engine read
+        defer_collection engine read
       end)
     old;
   List.length old <> List.length reads || List.exists2 ( != ) old reads
@@ -106,7 +107,7 @@ let shadow engine (base : node) =
       in
       own.fingerprint <- base.fingerprint;
       own.identity <- base.identity;
-      own.kept <- base.kept || Hashtbl.mem engine.pinned base.id;
+      own.root <- base.root;
       own.written <- true;
       Hashtbl.replace engine.shadows base.id own;
       engine.tally.copies <- engine.tally.copies + 1;
@@ -129,10 +130,10 @@ let shadow engine (base : node) =
    engine unless it already was, since its copy is then among the own
    readers if it still reads this. [phase] narrows to one phase. *)
 let readers_here engine (node : node) ~phase =
-  let wanted (reader : node) = match phase with Some p -> reader.phase = p | None -> true in
+  let in_phase (reader : node) = match phase with Some p -> reader.phase = p | None -> true in
   let own =
     Hashtbl.fold
-      (fun _ (reader : node) found -> if wanted reader then reader :: found else found)
+      (fun _ (reader : node) found -> if in_phase reader then reader :: found else found)
       node.readers []
   in
   match node.below with
@@ -141,7 +142,7 @@ let readers_here engine (node : node) ~phase =
       let from table found =
         Hashtbl.fold
           (fun _ (reader : node) found ->
-            if (not (wanted reader)) || Hashtbl.mem engine.shadows reader.id then found
+            if (not (in_phase reader)) || Hashtbl.mem engine.shadows reader.id then found
             else shadow engine reader :: found)
           table found
       in
@@ -182,6 +183,11 @@ let seed engine (node : node) =
       end)
     (readers_here engine node ~phase:None)
 
+(* Records a read. A query's read is an edge. A driver's read makes the
+   result a root, unless the driver only observes: a root is part of the
+   state, so it is written, though the node's result is as it was. A base's
+   node is copied into the engine to be its root there, since a base never
+   changes. *)
 let record (context : context) (node : node) =
   match context.frame with
   | Some frame ->
@@ -191,14 +197,13 @@ let record (context : context) (node : node) =
       end
   | None ->
       let engine = context.engine in
-      if (not engine.frozen) && not node.kept then
-        if node.engine != engine then Hashtbl.replace engine.pinned node.id ()
-        else begin
-          (* That a request keeps a node is part of the state, so it is
-             written, though the node's result is as it was. *)
-          node.kept <- true;
-          Hashtbl.replace engine.unsaved node.id node
+      if (not engine.frozen) && (not context.observing) && not node.root then begin
+        let own = if node.engine == engine then node else shadow engine node in
+        if not own.root then begin
+          own.root <- true;
+          Hashtbl.replace engine.unsaved own.id own
         end
+      end
 
 (* A cycle: every frame from the one for [node] to the newest is on it, so
    each of their results is the cycle. *)

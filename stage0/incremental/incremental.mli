@@ -83,9 +83,9 @@ val demand : context -> ('key, 'value) query -> 'key -> 'value
 val known : context -> ('key, 'value) query -> 'key -> 'value option
 (** The result the state holds for a query and key, if no change could have reached it: the phases
     before the query's are brought up to date, and nothing of the query's own phase is computed. No
-    read is recorded and the result is not kept. [None] for a result the state does not hold, one
-    whose reads may have changed, and one that raised. Raises [Invalid_argument] while a query runs,
-    since a read that is not recorded would make the query's result depend on what is held. *)
+    read is recorded and the result is not made a root. [None] for a result the state does not hold,
+    one whose reads may have changed, and one that raised. Raises [Invalid_argument] while a query
+    runs, since a read that is not recorded would make the query's result depend on what is held. *)
 
 (** {1 Engines} *)
 
@@ -101,6 +101,10 @@ val freeze : ?fixed:bool -> t -> unit
 val is_frozen : t -> bool
 val bases : t -> t list
 val context : t -> context
+
+val observer : t -> context
+(** A driver's context whose reads make no root: a result read through it is computed if the state
+    has none, and collected again if nothing else makes it necessary. *)
 
 val engine_of : context -> t
 (** The engine a context reads from. *)
@@ -121,9 +125,9 @@ val stabilize : t -> change
 (** Brings every result the engine holds up to date, and returns what was computed since the last
     call. *)
 
-val release : t -> ('key, 'value) query -> 'key -> unit
-(** No longer keeps a result for reads made outside queries. A result nothing reads is then dropped.
-*)
+val unroot : t -> ('key, 'value) query -> 'key -> unit
+(** Makes a result no longer a root. One that is then unnecessary is collected, with what only it
+    read. *)
 
 val executed : t -> string list
 (** With [~log:true], the queries computed since the log was last cleared, as ["name(key)"], in the
@@ -138,7 +142,7 @@ type counters = {
   changed : int;  (** Results that came out different *)
   adopted : int;  (** Results found as facts in the store instead of computed *)
   copied : int;  (** Results of a base copied into the engine, to be checked there *)
-  dropped : int;  (** Results dropped because nothing read them *)
+  collected : int;  (** Unnecessary results collected *)
 }
 
 val counters : t -> counters
