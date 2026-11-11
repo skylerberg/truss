@@ -61,6 +61,7 @@ touches. It follows [GOALS.md](GOALS.md) and the decisions in
 | `truss new` | Makes a new package |
 | `truss sync`, `truss status`, `truss stop` | Brings a worktree's session up to date, lists the background process's sessions, and stops it |
 | `truss clean` | Stops the background process and deletes the store |
+| `truss lsp` | Runs the language server for an editor, on standard input and output |
 
 `truss --version` prints the version of Truss the toolchain is, which a
 package's `truss` is compared with, and the version of each stage that has
@@ -700,6 +701,38 @@ package is not published, and the JSON document is `{"format",
 "diagnostics", "problems", "package", "version", "hash", "grows"}`, or with
 `"refused"`, the sentences that say why.
 
+## The language server
+
+```text
+truss lsp
+```
+
+Speaks the Language Server Protocol on standard input and output, for an
+editor. It holds the text of each file the editor has open and, after each
+change, reports what `truss check` would report of the open files with
+that text in place of what is on disk. Nothing is written to a file.
+
+- **The check runs where commands run:** in the project's background
+  process, or with `--no-server` in the server's own process. It reads a
+  trial session, which starts from the worktree's session and replaces the
+  open files, so an edit costs what it changes.
+- **Each open file's diagnostics** are published as
+  `textDocument/publishDiagnostics`, with a diagnostic's notes as related
+  information. A file's proofs are checked once it has no other
+  diagnostic, as `truss check` checks them.
+- **Each obligation's state** is sent as a `truss/proofStates`
+  notification: for each open file, every obligation's range, its code,
+  what it is to show, and whether it is proven, for an editor to mark
+  proven and unproven code apart.
+- **Positions count UTF-16 code units,** the protocol's default, or bytes
+  where the client offers `utf-8` among its position encodings.
+- **A burst of changes is checked once:** a check waits until no message
+  is waiting.
+
+The server asks for each change as the whole text, and also accepts
+ranges. It answers `initialize`, `shutdown`, and `exit`, and every other
+request with the error that it is not supported.
+
 ## Making a package
 
 ```text
@@ -809,8 +842,9 @@ It is left out of each command's help.
   --check` do. A file with a syntax error is reported and left as it is.
   Formatting changes no definition, so it rebuilds nothing. `truss show` is
   then to print a signature as `truss fmt` writes it.
-- **`truss lsp`,** which is to run the language server on standard input and
-  output.
+- **Code actions, hover, and go-to-definition in `truss lsp`.** A
+  diagnostic's fixes are to be code actions, and `truss explain` and
+  `truss references` are to answer hover and navigation.
 - **Renaming a field or a variant** with `truss rename`.
 - **Listing the proofs to check again** in `truss impact`, as it lists the
   tests whose code changed.

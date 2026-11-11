@@ -1488,4 +1488,108 @@ let () =
       let project = Project.load (Filename.concat root "weather") in
       if not (Report.clean (Report.gather ~proofs:true project)) then fail "has diagnostics")
 
+(* The language server *)
+
+let () =
+  test "JSON with escapes and a surrogate pair is read" (fun () ->
+      match Json.parse {|{"a": [1, -2, true, null], "b": "x\né😀"}|} with
+      | Json.Object [ ("a", Json.List [ Int 1; Int -2; Bool true; Null ]); ("b", String text) ] ->
+          expect_string ~expected:"x\n\xc3\xa9\xf0\x9f\x98\x80" text
+      | _ -> fail "not read");
+  test "a position counts UTF-16 code units, and an offset is its inverse" (fun () ->
+      let text = "a\n\xf0\x9f\x98\x80b" in
+      let offset = String.length text - 1 in
+      (match Lsp_command.position Utf_16 text offset with
+      | 1, 2 -> ()
+      | line, column -> fail "line %d, column %d" line column);
+      if Lsp_command.offset Utf_16 text ~line:1 ~column:2 <> offset then fail "not the inverse");
+  test "an open file's text is checked in place of the file on disk" (fun () ->
+      let root =
+        package
+          [
+            ("main.truss", "fn main(arguments: List[String]) -> ExitCode {\n  ExitCode.success\n}\n");
+          ]
+      in
+      let uri = "file://" ^ Filename.concat root "main.truss" in
+      let answer =
+        quietly (fun () ->
+            Lsp_command.check ~root Utf_16
+              [ (uri, "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ])
+      in
+      match Json.field "files" answer with
+      | Json.List [ file ] -> (
+          match (Json.field "diagnostics" file, Json.field "states" file) with
+          | Json.List [ diagnostic ], Json.List [ state ] ->
+              if Json.field "code" diagnostic <> Json.String "prover.overflow" then
+                fail "diagnostic %s" (Json.to_string diagnostic);
+              if Json.field "proven" state <> Json.Bool false then
+                fail "state %s" (Json.to_string state);
+              if
+                Json.field "range" diagnostic
+                <> Json.Object
+                     [
+                       ("start", Json.Object [ ("line", Json.Int 1); ("character", Json.Int 2) ]);
+                       ("end", Json.Object [ ("line", Json.Int 1); ("character", Json.Int 11) ]);
+                     ]
+              then fail "range %s" (Json.to_string (Json.field "range" diagnostic))
+          | _ -> fail "%s" (Json.to_string file))
+      | _ -> fail "%s" (Json.to_string answer));
+  test "the server answers initialize, an unsupported request, and shutdown" (fun () ->
+      let message body = Printf.sprintf "Content-Length: %d\r\n\r\n%s" (String.length body) body in
+      let input_file = Filename.temp_file "lsp-input" ""
+      and output_file = Filename.temp_file "lsp-output" "" in
+      Out_channel.with_open_bin input_file (fun channel ->
+          List.iter
+            (fun body -> output_string channel (message body))
+            [
+              {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///project","capabilities":{"general":{"positionEncodings":["utf-8"]}}}}|};
+              {|{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{}}|};
+              {|{"jsonrpc":"2.0","id":3,"method":"shutdown"}|};
+              {|{"jsonrpc":"2.0","method":"exit"}|};
+            ]);
+      let status =
+        In_channel.with_open_bin input_file (fun input ->
+            Out_channel.with_open_bin output_file (fun output ->
+                Lsp_command.serve ~input ~output ~check:(fun ~root:_ _ _ -> None)))
+      in
+      let written = In_channel.with_open_bin output_file In_channel.input_all in
+      if status <> 0 then fail "status %d" status;
+      List.iter
+        (fun part -> if not (contains written part) then fail "no %s in %s" part written)
+        [
+          {|"positionEncoding":"utf-8"|};
+          {|"id":2,"error":{"code":-32601|};
+          {|"id":3,"result":null|};
+        ]);
+  test "an open file's check is published, and cleared once it is closed" (fun () ->
+      let written = ref [] and asked = ref [] in
+      let check ~root encoding buffers =
+        asked := (root, encoding, buffers) :: !asked;
+        Some {|{"files":[{"uri":"file:///project/a%20b.truss","diagnostics":[],"states":[]}]}|}
+      in
+      let server =
+        Lsp_command.create ~write:(fun value -> written := Json.to_string value :: !written) ~check
+      in
+      let handle text = ignore (Lsp_command.handle server (Json.parse text)) in
+      handle
+        {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"rootUri":"file:///project"}}|};
+      handle
+        {|{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///project/a%20b.truss","text":"x"}}}|};
+      Lsp_command.refresh server;
+      (match !asked with
+      | [ ("/project", Utf_16, [ ("file:///project/a%20b.truss", "x") ]) ] -> ()
+      | _ -> fail "asked %d times, or with other buffers" (List.length !asked));
+      handle
+        {|{"jsonrpc":"2.0","method":"textDocument/didClose","params":{"textDocument":{"uri":"file:///project/a%20b.truss"}}}|};
+      Lsp_command.refresh server;
+      let all = String.concat "\n" (List.rev !written) in
+      List.iter
+        (fun part -> if not (contains all part) then fail "no %s in %s" part all)
+        [
+          {|"method":"textDocument/publishDiagnostics"|};
+          {|"method":"truss/proofStates"|};
+          {|"params":{"uri":"file:///project/a%20b.truss","diagnostics":[]}|};
+        ];
+      if List.length !asked <> 1 then fail "a check with no open file")
+
 let () = Harness.finish ()

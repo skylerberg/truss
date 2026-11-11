@@ -1492,9 +1492,6 @@ test the prover itself:
   nested quantifiers, each fact is about values made for every
   combination of bound names, and with them the solver runs out of steps
   even with triggers chosen.
-- **Proof states in the language server.** `Prover.states` gives each
-  obligation's state at its position, proven or not with the diagnostic
-  that says why; the language server, `truss lsp`, is not built yet.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.

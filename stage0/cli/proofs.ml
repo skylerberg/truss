@@ -14,15 +14,22 @@ let solver =
 let running (project : Project.t) =
   Running.through ~results:(Compiler.test_results ()) (lazy (Compiler.create project Development))
 
-(* The proofs' diagnostics of each of the modules, by module, with every
-   module's queries solved first, together. *)
-let diagnostics (project : Project.t) modules =
+(* The proofs of each of the modules, by module, with every module's
+   queries solved first, together: its diagnostics, and the state of each
+   of its obligations, which a language server shows. *)
+let checked (project : Project.t) modules =
   let solver = Lazy.force solver and running = running project in
   let tell answers =
     List.iter (fun (key, told) -> Database.set project.session Prover.told key told) answers
   in
   Prover.solve_ahead ~running ~tell project.context solver modules;
-  fun module_ -> Prover.diagnostics ~running ~tell project.context solver module_
+  fun module_ ->
+    ( Prover.diagnostics ~running ~tell project.context solver module_,
+      Prover.states ~running ~tell project.context solver module_ )
+
+let diagnostics (project : Project.t) modules =
+  let checked = checked project modules in
+  fun module_ -> fst (checked module_)
 
 (* Each definition [main] can reach whose proofs have a hole, which a
    program cannot be built with. *)
