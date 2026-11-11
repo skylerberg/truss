@@ -53,8 +53,9 @@ let no_layout =
 let layout : (unit, layout) Query.input =
   Query.input ~name:"worktree_layout" ~show:(fun () -> "") ()
 
-let stamps : (string, Worktree.stamp) Query.input =
-  Query.input ~name:"worktree_stamp" ~show:Fun.id ()
+(* Each file's stamp, by its path: what says, without reading the file,
+   that it has not changed. *)
+let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
 (* Each manifest's text, by its package's directory, so that an unchanged
    manifest need not be read again. *)
@@ -67,47 +68,39 @@ let lock_text : (unit, string) Query.input =
 
 (* Sessions *)
 
-type source = Directory of string | Commit of { repository : string; commit : string }
+(* What a session's files are, for what is asked of git. *)
+type kind =
+  | Worktree of string  (** A project's root *)
+  | Commit of { repository : string; commit : string }
+  | Library  (** The standard library as a state of its own *)
+  | Published  (** A published package with the packages it was published with *)
 
-type session = {
-  source : source;
-  mutable engine : Engine.t;
-  pointer : Store.pointer option;  (** Where a worktree's current state is named *)
+(* What the database keeps with a session of the session layer. *)
+type project = {
+  kind : kind;
+  update : Session.t -> unit;  (** Brings the inputs in line with the session's files *)
+  files : Files.t;
   mutable problems : string list;  (** Manifests that could not be read, and duplicate names *)
   mutable lock_fix : string option;
       (** The lock file the manifests give, when the one written is another *)
-  mutable used : float;
-  texts : (string, string) Hashtbl.t;
-      (** Each manifest and module file's fingerprint, by its path from the root *)
-  mutable pointed : bool;  (** Whether the pointer names the state as it is *)
   mutable applied : bool;  (** Whether this process has brought the inputs in line with the files *)
 }
 
-(* The standard library as a state of its own, for working on the library. *)
-type library = { library_engine : Engine.t; library_pointer : Store.pointer }
+type Session.attachment += Project of project
+type session = Session.t
 
-type state = {
-  store : Store.t;
-  identity : string;
-  standard : Engine.t Lazy.t;  (** The standard library, a fixed base under every state *)
-  sessions : (string, session) Hashtbl.t;
-      (** By root, or for a commit, by the project's root and the commit *)
-  libraries : (string, library) Hashtbl.t;  (** By name *)
-}
-
-let state : state option ref = ref None
-
-let budget () =
-  match Option.bind (Sys.getenv_opt "TRUSS_CACHE_SIZE") int_of_string_opt with
-  | Some bytes -> bytes
-  | None -> 20 * 1024 * 1024 * 1024
+let project session =
+  match Session.attachment session with
+  | Project project -> project
+  | _ -> invalid_arg "Database: a session with no project"
 
 (* A package whose sources never change is checked once, written whole, and
    found from then on by the key of its sources: for the standard library,
    which is built into the compiler, the compiler's identity. *)
 let standard_key identity = identity ^ " standard"
 
-let stored_standard store identity =
+let stored_standard () =
+  let store = Session.store () and identity = Session.identity () in
   let found =
     Option.bind
       (Store.find_result store ~kind:"package" ~key:(standard_key identity))
@@ -124,57 +117,19 @@ let stored_standard store identity =
       Engine.freeze ~fixed:true engine;
       engine
 
-let current () =
-  match !state with
-  | Some state -> state
-  | None ->
-      Engine.seal ();
-      let store = Store.open_ (Store.default_directory ()) in
-      let identity = Identity.compute (Store.directory store) in
-      let fresh =
-        {
-          store;
-          identity;
-          standard = lazy (stored_standard store identity);
-          sessions = Hashtbl.create 8;
-          libraries = Hashtbl.create 1;
-        }
-      in
-      state := Some fresh;
-      fresh
+(* The standard library, a fixed base under every project's state. *)
+let standard : Engine.t Lazy.t ref = ref (lazy (stored_standard ()))
+let () = Session.on_close (fun () -> standard := lazy (stored_standard ()))
+let prepare_store () = ignore (Lazy.force !standard)
 
-let prepare_store () = ignore (Lazy.force (current ()).standard)
-let session_prefix state = Printf.sprintf "session-%s-" (Identity.short state.identity)
-
-let session_name state root =
-  session_prefix state ^ String.sub (Blake3.to_hex (Blake3.hash root)) 0 16
-
-(* The list of worktrees with states, so that collection can tell which
-   still have a worktree. *)
-let worktrees_file state = Filename.concat (Store.directory state.store) "worktrees"
-
-let known_worktrees state =
-  try
-    In_channel.with_open_bin (worktrees_file state) In_channel.input_lines
-    |> List.filter_map (fun line ->
-        match String.index_opt line '\t' with
-        | Some i -> Some (String.sub line 0 i, String.sub line (i + 1) (String.length line - i - 1))
-        | None -> None)
-  with Sys_error _ -> []
-
-let remember_worktree state root name =
-  if not (List.mem (root, name) (known_worktrees state)) then
-    try
-      Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ]
-        0o644 (worktrees_file state) (fun out -> Printf.fprintf out "%s\t%s\n" root name)
-    with Sys_error _ -> ()
+let session_name root =
+  Printf.sprintf "session-%s-%s"
+    (Session.Identity.short (Session.identity ()))
+    (String.sub (Blake3.to_hex (Blake3.hash root)) 0 16)
 
 let read context input key = Query.find context input key
 let current_layout engine = Option.value (read (Engine.context engine) layout ()) ~default:no_layout
-
-(* A file's fingerprint, for telling which saved state a set of files is
-   nearest to. *)
-let text_fingerprint text = Blake3.hash text
+let layout_of session = current_layout (Session.engine session)
 
 (* Setting a worktree's files as inputs *)
 
@@ -295,7 +250,8 @@ let set_published engine (found : published) =
    directory with a manifest. *)
 let apply ?(text = fun _ -> None) session (files : (string * file_contents) list) =
   let module Manifest = Type_checker.Manifest in
-  let engine = session.engine in
+  let engine = Session.engine session in
+  let project = project session in
   let old = current_layout engine in
   let problems = ref [] in
   let problem directory format =
@@ -401,7 +357,7 @@ let apply ?(text = fun _ -> None) session (files : (string * file_contents) list
   (* The registry packages of the build: what the project's packages depend
      on that is no package of the project, at the versions the lock file and
      their own records give. *)
-  let store_packages = Store.files (current ()).store "packages" in
+  let store_packages = Session.directory "packages" in
   let selected, selection_problems =
     Registry.Selection.choose
       ~lock:(Option.value ~default:[] written)
@@ -436,7 +392,7 @@ let apply ?(text = fun _ -> None) session (files : (string * file_contents) list
     selected;
   (* The lock file is written one way: what the manifests and the versions
      in it give. Another is a problem whose fix is to write that one. *)
-  session.lock_fix <- None;
+  project.lock_fix <- None;
   (match written with
   | Some written when selection_problems = [] ->
       let current =
@@ -450,7 +406,7 @@ let apply ?(text = fun _ -> None) session (files : (string * file_contents) list
       let text = Registry.Lock.print current in
       if current = [] && written_text = None then ()
       else if written_text <> Some text then begin
-        session.lock_fix <- Some text;
+        project.lock_fix <- Some text;
         lock_problem "This is not the lock file the manifests give. %sRun `truss check --fix`."
           (String.concat ""
              (List.map
@@ -556,22 +512,13 @@ let apply ?(text = fun _ -> None) session (files : (string * file_contents) list
   List.iter
     (fun (path, contents) ->
       match contents with
-      | Text text ->
-          let fingerprint = text_fingerprint text in
-          if Hashtbl.find_opt session.texts path <> Some fingerprint then begin
-            Hashtbl.replace session.texts path fingerprint;
-            session.pointed <- false
-          end
+      | Text text -> Session.note_file session path (Some (Session.fingerprint text))
       | Unchanged -> ())
     files;
   let listed = Hashtbl.create (List.length files) in
   List.iter (fun (path, _) -> Hashtbl.replace listed path ()) files;
   List.iter
-    (fun path ->
-      if not (Hashtbl.mem listed path) then begin
-        Hashtbl.remove session.texts path;
-        session.pointed <- false
-      end)
+    (fun path -> if not (Hashtbl.mem listed path) then Session.note_file session path None)
     old.files;
   let present = Hashtbl.create (List.length modules) in
   List.iter (fun (_, module_, _) -> Hashtbl.replace present module_ ()) modules;
@@ -632,26 +579,23 @@ let apply ?(text = fun _ -> None) session (files : (string * file_contents) list
       time_limit;
       registry;
     };
-  session.problems <- List.rev !problems
+  project.problems <- List.rev !problems
 
-(* Reads the files of a directory whose stamps changed, and sets them. A
-   file that cannot be read, such as one deleted since the directory was
-   listed, is not there. A stamp is set only once its file's text is, so
-   that a scan that fails leaves the file to be read by the next. *)
-let scan session root =
-  let engine = session.engine in
+(* Reads the files whose stamps changed, and sets them. A file that cannot
+   be read, such as one deleted since its directory was listed, is not
+   there. A stamp is set only once its file's text is, so that a scan that
+   fails leaves the file to be read by the next. *)
+let scan (files : Files.t) session =
+  let engine = Session.engine session in
+  let project = project session in
   let context = Engine.context engine in
-  let text path =
-    try Some (In_channel.with_open_bin (Filename.concat root path) In_channel.input_all)
-    with Sys_error _ -> None
-  in
   let found =
     List.filter_map
       (fun (path, stamp) ->
         match read context stamps path with
         | Some old when old = stamp -> Some (path, stamp, Unchanged)
-        | _ -> Option.map (fun text -> (path, stamp, Text text)) (text path))
-      (Worktree.files root)
+        | _ -> Option.map (fun text -> (path, stamp, Text text)) (files.read path))
+      (files.list ())
   in
   let old = current_layout engine in
   (* A scan that finds every file as it was has nothing to bring in line.
@@ -659,13 +603,13 @@ let scan session root =
      that the files do not show, such as a package that could not be
      fetched. *)
   let unchanged =
-    session.applied && session.problems = []
+    project.applied && project.problems = []
     && List.for_all (fun (_, _, contents) -> contents = Unchanged) found
     && List.length found = List.length old.files
   in
   if not unchanged then begin
-    apply ~text session (List.map (fun (path, _, contents) -> (path, contents)) found);
-    session.applied <- true
+    apply ~text:files.read session (List.map (fun (path, _, contents) -> (path, contents)) found);
+    project.applied <- true
   end;
   let present = Hashtbl.create (List.length found) in
   List.iter
@@ -677,199 +621,63 @@ let scan session root =
     (fun path -> if not (Hashtbl.mem present path) then Engine.remove engine stamps path)
     old.files
 
-(* A worktree's pointer holds the name of its state's artifact, and each of
-   its files' fingerprints, by which a new worktree finds the saved state
-   nearest to it. *)
-type record = { artifact : string; files : (string * string) list }
+(* Each file's fingerprint, by which the saved state nearest to a set of
+   files is found. *)
+let fingerprints (files : Files.t) () =
+  List.filter_map
+    (fun (path, _) -> Option.map (fun text -> (path, Session.fingerprint text)) (files.read path))
+    (files.list ())
 
-let read_record pointer : record option =
-  match Store.read pointer with
-  | Some bytes -> ( try Some (Marshal.from_string bytes 0) with _ -> None)
-  | None -> None
+let attach_project session ~kind (files : Files.t) =
+  Session.attach session
+    (Project { kind; update = scan files; files; problems = []; lock_fix = None; applied = false })
 
-let logging = ref false
-
-let new_engine state =
-  let engine = Engine.create ~log:!logging ~bases:[ Lazy.force state.standard ] () in
-  Engine.attach engine state.store ~version:state.identity;
-  engine
-
-let open_state state artifact =
-  Engine.open_ ~log:!logging state.store ~version:state.identity
-    ~bases:[ Lazy.force state.standard ]
-    artifact
-
-(* Writes what changed in a session's state since it was last written, as a
-   difference over the artifact it was opened from or last wrote, and points
-   the worktree at it. *)
-let save state session =
-  match session.pointer with
-  | Some pointer when Engine.unwritten session.engine || not session.pointed ->
-      let artifact = Engine.write session.engine in
-      let files =
-        List.sort compare
-          (Hashtbl.fold (fun path print found -> (path, print) :: found) session.texts [])
-      in
-      Store.point pointer (Marshal.to_string { artifact; files } []);
-      session.pointed <- true
-  | _ -> Engine.record session.engine
-
-let stabilize state session =
-  let change = Engine.stabilize session.engine in
-  save state session;
-  change
-
-(* A chain of differences is folded into one whole state once the
-   differences reach half its size, which costs the state's size. So the
-   background process folds while no request is waiting, and makes a command
-   wait for it only once the differences are several times that. A process
-   that serves one command folds as it opens the state, which costs it the
-   state's size already. *)
-let serving = ref false
-
-let fold ?(waited_for = false) state session =
-  match session.pointer with
-  | Some pointer ->
-      let debt = Engine.debt session.engine in
-      let limit = max (debt.whole / 2) 256 in
-      if debt.differences > if waited_for && !serving then 4 * limit else limit then begin
-        let artifact = Engine.write ~full:true session.engine in
-        let files =
-          List.sort compare
-            (Hashtbl.fold (fun path print found -> (path, print) :: found) session.texts [])
-        in
-        Store.point pointer (Marshal.to_string { artifact; files } []);
-        session.pointed <- true;
-        Option.iter (fun engine -> session.engine <- engine) (open_state state artifact)
-      end
-  | None -> ()
-
-(* The saved state nearest to a set of files: the one that differs from them
-   in the fewest files, if it shares any. *)
-let nearest state (texts : (string * string) list) =
-  (* Another process may have written a state a moment ago. *)
-  Store.refresh state.store;
-  let prefix = session_prefix state in
-  let wanted = Hashtbl.create (List.length texts) in
-  List.iter (fun (path, print) -> Hashtbl.replace wanted path print) texts;
-  let score (record : record) =
-    let shared =
-      List.fold_left
-        (fun shared (path, print) ->
-          if Hashtbl.find_opt wanted path = Some print then shared + 1 else shared)
-        0 record.files
-    in
-    (shared, List.length record.files + List.length texts - (2 * shared))
-  in
-  List.fold_left
-    (fun best name ->
-      if not (String.starts_with ~prefix name) then best
-      else
-        match read_record (Store.pointer state.store name) with
-        | None -> best
-        | Some record -> (
-            let shared, differing = score record in
-            if shared = 0 then best
-            else
-              match best with
-              | Some (_, least) when least <= differing -> best
-              | _ -> Some (record, differing)))
-    None (Store.pointers state.store)
-  |> Option.map fst
-
-(* An engine for a set of files that has no state of its own: the nearest
-   saved state's, or a new one over the standard library. The second result
-   says whether it came from another state. *)
-let engine_near state texts =
-  match Option.bind (nearest state texts) (fun record -> open_state state record.artifact) with
-  | Some engine when Engine.inputs_stored engine -> (engine, true)
-  | Some _ | None -> (new_engine state, false)
-
-let fingerprints root =
-  List.map
-    (fun (path, _) ->
-      ( path,
-        text_fingerprint (In_channel.with_open_bin (Filename.concat root path) In_channel.input_all)
-      ))
-    (Worktree.files root)
-
-let open_directory state root =
-  match Hashtbl.find_opt state.sessions root with
-  | Some session -> Ok session
-  | None ->
-      let name = session_name state root in
-      let pointer = Store.pointer state.store name in
-      if not (Store.lock pointer) then
-        Error
-          (Printf.sprintf
-             "%s is open in another process of this compiler, such as its background process; \
-              leave out --no-server, or stop that process with `truss stop`."
-             root)
-      else
-        let own =
-          (* Another process may have written the state a moment ago. *)
-          Store.refresh state.store;
-          Option.bind (read_record pointer) (fun record ->
-              Option.map (fun engine -> (engine, record)) (open_state state record.artifact))
-        in
-        let engine, files, near =
-          match own with
-          | Some (engine, record) -> (engine, record.files, false)
-          | None ->
-              (* A new worktree starts from the nearest saved state. *)
-              let engine, near = engine_near state (fingerprints root) in
-              (engine, [], near)
-        in
-        let texts = Hashtbl.create (max 16 (List.length files)) in
-        List.iter (fun (path, print) -> Hashtbl.replace texts path print) files;
-        let session =
-          {
-            source = Directory root;
-            engine;
-            pointer = Some pointer;
-            problems = [];
-            lock_fix = None;
-            used = Unix.time ();
-            texts;
-            pointed = own <> None;
-            applied = false;
-          }
-        in
-        if near then
-          (* The stamps it carries are another worktree's. *)
-          List.iter (fun path -> Engine.remove engine stamps path) (current_layout engine).files;
-        Hashtbl.replace state.sessions root session;
-        remember_worktree state root name;
-        Ok session
-
-let open_commit state ~repository commit =
-  let name = Printf.sprintf "commit:%s:%s" repository commit in
-  match Hashtbl.find_opt state.sessions name with
+(* The session for a set of files: its own state if it has one, else the
+   nearest saved state, else a new one over the standard library. This is
+   the one way a project's session is opened, whatever its files are. *)
+let open_files ~key ?pointer ?home ~kind (files : Files.t) =
+  match Session.find key with
   | Some session -> Ok session
   | None -> (
-      match Git.files ~directory:repository commit with
-      | None -> Error (Printf.sprintf "cannot read commit %s." commit)
-      | Some texts ->
-          let engine, _ =
-            engine_near state (List.map (fun (path, text) -> (path, text_fingerprint text)) texts)
-          in
-          let session =
-            {
-              source = Commit { repository; commit };
-              engine;
-              pointer = None;
-              problems = [];
-              lock_fix = None;
-              used = Unix.time ();
-              texts = Hashtbl.create 16;
-              pointed = true;
-              applied = false;
-            }
-          in
-          apply session (List.map (fun (path, text) -> (path, Text text)) texts);
-          ignore (Engine.stabilize engine);
-          Hashtbl.replace state.sessions name session;
+      match
+        Session.open_ ~key ?pointer ?home ~version:(Session.identity ())
+          ~bases:(fun () -> [ Lazy.force !standard ])
+          ~fingerprints:(fingerprints files) ()
+      with
+      | Error () -> Error ()
+      | Ok (session, start) ->
+          attach_project session ~kind files;
+          if start = Session.Near then
+            (* The stamps it carries are another set of files'. *)
+            List.iter (fun path -> Session.remove session stamps path) (layout_of session).files;
           Ok session)
+
+let update session = (project session).update session
+
+let open_directory root =
+  Result.map_error
+    (fun () ->
+      Printf.sprintf
+        "%s is open in another process of this compiler, such as its background process; leave out \
+         --no-server, or stop that process with `truss stop`."
+        root)
+    (open_files ~key:root ~pointer:(session_name root) ~home:root ~kind:(Worktree root)
+       (Files.of_directory root))
+
+let open_commit ~repository commit =
+  let key = Printf.sprintf "commit:%s:%s" repository commit in
+  match Session.find key with
+  | Some session -> Ok session
+  | None -> (
+      match Files.of_commit ~directory:repository commit with
+      | None -> Error (Printf.sprintf "cannot read commit %s." commit)
+      | Some files -> (
+          match open_files ~key ~kind:(Commit { repository; commit }) files with
+          | Ok session ->
+              update session;
+              ignore (Engine.stabilize (Session.engine session));
+              Ok session
+          | Error () -> Error (Printf.sprintf "cannot open commit %s." commit)))
 
 (* The root of the project a directory is in: the nearest directory at or
    above it whose manifest has a [[project]] table, or with none, the
@@ -908,7 +716,7 @@ let relative_to root directory =
 (* The packages a request in a directory is about: those at or under it, or
    the one it is in. *)
 let target_packages session within =
-  let lay = current_layout session.engine in
+  let lay = layout_of session in
   let under (directory, _) =
     within = "" || directory = within
     || String.length directory > String.length within
@@ -922,19 +730,21 @@ let target_packages session within =
   | found -> found
 
 let package_modules session name =
-  match read (Engine.context session.engine) Workspace.packages name with
+  match read (Engine.context (Session.engine session)) Workspace.packages name with
   | Some package -> package.modules
   | None -> []
 
 (* Sessions as the command line sees them *)
 
-let root_of_session session =
-  match session.source with Directory root -> root | Commit c -> c.repository
+let root session =
+  match (project session).kind with
+  | Worktree root -> root
+  | Commit commit -> commit.repository
+  | Library | Published -> ""
 
-let root = root_of_session
-let engine session = session.engine
-let context session = Engine.context session.engine
-let problems session = session.problems
+let context session = Session.context session
+let set = Session.set
+let problems session = (project session).problems
 
 (* What only a package's code shows to be wrong with its manifest, which
    checks the package. *)
@@ -945,23 +755,25 @@ let manifest_problems session names =
       else
         List.map
           (fun problem -> (manifest_file directory, name, problem))
-          (try Engine.get session.engine Type_checker.manifest_problems name with Not_found -> []))
-    (current_layout session.engine).packages
+          (try Engine.get (Session.engine session) Type_checker.manifest_problems name
+           with Not_found -> []))
+    (layout_of session).packages
 
-let packages session = (current_layout session.engine).packages
+let packages session = (layout_of session).packages
 
 let module_file session (module_ : Path.module_) =
-  let lay = current_layout session.engine in
+  let lay = layout_of session in
   match List.find_opt (fun (_, name) -> name = module_.package) lay.packages with
   | Some (directory, _) -> Worktree.module_file ~package_directory:directory module_
   | None -> Workspace.file_path module_
 
-let time_limit session = (current_layout session.engine).time_limit
-let registry_packages session = (current_layout session.engine).registry
-let lock_fix session = session.lock_fix
+let time_limit session = (layout_of session).time_limit
+let registry_packages session = (layout_of session).registry
+let lock_fix session = (project session).lock_fix
 
 let diagnostics session module_ =
-  try Engine.get session.engine Type_checker.file_diagnostics module_ with Not_found -> []
+  try Engine.get (Session.engine session) Type_checker.file_diagnostics module_
+  with Not_found -> []
 
 let diagnostics_of session packages =
   List.concat_map
@@ -981,120 +793,54 @@ let open_session directory =
           (Printf.sprintf "No `truss.toml` in %s or any directory above it, so it is in no project."
              directory)
     | Some root -> (
-        let state = current () in
-        match open_directory state root with
+        match open_directory root with
         | Error message -> Error message
         | Ok session ->
-            session.used <- Unix.time ();
+            Session.touch session;
             (* Before any command holds the session's engine. *)
-            fold ~waited_for:true state session;
-            scan session root;
+            Session.fold ~waited_for:true session;
+            update session;
             (* The state is written when the command is done, with what the
                command computed, so that a first write holds a whole state. *)
-            ignore (Engine.stabilize session.engine);
+            ignore (Engine.stabilize (Session.engine session));
             Ok (session, target_packages session (relative_to root directory)))
 
 let refresh session =
-  match session.source with
-  | Directory root ->
-      scan session root;
-      ignore (Engine.stabilize session.engine)
-  | Commit _ -> ()
+  match (project session).kind with
+  | Worktree _ ->
+      update session;
+      ignore (Engine.stabilize (Session.engine session))
+  | Commit _ | Library | Published -> ()
 
-let save_session session = save (current ()) session
-let objects_directory () = Store.files (current ()).store "objects"
-let programs_directory () = Store.files (current ()).store "programs"
+let save_session = Session.save
+let objects_directory () = Session.directory "objects"
+let programs_directory () = Session.directory "programs"
+let results = Session.results
+let flush_store = Session.flush
+let sessions = Session.sessions
 
-let test_results () : Compile.results =
-  let store = (current ()).store in
-  {
-    find = (fun key -> Store.find_result store ~kind:"tests" ~key);
-    add = (fun key value -> Store.add_result store ~kind:"tests" ~key value);
-  }
+(* Graph questions. The worktree is checked first, so that every
+   definition's results are there to read and to compare; kept results make
+   this cheap. *)
 
-let flush_store () = Store.flush (current ()).store
+let check_all session = ignore (diagnostics_of session (layout_of session).packages)
 
-(* The roots code generation searches from are an input, which only the
-   database sets. *)
-let want_in engine lowering wanted =
-  let old = Option.value (read (Engine.context engine) Compile.roots lowering) ~default:[] in
-  let all = List.sort_uniq Instance.compare (wanted @ old) in
-  if all <> old then Engine.set engine Compile.roots lowering all
+type dependencies = Session.Graph.dependencies
 
-let want session lowering wanted = want_in session.engine lowering wanted
+let dependencies session =
+  check_all session;
+  Session.Graph.dependencies (Session.engine session)
 
-let sessions () =
-  match !state with
-  | None -> []
-  | Some state ->
-      Hashtbl.fold
-        (fun key session acc -> (key, List.length (Engine.nodes session.engine)) :: acc)
-        state.sessions []
-      |> List.sort compare
-
-(* Graph questions. Every answer names definitions and parts; the engine's
-   nodes stay inside. *)
-
-let subject_of node = Engine.subject node
-
-(* What a node's definition reads of other definitions: its reads, through
-   nodes about no definition, to the definitions and parts they reach. *)
-let definition_reads engine memo node =
-  let own = Option.map (fun (s : Query.subject) -> s.path) (subject_of node) in
-  let found = Hashtbl.create 8 in
-  let seen = Hashtbl.create 16 in
-  let rec walk n =
-    List.iter
-      (fun read ->
-        let identity = Engine.identity read in
-        if not (Hashtbl.mem seen identity) then begin
-          Hashtbl.replace seen identity ();
-          match subject_of read with
-          | Some subject when Some subject.path <> own ->
-              Hashtbl.replace found (subject.path, Option.value subject.part ~default:"") ()
-          | Some _ | None -> (
-              if
-                (* The standard library's own lookups are not followed, so a
-                 definition is not said to read everything they read. *)
-                not (Engine.is_fixed read)
-              then
-                match Hashtbl.find_opt memo identity with
-                | Some reached -> List.iter (fun r -> Hashtbl.replace found r ()) reached
-                | None -> walk read)
-        end)
-      (Engine.reads engine n)
-  in
-  walk node;
-  let reached = Hashtbl.fold (fun r () acc -> r :: acc) found [] in
-  reached
-
-(* For every definition in a session, what it reads of every other. The
-   worktree is checked first, so that every definition's results are there
-   to read. *)
-let dependency_table session =
-  ignore (diagnostics_of session (current_layout session.engine).packages);
-  let memo = Hashtbl.create 1024 in
-  let table : (Path.t, (Path.t * string * string) list) Hashtbl.t = Hashtbl.create 256 in
-  List.iter
-    (fun node ->
-      match subject_of node with
-      | Some subject ->
-          let part = Option.value subject.part ~default:"" in
-          let reads = definition_reads session.engine memo node in
-          let previous = Option.value (Hashtbl.find_opt table subject.path) ~default:[] in
-          Hashtbl.replace table subject.path
-            (List.map (fun (path, read_part) -> (path, part, read_part)) reads @ previous)
-      | None -> ())
-    (Engine.nodes session.engine);
-  table
+let reads = Session.Graph.reads
+let readers = Session.Graph.readers
 
 let all_declarations session =
-  let lay = current_layout session.engine in
+  let lay = layout_of session in
   List.concat_map
     (fun (_, name) ->
       List.concat_map
         (fun module_ ->
-          try Engine.get session.engine Resolve.Names.declarations module_ with _ -> [])
+          try Engine.get (Session.engine session) Resolve.Names.declarations module_ with _ -> [])
         (package_modules session name))
     lay.packages
 
@@ -1111,67 +857,16 @@ let find_definitions session name =
        (fun (d : Resolve.Names.declaration) -> if matches name d.path then Some d.path else None)
        (all_declarations session))
 
-type dependencies = (Path.t, (Path.t * string * string) list) Hashtbl.t
-
-let dependencies = dependency_table
-let reads (table : dependencies) path = Option.value (Hashtbl.find_opt table path) ~default:[]
-
-let readers (table : dependencies) target =
-  Hashtbl.fold
-    (fun reader reads acc ->
-      List.filter_map
-        (fun (path, reader_part, read_part) ->
-          if Path.equal path target then Some (reader, reader_part, read_part) else None)
-        reads
-      @ acc)
-    table []
-  |> List.sort_uniq compare
-
 (* Comparing a session with another, such as its base commit's *)
 
-type difference = Changed | Added | Same
-
-(* Every node of [mine] that may differ from the same node in [theirs],
-   with how it compares. A state holds only what differs from its bases, or
-   may, so where the two share a base these are the nodes either holds
-   itself; a base that only one has is compared whole. *)
-let compare_sessions mine theirs =
-  let differs node =
-    match Engine.current_in node theirs.engine with
-    | None -> Added
-    | Some other ->
-        if Engine.same_outcome mine.engine node theirs.engine other then Same else Changed
-  in
-  let seen = Hashtbl.create 256 in
-  let found = ref [] in
-  let consider node =
-    let identity = Engine.identity node in
-    if not (Hashtbl.mem seen identity) then begin
-      Hashtbl.replace seen identity ();
-      found := node :: !found
-    end
-  in
-  List.iter consider (Engine.unshared mine.engine theirs.engine);
-  List.iter
-    (fun other -> Option.iter consider (Engine.current_in other mine.engine))
-    (Engine.unshared theirs.engine mine.engine);
-  List.rev_map (fun node -> (node, differs node)) !found
-
-(* Checks every package of a session, so that every definition's results
-   are there to compare and to walk; kept results make this cheap. *)
-let check_all session = ignore (diagnostics_of session (current_layout session.engine).packages)
+type difference = Session.Graph.difference = Changed | Added | Same
 
 let changes mine theirs =
   check_all mine;
-  List.filter_map
-    (fun (node, difference) ->
-      match subject_of node with
-      | Some (subject : Query.subject) -> Some (subject.path, subject.part, difference)
-      | None -> None)
-    (compare_sessions mine theirs)
+  Session.Graph.changes (Session.engine mine) (Session.engine theirs)
 
 let base_commit session base =
-  let root = root_of_session session in
+  let root = root session in
   match base with
   | Some revision -> Git.resolve ~directory:root revision
   | None -> (
@@ -1180,64 +875,15 @@ let base_commit session base =
       | Some head, None -> Some head
       | None, _ -> None)
 
-let open_commit_of session commit =
-  open_commit (current ()) ~repository:(root_of_session session) commit
+let open_commit_of session commit = open_commit ~repository:(root session) commit
 
 (* Parallel work *)
 
-type place = { path : Path.t option; part : string option; label : string }
+type place = Session.Graph.place = { path : Path.t option; part : string option; label : string }
 
-type overlap =
+type overlap = Session.Graph.overlap =
   | Both_change of place
   | Reads of { this_worktree : bool; change : place; reads : place }
-      (** One worktree's change reads what the other changes *)
-
-(* Where two sessions' changes from a common base meet: each node both
-   changed, and each node one changed that reads what the other changed. *)
-let overlaps ~base mine theirs =
-  let changed session =
-    List.filter_map
-      (fun (node, difference) -> if difference = Same then None else Some node)
-      (compare_sessions session base)
-  in
-  let mine_changed = changed mine and theirs_changed = changed theirs in
-  let by_identity nodes =
-    let table = Hashtbl.create 64 in
-    List.iter (fun n -> Hashtbl.replace table (Engine.identity n) n) nodes;
-    table
-  in
-  let mine_table = by_identity mine_changed and theirs_table = by_identity theirs_changed in
-  let describe node =
-    match subject_of node with
-    | Some subject -> { path = Some subject.path; part = subject.part; label = Engine.label node }
-    | None -> { path = None; part = None; label = Engine.label node }
-  in
-  let both =
-    List.filter_map
-      (fun node ->
-        if Hashtbl.mem theirs_table (Engine.identity node) then Some (Both_change (describe node))
-        else None)
-      mine_changed
-  in
-  let reads_other session changed own_table other_table ~this_worktree =
-    List.concat_map
-      (fun node ->
-        if subject_of node = None then []
-        else
-          List.filter_map
-            (fun read ->
-              let identity = Engine.identity read in
-              match Hashtbl.find_opt other_table identity with
-              | Some other when not (Hashtbl.mem own_table identity) ->
-                  Some (Reads { this_worktree; change = describe node; reads = describe other })
-              | _ -> None)
-            (Engine.reads session.engine node))
-      changed
-  in
-  List.sort_uniq compare
-    (both
-    @ reads_other mine mine_changed mine_table theirs_table ~this_worktree:true
-    @ reads_other theirs theirs_changed theirs_table mine_table ~this_worktree:false)
 
 (* A commit of a worktree's files as they are, for merging. *)
 let commit_of_worktree root = Git.snapshot ~directory:root
@@ -1245,63 +891,65 @@ let commit_of_worktree root = Git.snapshot ~directory:root
 (* The same project in another worktree is at the same place under its
    worktree's top. *)
 let other_worktrees session =
-  let state = current () in
-  let root = root_of_session session in
+  let root = root session in
   let common = Git.common_directory root and prefix = Git.prefix root in
-  Hashtbl.fold
-    (fun _ other acc ->
-      match other.source with
-      | Directory other_root
-        when other_root <> root && common <> None
-             && Git.common_directory other_root = common
-             && Git.prefix other_root = prefix ->
-          other :: acc
-      | _ -> acc)
-    state.sessions []
+  List.filter
+    (fun other ->
+      match Session.attachment other with
+      | Project { kind = Worktree other_root; _ } ->
+          other_root <> root && common <> None
+          && Git.common_directory other_root = common
+          && Git.prefix other_root = prefix
+      | _ -> false)
+    (Session.all ())
+
+let commit_of session =
+  match (project session).kind with
+  | Worktree root -> Git.head ~directory:root
+  | Commit commit -> Some commit.commit
+  | Library | Published -> None
 
 let overlap_with session other =
-  let state = current () in
   check_all session;
   check_all other;
-  let root = root_of_session session in
-  let mine_commit = Git.head ~directory:root in
-  let theirs_commit =
-    match other.source with
-    | Directory other_root -> Git.head ~directory:other_root
-    | Commit c -> Some c.commit
-  in
-  match (mine_commit, theirs_commit) with
+  let root = root session in
+  match (commit_of session, commit_of other) with
   | Some a, Some b -> (
       match Git.merge_base ~directory:root a b with
       | None -> Error "no common commit."
       | Some base -> (
-          match open_commit state ~repository:root base with
+          match open_commit ~repository:root base with
           | Error message -> Error message
-          | Ok base_session -> Ok (overlaps ~base:base_session session other)))
+          | Ok base_session ->
+              Ok
+                (Session.Graph.overlaps ~base:(Session.engine base_session) (Session.engine session)
+                   (Session.engine other))))
   | _ -> Error "not a git worktree."
 
-(* An engine that starts from a session's state and changes on its own, for
-   trying a change: the session's state is written, and opened again, so
-   the two share everything but what the trial changes. *)
-let trial_engine state session =
-  save state session;
-  let artifact =
-    match Engine.artifact session.engine with
-    | Some artifact when not (Engine.unwritten session.engine) -> artifact
-    | _ -> Engine.write session.engine
-  in
-  match open_state state artifact with Some engine -> engine | None -> new_engine state
+(* A session that starts from another's state, with other files: some of
+   its files replaced, added, or, with [None], removed. It shares with the
+   session everything but what the change reaches, and is never saved, so a
+   change, such as a rename or another lock file, is tried before any file
+   is written. *)
+let trial_over session (files : Files.t) =
+  let trial = Session.trial session in
+  attach_project trial ~kind:(project session).kind files;
+  update trial;
+  ignore (Engine.stabilize (Session.engine trial));
+  trial
 
-let trial session = trial_engine (current ()) session
+let trial session changes = trial_over session (Files.with_changes (project session).files changes)
 
 (* The standard library as a state of its own *)
 
 let library_prefix = Printf.sprintf "library-%s-" (String.sub Compiler_version.digest 0 16)
+let () = Session.trust Compiler_version.digest
 
 (* The inputs of the [standard] package, set from sources: each module's
    text, and the package with its modules. The text of a module that the
    state holds and the sources do not is removed. *)
-let set_library engine (modules : (Path.module_ * string) list) =
+let set_library (modules : (Path.module_ * string) list) session =
+  let engine = Session.engine session in
   (match read (Engine.context engine) Workspace.packages Path.standard_package with
   | Some (package : Workspace.package) ->
       List.iter
@@ -1312,61 +960,31 @@ let set_library engine (modules : (Path.module_ * string) list) =
   | None -> ());
   load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[] modules
 
-let write_library ?full library =
-  let artifact = Engine.write ?full library.library_engine in
-  Store.point library.library_pointer (Marshal.to_string { artifact; files = [] } [])
-
 let open_library ?(modules = Standard_library.modules) name =
-  let state = current () in
-  match Hashtbl.find_opt state.libraries name with
-  | Some library ->
-      set_library library.library_engine modules;
-      Ok library
-  | None ->
-      let pointer = Store.pointer state.store (library_prefix ^ name) in
-      if not (Store.lock pointer) then
-        Error (Printf.sprintf "The library state `%s` is open in another process." name)
-      else begin
-        Store.refresh state.store;
-        let version = Compiler_version.digest in
-        let opened =
-          Option.bind (read_record pointer) (fun record ->
-              Engine.open_ ~log:!logging state.store ~version ~bases:[] record.artifact)
-        in
-        let engine =
-          match opened with
-          | Some engine -> engine
-          | None ->
-              let engine = Engine.create ~log:!logging () in
-              Engine.attach engine state.store ~version;
-              engine
-        in
-        let library = { library_engine = engine; library_pointer = pointer } in
-        (* A process that opens the state pays its size already, so this is
-           when its differences are folded into one whole state. *)
-        let debt = Engine.debt engine in
-        let library =
-          if debt.differences > max (debt.whole / 2) 256 then begin
-            write_library ~full:true library;
-            match
-              Option.bind (Engine.artifact engine)
-                (Engine.open_ ~log:!logging state.store ~version ~bases:[])
-            with
-            | Some engine -> { library with library_engine = engine }
-            | None -> library
-          end
-          else library
-        in
-        set_library library.library_engine modules;
-        Hashtbl.replace state.libraries name library;
-        Ok library
-      end
-
-let library_engine library = library.library_engine
-
-let save_library library =
-  if Engine.unwritten library.library_engine then write_library library
-  else Engine.record library.library_engine
+  match
+    Session.open_ ~key:("library:" ^ name) ~pointer:(library_prefix ^ name)
+      ~version:Compiler_version.digest
+      ~bases:(fun () -> [])
+      ~fingerprints:(fun () -> [])
+      ()
+  with
+  | Error () -> Error (Printf.sprintf "The library state `%s` is open in another process." name)
+  | Ok (session, _) ->
+      Session.attach session
+        (Project
+           {
+             kind = Library;
+             update = set_library modules;
+             files = Files.of_texts [];
+             problems = [];
+             lock_fix = None;
+             applied = true;
+           });
+      (* A process that opens the state pays its size already, so this is
+         when its differences are folded into one whole state. *)
+      Session.fold session;
+      update session;
+      Ok session
 
 (* Choosing versions *)
 
@@ -1374,8 +992,8 @@ type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Loc
 
 let project_manifests session =
   List.filter_map
-    (fun (_, name) -> read (Engine.context session.engine) Workspace.packages name)
-    (current_layout session.engine).packages
+    (fun (_, name) -> read (Engine.context (Session.engine session)) Workspace.packages name)
+    (layout_of session).packages
 
 (* The lock file a project would have with some packages at other versions:
    each of [set] at the version given, or at its newest, and with [all],
@@ -1389,7 +1007,7 @@ let plan_lock session ~set ~all =
       let before =
         try
           Registry.Lock.parse
-            (Option.value ~default:"" (read (Engine.context session.engine) lock_text ()))
+            (Option.value ~default:"" (read (Engine.context (Session.engine session)) lock_text ()))
         with Registry.Lock.Malformed _ -> []
       in
       let set =
@@ -1398,7 +1016,7 @@ let plan_lock session ~set ~all =
         if all then
           List.filter_map
             (fun (name, _, _) -> if List.mem_assoc name set then None else Some (name, None))
-            (current_layout session.engine).registry
+            (layout_of session).registry
         else []
       in
       let wanted =
@@ -1435,7 +1053,7 @@ let plan_lock session ~set ~all =
           let local name =
             List.exists (fun (package : Workspace.package) -> package.name = name) manifests
           in
-          let packages = Store.files (current ()).store "packages" in
+          let packages = Session.directory "packages" in
           let selected, problems =
             Registry.Selection.choose ~lock
               ~roots:
@@ -1467,105 +1085,63 @@ let plan_lock session ~set ~all =
             in
             Ok { text = Registry.Lock.print after; before; after })
 
-(* A published package at a version, in an engine of its own with the
-   packages it was published with, for comparing a release with it. *)
-let published_engine name version =
-  let state = current () in
-  let packages = Store.files state.store "packages" in
+(* A published package at a version, as a session of its own with the
+   packages it was published with, for comparing a release with it. Its
+   files in the store are a project of one package, whose lock file names
+   those packages. *)
+let published name version =
   match
     Option.bind (Registry.Index.current ()) (fun registry ->
         Registry.Index.hash_of registry name version)
   with
   | None ->
       Error (Printf.sprintf "The registry has no `%s` %s." name (Registry.Version.show version))
-  | Some hash ->
-      let engine = new_engine state in
-      let set name version ~hash =
-        match load_published ~packages name version ~hash with
-        | Ok found ->
-            set_published engine found;
-            Ok found
-        | Error reason ->
-            Error
-              (Printf.sprintf "`%s` %s cannot be read: %s." name (Registry.Version.show version)
-                 reason)
+  | Some hash -> (
+      let cannot reason =
+        Error
+          (Printf.sprintf "`%s` %s cannot be read: %s." name (Registry.Version.show version) reason)
       in
-      Result.bind (set name version ~hash) (fun found ->
-          List.fold_left
-            (fun result (entry : Registry.Lock.entry) ->
-              Result.bind result (fun engine ->
-                  Result.map (fun _ -> engine) (set entry.name entry.version ~hash:entry.hash)))
-            (Ok engine) found.record)
+      match load_published ~packages:(Session.directory "packages") name version ~hash with
+      | Error reason -> cannot reason
+      | Ok _ -> (
+          let directory = Filename.concat (Session.directory "packages") hash in
+          let key = Printf.sprintf "published:%s:%s" name hash in
+          match open_files ~key ~kind:Published (Files.of_directory directory) with
+          | Error () -> cannot "its state is open in another process"
+          | Ok session -> (
+              update session;
+              ignore (Engine.stabilize (Session.engine session));
+              match problems session with [] -> Ok session | problem :: _ -> cannot problem)))
 
 let code_packages session name =
-  try Engine.get session.engine Type_checker.code_packages name with Not_found -> []
-
-(* A session that starts from another's state, with a lock file in place of
-   its own, for seeing what other versions would change before the file is
-   written. It is never saved. *)
-let trial_with_lock session text =
-  let state = current () in
-  let trial =
-    {
-      source = session.source;
-      engine = trial_engine state session;
-      pointer = None;
-      problems = [];
-      lock_fix = None;
-      used = Unix.time ();
-      texts = Hashtbl.create 16;
-      pointed = true;
-      applied = false;
-    }
-  in
-  let files = (current_layout session.engine).files in
-  apply trial
-    (("truss.lock", Text text)
-    :: List.filter_map
-         (fun path -> if path = "truss.lock" then None else Some (path, Unchanged))
-         files);
-  ignore (Engine.stabilize trial.engine);
-  trial
+  try Engine.get (Session.engine session) Type_checker.code_packages name with Not_found -> []
 
 (* The diagnostics of a merge of two commits that neither has. *)
 let merge_preview session other =
-  let state = current () in
-  let root = root_of_session session in
-  match
-    ( commit_of_worktree root,
-      match other.source with
-      | Directory other_root -> commit_of_worktree other_root
-      | Commit c -> Some c.commit )
-  with
+  let root = root session in
+  let snapshot session =
+    match (project session).kind with
+    | Worktree root -> commit_of_worktree root
+    | Commit commit -> Some commit.commit
+    | Library | Published -> None
+  in
+  match (snapshot session, snapshot other) with
   | None, _ | _, None -> Error "cannot make commits to merge."
   | Some mine, Some theirs -> (
       match Git.merged_files ~directory:root mine theirs with
       | None -> Error "the two do not merge without a textual conflict."
       | Some texts ->
-          let merged =
-            {
-              source = Commit { repository = root; commit = "merge" };
-              engine = trial_engine state session;
-              pointer = None;
-              problems = [];
-              lock_fix = None;
-              used = Unix.time ();
-              texts = Hashtbl.create 16;
-              pointed = true;
-              applied = false;
-            }
-          in
-          apply merged (List.map (fun (path, text) -> (path, Text text)) texts);
+          let merged = trial_over session (Files.of_texts texts) in
           let keys s =
             List.concat_map
               (fun (m, ds) ->
                 List.map (fun (d : Diagnostic.t) -> (m, Diagnostic.Code.name d.code, d.message)) ds)
-              (diagnostics_of s (current_layout s.engine).packages)
+              (diagnostics_of s (layout_of s).packages)
           in
           let sides =
             List.concat_map
               (fun commit ->
-                match open_commit state ~repository:root commit with
+                match open_commit ~repository:root commit with
                 | Ok side -> keys side
                 | Error _ -> [])
               [ mine; theirs ]
@@ -1576,307 +1152,47 @@ let merge_preview session other =
                  if List.mem key sides then None else Some (module_file merged m, code, message))
                (List.sort_uniq compare (keys merged))))
 
-(* Runs a command. If a state it reads has lost an input's value, as after
-   another process collected the store, every open state is discarded with
-   its pointer, and the command is run once more, from the files. *)
-let recovering run =
-  try run ()
-  with Engine.Lost _ ->
-    (match !state with
-    | Some s ->
-        let discard pointer =
-          Store.remove_pointer pointer;
-          Store.unlock pointer
-        in
-        Hashtbl.iter (fun _ session -> Option.iter discard session.pointer) s.sessions;
-        Hashtbl.iter (fun _ library -> discard library.library_pointer) s.libraries;
-        Store.close s.store;
-        Engine.forget_bases ();
-        state := None
-    | None -> ());
-    run ()
-
-let stopping = ref false
-let stop () = stopping := true
-
-let reset () =
-  match !state with
-  | None -> ()
-  | Some s ->
-      Hashtbl.iter (fun _ session -> save s session) s.sessions;
-      Hashtbl.iter
-        (fun _ library ->
-          save_library library;
-          Store.unlock library.library_pointer)
-        s.libraries;
-      Store.close s.store;
-      Engine.forget_bases ();
-      state := None
-
-let session_engine directory =
-  match !state with
-  | None -> None
-  | Some s ->
-      Option.bind (root_of directory) (fun root ->
-          Option.map (fun session -> session.engine) (Hashtbl.find_opt s.sessions root))
+let recovering = Session.recovering
+let reset = Session.reset
 
 (* The background process *)
-
-let rec make_directory path =
-  if not (Sys.file_exists path) then begin
-    make_directory (Filename.dirname path);
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
-(* Only the user may reach the background process: what travels over its
-   socket is marshaled, and reading marshaled bytes from another user would
-   let that user run code as this one. *)
-let servers_directory () =
-  let directory = Filename.concat (Store.default_directory ()) "servers" in
-  make_directory directory;
-  (try Unix.chmod directory 0o700 with Unix.Unix_error _ -> ());
-  directory
-
-(* A directory in /tmp that is the user's alone. Another user could have
-   made one of this name first, so it is used only if it is a directory,
-   this user's, and closed to everyone else. *)
-let private_temporary_directory () =
-  let directory = Printf.sprintf "/tmp/truss-%d" (Unix.getuid ()) in
-  (try Unix.mkdir directory 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  match Unix.lstat directory with
-  | { st_kind = S_DIR; st_uid; st_perm; _ } when st_uid = Unix.getuid () && st_perm land 0o077 = 0
-    ->
-      directory
-  | _ | (exception Unix.Unix_error _) ->
-      failwith (directory ^ " is not a directory that only this user can use.")
-
-(* The socket's address, and its lock beside it in the store. A socket's
-   path has a short limit, about 100 bytes, so one under a long store path
-   goes in a directory of the user's own in /tmp, named by a hash of where it
-   would have been. *)
-let server_path identity = Filename.concat (servers_directory ()) (Identity.short identity)
-
-let socket_path identity =
-  let path = server_path identity ^ ".socket" in
-  if String.length path < 100 then path
-  else
-    Filename.concat (private_temporary_directory ())
-      (String.sub (Blake3.to_hex (Blake3.hash path)) 0 16 ^ ".socket")
-
-let idle_limit = 3. *. 3600.
-let session_idle_limit = 3600.
-
-let send channel value =
-  Marshal.to_channel channel value [];
-  flush channel
-
-(* Drops sessions nobody has used for an hour, saving them first. *)
-let drop_idle state now =
-  let idle =
-    Hashtbl.fold
-      (fun key session acc ->
-        if now -. session.used > session_idle_limit then (key, session) :: acc else acc)
-      state.sessions []
-  in
-  List.iter
-    (fun (key, session) ->
-      save state session;
-      Option.iter Store.unlock session.pointer;
-      Hashtbl.remove state.sessions key)
-    idle
-
-(* Removes the pointer of each worktree whose directory is gone, of any
-   compiler, and its line in the list of worktrees. A new worktree looks
-   through every pointer for the state nearest to it, so those of worktrees
-   that are gone must not gather. *)
-let prune state =
-  let known = known_worktrees state in
-  let live, dead = List.partition (fun (root, _) -> Sys.file_exists root) known in
-  if dead <> [] then begin
-    List.iter (fun (_, name) -> Store.remove_pointer (Store.pointer state.store name)) dead;
-    let file = worktrees_file state in
-    let partial = file ^ ".partial" in
-    try
-      Out_channel.with_open_bin partial (fun out ->
-          List.iter (fun (root, name) -> Printf.fprintf out "%s\t%s\n" root name) live);
-      Sys.rename partial file
-    with Sys_error _ -> ()
-  end
-
-(* Keeps the store within its budget. What the state of a worktree of this
-   compiler refers to is kept, and so are the standard library's state and
-   each named state of the library. A state another compiler wrote can be
-   read only by that compiler, so its values are not kept; that compiler
-   finds its state gone, and starts from its files. *)
-let collect state =
-  prune state;
-  Store.compact state.store;
-  if Store.size state.store > budget () then begin
-    let live = Hashtbl.create 4096 in
-    let keep ~version artifact =
-      List.iter
-        (fun name -> Hashtbl.replace live name ())
-        (Engine.values_in state.store ~version artifact)
-    in
-    let keep_pointer ~version name =
-      Option.iter
-        (fun (record : record) -> keep ~version record.artifact)
-        (read_record (Store.pointer state.store name))
-    in
-    let sessions = session_prefix state in
-    List.iter
-      (fun name ->
-        if String.starts_with ~prefix:sessions name then keep_pointer ~version:state.identity name
-        else if String.starts_with ~prefix:library_prefix name then
-          keep_pointer ~version:Compiler_version.digest name)
-      (Store.pointers state.store);
-    Option.iter (keep ~version:state.identity)
-      (Store.find_result state.store ~kind:"package" ~key:(standard_key state.identity));
-    Store.collect state.store ~budget:(budget ()) ~live:(Hashtbl.mem live)
-  end
 
 (* Watching: each open worktree's file stamps are checked every second while
    no request is waiting, so that results are current before they are asked
    for. A request scans again before it is answered, so it always sees every
    change made before it. *)
-let watch state =
-  Hashtbl.iter
-    (fun _ session ->
-      match session.source with
-      | Directory root -> (
+let watch () =
+  List.iter
+    (fun session ->
+      match Session.attachment session with
+      | Project { kind = Worktree _; _ } -> (
           try
-            scan session root;
-            ignore (stabilize state session)
+            update session;
+            ignore (Session.stabilize session)
           with _ -> ())
-      | Commit _ -> ())
-    state.sessions
+      | _ -> ())
+    (Session.all ())
 
-type 'response message = Progress of string | Final of 'response
+(* The standard library's state is kept when the store is collected. *)
+let kept () =
+  let identity = Session.identity () in
+  Option.to_list
+    (Option.map
+       (fun artifact -> (identity, artifact))
+       (Session.find_result ~kind:"package" ~key:(standard_key identity)))
 
-let serve ~handle =
-  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let state = current () in
-  let path = socket_path state.identity in
-  let lock =
-    Unix.openfile (server_path state.identity ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
-  in
-  match Unix.lockf lock F_TLOCK 0 with
-  | exception Unix.Unix_error _ -> ()
-  | () ->
-      serving := true;
-      (try Unix.unlink path with Unix.Unix_error _ -> ());
-      let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
-      Unix.bind socket (ADDR_UNIX path);
-      Unix.listen socket 16;
-      let last = ref (Unix.time ()) in
-      let last_collection = ref 0. in
-      while (not !stopping) && Unix.time () -. !last < idle_limit do
-        match Unix.select [ socket ] [] [] 1.0 with
-        | exception Unix.Unix_error (EINTR, _, _) -> ()
-        | [], _, _ ->
-            let now = Unix.time () in
-            drop_idle (current ()) now;
-            (let state = current () in
-             watch state;
-             Hashtbl.iter (fun _ session -> fold state session) state.sessions);
-            if now -. !last_collection > 60. then begin
-              last_collection := now;
-              (* A compiler that was built again has another identity, and
-                 its clients start a process of their own, so this one would
-                 only scan worktrees for no one. *)
-              if Identity.compute (Store.default_directory ()) <> (current ()).identity then
-                stopping := true;
-              collect (current ())
-            end
-        | _ -> (
-            match Unix.accept ~cloexec:true socket with
-            | exception Unix.Unix_error _ -> ()
-            | client, _ -> (
-                last := Unix.time ();
-                let input = Unix.in_channel_of_descr client in
-                let output = Unix.out_channel_of_descr client in
-                (try
-                   let request = Marshal.from_channel input in
-                   let progress text = send output (Progress text) in
-                   send output (Final (recovering (fun () -> handle ~progress request)))
-                 with _ -> ());
-                try Unix.close client with Unix.Unix_error _ -> ()))
-      done;
-      (let state = current () in
-       Hashtbl.iter (fun _ session -> save state session) state.sessions;
-       Store.close state.store);
-      (try Unix.unlink path with Unix.Unix_error _ -> ());
-      Unix.close lock
+let serve ~handle = Session.Server.serve ~idle:watch ~keep:kept ~handle
+let call = Session.Server.call
+let stop = Session.Server.stop
+let store_directory = Session.Server.store_directory
 
-(* Starts the background process, detached from the client's terminal. *)
-let start program =
-  let log = Filename.concat (servers_directory ()) "server.log" in
-  match Unix.fork () with
-  | 0 -> (
-      ignore (Unix.setsid ());
-      match Unix.fork () with
-      | 0 ->
-          let null = Unix.openfile "/dev/null" [ O_RDONLY ] 0 in
-          let out = Unix.openfile log [ O_WRONLY; O_CREAT; O_APPEND ] 0o644 in
-          Unix.dup2 null Unix.stdin;
-          Unix.dup2 out Unix.stdout;
-          Unix.dup2 out Unix.stderr;
-          (try Unix.execv program [| program; "__serve" |] with _ -> ());
-          Unix._exit 1
-      | _ -> Unix._exit 0)
-  | child -> ignore (Unix.waitpid [] child)
+(* For tests *)
 
-let connect path =
-  let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
-  match Unix.connect socket (ADDR_UNIX path) with
-  | () -> Some socket
-  | exception Unix.Unix_error _ ->
-      Unix.close socket;
-      None
+module Testing = struct
+  let engine = Session.engine
+  let logging = Session.logging
+  let standard_base = standard_base
 
-let store_directory () = Store.default_directory ()
-
-let call ?program ?(start_server = true) ~progress request =
-  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let identity = Identity.compute (Store.default_directory ()) in
-  let path = socket_path identity in
-  let program = Option.value program ~default:(Identity.executable ()) in
-  let rec attempt tries =
-    match connect path with
-    | Some socket -> Some socket
-    | None ->
-        if tries = 0 || not start_server then None
-        else begin
-          if tries = 50 then start program;
-          Unix.sleepf 0.1;
-          attempt (tries - 1)
-        end
-  in
-  match attempt 50 with
-  | None when not start_server -> Error "No background process is running."
-  | None -> Error "could not start or reach the background process; try --no-server."
-  | Some socket -> (
-      let input = Unix.in_channel_of_descr socket in
-      let output = Unix.out_channel_of_descr socket in
-      let rec receive () =
-        match Marshal.from_channel input with
-        | Progress text ->
-            progress text;
-            receive ()
-        | Final response -> response
-      in
-      match
-        send output request;
-        receive ()
-      with
-      | response ->
-          Unix.close socket;
-          Ok response
-      | exception _ ->
-          (try Unix.close socket with Unix.Unix_error _ -> ());
-          Error
-            "the background process ended while answering; see its log in the store's \
-             servers              directory.")
-
-let set_answers session answers =
-  List.iter (fun (key, told) -> Engine.set session.engine Prover.told key told) answers
+  let session_engine directory =
+    Option.bind (root_of directory) (fun root -> Option.map Session.engine (Session.find root))
+end

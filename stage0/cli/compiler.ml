@@ -46,8 +46,16 @@ let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
     | _ -> Workspace.file_path module_
   in
   let own = List.map snd (Database.packages project.session) in
-  Compile.create ~checks ~file_name ~want:(Database.want project.session)
+  Compile.create ~checks ~file_name
+    ~want:(fun lowering wanted ->
+      Database.set project.session Compile.roots lowering
+        (Compile.add_roots project.context lowering wanted))
     ~worked_on:(fun package -> List.mem package own)
     project.context (target ()) toolchain
     (Build.cache (Database.objects_directory ()))
     settings
+
+(* Kept test results, in the store. *)
+let test_results () : Compile.results =
+  let find, add = Database.results ~kind:"tests" in
+  { find; add }

@@ -66,7 +66,7 @@ let () =
       (Database.packages session)
   in
   let step session label run =
-    let counters () = Engine.counters (Database.engine session) in
+    let counters () = Engine.counters (Database.Testing.engine session) in
     let before = counters () in
     let (), milliseconds = timed run in
     let after = counters () in

@@ -20,6 +20,10 @@ type lowering
    database sets it. *)
 val roots : (lowering, Instance.key list) Query.input
 
+val add_roots : Query.context -> lowering -> Instance.key list -> Instance.key list
+(** The roots with more wanted, which a driver sets {!roots} to before it asks for those instances'
+    keys: a query cannot set an input. *)
+
 (* With [checks], the default, the program checks at run time each
    primitive operation that is undefined or wrong where its precondition
    does not hold: an index, a slice, arithmetic, a shift, and a call of

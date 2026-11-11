@@ -194,6 +194,12 @@ let roots : (lowering, Instance.key list) Query.input =
    reach. It reads what every such instance refers to, and comes out the
    same unless a group forms or changes, so only then does it cost anything
    after it. *)
+(* The roots with more wanted: what a driver sets the input to before it
+   asks for those instances' keys. *)
+let add_roots database lowering wanted =
+  List.sort_uniq Instance.compare
+    (wanted @ Option.value (Query.find database roots lowering) ~default:[])
+
 let recursion =
   Query.query ~name:"recursion" ~phase:Phases.recursion ~show:show_lowering
     ~equal:(Reachable.Keys.equal (List.equal Instance.equal))

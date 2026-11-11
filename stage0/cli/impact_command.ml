@@ -119,7 +119,7 @@ let tests_changed (project : Project.t) base =
   in
   let mine = keys project.context project.session in
   let theirs = keys (Database.context base) base in
-  let results = Database.test_results () in
+  let results = Compiler.test_results () in
   List.filter_map
     (fun (path, key) ->
       match List.find_opt (fun (p, _) -> Path.equal p path) theirs with
