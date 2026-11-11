@@ -2102,9 +2102,10 @@ The core form records these decisions:
   already computed: a missing start is `0`, a missing stop is the length of
   the base, and an inclusive stop is `stop + 1`. An array literal is
   constructed in place. A specification's sequence, set, or map is never
-  constructed at run time. An interpolated string records its pieces, the
-  `display` method of each interpolated value, and the methods of the text
-  builder. Widening a function value, and
+  constructed at run time. An interpolated string is a block of calls: of
+  `TextBuilder.new`, of `TextBuilder.write` for each piece of text, of the
+  `display` of each value, and of `TextBuilder.finish`. So each call has the
+  termination and cost obligations of any call. Widening a function value, and
   converting between a built-in integer and `Integer`, are explicit
   conversion nodes.
 - **A cost term over a bound names the trait method.** `time(Element.equal)`
@@ -2430,9 +2431,6 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **An interpolated string as calls.** It is still a node that names the text
-  builder's methods and the `display` of each value. It will be desugared to
-  those calls once they have `time` clauses.
 - **A contract as a result of its own.** In DESIGN.md, callers' proofs read a
   function's contract, separately from its interface and its body. Today the
   contract is type-checked with the body, and the prover reads it from the

@@ -125,11 +125,13 @@ let () =
     "{ Shape.Square(side: 2, label: default) }";
   expect_body "a range expression becomes a Range record" "fn g() -> Range[Int64] {\n  1..5\n}\n"
     "{ Range[Int64](start: 1, stop: 5, inclusive: false) }";
-  expect_body "an interpolated string lists its pieces, each with its `display` method"
+  expect_body "an interpolated string becomes a text builder, a call for each piece, and `finish`"
     "fn g(name: String, count: Int64) -> String {\n  \"${name}: ${count}\"\n}\n"
-    "{ interpolated(place name through Display.display for String by standard::text::impl Display \
-     for String, \": \", place count through Display.display for Int64 by \
-     standard::numbers::signed::impl Display for Int64) }";
+    "{ { let var own builder = standard::text::TextBuilder.new(); Display.display for String by \
+     standard::text::impl Display for String(place name, mut place builder); \
+     standard::text::TextBuilder.write(mut self)(mut place builder, \": \"); Display.display for \
+     Int64 by standard::numbers::signed::impl Display for Int64(place count, mut place builder); \
+     standard::text::TextBuilder.finish(own self)(own builder) } }";
   expect_body "a list literal, a slice, and an index"
     "fn g() -> Int64 {\n  let numbers = [1, 2, 3]\n  let _ = numbers[1..]\n  numbers[0]\n}\n"
     "{ let own numbers = { let var own storage = intrinsic::storage_with_capacity(3); \

@@ -34,15 +34,6 @@ let rec expression names (node : expression) =
   | Float number -> Printf.sprintf "%h" number
   | Boolean value -> string_of_bool value
   | String text -> Printf.sprintf "%S" text
-  | Interpolated { pieces; _ } ->
-      "interpolated("
-      ^ list
-          (function
-            | Text text -> Printf.sprintf "%S" text
-            | Displayed { value; display } ->
-                Printf.sprintf "%s through %s" (operand value) (callee names display))
-          pieces
-      ^ ")"
   | Template { literals; call } ->
       Printf.sprintf "template(%s) call %s" (list (Printf.sprintf "%S") literals) (expression call)
   | Use found -> place found
