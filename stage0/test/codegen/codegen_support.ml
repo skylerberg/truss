@@ -228,7 +228,7 @@ let example : Path.module_ = { package = "example"; modules = [ "main" ] }
 
 (* The standard library as a fixed base, shared by every test in a run, so
    that it is read and checked once and not for each test. *)
-let checked_standard = lazy (Database.standard_base ())
+let checked_standard = lazy (Database.Testing.standard_base ())
 
 (* The modules of a package named [example], of Truss source, with the
    standard library, ready to compile. Each must check cleanly. *)
@@ -246,7 +246,9 @@ let load_modules modules =
     modules;
   ( database,
     Compile.create
-      ~want:(Database.want_in (Engine.of_context database))
+      ~want:(fun lowering wanted ->
+        Engine.set (Engine.of_context database) Compile.roots lowering
+          (Compile.add_roots (Engine.context (Engine.of_context database)) lowering wanted))
       database target_64 (Lazy.force compiler) (Lazy.force cache) settings )
 
 let load text = load_modules [ (example, text) ]

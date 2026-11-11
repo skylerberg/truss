@@ -118,7 +118,7 @@ let failed_tests (project : Project.t) (package : Project.package) =
   else
     let compile = Compiler.create project Development in
     match
-      Compile.run_tests ~results:(Database.test_results ()) compile
+      Compile.run_tests ~results:(Compiler.test_results ()) compile
         ~time_limit:(Database.time_limit project.session * 1000)
         (List.map (fun (test : Test_command.test) -> test.path) tests)
     with
@@ -170,16 +170,17 @@ let decide (project : Project.t) registry (package : Project.package) =
       | None -> Published { version = Version.first name; files; grows = [] }
       | Some (version, newest) when newest = hash -> Unchanged version
       | Some (((major, minor, patch) as version), _) -> (
-          match Database.published_engine name version with
+          match Database.published name version with
           | Error message -> Refused [ message ]
-          | Ok engine ->
+          | Ok published ->
               let found, narrowed =
-                Compatibility.compare ~before:(Engine.context engine) ~after:project.context name
+                Compatibility.compare ~before:(Database.context published) ~after:project.context
+                  name
               in
               let breaks =
                 List.map
                   (fun (path, what) ->
-                    let was = Impact_command.signature (Engine.context engine) path
+                    let was = Impact_command.signature (Database.context published) path
                     and now = Impact_command.signature project.context path in
                     String.concat ""
                       (Printf.sprintf "%s %s." (Path.show path) what

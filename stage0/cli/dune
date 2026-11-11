@@ -14,7 +14,6 @@
   syntax_walk
   path
   query
-  engine
   workspace
   resolve
   types

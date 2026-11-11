@@ -80,7 +80,7 @@ let fresh_store ?(empty = false) () =
       then failwith "could not copy the store")
     standard;
   Unix.putenv "TRUSS_CACHE" directory;
-  Database.logging := true
+  Database.Testing.logging := true
 
 let package () =
   let directory = fresh "package" in
@@ -107,9 +107,11 @@ let errors directory =
   List.length found + List.length (Database.problems session)
 
 let computed directory =
-  match Database.session_engine directory with Some engine -> Engine.executed engine | None -> []
+  match Database.Testing.session_engine directory with
+  | Some engine -> Engine.executed engine
+  | None -> []
 
-let clear directory = Option.iter Engine.clear_log (Database.session_engine directory)
+let clear directory = Option.iter Engine.clear_log (Database.Testing.session_engine directory)
 
 let contains text part =
   let n = String.length part and l = String.length text in
@@ -265,6 +267,27 @@ let () =
       Unix.chmod (Filename.concat directory "other.truss") 0o644;
       if unreadable = 0 then fail "the change beside the unreadable file was not seen";
       if errors directory = 0 then fail "the change was lost once the file could be read");
+  test "a trial sees its changed, added, and removed files, and the session does not" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      write directory "other.truss" "internal fn one() -> Int64 {\n  1\n}\n";
+      expect_errors directory 0;
+      let session, _ = session directory in
+      let trial =
+        Database.trial session
+          [
+            ("main.truss", Some "internal fn double(value: Int64) -> Missing {\n  value\n}\n");
+            ("added.truss", Some "internal fn two() -> Int64 {\n  2\n}\n");
+            ("other.truss", None);
+          ]
+      in
+      let modules session = List.sort compare (Database.package_modules session "app") in
+      let named name : Path.module_ = { package = "app"; modules = [ name ] } in
+      if modules trial <> [ named "added"; named "main" ] then fail "the trial's modules";
+      if Database.diagnostics trial (named "main") = [] then fail "the trial did not see the change";
+      if modules session <> [ named "main"; named "other" ] then
+        fail "the session's modules changed";
+      if Database.diagnostics session (named "main") <> [] then fail "the session saw the change");
   test "a malformed manifest is a problem, at its line" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -335,7 +358,7 @@ let () =
       let second = worktree () in
       write second "part_3.truss" (module_text 3 ^ "\nfn extra() -> Int64 {\n  1\n}\n");
       expect_errors second 0;
-      match (Database.session_engine first, Database.session_engine second) with
+      match (Database.Testing.session_engine first, Database.Testing.session_engine second) with
       | Some whole, Some difference ->
           let own = Engine.count difference and all = List.length (Engine.nodes whole) in
           if own * 2 >= all then
@@ -555,9 +578,9 @@ let open_library modules =
 let check_library library modules =
   List.iter
     (fun (module_, _) ->
-      ignore (Engine.get (Database.library_engine library) Type_checker.file_diagnostics module_))
+      ignore (Engine.get (Database.Testing.engine library) Type_checker.file_diagnostics module_))
     modules;
-  Database.save_library library
+  Database.save_session library
 
 let () =
   test "a library state opened again after an edit computes only what the edit reached" (fun () ->
@@ -568,7 +591,7 @@ let () =
       Database.reset ();
       let second = (library_module "second", library_function "other") in
       let library = open_library [ first; second ] in
-      let engine = Database.library_engine library in
+      let engine = Database.Testing.engine library in
       Engine.clear_log engine;
       check_library library [ first; second ];
       let executed = Engine.executed engine in
@@ -584,7 +607,7 @@ let () =
       check_library (open_library [ first; second ]) [ first; second ];
       Database.reset ();
       let library = open_library [ first ] in
-      let context = Engine.context (Database.library_engine library) in
+      let context = Engine.context (Database.Testing.engine library) in
       if Query.find context Workspace.file_text (fst second) <> None then
         fail "the module's text is still set";
       if List.mem (fst second) (Query.demand context Workspace.modules Path.standard_package) then
@@ -597,10 +620,21 @@ let rec dune_files directory =
       if Sys.is_directory path then dune_files path else if entry = "dune" then [ path ] else [])
 
 let () =
-  test "no compiler stage lists the engine, the store, or the database" (fun () ->
+  test "each layer lists only the layers below it" (fun () ->
       let root = "../../stage0" in
       let outside_stages =
-        [ "incremental"; "query"; "engine"; "store"; "database"; "cli"; "bin"; "test"; "tools" ]
+        [
+          "incremental";
+          "query";
+          "engine";
+          "store";
+          "session";
+          "database";
+          "cli";
+          "bin";
+          "test";
+          "tools";
+        ]
       in
       List.iter
         (fun path ->
@@ -614,8 +648,39 @@ let () =
             in
             List.iter
               (fun layer -> if List.mem layer words then fail "%s lists %s" path layer)
-              [ "engine"; "store"; "database"; "incremental" ])
+              [ "engine"; "store"; "session"; "database"; "incremental" ])
         (dune_files root);
+      (* The command line is a driver: it reads through a session's context
+         and sets inputs through the database, and holds no engine. *)
+      let command_line = In_channel.with_open_bin (root ^ "/cli/dune") In_channel.input_all in
+      List.iter
+        (fun layer ->
+          if
+            List.mem layer
+              (String.split_on_char ' '
+                 (String.map
+                    (fun c -> if c = '\n' || c = '(' || c = ')' then ' ' else c)
+                    command_line))
+          then fail "the command line lists %s" layer)
+        [ "engine"; "store"; "session"; "incremental" ];
+      let database = In_channel.with_open_bin (root ^ "/database/dune") In_channel.input_all in
+      List.iter
+        (fun stage ->
+          if
+            List.mem stage
+              (String.split_on_char ' '
+                 (String.map (fun c -> if c = '\n' || c = '(' || c = ')' then ' ' else c) database))
+          then fail "the database lists %s" stage)
+        [ "compile"; "prover"; "infer"; "ownership" ];
+      let sessions = In_channel.with_open_bin (root ^ "/session/dune") In_channel.input_all in
+      List.iter
+        (fun stage ->
+          if
+            List.mem stage
+              (String.split_on_char ' '
+                 (String.map (fun c -> if c = '\n' || c = '(' || c = ')' then ' ' else c) sessions))
+          then fail "the session layer lists %s" stage)
+        [ "workspace"; "resolve"; "type_checker"; "registry"; "compile"; "prover"; "database" ];
       if not (List.mem "../../stage0/infer/dune" (dune_files root)) then
         fail "found no stage's dune file")
 

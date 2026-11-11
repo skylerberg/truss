@@ -170,21 +170,22 @@ let applied (project : Project.t) plan =
       (module_, text))
     (Project.modules project)
 
-(* An engine of the worktree with the plan made, for checking it: a trial
+(* A session of the worktree with the plan made, for checking it: a trial
    that starts from the session's state, so only what the rename changes is
-   checked, and which is dropped after. *)
+   checked, and which is dropped after. Each module's text is given under
+   the file it has after the plan, and the file of a module that moves is
+   removed. *)
 let trial (project : Project.t) after =
-  let engine = Database.trial project.session in
-  List.iter
-    (fun (package : Project.package) ->
-      match Project.manifest project package with
-      | Some manifest ->
-          Database.load_package ~usize_bits:manifest.usize_bits engine ~name:package.name
-            ~dependencies:manifest.dependencies
-            (List.filter (fun ((m : Path.module_), _) -> m.package = package.name) after)
-      | None -> ())
-    project.packages;
-  engine
+  let file module_ = Database.module_file project.session module_ in
+  let written = List.map (fun (module_, text) -> (file module_, Some text)) after in
+  let removed =
+    List.filter_map
+      (fun module_ ->
+        let file = file module_ in
+        if List.mem_assoc file written then None else Some (file, None))
+      (Project.modules project)
+  in
+  Database.trial project.session (written @ removed)
 
 let file_of (project : Project.t) (module_ : Path.module_) =
   match List.find_opt (fun (p : Project.package) -> p.name = module_.package) project.packages with
@@ -230,7 +231,7 @@ let run ~directory ~from_ ~to_ ~json =
       | Module module_ -> plan_module project module_ to_
     in
     let after = applied project plan in
-    let checked = Engine.context (trial project after) in
+    let checked = Database.context (trial project after) in
     let caused =
       List.filter_map
         (fun (module_, text) ->
