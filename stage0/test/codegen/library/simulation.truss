@@ -197,6 +197,27 @@ test "a world holds the files of its setup and the files that are written in it"
   }
 }
 
+test "a file written in a world has the time of the world's clock" {
+  let start = Instant.from_unix_nanoseconds(1000)
+  provide simulation::World.from(simulation::Setup.new().with_time(start)) {
+    Clock.sleep(Duration.seconds(2))
+    assert FileWrite.write_text(Path.new("/stamp"), contents: "x") is Ok(_)
+    assert FileRead.metadata(Path.new("/stamp")) is Ok(metadata)
+      && metadata.modified == start + Duration.seconds(2)
+  }
+}
+
+test "a world answers with the metadata of a path and of an open file" {
+  let setup = simulation::Setup.new().with_file(Path.new("/notes"), contents: "four")
+  provide simulation::World.from(own setup) {
+    assert FileRead.metadata(Path.new("/notes")) is Ok(of_path) && of_path.length == 4
+    assert FileRead.metadata(Path.new("/missing")) is Err(NotFound)
+    assert FileRead.open(Path.new("/notes")) is Ok(reader)
+      && reader.metadata() is Ok(of_file)
+      && of_file.length == 4
+  }
+}
+
 test "fail_next makes the next operation of its kind fail, once" {
   let world = simulation::World.new()
   provide world {

@@ -329,7 +329,16 @@ impl FileRead for World
   }
 
   fn metadata(self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileRead.metadata(path, follow_links: follow_links)
+        }
+      }
+    })
   }
 
   fn list(self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
@@ -637,7 +646,16 @@ impl Handles for World
   }
 
   fn metadata(self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          Handles.metadata(handle)
+        }
+      }
+    })
   }
 
   fn close(self, handle: own streams::Handle) -> Result[Unit, SystemError] {
