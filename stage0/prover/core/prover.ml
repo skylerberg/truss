@@ -32,12 +32,12 @@ let inherited database (path : Path.t) =
   | _ -> None
 
 (* An [impl]'s obligation to keep each law of its trait. *)
-let impl_laws database (key : Names.key) source =
+let impl_laws ?reveal database (key : Names.key) source =
   match Query.demand database Interface.Environment.interface key.path with
   | Some (Interface.Environment.Impl_interface interface)
     when not (Translate.impl_unfinished database key) ->
       [
-        Translate.laws database source ~impl:key.path ~trait:interface.implements
+        Translate.laws ?reveal database source ~impl:key.path ~trait:interface.implements
           ~for_type:interface.for_type
           ~proofs:
             (Translate.law_proofs database (Path.package key.path) interface.implements
@@ -54,7 +54,7 @@ let declaration database (key : Names.key) =
   Names.Declaration_map.find_opt (key.path, key.ordinal)
     (Query.demand database Names.declaration_index key.module_)
 
-let prove database (key : Names.key) =
+let prove ?reveal database (key : Names.key) =
   match (declaration database key, Translate.source_at_key database key) with
   | _ when specification key -> Not_proven_here
   | Some declaration, Some source -> (
@@ -65,16 +65,18 @@ let prove database (key : Names.key) =
            trait's type parameter, so it keeps the trait's clauses for every
            [impl] that keeps it. *)
         | (Function | Method), Function { body = None; _ } -> Not_proven_here
-        | Theorem, Function _ -> Obligations (Translate.theorem database source ~path:key.path)
+        | Theorem, Function _ ->
+            Obligations (Translate.theorem ?reveal database source ~path:key.path)
         | (Function | Method), Function { body = Some _; _ } ->
             Obligations
-              (Translate.function_
+              (Translate.function_ ?reveal
                  ~updating_helper:(Translate.is_updating_helper database key.path)
                  ?inherited:(inherited database key.path) database source ~path:key.path)
-        | Test, Test _ -> Obligations (Translate.test database source ~path:key.path)
-        | Constant, Constant _ -> Obligations (Translate.constant database source ~path:key.path)
+        | Test, Test _ -> Obligations (Translate.test ?reveal database source ~path:key.path)
+        | Constant, Constant _ ->
+            Obligations (Translate.constant ?reveal database source ~path:key.path)
         | Impl, _ ->
-            let outcomes = impl_laws database key source in
+            let outcomes = impl_laws ?reveal database key source in
             Obligations
               {
                 obligations =
@@ -82,14 +84,20 @@ let prove database (key : Names.key) =
                 holes = List.concat_map (fun (o : Translate.outcome) -> o.holes) outcomes;
               }
         | Type, Type { invariants = _ :: _; _ } | Type, Type { potential = Some _; _ } ->
-            Obligations (Translate.type_ database source ~path:key.path)
+            Obligations (Translate.type_ ?reveal database source ~path:key.path)
         | _ -> Not_proven_here
       with
       | Translate.Unsupported (span, message) -> Unsupported (span, message)
       | Translate.Foreign_unsupported message -> Unsupported (Syntax.Span.make 0 0, message))
   | _ -> Not_proven_here
 
-let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key prove
+let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key (prove ?reveal:None)
+
+(* A definition's obligations with every callee read as its own package
+   reads it, hidden bodies included, in the same order as its own: asked
+   of only where one of them is not proven and names a hidden callee. *)
+let revealed_proof =
+  Query.query ~phase:Phases.proofs ~name:"revealed_proof" ~show:Names.show_key (prove ~reveal:true)
 
 (* Messages *)
 
@@ -265,7 +273,15 @@ let within database (key : Names.key) (span : span) =
 (* An obligation's answer: the solver's, or what running the code that
    decides it gave, or that it ran past its time limit, or none yet, while
    what it asks is untold. *)
-type answer = Solved of Solver.answer | Ran_false | Ran_too_long | Waiting_answer
+(* [Solved_hidden] is an answer that is not a proof, where the query with
+   the definitions of the callees whose bodies are hidden here proves. *)
+type answer =
+  | Solved of Solver.answer
+  | Solved_hidden of Solver.answer
+  | Ran_false
+  | Ran_too_long
+  | Waiting_answer
+
 type evaluated = Holds | Fails | Too_long
 
 let bitwise_operations =
@@ -382,9 +398,10 @@ type running = {
 let not_running = { template = (fun _ -> None); call = (fun _ -> None) }
 
 (* Which of an obligation's queries is asked: as it was made, or with its
-   bitwise operations defined exactly, and either of those without its
-   callees' definitions. *)
-type variant = Made | Exact | Alone | Alone_exact
+   bitwise operations defined exactly, either of those without its
+   callees' definitions, or with the definitions of the callees whose
+   bodies are hidden here. *)
+type variant = Made | Exact | Alone | Alone_exact | Revealed
 
 (* What the world outside the prover says of a definition's proof: the
    solver, of one of its obligations' queries, by the obligation's index,
@@ -464,6 +481,7 @@ let variant_query ~call (obligation : Translate.obligation) choice variant =
   | Exact -> exactly (made None)
   | Alone -> Option.map (fun query -> made (Some query)) obligation.contracts_alone
   | Alone_exact -> Option.bind obligation.contracts_alone (fun query -> exactly (made (Some query)))
+  | Revealed -> Some (made None)
 
 let answers (teller : teller) (obligations : Translate.obligation list) =
   let solve index (obligation : Translate.obligation) choice =
@@ -509,6 +527,18 @@ let answers (teller : teller) (obligations : Translate.obligation list) =
             | Said _ | No_query -> (
                 match asked Made Exact with Some answer -> Solved answer | None -> Waiting_answer))
         | Some answer, _ -> Solved answer)
+  in
+  (* Where an obligation is not proven, whether seeing the bodies hidden
+     here would prove it, which is all its note about them is for. *)
+  let solve index (obligation : Translate.obligation) choice =
+    match solve index obligation choice with
+    | Solved ((Solver.Counterexample _ | Solver.Out_of_steps) as answer)
+      when obligation.hidden <> [] -> (
+        match teller.solve ~index ~choice ~variant:Revealed ~with_locals:false with
+        | Said Solver.Proven -> Solved_hidden answer
+        | Said _ | No_query -> Solved answer
+        | Untold -> Waiting_answer)
+    | answer -> answer
   in
   let indexed = List.mapi (fun index obligation -> (index, obligation)) obligations in
   let bounded =
@@ -571,19 +601,30 @@ let definition_states teller database (key : Names.key) =
               }
           in
           (* A body that would have defined a callee is hidden from another
-             package's proofs unless the callee is [transparent]. *)
+             package's proofs unless the callee is [transparent]: named where
+             seeing it would prove the obligation. *)
+          let answer, hidden_helps =
+            match answer with
+            | Solved_hidden answer -> (Solved answer, true)
+            | answer -> (answer, false)
+          in
           let hidden =
-            let sentence markable =
-              match List.filter (fun (_, can) -> can = markable) obligation.hidden with
-              | [] -> ""
-              | callees ->
-                  Printf.sprintf " The body of %s is not visible in this package: give it %s."
-                    (String.concat ", " (List.map (fun (name, _) -> "`" ^ name ^ "`") callees))
-                    (if markable then
-                       "an `ensures` that says what is needed, or make it a `public transparent fn`"
-                     else "an `ensures` that says what is needed")
-            in
-            sentence true ^ sentence false
+            if not hidden_helps then ""
+            else
+              let sentence markable =
+                match List.filter (fun (_, can) -> can = markable) obligation.hidden with
+                | [] -> ""
+                | callees ->
+                    Printf.sprintf
+                      " The body of %s is not visible in this package, and with it this would be \
+                       proven: give it %s."
+                      (String.concat ", " (List.map (fun (name, _) -> "`" ^ name ^ "`") callees))
+                      (if markable then
+                         "an `ensures` that says what is needed, or make it a `public transparent \
+                          fn`"
+                       else "an `ensures` that says what is needed")
+              in
+              sentence true ^ sentence false
           in
           ( {
               code = obligation.code;
@@ -591,7 +632,7 @@ let definition_states teller database (key : Names.key) =
               shows = obligation.message;
               failure =
                 (match answer with
-                | Solved Proven | Waiting_answer -> None
+                | Solved Proven | Solved_hidden _ | Waiting_answer -> None
                 | Ran_false -> failed " Running it on this template's text gives `false`."
                 | Ran_too_long ->
                     failed
@@ -662,7 +703,17 @@ let question_request =
     (fun database question ->
       match Query.demand database proof question.definition with
       | Obligations outcome -> (
-          match List.nth_opt outcome.obligations question.index with
+          (* The question of whether seeing the hidden bodies would prove
+             it is asked of the same obligation as its revealed proof made
+             it. *)
+          let obligations =
+            if question.variant = Revealed then
+              match Query.demand database revealed_proof question.definition with
+              | Obligations revealed -> revealed.obligations
+              | Not_proven_here | Unsupported _ -> []
+            else outcome.obligations
+          in
+          match List.nth_opt obligations question.index with
           | Some obligation ->
               let values =
                 List.map fst obligation.values

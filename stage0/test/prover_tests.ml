@@ -3304,6 +3304,13 @@ let () =
          {\n\
          }\n")
 
+(* Notes about hidden bodies *)
+
+let () =
+  test "a failure that seeing hidden bodies would not fix names none of them" (fun () ->
+      let found = message "fn first(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" in
+      if contains found "is not visible in this package" then fail "message %S" found)
+
 (* Definitions under a quantifier *)
 
 let () =

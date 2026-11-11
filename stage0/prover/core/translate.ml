@@ -252,6 +252,9 @@ type context = {
       (** Each type's elements and model as a buffer's, where it is one. *)
   mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
   mutable known_calls : known_call list;  (** Each call running code can give a value. *)
+  reveal : bool;
+      (** Whether callees in other packages are read as their own package reads them, bodies
+          included, to tell whether seeing a hidden body would prove an obligation. *)
   mutable entry : string list;
       (** The symbols of the definition's parameters and [self] as they arrive. *)
   mutable hidden_bodies : (string * (string * bool)) list;
@@ -279,6 +282,10 @@ type context = {
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
           through another's invariant is read once. *)
 }
+
+(* The package a callee is read from, for [source_at]: the definition's,
+   or none, which reads every callee as its own package does. *)
+let reader context = if context.reveal then None else Some (Path.package context.current)
 
 (* Symbols and facts *)
 
@@ -1194,8 +1201,8 @@ let make_contract database path ~own ~others ~body =
   { parts = own :: others; pure; result_kind; definition }
 
 (* The contract of a function, a theorem, or a type's own method. *)
-let function_contract ~reader database (path : Path.t) =
-  Option.bind (source_at ~reader database path) (fun (callee, _, _) ->
+let function_contract ?reader database (path : Path.t) =
+  Option.bind (source_at ?reader database path) (fun (callee, _, _) ->
       Option.map
         (fun own -> make_contract database path ~own ~others:[] ~body:(body_of callee))
         (part_of callee))
@@ -1230,13 +1237,13 @@ let provided_body database (trait : Path.t) name receiver =
 (* A trait method's contract: the [impl]'s own clauses with the trait's,
    when the call is known to reach one [impl], and the trait's alone
    through a bound or [any]. *)
-let method_contract ~reader database (trait : T.trait_reference) name receiver (evidence : evidence)
+let method_contract ?reader database (trait : T.trait_reference) name receiver (evidence : evidence)
     =
   let trait_side = trait_part database trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match source_at ~reader database path with
+      match source_at ?reader database path with
       | Some (callee, _, (Written | Derived)) ->
           Option.map
             (fun own ->
@@ -1803,7 +1810,7 @@ and written_equal context ty a b =
   | Some (((Impl _ : Path.t) as impl), arguments) -> (
       let evidence : evidence = Impl { impl; arguments } in
       match
-        method_contract ~reader:(Path.package context.current) context.database
+        method_contract ?reader:(reader context) context.database
           { trait = equal_trait; trait_arguments = []; associated = [] }
           "equal" Read evidence
       with
@@ -2331,9 +2338,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       | Some (Value given) -> (
           match unwidened given with
           | { kind = Function_value { path; _ }; _ } as named -> (
-              match
-                function_contract ~reader:(Path.package context.current) context.database path
-              with
+              match function_contract ?reader:(reader context) context.database path with
               | Some contract ->
                   check_named_callback context frame call_ passed named path contract values
               | None -> ())
@@ -2473,7 +2478,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       with_contract
         ~substitution_of:(fun _ -> substitution)
         ~instance:(instance_of arguments) path
-        (function_contract ~reader:(Path.package context.current) context.database path)
+        (function_contract ?reader:(reader context) context.database path)
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } -> (
       let arguments = arguments_of type_arguments in
       let self_type = substituted context frame self_type in
@@ -2534,8 +2539,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
           with_contract ~substitution_of
             ~instance:(instance_of (T.Type self_type :: arguments))
             path
-            (method_contract ~reader:(Path.package context.current) context.database trait name
-               receiver evidence))
+            (method_contract ?reader:(reader context) context.database trait name receiver evidence)
+      )
   | Indirect _ ->
       check_callback_requires context frame node through values;
       let frame = havoc_mut frame in
@@ -3531,7 +3536,7 @@ and callback_facts context frame (call_ : call) position known arguments =
   | Function { path; type_arguments } -> (
       match
         Option.bind
-          (source_at ~reader:(Path.package context.current) context.database path)
+          (source_at ?reader:(reader context) context.database path)
           (fun (callee, _, _) -> part_of callee)
       with
       | Some part -> (
@@ -4062,8 +4067,7 @@ and tagged_template context frame (node : expression) texts (made : expression) 
       } -> (
       let path = Path.Method { owner = impl; name; receiver } in
       match
-        method_contract ~reader:(Path.package context.current) context.database trait name receiver
-          evidence
+        method_contract ?reader:(reader context) context.database trait name receiver evidence
       with
       | Some contract ->
           let frame, value_ = operand_value context frame template in
@@ -4526,7 +4530,7 @@ and type_frame context frame source (ty : T.ty) ~self =
 
 (* A function used as a value. *)
 and global_value context frame (node : expression) path type_arguments =
-  match function_contract ~reader:(Path.package context.current) context.database path with
+  match function_contract ?reader:(reader context) context.database path with
   | Some contract -> named_function context frame node path type_arguments contract
   | None -> unsupported (at frame node) "a function the prover cannot read, used as a value"
 
@@ -6819,8 +6823,7 @@ and method_time_bound context (method_ : Path.t) self_type =
               | None -> false
             in
             match
-              method_contract ~reader:(Path.package context.current) context.database reference name
-                receiver
+              method_contract ?reader:(reader context) context.database reference name receiver
                 (Impl { impl; arguments })
             with
             | Some contract when makes_no_potential ->
@@ -8311,7 +8314,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
         | Some signature ->
             ( Some path,
               signature.terminates,
-              function_contract ~reader:(Path.package context.current) context.database path,
+              function_contract ?reader:(reader context) context.database path,
               substitution )
         | None -> (Some path, false, None, substitution))
     | Trait_method { trait; name; receiver; evidence; self_type; _ } ->
@@ -8341,8 +8344,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
         in
         ( Some path,
           signature_terminates context path,
-          method_contract ~reader:(Path.package context.current) context.database trait name
-            receiver evidence,
+          method_contract ?reader:(reader context) context.database trait name receiver evidence,
           [ ({ T.owner = trait.trait; name = "Self" }, T.Type self_type) ] )
     | _ -> (None, false, None, [])
   in
@@ -8474,10 +8476,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
   in
   let impl = match evidence with Impl { impl; _ } -> impl | _ -> assert false in
   let contract =
-    match
-      method_contract ~reader:(Path.package context.current) context.database trait "next" Mut
-        evidence
-    with
+    match method_contract ?reader:(reader context) context.database trait "next" Mut evidence with
     | Some contract -> contract
     | None ->
         unsupported span "a loop over `%s`, whose `next` the prover cannot read"
@@ -8661,8 +8660,9 @@ and havoc_parts context frame =
 
 (* Definitions *)
 
-let new_context database ~home ~current ~terminates ~measures =
+let new_context ?(reveal = false) database ~home ~current ~terminates ~measures =
   {
+    reveal;
     home;
     laws_assumed = [];
     database;
@@ -8839,8 +8839,8 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
    cost clauses are shown at each way it returns. [inherited] is, for an
    [impl]'s method, its trait's clauses, with the substitution they are
    read under and the body the trait provides, if any. *)
-let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (source : source)
-    ~path =
+let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited database
+    (source : source) ~path =
   let parameters, contract, body =
     match source.core.definition with
     | Function { parameters; contract; body = Some body } -> (parameters, contract, body)
@@ -8852,7 +8852,9 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
     || match signature with Some (signature : T.signature) -> signature.terminates | None -> false
   in
   let home = match source.key with Some key -> key | None -> invalid_arg "Translate.function_" in
-  let context = new_context database ~home ~current:path ~terminates ~measures:contract.decreases in
+  let context =
+    new_context ?reveal database ~home ~current:path ~terminates ~measures:contract.decreases
+  in
   let returns_span = definition_span source in
   context.proving <- proof;
   context.parameters <- parameters;
@@ -9204,9 +9206,9 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
 (* The laws of a trait an [impl] writes by hand, each shown for fresh
    values of its parameters, after the bodies of the [proof]s written for
    it. *)
-let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
+let laws ?reveal database (source : source) ~impl ~trait ~for_type ~proofs ~at =
   let home = match source.key with Some key -> key | None -> invalid_arg "Translate.laws" in
-  let context = new_context database ~home ~current:impl ~terminates:false ~measures:[] in
+  let context = new_context ?reveal database ~home ~current:impl ~terminates:false ~measures:[] in
   let start = empty_frame source in
   let substitution = trait_substitution database trait for_type in
   List.iter
@@ -9280,9 +9282,9 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
    it. The type's [cost potential] is well defined and never below zero
    for a value that meets its invariants, which is what makes each
    potential a fact about every valid value. *)
-let type_ database (source : source) ~path =
+let type_ ?reveal database (source : source) ~path =
   let home = match source.key with Some key -> key | None -> invalid_arg "Translate.type_" in
-  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
+  let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Type { invariants; potential; _ } ->
       let ty =
@@ -9313,9 +9315,9 @@ let type_ database (source : source) ~path =
   | _ -> ());
   outcome context
 
-let test database (source : source) ~path =
+let test ?reveal database (source : source) ~path =
   let home = match source.key with Some key -> key | None -> invalid_arg "Translate.test" in
-  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
+  let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Test body -> ignore (block_value context (empty_frame source) body)
   | _ -> ());
@@ -9323,12 +9325,12 @@ let test database (source : source) ~path =
 
 (* A constant's value is well defined, as any expression is: its
    arithmetic stays in range, and its shifts and divisions are valid. *)
-let constant database (source : source) ~path =
+let constant ?reveal database (source : source) ~path =
   let home = match source.key with Some key -> key | None -> invalid_arg "Translate.constant" in
-  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
+  let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Constant defined -> ignore (value context (empty_frame source) defined)
   | _ -> ());
   outcome context
 
-let theorem database source ~path = function_ ~proof:true database source ~path
+let theorem ?reveal database source ~path = function_ ?reveal ~proof:true database source ~path
