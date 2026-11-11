@@ -29,20 +29,20 @@ let wanted =
         in
         from 0
 
-let test name body =
-  if wanted name then begin
-    incr count;
-    current_test := name;
-    (match body () with
-    | () -> ()
-    | exception exception_ ->
-        (* With OCAMLRUNPARAM=b, the backtrace says where. *)
-        fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ()));
-    match Engine.audit_all () with
-    | problems ->
-        List.iter (fun problem -> fail "the code database kept a stale result: %s" problem) problems
-    | exception exception_ -> fail "auditing raised %s" (Printexc.to_string exception_)
-  end
+let always name body =
+  incr count;
+  current_test := name;
+  (match body () with
+  | () -> ()
+  | exception exception_ ->
+      (* With OCAMLRUNPARAM=b, the backtrace says where. *)
+      fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ()));
+  match Engine.audit_all () with
+  | problems ->
+      List.iter (fun problem -> fail "the code database kept a stale result: %s" problem) problems
+  | exception exception_ -> fail "auditing raised %s" (Printexc.to_string exception_)
+
+let test name body = if wanted name then always name body
 
 let finish () =
   if !failures > 0 then begin

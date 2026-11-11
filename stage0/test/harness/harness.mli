@@ -4,6 +4,10 @@ val test : string -> (unit -> unit) -> unit
 (** Runs a test now. An exception it raises is a failure, and so is a result that an engine the test
     made holds and a new engine with the same inputs computes differently. *)
 
+val always : string -> (unit -> unit) -> unit
+(** Runs a test whatever [TRUSS_TEST] names, for a step that every test of the executable needs,
+    such as building the program they run in. *)
+
 val wanted : string -> bool
 (** Whether a test of this name runs: every test does, or with [TRUSS_TEST] set, the tests whose
     names contain it. *)

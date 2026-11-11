@@ -1,3 +1,6 @@
+use standard::files
+use standard::streams
+
 fn shows(path: Path, expected: StringSlice) -> Bool {
   match path.text() {
     Some(text) => text == expected
@@ -155,4 +158,181 @@ test "joining within a directory refuses a part that would leave it" {
   assert refused("/srv/data", part: "a/b/../../..")
   assert refused("/srv/data", part: "/etc/passwd")
   assert refused("data", part: "/x")
+}
+
+fn path_of(text: StringSlice) -> Path {
+  Path.new(text)
+}
+
+test "memory files hold the files of their setup and make the directories above them" {
+  var memory = files::MemoryFiles.new()
+    .with_text(path_of("/etc/app/config.toml"), contents: "port = 80")
+    .with_bytes(path_of("/data/blob"), contents: [1, 2, 3])
+  assert memory.text(path_of("/etc/app/config.toml")) == Some("port = 80")
+  assert memory.contents(path_of("/data/blob")) == Some([1, 2, 3])
+  assert memory.text(path_of("/missing")) is None
+  assert memory.paths().length() == 2
+  provide mut memory {
+    assert FileRead.read_text(path_of("/etc/app/config.toml")) == Ok("port = 80")
+    assert FileRead.read(path_of("/data/blob")) == Ok([1, 2, 3])
+    assert FileRead.read(path_of("/etc/app")) == Err(SystemError.IsADirectory)
+    assert FileRead.read(path_of("/etc/none")) == Err(SystemError.NotFound)
+    assert FileRead.read(path_of("/data/blob/below")) == Err(SystemError.NotADirectory)
+    assert FileRead.metadata(path_of("/etc/app")) is Ok(directory) && directory.is_directory()
+    assert FileRead.metadata(path_of("/data/blob")) is Ok(blob) && blob.is_file() && blob.length == 3
+    assert FileRead.read_text(path_of("etc/./app/../app/config.toml")) == Ok("port = 80")
+  }
+}
+
+test "memory files write, replace, list, and remove" {
+  var memory = files::MemoryFiles.new()
+  provide mut memory {
+    assert FileWrite.write_text(path_of("/notes.txt"), contents: "first") is Ok(_)
+    assert FileWrite.write_text(path_of("/notes.txt"), contents: "second") is Ok(_)
+    assert FileRead.read_text(path_of("/notes.txt")) == Ok("second")
+    assert FileWrite.write_text(path_of("/none/notes.txt"), contents: "x") == Err(SystemError.NotFound)
+    assert FileWrite.create_directory(path_of("/logs")) is Ok(_)
+    assert FileWrite.create_directory(path_of("/logs")) == Err(SystemError.AlreadyExists)
+    assert FileWrite.write(path_of("/logs/a"), contents: [7]) is Ok(_)
+    assert FileRead.list(path_of("/")) is Ok(entries)
+      && entries.length() == 2
+      && entries[0].name == "notes.txt"
+      && entries[0].kind == files::FileKind.File
+      && entries[1].name == "logs"
+      && entries[1].kind == files::FileKind.Directory
+    assert FileRead.list(path_of("/notes.txt")) is Err(NotADirectory)
+    assert FileWrite.remove(path_of("/logs")) == Err(SystemError.DirectoryNotEmpty)
+    assert FileWrite.remove(path_of("/logs/a")) is Ok(_)
+    assert FileWrite.remove(path_of("/logs")) is Ok(_)
+    assert FileWrite.remove(path_of("/logs")) == Err(SystemError.NotFound)
+    assert FileWrite.remove(path_of("/")) == Err(SystemError.PermissionDenied)
+    assert files::is_present(path_of("/notes.txt")) && !files::is_present(path_of("/logs"))
+  }
+}
+
+test "memory files rename a file and a directory with the names below it" {
+  var memory = files::MemoryFiles.new()
+    .with_text(path_of("/project/source/main.truss"), contents: "main")
+    .with_text(path_of("/project/README"), contents: "read")
+    .with_text(path_of("/other"), contents: "other")
+  provide mut memory {
+    assert FileWrite.rename(path_of("/project"), to: path_of("/renamed")) is Ok(_)
+    assert FileRead.read_text(path_of("/renamed/source/main.truss")) == Ok("main")
+    assert FileRead.read_text(path_of("/renamed/README")) == Ok("read")
+    assert FileRead.read(path_of("/project/README")) == Err(SystemError.NotFound)
+    assert FileWrite.rename(path_of("/other"), to: path_of("/renamed/README")) is Ok(_)
+    assert FileRead.read_text(path_of("/renamed/README")) == Ok("other")
+    assert FileWrite.rename(path_of("/renamed"), to: path_of("/renamed/source/inside")) == Err(SystemError.InvalidInput)
+    assert FileWrite.rename(path_of("/renamed/README"), to: path_of("/renamed/source")) == Err(SystemError.IsADirectory)
+    assert FileWrite.rename(path_of("/none"), to: path_of("/else")) == Err(SystemError.NotFound)
+  }
+}
+
+test "memory files follow symbolic links and share the bytes of hard links" {
+  var memory = files::MemoryFiles.new().with_text(path_of("/real/data"), contents: "data")
+  provide mut memory {
+    assert FileWrite.link(path_of("/real"), link: path_of("/alias"), kind: files::LinkKind.Symbolic) is Ok(_)
+    assert FileRead.read_text(path_of("/alias/data")) == Ok("data")
+    assert FileRead.read_link(path_of("/alias")) is Ok(target) && "${target}" == "/real"
+    assert FileRead.read_link(path_of("/real")) == Err(SystemError.InvalidInput)
+    assert FileRead.resolve(path_of("/alias/data")) is Ok(resolved) && "${resolved}" == "/real/data"
+    assert FileRead.metadata(path_of("/alias"), follow_links: false) is Ok(link)
+      && link.kind == files::FileKind.SymbolicLink
+    assert FileRead.metadata(path_of("/alias")) is Ok(followed) && followed.is_directory()
+    assert FileWrite.link(path_of("relative"), link: path_of("/real/loop"), kind: files::LinkKind.Symbolic) is Ok(_)
+    assert FileWrite.link(path_of("loop"), link: path_of("/real/relative"), kind: files::LinkKind.Symbolic) is Ok(_)
+    assert FileRead.read(path_of("/real/loop")) == Err(SystemError.InvalidInput)
+
+    assert FileWrite.link(path_of("/real/data"), link: path_of("/copy"), kind: files::LinkKind.Hard) is Ok(_)
+    assert FileWrite.write_text(path_of("/copy"), contents: "changed") is Ok(_)
+    assert FileRead.read_text(path_of("/real/data")) == Ok("changed")
+    assert FileWrite.remove(path_of("/real/data")) is Ok(_)
+    assert FileRead.read_text(path_of("/copy")) == Ok("changed")
+    assert FileWrite.link(path_of("/real"), link: path_of("/hard"), kind: files::LinkKind.Hard)
+      == Err(SystemError.PermissionDenied)
+    assert FileWrite.link(path_of("/copy"), link: path_of("/alias"), kind: files::LinkKind.Hard)
+      == Err(SystemError.AlreadyExists)
+  }
+}
+
+test "memory files refuse what a file's permissions forbid" {
+  var memory = files::MemoryFiles.new().with_text(path_of("/secret"), contents: "hidden")
+  provide mut memory {
+    assert FileWrite.set_permissions(path_of("/secret"), permissions: files::Permissions.from_mode(0o444)) is Ok(_)
+    assert FileWrite.write_text(path_of("/secret"), contents: "new") == Err(SystemError.PermissionDenied)
+    assert FileWrite.open(path_of("/secret"), mode: files::WriteMode.Append) is Err(PermissionDenied)
+    assert FileRead.read_text(path_of("/secret")) == Ok("hidden")
+    assert FileWrite.set_permissions(path_of("/secret"), permissions: files::Permissions.from_mode(0o200)) is Ok(_)
+    assert FileRead.read_text(path_of("/secret")) == Err(SystemError.PermissionDenied)
+    assert FileRead.open(path_of("/secret")) is Err(PermissionDenied)
+    let stamp = Instant.from_unix_nanoseconds(5000000000)
+    assert FileWrite.set_modified(path_of("/secret"), time: stamp) is Ok(_)
+    assert FileRead.metadata(path_of("/secret")) is Ok(metadata)
+      && metadata.modified == stamp
+      && metadata.permissions.mode() == 0o200
+  }
+}
+
+test "a file opened in memory files reads, writes, seeks, and changes its length through its handle" {
+  var memory = files::MemoryFiles.new()
+  provide mut memory {
+    var file = FileWrite.open(path_of("/log"), mode: files::WriteMode.Update).expect("the file opens")
+    assert mut file.write_all("hello world".bytes()) is Ok(_)
+    assert mut file.seek(streams::Position.FromStart(offset: 6)) == Ok(6)
+    var word: List[UInt8] = []
+    assert mut file.read(mut word, limit: 3) == Ok(3)
+    assert word == [119, 111, 114]
+    assert mut file.write_at(0, bytes: "J".bytes()) == Ok(1)
+    assert mut file.seek(streams::Position.FromEnd(offset: -5)) == Ok(6)
+    assert mut file.seek(streams::Position.FromCurrent(offset: -7)) == Err(SystemError.InvalidInput)
+    assert mut file.set_length(5) is Ok(_)
+    assert file.metadata() is Ok(shortened) && shortened.length == 5
+    assert mut file.set_length(7) is Ok(_)
+    var tail: List[UInt8] = []
+    assert mut file.read_at(4, buffer: mut tail, limit: 10) == Ok(3)
+    assert tail == [111, 0, 0]
+    assert own file.close() is Ok(_)
+
+    var appended = FileWrite.open(path_of("/log"), mode: files::WriteMode.Append).expect("the file opens")
+    assert mut appended.write_all("!".bytes()) is Ok(_)
+    var unread: List[UInt8] = []
+    assert mut appended.read(mut unread, limit: 1) == Err(SystemError.InvalidInput)
+    assert own appended.close() is Ok(_)
+    assert FileWrite.open(path_of("/log"), mode: files::WriteMode.CreateNew) is Err(AlreadyExists)
+    assert FileRead.read(path_of("/log")) == Ok([74, 101, 108, 108, 111, 0, 0, 33])
+
+    var replaced = FileWrite.open(path_of("/log"), mode: files::WriteMode.Replace).expect("the file opens")
+    assert mut replaced.write_all("new".bytes()) is Ok(_)
+    assert own replaced.close() is Ok(_)
+    assert FileRead.read_text(path_of("/log")) == Ok("new")
+  }
+}
+
+test "a file reader over memory files reads lines through Handles" {
+  var memory = files::MemoryFiles.new().with_text(path_of("/fresh"), contents: "line one\r\nline two\nlast")
+  provide mut memory {
+    var reader = FileRead.open(path_of("/fresh")).expect("the file opens")
+    var lines: List[String] = []
+    for line in mut reader.lines() {
+      if line is Ok(text) {
+        mut lines.push(text.copy())
+      }
+    }
+    assert lines == ["line one", "line two", "last"]
+    assert mut reader.read_line() == Ok(None)
+    assert mut reader.seek(streams::Position.FromStart(offset: 10)) == Ok(10)
+    assert mut reader.read_line() == Ok(Some("line two"))
+    assert reader.metadata() is Ok(metadata) && metadata.length == 23
+    assert FileRead.open(path_of("/none")) is Err(NotFound)
+  }
+}
+
+test "a removed file stays readable through a handle that was open" {
+  var memory = files::MemoryFiles.new().with_text(path_of("/gone"), contents: "still here")
+  provide mut memory {
+    var reader = FileRead.open(path_of("/gone")).expect("the file opens")
+    assert FileWrite.remove(path_of("/gone")) is Ok(_)
+    assert FileRead.read(path_of("/gone")) == Err(SystemError.NotFound)
+    assert mut reader.read_line() == Ok(Some("still here"))
+  }
 }
