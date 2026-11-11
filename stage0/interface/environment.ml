@@ -79,19 +79,24 @@ let generic_arguments generics =
       | Capability_generic -> T.Capabilities [ T.Capability_parameter generic.generic ])
     generics
 
+(* The fields of a shape, in the order of their names. The order of
+   declaration is not part of a shape, so reordering a type's fields changes
+   no result that reads the shape. *)
 let fields context (written : field list) =
-  List.filter_map
-    (fun (field : field) ->
-      match field.kind with
-      | Field_declaration { name; type_; default } ->
-          Some
-            {
-              T.field_name = name.text;
-              field_type = Lower.type_ context type_;
-              field_has_default = Option.is_some default;
-            }
-      | Field_error -> None)
-    written
+  List.stable_sort
+    (fun (left : T.field) (right : T.field) -> String.compare left.field_name right.field_name)
+    (List.filter_map
+       (fun (field : field) ->
+         match field.kind with
+         | Field_declaration { name; type_; default } ->
+             Some
+               {
+                 T.field_name = name.text;
+                 field_type = Lower.type_ context type_;
+                 field_has_default = Option.is_some default;
+               }
+         | Field_error -> None)
+       written)
 
 (* The header of a trait, an [impl], or a capability: its own declarations,
    without the methods written inside it. *)
@@ -479,6 +484,47 @@ let interface =
       | Some key ->
           Option.map (fun lowered -> lowered.interface) (Query.demand database lowered key)
       | None -> None)
+
+(* The names of a type's fields in declaration order: of a record under
+   [None], and of each variant of a sum type under its name. A derived
+   [Ordered] compares fields in this order, and nothing else reads it. *)
+let declared_fields =
+  Query.query ~name:"declared_fields" ~phase:Interfaces ~show:Path.show (fun database path ->
+      let names (written : field list) =
+        List.filter_map
+          (fun (field : field) ->
+            match field.kind with
+            | Field_declaration { name; _ } -> Some name.text
+            | Field_error -> None)
+          written
+      in
+      match
+        Option.bind
+          (Query.demand database Summary.key path)
+          (Query.demand database Names.definition)
+      with
+      | Some { kind = Type_definition { body = Fields written; _ }; _ } -> [ (None, names written) ]
+      | Some { kind = Type_definition { body = Variants variants; _ }; _ } ->
+          List.map
+            (fun (variant : variant) ->
+              (Some variant.name.text, names (Option.value ~default:[] variant.fields)))
+            variants
+      | _ -> [])
+
+(* The fields of a variant of a type, or of a record, in declaration order.
+   [name] gives the name of a field. *)
+let in_declared_order database path ~variant ~name fields =
+  match List.assoc_opt variant (Query.demand database declared_fields path) with
+  | Some declared ->
+      let position field =
+        let rec find index = function
+          | [] -> index
+          | found :: rest -> if found = name field then index else find (index + 1) rest
+        in
+        find 0 declared
+      in
+      List.stable_sort (fun left right -> compare (position left) (position right)) fields
+  | None -> fields
 
 (* Built-in types *)
 

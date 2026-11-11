@@ -2791,6 +2791,17 @@ let () =
          {\n\
         \  first < second\n\
          }\n");
+  test "a derived ordering compares fields in declaration order, not in the order of their names"
+    (fun () ->
+      proven
+        "type Entry(weight: Int64, label: Int64)\n\
+        \  derives Equal, Ordered\n\n\
+         fn f(first: Entry, second: Entry) -> Bool\n\
+        \  requires first.weight < second.weight\n\
+        \  ensures result\n\
+         {\n\
+        \  first < second\n\
+         }\n");
   test "a derived ordering of a record falls to the next field on a tie" (fun () ->
       proven
         "type Version(major: Int64, minor: Int64)\n\

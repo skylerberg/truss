@@ -200,6 +200,20 @@ let () =
       let again = computed directory in
       if List.mem "checked(app::main::double)" again then fail "checked double again";
       if not (List.mem "checked(app::other::triple)" again) then fail "did not check triple");
+  test "reordering a type's fields checks no reader of the type again" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      let point fields = "internal type Point(" ^ fields ^ ")\n" in
+      write directory "point.truss" (point "x: Int64, y: Int64");
+      write directory "reader.truss"
+        "use app::point\n\nfn width(of: point::Point) -> Int64 {\n  of.x\n}\n";
+      expect_errors directory 0;
+      clear directory;
+      write directory "point.truss" (point "y: Int64, x: Int64");
+      expect_errors directory 0;
+      let again = computed directory in
+      if List.mem "checked(app::reader::width)" again then fail "checked width again";
+      if List.mem "signature(app::reader::width)" again then fail "lowered width's signature again");
   test "editing one method's body checks only that method again" (fun () ->
       fresh_store ();
       let directory = package () in

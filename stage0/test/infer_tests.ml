@@ -435,6 +435,25 @@ let () =
         "types.unknown_member");
   test "a method from a trait needs no import" (fun () ->
       fine "fn f(items: List[Int64]) -> List[Int64] {\n  items.copy()\n}\n");
+  test "a variant with one field is a function" (fun () ->
+      fine
+        "type Shape =\n\
+        \  | Circle(radius: Int64)\n\
+        \  | Rectangle(width: Int64, height: Int64)\n\n\
+         fn f(make: fn(own Int64) -> Shape) {}\n\n\
+         fn g() {\n\
+        \  f(Shape.Circle)\n\
+         }\n");
+  test "a variant with several fields is not a function, because fields have no order" (fun () ->
+      one_diagnostic
+        "type Shape =\n\
+        \  | Circle(radius: Int64)\n\
+        \  | Rectangle(width: Int64, height: Int64)\n\n\
+         fn f(make: fn(own Int64, own Int64) -> Shape) {}\n\n\
+         fn g() {\n\
+        \  f(Shape.Rectangle)\n\
+         }\n"
+        "types.not_a_value");
   test "a variant is looked up under its type" (fun () ->
       fine
         "type Shape =\n\
