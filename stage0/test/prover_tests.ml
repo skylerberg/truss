@@ -2997,9 +2997,53 @@ let () =
         \  made\n\
          }\n")
 
+(* Bitwise operations *)
+
+let () =
+  test "a bit set below a symbolic width keeps the bits above it clear" (fun () ->
+      proven
+        "theorem a_written_bit_keeps_the_unused_bits_clear(word: UInt64, used: USize, position: \
+         USize)\n\
+        \  requires used < 64\n\
+        \  requires position < used\n\
+        \  requires (word >> used) == 0\n\
+        \  ensures ((word ^ (1 << position)) >> used) == 0\n\
+        \  ensures ((word | (1 << position)) >> used) == 0\n\
+         {\n\
+         }\n\n\
+         theorem a_union_keeps_the_unused_bits_clear(first: UInt64, second: UInt64, used: USize)\n\
+        \  requires used < 64\n\
+        \  requires (first >> used) == 0\n\
+        \  requires (second >> used) == 0\n\
+        \  ensures ((first | second) >> used) == 0\n\
+         {\n\
+         }\n");
+  test "an exclusive or may be below its first operand" (fun () ->
+      not_proven
+        "theorem at_least_the_first(first: UInt64, second: UInt64)\n\
+        \  ensures (first ^ second) >= first\n\
+         {\n\
+         }\n"
+        "prover.ensures")
+
 (* Definitions under a quantifier *)
 
 let () =
+  test "a definition with branches, called under a quantifier on no bound value, is unfolded"
+    (fun () ->
+      proven
+        "fn used_bits(length: USize) -> UInt64\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  if length % 64 == 0 { UInt64.maximum } else { 5 }\n\
+         }\n\n\
+         theorem the_unused_words_hold_five(words: List[UInt64], length: USize)\n\
+        \  requires length % 64 == 1\n\
+        \  requires forall i in 0..words.length() =>\n\
+        \    words[i] == (if i < length { 1 } else { used_bits(length) })\n\
+        \  ensures forall i in 0..words.length() => i >= length ==> words[i] == 5\n\
+         {\n\
+         }\n");
   test "a derived ordering of a one-field record is its field's, for every value" (fun () ->
       proven
         "type Day(count: Int32)\n\

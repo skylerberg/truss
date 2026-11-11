@@ -267,8 +267,10 @@ and `reads` clauses):
   and the slice read again is a view of the new run, which the callee's
   postconditions are about.
 - **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
-  `~`, and shifts are functions the solver knows only by a few facts, such
-  as `0 <= a & b <= a` for unsigned values. An unsigned shift multiplies
+  `~`, and shifts are functions the solver knows only by a few facts. For
+  unsigned values, `a & b` is at most `a` and `b`, `a | b` is at least
+  each, `a | b` and `a ^ b` are at most `a + b`, and each is below every
+  `power(2, k)` that both `a` and `b` are below. An unsigned shift multiplies
   or divides by a power of two: `x << k` is `x * power(2, k)` where that
   fits, and `x >> k` is `x / power(2, k)`. `leading_zeros`,
   `trailing_zeros`, and `count_ones` are at most the width, and a nonzero
