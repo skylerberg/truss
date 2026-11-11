@@ -69,6 +69,10 @@ type obligation = {
       (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
   evaluation : evaluation option;  (** Running code that decides it, where there is any. *)
   known_calls : known_call list;  (** The calls its query mentions that running code can give. *)
+  hidden : (string * bool) list;
+      (** The callees its query mentions whose bodies would define them but are not visible in this
+          package, each with whether it can be marked [transparent], as a method of an [impl]
+          cannot. *)
 }
 
 type outcome = {
@@ -247,6 +251,9 @@ type context = {
       (** Each type's elements and model as a buffer's, where it is one. *)
   mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
   mutable known_calls : known_call list;  (** Each call running code can give a value. *)
+  mutable hidden_bodies : (string * (string * bool)) list;
+      (** Each callee in another package whose body would define it but is not [transparent]: its
+          symbol, with its name and whether it can be marked so. *)
   mutable cursors : (L.term * cursor) list;  (** Where each cursor value came from. *)
   mutable proving : bool;
       (** In a theorem, a [proof] block, or a law's proof, where a [todo] is a hole. *)
@@ -405,11 +412,21 @@ and make_obligation ?evaluation context frame code span message goal =
         mentioned query.goal || List.exists mentioned query.facts)
       context.known_calls
   in
+  let hidden =
+    List.sort_uniq compare
+      (List.filter_map
+         (fun (symbol, name) ->
+           if L.mentions [ symbol ] query.goal || List.exists (L.mentions [ symbol ]) query.facts
+           then Some name
+           else None)
+         context.hidden_bodies)
+  in
   {
     code;
     span;
     message;
     cited = None;
+    hidden;
     query;
     contracts_alone;
     values = context.values;
@@ -948,9 +965,16 @@ type found = Written | Derived | Provided
    is read under: the [impl]'s, for the form of the trait's method that the
    [impl] leaves to it. A caller reads its callee's specification, whose
    body is there only where the callee is a function in the logic, so
-   editing another body proves no caller again. *)
-let source_at database (path : Path.t) =
-  match Query.demand database Infer.specification_of_path path with
+   editing another body proves no caller again; a caller in another
+   package, [reader], reads the specification the callee's package
+   exports, whose body is there only for a [transparent] function. *)
+let source_at ?reader database (path : Path.t) =
+  let specification =
+    match reader with
+    | Some package when package <> Path.package path -> Infer.exported_specification_of_path
+    | _ -> Infer.specification_of_path
+  in
+  match Query.demand database specification path with
   | None -> None
   | Some (core, substitution) -> (
       if Option.is_some (Query.demand database Infer.derived path) then
@@ -1166,8 +1190,8 @@ let make_contract database path ~own ~others ~body =
   { parts = own :: others; pure; result_kind; definition }
 
 (* The contract of a function, a theorem, or a type's own method. *)
-let function_contract database (path : Path.t) =
-  Option.bind (source_at database path) (fun (callee, _, _) ->
+let function_contract ~reader database (path : Path.t) =
+  Option.bind (source_at ~reader database path) (fun (callee, _, _) ->
       Option.map
         (fun own -> make_contract database path ~own ~others:[] ~body:(body_of callee))
         (part_of callee))
@@ -1202,12 +1226,13 @@ let provided_body database (trait : Path.t) name receiver =
 (* A trait method's contract: the [impl]'s own clauses with the trait's,
    when the call is known to reach one [impl], and the trait's alone
    through a bound or [any]. *)
-let method_contract database (trait : T.trait_reference) name receiver (evidence : evidence) =
+let method_contract ~reader database (trait : T.trait_reference) name receiver (evidence : evidence)
+    =
   let trait_side = trait_part database trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match source_at database path with
+      match source_at ~reader database path with
       | Some (callee, _, (Written | Derived)) ->
           Option.map
             (fun own ->
@@ -1774,7 +1799,7 @@ and written_equal context ty a b =
   | Some (((Impl _ : Path.t) as impl), arguments) -> (
       let evidence : evidence = Impl { impl; arguments } in
       match
-        method_contract context.database
+        method_contract ~reader:(Path.package context.current) context.database
           { trait = equal_trait; trait_arguments = []; associated = [] }
           "equal" Read evidence
       with
@@ -2302,7 +2327,9 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       | Some (Value given) -> (
           match unwidened given with
           | { kind = Function_value { path; _ }; _ } as named -> (
-              match function_contract context.database path with
+              match
+                function_contract ~reader:(Path.package context.current) context.database path
+              with
               | Some contract ->
                   check_named_callback context frame call_ passed named path contract values
               | None -> ())
@@ -2442,7 +2469,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       with_contract
         ~substitution_of:(fun _ -> substitution)
         ~instance:(instance_of arguments) path
-        (function_contract context.database path)
+        (function_contract ~reader:(Path.package context.current) context.database path)
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } -> (
       let arguments = arguments_of type_arguments in
       let self_type = substituted context frame self_type in
@@ -2503,7 +2530,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
           with_contract ~substitution_of
             ~instance:(instance_of (T.Type self_type :: arguments))
             path
-            (method_contract context.database trait name receiver evidence))
+            (method_contract ~reader:(Path.package context.current) context.database trait name
+               receiver evidence))
   | Indirect _ ->
       check_callback_requires context frame node through values;
       let frame = havoc_mut frame in
@@ -3451,7 +3479,9 @@ and callback_facts context frame (call_ : call) position known arguments =
   match call_.callee with
   | Function { path; type_arguments } -> (
       match
-        Option.bind (source_at context.database path) (fun (callee, _, _) -> part_of callee)
+        Option.bind
+          (source_at ~reader:(Path.package context.current) context.database path)
+          (fun (callee, _, _) -> part_of callee)
       with
       | Some part -> (
           match List.nth_opt part.parameters position with
@@ -3980,7 +4010,10 @@ and tagged_template context frame (node : expression) texts (made : expression) 
         _;
       } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match method_contract context.database trait name receiver evidence with
+      match
+        method_contract ~reader:(Path.package context.current) context.database trait name receiver
+          evidence
+      with
       | Some contract ->
           let frame, value_ = operand_value context frame template in
           let own = List.hd contract.parts in
@@ -4442,7 +4475,7 @@ and type_frame context frame source (ty : T.ty) ~self =
 
 (* A function used as a value. *)
 and global_value context frame (node : expression) path type_arguments =
-  match function_contract context.database path with
+  match function_contract ~reader:(Path.package context.current) context.database path with
   | Some contract -> named_function context frame node path type_arguments contract
   | None -> unsupported (at frame node) "a function the prover cannot read, used as a value"
 
@@ -5382,6 +5415,16 @@ and contract_call context frame (node : expression) (call_ : call) path contract
             ~model:result_type symbol
       | _ -> ());
       applied_as := Some (symbol, sorts);
+      (if
+         Path.package path <> Path.package context.current
+         && (not (List.mem_assoc symbol context.hidden_bodies))
+         &&
+         match Interface.Impls.signature context.database path with
+         | Some signature -> T.body_is_definition signature && not signature.transparent
+         | None -> false
+       then
+         let markable = match path with Method { owner = Impl _; _ } -> false | _ -> true in
+         context.hidden_bodies <- (symbol, (Path.show path, markable)) :: context.hidden_bodies);
       let term = L.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
       note_known_call context call_ path term own_arguments;
@@ -5460,6 +5503,64 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                       L.Forall (parameters, L.equal (L.Apply (symbol, inputs)) defined)
                       :: context.facts
                 | None -> ())
+        | None -> ())
+    | None
+      when List.for_all (fun (part : part) -> part.requires = []) contract.parts
+           && List.exists (L.mentions after.bound) own_arguments -> (
+        (* Known by its contract alone and called on a quantifier's bound
+           values, the callee's [ensures] is stated once, for every valid
+           argument. *)
+        match !applied_as with
+        | Some (symbol, sorts) ->
+            once context ("contract of " ^ symbol) (fun () ->
+                let parameters =
+                  List.mapi (fun index sort -> (Printf.sprintf "ensured.%d" index, sort)) sorts
+                in
+                let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
+                let outside =
+                  {
+                    after with
+                    bound = List.map fst parameters;
+                    binders = [];
+                    condition = L.Boolean true;
+                    checking = false;
+                  }
+                in
+                let mark = context.fresh in
+                let valid =
+                  L.conjunction
+                    (List.map2
+                       (fun ((parameter : Core.parameter), _) input ->
+                         validity context outside ~assuming:true
+                           (T.substitute (substitution_of own) parameter.type_)
+                           input)
+                       own_bound inputs)
+                in
+                let ensured =
+                  List.concat_map
+                    (fun (part : part) ->
+                      let inside =
+                        {
+                          (part_frame outside part
+                             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+                             ~substitution:(substitution_of part))
+                          with
+                          result = Some (L.Apply (symbol, inputs));
+                          checking = false;
+                        }
+                      in
+                      List.filter_map
+                        (fun clause ->
+                          match snd (clause_value context inside clause) with
+                          | term when not (made_since context mark term) -> Some term
+                          | _ -> None
+                          | exception (Unsupported _ | Foreign_unsupported _) -> None)
+                        part.ensures)
+                    contract.parts
+                in
+                if ensured <> [] && not (made_since context mark valid) then
+                  context.facts <-
+                    L.Forall (parameters, L.( ==> ) valid (L.conjunction ensured)) :: context.facts)
         | None -> ())
     | _ -> ());
     (* The [ensures], after, where the [requires] held: [mut] parameters
@@ -5633,8 +5734,13 @@ and note_known_call context (call_ : call) path term arguments =
   in
   let values = List.filter_map literal arguments in
   match Interface.Impls.signature context.database path with
-  | Some ({ specification_only = false; generics = []; output = Returns result; _ } : T.signature)
+  | Some
+      ({ specification_only = false; generics = []; output = Returns result; _ } as signature :
+        T.signature)
     when direct
+         (* Running a callee reads its body, which a caller in another
+            package may read only when it is [transparent]. *)
+         && (Path.package path = Path.package context.current || signature.transparent)
          && List.length values = List.length arguments
          && (is_numeric result || is_bool result)
          && not (T.equal result T.Integer) ->
@@ -7978,7 +8084,10 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
         in
         match Interface.Impls.signature context.database path with
         | Some signature ->
-            (Some path, signature.terminates, function_contract context.database path, substitution)
+            ( Some path,
+              signature.terminates,
+              function_contract ~reader:(Path.package context.current) context.database path,
+              substitution )
         | None -> (Some path, false, None, substitution))
     | Trait_method { trait; name; receiver; evidence; self_type; _ } ->
         (* A trait's yielding method, read by its [impl]'s contract where the
@@ -8007,7 +8116,8 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
         in
         ( Some path,
           signature_terminates context path,
-          method_contract context.database trait name receiver evidence,
+          method_contract ~reader:(Path.package context.current) context.database trait name
+            receiver evidence,
           [ ({ T.owner = trait.trait; name = "Self" }, T.Type self_type) ] )
     | _ -> (None, false, None, [])
   in
@@ -8139,7 +8249,10 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
   in
   let impl = match evidence with Impl { impl; _ } -> impl | _ -> assert false in
   let contract =
-    match method_contract context.database trait "next" Mut evidence with
+    match
+      method_contract ~reader:(Path.package context.current) context.database trait "next" Mut
+        evidence
+    with
     | Some contract -> contract
     | None ->
         unsupported span "a loop over `%s`, whose `next` the prover cannot read"
@@ -8360,6 +8473,7 @@ let new_context database ~home ~current ~terminates ~measures =
     buffers = Hashtbl.create 16;
     equalities = [];
     known_calls = [];
+    hidden_bodies = [];
     cursors = [];
     proving = false;
     holes = [];
