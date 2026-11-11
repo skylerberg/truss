@@ -527,3 +527,70 @@ test "signing keys and agreement keys are drawn from the random capability" {
       && left.expose() == right.expose()
   }
 }
+
+fn stepped_bytes(count: USize, start: USize, modulus: USize) -> List[UInt8] {
+  var bytes: List[UInt8] = []
+  for index in 0..count {
+    match UInt8.try_from(start + index % modulus) {
+      Ok(byte) => mut bytes.push(byte)
+      Err(_) => mut bytes.push(0)
+    }
+  }
+  bytes
+}
+
+fn password_hash_hex(password: USize, salt: USize, effort: cryptography::PasswordCost) -> String {
+  let hash = cryptography::hash_password(
+    stepped_bytes(password, start: 48, modulus: 77),
+    salt: stepped_bytes(salt, start: 160, modulus: 53),
+    effort: effort,
+  )
+  hex::encode(hash[..])
+}
+
+test "hash_password gives the bytes that OpenSSL's Argon2id produces" {
+  assert password_hash_hex(
+    8,
+    salt: 8,
+    effort: cryptography::PasswordCost(memory_kibibytes: 8, iterations: 1, parallelism: 1),
+  )
+    == "9f5cbedabc0b5a5fc68c616d931cf7d0d41808260123b081e38401a058effc7e"
+  assert password_hash_hex(
+    0,
+    salt: 8,
+    effort: cryptography::PasswordCost(memory_kibibytes: 8, iterations: 1, parallelism: 1),
+  )
+    == "dc1a6bd586d35fb0e40abdd27db6da14335f8c04c64b990d21acd36a0b583d11"
+  assert password_hash_hex(
+    11,
+    salt: 16,
+    effort: cryptography::PasswordCost(memory_kibibytes: 32, iterations: 3, parallelism: 1),
+  )
+    == "ec96795655b389788c0aa55be337ea66200c20686f259310fc349e23ab185400"
+}
+
+test "hash_password with several lanes and a memory size that is not a multiple of the lanes" {
+  assert password_hash_hex(
+    32,
+    salt: 16,
+    effort: cryptography::PasswordCost(memory_kibibytes: 64, iterations: 2, parallelism: 2),
+  )
+    == "0d99ad0cab8a280629027b813e74bd323ce823924c3bea6b627d121d2ab7b04b"
+  assert password_hash_hex(
+    100,
+    salt: 33,
+    effort: cryptography::PasswordCost(memory_kibibytes: 71, iterations: 2, parallelism: 3),
+  )
+    == "4216edbca32c089f1f00079b4516e65488c8b2752b09405ccdc8aa7c61bfdfdf"
+  assert password_hash_hex(
+    16,
+    salt: 16,
+    effort: cryptography::PasswordCost(memory_kibibytes: 256, iterations: 2, parallelism: 4),
+  )
+    == "ff6f4f5585fe87450ec7fc361494ed733c4e0e583099d584c3d5d8333c7daa99"
+}
+
+test "hash_password with the default cost" {
+  assert password_hash_hex(16, salt: 16, effort: cryptography::PasswordCost())
+    == "b2fe92bef9e06d5c129e728b2e78965e2180818a2a9ae126914187564ecde44d"
+}
