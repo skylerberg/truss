@@ -210,7 +210,9 @@ public fn StringSlice.to_string(self) -> String
   String(storage: own output)
 }
 
-public fn TextBuilder.new() -> TextBuilder {
+public fn TextBuilder.new() -> TextBuilder
+  cost time O(1)
+{
   TextBuilder(text: String(storage: intrinsic::storage_empty()))
 }
 
@@ -220,31 +222,45 @@ public fn TextBuilder.write(mut self, text: StringSlice)
   mut self.text.push(text)
 }
 
-public fn TextBuilder.finish(own self) -> String {
+public fn TextBuilder.finish(own self) -> String
+  cost time O(1)
+{
   self.text
 }
 
-internal fn TextBuilder.write_byte(mut self, byte: UInt8) {
+internal fn TextBuilder.write_byte(mut self, byte: UInt8)
+  cost time finite
+{
   writing::byte(mut self.text.storage, value: byte)
 }
 
-internal fn TextBuilder.write_float32(mut self, value: Float32) {
+internal fn TextBuilder.write_float32(mut self, value: Float32)
+  cost time finite
+{
   writing::float32(mut self.text.storage, value: value)
 }
 
-internal fn TextBuilder.write_float64(mut self, value: Float64) {
+internal fn TextBuilder.write_float64(mut self, value: Float64)
+  cost time finite
+{
   writing::float64(mut self.text.storage, value: value)
 }
 
-public fn TextBuilder.write_character(mut self, character: Character) {
+public fn TextBuilder.write_character(mut self, character: Character)
+  cost time finite
+{
   writing::character(mut self.text.storage, value: character)
 }
 
-internal fn TextBuilder.write_unsigned(mut self, value: UInt64) {
+internal fn TextBuilder.write_unsigned(mut self, value: UInt64)
+  cost time finite
+{
   writing::unsigned(mut self.text.storage, value: value)
 }
 
-internal fn TextBuilder.write_signed(mut self, value: Int64) {
+internal fn TextBuilder.write_signed(mut self, value: Int64)
+  cost time finite
+{
   writing::signed(mut self.text.storage, value: value)
 }
 

@@ -247,7 +247,9 @@ impl Default for Duration {
   }
 }
 
-internal fn write_fixed_point(output: mut TextBuilder, whole: UInt64, fraction: UInt64, digits: USize) {
+internal fn write_fixed_point(output: mut TextBuilder, whole: UInt64, fraction: UInt64, digits: USize)
+  cost time finite
+{
   whole.display(mut output)
   if fraction != 0 {
     mut output.write(".")
@@ -829,7 +831,9 @@ internal fn DateTime.instant(self, offset_seconds: Int64) -> Option[Instant]
   }
 }
 
-internal fn write_fraction(output: mut TextBuilder, value: UInt64, digits: USize) {
+internal fn write_fraction(output: mut TextBuilder, value: UInt64, digits: USize)
+  cost time finite
+{
   let padded = value.format(minimum_digits: digits)
   let text = padded.slice()
   var end = text.length()
@@ -1332,6 +1336,7 @@ internal fn iso_week(ordinal: Int64, weekday: Int64, year: Int64) -> Int64
 
 internal fn write_two_digits(output: mut TextBuilder, value: Int64)
   requires 0 <= value && value <= 99
+  cost time finite
 {
   if value < 10 {
     mut output.write("0")

@@ -109,6 +109,36 @@ let () =
          }\n")
 
 let () =
+  test "a display that ends is proven, and a function with a time clause calls it" (fun () ->
+      proven
+        "type Point(x: Int64, y: Int64)\n\n\
+         impl Display for Point {\n\
+        \  fn display(self, output: mut TextBuilder) {\n\
+        \    mut output.write(\"(\")\n\
+        \    self.x.display(mut output)\n\
+        \    mut output.write(\", \")\n\
+        \    self.y.display(mut output)\n\
+        \    mut output.write(\")\")\n\
+        \  }\n\
+         }\n\n\
+         fn shown(point: Point) -> String\n\
+        \  cost time finite\n\
+         {\n\
+        \  var output = TextBuilder.new()\n\
+        \  point.display(mut output)\n\
+        \  own output.finish()\n\
+         }\n");
+  test "a display that may not end is rejected" (fun () ->
+      Support.one_diagnostic ~check
+        "type Stuck(value: Int64)\n\n\
+         impl Display for Stuck {\n\
+        \  fn display(self, output: mut TextBuilder) {\n\
+        \    while true {}\n\
+        \  }\n\
+         }\n"
+        "prover.termination")
+
+let () =
   test "two strings with the same text are equal" (fun () ->
       proven
         "fn same() -> Bool\n\
