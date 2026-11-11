@@ -518,6 +518,30 @@ state that uses it.
 - **A package being worked on is part of its worktree's state,** which is a
   base and a difference like any state.
 
+### The standard library's own state
+
+Work on the standard library edits the sources of a fixed base, and the
+library is built into the compiler, so each edit makes a new compiler
+identity, under which no kept fact is found. `Database.open_library` opens
+the library as a state of its own instead:
+
+- **The `standard` package is the engine's own inputs,** over no base, set
+  from the sources built into the compiler. The text of a module that is
+  gone from the sources is removed.
+- **Its facts are kept under the compiler's version,** not its identity. The
+  version is a digest of the compiler's source and of what it is built
+  with: the OCaml compiler, the build profile, the target, and the linked
+  libraries. Tests, tools, and the library's text are left out. So an edit
+  to the library keeps the version, and the state computes only what the
+  edit reached; a change to the compiler gives a new version.
+- **The state is opened from a pointer the caller names,** so each caller,
+  such as each share of the library's proofs, keeps a state of its own.
+- **It is folded when it is opened,** as a command run in its own process
+  folds a session.
+
+A user's session does not use this: there the library never changes, and is
+a fixed base.
+
 ## The store
 
 The store lives in `$TRUSS_CACHE`, else `$XDG_CACHE_HOME/truss`, else
@@ -533,7 +557,7 @@ the machine. It holds:
 | Object files | Their key, as CODEGEN.md describes | `objects/`, one file each, since a linker reads them by path |
 | A registry package's files | The hash of the files, as SYNTAX.md's "The lock file" defines it | `packages/`, one directory each |
 | A solver's answers | Their key, as PROVER.md describes | `proofs/`, one file each |
-| Pointers | A worktree's session | `pointers/` |
+| Pointers | A worktree's session, or a named state of the standard library | `pointers/` |
 | The compiler's identity, the list of worktrees, and the background process's lock and log | | the top, and `servers/` |
 
 Everything but a pointer is named by what it holds or what made it, and
@@ -604,7 +628,7 @@ minutes it checks, and when the segments take more:
 - **What a live state names is kept:** the artifacts of its chain, and every
   value they name. A worktree's state is live while its directory exists,
   and its pointer is removed once the directory is gone. The standard
-  library's artifact is kept.
+  library's artifact is kept, and so is each named state of the library.
 - **Results are kept while in use:** those this process read or added, and
   those in segments written in the last week.
 - **Survivors are copied into a new segment, and the old ones deleted.**

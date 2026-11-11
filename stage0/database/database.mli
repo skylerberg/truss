@@ -209,6 +209,23 @@ val trial : session -> Engine.t
     as a rename, before any file is written. It shares with the session everything but what the
     trial changes. *)
 
+(** {1 The standard library as a state of its own} *)
+
+type library
+
+val open_library : ?modules:(Path.module_ * string) list -> string -> (library, string) result
+(** The standard library as a state of its own, for working on the library: the [standard] package
+    is the engine's own inputs, over no base, set from [modules], which are the sources built into
+    this compiler unless given. The state is opened from the pointer of that name, so each caller
+    that gives its own name keeps its own state, and is kept under {!Compiler_version.digest}, so it
+    is found again after an edit to the library, and by a test as by the command line. An error says
+    that another process has the state open. *)
+
+val library_engine : library -> Engine.t
+
+val save_library : library -> unit
+(** Writes what changed in a library's state to the store, and points its name at it. *)
+
 val reset : unit -> unit
 (** Saves and closes every session and the store, so that the next request starts as a new process
     would. *)
