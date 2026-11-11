@@ -34,4 +34,4 @@ let holes_reached (project : Project.t) main =
               Some declaration.path
           | _ -> None)
         (Query.demand project.context Resolve.Names.declarations module_))
-    (Project.modules project)
+    (Project.program_modules project)

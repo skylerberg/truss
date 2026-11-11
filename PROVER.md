@@ -101,11 +101,12 @@ Every fact the prover must show, and where it comes from:
 | `unreachable` is never reached | Each `unreachable`, including the ones after guards that the type checker added |
 | A call's `requires` holds | Each call, including calls to theorems in proofs and calls in specifications |
 | An `ensures` holds | Each way a function returns, and for a lending or yielding method, each `yield` and each way it ends |
-| A type's invariant holds | Each value built or updated with `with`, each argument and returned value, each `mut` parameter when its function ends, and each `yield` where a method may end |
+| A type's invariant holds | Each value built or updated with `with`, each argument and returned value, each `mut` parameter when its function ends, each part handed out by a `yield`, each part lent `mut` when the lend ends, each value a loop changes at the end of each iteration, and each `yield` where a method may end |
 | A loop invariant holds | On entry to the loop, and at the end of each iteration |
 | A loop's `cost` holds | On entry to the loop, and at the end of each iteration |
 | A callback's `requires` holds | Each call through a function-typed parameter whose type has a `requires` |
-| A function passed as a callback accepts what it is promised | Each named function passed where a parameter's type has a `requires`: that `requires` implies the function's own |
+| A function passed as a callback accepts what it is promised | Each named function or function-typed parameter passed where a parameter's type has a `requires`: that `requires` implies the function's own |
+| A function value accepts every argument of its type | Each function with a `requires`, and each function-typed parameter whose type has one, used as a value anywhere but in a call or passed to a parameter |
 | Recursion and loops end | Each call in a cycle of the call graph, and each loop, in a function with a `time` clause |
 | A cost clause holds | Each function with one (see [Costs](#costs)) |
 | A law holds | Each law of each trait an `impl` implements by hand |
@@ -119,7 +120,9 @@ Every fact the prover must show, and where it comes from:
 
 An obligation names its kind, its definition, and its position within the
 definition, as every result does. A test's obligations are proven like any
-function's; that its run checks them too changes nothing here.
+function's; that its run checks them too changes nothing here. A
+constant's value has the obligations of any expression, so `1 << 8` as a
+`UInt8` is reported where the constant is defined.
 
 - **An index is a call.** `items[i]` reaches the `impl` of `Index` for its
   collection, whose `requires` is the bound, so every index into a `List`
@@ -1289,7 +1292,11 @@ test the prover itself:
   builds tests and `truss run` with run-time checks of what the prover
   proves, and `truss build` without them, as CODEGEN.md describes.
 - **The build** refuses a package with an obligation that is not proven,
-  and a program whose `main` can reach a hole in a proof.
+  and a program whose `main` can reach a hole in a proof. A dependency's
+  proofs are the program's too, since the build leaves out the run-time
+  checks they stand for: `truss check` and `truss build` prove every package
+  the command's packages depend on, but the standard library, whose proofs
+  are checked where it is released.
 
 ## Not built
 

@@ -2928,6 +2928,14 @@ let () =
          }\n"
         "prover.termination")
 
+(* Constants *)
+
+let () =
+  test "a constant's value is well defined" (fun () ->
+      not_proven "let shifted: UInt8 = 1 << 8\n" "prover.shift");
+  test "a constant whose value is in range proves" (fun () ->
+      proven "let shifted: UInt8 = 1 << 7\n")
+
 (* Concurrent code *)
 
 let early_return ensures =

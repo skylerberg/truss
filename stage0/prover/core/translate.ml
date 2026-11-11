@@ -8634,4 +8634,14 @@ let test database (source : source) ~path =
   | _ -> ());
   outcome context
 
+(* A constant's value is well defined, as any expression is: its
+   arithmetic stays in range, and its shifts and divisions are valid. *)
+let constant database (source : source) ~path =
+  let home = match source.key with Some key -> key | None -> invalid_arg "Translate.constant" in
+  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
+  (match source.core.definition with
+  | Constant defined -> ignore (value context (empty_frame source) defined)
+  | _ -> ());
+  outcome context
+
 let theorem database source ~path = function_ ~proof:true database source ~path
