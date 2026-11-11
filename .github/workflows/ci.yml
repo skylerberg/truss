@@ -220,16 +220,58 @@ jobs:
           ASAN_OPTIONS: detect_leaks=0
         run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune test --force stage0/test/codegen
 
-      # The programs that run on several threads, again under
-      # ThreadSanitizer, which the other sanitizers cannot run beside. The
-      # tests of tasks and shared values that run on threads have "on
-      # threads" in their names.
+      - if: github.event_name == 'push'
+        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+
+      - if: github.event_name == 'push'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/truss-objects
+          key: sanitized-objects-${{ github.sha }}
+
+  # The programs that run on several threads, again under ThreadSanitizer,
+  # which the other sanitizers cannot run beside: a report is a data race in
+  # the runtime or in generated code. The tests of tasks and shared values
+  # that run on threads have "on threads" in their names. These tests take
+  # as long as the other sanitizers' do, so they run on a runner of their
+  # own. None of them runs the prover, so the job installs no solver.
+  thread-sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - id: opam
+        uses: ./.github/actions/opam
+        with:
+          opam-version: ${{ env.OPAM_VERSION }}
+          opam-sha256: ${{ env.OPAM_SHA256 }}
+          ocaml-version: ${{ env.OCAML_VERSION }}
+
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/dune
+          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+          restore-keys: dune-${{ steps.opam.outputs.key }}-
+
+      # ThreadSanitizer's flag is part of an object's key, so these objects
+      # are this job's own. A run with no cache of this job's yet starts
+      # from the other sanitizers', which held these objects while the two
+      # were one job.
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/truss-objects
+          key: thread-sanitized-objects-${{ github.sha }}
+          restore-keys: |
+            thread-sanitized-objects-
+            sanitized-objects-
+
       - name: Test programs on threads under ThreadSanitizer
         env:
           TRUSS_SANITIZE: thread
           TRUSS_OBJECT_CACHE: /home/runner/.cache/truss-objects
-        working-directory: _build/default/stage0/test/codegen
         run: |
+          opam exec -- dune build stage0/test/codegen/parallel_tests.exe stage0/test/codegen/shared_tests.exe stage0/test/codegen/concurrent_tests.exe
+          cd _build/default/stage0/test/codegen
           ./parallel_tests.exe
           TRUSS_TEST="on threads" ./shared_tests.exe
           TRUSS_TEST="on threads" ./concurrent_tests.exe
@@ -241,4 +283,4 @@ jobs:
         uses: actions/cache/save@v6.1.0
         with:
           path: ~/.cache/truss-objects
-          key: sanitized-objects-${{ github.sha }}
+          key: thread-sanitized-objects-${{ github.sha }}
