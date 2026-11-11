@@ -110,6 +110,17 @@ let impls_used database impls (callee : Core.callee) =
       | None -> [])
   | _ -> []
 
+(* Whether a call of a trait's method is a call of the trait's method
+   itself, as a node: through [any], whose type is not known, or through a
+   bound on [Self], in a trait's provided body. A call through a bound on
+   another type parameter reaches the [impl] for the type the parameter is
+   given where the generic code is used, which that use's edges name. *)
+let dispatched (called : Core.callee) =
+  match called with
+  | Trait_method { evidence = Dynamic; _ } -> true
+  | Trait_method { evidence = Bound; self_type = Parameter { name = "Self"; _ }; _ } -> true
+  | _ -> false
+
 (* The edges of one body: each call, each function named as a value, and
    each [impl] an [any] value is made with. *)
 let edges database impls (body : Core.block) =
@@ -128,8 +139,9 @@ let edges database impls (body : Core.block) =
             impls
         in
         add [ Calls (if writes then own else Path.Method { owner = trait.trait; name; receiver }) ]
-    | Trait_method { trait; name; receiver; _ } ->
+    | Trait_method { trait; name; receiver; _ } when dispatched called ->
         add [ Calls (Path.Method { owner = trait.trait; name; receiver }) ]
+    | Trait_method _ -> ()
     | Capability_method _ | Intrinsic _ | Indirect _ -> ()
   in
   Core_walk.block
@@ -208,7 +220,7 @@ let successors database ~packages (path : Path.t) =
     | None -> []
   in
   let targets = function Calls path -> [ path ] | Uses_impl impl -> impl_methods database impl in
-  let dispatched =
+  let implementations =
     match path with
     | Method { owner; name; receiver } -> (
         match Query.demand database Interface.Environment.interface owner with
@@ -226,7 +238,7 @@ let successors database ~packages (path : Path.t) =
         | _ -> [])
     | _ -> []
   in
-  List.concat_map targets own @ dispatched
+  List.concat_map targets own @ implementations
 
 (* Whether [from] can reach [target] along the graph's edges, in the
    program [package] is part of. *)

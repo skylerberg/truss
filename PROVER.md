@@ -851,12 +851,17 @@ cycle can only be seen across definitions:
   as DESIGN.md's [Termination](DESIGN.md#termination) describes. An `impl`
   used where a bound needs it is an edge from the code that uses it to every
   method of that `impl`.
-- **A trait's method is a node.** A call through a bound or `any` is an
-  edge to it, and it has an edge to the trait's provided body and to each
-  `impl`'s own method of that name. A call that reaches an `impl` that
-  leaves the method to its trait is an edge to the provided body. So
-  provided methods that call each other, and a method that reaches itself
-  through `any`, are cycles.
+- **A trait's method is a node.** A call through `any`, or through a
+  bound on `Self` in a trait's provided body, is an edge to it, and it has
+  an edge to the trait's provided body and to each `impl`'s own method of
+  that name. A call that reaches an `impl` that leaves the method to its
+  trait is an edge to the provided body. So provided methods that call
+  each other, and a method that reaches itself through `any`, are cycles.
+  A call through a bound on another type parameter is no edge of its own:
+  it reaches the `impl` for the type the parameter is given where the
+  generic code is used, which is an edge there. Code is made for each type
+  a generic function is used with, so `List[Element].equal` calling
+  `Element.equal` reaches the `equal` of a smaller type, not itself.
 - **Cycles can cross packages through traits.** A dependency's code
   reaches this package's code only through a trait's method, so a walk
   reads each node's edges from its own package's graph, and a trait's

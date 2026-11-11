@@ -1706,12 +1706,22 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
    [&&] keeps what its right side binds, as an [is] does. *)
 and short_circuit context frame right ~runs ~otherwise ~binds combine =
   let after, right_value = value context (restrict frame runs) right in
+  (* What the right side spends is an upper bound on what the expression
+     spends, which is all a counter that bounds from above needs; one that
+     counts exactly needs the two paths apart. *)
+  let counts_exactly =
+    List.exists (fun (counter : Costs.counter) -> counter.counting = Exactly) context.counters
+  in
   let changed =
     Locals.exists (fun id term -> Locals.find_opt id after.locals <> Some term) frame.locals
-    || after.self <> frame.self || after.spent <> frame.spent
+    || after.self <> frame.self
+    || (counts_exactly && after.spent <> frame.spent)
   in
   if not changed then
-    Some ((if binds then { after with condition = frame.condition } else frame), combine right_value)
+    Some
+      ( (if binds then { after with condition = frame.condition }
+         else { frame with spent = after.spent }),
+        combine right_value )
   else
     match
       join context ~value_type:T.bool
@@ -2431,6 +2441,20 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             term
         | _ -> arrive context frame "result" result_type
       in
+      (* A function value meets its type's invariants where it returns, as
+         a function does, so its result and what it leaves in a [mut]
+         argument are valid. *)
+      assume_valid context frame result_type result;
+      List.iter
+        (fun (passed : passed) ->
+          match (passed.mode, passed.operand) with
+          | T.Mut, Some operand -> (
+              try
+                assume_valid context frame passed.type_
+                  (snd (operand_value context { frame with checking = false } operand))
+              with Unsupported _ | Foreign_unsupported _ -> ())
+          | _ -> ())
+        values;
       Some (frame, result)
   | Capability_method { capability; name } ->
       with_contract
@@ -2559,6 +2583,10 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
     result_type =
   let known = arrive context frame "result" result_type in
   match (operation, types) with
+  | Shared_update, _ ->
+      (* What [change] returned, which a function value's result is: valid. *)
+      assume_valid context frame result_type known;
+      known
   | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
       | Storage_capacity | Storage_set_capacity | Storage_lengthen | Storage_shorten | Storage_push
       | Storage_pop | Storage_insert | Storage_remove | Storage_swap | Storage_at | Storage_at_mut
@@ -2968,6 +2996,27 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
         ended :=
           (match finished with Some (frame, value) -> [ (frame, Some value) ] | None -> [])
           @ context.returns;
+        (* Like a function, it meets its type's invariants where it ends:
+           a call through it assumes so. *)
+        List.iter
+          (fun ((exit_ : frame), returned) ->
+            (match (returned, function_type.output) with
+            | Some term, Returns output ->
+                check_valid context exit_ span (substituted context frame output) term ~deep:true
+                  ~when_:"for the value this lambda returns"
+            | _ -> ());
+            List.iter2
+              (fun (pattern : pattern) (mode, input) ->
+                match (mode, pattern.kind) with
+                | T.Mut, Bind { local; _ } -> (
+                    match Locals.find_opt local exit_.locals with
+                    | Some term ->
+                        check_valid context exit_ span (substituted context frame input) term
+                          ~deep:true ~when_:"for a `mut` parameter when this lambda ends"
+                    | None -> ())
+                | _ -> ())
+              parameters function_type.inputs)
+          !ended;
         let spent_of (exit_ : frame) counter =
           match List.assoc_opt (Costs.key counter) exit_.spent with
           | Some term -> term
@@ -5015,7 +5064,11 @@ and contract_call context frame (node : expression) (call_ : call) path contract
      measure, at the call's arguments, is below the caller's on entry. *)
   if
     context.terminates && frame.checking
-    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path ~target:context.current
+    && (match call_.callee with
+       | Trait_method _ -> Call_graph.dispatched call_.callee
+       | _ -> true)
+    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
+         ~target:context.current
   then
     begin match (context.measures, own.decreases) with
     | [], [] when Path.equal path context.current && structural_parameters context frame own <> []
@@ -6124,7 +6177,12 @@ and indirect context (ty : T.ty) variant =
 (* [log(n)], [power(b, e)], and [time(f)] in a cost bound. *)
 and specification_function context frame (node : expression) (measure : specification_function)
     arguments =
-  let values = List.map (fun argument -> snd (value context frame argument)) arguments in
+  (* A specification function never runs, so a callback read for it is
+     not used as a value. *)
+  let values =
+    reading_callback context (fun () ->
+        List.map (fun argument -> snd (value context frame argument)) arguments)
+  in
   match (measure, values, arguments) with
   | Log, [ n ], [ argument ] ->
       let log = log_of context frame n in

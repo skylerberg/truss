@@ -23,6 +23,14 @@ let codes text =
   let database = Support.setup [ ("app::main", text) ] in
   Support.codes (check database (Support.module_of "app::main"))
 
+(* A file with diagnostics, all of one code, as a cycle of the call graph
+   gives at each call in it. *)
+let only_code text code =
+  match codes text with
+  | [] -> fail "no diagnostics"
+  | found ->
+      if List.exists (fun other -> other <> code) found then fail "%s" (String.concat ", " found)
+
 (* The message of a file's one diagnostic. *)
 let message text =
   let database = Support.setup [ ("app::main", text) ] in
@@ -266,7 +274,7 @@ let () =
          }\n"
         "prover.termination");
   test "an impl that reaches itself through a generic function cannot be shown to end" (fun () ->
-      not_proven
+      only_code
         "trait Check {\n\
         \  fn check(self) -> Bool\n\
         \    cost time finite\n\
@@ -2854,6 +2862,30 @@ let () =
         \  call(visit: visit)\n\
          }\n"
         "prover.requires");
+  test "a call through a function value gives a valid result" (fun () ->
+      proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         fn take(make: fn() -> Positive) -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  make().n\n\
+         }\n");
+  test "a lambda returns a valid value" (fun () ->
+      not_proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         fn apply(change: fn(Positive) -> Positive, value: Positive) -> Positive {\n\
+        \  change(value)\n\
+         }\n\n\
+         fn f() -> Positive {\n\
+        \  apply(fn(p) {\n\
+        \    var q = p\n\
+        \    q.n = 0\n\
+        \    q\n\
+        \  }, value: Positive(n: 1))\n\
+         }\n"
+        "prover.invariant");
   test "a callback with a requires bound to a local must accept every argument" (fun () ->
       not_proven
         "fn keep(visit: (fn(index: Int64) -> Int64 requires index < 1)) -> Int64 {\n\
@@ -2866,7 +2898,7 @@ let () =
 
 let () =
   test "provided methods that call each other are recursion" (fun () ->
-      not_proven
+      only_code
         "trait Ping {\n\
         \  fn ping(self) -> Int64\n\
         \    cost time finite\n\
@@ -2883,29 +2915,26 @@ let () =
          impl Ping for Foo {}\n"
         "prover.termination");
   test "a call through any that reaches back is recursion" (fun () ->
-      let found =
-        codes
-          "trait Step {\n\
-          \  fn step(own self) -> Int64\n\
-          \    cost time finite\n\
-           }\n\n\
-           fn run(value: own any Step) -> Int64\n\
-          \  cost time finite\n\
-           {\n\
-          \  own value.step()\n\
-           }\n\n\
-           type Foo()\n\n\
-           impl Step for Foo {\n\
-          \  fn step(own self) -> Int64\n\
-          \    cost time finite\n\
-          \  {\n\
-          \    let value: any Step = any self\n\
-          \    run(own value)\n\
-          \  }\n\
-           }\n"
-      in
-      if found <> [ "prover.termination"; "prover.termination" ] then
-        fail "%s" (String.concat ", " found));
+      only_code
+        "trait Step {\n\
+        \  fn step(own self) -> Int64\n\
+        \    cost time finite\n\
+         }\n\n\
+         fn run(value: own any Step) -> Int64\n\
+        \  cost time finite\n\
+         {\n\
+        \  own value.step()\n\
+         }\n\n\
+         type Foo()\n\n\
+         impl Step for Foo {\n\
+        \  fn step(own self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    let value: any Step = any self\n\
+        \    run(own value)\n\
+        \  }\n\
+         }\n"
+        "prover.termination");
   test "a method that calls itself through any is recursion" (fun () ->
       not_proven
         "trait Check {\n\
