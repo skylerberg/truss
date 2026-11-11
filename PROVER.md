@@ -1414,7 +1414,8 @@ test the prover itself:
   after it follows from the sum law of `Sequence.update` taken at the
   potential's own measure, which the solver runs out of steps finding and
   no `assert` in the library can name.
-- **More in a diagnostic.** A note at a clause in another file, the
+- **More in a diagnostic.** A note at a clause in another file, which a
+  message names by its file and line instead, the
   branches a counterexample's path takes, listed by position, and a
   fix that adds an obligation about parameters alone to the function as a
   `requires`. DESIGN.md's other fixes, checking it with an `if`, using the
