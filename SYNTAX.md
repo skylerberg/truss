@@ -3543,6 +3543,10 @@ public transparent fn is_sorted(items: Slice[Int64]) -> Bool
   `transparent`.
 - A `transparent` function's body is part of the package's interface, as its
   signature is: changing it can break a proof in a package that uses it.
+- The body calls only public functions and names only public constants. A
+  proof in another package would otherwise rely on the contract of a
+  function that is not part of the package's interface. The body can read a
+  field that other packages cannot see.
 - Only a function or a method of a type can be `transparent`, and only one
   whose body can be a definition: it has a `time` clause, no `uses` clause,
   and no `mut` parameter, and it returns its result.
