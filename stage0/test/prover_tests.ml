@@ -3397,6 +3397,9 @@ let () =
       proven
         "theorem each_in_range(items: List[Int64])\n\
         \  ensures forall i in 0..items.length() => items[i] <= Int64.maximum\n\
+         {\n\
+         }\n")
+
 (* Lambdas under a quantifier *)
 
 let () =
