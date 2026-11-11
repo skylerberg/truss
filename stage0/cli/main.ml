@@ -339,8 +339,8 @@ let clean =
     Term.(const (fun () -> Outcome.Exit 0) $ const ())
 
 let version =
-  Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)"
-    Type_checker.Manifest.truss_version Lir.version Unicode.version
+  Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)" Manifest.truss_version
+    Lir.version Unicode.version
 
 let truss =
   Cmd.group

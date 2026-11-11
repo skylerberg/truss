@@ -119,7 +119,7 @@ let plan_module (project : Project.t) (old_module : Path.module_) to_ =
   in
   List.iter
     (fun name ->
-      if Type_checker.Manifest.name_parts name <> Some [ name ] then
+      if Manifest.name_parts name <> Some [ name ] then
         Project.cannot_run "`%s` is not a lower_snake_case name, which a module's must be." name)
     modules;
   let new_module : Path.module_ = { package; modules } in

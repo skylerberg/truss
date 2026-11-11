@@ -14,7 +14,7 @@ let entry_of_line line text =
   let words = List.filter (( <> ) "") (String.split_on_char ' ' text) in
   match words with
   | name :: version :: hash :: rest ->
-      (match Type_checker.Manifest.name_parts name with
+      (match Manifest.name_parts name with
       | Some [ _; _ ] -> ()
       | _ ->
           malformed line

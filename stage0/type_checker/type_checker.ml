@@ -2,8 +2,6 @@
    definitions of a build. The stages are linked together; each reads the
    earlier ones' results through their queries. *)
 
-module Manifest = Manifest
-
 (* Every diagnostic of a file, from the lexer to the package checks, in the
    file's offsets and in order. *)
 let diagnostics database module_ =
