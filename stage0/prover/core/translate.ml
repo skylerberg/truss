@@ -378,9 +378,111 @@ let assume context frame term =
    after it. Inside a quantifier it is shown for each value the
    quantifier's premise admits, which is how a quantifier's body is shown
    to be well defined. *)
+(* A fix that adds a [requires] to the definition proven, before its body's
+   brace, which starts a line where the header has clauses and ends its
+   first line where it has none. *)
+let add_requires frame required =
+  let text = Lazy.force frame.source.text in
+  let rec line_brace from =
+    match String.index_from_opt text from '\n' with
+    | Some at when at + 1 < String.length text && text.[at + 1] = '{' -> Some (at + 1)
+    | Some at -> line_brace (at + 1)
+    | None -> None
+  in
+  let edit =
+    match line_brace 0 with
+    | Some at -> Some (Diagnostic.insert at ("  requires " ^ required ^ "\n"))
+    | None -> (
+        match String.index_opt text '{' with
+        | Some at when at > 0 && text.[at - 1] = ' ' ->
+            Some (Diagnostic.replace (Source.span (at - 1) at) ("\n  requires " ^ required ^ "\n"))
+        | _ -> None)
+  in
+  match edit with
+  | Some edit -> [ Diagnostic.fix (Printf.sprintf "Add `requires %s`" required) [ edit ] ]
+  | None -> []
+
+(* A goal about the definition's parameters as they arrive, written as
+   Truss: comparisons, logic, and arithmetic of parameters and literals,
+   which a [requires] states exactly, since a specification's integers do
+   not overflow. *)
+let truss_of_goal context term =
+  let name symbol =
+    if List.mem symbol context.entry then
+      match List.assoc_opt symbol context.values with Some name -> Some name | None -> Some "self"
+    else None
+  in
+  let named = ref false in
+  let all printed = if List.mem None printed then None else Some (List.filter_map Fun.id printed) in
+  let rec atom = function
+    | L.Symbol symbol ->
+        let printed = name symbol in
+        if printed <> None then named := true;
+        printed
+    | L.Integer value -> Some (Z.to_string value)
+    | L.Boolean value -> Some (if value then "true" else "false")
+    | _ -> None
+  and value term = arithmetic 0 term
+  and arithmetic level = function
+    | L.Apply ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
+        let inner = if operator = "+" then 1 else 2 in
+        Option.map
+          (fun printed -> parenthesized level inner (String.concat (" " ^ operator ^ " ") printed))
+          (all (List.map (arithmetic inner) parts))
+    | L.Apply ("-", [ left; right ]) ->
+        Option.map
+          (fun printed -> parenthesized level 1 (String.concat " - " printed))
+          (all [ arithmetic 1 left; arithmetic 2 right ])
+    | L.Apply ("-", [ inner ]) ->
+        Option.map (fun printed -> parenthesized level 3 ("-" ^ printed)) (arithmetic 3 inner)
+    | L.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
+    | term -> atom term
+  and parenthesized level inner text = if inner < level then "(" ^ text ^ ")" else text
+  and print = function
+    | L.Apply ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
+        match (value left, value right) with
+        | Some left, Some right ->
+            Some (Printf.sprintf "%s %s %s" left (if operator = "=" then "==" else operator) right)
+        | _ -> None)
+    | L.Apply ("and", parts) -> joined " && " parts
+    | L.Apply ("or", parts) -> joined " || " parts
+    | L.Apply ("not", [ inner ]) -> Option.map (Printf.sprintf "!(%s)") (print inner)
+    | L.Apply ("=>", [ premise; conclusion ]) -> (
+        match (print premise, print conclusion) with
+        | Some premise, Some conclusion -> Some (Printf.sprintf "(%s) ==> (%s)" premise conclusion)
+        | _ -> None)
+    | term -> atom term
+  and joined separator parts =
+    Option.map
+      (fun printed -> "(" ^ String.concat separator printed ^ ")")
+      (all (List.map print parts))
+  in
+  let printed =
+    match term with
+    | L.Apply ("and", parts) -> Option.map (String.concat " && ") (all (List.map print parts))
+    | L.Apply ("or", parts) -> Option.map (String.concat " || ") (all (List.map print parts))
+    | term -> print term
+  in
+  if !named then printed else None
+
 let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
   match obligation_at ?evaluation context frame code span message goal with
   | Some obligation ->
+      (* Without a fix of its own, a goal about the parameters alone is
+         offered as a [requires]. *)
+      let fixes =
+        match fixes with
+        | [] when frame.source.key = Some context.home && frame.checking -> (
+            let goal =
+              match frame.condition with
+              | L.Boolean true -> goal
+              | condition -> L.( ==> ) condition goal
+            in
+            match truss_of_goal context goal with
+            | Some required -> add_requires frame required
+            | None -> [])
+        | fixes -> fixes
+      in
       context.obligations <- { obligation with cited; fixes } :: context.obligations;
       assume context frame goal
   | None -> ()
@@ -2060,14 +2162,18 @@ and arithmetic ?operand ?divisor context frame (node : expression) ty
           (Printf.sprintf "`%s` may overflow `%s`: the least value over -1."
              (quote source node.origin) (T.show ty))
           (L.not_ L.(equal left (Integer low) &&& equal right (int (-1))))
-  | Some _ ->
+  | Some (low, high) ->
+      let unsigned = Z.sign low = 0 && not (T.is_builtin Character ty) in
       oblige context frame Overflow span
         ~fixes:
           (match operand with
           | Some operand -> overflow_fix context frame ty operation operand left right
           | None -> [])
         (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (T.show ty))
-        (in_range ty exact)
+        (match operation with
+        | (Add | Multiply) when unsigned -> L.Apply ("<=", [ exact; Integer high ])
+        | Subtract when unsigned -> L.Apply ("<=", [ Integer low; exact ])
+        | _ -> in_range ty exact)
   | None -> ());
   exact
 
@@ -5481,30 +5587,6 @@ and requires_fix context frame (part : part) (clause : expression) term (values 
     go 0;
     if written <> [] || part.parameters = [] then add_requires frame (Buffer.contents buffer)
     else []
-
-(* A fix that adds a [requires] to the definition proven, before its body's
-   brace, which starts a line where the header has clauses and ends its
-   first line where it has none. *)
-and add_requires frame required =
-  let text = Lazy.force frame.source.text in
-  let rec line_brace from =
-    match String.index_from_opt text from '\n' with
-    | Some at when at + 1 < String.length text && text.[at + 1] = '{' -> Some (at + 1)
-    | Some at -> line_brace (at + 1)
-    | None -> None
-  in
-  let edit =
-    match line_brace 0 with
-    | Some at -> Some (Diagnostic.insert at ("  requires " ^ required ^ "\n"))
-    | None -> (
-        match String.index_opt text '{' with
-        | Some at when at > 0 && text.[at - 1] = ' ' ->
-            Some (Diagnostic.replace (Source.span (at - 1) at) ("\n  requires " ^ required ^ "\n"))
-        | _ -> None)
-  in
-  match edit with
-  | Some edit -> [ Diagnostic.fix (Printf.sprintf "Add `requires %s`" required) [ edit ] ]
-  | None -> []
 
 (* An operand's text, where its value names only the definition's
    parameters as they arrive, so that a clause about it can be the

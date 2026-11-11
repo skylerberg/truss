@@ -3372,7 +3372,73 @@ let () =
                (List.map
                   (fun (d : Diagnostic.t) ->
                     String.concat ", " (List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes))
-                  found)))
+                  found)));
+  test "a failed assert about the parameters offers it as a requires" (fun () ->
+      match
+        fix_titles
+          "fn ordered(low: Int64, high: Int64) -> Int64 {\n\
+          \  proof {\n\
+          \    assert low < high\n\
+          \  }\n\
+          \  0\n\
+           }\n"
+      with
+      | [ "Add `requires low < high`" ] -> ()
+      | found -> fail "%s" (String.concat "; " found));
+  test "a failed assert under an if offers the if's condition as a premise" (fun () ->
+      match
+        fix_titles
+          "fn guarded(flag: Bool, count: Int64) -> Int64 {\n\
+          \  if flag {\n\
+          \    proof {\n\
+          \      assert count > 0\n\
+          \    }\n\
+          \  }\n\
+          \  0\n\
+           }\n"
+      with
+      | [ "Add `requires (flag) ==> (count > 0)`" ] -> ()
+      | found -> fail "%s" (String.concat "; " found));
+  test "a failed assert with arithmetic offers it as a requires" (fun () ->
+      match
+        fix_titles
+          "fn spaced(low: Int64, high: Int64) -> Int64 {\n\
+          \  proof {\n\
+          \    assert low + 2 * high <= 100 - (high - low)\n\
+          \  }\n\
+          \  0\n\
+           }\n"
+      with
+      | [ "Add `requires low + 2 * high <= 100 - (high - low)`" ] -> ()
+      | found -> fail "%s" (String.concat "; " found));
+  test "an unsigned sum that may overflow offers only its upper bound" (fun () ->
+      match fix_titles "fn total(count: UInt8, other: UInt8) -> UInt8 {\n  count + other\n}\n" with
+      | [ "Add `requires count + other <= 255`" ] -> ()
+      | found -> fail "%s" (String.concat "; " found));
+  test "an unsigned difference that may overflow offers only its lower bound" (fun () ->
+      match fix_titles "fn gap(low: UInt8, high: UInt8) -> UInt8 {\n  high - low\n}\n" with
+      | [ "Add `requires 0 <= high - low`" ] -> ()
+      | found -> fail "%s" (String.concat "; " found));
+  test "a failed assert about a call's result offers no requires" (fun () ->
+      let database =
+        Support.setup
+          [
+            ( "app::main",
+              "fn first(items: List[Int64]) -> Int64 {\n\
+              \  proof {\n\
+              \    assert items.length() > 0\n\
+              \  }\n\
+              \  0\n\
+               }\n" );
+          ]
+      in
+      match check database (Support.module_of "app::main") with
+      | [ { code; fixes = []; _ } ] when Diagnostic.Code.name code = "prover.assertion" -> ()
+      | found -> fail "%d diagnostics" (List.length found));
+  test "an overflow names the fixes that change what the code means" (fun () ->
+      let found = message "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
+      if not (contains found "checked operation") then fail "message %S" found)
+
 (* Counterexample paths *)
 
 let () =

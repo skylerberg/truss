@@ -610,10 +610,19 @@ let definition_states teller database (key : Names.key) =
       List.map
         (fun ((obligation : Translate.obligation), (answer : answer)) ->
           let span = source_span obligation.span in
+          (* These fixes change what the code means, so they are named, not
+             applied. *)
+          let others =
+            match obligation.code with
+            | Overflow | Division | Shift ->
+                " It can also be checked first with an `if`, done with the checked operation, or \
+                 allowed to stop the program with `uses Panic`."
+            | _ -> ""
+          in
           let failed explained =
             Some
               {
-                (diagnostic obligation.code span (obligation.message ^ explained)) with
+                (diagnostic obligation.code span (obligation.message ^ explained ^ others)) with
                 fixes = obligation.fixes;
               }
           in

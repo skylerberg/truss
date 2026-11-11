@@ -101,7 +101,7 @@ Every fact the prover must show, and where it comes from:
 | Obligation | Where |
 |---|---|
 | An index or slice is in bounds | Each `items[i]` and `items[a..b]`, through the `requires` of the `impl` of `Index` the call reaches |
-| An operation does not overflow | Each `+`, `-`, `*`, negation, and conversion on a built-in integer, and each of the intrinsic module's integer operations, as an `impl` of `Add` calls |
+| An operation does not overflow | Each `+`, `-`, `*`, negation, and conversion on a built-in integer, and each of the intrinsic module's integer operations, as an `impl` of `Add` calls; on an unsigned type, only the bound that the operation can pass: the greatest value for `+` and `*`, zero for `-` |
 | A division has a nonzero divisor, and is not the least value over `-1` | Each `/` and `%` on a built-in integer, and each intrinsic `divide` and `remainder` |
 | A shift amount is less than the width | Each `<<` and `>>` |
 | `unreachable` is never reached | Each `unreachable`, including the ones after guards that the type checker added |
@@ -1331,7 +1331,8 @@ Each obligation the prover could not prove is an error, with the shared
   by its term, not added to the query, so a query that proves keeps its
   text.
 - **A note at the clause.** A call's `requires` that may not hold has a
-  note at that clause, where the callee is in the same file.
+  note at that clause, where the callee is in the same file; for a callee
+  in another file, the message names the clause's file and line.
 - **A fix that moves the clause up.** Where a callee's `requires` that may
   not hold names only the definition's parameters as they arrive,
   constants, and literals, the diagnostic has a fix that adds it to the
@@ -1342,7 +1343,18 @@ Each obligation the prover could not prove is an error, with the shared
   has a fix of the bound the operand must be within: `count + 1` on a
   `UInt8` gives `requires count <= 254`. A divisor that may be zero, and a
   shift amount that may be the width or more, of such an operand, has the
-  fix `requires parts != 0` or `requires by < 64`.
+  fix `requires parts != 0` or `requires by < 64`. Any other obligation
+  that fails, where the goal and the conditions of the `if`s around it
+  are comparisons, logic, and arithmetic of the parameters as they arrive
+  and literals, has the fix that adds it as a `requires`: `assert low < high`
+  gives `requires low < high`, the same `assert` inside `if flag` gives
+  `requires (flag) ==> (low < high)`, and `count + other` on a `UInt8`
+  gives `requires count + other <= 255`. A specification's arithmetic is
+  exact, so the clause states the goal as the solver has it.
+- **Fixes that change what the code means.** An overflow, a divisor that
+  may be zero, or a shift amount that may be too large is named, not
+  fixed, as one to check first with an `if`, do with the checked
+  operation, or allow to stop the program with `uses Panic`.
 - **A state for every obligation.** Each obligation, shown or not, has a
   state at its position, for a language server to show; the diagnostics
   are the states that were not shown.
@@ -1467,15 +1479,6 @@ test the prover itself:
   nested quantifiers, each fact is about values made for every
   combination of bound names, and with them the solver runs out of steps
   even with triggers chosen.
-- **More in a diagnostic.** A note at a clause in another file, which a
-  message names by its file and line instead, and a
-  fix that adds an obligation about parameters alone to the function as a
-  `requires` for obligations other than a callee's `requires`, an
-  overflow with a literal, a divisor, and a shift amount, which needs the
-  obligation written back as Truss. DESIGN.md's
-  other fixes, checking it with an `if`, using the
-  checked version of the operation, and `uses Panic`, change what the code
-  means, so the message is to name them without applying them.
 - **Proof states in the language server.** `Prover.states` gives each
   obligation's state at its position, proven or not with the diagnostic
   that says why; the language server, `truss lsp`, is not built yet.
