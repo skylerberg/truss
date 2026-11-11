@@ -43,11 +43,13 @@ stage0's stages, which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists.
   signatures sees. Verus makes the same choice with `open` and `closed`, and
   Dafny's exports with `reveals` and `provides`. A method that a trait
   provides is read everywhere, because an `impl` in any package inherits it.
-  A `transparent` body calls only public functions and names only public
-  constants, as an `open` function's body does in Verus: the contract of a
-  function that other packages cannot see is not compared between releases.
-  Unlike Verus, the body can read a hidden field, since a change to the
-  field is a change to the body, which is compared.
+  A public contract and a `transparent` body call only public functions and
+  name only public constants, as a public specification and an `open`
+  function's body do in Verus, and as an exported specification does in
+  Dafny: the contract of a function that other packages cannot see is not
+  compared between releases. Unlike Verus, a `transparent` body can read a
+  hidden field, since a change to the field is a change to the body, which
+  is compared.
 - **The order of a type's fields is not part of its shape.** Reordering fields
   rebuilds nothing, except code that uses a derived `Ordered`, which compares
   fields in declaration order. The compiler chooses memory layout, and a record

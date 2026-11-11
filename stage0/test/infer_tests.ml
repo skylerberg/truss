@@ -1724,14 +1724,14 @@ let () =
       visibility
   in
   test "a transparent body calls only functions that other packages can call" (fun () ->
-      one_diagnostic (helper "internal " ^ transparent "half(value)") "types.private_in_transparent";
-      one_diagnostic (helper "" ^ transparent "half(value)") "types.private_in_transparent";
+      one_diagnostic (helper "internal " ^ transparent "half(value)") "types.private_in_public";
+      one_diagnostic (helper "" ^ transparent "half(value)") "types.private_in_public";
       fine (helper "public " ^ transparent "half(value)");
       fine (helper "public transparent " ^ transparent "half(value) + value"));
   test "a transparent body names only constants that other packages can name" (fun () ->
       one_diagnostic
         ("internal let limit: Int64 = 10\n\n" ^ transparent "value + limit")
-        "types.private_in_transparent";
+        "types.private_in_public";
       fine ("public let limit: Int64 = 10\n\n" ^ transparent "value + limit"));
   test "a transparent body calls only public methods, and can read a hidden field" (fun () ->
       let meter visibility =
@@ -1749,8 +1749,71 @@ let () =
           \           }\n"
           visibility
       in
-      one_diagnostic (meter "internal ") "types.private_in_transparent";
+      one_diagnostic (meter "internal ") "types.private_in_public";
       fine (meter "public "));
+  test "a public contract names only functions that other packages can call" (fun () ->
+      let sorted visibility =
+        Printf.sprintf
+          "%sfn in_order(items: Slice[Int64]) -> Bool\n\
+          \  cost time O(1)\n\
+           {\n\
+          \  items.length() < 2\n\
+           }\n\n"
+          visibility
+      in
+      let sort visibility clause =
+        Printf.sprintf "%sfn sort(items: mut Slice[Int64])\n  %s\n{\n  todo\n}\n" visibility clause
+      in
+      one_diagnostic
+        (sorted "internal " ^ sort "public " "ensures in_order(items)")
+        "types.private_in_public";
+      one_diagnostic
+        (sorted "" ^ sort "public " "requires in_order(items)")
+        "types.private_in_public";
+      fine (sorted "public " ^ sort "public " "ensures in_order(items)");
+      fine (sorted "internal " ^ sort "internal " "ensures in_order(items)");
+      fine (sorted "" ^ sort "" "ensures in_order(items)"));
+  test "a public contract names only constants that other packages can name" (fun () ->
+      let capped visibility =
+        Printf.sprintf
+          "%slet limit: Int64 = 10\n\n\
+           public fn capped(value: Int64) -> Int64\n\
+          \  ensures result <= limit\n\
+           {\n\
+          \  todo\n\
+           }\n"
+          visibility
+      in
+      one_diagnostic (capped "internal ") "types.private_in_public";
+      fine (capped "public "));
+  test
+    "the contract of a public trait's method and of its impl's method names only public functions"
+    (fun () ->
+      let helper =
+        "internal fn small(value: Int64) -> Bool\n  cost time O(1)\n{\n  value < 10\n}\n\n"
+      in
+      one_diagnostic
+        (helper ^ "public trait Sized {\n  fn size(self) -> Int64\n    ensures small(result)\n}\n")
+        "types.private_in_public";
+      fine (helper ^ "trait Sized {\n  fn size(self) -> Int64\n    ensures small(result)\n}\n");
+      let implemented visibility =
+        helper
+        ^ Printf.sprintf
+            "public trait Sized {\n\
+            \  fn size(self) -> Int64\n\
+             }\n\n\
+             %stype Box(side: Int64)\n\n\
+             impl Sized for Box {\n\
+            \  fn size(self) -> Int64\n\
+            \    ensures small(result)\n\
+            \  {\n\
+            \    todo\n\
+            \  }\n\
+             }\n"
+            visibility
+      in
+      one_diagnostic (implemented "public ") "types.private_in_public";
+      fine (implemented "internal "));
   test "a function that is not transparent can call a function that other packages cannot"
     (fun () ->
       fine

@@ -3530,6 +3530,13 @@ A public function's signature cannot mention a private or `internal` type, and
 neither can a public type's fields, unless the type is opaque. Other packages
 could never name such a type.
 
+A public function's `requires`, `ensures`, and `cost` clauses cannot call a
+private or `internal` function, or name such a constant. A proof in another
+package reads those clauses, and would rely on the contract of a function
+that is not part of the package's interface. The same holds for a method of
+a public trait or capability, and for a method of an `impl` that other
+packages can use.
+
 A public function can show its body to the proofs of other packages with
 `transparent`:
 
@@ -3547,10 +3554,9 @@ public transparent fn is_sorted(items: Slice[Int64]) -> Bool
   `transparent`.
 - A `transparent` function's body is part of the package's interface, as its
   signature is: changing it can break a proof in a package that uses it.
-- The body calls only public functions and names only public constants. A
-  proof in another package would otherwise rely on the contract of a
-  function that is not part of the package's interface. The body can read a
-  field that other packages cannot see.
+- The body calls only public functions and names only public constants, as
+  a public contract does. The body can read a field that other packages
+  cannot see.
 - Only a function or a method of a type can be `transparent`, and only one
   whose body can be a definition: it has a `time` clause, no `uses` clause,
   and no `mut` parameter, and it returns its result.

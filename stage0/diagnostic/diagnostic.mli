@@ -167,7 +167,6 @@ module Code : sig
     | Arity
     | Unsatisfied_bound
     | Private_in_public
-    | Private_in_transparent
     | Method_outside_package
     | Default_not_constant
     | Not_constant
