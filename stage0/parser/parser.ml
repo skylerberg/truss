@@ -6,6 +6,7 @@ type piece = Split.piece = { first : int; stop : int }
 
 let split = Split.pieces
 let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword Use
+let begins_statement = Atoms.begins_statement
 let spelled_words = List.map fst Cost_word.spellings
 
 type relative_diagnostics = Diagnostic.t list
@@ -71,25 +72,27 @@ let one_definition source tokens piece parse =
    [impl], or a capability. Each method is a separate definition, with its
    own tokens, base, and node ids, so that an edit to one method changes no
    other definition's tree. *)
-let definition source tokens piece =
-  let parsed, methods = one_definition source tokens piece Parse_definition.definition in
-  let container : Parse_definition.container option =
-    match parsed.value.value.kind with
+let methods source tokens (container : Syntax.definition) token_ranges =
+  let kind : Parse_definition.container option =
+    match container.kind with
     | Trait _ -> Some In_trait
     | Impl _ -> Some In_impl
     | Capability _ -> Some In_capability
     | _ -> None
   in
-  ( parsed,
-    match container with
-    | Some container ->
-        List.map
-          (fun (first, stop) ->
-            fst
-              (one_definition source tokens { first; stop }
-                 (Parse_definition.method_ ~container ~visibility:parsed.value.value.visibility)))
-          methods
-    | None -> [] )
+  match kind with
+  | Some kind ->
+      List.map
+        (fun (first, stop) ->
+          fst
+            (one_definition source tokens { first; stop }
+               (Parse_definition.method_ ~container:kind ~visibility:container.visibility)))
+        token_ranges
+  | None -> []
+
+let definition source tokens piece =
+  let parsed, token_ranges = one_definition source tokens piece Parse_definition.definition in
+  (parsed, methods source tokens parsed.value.value token_ranges)
 
 (* [use standard::file_system]. *)
 let use_path cursor : Syntax.path option =
@@ -189,19 +192,27 @@ let parse source tokens =
 type example = Example_definition | Example_signature
 
 let example_definition source tokens piece =
-  let example, _, diagnostics =
+  let (example, container), cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         match Parse_definition.example cursor with
         | Whole definition ->
             check cursor definition;
-            Example_definition
+            (Example_definition, Some definition)
         | Signature_alone (_, signature) ->
             Syntax_walk.signature (fun value -> Operators.expression cursor value) signature;
             Check.signature cursor signature;
-            Example_signature
-        | exception Cursor.Failed -> Example_definition)
+            (Example_signature, None)
+        | exception Cursor.Failed -> (Example_definition, None))
   in
-  (example, diagnostics)
+  (* The methods declared inside a trait, an [impl], or a capability are
+     separate definitions, so their diagnostics are not the container's. *)
+  let method_diagnostics =
+    match container with
+    | Some container ->
+        List.concat_map placed (methods source tokens container (List.rev !(cursor.methods)))
+    | None -> []
+  in
+  (example, diagnostics @ method_diagnostics)
 
 let example_statement source tokens piece =
   let (), _, diagnostics =

@@ -270,7 +270,53 @@ let () =
             (method_.value.value, method_.value.text, method_.diagnostics)
         | _ -> failwith "expected one method"
       in
-      if method_of ~indentation:"  " <> method_of ~indentation:"\t\t" then fail "the results differ")
+      if method_of ~indentation:"  " <> method_of ~indentation:"\t\t" then fail "the results differ");
+  test "an example's diagnostics include those of the methods declared inside it" (fun () ->
+      let source, tokens, pieces = pieces "impl Clock for Fixed {\n  fn now(self) -> { todo }\n}" in
+      match Parser.example_definition source tokens (List.hd pieces) with
+      | _, [ diagnostic ] ->
+          if Diagnostic.Code.name diagnostic.code <> "parser.unexpected_token" then
+            fail "code %s" (Diagnostic.Code.name diagnostic.code);
+          if diagnostic.span.start <> 41 then fail "start %d" diagnostic.span.start
+      | _, diagnostics -> fail "%d diagnostics" (List.length diagnostics))
+
+(* The parser's first sets and the lexer's line-break rule *)
+
+let () =
+  test "Layout lets every token in the first set of a statement begin one" (fun () ->
+      let kinds =
+        List.map (fun (_, keyword) -> Token.Keyword keyword) Token.keywords
+        @ List.map (fun (_, punctuation) -> Token.Punctuation punctuation) Token.punctuation
+        @ [
+            Upper "Name";
+            Lower "name";
+            Underscore;
+            Integer Z.one;
+            Float (Token.Decimal.make ~significand:Z.one ~exponent:Z.zero);
+            String
+              {
+                tag = None;
+                form = Ordinary;
+                first = { value = ""; span = Source.zero_width 0 };
+                rest = [||];
+              };
+          ]
+      in
+      (* An open-ended range is written only in brackets, where line breaks are ignored. *)
+      let only_in_brackets = [ Token.Punctuation Dot_dot; Punctuation Dot_dot_equal ] in
+      List.iter
+        (fun kind ->
+          if
+            Parser.begins_statement kind
+            && (not (Layout.can_begin kind))
+            && not (List.mem kind only_in_brackets)
+          then
+            fail "%s begins a statement, but a line break before it is not a NEWLINE"
+              (match kind with
+              | Keyword keyword -> Token.keyword_spelling keyword
+              | Punctuation punctuation -> Token.punctuation_spelling punctuation
+              | _ -> "a name or a literal"))
+        kinds)
 
 (* Node ids *)
 
