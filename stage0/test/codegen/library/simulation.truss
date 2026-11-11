@@ -1,5 +1,8 @@
+use standard::console
 use standard::files
 use standard::log
+use standard::network
+use standard::processes
 use standard::simulation
 use standard::tasks
 
@@ -258,6 +261,232 @@ test "tasks in a world append to one file, and each write arrives whole" {
         && text.contains("writer 1\n")
         && text.contains("writer 2\n")
         && text.contains("writer 3\n")
+    }
+  }
+}
+
+fn loopback(port: UInt16) -> network::SocketAddress {
+  network::SocketAddress(address: network::IpAddress.loopback, port: port)
+}
+
+fn text_of(bytes: Slice[UInt8]) -> String {
+  String.from_utf8_lossy(bytes)
+}
+
+fn scripted(code: UInt8, output: StringSlice, error_output: StringSlice) -> processes::Output {
+  processes::Output(
+    status: processes::ExitStatus.Exited(code: code),
+    output: output.to_bytes(),
+    error_output: error_output.to_bytes(),
+  )
+}
+
+test "a world resolves the hosts of its setup and addresses written out" {
+  let database = network::IpAddress.Version4([10, 0, 0, 2])
+  let world = simulation::World.from(simulation::Setup.new().with_host("database", address: database))
+  provide world {
+    assert NetworkClient.resolve("database") == Ok([database])
+    assert NetworkClient.resolve("localhost") == Ok([network::IpAddress.loopback])
+    assert NetworkClient.resolve("10.1.2.3") == Ok([network::IpAddress.Version4([10, 1, 2, 3])])
+    assert NetworkClient.resolve("nowhere") == Err(SystemError.HostNotFound)
+    world.fail_next(simulation::Operation.Resolve, error: SystemError.TimedOut)
+    assert NetworkClient.resolve("database") == Err(SystemError.TimedOut)
+    assert NetworkClient.resolve("database") is Ok(_)
+  }
+}
+
+test "a connection in a world carries bytes both ways, and ends when a side shuts down" {
+  let seeds: UInt64 = 16
+  for seed in 0..seeds {
+    provide simulation::World.new(seed: seed) {
+      var listener = NetworkServer.listen(loopback(8080)).expect("the port is free")
+      concurrent {
+        {
+          var served = mut listener.accept().expect("a connection arrives")
+          var request: List[UInt8] = []
+          assert mut served.read_to_end(mut request) == Ok(4)
+          assert text_of(request) == "ping"
+          assert mut served.write_all("pong".bytes()) is Ok(_)
+          assert mut served.shut_down(network::Direction.Both) is Ok(_)
+        }
+        {
+          var connection = network::connect("localhost", port: 8080).expect("the listener accepts")
+          assert connection.peer_address() == loopback(8080)
+          assert mut connection.write_all("ping".bytes()) is Ok(_)
+          assert mut connection.shut_down(network::Direction.Sending) is Ok(_)
+          var reply: List[UInt8] = []
+          assert mut connection.read_to_end(mut reply) == Ok(4)
+          assert text_of(reply) == "pong"
+          assert mut connection.write("more".bytes()) == Err(SystemError.BrokenPipe)
+        }
+      }
+    }
+  }
+}
+
+test "a world refuses a connection to a port with no listener, and a port taken twice" {
+  let world = simulation::World.new()
+  provide world {
+    assert NetworkClient.connect(loopback(9), timeout: None) is Err(ConnectionRefused)
+    let first = NetworkServer.listen(loopback(80)).expect("the port is free")
+    assert first.local_address() == loopback(80)
+    assert NetworkServer.listen(loopback(80)) is Err(AddressInUse)
+    let chosen = NetworkServer.listen(loopback(0)).expect("a port is free")
+    assert chosen.local_address().port >= 49152
+    world.fail_next(simulation::Operation.Connect, error: SystemError.Unreachable)
+    assert NetworkClient.connect(loopback(80), timeout: None) is Err(Unreachable)
+    assert NetworkClient.connect(loopback(80), timeout: None) is Ok(_)
+  }
+}
+
+test "a read with a timeout fails when the time passes with nothing sent" {
+  provide simulation::World.new() {
+    var listener = NetworkServer.listen(loopback(7000)).expect("the port is free")
+    var connection = network::connect("localhost", port: 7000).expect("the listener accepts")
+    assert mut connection.set_read_timeout(Some(Duration.seconds(3))) is Ok(_)
+    var buffer: List[UInt8] = []
+    assert mut connection.read(mut buffer, limit: 16) == Err(SystemError.TimedOut)
+    assert Clock.monotonic() == Duration.seconds(3)
+    var served = mut listener.accept().expect("the connection waits")
+    assert mut served.write_all("late".bytes()) is Ok(_)
+    assert mut connection.read(mut buffer, limit: 16) == Ok(4)
+    assert text_of(buffer) == "late" && Clock.monotonic() == Duration.seconds(3)
+  }
+}
+
+test "datagrams in a world arrive whole, in order, with the address they came from" {
+  provide simulation::World.new() {
+    var receiver = NetworkServer.bind_datagram(loopback(5353)).expect("the port is free")
+    var sender = NetworkClient.open_datagram().expect("a socket opens")
+    assert mut sender.send_to("first".bytes(), address: loopback(5353)) == Ok(5)
+    assert mut sender.send_to("second".bytes(), address: loopback(5353)) == Ok(6)
+    assert mut sender.send_to("lost".bytes(), address: loopback(1)) == Ok(4)
+    var buffer: List[UInt8] = []
+    let first = mut receiver.receive_from(mut buffer, limit: 64).expect("a datagram waits")
+    assert first.length == 5 && first.from == sender.local_address() && text_of(buffer) == "first"
+    mut buffer.clear()
+    let second = mut receiver.receive_from(mut buffer, limit: 3).expect("a datagram waits")
+    assert second.length == 3 && text_of(buffer) == "sec"
+    assert mut receiver.set_read_timeout(Some(Duration.seconds(2))) is Ok(_)
+    assert mut receiver.receive_from(mut buffer, limit: 64) is Err(TimedOut)
+    assert Clock.monotonic() == Duration.seconds(2)
+    assert NetworkServer.bind_datagram(loopback(5353)) is Err(AddressInUse)
+  }
+}
+
+test "a world runs the programs of its setup and keeps the commands that were run" {
+  var setup = simulation::Setup.new()
+  setup = own setup.with_program("git", output: scripted(1, output: "", error_output: "usage"))
+  setup = own setup.with_program("git", arguments: ["status"], output: scripted(0, output: "clean\n", error_output: ""))
+  let world = simulation::World.from(own setup)
+  provide world {
+    let capture = processes::Redirect.Capture
+    let status = Processes.run(processes::Command.new("git").argument("status").argument("--short").output(capture))
+      .expect("git is scripted")
+    assert status.status.is_success() && status.text() == Ok("clean\n")
+    let push = Processes.run(processes::Command.new("git").argument("push").error_output(capture))
+      .expect("git is scripted")
+    assert push.status == processes::ExitStatus.Exited(code: 1) && text_of(push.error_output) == "usage"
+    assert Processes.run(processes::Command.new("make")) is Err(NotFound)
+    assert Processes.run(processes::Command.new("git").argument("status")) is Ok(_)
+    assert world.output() == "clean\n"
+    assert world.commands() == [["git", "status", "--short"], ["git", "push"], ["make"], ["git", "status"]]
+    world.fail_next(simulation::Operation.Spawn, error: SystemError.TooManyOpen)
+    assert Processes.run(processes::Command.new("git")) is Err(TooManyOpen)
+  }
+}
+
+test "a program spawned in a world has pipes that hold what it wrote, and has already exited" {
+  var setup = simulation::Setup.new()
+  setup = own setup.with_program("sort", output: scripted(0, output: "a\nb\n", error_output: "warning"))
+  provide simulation::World.from(own setup) {
+    let pipe = processes::Redirect.Pipe
+    var child = Processes.spawn(processes::Command.new("sort").input(pipe).output(pipe).error_output(pipe))
+      .expect("sort is scripted")
+    var input = mut child.take_input().expect("the input is piped")
+    assert mut input.write_all("b\na\n".bytes()) is Ok(_)
+    assert own input.close() is Ok(_)
+    var output = mut child.take_output().expect("the output is piped")
+    var written: List[UInt8] = []
+    assert mut output.read_to_end(mut written) == Ok(4) && text_of(written) == "a\nb\n"
+    var error_output = mut child.take_error_output().expect("the error output is piped")
+    var warned: List[UInt8] = []
+    assert mut error_output.read_to_end(mut warned) == Ok(7) && text_of(warned) == "warning"
+    assert mut child.signal(processes::Signal.Terminate) is Ok(_)
+    assert mut child.wait() == Ok(processes::ExitStatus.Exited(code: 0))
+    var plain = Processes.spawn(processes::Command.new("sort")).expect("sort is scripted")
+    assert mut plain.take_output() is None && plain.identifier() != child.identifier()
+  }
+}
+
+test "a task waiting for a signal wakes when the world delivers one it waits for" {
+  let seeds: UInt64 = 8
+  for seed in 0..seeds {
+    let world = simulation::World.new(seed: seed)
+    provide world {
+      world.deliver(processes::Signal.HangUp)
+      concurrent {
+        let caught = Signals.wait([processes::Signal.Interrupt, processes::Signal.Terminate])
+        {
+          Clock.sleep(Duration.seconds(1))
+          world.deliver(processes::Signal.Terminate)
+        }
+      }
+      assert caught == Some(processes::Signal.Terminate)
+      assert Clock.monotonic() == Duration.seconds(1)
+      assert Signals.wait([processes::Signal.HangUp]) == Some(processes::Signal.HangUp)
+    }
+  }
+}
+
+test "a world's console streams read its input and write its output" {
+  let world = simulation::World.from(simulation::Setup.new().with_input(["one", "two"]))
+  provide world {
+    var input = Console.input()
+    var buffer: List[UInt8] = []
+    assert mut input.read(mut buffer, limit: 2) == Ok(2) && text_of(buffer) == "on"
+    assert Console.read_line() == Some("e")
+    mut buffer.clear()
+    assert mut input.read_to_end(mut buffer) == Ok(4) && text_of(buffer) == "two\n"
+    var output = Console.output()
+    assert mut output.write_all("out".bytes()) is Ok(_)
+    var errors = Console.error_output()
+    assert mut errors.write_all("err".bytes()) is Ok(_)
+    assert world.output() == "out" && world.errors() == "err"
+  }
+}
+
+test "a world has a terminal whose raw mode is set, used, and restored" {
+  let world = simulation::World.from(simulation::Setup.new().with_input(["hunter2", "plain"]))
+  provide world {
+    assert Console.terminal().size() == Ok(console::Size(columns: 80, rows: 24))
+    assert Console.terminal().is_interactive() && !world.is_raw_mode()
+    let seen = console::with_raw_mode(fn() { world.is_raw_mode() })
+    assert seen == Ok(true) && !world.is_raw_mode()
+    assert console::read_secret("Password: ") == Ok(Some("hunter2"))
+    assert world.output() == "Password: \n" && !world.is_raw_mode()
+    assert Console.read_line() == Some("plain")
+    assert console::read_secret("Again: ") == Ok(None)
+  }
+}
+
+test "HostsAllowed lets through the hosts it names and no others" {
+  let api = network::IpAddress.Version4([10, 0, 0, 7])
+  let other = network::IpAddress.Version4([10, 0, 0, 8])
+  var setup = simulation::Setup.new()
+  setup = own setup.with_host("api", address: api)
+  setup = own setup.with_host("other", address: other)
+  provide simulation::World.from(own setup) {
+    let everywhere = network::SocketAddress(address: network::IpAddress.unspecified, port: 443)
+    let listener = NetworkServer.listen(everywhere).expect("the port is free")
+    assert listener.local_address() == everywhere
+    provide network::HostsAllowed(hosts: ["api"]) {
+      assert NetworkClient.resolve("api") == Ok([api])
+      assert NetworkClient.resolve("other") == Err(SystemError.PermissionDenied)
+      assert network::connect("api", port: 443) is Ok(_)
+      assert network::connect("other", port: 443) is Err(PermissionDenied)
+      assert NetworkClient.connect(network::SocketAddress(address: other, port: 443), timeout: None) is Err(PermissionDenied)
+      assert NetworkClient.open_datagram() is Err(PermissionDenied)
     }
   }
 }

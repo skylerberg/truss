@@ -317,6 +317,7 @@ impl Index for List[Element] {
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     yield intrinsic::storage_at_mut(mut self.storage, index: key)
@@ -348,6 +349,7 @@ impl Index for Slice[Element] {
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: yielded[0]))
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     yield intrinsic::view_at_mut(mut self.elements, index: key)

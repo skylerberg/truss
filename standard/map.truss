@@ -71,6 +71,7 @@ internal fn exchange[Value](place: mut Value, value: own Value) -> Value
   ensures identical(place, value)
   ensures identical(result, old(place))
   cost time O(1)
+  cost amortized time O(1)
   cost allocations == 0
 {
   let previous = own place
@@ -97,6 +98,7 @@ internal fn Map[Key: Hash + Ordered, Value].replace_value_at(mut self, position:
     old(self.entries.model()).update(position, value: self.entries.model()[position]),
   )
   cost time O(1)
+  cost amortized time O(1)
   cost allocations == 0
 {
   proof {
@@ -153,6 +155,7 @@ public fn Map[Key: Hash + Ordered, Value].insert(mut self, key: own Key, value: 
     == old(self.length()) + (if contains_equal_key(old(self.model()), key: key) { 0 } else { 1 })
   ensures self.contains(key)
   cost time O(1 + old(self.length()) * (1 + time(Key.equal)))
+  cost amortized time O(1 + old(self.length()) * (1 + time(Key.equal)))
 {
   let position = self.index_of(key)
   if position < self.entries.length() {
@@ -301,6 +304,7 @@ public fn Map[Key: Hash + Ordered, Value].replace(mut self, key: own Key, value:
   ensures self.contains(key)
   ensures (result is Some(_)) == old(self.contains(key))
   cost time O(1 + old(self.length()) * (1 + time(Key.equal)))
+  cost amortized time O(1 + old(self.length()) * (1 + time(Key.equal)))
 {
   let position = self.index_of(key)
   if position < self.entries.length() {

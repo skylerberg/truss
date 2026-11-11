@@ -3390,6 +3390,16 @@ let () =
       if not (contains found "On that path, the arm `Some(count)` is taken.") then
         fail "message %S" found)
 
+(* Ranges under a quantifier *)
+
+let () =
+  test "a pure call's result is in its type's range for every bound value" (fun () ->
+      proven
+        "theorem each_in_range(items: List[Int64])\n\
+        \  ensures forall i in 0..items.length() => items[i] <= Int64.maximum\n\
+         {\n\
+         }\n")
+
 (* Lambdas under a quantifier *)
 
 let () =
@@ -3425,6 +3435,17 @@ let () =
         \      kept\n\
         \    }, value: items[i]) == items[i]\n\
          {\n\
+         }\n")
+
+(* Maps from another package *)
+
+let () =
+  test "an insertion into a map, of a new key or one it has, is amortized" (fun () ->
+      proven
+        "fn put(values: mut Map[Int64, Int64], key: Int64, value: Int64)\n\
+        \  cost amortized time O(1 + values.length())\n\
+         {\n\
+        \  mut values.insert(key, value: value)\n\
          }\n")
 
 (* Definitions under a quantifier *)

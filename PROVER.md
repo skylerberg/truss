@@ -431,7 +431,10 @@ decides when a body is a definition. In the solver:
   written one would. A function known by its contract alone, as one in
   another package that is not `transparent` is, or one with a `requires`,
   has its `ensures` stated once in the same way, for every argument its
-  parameters' types admit where its `requires` holds.
+  parameters' types admit where its `requires` holds. A pure function's
+  result is in its type's range, for every argument, stated once the
+  same way, so `forall i in 0..items.length() => items[i] <= Int64.maximum`
+  holds of a `List[Int64]`.
 - **Recursive definitions unfold once per use.** A definition that
   unfolded itself forever would never be finished, so a call to a function
   inside its own unfolding is left as the function applied to its
@@ -1461,14 +1464,6 @@ test the prover itself:
   captures none of the quantifier's bound values is read as it is outside
   it, and one that captures some says what it does for each of them,
   closed over the quantifier.
-- **An amortized replacement of a map's value.** A `Set` or a `Map` from
-  another package holds a potential the prover knows through its methods'
-  clauses, and inserting a new element or key is amortized. Replacing the
-  value under a key that is there is not: the value is changed through
-  `List`'s `Index` lend of the entry, and what a list's potential is after
-  such a lend follows only from `at`'s `ensures`, which say nothing of
-  sums. Saying it there, for every measure, would be one more quantified
-  fact at every index into a list that is changed.
 - **More in a diagnostic.** A note at a clause in another file, which a
   message names by its file and line instead, and a
   fix that adds an obligation about parameters alone to the function as a
