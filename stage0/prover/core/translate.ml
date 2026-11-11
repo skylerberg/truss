@@ -5746,6 +5746,21 @@ and contract_call context frame (node : expression) (call_ : call) path contract
          context.hidden_bodies <- (symbol, (Path.show path, markable)) :: context.hidden_bodies);
       let term = L.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
+      (* Called on a quantifier's bound values, where that fact would name
+         them, the result is in its type's range for every argument, which
+         is true of a pure function: outside its [requires] its value is
+         one the logic leaves free. *)
+      if bounds result_type <> None && List.exists (L.mentions after.bound) own_arguments then
+        once context ("range of " ^ symbol) (fun () ->
+            let parameters =
+              List.mapi (fun index sort -> (Printf.sprintf "ranged.%d" index, sort)) sorts
+            in
+            context.facts <-
+              L.Forall
+                ( parameters,
+                  in_range result_type
+                    (L.Apply (symbol, List.map (fun (name, _) -> L.Symbol name) parameters)) )
+              :: context.facts);
       note_known_call context call_ path term own_arguments;
       term
     end

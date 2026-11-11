@@ -431,7 +431,10 @@ decides when a body is a definition. In the solver:
   written one would. A function known by its contract alone, as one in
   another package that is not `transparent` is, or one with a `requires`,
   has its `ensures` stated once in the same way, for every argument its
-  parameters' types admit where its `requires` holds.
+  parameters' types admit where its `requires` holds. A pure function's
+  result is in its type's range, for every argument, stated once the
+  same way, so `forall i in 0..items.length() => items[i] <= Int64.maximum`
+  holds of a `List[Int64]`.
 - **Recursive definitions unfold once per use.** A definition that
   unfolded itself forever would never be finished, so a call to a function
   inside its own unfolding is left as the function applied to its
