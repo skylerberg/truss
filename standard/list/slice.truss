@@ -434,13 +434,16 @@ theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, f
 }
 
 public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option[USize]
-  requires self.is_sorted()
+  requires forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
   ensures match result {
     Some(index) => index < self.length() && self[index] == target
     None => !self.contains(target)
   }
   cost time O(log(self.length()) * time(Element.compare))
 {
+  proof {
+    sorted_from_model(self, bound: self.length())
+  }
   var low: USize = 0
   var high = self.length()
   while low < high
@@ -903,30 +906,35 @@ public fn Slice[Element].update_each[capability Granted](
   }
 }
 
-fn parent_holds[Element: Ordered](items: Slice[Element], limit: USize, parent: USize) -> Bool
+fn parent_holds[Element: Ordered](items: Sequence[Element], limit: Integer, parent: Integer) -> Bool
   requires limit <= items.length()
+  requires 0 <= parent
   requires parent < limit / 2
   cost time finite
 {
   items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent])
 }
 
-fn is_heap_from[Element: Ordered](items: Slice[Element], limit: USize, floor: USize) -> Bool
+fn is_heap_from[Element: Ordered](items: Sequence[Element], limit: Integer, floor: Integer) -> Bool
   requires limit <= items.length()
+  requires 0 <= floor
   cost time finite
 {
   forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent)
 }
 
-fn is_heap_except[Element: Ordered](items: Slice[Element], limit: USize, floor: USize, hole: USize) -> Bool
+fn is_heap_except[Element: Ordered](items: Sequence[Element], limit: Integer, floor: Integer, hole: Integer) -> Bool
   requires limit <= items.length()
+  requires 0 <= floor
   cost time finite
 {
   forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent)
 }
 
-fn children_are_at_most[Element: Ordered](items: Slice[Element], limit: USize, hole: USize, above: USize) -> Bool
+fn children_are_at_most[Element: Ordered](items: Sequence[Element], limit: Integer, hole: Integer, above: Integer) -> Bool
   requires limit <= items.length()
+  requires 0 <= hole
+  requires 0 <= above
   requires above < items.length()
   cost time finite
 {
@@ -972,14 +980,14 @@ theorem swap_keeps_heap_except[Element: Ordered](
   requires child == 2 * hole + 1 || child == 2 * hole + 2
   requires child < limit
   requires bound <= limit / 2
-  requires is_heap_except(before, limit: limit, floor: floor, hole: hole)
-  requires hole > floor ==> children_are_at_most(before, limit: limit, hole: hole, above: (hole - 1) / 2)
+  requires is_heap_except(before.model(), limit: limit, floor: floor, hole: hole)
+  requires hole > floor ==> children_are_at_most(before.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
   requires identical(after.model()[hole], before.model()[child])
   requires identical(after.model()[child], before.model()[hole])
   requires forall i in 0..before.length() => i == hole || i == child || identical(after.model()[i], before.model()[i])
-  requires parent_holds(after, limit: limit, parent: hole)
+  requires parent_holds(after.model(), limit: limit, parent: hole)
   ensures forall parent in floor..limit =>
-    parent >= bound || parent == child || parent_holds(after, limit: limit, parent: parent)
+    parent >= bound || parent == child || parent_holds(after.model(), limit: limit, parent: parent)
   decreases bound
   cost time finite
 {
@@ -994,8 +1002,8 @@ theorem swap_keeps_heap_except[Element: Ordered](
       bound: bound - 1,
     )
     if bound - 1 != child && bound - 1 != hole {
-      assert parent_holds(before, limit: limit, parent: bound - 1)
-      assert parent_holds(after, limit: limit, parent: bound - 1)
+      assert parent_holds(before.model(), limit: limit, parent: bound - 1)
+      assert parent_holds(after.model(), limit: limit, parent: bound - 1)
     }
   }
 }
@@ -1050,16 +1058,16 @@ fn sink_once[Element: Ordered](
   requires limit <= items.length()
   requires floor <= hole
   requires hole < limit / 2
-  requires is_heap_except(items, limit: limit, floor: floor, hole: hole)
-  requires hole <= floor || children_are_at_most(items, limit: limit, hole: hole, above: (hole - 1) / 2)
+  requires is_heap_except(items.model(), limit: limit, floor: floor, hole: hole)
+  requires hole <= floor || children_are_at_most(items.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
   requires top >= items.length() || limit <= top
   requires top >= items.length() || (forall i in 0..limit => items[i] <= items[top])
   ensures items.length() == old(items.length())
   ensures result == hole || result == 2 * hole + 1 || result == 2 * hole + 2
   ensures result < limit
-  ensures result == hole ==> is_heap_from(items, limit: limit, floor: floor)
-  ensures result != hole ==> is_heap_except(items, limit: limit, floor: floor, hole: result)
-  ensures result != hole ==> children_are_at_most(items, limit: limit, hole: result, above: hole)
+  ensures result == hole ==> is_heap_from(items.model(), limit: limit, floor: floor)
+  ensures result != hole ==> is_heap_except(items.model(), limit: limit, floor: floor, hole: result)
+  ensures result != hole ==> children_are_at_most(items.model(), limit: limit, hole: result, above: hole)
   ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
   ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
   cost time O(time(Element.compare))
@@ -1081,14 +1089,14 @@ fn sink_once[Element: Ordered](
   if items[hole] < items[child] {
     proof {
       less_is_at_most(items[hole], second: items[child])
-      assert child >= limit / 2 || parent_holds(items, limit: limit, parent: child)
+      assert child >= limit / 2 || parent_holds(items.model(), limit: limit, parent: child)
     }
     mut items.swap(hole, second: child)
     proof {
       assert items[child] <= items[hole]
       assert items[left] <= items[hole]
       assert left + 1 >= limit || items[left + 1] <= items[hole]
-      assert parent_holds(items, limit: limit, parent: hole)
+      assert parent_holds(items.model(), limit: limit, parent: hole)
       swap_keeps_heap_except(
         old(items),
         after: items,
@@ -1123,7 +1131,7 @@ fn sink_once[Element: Ordered](
       }
       assert items[left] <= items[hole]
       assert left + 1 >= limit || items[left + 1] <= items[hole]
-      assert parent_holds(items, limit: limit, parent: hole)
+      assert parent_holds(items.model(), limit: limit, parent: hole)
     }
     hole
   }
@@ -1131,14 +1139,14 @@ fn sink_once[Element: Ordered](
 
 fn settle[Element: Ordered](items: mut Slice[Element], start: USize, limit: USize, top: USize)
   requires limit <= items.length()
-  requires is_heap_except(items, limit: limit, floor: start, hole: start)
+  requires is_heap_except(items.model(), limit: limit, floor: start, hole: start)
   requires top >= items.length() || limit <= top
   requires top >= items.length() || (forall i in 0..limit => items[i] <= items[top])
   ensures items.length() == old(items.length())
-  ensures is_heap_from(items, limit: limit, floor: start)
+  ensures is_heap_from(items.model(), limit: limit, floor: start)
   ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
   ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
-  cost time O(log(limit) * time(Element.compare))
+  cost time O(log(items.length()) * time(Element.compare))
 {
   if start >= limit / 2 {
     return
@@ -1152,10 +1160,11 @@ fn settle[Element: Ordered](items: mut Slice[Element], start: USize, limit: USiz
     invariant hole < limit
     invariant 1 <= width
     invariant width <= limit
+    invariant width <= items.length()
     invariant settled || width - 1 <= hole
-    invariant !settled ==> is_heap_except(items, limit: limit, floor: start, hole: hole)
-    invariant !settled && hole > start ==> children_are_at_most(items, limit: limit, hole: hole, above: (hole - 1) / 2)
-    invariant settled ==> is_heap_from(items, limit: limit, floor: start)
+    invariant !settled ==> is_heap_except(items.model(), limit: limit, floor: start, hole: hole)
+    invariant !settled && hole > start ==> children_are_at_most(items.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
+    invariant settled ==> is_heap_from(items.model(), limit: limit, floor: start)
     invariant forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
     invariant top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
     decreases limit - hole + (if settled { 0 } else { 1 })
@@ -1173,7 +1182,7 @@ fn settle[Element: Ordered](items: mut Slice[Element], start: USize, limit: USiz
 
 theorem heap_item_is_at_most_root[Element: Ordered](items: Slice[Element], limit: USize, index: USize)
   requires limit <= items.length()
-  requires is_heap_from(items, limit: limit, floor: 0)
+  requires is_heap_from(items.model(), limit: limit, floor: 0)
   requires index < limit
   ensures items[index] <= items[0]
   decreases index
@@ -1182,7 +1191,7 @@ theorem heap_item_is_at_most_root[Element: Ordered](items: Slice[Element], limit
   if index > 0 {
     let parent = (index - 1) / 2
     heap_item_is_at_most_root(items, limit: limit, index: parent)
-    assert parent_holds(items, limit: limit, parent: parent)
+    assert parent_holds(items.model(), limit: limit, parent: parent)
     assert index == 2 * parent + 1 || index == 2 * parent + 2
     assert items[index] <= items[parent]
     at_most_chain(items[index], second: items[parent], third: items[0])
@@ -1191,7 +1200,7 @@ theorem heap_item_is_at_most_root[Element: Ordered](items: Slice[Element], limit
 
 theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: USize, bound: USize)
   requires limit <= items.length()
-  requires is_heap_from(items, limit: limit, floor: 0)
+  requires is_heap_from(items.model(), limit: limit, floor: 0)
   requires bound <= limit
   ensures forall i in 0..items.length() => i < bound ==> items[i] <= items[0]
   decreases bound
@@ -1205,7 +1214,7 @@ theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: USi
 
 fn build_heap[Element: Ordered](items: mut Slice[Element])
   ensures items.length() == old(items.length())
-  ensures is_heap_from(items, limit: items.length(), floor: 0)
+  ensures is_heap_from(items.model(), limit: items.length(), floor: 0)
   cost time O(items.length() * log(items.length()) * time(Element.compare))
 {
   let count = items.length()
@@ -1213,7 +1222,7 @@ fn build_heap[Element: Ordered](items: mut Slice[Element])
   while start > 0
     invariant items.length() == count
     invariant start <= count / 2
-    invariant is_heap_from(items, limit: count, floor: start)
+    invariant is_heap_from(items.model(), limit: count, floor: start)
     decreases start
     cost time O((count / 2 - start) * log(count) * time(Element.compare))
   {
@@ -1227,17 +1236,17 @@ theorem moving_root_keeps_heap[Element: Ordered](before: Slice[Element], after: 
   requires 2 <= limit
   requires limit <= before.length()
   requires bound <= (limit - 1) / 2
-  requires is_heap_from(before, limit: limit, floor: 0)
+  requires is_heap_from(before.model(), limit: limit, floor: 0)
   requires forall i in 0..before.length() => i == 0 || i == limit - 1 || identical(after.model()[i], before.model()[i])
-  ensures forall parent in 0..limit => parent >= bound || parent == 0 || parent_holds(after, limit: limit - 1, parent: parent)
+  ensures forall parent in 0..limit => parent >= bound || parent == 0 || parent_holds(after.model(), limit: limit - 1, parent: parent)
   decreases bound
   cost time finite
 {
   if bound > 0 {
     moving_root_keeps_heap(before, after: after, limit: limit, bound: bound - 1)
     if bound - 1 != 0 {
-      assert parent_holds(before, limit: limit, parent: bound - 1)
-      assert parent_holds(after, limit: limit - 1, parent: bound - 1)
+      assert parent_holds(before.model(), limit: limit, parent: bound - 1)
+      assert parent_holds(after.model(), limit: limit - 1, parent: bound - 1)
     }
   }
 }
@@ -1282,17 +1291,18 @@ theorem unchanged_tail_stays_sorted[Element: Ordered](before: Slice[Element], af
   }
 }
 
-fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: USize)
+fn put_largest_last[Element: Ordered](items: mut Slice[Element], unsorted: USize)
   requires 2 <= unsorted
   requires unsorted <= items.length()
-  requires is_heap_from(items, limit: unsorted, floor: 0)
-  requires forall i in 1..items.length() => i <= unsorted || items[i - 1] <= items[i]
+  requires is_heap_from(items.model(), limit: unsorted, floor: 0)
   requires unsorted >= items.length() || (forall i in 0..unsorted => items[i] <= items[unsorted])
   ensures items.length() == old(items.length())
-  ensures is_heap_from(items, limit: unsorted - 1, floor: 0)
-  ensures forall i in 1..items.length() => i > unsorted - 1 ==> items[i - 1] <= items[i]
+  ensures is_heap_except(items.model(), limit: unsorted - 1, floor: 0, hole: 0)
   ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
-  cost time O(log(unsorted) * time(Element.compare))
+  ensures identical(items.model()[unsorted - 1], old(items.model())[0])
+  ensures forall i in unsorted..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures unsorted >= items.length() || items[unsorted - 1] <= items[unsorted]
+  cost time O(1)
 {
   let last = unsorted - 1
   proof {
@@ -1303,19 +1313,32 @@ fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: US
   proof {
     moving_root_keeps_heap(old(items), after: items, limit: unsorted, bound: last / 2)
     moved_root_is_largest(old(items), after: items, limit: unsorted, bound: last)
-    assert identical(items.model()[last], old(items.model())[0])
   }
-  settle(mut items, start: 0, limit: last, top: last)
+}
+
+fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: USize)
+  requires 2 <= unsorted
+  requires unsorted <= items.length()
+  requires is_heap_from(items.model(), limit: unsorted, floor: 0)
+  requires forall i in 1..items.length() => i <= unsorted || items[i - 1] <= items[i]
+  requires unsorted >= items.length() || (forall i in 0..unsorted => items[i] <= items[unsorted])
+  ensures items.length() == old(items.length())
+  ensures is_heap_from(items.model(), limit: unsorted - 1, floor: 0)
+  ensures forall i in 1..items.length() => i > unsorted - 1 ==> items[i - 1] <= items[i]
+  ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
+  cost time O(log(items.length()) * time(Element.compare))
+{
+  put_largest_last(mut items, unsorted: unsorted)
+  settle(mut items, start: 0, limit: unsorted - 1, top: unsorted - 1)
   proof {
-    assert identical(items.model()[last], old(items.model())[0])
     assert forall i in unsorted..items.length() => identical(items.model()[i], old(items.model())[i])
     unchanged_tail_stays_sorted(old(items), after: items, from: unsorted, bound: items.length())
-    assert unsorted >= items.length() || items[last] <= items[unsorted]
+    assert unsorted >= items.length() || items[unsorted - 1] <= items[unsorted]
   }
 }
 
 fn drain_heap[Element: Ordered](items: mut Slice[Element])
-  requires is_heap_from(items, limit: items.length(), floor: 0)
+  requires is_heap_from(items.model(), limit: items.length(), floor: 0)
   ensures items.length() == old(items.length())
   ensures items.is_sorted()
   cost time O(items.length() * log(items.length()) * time(Element.compare))
@@ -1325,7 +1348,7 @@ fn drain_heap[Element: Ordered](items: mut Slice[Element])
   while unsorted >= 2
     invariant items.length() == count
     invariant unsorted <= count
-    invariant is_heap_from(items, limit: unsorted, floor: 0)
+    invariant is_heap_from(items.model(), limit: unsorted, floor: 0)
     invariant forall i in 1..count => i > unsorted ==> items[i - 1] <= items[i]
     invariant unsorted < count ==> forall i in 0..unsorted => items[i] <= items[unsorted]
     decreases unsorted
@@ -1348,6 +1371,14 @@ theorem sorted_in_model[Element: Ordered](items: Slice[Element], bound: USize)
     assert items[bound - 2] <= items[bound - 1]
     assert items.model()[bound - 2] <= items.model()[bound - 1]
   }
+}
+
+public theorem is_sorted_orders_model[Element: Ordered](items: Slice[Element])
+  requires items.is_sorted()
+  ensures forall i in 1..items.length() => items.model()[i - 1] <= items.model()[i]
+  cost time finite
+{
+  sorted_in_model(items, bound: items.length())
 }
 
 internal theorem sorted_from_model[Element: Ordered](items: Slice[Element], bound: USize)
