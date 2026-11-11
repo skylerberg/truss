@@ -2805,6 +2805,23 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
                 kind)
             kind);
       L.Symbol (symbol operation)
+  | Environment_entry, _ ->
+      (* An entry is a C string without its end, so none of its bytes is
+         zero. *)
+      let byte = T.builtin UInt8 in
+      let model = buffer_model context View byte known in
+      let length = sequence_length context byte model in
+      (match sequence_at context byte model (L.Symbol "entry.index") with
+      | Some at ->
+          assume context frame
+            (L.Forall
+               ( [ ("entry.index", L.Int) ],
+                 L.(
+                   Apply ("<=", [ int 0; Symbol "entry.index" ])
+                   &&& Apply ("<", [ Symbol "entry.index"; length ])
+                   ==> not_ (equal at (int 0))) ))
+      | None -> ());
+      known
   | Handle_from, _ -> (
       (* A handle's descriptor is a function of it, and the one it was made
          from. *)
