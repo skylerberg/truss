@@ -191,8 +191,9 @@ and `reads` clauses):
   type comes with its range as a fact, and each operation on one becomes
   an exact operation and an obligation that the result is in range, as in
   Dafny and Verus. The intrinsic module's integer operations mean what the
-  compiler makes them do: arithmetic that stops the program on overflow or
-  a zero divisor gives the exact result when it returns, wrapping
+  compiler makes them do: arithmetic gives the exact result, with its
+  operator's obligation that the result is in range and the divisor is not
+  zero, since a build without run-time checks does not stop there; wrapping
   arithmetic gives the exact result brought into range by a remainder,
   and the overflow tests, the comparisons, `fits`, and `convert` of a
   value that fits are exact. A float's `fits` an integer type when it is a
