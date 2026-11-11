@@ -155,6 +155,10 @@ and lowered =
    reach, which is composed from the instances' own keys, so that an edit
    changes the keys of what can reach the edited code and of nothing else. *)
 
+(* Declared when the module is initialized, not when first read: a state
+   opened before a query is declared leaves out every result that read
+   it. *)
+let () = ignore (Lazy.force pulled, Lazy.force lowered)
 let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_string key
 
 (* What an instance refers to, and the hash of its own code. A constant
@@ -226,6 +230,8 @@ let rec reach =
                  ( Query.demand database own_hash (lowering, member),
                    Query.demand database references (lowering, member) ))
                ~deep:reach_of ~members key))
+
+let () = ignore (Lazy.force reach)
 
 (* What a test's result is kept under: the key of everything its code can
    reach, the version of code generation, and the target, since [USize] is

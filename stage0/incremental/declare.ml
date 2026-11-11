@@ -4,6 +4,7 @@ open Values
 open Update
 
 let input ~name ~show ?(equal = ( = )) ?(about = fun _ -> None) () =
+  check_not_sealed name;
   incr numbers;
   let input =
     {
@@ -100,6 +101,7 @@ let remove engine (input : ('key, 'value) input) key =
 let query ~name ~show ~phase ?(saved = false) ?(portable = false) ?(equal = ( = ))
     ?(about = fun _ -> None) compute =
   if phase < 1 || phase >= phases then invalid_arg "Incremental.query: no such phase";
+  check_not_sealed name;
   incr numbers;
   let query =
     {

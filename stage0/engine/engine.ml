@@ -1,5 +1,6 @@
 type t = Incremental.t
 
+let seal = Incremental.seal
 let create = Incremental.create
 let freeze = Incremental.freeze
 let is_frozen = Incremental.is_frozen

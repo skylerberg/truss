@@ -149,6 +149,20 @@ let engines = ref 0
 let nodes_made = ref 0
 let numbers = ref 0
 
+(* Set once a state has been opened from a store. A query declared after
+   that was not there to restore its results, so every result that read
+   one was left out of the state, and is computed in every process. *)
+let sealed = ref false
+let seal () = sealed := true
+
+let check_not_sealed name =
+  if !sealed then
+    invalid_arg
+      (Printf.sprintf
+         "Incremental: `%s` is declared after a state was opened; declare it when its module is \
+          initialized"
+         name)
+
 (* Engines made while auditing, held weakly so that auditing keeps none
    alive. *)
 let auditing = ref false
