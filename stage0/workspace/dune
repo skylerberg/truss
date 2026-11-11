@@ -1,3 +1,13 @@
 (library
  (name workspace)
- (libraries query phases path source diagnostic token lexer syntax parser))
+ (libraries
+  query
+  phases
+  path
+  source
+  diagnostic
+  token
+  lexer
+  syntax
+  parser
+  manifest))

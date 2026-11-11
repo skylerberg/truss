@@ -46,7 +46,7 @@ let no_layout =
     packages = [];
     files = [];
     modules = [];
-    time_limit = Type_checker.Manifest.default_time_limit;
+    time_limit = Manifest.default_time_limit;
     registry = [];
   }
 
@@ -140,7 +140,7 @@ let manifest_file directory = if directory = "" then "truss.toml" else directory
 (* Registry packages *)
 
 type published = {
-  manifest : Type_checker.Manifest.package;
+  manifest : Manifest.package;
   record : Registry.Lock.t;
   sources : (string list * string) list;  (** Each module's names under its package, and its text *)
 }
@@ -172,10 +172,10 @@ let load_published ~packages name version ~hash =
           let files = Registry.Content.files ~all:true directory in
           let text file = List.assoc_opt file files in
           match
-            ( Option.map Type_checker.Manifest.parse (text "truss.toml"),
+            ( Option.map Manifest.parse (text "truss.toml"),
               Registry.Lock.parse (Option.value ~default:"" (text "truss.lock")) )
           with
-          | exception Type_checker.Manifest.Malformed (line, message) ->
+          | exception Manifest.Malformed (line, message) ->
               Error (Printf.sprintf "its manifest cannot be read: line %d: %s" line message)
           | exception Registry.Lock.Malformed (line, message) ->
               Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
@@ -199,11 +199,9 @@ let load_published ~packages name version ~hash =
 
 (* A package that is in a cycle of the project's packages that depend on
    each other, with the cycle. *)
-let dependency_cycle (packages : (string * Type_checker.Manifest.package) list) =
+let dependency_cycle (packages : (string * Manifest.package) list) =
   let dependencies name =
-    match
-      List.find_opt (fun (_, (p : Type_checker.Manifest.package)) -> p.name = name) packages
-    with
+    match List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages with
     | Some (_, package) ->
         List.map
           (fun (dependency : Workspace.dependency) -> dependency.package)
@@ -220,7 +218,7 @@ let dependency_cycle (packages : (string * Type_checker.Manifest.package) list) 
         (dependencies name)
   in
   List.find_map
-    (fun (directory, (package : Type_checker.Manifest.package)) ->
+    (fun (directory, (package : Manifest.package)) ->
       Option.map (fun way -> (directory, way)) (reaches package.name [] package.name))
     packages
 
@@ -249,7 +247,7 @@ let set_published engine (found : published) =
    root without one, which is a project of one package, every other
    directory with a manifest. *)
 let apply ?(text = fun _ -> None) session (files : (string * file_contents) list) =
-  let module Manifest = Type_checker.Manifest in
+  let module Manifest = Manifest in
   let engine = Session.engine session in
   let project = project session in
   let old = current_layout engine in
@@ -686,9 +684,7 @@ let open_commit ~repository commit =
 let root_of directory =
   let directory = try Unix.realpath directory with Unix.Unix_error _ -> directory in
   let has_project_table manifest =
-    try
-      Type_checker.Manifest.has_project_table
-        (In_channel.with_open_bin manifest In_channel.input_all)
+    try Manifest.has_project_table (In_channel.with_open_bin manifest In_channel.input_all)
     with Sys_error _ -> false
   in
   let rec up path nearest =

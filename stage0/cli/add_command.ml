@@ -26,11 +26,8 @@ let run ~directory ~names ~json =
   let manifest = Filename.concat package.directory Project.manifest_name in
   let written = In_channel.with_open_bin manifest In_channel.input_all in
   let with_entries =
-    try
-      List.fold_left
-        (fun text (name, _) -> Type_checker.Manifest.with_dependency text name)
-        written wanted
-    with Type_checker.Manifest.Malformed (line, message) ->
+    try List.fold_left (fun text (name, _) -> Manifest.with_dependency text name) written wanted
+    with Manifest.Malformed (line, message) ->
       Project.cannot_run "%s:%d: %s" (Project.shown manifest) line message
   in
   let write text =

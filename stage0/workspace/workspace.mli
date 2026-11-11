@@ -5,7 +5,7 @@
     definition whose tree comes out the same, as one that only moved does, changes nothing that
     reads it. *)
 
-type dependency = { package : string; capabilities : string list }
+type dependency = Manifest.dependency = { package : string; capabilities : string list }
 (** A dependency from the manifest, with the capabilities it is granted. *)
 
 type package = {

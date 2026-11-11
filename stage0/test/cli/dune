@@ -12,5 +12,6 @@
   memory_layout
   build
   type_checker
+  manifest
   registry
   compile))

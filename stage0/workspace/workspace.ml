@@ -1,4 +1,4 @@
-type dependency = { package : string; capabilities : string list }
+type dependency = Manifest.dependency = { package : string; capabilities : string list }
 
 type package = {
   name : string;
