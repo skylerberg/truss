@@ -40,7 +40,12 @@ val find : string -> t option
 
 val all : unit -> t list
 val key : t -> string
+
 val context : t -> Query.context
+(** For a driver's reads. Each result read through it becomes a root of the state. *)
+
+val observer : t -> Query.context
+(** For a driver's reads that make no root. *)
 
 val engine : t -> Engine.t
 (** For the client that says what the session's inputs are, and for tests. *)

@@ -249,6 +249,36 @@ let () =
       error "'a'" ~code:Character_literal ~at:"'" ~fixed:{|Character"a"|};
       error {|'\n'|} ~code:Character_literal ~at:"'" ~fixed:{|Character"\n"|};
       error {|'"'|} ~code:Character_literal ~at:"'" ~fixed:{|Character"\""|});
+  test "an escape of another language becomes a code point" (fun () ->
+      error {|"\x41"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"\u{41}"|};
+      error {|"\u00E9"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"\u{E9}"|};
+      error {|"\U0001F600"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"\u{1F600}"|};
+      error {|"\a"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"\u{7}"|});
+  test "an escape of another language gives the string its character" (fun () ->
+      equal_lists Fun.id "tokens" [ {|"A\x1Bé"|}; "NL" ] (tokens_of {|"\x41\e\u00E9"|}));
+  test "an escaped single quote needs no escape" (fun () ->
+      error {|"it\'s"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"it's"|});
+  test "a surrogate written with four digits has no fix" (fun () ->
+      error {|"\uD800"|} ~code:Invalid_escape ~at:"\\");
+  test "an f-string becomes an ordinary string" (fun () ->
+      error {|f"Hello {name}"|} ~code:String_prefix ~at:"f" ~fixed:{|"Hello ${name}"|};
+      error {|f"{{{user.name}}}"|} ~code:String_prefix ~at:"f" ~fixed:{|"{${user.name}}"|};
+      error {|f""|} ~code:String_prefix ~at:"f" ~fixed:{|""|});
+  test "an f-string with a format specification has no fix" (fun () ->
+      error {|f"{value:.2f}"|} ~code:String_prefix ~at:"f";
+      error {|f"{}"|} ~code:String_prefix ~at:"f");
+  test "an f-string is lexed as one string" (fun () ->
+      equal_lists Fun.id "tokens" [ "x"; "="; {|"a {b}"|}; "NL" ] (tokens_of {|x = f"a {b}"|}));
+  test "an r-string becomes a raw string" (fun () ->
+      error {|r"\d+"|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|};
+      equal_lists Fun.id "tokens" [ {|"\\d+"|}; "NL" ] (tokens_of {|r"\d+"|}));
+  test "a byte string has no fix" (fun () ->
+      error {|b"abc"|} ~code:String_prefix ~at:"b";
+      equal_lists Fun.id "tokens" [ {|"abc"|}; "NL" ] (tokens_of {|b"abc"|}));
+  test "a byte literal becomes a tagged string" (fun () ->
+      error "b'a'" ~code:Character_literal ~at:"b" ~fixed:{|UInt8"a"|});
+  test "a name before a string that is not a prefix is a name" (fun () ->
+      equal_lists Fun.id "tokens" [ "g"; {|"a"|}; "NL" ] (tokens_of {|g"a"|}));
   test "quotes touching a name are not a character literal" (fun () ->
       equal_lists Fun.id "codes"
         [ "lexer.unexpected_character"; "lexer.unexpected_character" ]

@@ -7,7 +7,9 @@ let phase_error (reader : node) what =
     (Printf.sprintf "Incremental: %s, of phase %d, reads %s, of a later phase" (label reader)
        reader.phase what)
 
-let wanted (node : node) = node.kept || node.below <> None || Hashtbl.length node.readers > 0
+(* A root, a copy of a base's node, or a node something reads. A node that
+   is none of these is unnecessary. *)
+let necessary (node : node) = node.root || node.below <> None || Hashtbl.length node.readers > 0
 
 let rec ensure engine (node : node) =
   if node.engine == engine then
@@ -77,7 +79,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
     node.busy <- false
   in
   let outcome =
-    match query.compute { engine; frame = Some frame } cell.key with
+    match query.compute { engine; frame = Some frame; observing = false } cell.key with
     | value -> Value value
     | exception ((Out_of_memory | Stack_overflow | Lost _) as fatal) ->
         finish ();
@@ -211,8 +213,9 @@ and adopt_new : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_
           in
           let candidates = List.filter_map Fun.id located in
           let adopted = List.for_all Option.is_some located && adopt engine query cell candidates in
-          (* A node made only to look is dropped if nothing came to read it. *)
-          if not adopted then List.iter (consider engine) candidates;
+          (* A node made only for the lookup is collected if nothing came to
+             read it. *)
+          if not adopted then List.iter (defer_collection engine) candidates;
           adopted)
   | _ -> false
 
@@ -243,9 +246,9 @@ let rec settle_marks engine phase =
       engine.marks.(phase) <- rest;
       engine.waiting <- engine.waiting - 1;
       if node.alive && node.marked then (
-        (* Nothing reads it and no request kept it, so it is dropped: left
-            marked, it would be written and opened as if it were current. *)
-        try if wanted node then ensure engine node else consider engine node
+        (* An unnecessary result is collected: left marked, it would be
+           written and opened as if it were current. *)
+        try if necessary node then ensure engine node else defer_collection engine node
         with fatal ->
           engine.marks.(phase) <- node :: engine.marks.(phase);
           engine.waiting <- engine.waiting + 1;

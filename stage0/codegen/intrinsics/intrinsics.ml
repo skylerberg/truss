@@ -112,12 +112,50 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
      that is undefined in C, or gives a wrong value, where its precondition
      does not hold. These are the only checks: no [requires] clause is
      evaluated when a program runs. *)
-  let panic_if failed message =
-    if checks then begin
-      let holds = local b (Raw Bool) in
-      emit b (Assign (at holds, failed));
-      panic_when (Copy (at holds)) message
-    end
+  let panic_if (failed : Lir.rvalue) message =
+    (* What a comparison comes to where its operands decide it: two
+       constants, or an unsigned value and zero. Such a comparison is not
+       written. GCC reports a comparison of an unsigned value with zero
+       that always or never holds, and the tests compile the C with every
+       warning an error. *)
+    let decided =
+      let unsigned_zero : Lir.operand -> bool = function
+        | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64 | USize), zero)) -> Z.sign zero = 0
+        | _ -> false
+      in
+      match failed with
+      | Binary (op, Constant (Integer (_, left)), Constant (Integer (_, right))) -> (
+          match op with
+          | Greater -> Some (Z.gt left right)
+          | Greater_equal -> Some (Z.geq left right)
+          | Less -> Some (Z.lt left right)
+          | Less_equal -> Some (Z.leq left right)
+          | Equal -> Some (Z.equal left right)
+          | Not_equal -> Some (not (Z.equal left right))
+          | _ -> None)
+      | Binary (Greater, zero, _) when unsigned_zero zero -> Some false
+      | Binary (Less, _, zero) when unsigned_zero zero -> Some false
+      | Binary (Greater_equal, _, zero) when unsigned_zero zero -> Some true
+      | Binary (Less_equal, zero, _) when unsigned_zero zero -> Some true
+      | _ -> None
+    in
+    if checks then
+      match decided with
+      | Some false -> ()
+      | Some true ->
+          finish b
+            (Fail
+               {
+                 failure = Panic;
+                 message = Constant (Bytes message);
+                 length = usize (String.length message);
+                 site;
+               });
+          start b (block b)
+      | None ->
+          let holds = local b (Raw Bool) in
+          emit b (Assign (at holds, failed));
+          panic_when (Copy (at holds)) message
   in
   let check_index index count =
     panic_if (Binary (Greater_equal, index, count)) "index out of bounds"
@@ -310,18 +348,19 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
       | Bit_xor -> binary Bit_xor
       | Complement -> unary Complement
       | Shift_left | Shift_right ->
-          (* A shift by the type's width or more, or by a negative amount,
-             is undefined in C. *)
-          (match integer_argument () with
-          | Some integer ->
+          (* The emitted C masks the amount to the type's width, so a shift
+             by the width or more, or by a negative amount, would give a
+             wrong value. The amount has a type of its own. *)
+          (match (integer_argument (), scalar env (type_argument 1)) with
+          | Some integer, Integer amount ->
               let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
-              let constant number : Lir.operand = Constant (Integer (integer, Z.of_int number)) in
-              (match integer with
+              let constant number : Lir.operand = Constant (Integer (amount, Z.of_int number)) in
+              (match amount with
               | Int8 | Int16 | Int32 | Int64 | ISize ->
                   panic_if (Binary (Less, value 1, constant 0)) "shift amount out of range"
               | _ -> ());
               panic_if (Binary (Greater_equal, value 1, constant bits)) "shift amount out of range"
-          | None -> ());
+          | _ -> ());
           binary (if operation = Shift_left then Shift_left else Shift_right)
       | Convert | Fits -> (
           (* Whether a value of [Source] fits [Target]: a test of each bound of

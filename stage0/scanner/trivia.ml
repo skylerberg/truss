@@ -92,14 +92,15 @@ let reject ?(code = Diagnostic.Code.Unexpected_character) cursor ~length message
 
 (* The end of a character literal from another language, such as `'a'` or
    `'\n'`, that starts at [start], or [None] if there is none there. The
-   habit is a literal standing on its own, so quotes touching a name, as in
-   `value's'debug`, are not one: they are stray `'`s. *)
-let character_literal_end cursor start =
+   habit is a literal that touches no name, so the quotes in
+   `value's'debug` are not one. With [after_prefix], the literal follows a
+   prefix, as in `b'a'`, which is the one name it may touch. *)
+let character_literal_end ?(after_prefix = false) cursor start =
   let touches_name index =
     let current = byte cursor index in
     is_ascii_name_byte current || current >= 0x80
   in
-  if start > 0 && touches_name (start - 1) then None
+  if (not after_prefix) && start > 0 && touches_name (start - 1) then None
   else
     let content = start + 1 in
     let current = byte cursor content in

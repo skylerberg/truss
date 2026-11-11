@@ -559,6 +559,12 @@ of the fixed code and continues.
 | `Point { x: 1.0, y: 2.0 }` | An `UPPER` name, then `{`, a name, and `:`, on one line; no block starts with a label | `Point(x: 1.0, y: 2.0)` |
 | `parse::<Int64>(text)` | `::` followed by `<` | `parse[Int64](text)` |
 | `items.map { it.name }` | A statement that ends with a name or a member, followed on its line by a block that uses `it`, in its code or in its interpolations | `items.map(fn(item) { item.name })`, renaming every `it`, and naming the parameter with the singular of the collection's name when its plural is regular, as `item` for `items` and `entry` for `entries`, and otherwise `element` |
+| `List<String>`, `fn first<T>(...)` | `<` where type arguments or generic parameters go, closed by `>` on the same line | `List[String]`, `fn first[T](...)` |
+| `Shape::Circle`, `List::new()` | `::` after an `UPPER` name in an expression | `Shape.Circle`, `List.new()` |
+| `Shape.Circle(radius)`, `Shape::Circle(radius)` in a pattern | `.` or `::` and an `UPPER` name after an `UPPER` name | `Circle(radius)` |
+| `vec![1, 2]`, `println!(...)` | A name, `!`, and `(` or `[`, with no space between them | `[1, 2]` for `vec!`; none for the others, whose message says what to write |
+| `todo!()`, `unreachable!()` | `!` and `(` right after the keyword | `todo`, `unreachable`; none when the parentheses hold arguments |
+| `(a, b)`, `(Int64, String)`, `pair.0` | A comma directly inside the parentheses of an expression or a type; a number after `.` | None; the message says that Truss has no tuples and recommends a record |
 | `x as Int64` | The reserved word `as` after an expression, with a type after it on the same line | `Int64.from(x)`, then `Int64.try_from(x)`, for a conversion that can lose information, as most casts can |
 | `0.0 =>` in a pattern | A float literal where a pattern begins | None; the message recommends a guard, as in `value if value == 0.0` |
 | `loop {`, `const`, `static` | A `Reserved` token where a statement or a definition starts | `while true {`, `let` |
@@ -623,13 +629,9 @@ report them (see [TYPECHECKER.md](TYPECHECKER.md)).
 
   | Written | Fix |
   |---|---|
-  | `(a, b)` as an expression | "Truss has no tuples", pointing to a record |
-  | `pair.0` | "Truss has no tuples" |
-  | `Shape.Circle(radius)` in a pattern | `Circle(radius)` |
-  | `Shape::Circle` | `Shape.Circle` |
-  | `fn first<T>(...)`, `List<String>` in a type | `fn first[T](...)`, `List[String]` |
   | `fn(x: Int64) { ... }` | `fn(x) { ... }`, since lambdas have no annotations |
-  | `println!(...)`, `vec![...]` | "Truss has no macros", with `Console.print_line(...)` and `[...]` |
+  | `List<String>.new()` in an expression | `List[String].new()`; there a `<` may be a comparison |
+  | `impl<T> Trait for Box<T>` | `impl Trait for Box[T]` |
   | `!response is Ok(_)` | `!(response is Ok(_))`, because `!` binds tighter than `is` |
   | `a ?? b`, `a ?: b` | `a.unwrap_or(b)` |
 - **Parsing only the definitions whose text changed.** A definition's tree

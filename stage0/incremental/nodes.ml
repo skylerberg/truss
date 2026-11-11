@@ -10,7 +10,7 @@ type counters = {
   changed : int;
   adopted : int;
   copied : int;
-  dropped : int;
+  collected : int;
 }
 
 type tally = {
@@ -20,7 +20,7 @@ type tally = {
   mutable changes : int;
   mutable adoptions : int;
   mutable copies : int;
-  mutable drops : int;
+  mutable collections : int;
 }
 
 type store = {
@@ -44,13 +44,12 @@ type t = {
   foreign : (int, (int, node) Hashtbl.t) Hashtbl.t;
       (** What here reads a base's node, by that node's id *)
   shadows : (int, node) Hashtbl.t;  (** The copy here of a base's node, by that node's id *)
-  pinned : (int, unit) Hashtbl.t;  (** Base nodes read from outside any query *)
   mutable clock : int;
   mutable frames : frame list;
   seeds : node list array;  (** By phase: readers of a result that changed, to be marked *)
   marks : node list array;  (** By phase: marked results, newest first *)
   mutable waiting : int;  (** How many seeds and marks there are *)
-  mutable limbo : node list;  (** Nodes to drop, if still unread, once nothing runs *)
+  mutable candidates : node list;  (** Nodes to collect, if still unnecessary, once no query runs *)
   logging : bool;
   mutable log : string list;
   mutable computed : node list;  (** Newest first *)
@@ -58,7 +57,7 @@ type t = {
   tally : tally;
   mutable store : store option;
   unsaved : (int, node) Hashtbl.t;  (** Saved nodes made or changed since the last write *)
-  mutable gone : (string * string) list;  (** Written nodes dropped since the last write *)
+  mutable collected : (string * string) list;  (** Written nodes collected since the last write *)
   mutable chain : string option;  (** The artifact last written, or opened from *)
   mutable on_whole : bool;
       (** Whether the engine's bases hold the whole state its chain starts from *)
@@ -83,7 +82,7 @@ and node = {
   mutable busy : bool;  (** Being computed, or having its reads checked *)
   mutable changed_at : int;
   mutable verified_at : int;
-  mutable kept : bool;
+  mutable root : bool;  (** Demanded by a driver: maintained across changes, and never collected *)
   mutable alive : bool;
   mutable fingerprint : string option;  (** The name of its value in the store *)
   mutable identity : string option;
@@ -140,7 +139,8 @@ and frame = {
   mutable cyclic : string list option;
 }
 
-and context = { engine : t; frame : frame option }
+(* [observing]: a driver's context whose reads make no root. *)
+and context = { engine : t; frame : frame option; observing : bool }
 
 type ('key, 'value) cells = ('key, ('key, 'value) result_cell) Hashtbl.t
 type ('key, 'value) input_cells = ('key, ('key, 'value) input_cell) Hashtbl.t
@@ -209,13 +209,12 @@ let create ?(log = false) ?(bases = []) () =
       own = Hashtbl.create 1024;
       foreign = Hashtbl.create 64;
       shadows = Hashtbl.create 64;
-      pinned = Hashtbl.create 16;
       clock = 1;
       frames = [];
       seeds = Array.make phases [];
       marks = Array.make phases [];
       waiting = 0;
-      limbo = [];
+      candidates = [];
       logging = log;
       log = [];
       computed = [];
@@ -228,11 +227,11 @@ let create ?(log = false) ?(bases = []) () =
           changes = 0;
           adoptions = 0;
           copies = 0;
-          drops = 0;
+          collections = 0;
         };
       store = List.find_map (fun base -> base.store) all;
       unsaved = Hashtbl.create 256;
-      gone = [];
+      collected = [];
       chain = None;
       on_whole = false;
       whole = 0;
@@ -247,7 +246,8 @@ let create ?(log = false) ?(bases = []) () =
 
 let is_frozen engine = engine.frozen
 let bases engine = engine.bases
-let context engine = { engine; frame = None }
+let context engine = { engine; frame = None; observing = false }
+let observer engine = { engine; frame = None; observing = true }
 let engine_of (context : context) = context.engine
 let attach engine store = engine.store <- Some store
 
@@ -259,7 +259,7 @@ let counters engine =
     changed = engine.tally.changes;
     adopted = engine.tally.adoptions;
     copied = engine.tally.copies;
-    dropped = engine.tally.drops;
+    collected = engine.tally.collections;
   }
 
 let tick engine =
@@ -326,7 +326,7 @@ let new_node engine ~phase ~below =
       busy = false;
       changed_at = 0;
       verified_at = 0;
-      kept = false;
+      root = false;
       alive = true;
       fingerprint = None;
       identity = None;

@@ -19,16 +19,23 @@ val freeze : ?fixed:bool -> t -> unit
 val is_frozen : t -> bool
 
 val context : t -> Query.context
-(** For reads made outside any query. Every result read through it is kept. *)
+(** For a driver's reads, made outside any query. Each result read through it becomes a root: the
+    engine maintains it across changes, with every result it reads, and never collects it. *)
+
+val observer : t -> Query.context
+(** For a driver's reads that make no root: a result is computed if the state has none, and is
+    collected again unless something else makes it necessary. A question about a state is asked
+    through this, so that asking does not change what the state maintains. *)
 
 val of_context : Query.context -> t
 val set : t -> ('key, 'value) Query.input -> 'key -> 'value -> unit
 val remove : t -> ('key, 'value) Query.input -> 'key -> unit
 
 val get : t -> ('key, 'value) Query.query -> 'key -> 'value
-(** A query's result, computed if needed, and kept from then on. *)
+(** A query's result, computed if needed, and a root from then on. *)
 
-val release : t -> ('key, 'value) Query.query -> 'key -> unit
+val unroot : t -> ('key, 'value) Query.query -> 'key -> unit
+(** Makes a result no longer a root. One that is then unnecessary is collected. *)
 
 type node = Incremental.node
 type change = Incremental.change = { computed : node list; changed : node list }
@@ -47,7 +54,7 @@ type counters = Incremental.counters = {
   changed : int;
   adopted : int;
   copied : int;
-  dropped : int;
+  collected : int;
 }
 
 val counters : t -> counters
@@ -77,7 +84,8 @@ val readers : t -> node -> node list
 val counterpart : node -> t -> node option
 
 val current_in : node -> t -> node option
-(** The same query and key in another engine, computed there if it has none. *)
+(** The same query and key in another engine, computed there if it has none. The other engine only
+    observes it, so it gains no root. *)
 
 val same_outcome : t -> node -> t -> node -> bool
 

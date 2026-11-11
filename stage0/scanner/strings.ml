@@ -228,6 +228,53 @@ and scan_escape cursor buffer =
     cursor.position <- stop;
     `Continue
   in
+  let is_hexadecimal current =
+    is_digit current || (current >= 0x61 && current <= 0x66) || (current >= 0x41 && current <= 0x46)
+  in
+  (* The value of exactly [count] hexadecimal digits at [position]. *)
+  let hex_value position count =
+    let rec all index =
+      index >= count || (is_hexadecimal (byte cursor (position + index)) && all (index + 1))
+    in
+    if all 0 then Some (int_of_string ("0x" ^ String.sub cursor.text position count)) else None
+  in
+  let is_scalar value = value <= 0x10FFFF && not (value >= 0xD800 && value <= 0xDFFF) in
+  (* An escape of another language, ending at [stop], for the character
+     [value]: its fix writes the code point, and the string has the
+     character. *)
+  let foreign_escape stop value =
+    let replacement = Printf.sprintf "\\u{%X}" value in
+    report cursor ~code:Invalid_escape
+      ~fixes:
+        [
+          Diagnostic.fix
+            ("Write `" ^ replacement ^ "`")
+            [ Diagnostic.replace (span start stop) replacement ];
+        ]
+      (span start stop)
+      (Printf.sprintf
+         "`%s` is not an escape in Truss. A character is written by its code point: `%s`."
+         (String.sub cursor.text start (stop - start))
+         replacement);
+    Unicode.encode buffer value;
+    cursor.position <- stop;
+    `Continue
+  in
+  let unknown () =
+    let packed = decode cursor (start + 1) in
+    let length = if packed < 0 then 1 else Unicode.decoded_length packed in
+    let written =
+      if packed < 0 then Printf.sprintf "`\\` followed by %s" (show_character cursor (start + 1))
+      else Printf.sprintf "`%s`" (String.sub cursor.text start (1 + length))
+    in
+    problem
+      (start + 1 + length)
+      (Printf.sprintf
+         "%s is not an escape. The escapes are `\\n`, `\\t`, `\\r`, `\\0`, `\\\\`, `\\\"`, `\\${`, \
+          and `\\u{...}`. For text with backslashes, such as a regular expression or a Windows \
+          path, a raw string has no escapes: `\"\"\"\\d+\"\"\"`."
+         written)
+  in
   if is_end_of_line escaped then begin
     report cursor ~code:Invalid_escape
       (span start (start + 1))
@@ -250,17 +297,14 @@ and scan_escape cursor buffer =
         `Continue
     | 'u' ->
         let form = "A Unicode escape is written `\\u{...}`, with 1 to 6 hexadecimal digits." in
-        if byte cursor (start + 2) <> Char.code '{' then problem (start + 2) form
+        if byte cursor (start + 2) <> Char.code '{' then
+          match hex_value (start + 2) 4 with
+          | Some value when is_scalar value -> foreign_escape (start + 6) value
+          | _ -> problem (start + 2) form
         else
           let digits_start = start + 3 in
           let rec digits_end position =
-            let current = byte cursor position in
-            if
-              is_digit current
-              || (current >= 0x61 && current <= 0x66)
-              || (current >= 0x41 && current <= 0x46)
-            then digits_end (position + 1)
-            else position
+            if is_hexadecimal (byte cursor position) then digits_end (position + 1) else position
           in
           let stop = digits_end digits_start in
           let count = stop - digits_start in
@@ -280,21 +324,26 @@ and scan_escape cursor buffer =
               cursor.position <- stop + 1;
               `Continue
             end
-    | _ ->
-        let packed = decode cursor (start + 1) in
-        let length = if packed < 0 then 1 else Unicode.decoded_length packed in
-        let written =
-          if packed < 0 then
-            Printf.sprintf "`\\` followed by %s" (show_character cursor (start + 1))
-          else Printf.sprintf "`%s`" (String.sub cursor.text start (1 + length))
-        in
-        problem
-          (start + 1 + length)
-          (Printf.sprintf
-             "%s is not an escape. The escapes are `\\n`, `\\t`, `\\r`, `\\0`, `\\\\`, `\\\"`, \
-              `\\${`, and `\\u{...}`. For text with backslashes, such as a regular expression or a \
-              Windows path, a raw string has no escapes: `\"\"\"\\d+\"\"\"`."
-             written)
+    | 'x' -> (
+        match hex_value (start + 2) 2 with
+        | Some value -> foreign_escape (start + 4) value
+        | None -> unknown ())
+    | 'U' -> (
+        match hex_value (start + 2) 8 with
+        | Some value when is_scalar value -> foreign_escape (start + 10) value
+        | _ -> unknown ())
+    | 'a' -> foreign_escape (start + 2) 0x07
+    | 'b' -> foreign_escape (start + 2) 0x08
+    | 'f' -> foreign_escape (start + 2) 0x0C
+    | 'v' -> foreign_escape (start + 2) 0x0B
+    | 'e' -> foreign_escape (start + 2) 0x1B
+    | '\'' ->
+        report cursor ~code:Invalid_escape
+          ~fixes:[ Diagnostic.fix "Write `'`" [ Diagnostic.replace (span start (start + 2)) "'" ] ]
+          (span start (start + 2))
+          "`'` needs no escape in a string.";
+        simple '\''
+    | _ -> unknown ()
 
 (* At the dollar signs or quotes that open a raw string. *)
 and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
@@ -642,10 +691,12 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
     lines;
   literal ~tag ~form joined delimiter_start
 
-(* A character literal from another language, `'a'` or `'\n'`, ending at
-   [stop]: reported, with a fix to the tagged string `Character"a"`, which
-   is the token it becomes. *)
-let character_literal cursor ~stop =
+(* A character literal from another language, `'a'` or `'\n'`, whose
+   opening quote is at the cursor and which ends at [stop]: reported, with a
+   fix to the tagged string `Character"a"`, which is the token it becomes.
+   [literal_start] is where the literal starts, which is before the quote
+   for a byte literal, `b'a'`, whose [tag] is `UInt8`. *)
+let character_literal cursor ~tag ~literal_start ~stop =
   let start = cursor.position in
   let content = String.sub cursor.text (start + 1) (stop - start - 2) in
   let as_ordinary = match content with "\"" -> "\\\"" | "\\'" -> "'" | other -> other in
@@ -665,22 +716,112 @@ let character_literal cursor ~stop =
         | _ -> "")
     | other -> other
   in
-  let replacement = "Character\"" ^ as_ordinary ^ "\"" in
+  let replacement = tag ^ "\"" ^ as_ordinary ^ "\"" in
   report cursor ~code:Character_literal
     ~fixes:
       [
         Diagnostic.fix
           ("Write `" ^ replacement ^ "`")
-          [ Diagnostic.replace (span start stop) replacement ];
+          [ Diagnostic.replace (span literal_start stop) replacement ];
       ]
-    (span start stop)
-    (Printf.sprintf "Truss has no character literals. A single character is a tagged string: `%s`."
+    (span literal_start stop)
+    (Printf.sprintf "Truss has no %s literals. A single %s is a tagged string: `%s`."
+       (if tag = "UInt8" then "byte" else "character")
+       (if tag = "UInt8" then "byte" else "character")
        replacement);
   cursor.position <- stop;
   String
     {
-      tag = Some ("Character", Source.zero_width start);
+      tag = Some (tag, Source.zero_width literal_start);
       form = Ordinary;
       first = { value; span = span (start + 1) (stop - 1) };
       rest = [||];
     }
+
+(* The edits that turn the text of a Python f-string, between [start] and
+   [stop], into a Truss string's: `{name}` becomes `${name}`, and `{{` and
+   `}}` become `{` and `}`. [None] when a replacement field is not an
+   expression alone, as `{value:.2f}` and `{}` are not, since no exact fix
+   exists then. *)
+let format_field_edits cursor ~start ~stop =
+  let plain current =
+    is_ascii_name_byte current || is_space current
+    || List.mem (Char.chr current) [ '.'; ','; '('; ')'; '['; ']'; '+'; '-'; '*'; '/' ]
+  in
+  let rec field_end position =
+    if position >= stop then None
+    else if byte cursor position = Char.code '}' then Some position
+    else if plain (byte cursor position) then field_end (position + 1)
+    else None
+  in
+  let rec edits position found =
+    if position >= stop then Some (List.rev found)
+    else
+      let current = Char.chr (byte cursor position) and next = byte cursor (position + 1) in
+      match current with
+      | '\\' -> edits (position + 2) found
+      | ('{' | '}') when next = Char.code current ->
+          edits (position + 2)
+            (Diagnostic.replace (span position (position + 2)) (String.make 1 current) :: found)
+      | '{' -> (
+          match field_end (position + 1) with
+          | Some close when skip_spaces cursor (position + 1) < close ->
+              edits (close + 1) (Diagnostic.insert position "$" :: found)
+          | _ -> None)
+      | _ -> edits (position + 1) found
+  in
+  edits start []
+
+(* A string with a prefix from another language, `f"..."`, `r"..."`, or
+   `b"..."`: the cursor is at the quote after the prefix, which starts at
+   [start]. The prefix is reported, and the token is the string that the
+   fix writes: an ordinary string for `f` and `b`, and a raw string for
+   `r`. *)
+let prefixed_string cursor ~scan ~prefix ~start ~nesting =
+  let quote_start = cursor.position in
+  let empty = run_length cursor quote_start quote = 2 in
+  let remove_prefix = Diagnostic.delete (span start quote_start) in
+  let kind, ending =
+    if prefix = "r" && not empty then begin
+      cursor.position <- quote_start + 1;
+      scan_one_line_raw cursor ~scan ~tag:None
+        ~form:(Raw { quotes = 3; dollars = 0; multi_line = false })
+        ~nesting ~literal_start:start ~dollars:0 ~quotes:1
+    end
+    else scan_string cursor ~scan ~tag:None ~nesting
+  in
+  let text_start = quote_start + 1 and text_stop = cursor.position - 1 in
+  let has_interpolations =
+    match kind with String { rest; _ } -> Array.length rest > 0 | _ -> false
+  in
+  let message, fixes =
+    match prefix with
+    | "f" ->
+        ( "Truss has no `f` strings. Every string interpolates with `${...}`, as in `\"Hello \
+           ${name}\"`.",
+          if ending = Unterminated || has_interpolations then []
+          else if empty then [ Diagnostic.fix "Remove the `f`" [ remove_prefix ] ]
+          else
+            match format_field_edits cursor ~start:text_start ~stop:text_stop with
+            | Some edits -> [ Diagnostic.fix "Write an ordinary string" (remove_prefix :: edits) ]
+            | None -> [] )
+    | "r" ->
+        ( "Truss has no `r` strings. A raw string, which has no escapes, is written between \
+           `\"\"\"`s, as in `\"\"\"\\d+\"\"\"`.",
+          if ending = Unterminated || has_interpolations then []
+          else if empty then [ Diagnostic.fix "Remove the `r`" [ remove_prefix ] ]
+          else if byte cursor (text_stop - 1) = Char.code '\\' then []
+          else
+            [
+              Diagnostic.fix "Write a raw string"
+                [
+                  Diagnostic.replace (span start text_start) "\"\"\"";
+                  Diagnostic.replace (span text_stop (text_stop + 1)) "\"\"\"";
+                ];
+            ] )
+    | _ ->
+        ( "Truss has no byte strings. A string is UTF-8 text, and `text.bytes()` gives its bytes.",
+          [] )
+  in
+  report cursor ~code:String_prefix ~fixes (span start quote_start) message;
+  (kind, ending)

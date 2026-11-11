@@ -449,11 +449,10 @@ let rec expression builder frontier (node : Core.expression) : int list =
   | Call call -> call_ builder frontier node call
   | Operator { arguments; _ } | Specification_function { arguments; _ } -> all frontier arguments
   | Compare { left; right; _ } | Identical (left, right) -> all frontier [ left; right ]
-  | And (left, right) | Or (left, right) | Implies (left, right) ->
-      let after_left = expression builder frontier left in
-      after_left @ expression builder after_left right
-  | Not inner | Echo inner | Old inner | To_any { value = inner; _ } | Convert { value = inner; _ }
-    ->
+  | And _ | Or _ | Implies _ | Not _ ->
+      let on_true, on_false = condition builder frontier node in
+      List.sort_uniq compare (on_true @ on_false)
+  | Echo inner | Old inner | To_any { value = inner; _ } | Convert { value = inner; _ } ->
       expression builder frontier inner
   | Matches { value; pattern } ->
       let frontier = operand builder frontier Read value in
@@ -852,6 +851,33 @@ and returned_value builder frontier (value : Core.expression) =
 and returned_block builder frontier (body : Core.block) =
   let frontier = List.fold_left (statement builder) frontier body.statements in
   match body.value with Some value -> returned_value builder frontier value | None -> frontier
+
+(* The points from which control leaves a Boolean expression with [true],
+   and the points from which it leaves with [false]. A short-circuit
+   operator evaluates its right operand from one of the two: [left && right]
+   evaluates [right] only where [left] is [true]. So an operand has an edge
+   to the operand after it and to the code after the whole expression, and a
+   chain of operators has a number of edges linear in its length. *)
+and condition builder frontier (node : Core.expression) : int list * int list =
+  match node.kind with
+  | And (left, right) ->
+      let left_true, left_false = condition builder frontier left in
+      let right_true, right_false = condition builder left_true right in
+      (right_true, left_false @ right_false)
+  | Or (left, right) ->
+      let left_true, left_false = condition builder frontier left in
+      let right_true, right_false = condition builder left_false right in
+      (left_true @ right_true, right_false)
+  | Implies (left, right) ->
+      let left_true, left_false = condition builder frontier left in
+      let right_true, right_false = condition builder left_true right in
+      (left_false @ right_true, right_false)
+  | Not inner ->
+      let on_true, on_false = condition builder frontier inner in
+      (on_false, on_true)
+  | _ ->
+      let after = expression builder frontier node in
+      (after, after)
 
 and block builder frontier (body : Core.block) =
   let frontier = List.fold_left (statement builder) frontier body.statements in

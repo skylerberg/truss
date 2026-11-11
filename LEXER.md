@@ -340,16 +340,26 @@ literal with many digits cannot make the lexer quadratic.
   its fix, `Character"a"`. The lexer emits the tagged string, so that the
   parser can continue.
 
-| Written | From | Fix |
-|---|---|---|
-| `f"Hello {name}"` | Python | `"Hello ${name}"` |
-| `r"\d+"`, `r#"\d+"#` | Python, Rust | `"""\d+"""` |
-| `b'a'` | Rust, Python | `UInt8"a"` |
-| `b"bytes"` | Rust, Python | No fix. The message points to `text.bytes()`. |
-| `$"Hello {name}"`, `@"C:\logs"` | C# | `"Hello ${name}"`, `"""C:\logs"""` |
-| `` `Hello ${name}` `` | JavaScript | `"Hello ${name}"`, or a raw string if it spans lines |
-| `'abc'` | Python, JavaScript | `"abc"` |
-| `'a` with no closing quote | Rust lifetimes | No fix. Truss has no lifetimes. |
+The name `f`, `r`, or `b` directly before an ordinary or an empty string is a
+string prefix from another language. The lexer reports the prefix and emits
+the string that the fix writes, as one token:
+
+| Written | From | Fix | Token |
+|---|---|---|---|
+| `f"Hello {name}"` | Python | `"Hello ${name}"` | An ordinary string |
+| `r"\d+"` | Python, Rust | `"""\d+"""` | A raw string |
+| `b"bytes"` | Rust, Python | No fix. The message points to `text.bytes()`. | An ordinary string |
+| `b'a'` | Rust, Python | `UInt8"a"` | The tagged string |
+
+- **An f-string's fix rewrites its replacement fields.** `{name}` becomes
+  `${name}`, and `{{` and `}}` become `{` and `}`. A field that is not an
+  expression alone, such as `{value:.2f}` or `{}`, has no exact
+  translation, so the string then has no fix.
+- **An r-string is scanned with no escapes,** as the raw string it becomes.
+  One whose text ends with `\` has no fix, since Python and Rust disagree
+  about where it ends.
+- **Any other name before a string is a name.** `g"a"` is the name `g` and
+  a string, which the parser rejects.
 
 ### Ordinary strings
 
@@ -364,6 +374,16 @@ The value is the text in UTF-8, with escapes applied. The escapes are `\n`,
 digits. Any other `\` sequence is an error. A `\u{...}` escape whose value is
 not a Unicode scalar value, such as `\u{D800}` or `\u{110000}`, is an error
 with no fix.
+
+An escape of another language gets a fix, and the string has the character
+it means:
+
+| Written | Fix |
+|---|---|
+| `\x41` | `\u{41}` |
+| `\u00E9`, `\U0001F600` | `\u{E9}`, `\u{1F600}`, with the leading zeros dropped |
+| `\'` | `'` |
+| `\a`, `\b`, `\f`, `\v`, `\e` | `\u{7}`, `\u{8}`, `\u{C}`, `\u{B}`, `\u{1B}` |
 
 ### Raw strings
 
@@ -679,20 +699,17 @@ cost:
     | `0x1p3`, `0x1.8` | Truss has no hexadecimal floats. Write a decimal float. |
     | `1'000` | The fix writes `1_000`. |
 
-  - **String prefixes.** A `Lower` name followed directly by `"` or `'` would
-    be reported with a fix, and the string lexed without the prefix.
-    Today `f"..."` lexes as the name `f` followed by a string, which the
-    parser rejects.
-  - **Escapes:**
+  - **Strings:**
 
-    | Written | Fix |
-    |---|---|
-    | `\x41` | `\u{41}` |
-    | `\u00E9`, `\U0001F600` | `\u{00E9}`, `\u{1F600}` (leading zeros dropped to fit six digits) |
-    | `\'` | `'` |
-    | `\a`, `\b`, `\f`, `\v`, `\e` | `\u{7}`, `\u{8}`, `\u{C}`, `\u{B}`, `\u{1B}` |
-    | `\(name)` | Swift interpolation: `${name}` |
-    | `\` at the end of a line | No fix. The message suggests a raw string. |
+    | Written | From | Fix |
+    |---|---|---|
+    | `r#"\d+"#` | Rust | `"""\d+"""` |
+    | `f"""..."""`, `r"""..."""` | Python | The raw string without the prefix |
+    | `$"Hello {name}"`, `@"C:\logs"` | C# | `"Hello ${name}"`, `"""C:\logs"""` |
+    | `` `Hello ${name}` `` | JavaScript | `"Hello ${name}"`, or a raw string if it spans lines |
+    | `'abc'` | Python, JavaScript | `"abc"` |
+    | `'a` with no closing quote | Rust lifetimes | No fix. Truss has no lifetimes. |
+    | `\(name)` in a string | Swift | `${name}` |
 
   - **Other sequences:**
 

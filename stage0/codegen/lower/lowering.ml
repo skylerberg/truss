@@ -22,12 +22,23 @@ type cleanup =
    method's body is written into the caller up to its [yield]; the rest of
    it waits at [resume] and ends at [finished]. Each way out of the scope
    that owns the lend jumps to [resume], with [selector] saying which way it
-   was going, and [finished] sends it on, to one of [ways]. *)
+   was going, and [finished] sends it on, to one of [ways].
+
+   The caller goes on from whichever [yield] the method reached. So a local
+   that the method owns at one [yield] and not at another may or may not
+   hold a value there, and the rest of the method drops it only on the
+   path from its own [yield]. [owned] is every such local, and [finished]
+   drops each. Drop elaboration gives such a drop a flag, so it drops a
+   local only if it still holds a value. Without the drops, a path on
+   which the local may still own a value reaches the function's return,
+   which drop elaboration reports as a leak. *)
 and lend = {
   resume : Lir.block;
   finished : Lir.block;
   selector : Lir.local;
   mutable ways : Lir.block list;  (** Most recent first, numbered from the first *)
+  owned : Lir.place list;
+      (** What the method's own scopes owned at a [yield] that the caller went on from *)
 }
 
 (* A scope owns what is dropped as it ends: the scope of a block's names,
@@ -324,6 +335,7 @@ let drop_scope st (scope : scope) =
           lend.ways <- way :: lend.ways;
           finish st.b (Goto lend.resume);
           aside st.b lend.finished (fun () ->
+              List.iter (fun place -> emit st.b (Drop place)) lend.owned;
               finish st.b
                 (match lend.ways with
                 | [ only ] -> Goto only

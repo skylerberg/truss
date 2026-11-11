@@ -102,7 +102,7 @@ let () =
 (* Pushing *)
 
 let () =
-  test "stabilizing brings kept results up to date" (fun () ->
+  test "stabilizing brings every root up to date" (fun () ->
       let engine, files, total = setup () in
       ignore (Engine.get engine total ());
       ignore (Engine.stabilize engine);
@@ -141,14 +141,14 @@ let () =
       Engine.set engine value () 2;
       ignore (Engine.stabilize engine);
       expect_log engine []);
-  test "a result nothing reads any more is dropped" (fun () ->
+  test "a result that is no longer a root, and that nothing reads, is collected" (fun () ->
       let engine, _, total = setup () in
       ignore (Engine.get engine total ());
-      Engine.release engine total ();
+      Engine.unroot engine total ();
       let left =
         labels (List.filter (fun node -> Engine.reads engine node <> []) (Engine.nodes engine))
       in
-      if left <> [] then fail "kept [%s]" (String.concat "; " left));
+      if left <> [] then fail "not collected: [%s]" (String.concat "; " left));
   test "readers and reads are the edges in both directions" (fun () ->
       let engine, _, total = setup () in
       ignore (Engine.get engine total ());
@@ -228,7 +228,7 @@ let () =
 (* Dropping *)
 
 let () =
-  test "a result a running query has read is not dropped before the query ends" (fun () ->
+  test "a result a running query has read is not collected before the query ends" (fun () ->
       (* [n] reads [x] and then [y]. [y] used to read [x] and no longer
          does, and nothing else reads [x], so while [n] is computed again
          [x] loses its last reader before [n] counts as one. *)
@@ -255,7 +255,7 @@ let () =
       Engine.set engine value () 99;
       let result = Engine.get engine n () in
       if result <> 99 then fail "n is %d" result);
-  test "a result is dropped once the query that stopped reading it has ended" (fun () ->
+  test "a result is collected once the query that stopped reading it has ended" (fun () ->
       let engine = Engine.create () in
       let flag = Query.input ~name:"flag" ~show:(fun () -> "") () in
       let helper = unit_query "helper" (fun _ () -> 1) in
@@ -267,8 +267,8 @@ let () =
       ignore (Engine.get engine reader ());
       Engine.set engine flag () false;
       ignore (Engine.get engine reader ());
-      if List.mem "helper()" (labels (Engine.nodes engine)) then fail "kept the helper");
-  test "an input that is set is kept when nothing reads it" (fun () ->
+      if List.mem "helper()" (labels (Engine.nodes engine)) then fail "the helper was not collected");
+  test "an input that is set is not collected when nothing reads it" (fun () ->
       let engine = Engine.create () in
       let switch = Query.input ~name:"switch" ~show:(fun () -> "") () in
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
@@ -635,5 +635,33 @@ let () =
       match Query.phase ~name:"test_twice" ~after:[] with
       | _ -> fail "the second was declared"
       | exception Invalid_argument _ -> ())
+
+let () =
+  test "an observed result is computed and collected, and makes no root" (fun () ->
+      let engine, _, total = setup () in
+      let value = Query.demand (Engine.observer engine) total () in
+      if value <> 2 then fail "total %d" value;
+      if List.exists (fun node -> not (Engine.is_input node)) (Engine.nodes engine) then
+        fail "the engine holds [%s]" (String.concat "; " (labels (Engine.nodes engine))));
+  test "observing a root leaves it a root" (fun () ->
+      let engine, files, total = setup () in
+      ignore (Engine.get engine total ());
+      ignore (Query.demand (Engine.observer engine) total ());
+      Engine.clear_log engine;
+      Engine.set engine files "a" "four";
+      ignore (Engine.stabilize engine);
+      if not (List.mem "total()" (Engine.executed engine)) then
+        fail "the root was not brought up to date");
+  test "comparing with another engine makes no root in it" (fun () ->
+      let build = build () in
+      let mine = Engine.create () and theirs = Engine.create () in
+      fill mine build;
+      fill theirs build;
+      ignore (Engine.get mine build.total ());
+      List.iter
+        (fun node -> ignore (Engine.current_in node theirs))
+        (List.filter (fun node -> not (Engine.is_input node)) (Engine.nodes mine));
+      if List.exists (fun node -> not (Engine.is_input node)) (Engine.nodes theirs) then
+        fail "the other engine holds [%s]" (String.concat "; " (labels (Engine.nodes theirs))))
 
 let () = finish ()

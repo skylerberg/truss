@@ -424,6 +424,59 @@ let () =
   test "parse::<Int64>(text)" (fun () ->
       body_error "let n = parse::<Int64>(text)" ~code:Turbofish ~at:"<"
         ~fixed:"let n = parse[Int64](text)");
+  test "List<String> in a type" (fun () ->
+      body_error "let names: List<String> = []" ~code:Angle_brackets ~at:"<"
+        ~fixed:"let names: List[String] = []";
+      body_error "let table: Map<String, List<Int64>> = [:]" ~code:Angle_brackets ~at:"<"
+        ~fixed:"let table: Map[String, List[Int64]] = [:]");
+  test "fn first<T> in a definition" (fun () ->
+      error "fn first<Element: Ordered>(items: List[Element]) -> Element { todo }"
+        ~code:Angle_brackets ~at:"<"
+        ~fixed:"fn first[Element: Ordered](items: List[Element]) -> Element { todo }";
+      error "type Box<Item>(item: Item)" ~code:Angle_brackets ~at:"<"
+        ~fixed:"type Box[Item](item: Item)");
+  test "List<String> is parsed as the brackets it means" (fun () ->
+      let statements, _ = body_of "let table: Map<String, List<Int64>> = [:]" in
+      if
+        List.map Syntax_print.statement statements
+        <> [ "(let table : Map[String, List[Int64]] (map))" ]
+      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+  test "a comparison after a type is not angle brackets" (fun () ->
+      let _, diagnostics = body_of "let small = count as Int64 < limit" in
+      if codes diagnostics <> [ "parser.as_conversion" ] then
+        fail "got [%s]" (String.concat "; " (codes diagnostics)));
+  test "Shape::Circle" (fun () ->
+      body_error "let shape = Shape::Circle(radius: 1.0)" ~code:Path_separator ~at:"::"
+        ~fixed:"let shape = Shape.Circle(radius: 1.0)";
+      body_error "let items = List::new()" ~code:Path_separator ~at:"::"
+        ~fixed:"let items = List.new()");
+  test "Shape::Circle is parsed as the member it means" (fun () ->
+      let statements, _ = body_of "let shape = geometry::Shape::Circle" in
+      if List.map Syntax_print.statement statements <> [ "(let shape (. geometry::Shape Circle))" ]
+      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+  test "a variant with its type in a pattern" (fun () ->
+      body_error "let area = match shape {\n  Shape.Circle(radius) => radius\n  _ => 0.0\n}"
+        ~code:Qualified_variant ~at:"Shape."
+        ~fixed:"let area = match shape {\n  Circle(radius) => radius\n  _ => 0.0\n}";
+      body_error "let empty = shape is geometry::Shape::Empty" ~code:Qualified_variant
+        ~at:"geometry::Shape::" ~fixed:"let empty = shape is Empty");
+  test "a constant of a type in a pattern is not a variant" (fun () ->
+      let _, diagnostics = body_of "let teapot = status is Status.teapot" in
+      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
+  test "vec![...]" (fun () ->
+      body_error "let items = vec![1, 2]" ~code:Macro_call ~at:"!" ~fixed:"let items = [1, 2]");
+  test "println!(...) has no fix" (fun () ->
+      body_error "println!(\"total: {}\", total)" ~code:Macro_call ~at:"!");
+  test "todo!()" (fun () ->
+      body_error "todo!()" ~code:Macro_call ~at:"!" ~fixed:"todo";
+      body_error "unreachable!(\"never\")" ~code:Macro_call ~at:"!");
+  test "a negation after a name is not a macro" (fun () ->
+      let _, diagnostics = body_of "let different = a != (b)" in
+      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
+  test "a tuple" (fun () ->
+      body_error "let pair = (1, 2)" ~code:Tuple ~at:"(" ~occurrence:2;
+      body_error "let first = pair.0" ~code:Tuple ~at:"0";
+      body_error "let pair: (Int64, String) = make()" ~code:Tuple ~at:"(" ~occurrence:2);
   test "items.map { it.name }" (fun () ->
       body_error "let names = items.map { it.name }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let names = items.map(fn(item) { item.name })");

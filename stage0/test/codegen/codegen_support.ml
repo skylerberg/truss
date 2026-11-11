@@ -160,9 +160,22 @@ let compiler =
 (* Generated C must compile with every warning an error, apart from these,
    which are known not to apply to it: parameters a function does not read
    are normal, as for an adapter's environment, and so is a value computed
-   and never read, as [let _ = ...] does. *)
+   and never read, as [let _ = ...] does. A prototype of the C library's
+   table writes a parameter as a pointer where a header writes an array,
+   as for [pipe]'s two descriptors. The two are one type in C, and GCC 15
+   reports the difference in spelling. [-Wtype-limits] is asked for by
+   name: GCC's [-Wextra] has it and Clang's does not, so without it a
+   comparison that only GCC rejects passes wherever the tests use Clang. *)
 let strict =
-  [ "-Wall"; "-Wextra"; "-Werror"; "-Wno-unused-parameter"; "-Wno-unused-but-set-variable" ]
+  [
+    "-Wall";
+    "-Wextra";
+    "-Wtype-limits";
+    "-Werror";
+    "-Wno-unused-parameter";
+    "-Wno-unused-but-set-variable";
+    "-Wno-array-parameter";
+  ]
 
 let counter = ref 0
 
