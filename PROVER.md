@@ -67,6 +67,12 @@ with the facts gathered before it (see
 cut down to the facts it can use, written in a canonical form, and given to
 the solver (see [Queries](#queries)).
 
+One walk reads Truss and makes the verification conditions. Boogie and
+Why3 put a proof program between the two, which weakest preconditions turn
+into conditions; that keeps reading the language apart from the logic, at
+the cost of a second representation of every body that only the walk
+would read, so Truss has none.
+
 ### One definition at a time, one obligation at a time
 
 The prover works as the type checker does, through queries with traces (see
@@ -1459,9 +1465,6 @@ test the prover itself:
   other fixes, checking it with an `if`, using the
   checked version of the operation, and `uses Panic`, change what the code
   means, so the message is to name them without applying them.
-- **Proof programs as a data structure of their own,** made from a body
-  and then turned into verification conditions by weakest preconditions,
-  which would keep reading Truss apart from the logic. One walk does both.
 - **Proof states in the language server.** `Prover.states` gives each
   obligation's state at its position, proven or not with the diagnostic
   that says why; the language server, `truss lsp`, is not built yet.
