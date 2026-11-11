@@ -1227,6 +1227,9 @@ fn main(arguments: List[String]) -> ExitCode
 (* Cancelling a task that waits *)
 
 let () =
+  (* The child's output is discarded. A child that inherited the program's
+     output would keep it open after the program ended, and the test would
+     wait for the child to end. *)
   test "on threads, a cancelled task returns from a call that blocks in the operating system"
     (fun () ->
       expect_threaded ~expected:"run: cancelled\ntimed out\n"
@@ -1237,7 +1240,11 @@ fn run_or_time_out() -> String
 {
   concurrent {
     {
-      match Processes.run(processes::Command.new("sleep").argument("5")) {
+      let slow = processes::Command.new("sleep")
+        .argument("5")
+        .output(processes::Redirect.Discard)
+        .error_output(processes::Redirect.Discard)
+      match Processes.run(slow) {
         Ok(_) => Console.print_line("run: ended")
         Err(error) => Console.print_line("run: ${error}")
       }

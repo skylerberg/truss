@@ -475,8 +475,9 @@ capture nothing, so storing one never stores a pointer into a stack.
 
 A cursor is the state machine of one pulled yielding method (see
 [Cursors](#cursors-1)). Its layout is a state number, the method's
-parameters, and the locals that are live across a `yield`, with the states
-of any cursors it pulls from inside it. A parameter's field is named by its
+parameters but its evidence, and the locals that are live across a
+`yield`, with the states of any cursors it pulls from inside it. A
+parameter's field is named by its
 place among the parameters that have a size, in `Convention`, which is how
 the code that makes a cursor and the method's state machine agree on it. An `own` argument is held as a
 value the cursor owns and drops, whatever its size, since the cursor may
@@ -1032,18 +1033,30 @@ compile iterators:
 1. Number each `yield` as a state, from 1 in the order of the blocks. State
    0 is the start, and the state after the last is the end.
 2. Find the locals live where a `yield` resumes or stops, by liveness over
-   the LIR. They and the parameters become the cursor's fields, beside the
-   state number; everything else stays in C locals. A kept local reads and
-   writes its field through the cursor, so a `yield` stores nothing.
+   the LIR. They and the parameters, but the evidence, become the cursor's
+   fields, beside the state number; everything else stays in C locals. A
+   kept local reads and writes its field through the cursor, so a `yield`
+   stores nothing.
 3. `next()` switches on the state and jumps to the block after that
    `yield`. Each `yield` sets the state and returns `Some` of the value.
    Reaching the end sets the end state and returns `None`, as `next()` does
-   ever after.
+   ever after. `next()` takes the method's evidence as parameters after
+   the cursor, and each call passes the evidence that its own code has,
+   as a call of a function value whose type has `uses` does.
 4. In the version lowered for pulling, a `for` loop or a pulled cursor
    inside the method is an explicit cursor and calls to its `next()`, rather
    than a loop body, since a loop body cannot stop partway. The inner cursor
    is live across the outer `yield`s, so it becomes a field of the outer
    cursor.
+
+A cursor holds no evidence. The evidence that a method is given where it
+is pulled is in the frame of a `provide`, and a cursor is a value that can
+outlive that frame. A cursor that held the evidence would then call an
+implementation that had been dropped, which is a use after free. So the
+type checker requires the method's capabilities at each `next`, and each
+`next` uses the implementation that is provided where it is called. The
+drop function is given no evidence and has none to read: code generation
+reports a compiler bug if a `stop` path reads any.
 
 A `for` over a value of a type that implements `Cursor` is the same loop
 with the type's own `next`: it is called until it gives `None`, and the
@@ -1058,9 +1071,12 @@ the end it drops nothing. A method whose yields go through a recursive call has
 no fixed-size state, so the type checker reports any pull of it, as
 DESIGN.md says.
 
-Every cursor implements the prelude's `Cursor` trait, by an `impl` that the
-compiler derives for the yielding function. A call of that `impl`'s `next`,
-which generic code reaches through a bound, is a call of the state machine.
+A cursor of a method with no `uses` clause implements the prelude's
+`Cursor` trait, by an `impl` that the compiler derives for the yielding
+function. A call of that `impl`'s `next`, which generic code reaches
+through a bound, is a call of the state machine. It passes no evidence,
+which is why the type checker gives a cursor of a method with a `uses`
+clause no such `impl`.
 The methods that the trait gives a body, such as `count` and `skip`, are
 instances of the trait's code for the cursor's type, as for any `impl`. So
 `any Cursor[Element = Int64]` gets an ordinary vtable.

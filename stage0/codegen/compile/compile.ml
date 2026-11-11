@@ -52,8 +52,8 @@ let rec fresh_context lowering database =
   let context = Lower.context ~checks:lowering.checks database lowering.target in
   (context.cursor_fields :=
      fun yielding ->
-       Yields.cursor_fields context.env
-         (fst (Query.demand database (Lazy.force pulled) (lowering, yielding))));
+       let f, _ = Query.demand database (Lazy.force pulled) (lowering, yielding) in
+       Yields.cursor_fields context.env ~evidence:(Lower.pulled_evidence context yielding f) f);
   (context.constant :=
      fun path ->
        match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
@@ -96,7 +96,14 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       Compiled
         (Code
            (Lir.canonical_instance
-              { key; main = Yields.cursor_drop context.env ~cursor ~owned f; nested = [||] }))
+              {
+                key;
+                main =
+                  Yields.cursor_drop context.env ~cursor ~owned
+                    ~evidence:(Lower.pulled_evidence context yielding f)
+                    f;
+                nested = [||];
+              }))
   | Cursor_next yielding ->
       let f, _ = pulled yielding in
       let cursor = Ground.Cursor yielding in
@@ -104,7 +111,14 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
       Compiled
         (Code
            (Lir.canonical_instance
-              { key; main = Yields.cursor_next context.env ~cursor ~result f; nested = [||] }))
+              {
+                key;
+                main =
+                  Yields.cursor_next context.env ~cursor ~result
+                    ~evidence:(Lower.pulled_evidence context yielding f)
+                    f;
+                nested = [||];
+              }))
   | Drop ty -> code (Glue.drop glue ty)
   | Copy ty -> code (Glue.copy glue ty)
   | Debug ty -> code (Glue.debug glue ty)
