@@ -7,9 +7,7 @@
   path
   source
   diagnostic
-  query
   database
-  memory_layout
   build
   type_checker
   registry

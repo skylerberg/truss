@@ -1,11 +1,3 @@
 (library
  (name parse_support)
- (libraries
-  harness
-  source
-  diagnostic
-  lexer
-  parser
-  syntax
-  syntax_print
-  documents))
+ (libraries harness source diagnostic lexer parser syntax_print documents))

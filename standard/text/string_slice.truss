@@ -985,11 +985,67 @@ public fn StringSlice.to_uppercase(self) -> String
   output
 }
 
+internal type PendingText(text: String)
+  cost potential 8 * text.length()
+
+internal fn PendingText.push_character(mut self, character: Character)
+  cost amortized time O(1)
+{
+  mut self.text.push_character(character)
+}
+
+internal fn PendingText.flush(mut self, output: mut String)
+  cost amortized time O(1)
+{
+  mut output.push(self.text.slice())
+  self.text = ""
+}
+
+internal fn lower_character(
+  output: mut String,
+  after_sigma: mut PendingText,
+  sigma_is_undecided: mut Bool,
+  follows_cased: mut Bool,
+  character: Character,
+)
+  cost amortized time O(1)
+{
+  let code = character.code()
+  let cased = unicode_tables::is_cased(code)
+  let ignorable = unicode_tables::is_case_ignorable(code)
+  if !ignorable && sigma_is_undecided {
+    if cased {
+      mut output.push("σ")
+    } else {
+      mut output.push("ς")
+    }
+    mut after_sigma.flush(mut output)
+    sigma_is_undecided = false
+  }
+  if code == 931 {
+    if follows_cased {
+      sigma_is_undecided = true
+    } else {
+      mut output.push("σ")
+    }
+  } else if sigma_is_undecided {
+    mut after_sigma.push_character(character.to_lowercase())
+  } else {
+    match unicode_tables::lowercase_expansion_of(code) {
+      Some(expansion) => push_expansion(mut output, expansion: expansion)
+      None => mut output.push_character(character.to_lowercase())
+    }
+  }
+  if !ignorable {
+    follows_cased = cased
+  }
+}
+
 public fn StringSlice.to_lowercase(self) -> String
-  cost time finite
+  cost time O(self.length())
 {
   var output = ""
-  var after_sigma = ""
+  var after_sigma = PendingText(text: "")
   var sigma_is_undecided = false
   var follows_cased = false
   var offset: USize = 0
@@ -998,41 +1054,18 @@ public fn StringSlice.to_lowercase(self) -> String
     decreases self.length() - offset
   {
     let decoded = self.decode(offset)
-    let code = decoded.character.code()
-    let cased = unicode_tables::is_cased(code)
-    let ignorable = unicode_tables::is_case_ignorable(code)
-    if !ignorable && sigma_is_undecided {
-      if cased {
-        mut output.push("σ")
-      } else {
-        mut output.push("ς")
-      }
-      mut output.push(after_sigma.slice())
-      after_sigma = ""
-      sigma_is_undecided = false
-    }
-    if code == 931 {
-      if follows_cased {
-        sigma_is_undecided = true
-      } else {
-        mut output.push("σ")
-      }
-    } else if sigma_is_undecided {
-      mut after_sigma.push_character(decoded.character.to_lowercase())
-    } else {
-      match unicode_tables::lowercase_expansion_of(code) {
-        Some(expansion) => push_expansion(mut output, expansion: expansion)
-        None => mut output.push_character(decoded.character.to_lowercase())
-      }
-    }
-    if !ignorable {
-      follows_cased = cased
-    }
+    lower_character(
+      mut output,
+      after_sigma: mut after_sigma,
+      sigma_is_undecided: mut sigma_is_undecided,
+      follows_cased: mut follows_cased,
+      character: decoded.character,
+    )
     offset += decoded.length
   }
   if sigma_is_undecided {
     mut output.push("ς")
-    mut output.push(after_sigma.slice())
+    mut after_sigma.flush(mut output)
   }
   output
 }

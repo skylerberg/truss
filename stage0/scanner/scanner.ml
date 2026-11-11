@@ -164,7 +164,8 @@ let rec scan cursor ~inline ~nesting =
            raw string's `\"\"\"` choose how it interpolates."
     | '\'' -> (
         match Trivia.character_literal_end cursor start with
-        | Some stop -> token (Strings.character_literal cursor ~stop)
+        | Some stop ->
+            token (Strings.character_literal cursor ~tag:"Character" ~literal_start:start ~stop)
         | None -> reject 1 "`'` is not used in Truss. Strings are written with `\"`.")
     | '/' when next = Char.code '/' || next = Char.code '*' ->
         if inline then reject ~code:Comment 2 Trivia.comment_message
@@ -243,6 +244,19 @@ and name cursor ~nesting =
     when byte cursor stop = quote
          || (byte cursor stop = dollar && Trivia.opens_raw_string cursor stop) ->
       string cursor ~tag:(Some (tag, span start stop)) ~nesting ~start
+  (* A prefix from another language before an ordinary or an empty string. *)
+  | Lower (("f" | "r" | "b") as prefix)
+    when byte cursor stop = quote && run_length cursor stop quote <= 2 ->
+      let kind, ending = Strings.prefixed_string cursor ~scan ~prefix ~start ~nesting in
+      Token { kind; start; ending }
+  | Lower "b" when byte cursor stop = Char.code '\'' -> (
+      match Trivia.character_literal_end cursor stop ~after_prefix:true with
+      | Some literal_stop ->
+          let kind =
+            Strings.character_literal cursor ~tag:"UInt8" ~literal_start:start ~stop:literal_stop
+          in
+          Token { kind; start; ending = Closed }
+      | None -> Token { kind; start; ending = Closed })
   | kind -> Token { kind; start; ending = Closed }
 
 (* The next raw token of the file. Line breaks between tokens are trivia

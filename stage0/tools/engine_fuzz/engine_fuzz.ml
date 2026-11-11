@@ -73,7 +73,8 @@ type change =
   | Set of int * int
   | Remove of int
   | Get of int
-  | Release of int
+  | Observe of int
+  | Unroot of int
   | Stabilize
   | Reopen of { full : bool }
   | Open_second
@@ -88,7 +89,8 @@ let show step =
     | Set (key, value) -> Printf.sprintf "set %d to %d" key value
     | Remove key -> Printf.sprintf "remove %d" key
     | Get index -> Printf.sprintf "get %d" index
-    | Release index -> Printf.sprintf "release %d" index
+    | Observe index -> Printf.sprintf "observe %d" index
+    | Unroot index -> Printf.sprintf "unroot %d" index
     | Stabilize -> "stabilize"
     | Reopen { full } ->
         Printf.sprintf "write%s and open again" (if full then " the whole state" else "")
@@ -119,13 +121,14 @@ let discard world =
 let choose world random =
   let second = world.other <> None && Random.State.int random 4 = 0 in
   let change =
-    match Random.State.int random 12 with
+    match Random.State.int random 14 with
     | 0 | 1 | 2 | 3 ->
         let key = Random.State.int random inputs in
         Set (key, Random.State.int random 1000)
     | 4 -> Remove (Random.State.int random inputs)
     | 5 | 6 | 7 -> Get (Random.State.int random nodes)
-    | 8 -> Release (Random.State.int random nodes)
+    | 12 | 13 -> Observe (Random.State.int random nodes)
+    | 8 -> Unroot (Random.State.int random nodes)
     | 9 -> Stabilize
     | 10 -> Reopen { full = Random.State.int random 4 = 0 }
     | _ -> Open_second
@@ -139,7 +142,8 @@ let apply world step =
   | Set (key, value) -> Engine.set engine value_input key value
   | Remove key -> Engine.remove engine value_input key
   | Get index -> ignore (Engine.get engine (node index) index)
-  | Release index -> Engine.release engine (node index) index
+  | Observe index -> ignore (Query.demand (Engine.observer engine) (node index) index)
+  | Unroot index -> Engine.unroot engine (node index) index
   | Stabilize -> ignore (Engine.stabilize engine)
   | Reopen { full } ->
       Option.iter (fun engine -> world.engine <- engine) (opened (Engine.write ~full world.engine))

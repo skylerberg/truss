@@ -26,14 +26,14 @@ let freeze ?(fixed = false) engine =
     engine.fixed <- fixed
   end
 
-let release engine (query : ('key, 'value) query) key =
+let unroot engine (query : ('key, 'value) query) key =
   match Hashtbl.find_opt (result_cells engine query) key with
   | Some cell ->
-      if cell.node.kept then begin
-        cell.node.kept <- false;
+      if cell.node.root then begin
+        cell.node.root <- false;
         Hashtbl.replace engine.unsaved cell.node.id cell.node
       end;
-      drop_or_wait engine cell.node;
+      collect_or_defer engine cell.node;
       sweep engine
   | None -> ()
 
@@ -113,36 +113,42 @@ let counterpart (node : node) other =
   | Result (query, cell) -> Option.map (fun cell -> cell.node) (find_result other query cell.key)
   | Unfilled -> None
 
+(* The same query and key in another engine, computed there if it has none.
+   The other engine only observes it, so comparing two states makes no root
+   in either. *)
 let current_in (node : node) other =
   match node.cell with
   | Input (input, cell) ->
       Option.map (fun cell -> cell.input_node) (find_input other input cell.input_key)
   | Result (query, cell) ->
-      (try ignore (demand (context other) query cell.key) with _ -> ());
-      Option.map (fun cell -> cell.node) (find_result other query cell.key)
+      if other.frozen then Option.map (fun cell -> cell.node) (find_result other query cell.key)
+      else Some (observed_node other query cell.key)
   | Unfilled -> None
 
+(* Whether two nodes of one query or input and key, each in its engine,
+   hold equal results. The nodes' own cells are compared, so a node that
+   was collected since still answers. *)
 let same_outcome engine (left : node) other (right : node) =
-  match left.cell with
-  | Input (input, mine) -> (
-      match find_input other input mine.input_key with
-      | Some theirs when theirs.input_node == right -> (
+  match (left.cell, right.cell) with
+  | Input (input, mine), Input (other_input, theirs) -> (
+      match Type.Id.provably_equal input.input_cells other_input.input_cells with
+      | Some Type.Equal -> (
           match (input_value engine mine, input_value other theirs) with
           | Some mine, Some theirs -> input.input_equal mine theirs
           | None, None -> true
           | _ -> false)
-      | _ -> false)
-  | Result (query, mine) -> (
-      match find_result other query mine.key with
-      | Some theirs when theirs.node == right -> (
+      | None -> false)
+  | Result (query, mine), Result (other_query, theirs) -> (
+      match Type.Id.provably_equal query.cells other_query.cells with
+      | Some Type.Equal -> (
           match (left.fingerprint, right.fingerprint) with
           | Some mine, Some theirs when mine = theirs -> true
           | _ -> (
               match (load engine mine, load other theirs) with
               | Some mine, Some theirs -> same_outcomes query mine theirs
               | _ -> false))
-      | _ -> false)
-  | Unfilled -> false
+      | None -> false)
+  | _ -> false
 
 (* Whether the store still has the value of every input of the state,
    apart from its fixed bases'. *)

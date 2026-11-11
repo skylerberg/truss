@@ -2,6 +2,7 @@ use standard::map
 
 public opaque type Deque[Element](front: List[Element], back: List[Element])
   invariant front.length() <= USize.maximum - back.length()
+  cost potential if front.length() > back.length() { 8 * (front.length() - back.length()) } else { 8 * (back.length() - front.length()) }
   derives Copyable
 
 internal fn Deque[Element].model_at(self, index: Integer) -> Element
