@@ -12,7 +12,7 @@ type input =
       span : Source.span;
       first_line_break : Source.span option;
       blank_line : bool;
-      unterminated : bool;
+      unterminated_string : bool;
     }
       (** The next token, with the first line break before it, if any, whether a blank line came
           before it, and whether it is an unterminated string, an error already reported. *)
@@ -20,9 +20,9 @@ type input =
       position : int;
       first_line_break : Source.span option;
       blank_line : bool;
-      unterminated : bool;
+      ends_unterminated : bool;
     }
-      (** The end of the input. [unterminated] says whether it ends inside an unterminated
+      (** The end of the input. [ends_unterminated] says whether it ends inside an unterminated
           construct, an error the scanner already reported: an interpolation that a line break
           ended, or a file that ends inside a comment or a raw string. Brackets left open are then
           closed without another error. *)

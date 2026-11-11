@@ -7,8 +7,8 @@ implements the lexical grammar in [GRAMMAR.md](GRAMMAR.md), and the rules in
 ## What the lexer does
 
 The lexer takes the bytes of one source file and returns an array of tokens and
-a list of diagnostics. It always returns tokens, even for a broken file, so
-that later stages can report more than the first error.
+a list of diagnostics. It always returns tokens, even for a file with errors,
+so that later stages can report more than the first error.
 
 The lexer:
 
@@ -23,7 +23,8 @@ The lexer:
 It does not:
 
 - know the grammar, beyond brackets and strings
-- decide what `name[...]` means, or what type a literal has
+- resolve `name[...]` to an index or type arguments, or infer a literal's
+  type
 - round float literals. The type checker does that once it knows the type.
 
 **The lexer is a pure function of one file's text.** It gets no feedback from
@@ -54,10 +55,10 @@ brackets. The two are separate stages of one pipeline, not two passes over
 the file:
 
 - **Layout pulls from the scanner.** The scanner's interface is
-  `Scanner.next : Scanner.t -> raw_token`. Layout keeps the previous token and
-  the bracket stack, which is all the line-break rule needs, and asks for the
-  next raw token only when it is needed. No array of raw tokens is ever built,
-  and the bytes are read once.
+  `Scanner.next : Scanner.t -> raw_token`. Layout's state is the previous
+  token and the bracket stack, which is all the line-break rule needs, and
+  it requests the next raw token only when it needs one. No array of raw
+  tokens is built, and the bytes are read once.
 - **The lexer's output is one array of final tokens.** Layout appends each
   token as it produces it. The parser receives the whole array, not a
   stream, because the later stages share that one buffer: the parser's
@@ -107,8 +108,8 @@ sedlex:
   string translates line by line. A sedlex specification does not.
 - **One fewer dependency, and no ppx.**
 
-The cost is a few hundred more lines than a sedlex specification. They are in
-the part of the compiler that is easiest to test exhaustively.
+The cost is more code than a sedlex specification, in the part of the
+compiler that is easiest to test exhaustively.
 
 ## Source text
 
@@ -142,9 +143,10 @@ The forbidden characters are those listed in GRAMMAR.md: the characters with
 the `Bidi_Control` property, control characters other than tab, line feed, and
 a carriage return before a line feed, and every other
 `Default_Ignorable_Code_Point` except U+200C, U+200D, and the variation
-selectors. The characters left legal can still carry hidden data in a string,
-as DESIGN.md says. Truss does not restrict where they go, since no other
-language does and the rules would have to know every emoji and script.
+selectors. The characters that remain legal can still carry hidden data in a
+string, as DESIGN.md says. Truss does not restrict their positions, since no
+other language does and the rules would need the data of every emoji and
+script.
 
 - The scanner checks every character as it reads it, in code and in strings
   alike.
@@ -235,8 +237,8 @@ and interpolation = { tokens : token array; span : span }
   confines an error inside an interpolation to that interpolation.
 - **A tag is only the name.** In `database::SqlQuery"..."`, `database` and
   `::` are ordinary tokens before the string, and the parser joins them.
-- **`line_break_before` drives the layout pass.** `blank_line_before` lets
-  `truss fmt` keep blank lines, which it does, collapsing a run of them to
+- **`line_break_before` is the layout pass's input.** `truss fmt` reads
+  `blank_line_before` to preserve blank lines, collapsing a run of them to
   one, as Go, Rust, and Gleam do.
 - **`keyword`, `reserved`, `punctuation`, and `foreign` have one constructor
   per item,** each built from a single list in `Token`. A test reads the
@@ -288,9 +290,10 @@ file.
 
 ### Scanning
 
-A number is scanned wide and then checked, so that `3u8`, `0xFG`, `1_`, and
-`0b102` each become one token with one precise error, instead of a number
-followed by a stray name:
+The scanner takes the longest run of name characters that starts with a
+digit as one number token, and then validates it. So `3u8`, `0xFG`, `1_`, and
+`0b102` each become one token with one precise error, not a number followed
+by a name:
 
 1. Read the maximal run of ASCII letters, digits, and `_` that starts at the
    digit.
@@ -308,7 +311,7 @@ is `1.0`, `.`, `max`.
 
 | Written | Error and fix |
 |---|---|
-| `3u8`, `1.5f`, `10i64`, `100L` | Literals have no type suffixes. The fix writes `3`, and the message shows how context gives the type: `let small: UInt8 = 3`. |
+| `3u8`, `1.5f`, `10i64`, `100L` | Literals have no type suffixes. The fix writes `3`, and the message shows an annotation that determines the type: `let small: UInt8 = 3`. |
 | `0X1F`, `0B1`, `0O7`, `1E9` | Prefixes and exponents are lowercase: `0x1F`, `0b1`, `0o7`, `1e9`. |
 | `0x`, `0b`, `1e` | The digits are missing. |
 | `0b102`, `0o8`, `0xFG` | The error points at the digit the base does not allow. |
@@ -432,9 +435,9 @@ lexer. The type checker checks that each holds exactly one character.
 
 ## Punctuation
 
-The scanner takes the longest match from GRAMMAR.md's list of punctuation, with
-a small decision on the first one or two bytes. There are no generic
-longest-match tables.
+The scanner takes the longest match from GRAMMAR.md's list of punctuation, by
+a match on the first byte and then on the one or two bytes after it. It has
+no table-driven matcher.
 
 ### Rejected sequences
 
@@ -590,8 +593,9 @@ type t = {
   mistake inserted into each document example. Fixes are not checked while
   lexing: that could only show that a fix lexes cleanly, not that it is
   what the author meant, and every change to the lexer would have to
-  preserve a subtle invariant. A fix offered for an error that only arises where two
-  recoveries meet may leave an error behind; lexing again shows it.
+  preserve a subtle invariant. A fix offered for an error that arises only
+  where two recoveries interact may leave an error; lexing the fixed text
+  reports it.
 - An error with no exact fix gets none, even where a guess would usually be
   right: an agent applies fixes without reading them, so a wrong fix is
   worse than none. A closer that matches nothing has no fix, since an extra
@@ -613,8 +617,8 @@ type t = {
   `sources.txt`, and writes `stage0/unicode/unicode_tables.ml`.
   `regenerate.sh` runs the whole process. Only the generated module, the
   list of source URLs, and their hashes are checked in, so the repository
-  stays small and the output is reproducible. Building the compiler never downloads anything;
-  only regenerating the tables does.
+  stays small and the output is reproducible. Building the compiler never
+  downloads anything; only regenerating the tables does.
 - **Tables** are sorted arrays of code point ranges, searched by binary search,
   with a 128-entry table for ASCII.
 - **Properties used:** `XID_Start` and `XID_Continue`, to find words, and
