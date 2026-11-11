@@ -135,6 +135,8 @@ let intrinsic_name = function
   | Shared_free -> "shared_free"
   | Shared_lock -> "shared_lock"
   | Shared_unlock -> "shared_unlock"
+  | Blocking_begin -> "blocking_begin"
+  | Blocking_end -> "blocking_end"
 
 let rvalue_to_string = function
   | Use operand -> operand_to_string operand

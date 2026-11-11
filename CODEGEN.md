@@ -1145,30 +1145,71 @@ implementation, `SystemTasks`, calls the runtime's task functions.
 | `lock(mutex)`, `unlock(mutex)` | Mutual exclusion between the calls of a `mut` implementation |
 | `yield_now()` | Yields the thread to another task |
 
-The runtime runs each task on an operating-system thread of its own:
+The runtime runs each task on a stack of its own, as it runs a coroutine,
+and the pool's threads run the tasks that are ready:
 
-- **A group** counts its tasks that have not ended. `join` blocks until
-  the count is zero and then frees the group.
+- **The ready queue** holds the tasks that can run. A thread of the pool
+  takes one, switches to its stack, and runs it until it parks, yields,
+  or ends.
+- **A task that waits parks.** Waiting for a key, for a mutex, or for the
+  tasks of a group switches from the task's stack back to the thread,
+  which takes the next ready task. A parked task holds no thread. What it
+  waits for makes it ready again, and it then runs on whichever thread
+  takes it.
+- **A thread that is not a task blocks while it waits.** The thread that
+  runs `main` is one. It runs no task meanwhile. A task that ran on top
+  of the thread's own computation could block for long, and would hold
+  that computation up after its wait had ended.
+- **A call that blocks holds its thread.** The C library's rows that can
+  block, such as `read`, `accept`, and `nanosleep`, are named in the
+  table, and lowering brackets each call with `blocking_begin` and
+  `blocking_end`.
+- **Spare threads run tasks in place of blocked threads.** A thread is
+  blocked while it is in a bracketed call, while it waits and is not a
+  task, and while it sleeps until a `parallel` branch that another thread
+  took is done. For each blocked thread, one spare thread may run tasks,
+  so a program runs tasks on as many threads as the pool has. A spare
+  thread is called or started when a task is ready, no thread of the pool
+  is idle, and fewer spare threads run tasks than threads are blocked. It
+  sleeps when that no longer holds, and it never exits. On a machine
+  with one core the pool has no thread but the first, so a spare thread
+  runs the tasks while `main` waits for them.
+- **A task changes threads.** A task that parks goes on on whichever
+  thread takes it. What the runtime keeps for each thread follows the
+  task: the coroutine that the task is in, and for the sanitizers the
+  stack that it left. Generated code reads `errno` through the runtime's
+  `t_runtime_errno`. glibc declares its own function for the address of
+  `errno` as returning the same address on every call, so a C compiler
+  could reuse one thread's address after the task has moved to another.
+- **A `parallel` block in a task** forks on the queue of the thread that
+  runs the task, and a spare thread has such a queue too. A branch may
+  use no capability but `Panic`, so a task neither parks nor yields
+  inside the block, and it leaves the block on the thread it entered it
+  on.
+- **A group** counts its tasks that have not ended. `join` waits until the
+  count is zero and then frees the group.
 - **Cancellation** is a flag on the group. A task is cancelled when its
   group, or a group that encloses it, is. `cancel` sets the flag once and
-  wakes every waiter, so that a cancelled one returns from `wait`.
+  makes every waiter ready, so that a cancelled one returns from `wait`.
 - **A cancelled task that is blocked in a system call is interrupted.**
-  `cancel` sends `SIGURG` to the thread of each task of the group, and of
-  each group that those tasks opened. The handler does nothing and is
-  installed without `SA_RESTART`, so a blocked read, accept, or sleep
-  fails with `EINTR`. The standard library's retry loops stop retrying in
-  a cancelled task, and the error becomes `SystemError.Cancelled`. A task
-  can start a blocking call just after an interrupt, so `join` sends the
-  interrupt again every few milliseconds until the cancelled tasks have
-  ended. The runtime reserves `SIGURG`, as Go's runtime does. A host
-  lookup cannot be interrupted, so it runs to its end.
+  `cancel` hands the group to a thread of the runtime. Every few
+  milliseconds, until the group is joined, that thread sends `SIGURG` to
+  each thread that runs a blocked task of the group, or of a group that
+  its tasks opened. The handler does nothing and is installed without
+  `SA_RESTART`, so a blocked read, accept, or sleep fails with `EINTR`.
+  The standard library's retry loops stop retrying in a cancelled task,
+  and the error becomes `SystemError.Cancelled`. The interrupt is
+  repeated because a task can start a blocking call just after one. The
+  runtime reserves `SIGURG`, as Go's runtime does. A host lookup cannot
+  be interrupted, so it runs to its end.
 - **Waiting on a key** uses a fixed table of slots. A key hashes to a
   slot, which counts the wakes of its keys. `watch` returns the count,
-  `wait` blocks while the count is unchanged, and `wake` increments it.
+  `wait` parks the caller if the count is unchanged, and `wake`
+  increments it and makes the slot's waiters ready.
   Two keys can share a slot, so `wait` can return without a wake of its
   own key, and its caller tests its condition again.
 - **A mutex** is a `UInt64` that its owner initialized to zero. `lock`
-  changes it from 0 to 1 with a compare-and-swap, and a thread that finds
+  changes it from 0 to 1 with a compare-and-swap, and a caller that finds
   it locked waits on its address as a key. That wait is not cancellable.
 - **A test program, and code run while compiling, start no thread.**
   `spawn` calls the task's function and returns when it returns, so tasks
@@ -2118,13 +2159,16 @@ a command line can hold.
 - **A `parallel for` over any other method at once.** A collection that
   cannot give its parts by position needs a way to split itself in two,
   as Rust's rayon and Java's `Spliterator` have.
-- **Tasks without a thread each.** A task has an operating-system thread
-  of its own, so a program with very many blocked tasks runs out of
-  threads. Later a task is to have its own stack and run on the pool's
-  threads: a call that would block registers what it waits for with the
-  operating system and switches to another task. A call that the
-  operating system cannot wait for that way, such as reading a file or
-  looking up a host, runs on a thread kept for such calls.
+- **An event loop.** A task that blocks in a call of the operating system
+  holds a thread for as long. A socket or a timer is to be registered
+  with the operating system (`kqueue`, `epoll`), so that a task that waits
+  for one parks. A call that the operating system cannot wait for that
+  way, such as reading a file or looking up a host, stays a blocking
+  call.
+- **More tasks at once than the operating system allows mappings.** Each
+  task's stack is a mapping with a guard page. Linux allows a process
+  about sixty-five thousand mappings by default, which is about thirty
+  thousand tasks.
 - **The seeded `Tasks`.** It is to run each task as a coroutine, one at a
   time, and pick the next by its seed at each capability call that blocks,
   spawns a task, or locks a mutex.

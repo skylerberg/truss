@@ -750,8 +750,16 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
               parameters
           in
           let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).system function_) in
+          (* A call that can block is bracketed, so that the runtime knows
+             the thread is blocked while it lasts. *)
+          let bracket intrinsic =
+            if Libc.blocks function_ then
+              emit b (Call { target = Intrinsic intrinsic; arguments = []; result = Discarded })
+          in
           let call result =
+            bracket Blocking_begin;
             emit b (Call { target; arguments = given; result });
+            bracket Blocking_end;
             List.iter (fun write -> write ()) (List.rev !after)
           in
           match result with
