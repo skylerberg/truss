@@ -332,15 +332,17 @@ let bitwise_of name =
 
 let exactly (query : L.query) =
   let found = ref [] in
-  let rec walk = function
+  let rec walk bound = function
     | L.Apply (name, arguments) as term ->
-        if bitwise_of name <> None && not (List.mem term !found) then found := term :: !found;
-        List.iter walk arguments
-    | L.Forall (_, body) | L.Exists (_, body) -> walk body
+        (if bitwise_of name <> None && not (List.mem_assoc term !found) then
+           let named = List.filter (fun (symbol, _) -> L.mentions [ symbol ] term) bound in
+           found := (term, named) :: !found);
+        List.iter (walk bound) arguments
+    | L.Forall (symbols, body) | L.Exists (symbols, body) -> walk (symbols @ bound) body
     | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> ()
   in
-  List.iter walk (query.goal :: query.facts);
-  let defined term =
+  List.iter (walk []) (query.goal :: query.facts);
+  let definition term =
     match term with
     | L.Apply (name, arguments) -> (
         match (bitwise_of name, arguments) with
@@ -393,6 +395,13 @@ let exactly (query : L.query) =
               result
         | _ -> None)
     | _ -> None
+  in
+  (* A term under a quantifier that names its bound symbols is defined for
+     each of their values. *)
+  let defined (term, named) =
+    Option.map
+      (fun definition -> if named = [] then definition else L.Forall (named, definition))
+      (definition term)
   in
   match List.filter_map defined (List.rev !found) with
   | [] -> None
