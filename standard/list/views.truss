@@ -140,7 +140,7 @@ public fn List[Element: Equal].find_slice(self, needle: Slice[Element]) -> Optio
     Some(index) => index + needle.length() <= self.length()
     None => true
   }
-  cost time O(self.length() + needle.length())
+  cost time O(self.length() * time(Element.equal) + needle.length() * time(Element.equal))
 {
   self.slice().find_slice(needle)
 }
@@ -157,9 +157,9 @@ public fn List[Element: Ordered].binary_search(self, target: Element) -> Option[
     Some(index) => index < self.length() && self[index] == target
     None => !self.contains(target)
   }
-  cost time O(log(self.length()))
+  cost time O(log(self.length()) * time(Element.compare))
 {
-  todo
+  self.slice().binary_search(target)
 }
 
 public fn List[Element: Ordered].minimum(self) lends Option[Element]
@@ -428,7 +428,7 @@ public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Orde
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
-  todo
+  mut self[..].sort_by(compare)
 }
 
 public fn List[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))

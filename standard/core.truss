@@ -86,10 +86,10 @@ public trait Ordered: Equal {
   }
 
   law transitive(first: Self, second: Self, third: Self)
-    requires first < second
-    requires second < third
+    requires first <= second
+    requires second <= third
   {
-    first < third
+    first <= third
   }
 }
 
