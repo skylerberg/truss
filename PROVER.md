@@ -273,8 +273,13 @@ and `reads` clauses):
   fits, and `x >> k` is `x / power(2, k)`. `leading_zeros`,
   `trailing_zeros`, and `count_ones` are at most the width, and a nonzero
   unsigned `x` lies from `power(2, width - 1 - leading_zeros(x))` to before
-  `power(2, width - leading_zeros(x))`. That proves the bounds most bit
-  twiddling needs. When a query that mentions a bitwise operation is not
+  `power(2, width - leading_zeros(x))`. Each is a function of its operand,
+  and for an unsigned `x` the three are related: `count_ones(x)` is zero
+  exactly when `x` is, and no more than `width - leading_zeros(x)`, which
+  it equals where `x + 1` is that power of two; `trailing_zeros(x)` is
+  below the highest one; and zero has `width` leading and trailing zeros,
+  as compiled code gives. That proves the bounds most bit twiddling
+  needs. When a query that mentions a bitwise operation is not
   proven that way, the prover tries it once more with each such operation
   defined exactly: as the operation on its operands' bits, of their type's
   width, read back as an integer, which the solver decides by

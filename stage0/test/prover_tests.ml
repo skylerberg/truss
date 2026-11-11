@@ -3019,6 +3019,42 @@ let () =
          {\n\
          }\n")
 
+(* Counts of bits *)
+
+let () =
+  test "zero has no ones" (fun () ->
+      proven
+        "theorem t(word: UInt64)\n  requires word == 0\n  ensures word.count_ones() == 0\n{\n}\n");
+  test "the ones of a value fit below its bit length" (fun () ->
+      proven
+        "theorem t(word: UInt64, bits: USize)\n\
+        \  requires bits < 64\n\
+        \  requires word < power(2, bits)\n\
+        \  ensures word.count_ones() <= bits\n\
+         {\n\
+         }\n");
+  test "the lowest one is below the bit length" (fun () ->
+      proven
+        "theorem t(word: UInt64, bits: USize)\n\
+        \  requires bits <= 64\n\
+        \  requires word != 0\n\
+        \  requires bits == 64 || word < power(2, bits)\n\
+        \  ensures word.trailing_zeros() < bits\n\
+         {\n\
+         }\n");
+  test "every one below a power of two is counted" (fun () ->
+      proven
+        "theorem t(word: UInt64, bits: USize)\n\
+        \  requires bits <= 64\n\
+        \  requires bits > 0\n\
+        \  requires word + 1 == power(2, bits)\n\
+        \  ensures word.count_ones() == bits\n\
+         {\n\
+         }\n");
+  test "a value may have ones" (fun () ->
+      not_proven "theorem t(word: UInt64)\n  ensures word.count_ones() == 0\n{\n}\n"
+        "prover.ensures")
+
 (* Concurrent code *)
 
 let early_return ensures =
