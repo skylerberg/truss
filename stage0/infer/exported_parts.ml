@@ -42,12 +42,11 @@ let called_from_other_packages (state : state) =
   match Query.demand state.database Names.container state.key with
   | None -> is_public state.definition.visibility
   | Some container -> (
-      match
-        ( Query.demand state.database Names.definition container,
-          Query.demand state.database Environment.lowered container )
-      with
-      | Some { kind = Trait _ | Capability _; visibility; _ }, _ -> is_public visibility
-      | Some { kind = Impl _; _ }, Some { interface = Impl_interface impl; _ } -> (
+      (* The container's interface, and not its definition: the definition
+         changes with an edit to any method written inside it. *)
+      match Query.demand state.database Environment.interface container.path with
+      | Some (Trait_interface _) -> visible_to_other_packages state.database container.path
+      | Some (Impl_interface impl) -> (
           visible_to_other_packages state.database impl.implements.trait
           &&
           match impl.for_type with
