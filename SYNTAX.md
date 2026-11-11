@@ -1466,7 +1466,9 @@ A yielding method gives out parts one after another:
   implements `Cursor` too.
 - **A cursor of a method with a `uses` clause needs those capabilities at each
   `next`,** and in a `for` loop over it, because `next` runs the method's
-  code. It is not a `Cursor`: `Cursor.next` uses no capability, so generic
+  code. Each `next` uses the implementation that is provided where `next`
+  is called, not the one that was provided where the cursor was made. It
+  is not a `Cursor`: `Cursor.next` uses no capability, so generic
   code such as `zip` could not give the cursor what it needs. Pull it, or
   loop over it, where the capabilities are available.
 - A method that yields `mut` access cannot be pulled, because a cursor would

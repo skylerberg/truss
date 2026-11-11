@@ -38,6 +38,11 @@ let context = Definitions.context
 let test_key = Definitions.test_key
 let cursor_result = Targets.cursor_result
 
+let pulled_evidence context (yielding : Ground.yielding) (f : Lir.function_) =
+  let count = List.length (Targets.cursor_evidence context yielding) in
+  let first = List.length f.parameters - count in
+  List.filteri (fun position _ -> position >= first) f.parameters
+
 type constant = Constants.constant = Folded of Lir.data | Run of Ground.ty
 
 let constant = Constants.constant

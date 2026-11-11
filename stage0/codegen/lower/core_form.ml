@@ -481,7 +481,7 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
       | Yields _ ->
           (* A yielding method called outside a [for] loop makes a cursor,
              which holds its arguments. *)
-          cursor_into st ~path ~type_arguments ~signature ~substitution ~arguments ~mask destination
+          cursor_into st ~path ~type_arguments ~signature ~arguments ~mask destination
       | Lends _ -> bug "a lending call that is not a lent place")
   | None, Intrinsic { operation; type_arguments } -> (
       match

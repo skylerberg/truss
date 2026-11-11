@@ -88,24 +88,26 @@ let () =
   let yielding : Ground.yielding = { method_ = definition "count_to"; type_arguments = [] } in
   let cursor = Ground.Cursor yielding in
   test "a cursor keeps the parameters and the locals live across a yield" (fun () ->
-      let fields = List.map fst (Yields.cursor_fields (shape_env ()) count_to) in
+      let fields = List.map fst (Yields.cursor_fields (shape_env ()) ~evidence:[] count_to) in
       expect_string ~expected:"state parameter0 local1" (String.concat " " fields));
   test "a pulled method yields each value and then None" (fun () ->
       let cursor_shape =
-        ("cursor of count_to", Record (Yields.cursor_fields (shape_env ()) count_to))
+        ("cursor of count_to", Record (Yields.cursor_fields (shape_env ()) ~evidence:[] count_to))
       in
       let env = shape_env ~extra:[ cursor_shape ] () in
       let result = option int32 in
       let next =
         {
-          (instance "next" (Lir.canonical (Yields.cursor_next env ~cursor ~result count_to))) with
+          (instance "next"
+             (Lir.canonical (Yields.cursor_next env ~cursor ~result ~evidence:[] count_to)))
+          with
           key = Cursor_next yielding;
         }
       in
       let release : Lir.t =
         {
           key = Drop cursor;
-          main = Lir.canonical (Yields.cursor_drop env ~cursor ~owned:[] count_to);
+          main = Lir.canonical (Yields.cursor_drop env ~cursor ~owned:[] ~evidence:[] count_to);
           nested = [||];
         }
       in

@@ -54,6 +54,10 @@ val pulled :
 (* What a cursor's [next] returns: an [Option] of what the method yields. *)
 val cursor_result : context -> Ground.yielding -> Ground.ty
 
+(* The parameters of the pulled version that are evidence, which are its
+   last. A cursor does not hold them: its [next] takes them. *)
+val pulled_evidence : context -> Ground.yielding -> Lir.function_ -> Lir.local list
+
 (* A capability [impl]'s table of entries. *)
 val table : context -> Instance.key -> Lir.table
 
