@@ -61,11 +61,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
     what it changed. Only pushes to `main` save it, trimmed so that it stays
     quick to restore.
   - **The build, formatting, the opam file, and the compiler's tests are one
-    dune run,** so they overlap. Three things run beside it, each on a
+    dune run,** so they overlap. Four things run beside it, each on a
     runner of its own: the codegen tests, the codegen tests again under
-    sanitizers, and the standard library's proofs.
-    The sanitizers' job runs the programs that use several threads a second
-    time under ThreadSanitizer, which cannot run beside the others.
+    AddressSanitizer and UndefinedBehaviorSanitizer, the programs that use
+    several threads under ThreadSanitizer, and the standard library's
+    proofs. ThreadSanitizer cannot run beside the other sanitizers, and its
+    tests take as long as theirs, so it has a job of its own.
   - **The standard library's proofs have their own jobs.** They are the
     longest test, and the one that grows with the library, so they do not
     share a runner's cores with the rest. The dune run sets
