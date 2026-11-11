@@ -2418,11 +2418,20 @@ package may want those names for its own types. They are `core::Pair`,
   `files::FilesWithin` and `network::HostsAllowed`.
 - **`simulation::World` fakes every capability at once.** It is an
   in-memory machine: a file system, a network between its own hosts, a
-  clock that advances only when the test says, programs that return what
-  the test scripted, tasks scheduled by a seed, and fault injection.
-  FoundationDB tests its database this way. A test that opens both files
-  and connections provides a `World`, because one provider must implement
-  `Handles` for every handle, as the operating system does.
+  clock that advances when every task is blocked or when the test says,
+  programs that return what the test scripted, tasks scheduled by a seed,
+  and fault injection. FoundationDB tests its database this way. A test
+  that opens both files and connections provides a `World`, because one
+  provider must implement `Handles` for every handle, as the operating
+  system does.
+- **A `World` is a reference to its state.** It implements `Tasks`, so its
+  methods are not made mutually exclusive by a mutex, and several tasks
+  call them. Its state is therefore in the cell that a channel's queue is
+  in, and each capability method is one pure update of the cell. The
+  method first lets the seed switch to another task, so a test explores
+  the orders of the calls. A plain record, `simulation::Setup`, holds what
+  the world starts with, because the cell can be read only where `Tasks`
+  is available.
 
 ## Visibility
 
