@@ -253,6 +253,12 @@ type context = {
   mutable unfinished : L.term list;
       (** The condition of each path a [todo] ends in the [proof] block being read. *)
   mutable call_targets : (L.term * Core.local) list;
+  mutable passed_values : int list;
+      (** Each named function passed straight to a parameter, which the call checks against
+          what the parameter promises. *)
+  mutable reading_callback : bool;
+      (** Reading a function-typed parameter to call it or pass it, where its [requires] is
+          checked, not lost. *)
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
   ranking : bool;
       (** Whether the definition proven may show a recursive call ends by being on a part of its
@@ -1318,6 +1324,7 @@ and place_value context frame (place : place) =
       | None -> raise (Foreign_unsupported "`self` outside a method"))
   | Constant { path; _ } -> (frame, constant_value context frame path)
   | Local { local; _ } -> (
+      if frame.checking && not context.reading_callback then escaping_callback context frame local;
       match Locals.find_opt local frame.locals with
       | Some term -> (frame, term)
       | None -> raise (Foreign_unsupported "a local the prover did not bind"))
@@ -1336,6 +1343,82 @@ and place_value context frame (place : place) =
 and operand_value context frame = function
   | Place place -> place_value context frame place
   | Value node -> value context frame node
+
+(* A function-typed parameter whose type has a [requires], read as a value
+   other than to call it or pass it to a parameter: the value's type keeps
+   no [requires], so the [requires] must hold for every argument. *)
+and escaping_callback context frame local =
+  match
+    ( List.find_opt (fun (parameter : Core.parameter) -> parameter.local = local) context.parameters,
+      local_type context frame local )
+  with
+  | Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ },
+    Some (T.Function function_type)
+    when List.length inputs = List.length function_type.inputs ->
+      let arguments =
+        List.map
+          (fun (_, input) ->
+            let input = substituted context frame input in
+            let term = arrive context frame "argument" input in
+            assume_valid context frame input term;
+            term)
+          function_type.inputs
+      in
+      check_callback_contract context frame (span_of frame.source (List.hd requires).origin) ~name
+        inputs requires arguments ~promised:(L.Boolean true)
+        ~why:"is used as a value whose type promises nothing of its arguments"
+  | _ -> ()
+
+and reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
+ fun context read ->
+  let saved = context.reading_callback in
+  context.reading_callback <- true;
+  Fun.protect ~finally:(fun () -> context.reading_callback <- saved) read
+
+(* A function-typed parameter passed on for another callee's parameter:
+   what that parameter promises its arguments must imply this one's
+   [requires]. *)
+and check_forwarded_callback context frame (node : expression) (call_ : call) (passed : passed)
+    local values =
+  match
+    List.find_opt (fun (parameter : Core.parameter) -> parameter.local = local) context.parameters
+  with
+  | Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ } -> (
+      match parameter_type context frame call_ passed.position with
+      | Some (T.Function expected) when List.length expected.inputs = List.length inputs ->
+          let arguments =
+            List.map
+              (fun (_, input) ->
+                let input = substituted context frame input in
+                let term = arrive context frame "argument" input in
+                assume_valid context frame input term;
+                term)
+              expected.inputs
+          in
+          let known = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
+          check_callback_contract context frame (at frame node) ~name inputs requires arguments
+            ~promised:
+              (L.conjunction (callback_facts context frame call_ passed.position known arguments))
+            ~why:"is passed for a parameter that may not promise what it requires"
+      | _ -> escaping_callback context frame local)
+  | _ -> ()
+
+(* That a function-typed parameter's [requires], read with its parameters
+   as they were on entry, holds wherever [promised] does. *)
+and check_callback_contract context frame span ~name inputs requires arguments ~promised ~why =
+  let locals =
+    List.fold_left2
+      (fun locals (input, _) term -> Locals.add input term locals)
+      frame.old_locals inputs arguments
+  in
+  let inside = { frame with locals; self = frame.old_self; checking = false } in
+  List.iter
+    (fun (clause : expression) ->
+      oblige context (restrict frame promised) Requires span
+        (Printf.sprintf "`%s` %s, so its `%s` may not hold." name why
+           (quote frame.source clause.origin))
+        (snd (clause_value context inside clause)))
+    requires
 
 and expression_kind context frame (node : expression) : (frame * L.term) option =
   let source = frame.source in
@@ -2051,6 +2134,11 @@ and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
                       ~inclusive:false
                   in
                   (frame, term, Some (low, high))
+              | Place (Local _) ->
+                  let frame, term =
+                    reading_callback context (fun () -> operand_value context frame operand)
+                  in
+                  (frame, term, None)
               | _ ->
                   let frame, term = operand_value context frame operand in
                   (frame, term, None)
@@ -2096,18 +2184,27 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
     match call_.callee with
     | Indirect callee ->
         let ty = operand_type context frame callee in
-        let frame, term = operand_value context frame callee in
+        let frame, term = reading_callback context (fun () -> operand_value context frame callee) in
         (frame, Some (ty, term, callee))
     | _ -> (frame, None)
-  in
-  let frame, values =
-    call_arguments context frame node call_ ~facts_for:(fun position known arguments ->
-        callback_facts context frame call_ position known arguments)
   in
   let rec unwidened (node : expression) =
     match node.kind with
     | Convert { conversion = Widen; value = inner } -> unwidened inner
     | _ -> node
+  in
+  List.iter
+    (function
+      | Passed { value = Value given; _ } -> (
+          match unwidened given with
+          | { kind = Function_value _; id; _ } ->
+              context.passed_values <- id :: context.passed_values
+          | _ -> ())
+      | Passed _ | Default -> ())
+    call_.arguments;
+  let frame, values =
+    call_arguments context frame node call_ ~facts_for:(fun position known arguments ->
+        callback_facts context frame call_ position known arguments)
   in
   List.iter
     (fun (passed : passed) ->
@@ -2120,6 +2217,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                   check_named_callback context frame call_ passed named path contract values
               | None -> ())
           | _ -> ())
+      | Some (Place (Local { local; _ })) -> check_forwarded_callback context frame node call_ passed local values
       | _ -> ())
     values;
   (* An index read, which the ownership check may have paired with
@@ -3224,12 +3322,14 @@ and check_callback_requires context frame (node : expression) through (values : 
       with
       | Some { callback_contract = Some { inputs; requires }; name; _ }
         when List.length inputs = List.length values ->
+          (* The [requires] names the parameters as the caller passed them,
+             which is what the caller showed it with. *)
           let locals =
             List.fold_left2
               (fun locals (input, _) (passed : passed) -> Locals.add input passed.term locals)
-              frame.locals inputs values
+              frame.old_locals inputs values
           in
-          let inside = { frame with locals; checking = false } in
+          let inside = { frame with locals; self = frame.old_self; checking = false } in
           List.iter
             (fun (clause : expression) ->
               oblige context frame Requires (at frame node)
@@ -4150,6 +4250,38 @@ and named_function context frame (node : expression) path type_arguments contrac
          (Path.show path))
       (L.Boolean false);
   let ty = type_of context frame node in
+  (* A function with a [requires], used as a value anywhere but passed
+     straight to a parameter, which checks it, has a type that keeps no
+     [requires], so it must accept every argument of that type. *)
+  (match (ty, contract.parts) with
+  | T.Function function_type, own :: _
+    when own.requires <> [] && frame.checking && not (List.mem node.id context.passed_values) ->
+      let inputs =
+        List.map
+          (fun (_, input) ->
+            let input = substituted context frame input in
+            let term = arrive context frame "argument" input in
+            assume_valid context frame input term;
+            term)
+          function_type.inputs
+      in
+      if List.length own.parameters = List.length inputs then begin
+        let inside =
+          part_frame frame own
+            ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+            ~substitution:[]
+        in
+        List.iter
+          (fun (clause : expression) ->
+            oblige context frame Requires (at frame node)
+              (Printf.sprintf
+                 "`%s` is used as a value of `%s`, which promises nothing of its arguments, so its \
+                  `%s` may not hold."
+                 (Path.show path) (T.show ty) (quote own.callee clause.origin))
+              (snd (clause_value context inside clause)))
+          own.requires
+      end
+  | _ -> ());
   let instance =
     match List.map (T.substitute_argument frame.substitution) type_arguments with
     | [] -> ""
@@ -7917,6 +8049,8 @@ let new_context database ~home ~current ~terminates ~measures =
     holes = [];
     unfinished = [];
     call_targets = [];
+    passed_values = [];
+    reading_callback = false;
     validating = [];
     ranking =
       terminates && measures = []

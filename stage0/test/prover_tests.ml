@@ -2803,6 +2803,65 @@ let () =
         \  option.unwrap_or(0)\n\
          }\n")
 
+(* A function value's requires *)
+
+let () =
+  test "a function with a requires bound to a local must accept every argument" (fun () ->
+      not_proven
+        "fn below_three(index: USize) -> USize\n\
+        \  requires index < 3\n\
+         {\n\
+        \  index\n\
+         }\n\n\
+         fn f() -> USize {\n\
+        \  let g = below_three\n\
+        \  g(5)\n\
+         }\n"
+        "prover.requires");
+  test "a function with a requires passed through a local must accept every argument" (fun () ->
+      not_proven
+        "fn below_one(index: Int64) -> Int64\n\
+        \  requires index < 1\n\
+         {\n\
+        \  index\n\
+         }\n\n\
+         fn call(visit: (fn(index: Int64) -> Int64 requires index < 2)) -> Int64 {\n\
+        \  visit(1)\n\
+         }\n\n\
+         fn f() -> Int64 {\n\
+        \  let g: fn(Int64) -> Int64 = below_one\n\
+        \  call(visit: g)\n\
+         }\n"
+        "prover.requires");
+  test "a callback's requires names a mut parameter as the caller passed it" (fun () ->
+      not_proven
+        "fn grow(limit: mut USize, visit: (fn(index: USize) -> Int64 requires index < limit)) -> \
+         Int64 {\n\
+        \  if limit < 100 { limit = limit + 1 }\n\
+        \  visit(limit - 1)\n\
+         }\n\n\
+         fn f(items: List[Int64]) -> Int64 {\n\
+        \  var n: USize = 0\n\
+        \  grow(mut n, visit: fn(i) { items[i] })\n\
+         }\n"
+        "prover.requires");
+  test "a forwarded callback must be promised what it requires" (fun () ->
+      not_proven
+        "fn call(visit: (fn(index: Int64) -> Int64 requires index < 2)) -> Int64 {\n\
+        \  visit(1)\n\
+         }\n\n\
+         fn forward(visit: (fn(index: Int64) -> Int64 requires index < 1)) -> Int64 {\n\
+        \  call(visit: visit)\n\
+         }\n"
+        "prover.requires");
+  test "a callback with a requires bound to a local must accept every argument" (fun () ->
+      not_proven
+        "fn keep(visit: (fn(index: Int64) -> Int64 requires index < 1)) -> Int64 {\n\
+        \  let g: fn(Int64) -> Int64 = visit\n\
+        \  g(5)\n\
+         }\n"
+        "prover.requires")
+
 (* Concurrent code *)
 
 let early_return ensures =
