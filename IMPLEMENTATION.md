@@ -30,7 +30,8 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **The Unicode tables are generated.** The compiler's tables are in
   `stage0/unicode/unicode_tables.ml`. The standard library's are in
   `standard/text/unicode_data.truss`, which holds the tables of character
-  properties, case mappings, and normalization, and nothing else. Both are
+  properties, case mappings, normalization, and grapheme cluster boundaries,
+  and nothing else. Both are
   generated from the same version of the Unicode character database, whose
   files `stage0/tools/unicode/sources.txt` lists with their hashes. To move
   to a new version of Unicode, change that list and run

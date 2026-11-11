@@ -12,3 +12,5 @@ d6b151d2d40ee9b1876d26f417980f45ffae47b6055ccf7203cb31f07a030f94 https://www.uni
 a004797658a457bec4dc11683e39f69249ea3b595b752dbea6721c4c9f587b0d https://www.unicode.org/Public/18.0.0/ucd/CaseFolding.txt
 a0cf29eacd00cfcaec4381c6b7c281685f18dbb4e7ff82b4076ccb342ca839aa https://www.unicode.org/Public/18.0.0/ucd/EastAsianWidth.txt
 98ac7f67d985fe781e317f6182e885e94cabb0c314769e6dd73e48b226931ccd https://www.unicode.org/Public/18.0.0/ucd/DerivedNormalizationProps.txt
+0839dcb79e4ac639ecd538b1abf7c9d22e3f9dd265b7e182d33627aa4d75b45a https://www.unicode.org/Public/18.0.0/ucd/auxiliary/GraphemeBreakProperty.txt
+80d00f8e616a0ef27fd6b8de3b758c06383b5d917e2977709578e68baf733bf1 https://www.unicode.org/Public/18.0.0/ucd/emoji/emoji-data.txt
