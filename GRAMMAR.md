@@ -255,9 +255,9 @@ Every other token continues the line before it: `.`, `,`, `:`, `::`, `)`,
 `]`, `}`, `?`, `|`, `=>`, `->`, `=` and the compound assignments, the binary
 operators other than `-`, `..`, `..=`, and the keywords `cost`, `decreases`,
 `derives`, `else`, `ensures`, `in`, `indirect`, `invariant`, `is`, `lends`,
-`opaque`, `requires`, `transparent`, `uses`, `with`, and `yields`. So no `NEWLINE` ever
-comes before a closing `}`, and statements, `match` arms, and members are
-separated by `NEWLINE`s, not ended by them.
+`opaque`, `requires`, `transparent`, `uses`, `with`, and `yields`. So no
+`NEWLINE` ever comes before a closing `}`, and statements, `match` arms, and
+members are separated by `NEWLINE`s, not ended by them.
 
 The parser skips a `NEWLINE` immediately before a `{` that must open a body.
 

@@ -591,12 +591,14 @@ let top_level cursor ~function_ =
       ()
   | _, Some (public, word), _ ->
       let (code : Diagnostic.Code.parser), message, spelled =
-        if visibility = Public_opaque then
-          (Diagnostic.Code.Misplaced_opaque, "Only a type can be `opaque`.", "opaque")
-        else
-          ( Misplaced_transparent,
-            "Only a function or a method of a type can be `transparent`.",
-            "transparent" )
+        match visibility with
+        | Public_opaque ->
+            (Diagnostic.Code.Misplaced_opaque, "Only a type can be `opaque`.", "opaque")
+        | Public_transparent ->
+            ( Misplaced_transparent,
+              "Only a function or a method of a type can be `transparent`.",
+              "transparent" )
+        | Private | Internal | Public -> Cursor.fail cursor "a visibility with a modifier"
       in
       Cursor.report cursor code word.span message
         ~fixes:

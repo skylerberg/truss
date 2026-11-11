@@ -166,6 +166,8 @@ let () =
         ~fixed:"public let limit: Int64 = 1");
   test "an impl with a visibility and a modifier has one diagnostic" (fun () ->
       error "public transparent impl A for B {}" ~code:Misplaced_visibility ~at:"public"
+        ~fixed:"impl A for B {}";
+      error "public opaque impl A for B {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"impl A for B {}")
 
 (* Precedence and combinations that need parentheses *)
