@@ -40,7 +40,14 @@ impl Display for UInt8 {
 impl Add[UInt8] for UInt8 {
   type Output = UInt8
 
+  fn add_is_defined(self, right: UInt8) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: UInt8) -> UInt8
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -50,7 +57,14 @@ impl Add[UInt8] for UInt8 {
 impl Subtract[UInt8] for UInt8 {
   type Output = UInt8
 
+  fn subtract_is_defined(self, right: UInt8) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: UInt8) -> UInt8
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -60,7 +74,14 @@ impl Subtract[UInt8] for UInt8 {
 impl Multiply[UInt8] for UInt8 {
   type Output = UInt8
 
+  fn multiply_is_defined(self, right: UInt8) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: UInt8) -> UInt8
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -70,7 +91,14 @@ impl Multiply[UInt8] for UInt8 {
 impl Divide[UInt8] for UInt8 {
   type Output = UInt8
 
+  fn divide_is_defined(self, right: UInt8) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn divide(self, right: UInt8) -> UInt8
+    requires right != 0
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -80,7 +108,14 @@ impl Divide[UInt8] for UInt8 {
 impl Remainder[UInt8] for UInt8 {
   type Output = UInt8
 
+  fn remainder_is_defined(self, right: UInt8) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn remainder(self, right: UInt8) -> UInt8
+    requires right != 0
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -272,7 +307,14 @@ impl Display for UInt16 {
 impl Add[UInt16] for UInt16 {
   type Output = UInt16
 
+  fn add_is_defined(self, right: UInt16) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: UInt16) -> UInt16
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -282,7 +324,14 @@ impl Add[UInt16] for UInt16 {
 impl Subtract[UInt16] for UInt16 {
   type Output = UInt16
 
+  fn subtract_is_defined(self, right: UInt16) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: UInt16) -> UInt16
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -292,7 +341,14 @@ impl Subtract[UInt16] for UInt16 {
 impl Multiply[UInt16] for UInt16 {
   type Output = UInt16
 
+  fn multiply_is_defined(self, right: UInt16) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: UInt16) -> UInt16
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -302,7 +358,14 @@ impl Multiply[UInt16] for UInt16 {
 impl Divide[UInt16] for UInt16 {
   type Output = UInt16
 
+  fn divide_is_defined(self, right: UInt16) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn divide(self, right: UInt16) -> UInt16
+    requires right != 0
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -312,7 +375,14 @@ impl Divide[UInt16] for UInt16 {
 impl Remainder[UInt16] for UInt16 {
   type Output = UInt16
 
+  fn remainder_is_defined(self, right: UInt16) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn remainder(self, right: UInt16) -> UInt16
+    requires right != 0
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -500,7 +570,14 @@ impl Display for UInt32 {
 impl Add[UInt32] for UInt32 {
   type Output = UInt32
 
+  fn add_is_defined(self, right: UInt32) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: UInt32) -> UInt32
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -510,7 +587,14 @@ impl Add[UInt32] for UInt32 {
 impl Subtract[UInt32] for UInt32 {
   type Output = UInt32
 
+  fn subtract_is_defined(self, right: UInt32) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: UInt32) -> UInt32
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -520,7 +604,14 @@ impl Subtract[UInt32] for UInt32 {
 impl Multiply[UInt32] for UInt32 {
   type Output = UInt32
 
+  fn multiply_is_defined(self, right: UInt32) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: UInt32) -> UInt32
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -530,7 +621,14 @@ impl Multiply[UInt32] for UInt32 {
 impl Divide[UInt32] for UInt32 {
   type Output = UInt32
 
+  fn divide_is_defined(self, right: UInt32) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn divide(self, right: UInt32) -> UInt32
+    requires right != 0
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -540,7 +638,14 @@ impl Divide[UInt32] for UInt32 {
 impl Remainder[UInt32] for UInt32 {
   type Output = UInt32
 
+  fn remainder_is_defined(self, right: UInt32) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn remainder(self, right: UInt32) -> UInt32
+    requires right != 0
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -724,7 +829,14 @@ impl Display for UInt64 {
 impl Add[UInt64] for UInt64 {
   type Output = UInt64
 
+  fn add_is_defined(self, right: UInt64) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: UInt64) -> UInt64
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -734,7 +846,14 @@ impl Add[UInt64] for UInt64 {
 impl Subtract[UInt64] for UInt64 {
   type Output = UInt64
 
+  fn subtract_is_defined(self, right: UInt64) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: UInt64) -> UInt64
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -744,7 +863,14 @@ impl Subtract[UInt64] for UInt64 {
 impl Multiply[UInt64] for UInt64 {
   type Output = UInt64
 
+  fn multiply_is_defined(self, right: UInt64) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: UInt64) -> UInt64
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -754,7 +880,14 @@ impl Multiply[UInt64] for UInt64 {
 impl Divide[UInt64] for UInt64 {
   type Output = UInt64
 
+  fn divide_is_defined(self, right: UInt64) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn divide(self, right: UInt64) -> UInt64
+    requires right != 0
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -764,7 +897,14 @@ impl Divide[UInt64] for UInt64 {
 impl Remainder[UInt64] for UInt64 {
   type Output = UInt64
 
+  fn remainder_is_defined(self, right: UInt64) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn remainder(self, right: UInt64) -> UInt64
+    requires right != 0
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -940,7 +1080,14 @@ impl Display for USize {
 impl Add[USize] for USize {
   type Output = USize
 
+  fn add_is_defined(self, right: USize) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: USize) -> USize
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -950,7 +1097,14 @@ impl Add[USize] for USize {
 impl Subtract[USize] for USize {
   type Output = USize
 
+  fn subtract_is_defined(self, right: USize) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: USize) -> USize
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -960,7 +1114,14 @@ impl Subtract[USize] for USize {
 impl Multiply[USize] for USize {
   type Output = USize
 
+  fn multiply_is_defined(self, right: USize) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: USize) -> USize
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -970,7 +1131,14 @@ impl Multiply[USize] for USize {
 impl Divide[USize] for USize {
   type Output = USize
 
+  fn divide_is_defined(self, right: USize) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn divide(self, right: USize) -> USize
+    requires right != 0
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -980,7 +1148,14 @@ impl Divide[USize] for USize {
 impl Remainder[USize] for USize {
   type Output = USize
 
+  fn remainder_is_defined(self, right: USize) -> Bool
+    cost time O(1)
+  {
+    right != 0
+  }
+
   fn remainder(self, right: USize) -> USize
+    requires right != 0
     cost time O(1)
   {
     intrinsic::remainder(self, right)

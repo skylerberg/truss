@@ -95,8 +95,8 @@ Every fact the prover must show, and where it comes from:
 | Obligation | Where |
 |---|---|
 | An index or slice is in bounds | Each `items[i]` and `items[a..b]`, through the `requires` of the `impl` of `Index` the call reaches |
-| An operation does not overflow | Each `+`, `-`, `*`, negation, and conversion on a built-in integer |
-| A division has a nonzero divisor, and is not the least value over `-1` | Each `/` and `%` on a built-in integer |
+| An operation does not overflow | Each `+`, `-`, `*`, negation, and conversion on a built-in integer, and each of the intrinsic module's integer operations, as an `impl` of `Add` calls |
+| A division has a nonzero divisor, and is not the least value over `-1` | Each `/` and `%` on a built-in integer, and each intrinsic `divide` and `remainder` |
 | A shift amount is less than the width | Each `<<` and `>>` |
 | `unreachable` is never reached | Each `unreachable`, including the ones after guards that the type checker added |
 | A call's `requires` holds | Each call, including calls to theorems in proofs and calls in specifications |
@@ -191,8 +191,9 @@ and `reads` clauses):
   type comes with its range as a fact, and each operation on one becomes
   an exact operation and an obligation that the result is in range, as in
   Dafny and Verus. The intrinsic module's integer operations mean what the
-  compiler makes them do: arithmetic that stops the program on overflow or
-  a zero divisor gives the exact result when it returns, wrapping
+  compiler makes them do: arithmetic gives the exact result, with its
+  operator's obligation that the result is in range and the divisor is not
+  zero, since a build without run-time checks does not stop there; wrapping
   arithmetic gives the exact result brought into range by a remainder,
   and the overflow tests, the comparisons, `fits`, and `convert` of a
   value that fits are exact. A float's `fits` an integer type when it is a
@@ -538,6 +539,12 @@ call uses the capability method's contract.
   are asserted again. The places a body may change are the locals, or
   `self`, that it assigns to, passes `mut`, or loops over `mut`, so nothing
   else loses what was known about it.
+- **Validity is an invariant of every loop.** Each value a loop changes
+  that is valid on entry is valid at the head of each iteration, and is
+  asserted valid at the end of each one. A body may break a value's
+  invariant and restore it before the iteration ends. A value that is not
+  valid on entry, such as `self` in a private method that updates it, is
+  not held to it.
 - **A `for` loop** is the same, with what the `each` it calls promises. A
   ghost sequence, `yielded`, holds what the earlier iterations received.
   At the head, the loop's invariants and the method's clauses that hold
@@ -602,8 +609,11 @@ invariants and the validity of its fields.
   from a `yield`.
 - **Validity is asserted** where DESIGN.md says an invariant must hold:
   where a value is built or updated with `with`, where it is passed to a
-  call or returned, for each `mut` parameter where its function ends, and
-  at each `yield` where a yielding method may end.
+  call or returned, for each `mut` parameter where its function ends, for
+  each part handed out by a `yield` and for `self` at each `yield` where a
+  yielding method may end, and for a part lent `mut` where the lend ends.
+  The value the part was lent from is valid after the lend only if the
+  part is.
 - **A private method that takes `mut self`** neither assumes nor asserts
   the validity of `self`. A call to one from a method of the same type
   passes `self` without asserting it, so a half-finished update can be
@@ -641,7 +651,9 @@ every `requires` and the `ensures` before it, and a loop's invariant with
 the invariants before it. Inside a quantifier, these are checked for each
 value its range admits, so `forall i in 0..items.length() => items[i] > 0`
 is well defined and `forall i in 0..items.length() + 1 => items[i] > 0` is
-not.
+not. A quantifier's body runs only for the values its range admits, which
+may be none, so what the body assumes holds only for them. A pure call's
+`ensures` and definition are facts of mathematics, which hold either way.
 
 - **Arithmetic is exact** on `Integer`, and an `Integer` passed where a
   built-in integer is expected carries the type checker's obligation that
@@ -672,7 +684,7 @@ not.
   rest of the path. In a test it is assumed, since the test's run checks
   it.
 - **A law** of a trait, or of a trait it requires, is a fact, quantified
-  over its parameters, wherever the trait's methods are used on a type that
+  over its parameters and read with the trait's arguments, wherever the trait's methods are used on a type that
   implements it: for a type parameter bounded by the trait, and for a
   concrete type whose `impl`'s laws are proven. Each hand-written `impl`
   must prove each law, under the code `prover.law`, from the `impl`'s
@@ -684,9 +696,13 @@ not.
   by field, as [Equality](#equality) says. Nothing is proven for a derived
   implementation, as DESIGN.md says.
 - **An `impl`'s method keeps its trait's or its capability's contract.**
-  The trait's or capability's `requires` is assumed and must imply the
-  method's own, and its `ensures` is shown at each way the method returns,
-  since calls through a bound, or of the capability, rely on them. A
+  Its body is proven under its own `requires`, or the trait's when it
+  states none, since a call that reaches the `impl` shows only that one.
+  The trait's or capability's `requires` must imply the method's own. Its
+  `ensures` is shown at each way the method returns, under the trait's
+  `requires`, since calls through a bound, or of the capability, rely on
+  it. A call that reaches the `impl` assumes the trait's `ensures` only
+  where the trait's `requires` holds. A
   capability's method takes no `self`, so the `impl`'s `self` is left out
   when their parameters are paired. The method's own `ensures` and cost
   clauses are shown as a function's are.
@@ -1130,6 +1146,10 @@ regardless, with their run-time checks.
 - **An `impl`'s laws are skipped while the `impl` is unfinished.** A law
   constrains what the `impl`'s methods return. If a method the `impl`
   defines contains a `todo`, the laws of that `impl` are not obligations.
+- **A law that is not shown is a hole where it is used.** A law of an
+  unfinished `impl`, or one whose `proof` holds a `todo`, is still a fact
+  for code that uses the `impl`, and each definition that assumes it has a
+  hole there, so a build refuses it.
 - **Holes are not errors.** Truss has no warnings, so a hole is not a
   diagnostic: each definition's outcome lists its holes, `truss holes`
   lists every `todo` with what it blocks, and `truss build` refuses a
@@ -1203,6 +1223,16 @@ A proof is as trustworthy as:
 - the standard library's contracts whose bodies end in any other
   intrinsic, which the prover knows only by its type, so they are relied
   on and not proven
+- three facts about `intrinsic::Shared`, which the prover knows only by
+  its operations' types, so a model of it must keep them:
+  - other tasks may update a `Shared`'s value between any two calls of
+    `shared_update`, so the result of one call is unconstrained by earlier
+    calls
+  - `copy()` of a `Shared` is an alias of the same block, so `Shared` is
+    not a value type, and value equality on it would be unsound
+  - `shared_key` is the block's address, not a function of its value: two
+    blocks with equal values have different keys, and a key differs
+    between runs
 - compiled code, for the checks that are run
 
 Everything else is proven. The run-time checks of every test build, and

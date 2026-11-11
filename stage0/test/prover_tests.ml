@@ -2445,6 +2445,39 @@ let () =
         \  x\n\
          }\n"
         "prover.ensures");
+  test "a quantifier over an empty range shows nothing of the path" (fun () ->
+      not_proven
+        "fn hang() -> Bool\n\
+        \  ensures false\n\
+         {\n\
+        \  while true {}\n\
+         }\n\n\
+         fn f(x: Int64) -> Int64\n\
+        \  ensures result <= 0\n\
+         {\n\
+        \  if x > 0 {\n\
+        \    let _ = exists _ in 0..0 => hang()\n\
+        \  }\n\
+        \  x\n\
+         }\n"
+        "prover.ensures");
+  test "a lambda over a type no value has shows nothing of the path" (fun () ->
+      not_proven
+        "type Empty(value: Int64)\n\
+        \  invariant value > 0\n\
+        \  invariant value < 0\n\n\
+         fn ignore(visit: fn(Empty) -> Int64) -> Int64 {\n\
+        \  0\n\
+         }\n\n\
+         fn f(x: Int64) -> Int64\n\
+        \  ensures result <= 0\n\
+         {\n\
+        \  if x > 0 {\n\
+        \    let _ = ignore(fn(e) { e.value })\n\
+        \  }\n\
+        \  x\n\
+         }\n"
+        "prover.ensures");
   test "a law's proof that never ends shows nothing" (fun () ->
       not_proven
         (monoid ^ flag_impl "true" ^ "\nproof Monoid.left_identity for Flag {\n  while true {}\n}\n")
@@ -2455,6 +2488,185 @@ let () =
       in
       proven text;
       if holes text <> 1 then fail "%d holes" (holes text))
+
+(* What a caller assumes is what was shown *)
+
+let () =
+  test "a trait's ensures holds of an impl's method only where the trait's requires does" (fun () ->
+      not_proven
+        "trait Scaled {\n\
+        \  fn scale(self, n: Int64) -> Int64\n\
+        \    requires n > 0\n\
+        \    ensures result > 0\n\
+         }\n\n\
+         type Box()\n\n\
+         impl Scaled for Box {\n\
+        \  fn scale(self, n: Int64) -> Int64\n\
+        \    requires n >= 0\n\
+        \  {\n\
+        \    n\n\
+        \  }\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  Box().scale(0)\n\
+         }\n"
+        "prover.ensures");
+  test "a law of an unfinished impl is a hole where it is assumed" (fun () ->
+      let text =
+        "trait Sized {\n\
+        \  fn measure(self) -> Int64\n\
+        \    cost time finite\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time finite\n\n\
+        \  law positive(value: Self) { value.measure() > 0 }\n\
+         }\n\n\
+         type Box(size: Int64)\n\n\
+         impl Sized for Box {\n\
+        \  fn measure(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.size\n\
+        \  }\n\n\
+        \  fn label(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    todo\n\
+        \  }\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  Box(size: 0).measure()\n\
+         }\n"
+      in
+      if holes text <> 1 then fail "%d holes" (holes text));
+  test "a law whose proof holds a todo is a hole where it is assumed" (fun () ->
+      let text =
+        "trait Zero {\n\
+        \  fn zero(self) -> UInt8\n\
+        \    cost time finite\n\n\
+        \  law is_zero(value: Self) { value.zero() == 0 }\n\
+         }\n\n\
+         impl Zero for UInt8 {\n\
+        \  fn zero(self) -> UInt8\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self\n\
+        \  }\n\
+         }\n\n\
+         proof Zero.is_zero for UInt8 {\n\
+        \  todo\n\
+         }\n\n\
+         fn f(x: UInt8) -> UInt8\n\
+        \  ensures result == 0\n\
+         {\n\
+        \  x.zero()\n\
+         }\n"
+      in
+      if holes text <> 2 then fail "%d holes" (holes text));
+  test "each impl of a trait with arguments keeps its own laws" (fun () ->
+      not_proven
+        "trait Scale[Factor] {\n\
+        \  fn scale(self, by: Factor) -> Int64\n\
+        \    cost time finite\n\n\
+        \  law zero(value: Self, by: Factor) { value.scale(by) == 0 }\n\
+         }\n\n\
+         type Box()\n\n\
+         impl Scale[Int64] for Box {\n\
+        \  fn scale(self, by: Int64) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    0\n\
+        \  }\n\
+         }\n\n\
+         impl Scale[Bool] for Box {\n\
+        \  fn scale(self, by: Bool) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    1\n\
+        \  }\n\
+         }\n"
+        "prover.law");
+  test "an element changed through a lend meets its invariant when the lend ends" (fun () ->
+      not_proven
+        "type Span(low: Int64, high: Int64)\n\
+        \  invariant low <= high\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 1\n\
+         {\n\
+        \  var spans: List[Span] = [Span(low: 0, high: 0)]\n\
+        \  spans[0].low = 1\n\
+        \  spans[0].high\n\
+         }\n"
+        "prover.invariant");
+  test "an element changed through a lend that keeps its invariant proves" (fun () ->
+      proven
+        "type Span(low: Int64, high: Int64)\n\
+        \  invariant low <= high\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 5\n\
+         {\n\
+        \  var spans: List[Span] = [Span(low: 0, high: 0)]\n\
+        \  spans[0].high = 5\n\
+        \  spans[0].high\n\
+         }\n");
+  test "a yielded part meets its invariant" (fun () ->
+      not_proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         type Source()\n\n\
+         fn Source.each(self) yields Positive {\n\
+        \  var p = Positive(n: 1)\n\
+        \  p.n = -5\n\
+        \  yield p\n\
+         }\n"
+        "prover.invariant");
+  test "a loop keeps the validity of each value it changes" (fun () ->
+      proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         fn take(item: Positive) -> Int64 {\n\
+        \  item.n\n\
+         }\n\n\
+         fn f(count: USize) -> Int64 {\n\
+        \  var item = Positive(n: 1)\n\
+        \  for _ in 0..count {\n\
+        \    item.n = 0\n\
+        \    item.n = 5\n\
+        \  }\n\
+        \  take(item)\n\
+         }\n");
+  test "an iteration must keep the validity of each value the loop changes" (fun () ->
+      not_proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         fn take(item: Positive) -> Int64 {\n\
+        \  item.n\n\
+         }\n\n\
+         fn f(count: USize) -> Int64 {\n\
+        \  var item = Positive(n: 2)\n\
+        \  for _ in 0..count {\n\
+        \    item.n = 0\n\
+        \  }\n\
+        \  1\n\
+         }\n"
+        "prover.invariant")
+
+(* Integer operations of the intrinsic module *)
+
+let () =
+  test "generic negation needs what the trait requires" (fun () ->
+      not_proven "fn negate[Number: Negate](value: Number) -> Number.Output {\n  -value\n}\n"
+        "prover.requires");
+  test "generic negation proves where what the trait requires holds" (fun () ->
+      proven
+        "fn negate[Number: Negate](value: Number) -> Number.Output\n\
+        \  requires value.negate_is_defined()\n\
+         {\n\
+        \  -value\n\
+         }\n")
 
 (* Concurrent code *)
 

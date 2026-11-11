@@ -163,6 +163,7 @@ let () =
       one_diagnostic
         "type Meters(value: Int64)\n\n\
          impl Add[Meters] for Meters {\n\
+        \  fn add_is_defined(self, right: Meters) -> Bool { true }\n\
         \  fn add(self, right: Meters) -> Self.Output { todo }\n\
          }\n"
         "types.missing_member");

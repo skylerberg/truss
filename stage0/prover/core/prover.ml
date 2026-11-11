@@ -31,63 +31,16 @@ let inherited database (path : Path.t) =
       | _ -> None)
   | _ -> None
 
-(* The [proof]s written for a trait's laws on a type, in the package: each
-   law's name, with the proof's source and body. *)
-let law_proofs database package trait (for_type : Types.ty) =
-  let head = match for_type with Named { path; _ } -> Some path | _ -> None in
-  List.concat_map
-    (fun module_ ->
-      List.filter_map
-        (fun (declaration : Names.declaration) ->
-          match
-            ( declaration.kind,
-              Query.demand database Interface.Environment.interface declaration.path )
-          with
-          | Law_proof, Some (Interface.Environment.Law_proof_interface proven)
-            when Path.equal proven.trait.trait trait
-                 &&
-                 match (proven.for_type, head) with
-                 | Named { path; _ }, Some head -> Path.equal path head
-                 | _ -> false -> (
-              match Translate.source_at_key database (Names.key_of declaration) with
-              | Some ({ core = { definition = Law_proof body; _ }; _ } as source) ->
-                  Some (proven.law, (source, body))
-              | _ -> None)
-          | _ -> None)
-        (Query.demand database Names.declarations module_))
-    (Query.demand database Workspace.modules package)
-
-(* Whether an [impl] writes a method whose body holds a [todo]. Its laws
-   are about what its methods return, so they wait, as the methods'
-   contracts do. *)
-let unfinished database (key : Names.key) =
-  List.exists
-    (fun (method_ : Names.key) ->
-      match Translate.source_at_key database method_ with
-      | Some { core = { definition = Function { body = Some body; _ }; _ }; _ } ->
-          let found = ref false in
-          Core_walk.block
-            (Core_walk.deep
-               {
-                 Core_walk.ignore_all with
-                 expression =
-                   (fun (node : Core.expression) ->
-                     match node.kind with Todo -> found := true | _ -> ());
-               })
-            body;
-          !found
-      | _ -> false)
-    (Query.demand database Names.contained key)
-
 (* An [impl]'s obligation to keep each law of its trait. *)
 let impl_laws database (key : Names.key) source =
   match Query.demand database Interface.Environment.interface key.path with
-  | Some (Interface.Environment.Impl_interface interface) when not (unfinished database key) ->
+  | Some (Interface.Environment.Impl_interface interface)
+    when not (Translate.impl_unfinished database key) ->
       [
-        Translate.laws database source ~impl:key.path ~trait:interface.implements.trait
+        Translate.laws database source ~impl:key.path ~trait:interface.implements
           ~for_type:interface.for_type
           ~proofs:
-            (law_proofs database (Path.package key.path) interface.implements.trait
+            (Translate.law_proofs database (Path.package key.path) interface.implements
                interface.for_type)
           ~at:(Translate.definition_span source);
       ]

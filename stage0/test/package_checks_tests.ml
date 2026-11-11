@@ -29,10 +29,12 @@ let () =
               "type Vector[Element](first: Element)\n\n\
                impl Add[Element] for Vector[Element] {\n\
               \  type Output = Vector[Element]\n\
+              \  fn add_is_defined(self, right: Element) -> Bool { true }\n\
               \  fn add(self, right: Element) -> Vector[Element] { todo }\n\
                }\n\n\
                impl Add[Int64] for Vector[Element] {\n\
               \  type Output = Vector[Element]\n\
+              \  fn add_is_defined(self, right: Int64) -> Bool { true }\n\
               \  fn add(self, right: Int64) -> Vector[Element] { todo }\n\
                }\n" );
           ]
@@ -337,6 +339,7 @@ let () =
             "public type Vector[Element](items: List[Element])\n\n\
              impl Add[Element] for Vector[Element] {\n\
             \  type Output = Vector[Element]\n\
+            \  fn add_is_defined(self, right: Element) -> Bool { true }\n\
             \  fn add(self, right: Element) -> Vector[Element] { todo }\n\
              }\n" );
         ];
@@ -348,6 +351,7 @@ let () =
              public type Meters(value: Int64)\n\n\
              impl Add[Meters] for vector::Vector[Element] {\n\
             \  type Output = vector::Vector[Element]\n\
+            \  fn add_is_defined(self, right: Meters) -> Bool { true }\n\
             \  fn add(self, right: Meters) -> vector::Vector[Element] { todo }\n\
              }\n" );
         ];

@@ -926,6 +926,22 @@ let source_at database (path : Path.t) =
                      (Method { owner = impl.implements.trait; name; receiver })))
         | None, _ -> None)
 
+(* What a trait's clauses and laws are read with for a type: [Self] the
+   type, and each of the trait's parameters its argument. *)
+let trait_substitution database (trait : T.trait_reference) (ty : T.ty) =
+  let generics =
+    match Query.demand database Interface.Environment.interface trait.trait with
+    | Some (Interface.Environment.Trait_interface interface) ->
+        List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics
+    | _ -> []
+  in
+  let rec pair generics arguments =
+    match (generics, arguments) with
+    | generic :: generics, argument :: arguments -> (generic, argument) :: pair generics arguments
+    | _ -> []
+  in
+  ({ T.owner = trait.trait; name = "Self" }, T.Type ty) :: pair generics trait.trait_arguments
+
 (* A form's clauses about what it defines. *)
 let part_of ?(inherited = false) callee =
   match callee.core.definition with
@@ -947,6 +963,71 @@ let part_of ?(inherited = false) callee =
   | _ -> None
 
 let body_of callee = match callee.core.definition with Function { body; _ } -> body | _ -> None
+
+let holds_todo (body : block) =
+  let found = ref false in
+  Core_walk.block
+    (Core_walk.deep
+       {
+         Core_walk.ignore_all with
+         expression =
+           (fun (node : Core.expression) -> match node.kind with Todo -> found := true | _ -> ());
+       })
+    body;
+  !found
+
+(* The [proof]s written for a trait's laws on a type, in the package: each
+   law's name, with the proof's source and body. *)
+let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
+  let same_argument (left : T.argument) (right : T.argument) =
+    match (left, right) with Type left, Type right -> T.equal left right | _ -> left = right
+  in
+  let head = match for_type with Named { path; _ } -> Some path | _ -> None in
+  List.concat_map
+    (fun module_ ->
+      List.filter_map
+        (fun (declaration : Names.declaration) ->
+          match
+            ( declaration.kind,
+              Query.demand database Interface.Environment.interface declaration.path )
+          with
+          | Law_proof, Some (Interface.Environment.Law_proof_interface proven)
+            when Path.equal proven.trait.trait trait.trait
+                 && List.equal same_argument proven.trait.trait_arguments trait.trait_arguments
+                 &&
+                 match (proven.for_type, head) with
+                 | Named { path; _ }, Some head -> Path.equal path head
+                 | _ -> false -> (
+              match source_at_key database (Names.key_of declaration) with
+              | Some ({ core = { definition = Law_proof body; _ }; _ } as source) ->
+                  Some (proven.law, (source, body))
+              | _ -> None)
+          | _ -> None)
+        (Query.demand database Names.declarations module_))
+    (Query.demand database Workspace.modules package)
+
+(* Whether an [impl] writes a method whose body holds a [todo]. Its laws
+   are about what its methods return, so they wait, as the methods'
+   contracts do. *)
+let impl_unfinished database (key : Names.key) =
+  List.exists
+    (fun (method_ : Names.key) ->
+      match source_at_key database method_ with
+      | Some { core = { definition = Function { body = Some body; _ }; _ }; _ } -> holds_todo body
+      | _ -> false)
+    (Query.demand database Names.contained key)
+
+(* Whether an [impl]'s law is not shown: the [impl] is unfinished, so its
+   laws wait, or the law's proof holds a [todo]. A proof that assumes it
+   has a hole there. *)
+let law_unshown database (impl : Path.t) (trait : T.trait_reference) for_type name =
+  match Query.demand database Interface.Summary.key impl with
+  | Some key ->
+      impl_unfinished database key
+      || List.exists
+           (fun (law, (_, body)) -> law = name && holds_todo body)
+           (law_proofs database (Path.package impl) trait for_type)
+  | None -> false
 
 (* Whether a body is functional, so that it can be the function's
    definition: [let], [if], [match], [is], calls, fields, building values,
@@ -1725,8 +1806,12 @@ and if_ context frame (node : expression) condition (then_ : block) (else_ : blo
 and quantified context frame (node : expression) (quantifier : Syntax.quantifier) binder body =
   let make ?count bound_symbol sort premise body_frame =
     let mark = context.fresh in
+    (* The body runs only for the values the premise admits, which may be
+       none, so what it assumes is only for them. *)
     let body_frame =
-      { body_frame with binders = (bound_symbol, sort, premise) :: body_frame.binders }
+      restrict
+        { body_frame with binders = (bound_symbol, sort, premise) :: body_frame.binders }
+        premise
     in
     let after, body_value = value context body_frame body in
     let bound = [ (bound_symbol, sort) ] in
@@ -2113,17 +2198,18 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
   | Trait_method { trait; name; receiver; evidence; self_type; type_arguments } -> (
       let arguments = arguments_of type_arguments in
       let self_type = substituted context frame self_type in
+      let trait = { trait with trait_arguments = arguments_of trait.trait_arguments } in
       (* A bound on [Self], read where [Self] is a known type, as in a law
          proven for one [impl], reaches that type's [impl]. *)
       let evidence : evidence =
         match evidence with
         | Bound -> (
-            match concrete_impl context trait.trait self_type with
+            match concrete_impl context trait self_type with
             | Some (impl, arguments) -> Impl { impl; arguments }
             | None -> evidence)
         | _ -> evidence
       in
-      assume_laws context frame trait.trait self_type;
+      assume_laws context frame ~at:span trait self_type;
       let operands () = List.map (fun (passed : passed) -> passed.term) values in
       match (name, evidence, operands ()) with
       | "equal", _, [ a; b ] when Path.equal trait.trait equal_trait && structural context self_type
@@ -2147,17 +2233,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
           let trait_path = Path.Method { owner = trait.trait; name; receiver } in
           (* The trait's clauses are about [Self] and the trait's parameters. *)
           let trait_substitution =
-            let trait_generics =
-              match Query.demand context.database Interface.Environment.interface trait.trait with
-              | Some (Interface.Environment.Trait_interface interface) ->
-                  List.map (fun (generic : T.generic) -> generic.generic) interface.trait_generics
-              | _ -> []
-            in
-            let given =
-              ({ T.owner = trait.trait; name = "Self" }, T.Type self_type)
-              :: pair trait_generics (arguments_of trait.trait_arguments) ~given:[]
-            in
-            pair (generics_of trait_path) arguments ~given
+            pair (generics_of trait_path) arguments
+              ~given:(trait_substitution context.database trait self_type)
           in
           let path, own_substitution =
             match evidence with
@@ -2432,7 +2509,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
             (in_range target value);
           value
       | _ -> known)
-  | _ -> integer_intrinsic context frame operation types operands known
+  | _ -> integer_intrinsic context frame ~node operation types operands known
 
 (* A function of the C library, by its row of the C library's table. It
    is given only an address into a storage, so each storage it is lent
@@ -2555,7 +2632,7 @@ and float_fits target value =
         &&& Apply ("<=", [ cut; Integer high ]))
   | None -> L.Boolean false
 
-and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
+and integer_intrinsic context frame ~node (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
   let exact operation left right =
     match (operation : Intrinsic.operation) with
@@ -2566,15 +2643,18 @@ and integer_intrinsic context frame (operation : Intrinsic.operation) types oper
     | _ -> L.Apply ("*", [ left; right ])
   in
   match (operation, integer, types, operands) with
+  (* An integer operation is defined where its operator is, so it has the
+     operator's obligations: a call of it, as an [impl] of [Add] makes, shows
+     what [+] would. *)
   | (Add | Subtract | Multiply | Divide | Remainder), Some _, ty :: _, [ left; right ] ->
-      let result = exact operation left right in
-      if operation = Divide || operation = Remainder then
-        assume context frame (L.not_ (L.equal right (L.int 0)));
+      let result = arithmetic context frame node ty operation left right in
       assume context frame (in_range ty result);
       result
   | Negate, Some _, ty :: _, [ value ] ->
       let result = L.Apply ("-", [ value ]) in
-      assume context frame (in_range ty result);
+      oblige context frame Overflow (at frame node)
+        (Printf.sprintf "`%s` may overflow `%s`." (quote frame.source node.origin) (T.show ty))
+        (in_range ty result);
       result
   | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), Some (low, high), _, [ left; right ] ->
       let modulus = Z.succ (Z.sub high low) in
@@ -3118,8 +3198,10 @@ and updating_helper context (call_ : call) =
 (* The [impl] of a trait for a known type, with what its generic parameters
    stand for there. An [impl] whose parameters have bounds is taken only in
    its own proofs, where they are what is assumed: elsewhere this cannot
-   tell whether they hold. *)
-and concrete_impl context trait (ty : T.ty) =
+   tell whether they hold. The [impl] is of the trait with these arguments,
+   so a type with an [impl] of [Scale[Int64]] and one of [Scale[Bool]]
+   reaches each by its own. *)
+and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
   match ty with
   | Named { path; _ } ->
       let packages = List.sort_uniq compare [ Path.package context.current; Path.package path ] in
@@ -3139,13 +3221,18 @@ and concrete_impl context trait (ty : T.ty) =
                   let variables =
                     List.map (fun (generic : T.generic) -> generic.generic) interface.impl_generics
                   in
-                  match Interface.Impls.match_type ~variables [] interface.for_type ty with
+                  match
+                    Option.bind (Interface.Impls.match_type ~variables [] interface.for_type ty)
+                      (fun arguments ->
+                        Interface.Impls.match_arguments ~variables arguments
+                          interface.implements.trait_arguments trait.trait_arguments)
+                  with
                   | Some arguments -> Some (impl, arguments)
                   | None -> None)
               | _ -> None)
             (Call_graph.impls_for
                (Query.demand context.database Call_graph.package_impls package)
-               [ trait ] ty))
+               [ trait.trait ] ty))
         packages
   | _ -> None
 
@@ -3153,20 +3240,33 @@ and concrete_impl context trait (ty : T.ty) =
    type, each quantified over its parameters. A law is shown for each
    [impl] written by hand, by the [impl], so it is a fact wherever the
    trait's methods are used. *)
-and assume_laws context frame trait (ty : T.ty) =
-  let key = Path.show trait ^ " for " ^ type_key ty in
+and assume_laws context frame ~at (trait : T.trait_reference) (ty : T.ty) =
+  let key = laws_key trait ty in
   if not (List.mem key context.laws_assumed) then begin
     context.laws_assumed <- key :: context.laws_assumed;
     List.iter
-      (fun trait ->
+      (fun path ->
+        let required =
+          if Path.equal path trait.trait then trait
+          else { T.trait = path; trait_arguments = []; associated = [] }
+        in
+        let substitution = trait_substitution context.database required ty in
+        let impl = Option.map fst (concrete_impl context required ty) in
         List.iter
           (fun (source, (law : law)) ->
-            match law_fact context frame source trait ty law with
-            | Some law -> fact context frame law
+            match law_fact context frame source ~substitution law with
+            | Some fact_ ->
+                (match impl with
+                | Some impl when law_unshown context.database impl required ty law.name ->
+                    context.holes <- (context.home, at) :: context.holes
+                | _ -> ());
+                fact context frame fact_
             | None -> ())
-          (laws_of context trait))
-      (Call_graph.traits_with_required context.database trait)
+          (laws_of context path))
+      (Call_graph.traits_with_required context.database trait.trait)
   end
+
+and laws_key (trait : T.trait_reference) ty = T.show_trait trait ^ " for " ^ type_key ty
 
 and laws_of context trait =
   match
@@ -3178,9 +3278,10 @@ and laws_of context trait =
       List.map (fun (law : law) -> (source, law)) laws
   | _ -> []
 
-(* A law's frame: its parameters as the given terms, with [Self] the type. *)
-and law_frame frame source trait ty (law : law) terms =
-  let types = law_parameter_types source trait ty law in
+(* A law's frame: its parameters as the given terms, with [Self] and the
+   trait's parameters as the substitution says. *)
+and law_frame frame source ~substitution (law : law) terms =
+  let types = law_parameter_types ~substitution law in
   let locals, types =
     List.fold_left2
       (fun (locals, types_) ((parameter : Core.parameter), ty) term ->
@@ -3201,18 +3302,17 @@ and law_frame frame source trait ty (law : law) terms =
     checking = false;
     loop = None;
     updating = None;
-    substitution = [ ({ T.owner = trait; name = "Self" }, T.Type ty) ];
+    substitution;
     self_type = None;
   }
 
-and law_parameter_types _source trait ty (law : law) =
+and law_parameter_types ~substitution (law : law) =
   List.map
-    (fun (parameter : Core.parameter) ->
-      T.substitute [ ({ T.owner = trait; name = "Self" }, T.Type ty) ] parameter.type_)
+    (fun (parameter : Core.parameter) -> T.substitute substitution parameter.type_)
     law.parameters
 
-and law_fact context frame source trait ty (law : law) =
-  let types = law_parameter_types source trait ty law in
+and law_fact context frame source ~substitution (law : law) =
+  let types = law_parameter_types ~substitution law in
   if List.exists (fun ty -> T.is_error ty) types then None
   else begin
     context.fresh <- context.fresh + 1;
@@ -3220,7 +3320,7 @@ and law_fact context frame source trait ty (law : law) =
     let inside =
       law_frame
         { frame with bound = symbols @ frame.bound }
-        source trait ty law
+        source ~substitution law
         (List.map (fun s -> L.Symbol s) symbols)
     in
     try
@@ -4078,15 +4178,17 @@ and contract_for_every_argument context frame (contract : contract) parameters v
       | own :: others -> if own.requires <> [] || others = [] then [ own ] else others
       | [] -> []
     in
-    let required =
+    let requires_of parts =
       L.conjunction
         (List.concat_map
            (fun (part : part) ->
              List.map (fun clause -> snd (clause_value context (read part) clause)) part.requires)
-           requiring)
+           parts)
     in
+    let required = requires_of requiring in
     List.iter
       (fun (part : part) ->
+        let required = if List.memq part requiring then required else requires_of [ part ] in
         List.iter
           (fun clause ->
             let ensured = snd (clause_value context (read part) clause) in
@@ -4698,7 +4800,23 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       requiring
   in
   let required = L.conjunction required in
+  (* Each part's [ensures] holds where its [requires] does: a trait's, of
+     an [impl]'s method whose own precondition is weaker, only where the
+     trait's holds too. *)
+  let required_by (part : part) =
+    if List.memq part requiring then required
+    else
+      L.conjunction
+        (List.map
+           (fun (clause : expression) -> snd (clause_value context (entry_frame part) clause))
+           part.requires)
+  in
   let after = havoc_mut frame in
+  (* A pure call's [ensures], where its [requires] holds, and its
+     definition are facts of mathematics, true whether or not the body of a
+     quantifier around the call runs. *)
+  let in_quantifier = contract.pure && frame.binders <> [] in
+  let state term = if in_quantifier then fact context after term else assume context after term in
   (* What each [mut] argument holds after the call: what its place holds,
      which [havoc_mut] gave a fresh value. *)
   let changed =
@@ -4756,12 +4874,31 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     else arrive context after "result" result_type
   in
   if contract.result_kind <> `Yields then assume_valid context after result_type result;
+  (* A part lent [mut] goes back into the value it is part of when the lend
+     ends, as the caller's statement left it, so that value is valid only
+     if the part is, which is checked below. *)
+  let left_valid =
+    match (contract.result_kind, call_.lends, lent_final) with
+    | `Lends, Some T.Mut, Some leave ->
+        Some (validity context after ~assuming:false ~deep:true result_type (leave result), leave)
+    | _ -> None
+  in
+  let check_left () =
+    match left_valid with
+    | Some (_, leave) ->
+        check_valid context after span result_type (leave result) ~deep:true
+          ~when_:"when the lend of this part ends"
+    | None -> ()
+  in
   let helper = updating_helper context call_ in
   List.iter
     (fun (passed : passed) ->
       if passed.mode = T.Mut && not (helper && passed.position = 0) then
         match List.assoc_opt passed.position changed with
-        | Some term -> assume_valid context after passed.type_ term
+        | Some term ->
+            let valid = validity context after ~assuming:true passed.type_ term in
+            assume context after
+              (match left_valid with Some (left, _) -> L.( ==> ) left valid | None -> valid)
         | None -> ())
     values;
   if not (List.exists (Path.equal path) context.instantiating) then begin
@@ -4770,81 +4907,101 @@ and contract_call context frame (node : expression) (call_ : call) path contract
        the prover cannot read is simply not unfolded. *)
     (match contract.definition with
     | Some (part, body) when not (List.exists (L.mentions after.bound) own_arguments) ->
-        let unfolding = { (entry_frame part) with condition = after.condition } in
+        let unfolding =
+          {
+            (entry_frame part) with
+            condition = (if in_quantifier then L.Boolean true else after.condition);
+          }
+        in
         let mark = List.length context.facts in
         (try
            match block_value context unfolding body with
-           | Some (_, defined) -> assume context after (L.( ==> ) required (L.equal result defined))
+           | Some (_, defined) -> state (L.( ==> ) required (L.equal result defined))
            | None -> ()
          with Unsupported _ | Foreign_unsupported _ -> ());
         List.iter (fun fact -> Hashtbl.replace context.unfolded fact ()) (facts_since context mark)
     | _ -> ());
     (* The [ensures], after, where the [requires] held: [mut] parameters
        have their new values, and [old] the ones they had. *)
-    List.iter
-      (fun (part : part) ->
-        let entry = bindings part in
-        let exit_bindings =
-          List.mapi
-            (fun index (parameter, term) ->
-              ( parameter,
-                match List.assoc_opt index changed with Some term -> Some term | None -> term ))
-            entry
-        in
-        let entry_locals, types, entry_self = bind entry in
-        let exit_locals, _, exit_self = bind exit_bindings in
-        let ensures_frame =
-          {
-            frame with
-            source = part.callee;
-            condition = after.condition;
-            locals = exit_locals;
-            types;
-            old_locals = entry_locals;
-            self = self_of part exit_self;
-            old_self = self_of part entry_self;
-            self_type = self_type_of part entry_self;
-            result = Some result;
-            checking = false;
-            loop = None;
-            updating = None;
-            substitution = substitution_of part;
-          }
-        in
-        let ensures_frame =
-          match contract.result_kind with
-          | `Lends ->
-              (* The part as lent, and the parts handed out: the one part, as
+    let assume_ensures keep =
+      List.iter
+        (fun (part : part) ->
+          let entry = bindings part in
+          let exit_bindings =
+            List.mapi
+              (fun index (parameter, term) ->
+                ( parameter,
+                  match List.assoc_opt index changed with Some term -> Some term | None -> term ))
+              entry
+          in
+          let entry_locals, types, entry_self = bind entry in
+          let exit_locals, _, exit_self = bind exit_bindings in
+          let ensures_frame =
+            {
+              frame with
+              source = part.callee;
+              condition = after.condition;
+              locals = exit_locals;
+              types;
+              old_locals = entry_locals;
+              self = self_of part exit_self;
+              old_self = self_of part entry_self;
+              self_type = self_type_of part entry_self;
+              result = Some result;
+              checking = false;
+              loop = None;
+              updating = None;
+              substitution = substitution_of part;
+            }
+          in
+          let ensures_frame =
+            match contract.result_kind with
+            | `Lends ->
+                (* The part as lent, and the parts handed out: the one part, as
                  the caller's statement left it. *)
-              let left = match lent_final with Some leave -> leave result | None -> result in
-              let none = empty_parts context after result_type in
-              {
-                ensures_frame with
-                yielded = Some (appended context after result_type none left);
-                finished = Some (L.Boolean true);
-              }
-          | `Returns | `Yields -> ensures_frame
-        in
-        List.iter
-          (fun (clause : expression) ->
-            let frame_for_clause =
-              if contract.result_kind = `Lends && mentions_result clause then
+                let left = match lent_final with Some leave -> leave result | None -> result in
+                let none = empty_parts context after result_type in
                 {
                   ensures_frame with
-                  locals = entry_locals;
-                  self = self_of part entry_self;
-                  yielded = None;
+                  yielded = Some (appended context after result_type none left);
+                  finished = Some (L.Boolean true);
                 }
-              else ensures_frame
-            in
-            match clause_value context frame_for_clause clause with
-            | _, term -> assume context after (L.( ==> ) required term))
-          part.ensures)
-      (* A yielding method's clauses are about each part it hands out and
+            | `Returns | `Yields -> ensures_frame
+          in
+          List.iter
+            (fun (clause : expression) ->
+              if keep clause then
+                let frame_for_clause =
+                  if contract.result_kind = `Lends && mentions_result clause then
+                    {
+                      ensures_frame with
+                      locals = entry_locals;
+                      self = self_of part entry_self;
+                      yielded = None;
+                    }
+                  else ensures_frame
+                in
+                match clause_value context frame_for_clause clause with
+                | _, term ->
+                    (* A pure call's [ensures], where its [requires] holds, is a
+                   fact of mathematics, true whether or not a quantifier's
+                   body around it runs. *)
+                    state (L.( ==> ) (required_by part) term))
+            part.ensures)
+        (* A yielding method's clauses are about each part it hands out and
          how it ends, which each pull of the cursor it makes meets. *)
-      (if contract.result_kind = `Yields then [] else contract.parts);
+        (if contract.result_kind = `Yields then [] else contract.parts)
+    in
+    (* A lend's clauses about the part as lent come before the check of what
+       the caller left in it, and those about how the lend ends, which read
+       that part, after. *)
+    let about_part clause = contract.result_kind <> `Lends || mentions_result clause in
+    assume_ensures about_part;
+    check_left ();
+    assume_ensures (fun clause -> not (about_part clause));
     context.instantiating <- List.tl context.instantiating
-  end;
+  end
+  else check_left ();
   (if contract.result_kind = `Yields then
      match result_type with
      | T.Cursor _ as cursor_type -> (
@@ -6482,6 +6639,8 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
       in
       show each ~at:frame ~result:(Some handed) ~yielded:before ~finished:None
         ~when_:"for the part handed out here";
+      check_valid context frame span part_type handed ~deep:true
+        ~when_:"for the part handed out here";
       (* What the caller leaves in a part lent [mut] is stored back in each
          place it lends. *)
       let frame, part_after =
@@ -6844,6 +7003,55 @@ and havoc context frame (changed : changed) =
   | true, Some ty -> { frame with self = Some (arrive context frame "loop" ty) }
   | _ -> frame
 
+(* Validity is an invariant of every loop: each value the loop changes
+   that is valid on entry is valid at the head of each iteration, so each
+   iteration must keep it valid. A value that is not valid on entry, as
+   [self] may not be in a private method that updates it, is not held to
+   it. *)
+and kept_validity context (entry : frame) (changed : changed) =
+  let kept name ty before read =
+    match validity context entry ~assuming:false ~deep:true ty before with
+    | L.Boolean true -> None
+    | valid -> Some (name, ty, valid, read)
+  in
+  List.filter_map
+    (fun local ->
+      match (local_type context entry local, Locals.find_opt local entry.locals) with
+      | Some ty, Some before ->
+          kept
+            (Option.value (Hashtbl.find_opt context.local_names local) ~default:"a local")
+            ty before
+            (fun (at : frame) -> Locals.find_opt local at.locals)
+      | _ -> None)
+    changed.changed_locals
+  @
+  match (changed.changes_self, entry.self, entry.self_type) with
+  | true, Some before, Some ty ->
+      Option.to_list (kept "self" ty before (fun (at : frame) -> at.self))
+  | _ -> []
+
+and assume_kept_validity context head kept =
+  List.iter
+    (fun (_, ty, valid_on_entry, read) ->
+      match read head with
+      | Some term ->
+          assume context head
+            (L.( ==> ) valid_on_entry (validity context head ~assuming:true ~deep:true ty term))
+      | None -> ())
+    kept
+
+and check_kept_validity context end_ span kept =
+  List.iter
+    (fun (name, ty, valid_on_entry, read) ->
+      match read end_ with
+      | Some term ->
+          oblige context end_ Invariant span
+            (Printf.sprintf "The invariant of `%s` may not hold for `%s` after an iteration."
+               (T.show ty) name)
+            (L.( ==> ) valid_on_entry (validity context end_ ~assuming:false ~deep:true ty term))
+      | None -> ())
+    kept
+
 and invariants (clauses : loop_clause list) =
   List.filter_map (function Invariant value -> Some value | _ -> None) clauses
 
@@ -6875,7 +7083,9 @@ and while_ context frame (node : statement) condition clauses body =
   let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
   loop_entry context frame costs;
   let mark = context.fresh and facts_mark = List.length context.facts in
+  let kept = kept_validity context frame changed in
   let head = havoc context frame changed in
+  assume_kept_validity context head kept;
   let head =
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
   in
@@ -6948,6 +7158,7 @@ and while_ context frame (node : statement) condition clauses body =
     (fun (end_ : frame) ->
       let end_ = { end_ with loop = frame.loop } in
       check_invariants context end_ clauses ~when_:"after an iteration";
+      check_kept_validity context end_ span kept;
       match (start_measures, measure_terms end_) with
       | Some before, Some after ->
           oblige context end_ Termination span "This loop's measure may not decrease."
@@ -7004,7 +7215,9 @@ and for_ context frame (node : statement) (pattern : pattern) (iteration : itera
       let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
       loop_entry context frame costs;
       let mark = context.fresh and facts_mark = List.length context.facts in
+      let kept = kept_validity context frame changed in
       let head = havoc context frame changed in
+      assume_kept_validity context head kept;
       let head =
         if contains_yield body then { head with handed_out = havoc_parts context head } else head
       in
@@ -7057,7 +7270,8 @@ and for_ context frame (node : statement) (pattern : pattern) (iteration : itera
         ~breaks:(List.map with_through exits.breaks);
       List.iter
         (fun (end_ : frame) ->
-          check_invariants context (with_through end_) clauses ~when_:"after an iteration")
+          check_invariants context (with_through end_) clauses ~when_:"after an iteration";
+          check_kept_validity context end_ span kept)
         ends;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
@@ -7125,10 +7339,17 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
            call reaches one and otherwise by the trait's, with [Self] the
            type it is called on. *)
         let self_type = substituted context frame self_type in
+        let trait =
+          {
+            trait with
+            trait_arguments =
+              List.map (T.substitute_argument frame.substitution) trait.trait_arguments;
+          }
+        in
         let evidence : evidence =
           match evidence with
           | Bound -> (
-              match concrete_impl context trait.trait self_type with
+              match concrete_impl context trait self_type with
               | Some (impl, arguments) -> Impl { impl; arguments }
               | None -> evidence)
           | _ -> evidence
@@ -7371,7 +7592,9 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
   let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
   loop_entry context entry costs;
   let mark = context.fresh and facts_mark = List.length context.facts in
+  let kept = kept_validity context frame changed in
   let head = havoc context frame changed in
+  assume_kept_validity context head kept;
   let head =
     if contains_yield body then { head with handed_out = havoc_parts context head } else head
   in
@@ -7402,7 +7625,8 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
     ~breaks:(List.map with_through exits.breaks);
   List.iter
     (fun (end_ : frame) ->
-      check_invariants context (with_through end_) clauses ~when_:"after an iteration")
+      check_invariants context (with_through end_) clauses ~when_:"after an iteration";
+      check_kept_validity context end_ (span_of frame.source node.origin) kept)
     ends;
   let ended = received.advance (restrict head (L.not_ received.another)) in
   let varies = made_since context mark in
@@ -7749,6 +7973,15 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
     | _ -> None
   in
   let own_requires = List.map (fun (clause : condition) -> clause.value) contract.requires in
+  (* The trait's precondition, on entry: what its postcondition and cost
+     clauses are promised under. *)
+  let trait_requires =
+    match trait_frame start ~result:None with
+    | Some (part, inside) ->
+        L.conjunction
+          (List.map (fun clause -> snd (clause_value context inside clause)) part.requires)
+    | None -> L.Boolean true
+  in
   (* Its cost clauses, and its trait's, each count from zero. *)
   let promised =
     promises context source start.locals contract.costs ~inherited:false
@@ -7768,7 +8001,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   in
   let start =
     match trait_frame start ~result:None with
-    | Some (part, inside)
+    | Some (part, _)
     (* A tag's [from_template] may require more than its trait, since only
        a template calls it, where the tag is known; a call through a bound
        is an error, which keeps that sound. *)
@@ -7776,21 +8009,30 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
              (match part.callee.key with
              | Some { path = Method { owner; _ }; _ } -> Path.equal owner template_trait
              | _ -> false) ->
-        List.iter
-          (fun (clause : expression) ->
-            assume context start (snd (clause_value context inside clause)))
-          part.requires;
-        List.fold_left
-          (fun frame (clause : expression) ->
-            let frame, term = clause_value context frame clause in
-            oblige context frame Requires (at frame clause)
-              (Printf.sprintf
-                 "`%s` may not follow from the trait's precondition, which callers through the \
-                  trait show, and an `impl`'s precondition must."
-                 (quote source clause.origin))
-              term;
-            frame)
-          start own_requires
+        if own_requires = [] then begin
+          assume context start trait_requires;
+          start
+        end
+        else begin
+          ignore
+            (List.fold_left
+               (fun frame (clause : expression) ->
+                 let frame, term = clause_value context frame clause in
+                 oblige context frame Requires (at frame clause)
+                   (Printf.sprintf
+                      "`%s` may not follow from the trait's precondition, which callers through \
+                       the trait show, and an `impl`'s precondition must."
+                      (quote source clause.origin))
+                   term;
+                 frame)
+               (restrict start trait_requires) own_requires);
+          List.fold_left
+            (fun frame (clause : expression) ->
+              let frame, term = clause_value context frame clause in
+              assume context frame term;
+              frame)
+            start own_requires
+        end
     | _ ->
         List.fold_left
           (fun frame (clause : expression) ->
@@ -7914,12 +8156,13 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
         | Some term, Some output -> Costs.plus given (potential context frame output term)
         | _ -> given
       in
+      let under_trait = restrict frame trait_requires in
       List.iter
         (fun promise ->
           if promise.inherited then
             match trait_frame frame ~result:returned with
             | Some (_, inside) ->
-                keep_promise context frame promise
+                keep_promise context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
                   ~span:returns_span ~change
             | None -> ()
@@ -7934,7 +8177,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
           List.iter
             (fun (clause : expression) ->
               let _, term = clause_value context inside clause in
-              oblige context frame Ensures returns_span
+              oblige context under_trait Ensures returns_span
                 (Printf.sprintf "The %s's `%s` may not hold when this method returns."
                    (promised_by database part.callee)
                    (quote part.callee clause.origin))
@@ -7971,13 +8214,13 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
   let home = match source.key with Some key -> key | None -> invalid_arg "Translate.laws" in
   let context = new_context database ~home ~current:impl ~terminates:false ~measures:[] in
   let start = empty_frame source in
+  let substitution = trait_substitution database trait for_type in
   List.iter
     (fun (law_source, (law : law)) ->
-      let types = law_parameter_types law_source trait for_type law in
+      let types = law_parameter_types ~substitution law in
       if not (List.exists (fun ty -> T.is_error ty) types) then begin
         (* The other laws are facts here, and this one is not. *)
-        context.laws_assumed <-
-          (Path.show trait ^ " for " ^ type_key for_type) :: context.laws_assumed;
+        context.laws_assumed <- laws_key trait for_type :: context.laws_assumed;
         let terms =
           List.map
             (fun ty ->
@@ -7999,18 +8242,19 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
                (fun (name, proof) -> if name = law.name then Some proof else None)
                proofs)
         in
-        let inside = law_frame start law_source trait for_type law terms in
+        let inside = law_frame start law_source ~substitution law terms in
         List.iter
           (fun clause -> assume context start (snd (clause_value context inside clause)))
           law.requires;
         match block_value context inside law.body with
         | Some (_, holds) ->
             oblige context start Law at
-              (Printf.sprintf "The law `%s` may not hold for `%s`." law.name (T.show for_type))
+              (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (T.show_trait trait) law.name
+                 (T.show for_type))
               holds
         | None -> ()
       end)
-    (laws_of context trait);
+    (laws_of context trait.trait);
   outcome context
 
 (* A type's own clauses. Each invariant is well defined for a value whose

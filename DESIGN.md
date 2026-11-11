@@ -901,6 +901,16 @@ choices below keep method calls predictable:
   arithmetic operators use `Add[Right]` and similar traits, with the result
   as an associated type. Comparisons stay between values of one type,
   because the laws of `Equal` and `Ordered` relate a type to itself.
+- **An operator trait says where its operation is defined.** `Int8`'s `+`
+  is not defined where the sum overflows, and its `/` is not defined for a
+  divisor of 0. If `Add.add` promised a result for every pair of values, an
+  `impl` for a fixed-width integer would have to wrap or to crash, and
+  generic code could overflow with nothing in its signature to show it. So
+  each trait has a second method, such as `add_is_defined`, and the
+  operation requires it. Generic code then carries the obligation that an
+  operator on a built-in type has, as `Index.at` requires `contains_key`.
+  Verus gives Rust's `Add` a precondition, `add_req`, for the same reason.
+  A type whose operation is defined everywhere returns `true`.
 - **Associated types are chosen by each implementation,** as in Rust: the
   key and result of `Index`, the element of a collection, the part type of
   `FromTemplate`. A trait's type parameters are what an `impl` is chosen by,
