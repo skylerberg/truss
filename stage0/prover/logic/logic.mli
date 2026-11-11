@@ -87,6 +87,10 @@ val text : query -> string
     then the negated goal, then [(check-sat)]. Each quantifier states the triggers chosen for it.
     Only symbols reached from the facts or the goal are declared. *)
 
+val term_text : query -> term -> string option
+(** A term in the query's canonical names, for asking its value of a model, or [None] if it names a
+    symbol the query's text does not. *)
+
 val symbols : query -> (string * string) list
 (** Each declared symbol the canonical text mentions, with its canonical name, for reading a model
     back. *)

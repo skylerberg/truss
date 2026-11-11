@@ -36,7 +36,10 @@ type canonical
 (** An answer in a query's canonical names, which every query with the same text shares, so it can
     be kept by its request's key alone. *)
 
-val request : ?values:string list -> Logic.query -> request
+val request : ?values:string list -> ?terms:(string * Logic.term) list -> Logic.query -> request
+(** [values] are the prover's symbols whose values a counterexample should give, and [terms] named
+    terms whose values it should give, each by its name. *)
+
 val request_key : request -> string
 
 val ask : t -> request -> canonical
