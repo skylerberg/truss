@@ -116,6 +116,24 @@ let () =
          -> Bytes (block todo)))";
       definition "impl Display for List[Element: Display] {}"
         "(impl Display for List[Element: Display])");
+  test "an associated capability set" (fun () ->
+      definition
+        "trait Feed {\n  capability Uses\n  fn pull(mut self) -> Int64\n    uses Self.Uses\n}"
+        "(trait Feed (capability Uses) (fn pull (mut self) -> Int64 (uses Self.Uses)))";
+      definition
+        "impl Feed for Zip[First: Feed, Second: Feed] {\n\
+        \  capability Uses = First.Uses, Second.Uses, Clock\n\
+         }"
+        "(impl Feed for Zip[First: Feed, Second: Feed] (capability Uses = First.Uses Second.Uses \
+         Clock))";
+      definition "fn drain[Source: Feed](source: mut Source)\n  uses Source.Uses, Clock\n{\n}"
+        "(fn drain[Source: Feed] ((source: mut Source)) (uses Source.Uses Clock) (block))";
+      definition "fn run(step: (fn() uses Self.Uses)) {}"
+        "(fn run ((step: (fn () (uses Self.Uses)))) (block))");
+  test "an associated capability set is named after a dot" (fun () ->
+      error "fn f()\n  uses Self\n{\n}" ~code:Unexpected_token ~at:"\n{";
+      error "impl Feed for Gauge {\n  capability Uses\n}" ~code:Unexpected_token ~at:"}";
+      error "type Point(x: Int64)\n  derives Self.Uses" ~code:Unexpected_token ~at:"Self");
   test "a capability" (fun () ->
       definition "capability Clock {\n  fn now() -> Instant\n  fn sleep(duration: Duration)\n}"
         "(capability Clock (fn now () -> Instant) (fn sleep ((duration: Duration))))");

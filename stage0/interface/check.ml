@@ -497,13 +497,16 @@ and agrees_result (left : T.result) (right : T.result) =
    type of [Self] is the definition given by this [impl] or by the [impl] of
    a required trait. An associated type that the trait declares and the
    [impl] does not define is an error wherever a method's signature mentions
-   it. The [impl] itself reports it, once. *)
+   it. The [impl] itself reports it, once. The trait's sets of capabilities
+   are read in the same way: each associated capability set of [Self] is the
+   set that this [impl] defines. *)
 type view = {
   trait : T.trait_interface;
   shown_trait : string;
   substitution : T.substitution;
   impl_bounds : T.parameter -> T.trait_reference list;
   normalize : T.ty -> T.ty;
+  normalize_capabilities : T.capability list -> T.capability list;
   missing_associated : (string * Diagnostic.t) list;
 }
 
@@ -558,7 +561,27 @@ let impl_view database ~bounds (impl : T.impl_interface) (trait_path : path_type
               | _ -> None)
             (T.substitute substitution type_)
         in
-        { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated })
+        let normalize_capabilities capabilities =
+          List.sort_uniq compare
+            (List.concat_map
+               (function
+                 | T.Capability_projection { base; trait = projected; name }
+                   when T.equal base impl.for_type
+                        && Path.equal projected.trait impl.implements.trait ->
+                     Option.value ~default:[] (List.assoc_opt name impl.capability_sets)
+                 | capability ->
+                     Impls.normalize_capabilities database ~bounds:impl_bounds [ capability ])
+               (T.substitute_capabilities substitution capabilities))
+        in
+        {
+          trait;
+          shown_trait;
+          substitution;
+          impl_bounds;
+          normalize;
+          normalize_capabilities;
+          missing_associated;
+        })
       (Query.demand database Environment.trait_interface impl.implements.trait)
 
 (* The checks of an [impl]'s own header: it defines every member that its
@@ -579,7 +602,7 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
   else
     match impl_view database ~bounds:(bounds state) impl trait_path with
     | None -> ()
-    | Some { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated } ->
+    | Some { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated; _ } ->
         let check_evidence_grants (span : span) evidence =
           state.diagnostics <-
             List.map
@@ -635,21 +658,36 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
                     | Some evidence -> check_evidence_grants trait_path.span evidence)
                   associated.associated_bounds)
           trait.associated_types;
-        List.iter
-          (fun (line : impl_member line) ->
-            match line.kind with
-            | Associated_definition (name, _) ->
-                if
-                  not
-                    (List.exists
-                       (fun (associated : T.associated_type) ->
-                         associated.associated_name = name.text)
-                       trait.associated_types)
-                then
-                  report state Extra_member name.span
-                    (Printf.sprintf "`%s` declares no associated type `%s`." shown_trait name.text)
-            | Impl_member_error -> ())
-          written_members;
+        ignore
+          (List.fold_left
+             (fun defined (line : impl_member line) ->
+               match line.kind with
+               | Associated_definition (name, _) ->
+                   if
+                     not
+                       (List.exists
+                          (fun (associated : T.associated_type) ->
+                            associated.associated_name = name.text)
+                          trait.associated_types)
+                   then
+                     report state Extra_member name.span
+                       (Printf.sprintf "`%s` declares no associated type `%s`." shown_trait
+                          name.text);
+                   defined
+               | Capability_definition (name, _) ->
+                   if not (List.mem name.text trait.associated_capabilities) then
+                     report state Extra_member name.span
+                       (Printf.sprintf "`%s` declares no associated capability set `%s`."
+                          shown_trait name.text)
+                   else if List.mem name.text defined then
+                     report state Extra_member name.span
+                       (Printf.sprintf
+                          "This `impl` already defines `%s`. List every capability in one \
+                           definition, separated by commas."
+                          name.text);
+                   name.text :: defined
+               | Impl_member_error -> defined)
+             [] written_members);
         (* The traits a trait requires are implemented for the same type. *)
         List.iter
           (fun (required : T.trait_reference) ->
@@ -672,7 +710,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
     (impl : T.impl_interface) (trait_path : path_type) =
   match impl_view state.database ~bounds:(bounds state) impl trait_path with
   | None -> ()
-  | Some { trait; shown_trait; normalize; _ } -> (
+  | Some { trait; shown_trait; normalize; normalize_capabilities; _ } -> (
       let declared =
         List.find_opt
           (fun (method_ : T.trait_method) ->
@@ -732,6 +770,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
             let expected =
               if trait.is_capability then { expected with receiver = given.receiver } else expected
             in
+            let expected = { expected with uses = normalize_capabilities expected.uses } in
             let parameters_agree =
               List.length expected.parameters = List.length given.parameters
               && List.for_all2
@@ -773,7 +812,12 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
                  implementation can use the capabilities that its [impl]
                  declares and no others. *)
               let allowed = if trait.is_capability then [] else expected.uses in
-              if not (List.for_all (fun capability -> List.mem capability allowed) given.uses) then
+              if
+                not
+                  (List.for_all
+                     (fun capability -> List.mem capability allowed)
+                     (normalize_capabilities given.uses))
+              then
                 report state Impl_uses name.span
                   (if trait.is_capability then
                      Printf.sprintf

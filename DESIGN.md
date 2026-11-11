@@ -1402,6 +1402,22 @@ whoever runs the function chooses the implementation with `provide`.
   (`capability Granted`). This keeps one rule everywhere: no `uses` means
   pure. Callbacks are pure by default, which is the safe choice for
   comparators and anything run in parallel.
+- **A trait can leave a set of capabilities for each implementation to
+  choose.** `Cursor` declares `capability Uses`, its `next` declares
+  `uses Self.Uses`, and each `impl` defines the set: `FileRead` for a cursor
+  over a file's lines, nothing for a cursor over a list. The cursor of a
+  yielding method has the method's `uses` clause as its set. Generic code
+  that advances a cursor declares `uses Source.Uses`, and a call of it needs
+  the capabilities of the cursor that it passes. Otherwise a trait's method
+  could use only the capabilities that the trait fixes for every
+  implementation: `Cursor.next` would use none, and a cursor that reads a
+  file could not be passed to `zip`, `take`, or `to_list`. Swift does the
+  same for errors: `AsyncIteratorProtocol` has an associated `Failure` type,
+  which its `next` throws. Koka's effect variables on every function type
+  are more general, and a capability parameter already covers the case that
+  they serve in Truss, a callback. An `any` type fixes every such set to the
+  empty set, because code that holds the value cannot name the capabilities
+  of the type that it hides.
 - **A function type with clauses is written in parentheses,** as in
   `(fn(Item) uses Clock, Random cost time finite)`. Its clauses come after
   the return type, in the same order as in a definition. Swift and Koka

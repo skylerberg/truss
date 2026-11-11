@@ -318,7 +318,10 @@ clause        = "uses" capability_list
               | "ensures" expression
               | "decreases" expression { "," expression }
               | "cost" cost ;
-capability_list = path_type { "," path_type } ;
+capability_list = capability_reference { "," capability_reference } ;
+capability_reference = path_type
+                     | "Self" "." UPPER_NAME
+                     | UPPER_NAME "." UPPER_NAME ;
 
 cost          = [ "amortized" ] resource bound ;
 resource      = "time" | "allocations" | "allocated_bytes"
@@ -333,6 +336,9 @@ bound         = "O" "(" expression ")" | "finite"
   `UPPER_NAME` with that spelling, not for a keyword token (see
   [Keywords](#keywords)).
 - `uses` and `decreases` appear at most once. The others may repeat.
+- `Self.Uses` and `Source.Uses` name an associated capability set: of `Self`,
+  or of a generic parameter. `calls(...)` takes a capability by its path and
+  cannot name an associated capability set.
 - `finite` is allowed only for `time`.
 - In a `cost` clause, `time(...)`, `calls(...)`, `log(...)`, and
   `power(..., ...)` inside expressions are cost-only functions, and `result`
@@ -408,12 +414,15 @@ trait        = "trait" UPPER_NAME [ generics ] [ ":" bound ]
                "{" lines(trait_member) "}" ;
 trait_member = signature [ body ]
              | "type" UPPER_NAME [ ":" bound ]
+             | "capability" UPPER_NAME
              | "law" LOWER_NAME parameters { "requires" expression } block ;
 signature    = "fn" LOWER_NAME [ generics ] parameters [ result ] { clause } ;
 
 impl         = "impl" path_type "for" type_head [ "uses" capability_list ]
                "{" lines(impl_member) "}" ;
-impl_member  = function_member | "type" UPPER_NAME "=" type ;
+impl_member  = function_member
+             | "type" UPPER_NAME "=" type
+             | "capability" UPPER_NAME "=" capability_list ;
 function_member = signature body ;
 
 capability   = "capability" UPPER_NAME

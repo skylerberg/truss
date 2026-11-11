@@ -446,7 +446,7 @@ let check_definition state (lowered : Environment.lowered) =
                     law.requires;
                   if not (broken (Member_body index)) then
                     body state { env with output = Some (Returns T.bool) } law.body
-              | Associated_type _ | Trait_member_error -> ())
+              | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
         if not (broken Body) then begin
@@ -554,7 +554,7 @@ let finalize (state : state) =
         | Intrinsic intrinsic ->
             Intrinsic { intrinsic with type_arguments = List.map argument intrinsic.type_arguments }
         | other -> other);
-      uses = resolve_capabilities state written.uses;
+      uses = final_capabilities state written.uses;
       result = final written.result;
     }
   in

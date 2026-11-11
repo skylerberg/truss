@@ -210,6 +210,8 @@ let evidence_for (substitution : T.substitution) (uses : T.capability list) =
           | Some (T.Capabilities set) ->
               List.filter_map (function T.Capability q -> Some q | _ -> None) set
           | _ -> [])
+      | Capability_projection { name; _ } ->
+          bug "the associated capability set %s is not normalized" name
       | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
     uses
   |> List.filter (fun path -> not (Path.equal path panic_path))

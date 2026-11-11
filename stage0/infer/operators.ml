@@ -584,6 +584,42 @@ and any_ state env ?expected (value : expression) (inner : expression) =
             | Some (name, given) ->
                 Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`." (T.show any_type)
                   name (T.show inner_type) (show state given)));
+      (* Code that holds the [any] value calls its methods without the
+         capabilities of the type that it hides, so that type's associated
+         capability sets must be empty. Otherwise a method would use a
+         capability that no caller declares. *)
+      defer state (fun () ->
+          let inner_type = normalize state inner_type in
+          Unify.unknowns state.unifier inner_type = []
+          && begin
+            if Option.is_some (implements state inner_type trait) then
+              List.iter
+                (fun (bound : T.trait_reference) ->
+                  match Query.demand state.database Environment.trait_interface bound.trait with
+                  | Some interface ->
+                      List.iter
+                        (fun name ->
+                          match
+                            Impls.capability_set state.database ~bounds:(bounds state) inner_type
+                              { bound with associated = [] } name
+                          with
+                          | [] -> ()
+                          | set ->
+                              report state No_impl value.span
+                                (Printf.sprintf
+                                   "`%s` cannot be an `%s`: its `%s` is %s, and code that holds an \
+                                    `any` value has no capability to give to its methods."
+                                   (T.show inner_type) (T.show any_type) name
+                                   (String.concat ", "
+                                      (List.map
+                                         (fun capability ->
+                                           "`" ^ T.show_capability capability ^ "`")
+                                         set))))
+                        interface.associated_capabilities
+                  | None -> ())
+                (Interface.Properties.bound_closure state.database ~self:inner_type trait);
+            true
+          end);
       any_type
   | _ ->
       ignore (expression state env inner);

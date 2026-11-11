@@ -107,9 +107,15 @@ and generics = function
   | [] -> ""
   | parameters -> "[" ^ String.concat ", " (list generic parameters) ^ "]"
 
+and capability_reference (reference : capability_reference) =
+  match reference.kind with
+  | Capability_path path_type -> path_type_text path_type
+  | Self_capabilities name -> "Self." ^ name.text
+  | Associated_capabilities (parameter, name) -> parameter.text ^ "." ^ name.text
+
 and clause (clause : clause) =
   match clause.kind with
-  | Uses capabilities -> form "uses" (list path_type_text capabilities)
+  | Uses capabilities -> form "uses" (list capability_reference capabilities)
   | Requires value -> form "requires" [ expression value ]
   | Ensures value -> form "ensures" [ expression value ]
   | Decreases measures -> form "decreases" (list expression measures)
@@ -414,6 +420,7 @@ let definition ?(methods = []) (definition : definition) =
                 | Associated_type (name, bounds) ->
                     form "type"
                       [ name.text ^ ": " ^ String.concat " + " (list path_type_text bounds) ]
+                | Associated_capability name -> form "capability" [ name.text ]
                 | Law written -> law written
                 | Trait_member_error -> "error")
               trait_members
@@ -424,12 +431,14 @@ let definition ?(methods = []) (definition : definition) =
              path_type_text trait_;
              "for";
              type_head type_;
-             (match uses with [] -> "" | _ -> form "uses" (list path_type_text uses));
+             (match uses with [] -> "" | _ -> form "uses" (list capability_reference uses));
            ]
           @ members
               (function
                 | Associated_definition (name, type_) ->
                     form "type" [ name.text; "="; type_expression type_ ]
+                | Capability_definition (name, capabilities) ->
+                    form "capability" (name.text :: "=" :: list capability_reference capabilities)
                 | Impl_member_error -> "error")
               impl_members
           @ methods)
@@ -443,7 +452,7 @@ let definition ?(methods = []) (definition : definition) =
         form "test"
           [
             string_literal name;
-            (match uses with [] -> "" | _ -> form "uses" (list path_type_text uses));
+            (match uses with [] -> "" | _ -> form "uses" (list capability_reference uses));
             block body;
           ]
     | Theorem { name; generics = parameters; parameters = theorem_parameters; clauses; body } ->

@@ -1447,13 +1447,15 @@ A yielding method gives out parts one after another:
   `break` does. A cursor from an `own self` method owns what it iterates
   over. A cursor from a `self` method is a view. Cursors are how `zip`,
   merging sorted sequences, and looking ahead with `peek` are written.
-- **A cursor's type has no name,** as with Rust's closures, but a cursor of a
-  method without a `uses` clause implements the prelude trait `Cursor`:
+- **A cursor's type has no name,** as with Rust's closures, but it implements
+  the prelude trait `Cursor`:
 
   ```truss
   trait Cursor {
     type Element
+    capability Uses
     fn next(mut self) -> Option[Self.Element]
+      uses Self.Uses
   }
 
   type Lexer[Characters: Cursor[Element = Character]](characters: Characters, line: USize)
@@ -1468,10 +1470,11 @@ A yielding method gives out parts one after another:
 - **A cursor of a method with a `uses` clause needs those capabilities at each
   `next`,** and in a `for` loop over it, because `next` runs the method's
   code. Each `next` uses the implementation that is provided where `next`
-  is called, not the one that was provided where the cursor was made. It
-  is not a `Cursor`: `Cursor.next` uses no capability, so generic
-  code such as `zip` could not give the cursor what it needs. Pull it, or
-  loop over it, where the capabilities are available.
+  is called, not the one that was provided where the cursor was made. The
+  cursor's `Uses` is the method's `uses` clause, so a generic function that
+  advances a cursor declares `uses Source.Uses`, and a call of it with this
+  cursor needs the same capabilities (see
+  [Associated capability sets](#associated-capability-sets)).
 - A method that yields `mut` access cannot be pulled, because a cursor would
   have to store the access. To change two collections side by side, use
   indexes, or the standard `zip` for indexable collections:
@@ -2883,6 +2886,55 @@ fn first[Items: Iterable](items: Items) -> Option[Items.Element]
   implementation says what they mean for its type: a `List`'s keys are the
   indexes below its length.
 
+### Associated capability sets
+
+A trait can leave a set of capabilities for each implementation to choose:
+
+```truss
+trait Cursor {
+  type Element
+  capability Uses
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+}
+
+impl Cursor for Lines {
+  type Element = String
+  capability Uses = FileRead
+  fn next(mut self) -> Option[String]
+    uses FileRead
+  { todo }
+}
+
+impl Cursor for Chain[First: Cursor, Second: Cursor[Element = First.Element]] {
+  type Element = First.Element
+  capability Uses = First.Uses, Second.Uses
+  fn next(mut self) -> Option[First.Element]
+    uses Self.Uses
+  { todo }
+}
+
+fn count[Source: Cursor](source: own Source) -> USize
+  uses Source.Uses
+```
+
+- `capability Uses` in a trait declares the set. `Self.Uses` in the `uses`
+  clause of the trait's methods is the set of the implementing type.
+- `capability Uses = FileRead` in an `impl` defines the set, as a list of
+  capabilities, capability parameters, and the sets of the type's
+  parameters. An `impl` that leaves the member out has the empty set. A
+  method of the `impl` can use the capabilities of the set and no others.
+- `Source.Uses` names the set of a generic parameter, in the `uses` clause
+  of a function or of a function type. A call needs the capabilities of the
+  set for the call's type arguments: `count` needs `FileRead` for a `Lines`,
+  and nothing for the cursor of a list.
+- A function that is generic over a `Cursor` and advances it declares
+  `uses Source.Uses`. Without the clause, the call of `next` is an error:
+  the function would run code that uses a capability its signature does not
+  declare.
+- A bound cannot constrain a set, and `calls(...)` cannot count the calls of
+  one.
+
 ### Deriving
 
 A `derives` clause on a type asks the compiler to write trait implementations
@@ -3001,6 +3053,11 @@ for handler in server.handlers {
   requires them, like `Loggable` above.
 - `any` fixes every associated type of its trait, as a bound can:
   `any Cursor[Element = Int64]`.
+- `any` fixes every associated capability set of its trait to the empty set:
+  code that holds the value cannot name the capabilities of the type that
+  it hides. So `any value` is an error for a value whose type has a
+  capability in such a set, as the cursor of a method with a `uses` clause
+  has.
 - A method can be called through `any` if it takes `self`, `mut self`, or
   `own self`, has no generic parameters of its own, and does not take or
   return `Self`. Calling any other method on an `any` value is a compile

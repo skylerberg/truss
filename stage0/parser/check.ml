@@ -284,7 +284,7 @@ let definition cursor (definition : definition) =
               parameters cursor law.parameters;
               List.iter (expression cursor (specification plain)) law.requires;
               block cursor (specification plain) law.body
-          | Associated_type _ | Trait_member_error -> ())
+          | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
         members
   | Impl { type_; members; _ } ->
       generic_parameters cursor type_.generics;
@@ -292,7 +292,7 @@ let definition cursor (definition : definition) =
         (fun (member : impl_member line) ->
           match member.kind with
           | Associated_definition (_, type_) -> types cursor plain type_
-          | Impl_member_error -> ())
+          | Capability_definition _ | Impl_member_error -> ())
         members
   | Capability _ -> ()
   | Constant { type_; value; _ } ->

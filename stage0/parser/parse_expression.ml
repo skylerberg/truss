@@ -258,10 +258,38 @@ and generic_parameter cursor : generic_parameter =
   in
   { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
+(* [Equal, Hash]. *)
+and path_type_list cursor =
+  let rec loop paths =
+    let paths = path_type cursor :: paths in
+    if Cursor.accept_punctuation cursor Comma then loop paths else List.rev paths
+  in
+  loop []
+
+(* [FileRead], [Self.Uses], [Source.Uses]. *)
+and capability_reference cursor : capability_reference =
+  let start = cursor.Cursor.index in
+  let kind =
+    match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1, Cursor.peek_ahead cursor 2) with
+    | Keyword Self_type, _, _ ->
+        Cursor.advance cursor;
+        if not (Cursor.accept_punctuation cursor Dot) then
+          Cursor.fail cursor
+            "`.` and an associated capability set, as in `Self.Uses`; `Self` is a type, not a \
+             capability";
+        Self_capabilities (Atoms.upper cursor "an associated capability set after `Self.`")
+    | Upper text, Punctuation Dot, Upper _ ->
+        let parameter = Atoms.name cursor (Cursor.next cursor) text in
+        Cursor.advance cursor;
+        Associated_capabilities (parameter, Atoms.upper cursor "an associated capability set")
+    | _ -> Capability_path (path_type cursor)
+  in
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
+
 (* [FileRead, FileWrite]. *)
 and capability_list cursor =
   let rec loop capabilities =
-    let capabilities = path_type cursor :: capabilities in
+    let capabilities = capability_reference cursor :: capabilities in
     if Cursor.accept_punctuation cursor Comma then loop capabilities else List.rev capabilities
   in
   loop []

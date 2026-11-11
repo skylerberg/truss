@@ -28,9 +28,14 @@ and type_argument f = function
   | Type_argument type_ | Constraint (_, type_) -> type_expression f type_
   | Count _ | Count_name _ -> ()
 
+and capability_reference f (reference : capability_reference) =
+  match reference.kind with
+  | Capability_path path -> path_type f path
+  | Self_capabilities _ | Associated_capabilities _ -> ()
+
 and clause f (clause : clause) =
   match clause.kind with
-  | Uses capabilities -> List.iter (path_type f) capabilities
+  | Uses capabilities -> List.iter (capability_reference f) capabilities
   | Requires value | Ensures value -> f value
   | Decreases measures -> List.iter f measures
   | Cost cost -> (
@@ -215,16 +220,18 @@ let definition ?statement:visit f (definition : definition) =
               List.iter (parameter f) law.parameters;
               List.iter f law.requires;
               block law.body
-          | Trait_member_error -> ())
+          | Associated_capability _ | Trait_member_error -> ())
         members
   | Impl { trait_; type_; uses; members } ->
       path_type f trait_;
       type_head f type_;
-      List.iter (path_type f) uses;
+      List.iter (capability_reference f) uses;
       List.iter
         (fun (member : impl_member line) ->
           match member.kind with
           | Associated_definition (_, type_) -> type_expression f type_
+          | Capability_definition (_, capabilities) ->
+              List.iter (capability_reference f) capabilities
           | Impl_member_error -> ())
         members
   | Capability _ -> ()
@@ -233,7 +240,7 @@ let definition ?statement:visit f (definition : definition) =
       type_expression f type_;
       f value
   | Test { uses; body; _ } ->
-      List.iter (path_type f) uses;
+      List.iter (capability_reference f) uses;
       block body
   | Theorem { generics; parameters; clauses; body; _ } ->
       List.iter (generic_parameter f) generics;
@@ -333,9 +340,16 @@ let walk_names ~on_name:add (definition_ : definition) =
             add name;
             type_ argument)
       written.arguments
+  and capability_ (written : capability_reference) =
+    match written.kind with
+    | Capability_path written -> path_type_ written
+    | Self_capabilities name -> add name
+    | Associated_capabilities (base, name) ->
+        add base;
+        add name
   and clause_ (written : clause) =
     match written.kind with
-    | Uses capabilities -> List.iter path_type_ capabilities
+    | Uses capabilities -> List.iter capability_ capabilities
     | Requires value | Ensures value -> expression value
     | Decreases measures -> List.iter expression measures
     | Cost cost -> (
@@ -542,6 +556,7 @@ let walk_names ~on_name:add (definition_ : definition) =
           | Associated_type (name, bounds) ->
               add name;
               List.iter path_type_ bounds
+          | Associated_capability name -> add name
           | Law law ->
               add law.name;
               List.iter parameter_ law.parameters;
@@ -552,13 +567,16 @@ let walk_names ~on_name:add (definition_ : definition) =
   | Impl { trait_; type_ = written; uses; members } ->
       path_type_ trait_;
       head written;
-      List.iter path_type_ uses;
+      List.iter capability_ uses;
       List.iter
         (fun (member : impl_member line) ->
           match member.kind with
           | Associated_definition (name, written) ->
               add name;
               type_ written
+          | Capability_definition (name, capabilities) ->
+              add name;
+              List.iter capability_ capabilities
           | Impl_member_error -> ())
         members
   | Capability { name; _ } -> add name
@@ -568,7 +586,7 @@ let walk_names ~on_name:add (definition_ : definition) =
       expression value
   | Test { name; uses; body } ->
       literal_string name;
-      List.iter path_type_ uses;
+      List.iter capability_ uses;
       block_ body
   | Theorem { name; generics; parameters; clauses; body } ->
       add name;

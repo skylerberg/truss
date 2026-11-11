@@ -143,7 +143,7 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
   in
   let report_missing =
     List.iter (fun capability ->
-        let shown = show_capability capability in
+        let shown = T.show_capability capability in
         match scope.kind with
         | Lambda_body lambda ->
             report checking Lambda_uses lambda
@@ -165,12 +165,19 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
         | Function_body when for_implementation ->
             report checking Not_available origin
               (Printf.sprintf "This implementation uses `%s`, which is not available here." shown)
-        | Function_body ->
-            report checking Not_available origin
-              (Printf.sprintf
-                 "This call uses `%s`, which is not available here. Declare it with `uses %s`, or \
-                  `provide` an implementation."
-                 shown shown))
+        | Function_body -> (
+            match capability with
+            | T.Capability _ ->
+                report checking Not_available origin
+                  (Printf.sprintf
+                     "This call uses `%s`, which is not available here. Declare it with `uses %s`, \
+                      or `provide` an implementation."
+                     shown shown)
+            | Capability_parameter _ | Capability_projection _ | Capability_variable _ ->
+                report checking Not_available origin
+                  (Printf.sprintf
+                     "This call uses `%s`, which is not available here. Declare it with `uses %s`."
+                     shown shown)))
   in
   if required <> [] then
     state.capability_constraints <-
@@ -192,7 +199,9 @@ let require_intrinsic_uses checking scope (origin : Core.origin) operation =
       (List.map (fun capability -> T.Capability capability) (Intrinsic.uses operation))
 
 (* Handles a callee that is stored in a node other than a [Call] (see
-   [Core_walk.visit]). It requires the [uses] of the callee's signature. *)
+   [Core_walk.visit]). It requires the [uses] of the callee's signature. A
+   trait's method requires the [uses] that the trait declares, for the type
+   that the method is called on: [next] declares [Self.Uses]. *)
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   let state = checking.state in
   check_callee_grants checking origin callee;
@@ -202,11 +211,20 @@ let require_callee_uses checking scope (origin : Core.origin) (callee : Core.cal
         (match Interface.Impls.signature state.database path with
         | Some signature -> signature.uses
         | None -> [])
-  | Trait_method { trait; name; receiver; _ } ->
+  | Trait_method { trait; name; receiver; self_type; type_arguments; _ } ->
       require_available checking scope origin
-        (match Members.trait_method state.database trait.trait name receiver with
-        | Some method_ -> method_.method_signature.uses
-        | None -> [])
+        (match
+           ( Members.trait_method state.database trait.trait name receiver,
+             Query.demand state.database Environment.trait_interface trait.trait )
+         with
+        | Some method_, Some interface ->
+            let signature = method_.method_signature in
+            Impls.normalize_capabilities state.database ~bounds:(bounds state)
+              (T.substitute_capabilities
+                 (Interface.Properties.trait_substitution interface ~self:self_type trait
+                 @ Option.value ~default:[] (T.substitution_of signature.generics type_arguments))
+                 signature.uses)
+        | _ -> [])
   | Capability_method { capability; _ } ->
       require_available checking scope origin [ T.Capability capability ]
   | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope origin operation
@@ -240,20 +258,6 @@ let rec check_expression checking scope (node : Core.expression) =
         call.uses;
       match call.callee with
       | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope node.origin operation
-      (* A method that [Cursor] provides is the trait's code, which uses no
-         capability and so has none to give to the cursor's [next]. *)
-      | Trait_method { name; self_type; evidence = Impl { impl; _ }; _ }
-        when Option.is_some (Impls.cursor_of_impl impl) -> (
-          match Impls.cursor_uses checking.state.database self_type with
-          | [] -> ()
-          | uses ->
-              report checking Not_available node.origin
-                (Printf.sprintf
-                   "`%s` is `Cursor`'s own code, which uses no capability, and the `next` of this \
-                    cursor uses %s. Loop over the cursor with `for`, or call its `next`, where %s \
-                    available."
-                   name (shown_capabilities uses)
-                   (match uses with [ _ ] -> "it is" | _ -> "they are")))
       | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> ())
   | _ -> check_children checking scope (`Expression node)
 
@@ -397,6 +401,17 @@ and check_provide checking scope implementations body =
    nothing changes, which gives the least solution. Then every constraint
    that still does not hold is reported. *)
 let solve (state : state) =
+  (* A constraint was collected while types were inferred, so its sets can
+     name an associated capability set of a type that was not known then. *)
+  state.capability_constraints <-
+    List.map
+      (fun (constraint_ : subset_constraint) ->
+        {
+          constraint_ with
+          subset = final_capabilities state constraint_.subset;
+          superset = final_capabilities state constraint_.superset;
+        })
+      state.capability_constraints;
   let solution = Hashtbl.create 8 in
   let value_of variable = Option.value ~default:[] (Hashtbl.find_opt solution variable) in
   let substitute capabilities =
@@ -443,16 +458,22 @@ let solve (state : state) =
 (* Whether a value of a type can call code that uses a capability: the type
    is a function type with a [uses] clause, an [any] type or a bounded type
    parameter whose trait has a method with one, or a type that contains one
-   of these at any depth. *)
+   of these at any depth. An associated capability set is empty for an [any]
+   type, and can hold any capability for a type parameter. *)
 let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T.ty) =
   let inside = can_call_capability_code state ~bounds ~seen in
   let trait_uses (trait : T.trait_reference) =
+    let can_hold_a_capability : T.capability -> bool = function
+      | Capability_projection _ -> ( match type_ with T.Any _ -> false | _ -> true)
+      | Capability _ | Capability_parameter _ | Capability_variable _ -> true
+    in
     List.exists
       (fun (bound : T.trait_reference) ->
         match Query.demand state.database Environment.trait_interface bound.trait with
         | Some interface ->
             List.exists
-              (fun (method_ : T.trait_method) -> method_.method_signature.uses <> [])
+              (fun (method_ : T.trait_method) ->
+                List.exists can_hold_a_capability method_.method_signature.uses)
               interface.methods
         | None -> false)
       (trait :: Interface.Properties.bound_closure state.database ~self:type_ trait)
@@ -578,7 +599,7 @@ let check_monitor_callbacks checking implementations =
                               enter the monitor of a nested `provide`, and two tasks could \
                               deadlock. Pass the method the values that it needs instead of a \
                               callback."
-                             (show_capability (T.Capability found.capability))
+                             (T.show_capability (T.Capability found.capability))
                              method_.method_name parameter.name)
                     | None -> ())
                   capability.methods
@@ -635,7 +656,11 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
                 Some (T.Capability impl.implements.trait)
             | _ -> None)
       in
-      Option.iter (check_block checking (function_body ?implemented_capability signature.uses)) body
+      Option.iter
+        (check_block checking
+           (function_body ?implemented_capability
+              (Impls.normalize_capabilities state.database ~bounds:(bounds state) signature.uses)))
+        body
   | Test body, _, Test_interface uses ->
       check_block checking (function_body (union uses [ panic ])) body
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body; _ }, _, _ ->

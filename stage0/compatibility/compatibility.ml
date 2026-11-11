@@ -59,6 +59,13 @@ let contract ~(before : clause list) ~(after : clause list) =
 
 (* Signatures *)
 
+let uses_more : T.capability -> change = function
+  | Capability path -> Breaks (Printf.sprintf "uses `%s`, which it did not" (Path.show path))
+  | (Capability_parameter _ | Capability_projection _) as capability ->
+      Breaks (Printf.sprintf "uses `%s`, which it did not" (T.show_capability capability))
+  | Capability_variable _ ->
+      Compiler_bug.bug ~stage:"Compatibility" "a signature holds an unknown set of capabilities"
+
 let signature ~(before : T.signature) ~(after : T.signature) =
   let same_parameters =
     List.length before.parameters = List.length after.parameters
@@ -92,16 +99,7 @@ let signature ~(before : T.signature) ~(after : T.signature) =
       (if before.terminates && not after.terminates then [ Breaks "no longer promises to end" ]
        else if after.terminates && not before.terminates then [ Grows "promises to end" ]
        else []);
-      List.map
-        (function
-          | T.Capability path ->
-              Breaks (Printf.sprintf "uses `%s`, which it did not" (Path.show path))
-          | T.Capability_parameter parameter ->
-              Breaks (Printf.sprintf "uses `%s`, which it did not" parameter.name)
-          | T.Capability_variable _ ->
-              Compiler_bug.bug ~stage:"Compatibility"
-                "a signature holds an unknown set of capabilities")
-        more;
+      List.map uses_more more;
       (if fewer <> [] then [ Grows "uses fewer capabilities" ] else []);
       (if gained_default then [ Grows "has a default it did not" ] else []);
     ]
@@ -252,6 +250,11 @@ let trait ~(before : T.trait_interface) ~(after : T.trait_interface) ~before_def
       (if before.associated_types <> after.associated_types then
          [ Breaks "has other associated types" ]
        else []);
+      (if missing_from after.associated_capabilities before.associated_capabilities <> [] then
+         [ Breaks "no longer has an associated capability set it did" ]
+       else if missing_from before.associated_capabilities after.associated_capabilities <> [] then
+         [ Grows "has an associated capability set more" ]
+       else []);
       (if laws before_definition <> laws after_definition then [ Breaks "has other laws" ] else []);
       methods;
       gained;
@@ -278,7 +281,8 @@ let impls database package =
             Some
               ( declaration.path,
                 Printf.sprintf "the `impl` of `%s` for `%s`" (T.show_trait impl.implements)
-                  (T.show impl.for_type) )
+                  (T.show impl.for_type),
+                impl.capability_sets )
         | _ -> None
       else None)
     (declarations database package)
@@ -339,14 +343,37 @@ let compare ~before ~after package =
   in
   let old_impls = impls before package and new_impls = impls after package in
   let impl_changes =
-    List.filter_map
-      (fun (path, shown) ->
-        if List.exists (fun (_, other) -> other = shown) new_impls then None
-        else Some (found path (Breaks (Printf.sprintf "is gone: %s" shown))))
+    (* A caller of the trait's methods on the type needs each capability
+       of an associated capability set, so a set that gains one breaks the
+       caller. *)
+    List.concat_map
+      (fun (path, shown, old_sets) ->
+        match List.find_opt (fun (_, other, _) -> other = shown) new_impls with
+        | None -> [ found path (Breaks (Printf.sprintf "is gone: %s" shown)) ]
+        | Some (_, _, new_sets) ->
+            let set name sets = Option.value ~default:[] (List.assoc_opt name sets) in
+            List.concat_map
+              (fun name ->
+                let was = set name old_sets and is = set name new_sets in
+                List.map
+                  (fun capability ->
+                    found path
+                      (Breaks
+                         (Printf.sprintf "has `%s` in its `%s`, which it did not: %s"
+                            (T.show_capability capability) name shown)))
+                  (missing_from was is)
+                @
+                if missing_from is was <> [] then
+                  [
+                    found path
+                      (Grows (Printf.sprintf "has fewer capabilities in its `%s`: %s" name shown));
+                  ]
+                else [])
+              (List.sort_uniq String.compare (List.map fst (old_sets @ new_sets))))
       old_impls
     @ List.filter_map
-        (fun (path, shown) ->
-          if List.exists (fun (_, other) -> other = shown) old_impls then None
+        (fun (path, shown, _) ->
+          if List.exists (fun (_, other, _) -> other = shown) old_impls then None
           else Some (found path (Grows (Printf.sprintf "is new: %s" shown))))
         new_impls
   in

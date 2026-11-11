@@ -47,6 +47,8 @@ and ground_argument context substitution (argument : Types.argument) : Ground.ar
               (function
                 | Types.Capability path -> [ path ]
                 | Capability_parameter p -> context.capabilities p
+                | Capability_projection { name; _ } ->
+                    bug "the associated capability set %s is not normalized" name
                 | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
               set))
 
@@ -68,6 +70,8 @@ and ground_function context substitution (f : Types.function_type) : Ground.func
               (function
                 | Types.Capability path -> [ path ]
                 | Capability_parameter p -> context.capabilities p
+                | Capability_projection { name; _ } ->
+                    bug "the associated capability set %s is not normalized" name
                 | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
               f.uses));
   }
