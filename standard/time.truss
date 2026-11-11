@@ -168,6 +168,12 @@ public fn Duration.checked_multiply(self, factor: Int64) -> Option[Duration]
 impl Add[Duration] for Duration {
   type Output = Duration
 
+  fn add_is_defined(self, right: Duration) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn add(self, right: Duration) -> Duration {
     Duration(nanoseconds: self.nanoseconds.saturating_add(right.nanoseconds))
   }
@@ -175,6 +181,12 @@ impl Add[Duration] for Duration {
 
 impl Subtract[Duration] for Duration {
   type Output = Duration
+
+  fn subtract_is_defined(self, right: Duration) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn subtract(self, right: Duration) -> Duration {
     Duration(nanoseconds: self.nanoseconds.saturating_subtract(right.nanoseconds))
@@ -184,6 +196,12 @@ impl Subtract[Duration] for Duration {
 impl Multiply[Int64] for Duration {
   type Output = Duration
 
+  fn multiply_is_defined(self, right: Int64) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn multiply(self, right: Int64) -> Duration {
     Duration(nanoseconds: self.nanoseconds.saturating_multiply(right))
   }
@@ -191,6 +209,12 @@ impl Multiply[Int64] for Duration {
 
 impl Divide[Int64] for Duration {
   type Output = Option[Duration]
+
+  fn divide_is_defined(self, right: Int64) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn divide(self, right: Int64) -> Option[Duration]
   {
@@ -203,6 +227,12 @@ impl Divide[Int64] for Duration {
 
 impl Negate for Duration {
   type Output = Duration
+
+  fn negate_is_defined(self) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn negate(self) -> Duration
   {
@@ -529,6 +559,12 @@ public fn Instant.checked_subtract(self, duration: Duration) -> Option[Instant]
 impl Add[Duration] for Instant {
   type Output = Instant
 
+  fn add_is_defined(self, right: Duration) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn add(self, right: Duration) -> Instant {
     Instant(nanoseconds: self.nanoseconds.saturating_add(right.nanoseconds))
   }
@@ -537,6 +573,12 @@ impl Add[Duration] for Instant {
 impl Subtract[Duration] for Instant {
   type Output = Instant
 
+  fn subtract_is_defined(self, right: Duration) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn subtract(self, right: Duration) -> Instant {
     Instant(nanoseconds: self.nanoseconds.saturating_subtract(right.nanoseconds))
   }
@@ -544,6 +586,12 @@ impl Subtract[Duration] for Instant {
 
 impl Subtract[Instant] for Instant {
   type Output = Duration
+
+  fn subtract_is_defined(self, right: Instant) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn subtract(self, right: Instant) -> Duration {
     self.duration_since(right)

@@ -1,247 +1,358 @@
 use standard::console
 use standard::environment
 use standard::files
+use standard::intrinsic
 use standard::log
 use standard::network
 use standard::processes
 use standard::random
 use standard::streams
+use standard::tasks
 
 public type Operation = Open | Read | Write | Connect | Accept | Resolve | Spawn
   derives Equal, Hash
 
 type Fault(operation: Operation, error: SystemError)
 
-public opaque type World(
-  files: files::MemoryFiles,
+public opaque type Setup(input: List[String], environment: environment::FixedEnvironment, start: Instant)
+
+public fn Setup.new() -> Setup {
+  Setup(
+    input: [],
+    environment: environment::FixedEnvironment.new(
+      environment::Platform(
+        operating_system: environment::OperatingSystem.Linux,
+        architecture: environment::Architecture.X86With64Bits,
+        processor_count: 1,
+        host_name: "simulation",
+        process_identifier: 1,
+      ),
+      current_directory: Path.new("/"),
+    ),
+    start: Instant.epoch,
+  )
+}
+
+public fn Setup.with_file(own self, path: Path, contents: StringSlice) -> Setup {
+  todo
+}
+
+public fn Setup.with_variable(own self, name: StringSlice, value: StringSlice) -> Setup {
+  var changed = own self
+  changed.environment = own changed.environment.with_variable(name, value: value)
+  changed
+}
+
+public fn Setup.with_input(own self, lines: own List[String]) -> Setup {
+  var changed = own self
+  changed.input = own lines
+  changed
+}
+
+public fn Setup.with_host(own self, name: StringSlice, address: network::IpAddress) -> Setup {
+  todo
+}
+
+public fn Setup.with_program(
+  own self,
+  name: StringSlice,
+  respond: own fn(processes::Command) -> processes::Output,
+) -> Setup {
+  todo
+}
+
+public fn Setup.with_time(own self, now: Instant) -> Setup {
+  var changed = own self
+  changed.start = now
+  changed
+}
+
+type State(
   console: console::CapturedConsole,
   log: log::CapturedLog,
   environment: environment::FixedEnvironment,
   generator: random::Generator,
-  now: Instant,
-  elapsed: Duration,
-  hosts: Map[String, network::IpAddress],
-  programs: Map[String, fn(processes::Command) -> processes::Output],
   faults: List[Fault],
   pending_signals: List[processes::Signal],
-  next_handle: UInt64,
 )
 
+public opaque type World(tasks: tasks::SeededTasks, state: intrinsic::Shared[State], start: Instant)
+
 public fn World.new(seed: UInt64 = 0) -> World {
-  todo
+  World.from(Setup.new(), seed: seed)
 }
 
-public fn World.with_file(own self, path: Path, contents: StringSlice) -> World {
-  todo
+public fn World.from(setup: own Setup, seed: UInt64 = 0) -> World {
+  var generator = random::Generator.seeded(seed)
+  let scheduling_seed = mut generator.next()
+  World(
+    tasks: tasks::SeededTasks.new(scheduling_seed),
+    state: intrinsic::shared_new(
+      State(
+        console: console::CapturedConsole.new(input: own setup.input),
+        log: log::CapturedLog(),
+        environment: own setup.environment,
+        generator: generator,
+        faults: [],
+        pending_signals: [],
+      ),
+    ),
+    start: setup.start,
+  )
 }
 
-public fn World.with_variable(own self, name: StringSlice, value: StringSlice) -> World {
-  todo
-}
-
-public fn World.with_input(own self, lines: own List[String]) -> World {
-  todo
-}
-
-public fn World.with_host(own self, name: StringSlice, address: network::IpAddress) -> World {
-  todo
-}
-
-public fn World.with_program(
-  own self,
-  name: StringSlice,
-  respond: own fn(processes::Command) -> processes::Output,
-) -> World {
-  todo
-}
-
-public fn World.with_time(own self, now: Instant) -> World {
-  todo
-}
-
-public fn World.output(self) -> StringSlice
-  cost time O(1)
+fn World.preemption_point(self)
+  uses Panic
 {
-  self.console.output()
+  provide self.tasks {
+    Tasks.yield_now()
+  }
 }
 
-public fn World.errors(self) -> StringSlice
-  cost time O(1)
+public fn World.output(self) -> String
+  uses Tasks
 {
-  self.console.errors()
+  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    state.console.output().to_string()
+  })
 }
 
-public fn World.records(self) -> Slice[log::Record]
-  cost time O(1)
+public fn World.errors(self) -> String
+  uses Tasks
 {
-  self.log.records.slice()
+  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    state.console.errors().to_string()
+  })
 }
 
-public fn World.file_text(self, path: Path) -> Option[String] {
-  self.files.text(path)
+public fn World.records(self) -> List[log::Record]
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    state.log.records.copy()
+  })
 }
 
-public fn World.file_bytes(self, path: Path) lends Option[List[UInt8]] {
+public fn World.file_text(self, path: Path) -> Option[String]
+  uses Tasks
+{
+  todo
+}
+
+public fn World.file_bytes(self, path: Path) -> Option[List[UInt8]]
+  uses Tasks
+{
   todo
 }
 
 public fn World.now(self) -> Instant
-  cost time O(1)
+  uses Tasks
 {
-  self.now
+  self.start + self.tasks.elapsed()
 }
 
-public fn World.advance(mut self, by: Duration)
+public fn World.advance(self, by: Duration)
   requires !by.is_negative()
+  uses Tasks
 {
-  todo
+  self.tasks.advance(by)
 }
 
-public fn World.fail_next(mut self, operation: Operation, error: SystemError) {
-  mut self.faults.push(Fault(operation: operation, error: error.copy()))
+public fn World.fail_next(self, operation: Operation, error: SystemError)
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: Fault(operation: operation, error: error.copy()), change: fn(state, fault) {
+    mut state.faults.push(fault)
+  })
 }
 
-public fn World.deliver(mut self, signal: processes::Signal) {
-  mut self.pending_signals.push(signal.copy())
+public fn World.deliver(self, signal: processes::Signal)
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: signal.copy(), change: fn(state, delivered) {
+    mut state.pending_signals.push(delivered)
+  })
 }
 
-impl Console for World {
-  fn print(mut self, text: StringSlice) {
-    todo
+impl Console for World
+  uses Panic
+{
+  fn print(self, text: StringSlice) {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.console {
+        Console.print(text)
+      }
+    })
   }
 
-  fn print_line(mut self, text: StringSlice) {
-    todo
+  fn print_line(self, text: StringSlice) {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.console {
+        Console.print_line(text)
+      }
+    })
   }
 
-  fn print_error(mut self, text: StringSlice) {
-    todo
+  fn print_error(self, text: StringSlice) {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.console {
+        Console.print_error(text)
+      }
+    })
   }
 
-  fn read_line(mut self) -> Option[String] {
-    todo
+  fn read_line(self) -> Option[String] {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.console {
+        Console.read_line()
+      }
+    })
   }
 
-  fn input(mut self) -> console::Input {
-    todo
+  fn input(self) -> console::Input {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.console {
+        Console.input()
+      }
+    })
   }
 
-  fn output(mut self) -> console::Output {
-    todo
+  fn output(self) -> console::Output {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.console {
+        Console.output()
+      }
+    })
   }
 
-  fn error_output(mut self) -> console::Output {
-    todo
+  fn error_output(self) -> console::Output {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.console {
+        Console.error_output()
+      }
+    })
   }
 
-  fn terminal(mut self) -> console::Terminal {
-    todo
+  fn terminal(self) -> console::Terminal {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.console {
+        Console.terminal()
+      }
+    })
   }
 }
 
 impl FileRead for World {
-  fn read(mut self, file: Path) -> Result[List[UInt8], SystemError] {
+  fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     todo
   }
 
-  fn read_text(mut self, file: Path) -> Result[String, SystemError] {
+  fn read_text(self, file: Path) -> Result[String, SystemError] {
     todo
   }
 
-  fn open(mut self, file: Path) -> Result[files::FileReader, SystemError] {
+  fn open(self, file: Path) -> Result[files::FileReader, SystemError] {
     todo
   }
 
-  fn metadata(mut self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
+  fn metadata(self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
     todo
   }
 
-  fn list(mut self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
+  fn list(self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
     todo
   }
 
-  fn read_link(mut self, link: Path) -> Result[Path, SystemError] {
+  fn read_link(self, link: Path) -> Result[Path, SystemError] {
     todo
   }
 
-  fn resolve(mut self, path: Path) -> Result[Path, SystemError] {
+  fn resolve(self, path: Path) -> Result[Path, SystemError] {
     todo
   }
 }
 
 impl FileWrite for World {
-  fn write(mut self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+  fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn write_text(mut self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn open(mut self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
+  fn open(self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
     todo
   }
 
-  fn create_directory(mut self, directory: Path) -> Result[Unit, SystemError] {
+  fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn remove(mut self, path: Path) -> Result[Unit, SystemError] {
+  fn remove(self, path: Path) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn rename(mut self, from: Path, to: Path) -> Result[Unit, SystemError] {
+  fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn link(mut self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
+  fn link(self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn set_permissions(mut self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
+  fn set_permissions(self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn set_modified(mut self, path: Path, time: Instant) -> Result[Unit, SystemError] {
+  fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
     todo
   }
 }
 
 impl NetworkClient for World {
-  fn resolve(mut self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
+  fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
     todo
   }
 
-  fn connect(mut self, address: network::SocketAddress, timeout: Option[Duration]) -> Result[network::Connection, SystemError] {
+  fn connect(self, address: network::SocketAddress, timeout: Option[Duration]) -> Result[network::Connection, SystemError] {
     todo
   }
 
-  fn open_datagram(mut self) -> Result[network::DatagramSocket, SystemError] {
+  fn open_datagram(self) -> Result[network::DatagramSocket, SystemError] {
     todo
   }
 }
 
 impl NetworkServer for World {
-  fn listen(mut self, address: network::SocketAddress) -> Result[network::Listener, SystemError] {
+  fn listen(self, address: network::SocketAddress) -> Result[network::Listener, SystemError] {
     todo
   }
 
-  fn bind_datagram(mut self, address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
+  fn bind_datagram(self, address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
     todo
   }
 }
 
 impl Handles for World {
-  fn read(mut self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+  fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
     todo
   }
 
-  fn write(mut self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+  fn write(self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
     todo
   }
 
   fn read_at(
-    mut self,
+    self,
     handle: streams::Handle,
     offset: UInt64,
     buffer: mut List[UInt8],
@@ -250,36 +361,36 @@ impl Handles for World {
     todo
   }
 
-  fn write_at(mut self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+  fn write_at(self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
     todo
   }
 
-  fn seek(mut self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
+  fn seek(self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
     todo
   }
 
-  fn set_length(mut self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
+  fn set_length(self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn synchronize(mut self, handle: streams::Handle) -> Result[Unit, SystemError] {
+  fn synchronize(self, handle: streams::Handle) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn metadata(mut self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
+  fn metadata(self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
     todo
   }
 
-  fn close(mut self, handle: own streams::Handle) -> Result[Unit, SystemError] {
+  fn close(self, handle: own streams::Handle) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn shut_down(mut self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+  fn shut_down(self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
     todo
   }
 
   fn set_timeout(
-    mut self,
+    self,
     handle: streams::Handle,
     direction: network::Direction,
     timeout: Option[Duration],
@@ -287,12 +398,12 @@ impl Handles for World {
     todo
   }
 
-  fn accept(mut self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
+  fn accept(self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
     todo
   }
 
   fn send_to(
-    mut self,
+    self,
     socket: streams::Handle,
     bytes: Slice[UInt8],
     address: network::SocketAddress,
@@ -301,7 +412,7 @@ impl Handles for World {
   }
 
   fn receive_from(
-    mut self,
+    self,
     socket: streams::Handle,
     buffer: mut List[UInt8],
     limit: USize,
@@ -309,141 +420,224 @@ impl Handles for World {
     todo
   }
 
-  fn wait(mut self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
+  fn wait(self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
     todo
   }
 
-  fn signal(mut self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+  fn signal(self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
     todo
   }
 
-  fn terminal_size(mut self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
+  fn terminal_size(self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
     todo
   }
 
-  fn set_raw_mode(mut self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
-    todo
-  }
-}
-
-impl Clock for World {
-  fn now(mut self) -> Instant {
-    todo
-  }
-
-  fn monotonic(mut self) -> Duration {
-    todo
-  }
-
-  fn sleep(mut self, duration: Duration) {
+  fn set_raw_mode(self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
     todo
   }
 }
 
-impl Random for World {
-  fn next(mut self) -> UInt64 {
-    todo
+impl Clock for World
+  uses Panic
+{
+  fn now(self) -> Instant {
+    provide self.tasks {
+      Tasks.yield_now()
+      self.start + self.tasks.elapsed()
+    }
+  }
+
+  fn monotonic(self) -> Duration {
+    provide self.tasks {
+      Tasks.yield_now()
+      self.tasks.elapsed()
+    }
+  }
+
+  fn sleep(self, duration: Duration) {
+    provide self.tasks {
+      self.tasks.sleep(duration)
+    }
   }
 }
 
-impl Environment for World {
-  fn variable(mut self, name: StringSlice) -> Option[String] {
-    todo
+impl Random for World
+  uses Panic
+{
+  fn next(self) -> UInt64 {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.generator.next()
+    })
+  }
+}
+
+impl Environment for World
+  uses Panic
+{
+  fn variable(self, name: StringSlice) -> Option[String] {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide state.environment {
+        Environment.variable(name)
+      }
+    })
   }
 
-  fn variables(mut self) -> List[environment::Variable] {
-    todo
+  fn variables(self) -> List[environment::Variable] {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide state.environment {
+        Environment.variables()
+      }
+    })
   }
 
-  fn current_directory(mut self) -> Result[Path, SystemError] {
-    todo
+  fn current_directory(self) -> Result[Path, SystemError] {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide state.environment {
+        Environment.current_directory()
+      }
+    })
   }
 
-  fn platform(mut self) -> environment::Platform {
-    todo
+  fn platform(self) -> environment::Platform {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide state.environment {
+        Environment.platform()
+      }
+    })
   }
 
-  fn location(mut self, location: environment::Location) -> Option[Path] {
-    todo
+  fn location(self, location: environment::Location) -> Option[Path] {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide state.environment {
+        Environment.location(location)
+      }
+    })
   }
 
-  fn local_zone(mut self) -> Option[String] {
-    todo
+  fn local_zone(self) -> Option[String] {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide state.environment {
+        Environment.local_zone()
+      }
+    })
   }
 
-  fn zone_rules(mut self, name: StringSlice) -> Option[List[UInt8]] {
-    todo
+  fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]] {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide state.environment {
+        Environment.zone_rules(name)
+      }
+    })
   }
 }
 
 impl Processes for World {
-  fn run(mut self, command: processes::Command) -> Result[processes::Output, SystemError] {
+  fn run(self, command: processes::Command) -> Result[processes::Output, SystemError] {
     todo
   }
 
-  fn spawn(mut self, command: processes::Command) -> Result[processes::Child, SystemError] {
+  fn spawn(self, command: processes::Command) -> Result[processes::Child, SystemError] {
     todo
   }
 }
 
 impl Signals for World {
-  fn wait(mut self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
+  fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
     todo
   }
 }
 
-impl Tasks for World {
-  fn open(mut self) -> UInt64 {
-    todo
+impl Tasks for World
+  uses Panic
+{
+  fn open(self) -> UInt64 {
+    provide self.tasks {
+      Tasks.open()
+    }
   }
 
-  fn spawn(mut self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
-    todo
+  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    provide self.tasks {
+      Tasks.spawn(task_group, work: work, item: item)
+    }
   }
 
-  fn join(mut self, task_group: UInt64) {
-    todo
+  fn join(self, task_group: UInt64) {
+    provide self.tasks {
+      Tasks.join(task_group)
+    }
   }
 
-  fn cancel(mut self, task_group: UInt64) -> Bool {
-    todo
+  fn cancel(self, task_group: UInt64) -> Bool {
+    provide self.tasks {
+      Tasks.cancel(task_group)
+    }
   }
 
-  fn cancelled(mut self) -> Bool {
-    todo
+  fn cancelled(self) -> Bool {
+    provide self.tasks {
+      Tasks.cancelled()
+    }
   }
 
-  fn watch(mut self, key: UInt64) -> UInt64 {
-    todo
+  fn watch(self, key: UInt64) -> UInt64 {
+    provide self.tasks {
+      Tasks.watch(key)
+    }
   }
 
-  fn wait(mut self, key: UInt64, ticket: UInt64, reason: StringSlice) {
-    todo
+  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {
+    provide self.tasks {
+      Tasks.wait(key, ticket: ticket, reason: reason)
+    }
   }
 
-  fn wake(mut self, key: UInt64) {
-    todo
+  fn wake(self, key: UInt64) {
+    provide self.tasks {
+      Tasks.wake(key)
+    }
   }
 
-  fn lock(mut self, mutex: UInt64) {
-    todo
+  fn lock(self, mutex: UInt64) {
+    provide self.tasks {
+      Tasks.lock(mutex)
+    }
   }
 
-  fn unlock(mut self, mutex: UInt64) {
-    todo
+  fn unlock(self, mutex: UInt64) {
+    provide self.tasks {
+      Tasks.unlock(mutex)
+    }
   }
 
-  fn yield_now(mut self) {
-    todo
+  fn yield_now(self) {
+    provide self.tasks {
+      Tasks.yield_now()
+    }
   }
 }
 
-impl Log for World {
-  fn record(mut self, record: log::Record) {
-    todo
+impl Log for World
+  uses Panic
+{
+  fn record(self, record: log::Record) {
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      provide mut state.log {
+        Log.record(record)
+      }
+    })
   }
 
-  fn enabled(mut self, level: log::Level) -> Bool {
-    todo
+  fn enabled(self, level: log::Level) -> Bool {
+    true
   }
 }

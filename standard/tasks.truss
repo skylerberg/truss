@@ -223,6 +223,7 @@ type Status =
   | Joining(task_group: UInt64)
   | Waiting(reason: String)
   | Locking(mutex: UInt64)
+  | Sleeping(deadline: Duration)
 
 type Task(
   coroutine: USize,
@@ -253,6 +254,7 @@ type Scheduler(
   next: Option[USize],
   groups_opened: UInt64,
   tickets_issued: UInt64,
+  elapsed: Duration,
 )
   invariant running < tasks.length()
   invariant !(next is Some(task) && task >= tasks.length())
@@ -277,6 +279,7 @@ internal fn Scheduler.new(seed: UInt64) -> Scheduler {
     next: None,
     groups_opened: 0,
     tickets_issued: 0,
+    elapsed: Duration.zero,
   )
 }
 
@@ -419,6 +422,32 @@ internal fn Scheduler.unlock(mut self, mutex: UInt64) {
   }
 }
 
+internal fn Scheduler.sleep(mut self, duration: Duration) -> Bool {
+  if self.tasks[self.running].cancelled || duration <= Duration.zero {
+    return false
+  }
+  self.tasks[self.running].status = Status.Sleeping(deadline: self.elapsed + duration)
+  true
+}
+
+internal fn Scheduler.advance(mut self, by: Duration) {
+  if by > Duration.zero {
+    self.elapsed = self.elapsed + by
+  }
+}
+
+internal fn Scheduler.earliest_deadline(self) -> Option[Duration] {
+  var earliest: Option[Duration] = None
+  for task in self.tasks {
+    if task.status is Sleeping(deadline) {
+      if !(earliest is Some(other) && other <= deadline) {
+        earliest = Some(deadline)
+      }
+    }
+  }
+  earliest
+}
+
 internal fn Scheduler.can_run(self, task: USize) -> Bool
   requires task < self.tasks.length()
 {
@@ -428,20 +457,33 @@ internal fn Scheduler.can_run(self, task: USize) -> Bool
     Joining(task_group) => !self.has_unfinished_task(task_group)
     Waiting(_) => self.tasks[task].woken || self.tasks[task].cancelled
     Locking(mutex) => !self.locked.contains(mutex)
+    Sleeping(deadline) => deadline <= self.elapsed || self.tasks[task].cancelled
   }
+}
+
+internal fn Scheduler.runnable_count(self) -> USize {
+  var count: USize = 0
+  for task in 0..self.tasks.length() {
+    if self.can_run(task) {
+      count = count.saturating_add(1)
+    }
+  }
+  count
 }
 
 internal fn Scheduler.pick_runnable(mut self) -> Option[USize]
   ensures !(result is Some(task) && task >= self.tasks.length())
 {
-  var runnable: USize = 0
-  for task in 0..self.tasks.length() {
-    if self.can_run(task) {
-      runnable = runnable.saturating_add(1)
-    }
-  }
+  var runnable = self.runnable_count()
   if runnable == 0 {
-    return None
+    match self.earliest_deadline() {
+      Some(deadline) if deadline > self.elapsed => self.elapsed = deadline
+      _ => return None
+    }
+    runnable = self.runnable_count()
+    if runnable == 0 {
+      return None
+    }
   }
   var skipped = mut self.generator.index(runnable)
   for task in 0..self.tasks.length() {
@@ -522,6 +564,33 @@ public opaque type SeededTasks(scheduler: intrinsic::Shared[Scheduler])
 
 public fn SeededTasks.new(seed: UInt64) -> SeededTasks {
   SeededTasks(scheduler: intrinsic::shared_new(Scheduler.new(seed)))
+}
+
+internal fn SeededTasks.elapsed(self) -> Duration
+  uses Tasks
+{
+  intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    scheduler.elapsed
+  })
+}
+
+internal fn SeededTasks.advance(self, by: Duration)
+  uses Tasks
+{
+  intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    mut scheduler.advance(by)
+  })
+}
+
+internal fn SeededTasks.sleep(self, duration: Duration)
+  uses Tasks, Panic
+{
+  let blocked = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    mut scheduler.sleep(duration)
+  })
+  if blocked {
+    switch_task(self.scheduler)
+  }
 }
 
 impl Tasks for SeededTasks

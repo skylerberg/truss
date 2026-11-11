@@ -901,6 +901,16 @@ choices below keep method calls predictable:
   arithmetic operators use `Add[Right]` and similar traits, with the result
   as an associated type. Comparisons stay between values of one type,
   because the laws of `Equal` and `Ordered` relate a type to itself.
+- **An operator trait says where its operation is defined.** `Int8`'s `+`
+  is not defined where the sum overflows, and its `/` is not defined for a
+  divisor of 0. If `Add.add` promised a result for every pair of values, an
+  `impl` for a fixed-width integer would have to wrap or to crash, and
+  generic code could overflow with nothing in its signature to show it. So
+  each trait has a second method, such as `add_is_defined`, and the
+  operation requires it. Generic code then carries the obligation that an
+  operator on a built-in type has, as `Index.at` requires `contains_key`.
+  Verus gives Rust's `Add` a precondition, `add_req`, for the same reason.
+  A type whose operation is defined everywhere returns `true`.
 - **Associated types are chosen by each implementation,** as in Rust: the
   key and result of `Index`, the element of a collection, the part type of
   `FromTemplate`. A trait's type parameters are what an `impl` is chosen by,
@@ -2418,11 +2428,20 @@ package may want those names for its own types. They are `core::Pair`,
   `files::FilesWithin` and `network::HostsAllowed`.
 - **`simulation::World` fakes every capability at once.** It is an
   in-memory machine: a file system, a network between its own hosts, a
-  clock that advances only when the test says, programs that return what
-  the test scripted, tasks scheduled by a seed, and fault injection.
-  FoundationDB tests its database this way. A test that opens both files
-  and connections provides a `World`, because one provider must implement
-  `Handles` for every handle, as the operating system does.
+  clock that advances when every task is blocked or when the test says,
+  programs that return what the test scripted, tasks scheduled by a seed,
+  and fault injection. FoundationDB tests its database this way. A test
+  that opens both files and connections provides a `World`, because one
+  provider must implement `Handles` for every handle, as the operating
+  system does.
+- **A `World` is a reference to its state.** It implements `Tasks`, so its
+  methods are not made mutually exclusive by a mutex, and several tasks
+  call them. Its state is therefore in the cell that a channel's queue is
+  in, and each capability method is one pure update of the cell. The
+  method first lets the seed switch to another task, so a test explores
+  the orders of the calls. A plain record, `simulation::Setup`, holds what
+  the world starts with, because the cell can be read only where `Tasks`
+  is available.
 
 ## Visibility
 

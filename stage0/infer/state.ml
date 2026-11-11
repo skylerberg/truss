@@ -504,8 +504,8 @@ let evidence_of = function
 
 (* Standard paths *)
 
-let standard modules name : Path.t = Top { module_ = { package = "standard"; modules }; name }
-let core = standard [ "core" ]
+let standard = Path.standard
+let core = Path.core
 let option_path = standard [ "option" ] "Option"
 let result_path = standard [ "result" ] "Result"
 let list_path = standard [ "list" ] "List"

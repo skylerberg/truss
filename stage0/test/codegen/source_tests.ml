@@ -317,12 +317,7 @@ let () =
                     Derived
                       {
                         type_ = Top { module_ = example; name = "Both" };
-                        trait =
-                          Top
-                            {
-                              module_ = { package = "standard"; modules = [ "core" ] };
-                              name = "Equal";
-                            };
+                        trait = Path.core "Equal";
                       };
                   name = "equal";
                   receiver = Read;

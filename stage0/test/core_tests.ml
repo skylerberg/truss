@@ -454,12 +454,12 @@ let () =
      }\n"
     "{ for item in yielding_call standard::list::impl Iterable for List[Element].each[Int64](place \
      items) { concurrent #48 { let own first = match app::main::fetch(place item) { Ok(value: own \
-     value) => { value } Err(error: own error) => { leaving branch 0 of #48 { return Result[Int64, \
-     Int64].Err(error: error) } } diverges }; if (item > 3) { leaving branch 1 of #48 { break } } \
-     diverges }; let _ = place first }; concurrent #93 for item in yielding_call \
+     value) => { value } Err(error: own error) => { task_exit branch 0 of #48 { return \
+     Result[Int64, Int64].Err(error: error) } } diverges }; if (item > 3) { task_exit branch 1 of \
+     #48 { break } } diverges }; let _ = place first }; concurrent #93 for item in yielding_call \
      standard::list::impl Iterable for List[Element].each[Int64](place items) { if (item > 5) { \
-     leaving an iteration of #93 { break } } diverges; if (item > 4) { continue } diverges; if \
-     (item > 3) { leaving an iteration of #93 { return Result[Int64, Int64].Err(error: item) } } \
+     task_exit an iteration of #93 { break } } diverges; if (item > 4) { continue } diverges; if \
+     (item > 3) { task_exit an iteration of #93 { return Result[Int64, Int64].Err(error: item) } } \
      diverges }; Result[Int64, Int64].Ok(value: 0) }";
   expect_body "an assignment through an index calls `assign` where the type has it"
     "fn g(name: own String) {\n\
@@ -815,7 +815,7 @@ let printed_derived text type_name trait name receiver =
           Derived
             {
               type_ = Top { module_ = module_of "app::main"; name = type_name };
-              trait = Top { module_ = { package = "standard"; modules = [ "core" ] }; name = trait };
+              trait = Path.core trait;
             };
         name;
         receiver;
@@ -889,8 +889,7 @@ let () =
               Derived
                 {
                   type_ = Top { module_ = module_of "app::main"; name = "Later" };
-                  trait =
-                    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Equal" };
+                  trait = Path.core "Equal";
                 };
             name = "equal";
             receiver = Read;
@@ -999,13 +998,7 @@ let () =
       | found, substitution -> fail "found %s with [%s]" found (String.concat "; " substitution));
   test "a method of a derived impl has the generated core form" (fun () ->
       let database = setup [ ("app::main", text) ] in
-      let owner : Path.t =
-        Derived
-          {
-            type_ = both;
-            trait = Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Equal" };
-          }
-      in
+      let owner : Path.t = Derived { type_ = both; trait = Path.core "Equal" } in
       match
         ( Query.demand database Infer.core_of_path
             (Method { owner; name = "equal"; receiver = Read }),
