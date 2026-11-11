@@ -12,6 +12,8 @@ type specification_function = Log | Power | Time | Calls
 type target =
   | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
   | Local of id  (** A local or parameter, by the id of the name that binds it. *)
+  | Law_parameter of int
+      (** In a law's proof, a parameter of the law, by its position among the law's parameters. *)
   | Type_parameter of Types.parameter
       (** A generic type parameter, by the definition that declares it and its name. *)
   | Capability_parameter of Types.parameter  (** A generic parameter declared [capability Name]. *)
@@ -35,7 +37,11 @@ type target =
 type bracket = Index | Type_arguments | Method_bracket
 
 (* The kind of a local value name in scope. *)
-type value = Value_local of id | Value_generic of Types.parameter | Value_field of string
+type value =
+  | Value_local of id
+  | Value_generic of Types.parameter
+  | Value_field of string
+  | Value_law_parameter of int
 
 type specification = {
   active : bool;  (** In a specification or a proof, where [old] has its meaning. *)
@@ -363,6 +369,7 @@ and local_value state scope (name : name) =
   | Some (Value_local id, _) -> set state name (Local id)
   | Some (Value_generic parameter, _) -> set state name (Value_parameter parameter)
   | Some (Value_field field, _) -> set state name (Field field)
+  | Some (Value_law_parameter index, _) -> set state name (Law_parameter index)
   | None ->
       if scope.specification.active && text = "old" then set state name Old
       else if scope.specification.yielded && text = "yielded" then set state name Yielded
@@ -1065,10 +1072,27 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
         List.iter (clause state scope) clauses;
         if not body_broken then block state scope body
       end
-  | Law_proof { trait_; type_; body; _ } ->
+  | Law_proof { trait_; law; type_; body } ->
       if not header_broken then begin
         path_type state scope trait_;
         type_expression state scope type_;
-        if not body_broken then block state { scope with specification = in_specification } body
+        (* The body is checked as the law's body is: with the law's
+           parameters in scope. *)
+        let law_parameters =
+          match state.names.(trait_.path.last.id) with
+          | Some (Definition (Trait, trait)) ->
+              Option.value ~default:[]
+                (Query.demand state.database Names.law_parameters (trait, law.text))
+          | _ -> []
+        in
+        let values =
+          List.fold_left
+            (fun values (index, name) ->
+              String_map.add name (Value_law_parameter index, "a parameter of the law") values)
+            scope.values
+            (List.mapi (fun index name -> (index, name)) law_parameters)
+        in
+        if not body_broken then
+          block state { scope with values; specification = in_specification } body
       end
   | Definition_error _ -> ()

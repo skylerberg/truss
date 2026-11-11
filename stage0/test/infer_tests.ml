@@ -435,6 +435,47 @@ let () =
         "types.unknown_member");
   test "a method from a trait needs no import" (fun () ->
       fine "fn f(items: List[Int64]) -> List[Int64] {\n  items.copy()\n}\n");
+  test "a law's proof names the law's parameters, which have the proof's type for Self" (fun () ->
+      fine
+        "type Pair(first: UInt8, second: UInt8)\n\
+        \  derives Equal\n\n\
+         fn same(first: Pair, second: Pair) -> Bool {\n\
+        \  first == second\n\
+         }\n\n\
+         impl Ordered for Pair {\n\
+        \  fn compare(self, other: Pair) -> Ordering {\n\
+        \    self.first.compare(other.first)\n\
+        \  }\n\
+         }\n\n\
+         proof Ordered.agrees_with_equal for Pair {\n\
+        \  let _ = same(first, second: second)\n\
+         }\n");
+  test "a law's proof names no parameter of another law" (fun () ->
+      one_diagnostic
+        "type Pair(first: UInt8, second: UInt8)\n\
+        \  derives Equal\n\n\
+         impl Ordered for Pair {\n\
+        \  fn compare(self, other: Pair) -> Ordering {\n\
+        \    self.first.compare(other.first)\n\
+        \  }\n\
+         }\n\n\
+         proof Ordered.agrees_with_equal for Pair {\n\
+        \  let _ = third\n\
+         }\n"
+        "resolve.unknown_name");
+  test "a law's proof cannot assign to a parameter of the law" (fun () ->
+      one_diagnostic
+        "type Pair(first: UInt8, second: UInt8)\n\
+        \  derives Equal\n\n\
+         impl Ordered for Pair {\n\
+        \  fn compare(self, other: Pair) -> Ordering {\n\
+        \    self.first.compare(other.first)\n\
+        \  }\n\
+         }\n\n\
+         proof Ordered.agrees_with_equal for Pair {\n\
+        \  first = second\n\
+         }\n"
+        "types.not_assignable");
   test "a variant with one field is a function" (fun () ->
       fine
         "type Shape =\n\

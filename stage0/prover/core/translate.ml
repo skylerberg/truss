@@ -1020,7 +1020,7 @@ let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
                  | Named { path; _ }, Some head -> Path.equal path head
                  | _ -> false -> (
               match source_at_key database (Names.key_of declaration) with
-              | Some ({ core = { definition = Law_proof body; _ }; _ } as source) ->
+              | Some ({ core = { definition = Law_proof { body; _ }; _ }; _ } as source) ->
                   Some (proven.law, (source, body))
               | _ -> None)
           | _ -> None)

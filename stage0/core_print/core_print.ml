@@ -353,7 +353,8 @@ let definition (definition : definition) =
           laws
     | Constant value -> [ expression names value ]
     | Test body -> [ "test " ^ block names body ]
-    | Law_proof body -> [ "proof " ^ block names body ]
+    | Law_proof { parameters; body } ->
+        [ Printf.sprintf "proof(%s) %s" (list (parameter names) parameters) (block names body) ]
     | Empty -> []
   in
   String.concat "\n" lines

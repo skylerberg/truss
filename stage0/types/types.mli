@@ -230,6 +230,8 @@ type trait_interface = {
   requires : trait_reference list;
   associated_types : associated_type list;
   methods : trait_method list;
+  laws : (string * (string * ty) list) list;
+      (** Each law's name, and its parameters' names and types. A proof of the law names them. *)
   is_capability : bool;
   broken_methods : (string * Diagnostic.reported) list;
       (** Members the parser could not read, whose uses get [Error]. *)

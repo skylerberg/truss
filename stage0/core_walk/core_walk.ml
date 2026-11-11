@@ -245,7 +245,7 @@ let definition_children visit = function
           block visit law.body)
         laws
   | Constant value -> visit.expression value
-  | Test body | Law_proof body -> block visit body
+  | Test body | Law_proof { body; _ } -> block visit body
   | Empty -> ()
 
 (* Calls [visit] on every node of a definition. *)

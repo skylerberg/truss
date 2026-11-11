@@ -41,6 +41,13 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> bug "the local `%s` has no type" text)
+  | Law_parameter index -> (
+      match List.nth_opt state.law_parameters index with
+      | Some (_, type_) ->
+          register_expression state value (fun () ->
+              Use (Local { local = Synthetic index; type_ = final state type_; origin = value.id }));
+          type_
+      | None -> bug "the law has no parameter `%s`" text)
   | Value_parameter parameter ->
       state.tables.meanings.(value.id) <- Some (Generic_value parameter);
       register_expression state value (fun () -> Value_parameter parameter);
