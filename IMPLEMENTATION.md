@@ -27,16 +27,16 @@ develop as well as make it easier to bootstrap the compiler in parts.
   `brew install z3` on macOS, or from the release's archive, and put it on
   the path or name it in `TRUSS_Z3`. CI downloads that release and checks
   its hash.
-- **The Unicode tables are generated.** `standard/text/unicode_data.truss`
-  holds the tables of character properties, case mappings, and
-  normalization, and nothing else. `stage0/unicode_tables` writes it from
-  six files of the Unicode character database: `UnicodeData.txt`,
-  `DerivedCoreProperties.txt`, `DerivedNormalizationProps.txt`,
-  `SpecialCasing.txt`, `CaseFolding.txt`, and `EastAsianWidth.txt`. To move
-  to a new version of Unicode, download those files of that version into
-  one directory and run
-  `dune exec stage0/unicode_tables/unicode_tables.exe -- DIRECTORY > standard/text/unicode_data.truss`.
-  The functions that search the tables are written by hand, in
+- **The Unicode tables are generated.** The compiler's tables are in
+  `stage0/unicode/unicode_tables.ml`. The standard library's are in
+  `standard/text/unicode_data.truss`, which holds the tables of character
+  properties, case mappings, normalization, and grapheme cluster boundaries,
+  and nothing else. Both are
+  generated from the same version of the Unicode character database, whose
+  files `stage0/tools/unicode/sources.txt` lists with their hashes. To move
+  to a new version of Unicode, change that list and run
+  `stage0/tools/unicode/regenerate.sh`. The functions that search the
+  library's tables are written by hand, in
   `standard/text/unicode_tables.truss`. Each function there that names a
   table assigns its result to a `var`, so that its body is not functional
   and callers know it by its contract. With a functional body the function

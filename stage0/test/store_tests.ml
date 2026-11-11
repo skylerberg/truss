@@ -467,4 +467,21 @@ let () =
       let value = Engine.get again reads_reader () in
       if value <> 80 then fail "result %d after the change" value)
 
+let () =
+  test "an input whose value the store lost is an error, and never reads as not set" (fun () ->
+      let store, artifact = written () in
+      let directory = Store.directory store in
+      Store.close store;
+      let store = Store.open_ directory in
+      let lost = Blake3.hash (Marshal.to_string 4 [ Marshal.No_sharing ]) in
+      Store.collect store ~budget:0 ~live:(fun name -> name <> lost);
+      match Engine.open_ store ~version ~bases:[] artifact with
+      | None -> fail "the state did not open"
+      | Some engine -> (
+          Engine.skip_audit engine;
+          if Engine.inputs_stored engine then fail "every input is said to be stored";
+          match Query.find (Engine.context engine) value_input () with
+          | _ -> fail "the input was read"
+          | exception Engine.Lost _ -> ()))
+
 let () = finish ()

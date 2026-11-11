@@ -80,6 +80,10 @@ val want : session -> Compile.lowering -> Instance.key list -> unit
 val want_in : Engine.t -> Compile.lowering -> Instance.key list -> unit
 (** The same, for an engine that is not a session's, as tests have. *)
 
+val prepare_store : unit -> unit
+(** Checks the standard library and keeps its state in the store, unless the store has it, as the
+    first session opened in a new store does. *)
+
 val flush_store : unit -> unit
 (** Writes what the store holds in memory. *)
 
@@ -158,6 +162,11 @@ val call :
 val store_directory : unit -> string
 (** Where the store is: [$TRUSS_CACHE], or else [$XDG_CACHE_HOME/truss], or else [~/.cache/truss].
 *)
+
+val recovering : (unit -> 'a) -> 'a
+(** Runs a command that is not answered by the background process. If a state it reads has lost an
+    input's value, as after another process collected the store, every open state is discarded and
+    the command is run once more, from the files. {!serve} does this for each request. *)
 
 val stop : unit -> unit
 (** Ends the background process once the request being answered is. *)

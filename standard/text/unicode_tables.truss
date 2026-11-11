@@ -277,3 +277,20 @@ internal fn composition_of(first: UInt32, second: UInt32) -> Option[UInt32]
   var composite = pair_value(unicode_data::composition_pairs[..], first: first, second: second)
   composite
 }
+
+internal fn grapheme_properties_of(code: UInt32) -> UInt32
+  cost time O(1)
+{
+  var properties: UInt32 = 0
+  if code >= 44032 && code < 55204 {
+    properties = if (code - 44032) % 28 == 0 { 12 } else { 13 }
+  } else if code < 32 || code >= 127 {
+    match range_value(unicode_data::grapheme_ranges[..], code: code) {
+      Some(found) => {
+        properties = found
+      }
+      None => {}
+    }
+  }
+  properties
+}

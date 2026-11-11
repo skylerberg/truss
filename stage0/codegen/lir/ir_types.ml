@@ -145,9 +145,9 @@ type intrinsic =
   | Shared_lock  (** [(value pointer)]: locks the block's mutex *)
   | Shared_unlock  (** [(value pointer)]: unlocks the block's mutex *)
   | Blocking_begin
-      (** [()]: before a call of the operating system that can block. The runtime may start a spare
-          thread to run the tasks that are ready, and it can now interrupt the call if the calling
-          task is cancelled. *)
+      (** [()]: before a call of the operating system that can block. If the call lasts, the runtime
+          counts the thread as blocked, and a spare thread may run tasks in its place. The runtime
+          can now interrupt the call if the calling task is cancelled. *)
   | Blocking_end  (** [()]: after such a call. It leaves [errno] as the call set it. *)
 
 type target =

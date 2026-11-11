@@ -489,7 +489,7 @@ let client argv =
   let arguments = List.tl (Arguments.prepare argv) in
   let no_server = List.mem "--no-server" arguments || Sys.getenv_opt "TRUSS_NO_SERVER" = Some "1" in
   let arguments = List.filter (( <> ) "--no-server") arguments in
-  let local () = finish (evaluate arguments) in
+  let local () = finish (Database.recovering (fun () -> evaluate arguments)) in
   match command_of arguments with
   | Some "clean" -> clean_store ()
   | None | Some "new" -> local ()

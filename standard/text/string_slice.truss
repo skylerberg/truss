@@ -1,5 +1,6 @@
 use standard::core
 use standard::intrinsic
+use standard::text::grapheme_breaks
 use standard::text::unicode_tables
 
 public fn StringSlice.is_empty(self) -> Bool
@@ -244,9 +245,31 @@ public fn StringSlice.last_character(self) -> Option[Character]
 }
 
 public fn StringSlice.graphemes(self) yields StringSlice
+  ensures yielded.length() <= self.length()
   cost time O(self.length())
 {
-  todo
+  var start: USize = 0
+  var offset: USize = 0
+  var state = grapheme_breaks::State.start()
+  while offset < self.length()
+    invariant start <= offset
+    invariant offset <= self.length()
+    invariant yielded.length() <= start
+    decreases self.length() - offset
+    cost time O(offset)
+  {
+    let decoded = self.decode(offset)
+    let code = decoded.character.code()
+    if offset > start && !state.joins(code) {
+      yield self.part(start, to: offset)
+      start = offset
+    }
+    state = state.after(code)
+    offset += decoded.length
+  }
+  if start < self.length() {
+    yield self.part(start, to: self.length())
+  }
 }
 
 public fn StringSlice.lines(self) yields StringSlice
