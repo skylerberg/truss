@@ -205,7 +205,7 @@ public fn is_normalized(text: StringSlice, form: Form = Form.Composed) -> Bool
 }
 
 public fn fold_case(text: StringSlice) -> String
-  cost time finite
+  cost time O(text.length())
 {
   var output = ""
   for character in text.characters() {

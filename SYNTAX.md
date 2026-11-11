@@ -1015,6 +1015,11 @@ fn List[Element].push(mut self, item: own Element)
   `cost amortized time O(count)`. It can also promise a plain bound that
   includes the potential the list came in with, as in
   `cost time O(count + items.length())`.
+- A function can state both bounds on a resource. `List.pop` promises
+  `cost time O(1)` for each call and `cost amortized time O(1)`, which
+  also covers the potential it leaves in the list. A caller with an
+  amortized bound counts the amortized one, and any other caller the plain
+  one.
 - A value's potential belongs to that value alone. Values are never shared,
   so two parts of a program can never use up the same potential.
   `copy()` makes a new potential, and pays for it with its own cost.
