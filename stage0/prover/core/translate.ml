@@ -3137,6 +3137,32 @@ and integer_intrinsic context frame ~node (operation : Intrinsic.operation) type
    which nothing more is known. *)
 and lambda context frame (node : expression) (parameters : pattern list) captures (body : block)
     ~facts =
+  (* Inside a quantifier, a lambda that captures none of its bound values is
+     one function for every one of them, so it is read outside it. *)
+  let captured (capture : capture) =
+    match capture.local with Self -> frame.self | local -> Locals.find_opt local frame.locals
+  in
+  if
+    frame.bound <> []
+    && List.for_all
+         (fun capture ->
+           match captured capture with
+           | Some term -> not (L.mentions frame.bound term)
+           | None -> false)
+         captures
+  then
+    (* The bound values stay bound, so a fact about the lambda's arguments
+       that names one is still left out. *)
+    let _, term =
+      read_lambda ~capture_free:true context
+        { frame with binders = []; condition = L.Boolean true }
+        node parameters captures body ~facts
+    in
+    (frame, term)
+  else read_lambda context frame node parameters captures body ~facts
+
+and read_lambda ?(capture_free = false) context frame (node : expression)
+    (parameters : pattern list) captures (body : block) ~facts =
   let span = at frame node in
   let ty = type_of context frame node in
   let function_type =
@@ -3330,7 +3356,7 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
     | Some term -> term
     | None ->
         let term = arrive context frame "lambda" ty in
-        if in_the_logic function_type && frame.bound = [] then
+        if in_the_logic function_type && (frame.bound = [] || capture_free) then
           what_a_lambda_does context function_type term ~called ~arguments ~start_fresh ~end_fresh
             ~start_declarations ~premises ~shown:(facts_since context facts_mark) ~ended:!ended;
         term

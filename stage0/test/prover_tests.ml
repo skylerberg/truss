@@ -3374,6 +3374,27 @@ let () =
       if not (contains found "On that path, the arm `Some(count)` is taken.") then
         fail "message %S" found)
 
+(* Lambdas under a quantifier *)
+
+let () =
+  test "a lambda in a quantifier that captures no bound value is known for every argument"
+    (fun () ->
+      proven
+        "fn apply(change: (fn(Bool) -> Bool cost time finite), value: Bool) -> Bool\n\
+        \  ensures result == change(value)\n\
+        \  cost time finite\n\
+         {\n\
+        \  change(value)\n\
+         }\n\n\
+         theorem each_kept(items: List[Bool])\n\
+        \  ensures forall i in 0..items.length() =>\n\
+        \    apply(fn(x) {\n\
+        \      var kept = x\n\
+        \      kept\n\
+        \    }, value: items[i]) == items[i]\n\
+         {\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =

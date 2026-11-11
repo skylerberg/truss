@@ -1449,11 +1449,13 @@ test the prover itself:
   nested quantifiers, each fact is about values made for every
   combination of bound names, and with them the solver runs out of steps
   even with triggers chosen.
-- **A lambda inside a quantifier, or with a functional lambda inside it,**
-  whose body is not functional is applied as a function the solver knows
-  nothing more about: inside a quantifier its arguments are not alone in
-  what it can differ by, and a functional lambda's symbol is named after
-  what it captures, which would be one function for every argument.
+- **A lambda inside a quantifier that captures one of its bound values,
+  or with a functional lambda inside it,** whose body is not functional is
+  applied as a function the solver knows nothing more about: its arguments
+  are not alone in what it can differ by, and a functional lambda's symbol
+  is named after what it captures, which would be one function for every
+  argument. A lambda that captures no bound value is one function for
+  every one of them, and is read as it is outside a quantifier.
 - **An amortized replacement of a map's value.** A `Set` or a `Map` from
   another package holds a potential the prover knows through its methods'
   clauses, and inserting a new element or key is amortized. Replacing the
