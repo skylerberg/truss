@@ -566,6 +566,21 @@ let definition_states teller database (key : Names.key) =
           let failed explained =
             Some (diagnostic obligation.code span (obligation.message ^ explained))
           in
+          (* A body that would have defined a callee is hidden from another
+             package's proofs unless the callee is [transparent]. *)
+          let hidden =
+            let sentence markable =
+              match List.filter (fun (_, can) -> can = markable) obligation.hidden with
+              | [] -> ""
+              | callees ->
+                  Printf.sprintf " The body of %s is not visible in this package: give it %s."
+                    (String.concat ", " (List.map (fun (name, _) -> "`" ^ name ^ "`") callees))
+                    (if markable then
+                       "an `ensures` that says what is needed, or make it a `public transparent fn`"
+                     else "an `ensures` that says what is needed")
+            in
+            sentence true ^ sentence false
+          in
           ( {
               code = obligation.code;
               span;
@@ -579,16 +594,17 @@ let definition_states teller database (key : Names.key) =
                       " Running it on this template's text took longer than the time limit, so it \
                        is not known."
                 | Solved (Counterexample values) ->
-                    failed (counterexample (Logic.members obligation.query) obligation values)
+                    failed
+                      (counterexample (Logic.members obligation.query) obligation values ^ hidden)
                 | Solved Out_of_steps ->
                     failed
                       (" The solver ran out of steps, so it may hold but needs help: a `proof` \
                         block or a theorem."
-                      ^
-                      if Logic.untriggered obligation.query then
-                        " A quantified fact it may need has no term for the solver to use it by, \
-                         so an `assert` that names the term it is needed for may be enough."
-                      else ""));
+                      ^ (if Logic.untriggered obligation.query then
+                           " A quantified fact it may need has no term for the solver to use it \
+                            by, so an `assert` that names the term it is needed for may be enough."
+                         else "")
+                      ^ hidden));
             },
             obligation.cited ))
         (answers teller outcome.obligations)
