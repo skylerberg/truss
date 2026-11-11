@@ -56,6 +56,7 @@ type obligation = {
   cited : (Names.key * span) option;
       (** The clause it comes from, in the definition that states it, where that is not the one
           being proven: a callee's [requires]. *)
+  fixes : Diagnostic.fix list;  (** Edits of the definition proven that would show it. *)
   query : L.query;
   contracts_alone : L.query option;
       (** The query without what unfolding callees' definitions gave, where it has any: asked when
@@ -251,6 +252,8 @@ type context = {
       (** Each type's elements and model as a buffer's, where it is one. *)
   mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
   mutable known_calls : known_call list;  (** Each call running code can give a value. *)
+  mutable entry : string list;
+      (** The symbols of the definition's parameters and [self] as they arrive. *)
   mutable hidden_bodies : (string * (string * bool)) list;
       (** Each callee in another package whose body would define it but is not [transparent]: its
           symbol, with its name and whether it can be marked so. *)
@@ -357,10 +360,10 @@ let assume context frame term =
    after it. Inside a quantifier it is shown for each value the
    quantifier's premise admits, which is how a quantifier's body is shown
    to be well defined. *)
-let rec oblige ?evaluation ?cited context frame code span message goal =
+let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
   match obligation_at ?evaluation context frame code span message goal with
   | Some obligation ->
-      context.obligations <- { obligation with cited } :: context.obligations;
+      context.obligations <- { obligation with cited; fixes } :: context.obligations;
       assume context frame goal
   | None -> ()
 
@@ -426,6 +429,7 @@ and make_obligation ?evaluation context frame code span message goal =
     span;
     message;
     cited = None;
+    fixes = [];
     hidden;
     query;
     contracts_alone;
@@ -5183,6 +5187,105 @@ and check_valid context frame span ty term ~deep ~when_ =
 and check_built context frame (node : expression) ty term =
   check_valid context frame (at frame node) ty term ~deep:false ~when_:"for the value built here"
 
+(* A fix for a callee's [requires] that is about the definition's
+   parameters alone: the clause, with each of the callee's parameters
+   written as its argument, as a [requires] of the definition, which then
+   holds at every call of it instead. *)
+and requires_fix context frame (part : part) (clause : expression) term (values : passed list) =
+  let rec free = function
+    | L.Symbol name -> [ name ]
+    | L.Integer _ | L.Boolean _ | L.Bits _ -> []
+    | L.Apply (_, arguments) -> List.concat_map free arguments
+    | L.Forall (bound, body) | L.Exists (bound, body) ->
+        List.filter (fun name -> not (List.mem_assoc name bound)) (free body)
+  in
+  let fixed name =
+    List.mem name context.entry
+    || String.starts_with ~prefix:"constant." name
+    || String.starts_with ~prefix:"literal." name
+  in
+  let operand_origin = function
+    | Value (expression : expression) -> Some expression.origin
+    | Place (Local { origin; _ } | Constant { origin; _ } | Field { origin; _ }) -> Some origin
+    | Place _ -> None
+  in
+  let simple text =
+    String.for_all
+      (fun c ->
+        c = '_' || c = '.'
+        || Char.code c >= 128
+        || (c >= 'a' && c <= 'z')
+        || (c >= 'A' && c <= 'Z')
+        || (c >= '0' && c <= '9'))
+      text
+  in
+  let written =
+    List.filter_map
+      (fun (index, (parameter : Core.parameter)) ->
+        match List.find_opt (fun (passed : passed) -> passed.position = index) values with
+        | Some { operand = Some operand; _ } -> (
+            match operand_origin operand with
+            | Some origin ->
+                let text = quote frame.source origin in
+                Some (parameter.name, if simple text then text else "(" ^ text ^ ")")
+            | None -> None)
+        | _ -> None)
+      (List.mapi (fun index parameter -> (index, parameter)) part.parameters)
+  in
+  if frame.source.key <> Some context.home || not (List.for_all fixed (free term)) then []
+  else
+    let clause_text = quote part.callee clause.origin in
+    let buffer = Buffer.create (String.length clause_text) in
+    let length = String.length clause_text in
+    let identifier c =
+      c = '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+    in
+    let rec go index =
+      if index < length then
+        if identifier clause_text.[index] && (index = 0 || not (identifier clause_text.[index - 1]))
+        then begin
+          let stop = ref index in
+          while !stop < length && identifier clause_text.[!stop] do
+            incr stop
+          done;
+          let word = String.sub clause_text index (!stop - index) in
+          let after_dot = index > 0 && clause_text.[index - 1] = '.' in
+          (match List.assoc_opt word written with
+          | Some text when not after_dot -> Buffer.add_string buffer text
+          | _ -> Buffer.add_string buffer word);
+          go !stop
+        end
+        else begin
+          Buffer.add_char buffer clause_text.[index];
+          go (index + 1)
+        end
+    in
+    go 0;
+    let required = Buffer.contents buffer in
+    let text = Lazy.force frame.source.text in
+    (* The body's brace starts a line where the header has clauses, and
+       ends its first line where it has none. *)
+    let rec line_brace from =
+      match String.index_from_opt text from '\n' with
+      | Some at when at + 1 < String.length text && text.[at + 1] = '{' -> Some (at + 1)
+      | Some at -> line_brace (at + 1)
+      | None -> None
+    in
+    let edit =
+      match line_brace 0 with
+      | Some at -> Some (Diagnostic.insert at ("  requires " ^ required ^ "\n"))
+      | None -> (
+          match String.index_opt text '{' with
+          | Some at when at > 0 && text.[at - 1] = ' ' ->
+              Some
+                (Diagnostic.replace (Source.span (at - 1) at) ("\n  requires " ^ required ^ "\n"))
+          | _ -> None)
+    in
+    match edit with
+    | Some edit when written <> [] || part.parameters = [] ->
+        [ Diagnostic.fix (Printf.sprintf "Add `requires %s`" required) [ edit ] ]
+    | _ -> []
+
 (* A call to a function whose contract the prover reads: its [requires]
    must hold, its [ensures] holds after, and a recursive call decreases. *)
 and contract_call context frame (node : expression) (call_ : call) path contract
@@ -5342,6 +5445,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
             oblige context frame Requires span
               ?cited:
                 (Option.map (fun key -> (key, span_of part.callee clause.origin)) part.callee.key)
+              ~fixes:(requires_fix context frame part clause term values)
               (Printf.sprintf "`%s` may not hold for this call to `%s`."
                  (quote part.callee clause.origin) (Path.show path))
               term;
@@ -8540,6 +8644,7 @@ let new_context database ~home ~current ~terminates ~measures =
     buffers = Hashtbl.create 16;
     equalities = [];
     known_calls = [];
+    entry = [];
     hidden_bodies = [];
     cursors = [];
     proving = false;
@@ -8709,6 +8814,9 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
               | _ -> unsupported returns_span "`self` without a type"
             in
             let self = arrive context frame "self" self_type in
+            (match self with
+            | L.Symbol symbol -> context.entry <- symbol :: context.entry
+            | _ -> ());
             (* A step of an update may be given a value in the middle of
                one. *)
             if not updating_helper then assume_valid context frame self_type self;
@@ -8717,7 +8825,9 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
             let ty = parameter.type_ in
             let term = arrive context frame ("parameter." ^ parameter.name) ty in
             (match term with
-            | L.Symbol symbol -> context.values <- (symbol, parameter.name) :: context.values
+            | L.Symbol symbol ->
+                context.values <- (symbol, parameter.name) :: context.values;
+                context.entry <- symbol :: context.entry
             | _ -> ());
             assume_valid context frame ty term;
             bind frame local ty term)
