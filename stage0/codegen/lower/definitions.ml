@@ -32,7 +32,7 @@ let context ?(checks = false) database target =
     {
       type_interface = (fun path -> Query.demand database Environment.type_interface path);
       normalize = Interface.Impls.normalize database ~bounds:(fun _ -> []);
-      capabilities = (fun _ -> []);
+      normalize_capabilities = Interface.Impls.normalize_capabilities database ~bounds:(fun _ -> []);
       cursor_fields = (fun yielding -> !cursor_fields yielding);
     }
   in
@@ -193,30 +193,8 @@ let code_of context (path : Path.t) type_arguments : code =
       | None, _ -> bug "%s is not a function" (Path.show path))
   | Member_constant _ | Impl _ | Derived _ | Law_proof _ -> bug "%s is not code" (Path.show path)
 
-(* The C signature of a function from its interface, after substitution:
-   the result pointer when the result is too large, each parameter, the
-   mask of defaults passed when there are defaults, and then the evidence
-   for each capability it uses. *)
 let panic_path = Monomorphic.panic_capability
-
-(* The capabilities a function takes evidence for, in path order: those it
-   uses, with capability parameters replaced by what they stand for, but
-   [Panic], which has no evidence. *)
-let evidence_for (substitution : T.substitution) (uses : T.capability list) =
-  List.concat_map
-    (function
-      | T.Capability path -> [ path ]
-      | Capability_parameter p -> (
-          match List.assoc_opt p substitution with
-          | Some (T.Capabilities set) ->
-              List.filter_map (function T.Capability q -> Some q | _ -> None) set
-          | _ -> [])
-      | Capability_projection { name; _ } ->
-          bug "the associated capability set %s is not normalized" name
-      | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
-    uses
-  |> List.filter (fun path -> not (Path.equal path panic_path))
-  |> List.sort_uniq Path.compare
+let evidence_for context = Monomorphic.evidence_for context.monomorphic
 
 (* How a function's result is passed, and whether it returns at all. *)
 let result_of context substitution (result : T.result) =
@@ -226,6 +204,10 @@ let result_of context substitution (result : T.result) =
       (Convention.result context.env (Monomorphic.ground context.monomorphic substitution ty), true)
   | Yields _ | Lends _ -> (Convention.Nothing, true)
 
+(* The C signature of a function from its interface, after substitution:
+   the result pointer when the result is too large, each parameter, the
+   mask of defaults passed when there are defaults, and then the evidence
+   for each capability it uses. *)
 let lir_signature context substitution ~(parameters : (T.mode * T.ty) list) ~has_defaults
     ?(uses = []) (result : T.result) : Lir.signature * Convention.result =
   let ground ty = Monomorphic.ground context.monomorphic substitution ty in
@@ -236,7 +218,7 @@ let lir_signature context substitution ~(parameters : (T.mode * T.ty) list) ~has
       parameters
   in
   let mask = if has_defaults then [ Lir.Raw (Integer UInt64) ] else [] in
-  let evidence = List.map (fun _ -> Convention.evidence) (evidence_for substitution uses) in
+  let evidence = List.map (fun _ -> Convention.evidence) (evidence_for context substitution uses) in
   (Convention.signature ~returns (written @ mask @ evidence) result_ty, result_ty)
 
 let has_defaults (signature : T.signature) =

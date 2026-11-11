@@ -3,13 +3,31 @@ let bug format = Compiler_bug.bug ~stage:"Monomorphic" format
 type context = {
   type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;
-  capabilities : Types.parameter -> Path.t list;
+  normalize_capabilities : Types.capability list -> Types.capability list;
   cursor_fields : Ground.yielding -> (string * Memory_layout.member) list;
 }
 
 let mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
 let builtin builtin = Ground.Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let panic_capability = Well_known.path Panic
+
+(* The capabilities of a set in an instance, in path order. *)
+let capabilities context substitution (set : Types.capability list) : Path.t list =
+  List.sort_uniq Path.compare
+    (List.map
+       (function
+         | Types.Capability path -> path
+         | Capability_parameter p ->
+             bug "the capability parameter %s of %s is not substituted" p.name (Path.show p.owner)
+         | Capability_projection { name; _ } ->
+             bug "the associated capability set %s is not normalized" name
+         | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
+       (context.normalize_capabilities (Types.substitute_capabilities substitution set)))
+
+let evidence_for context substitution uses =
+  List.filter
+    (fun path -> not (Path.equal path panic_capability))
+    (capabilities context substitution uses)
 
 let rec ground context substitution (ty : Types.ty) : Ground.ty =
   match context.normalize (Types.substitute substitution ty) with
@@ -40,17 +58,7 @@ and ground_argument context substitution (argument : Types.argument) : Ground.ar
   | Value (Known value) -> Value value
   | Value (Value_parameter p) -> bug "the value parameter %s is not substituted" p.name
   | Value (Value_variable _) -> bug "a value the checker left undecided"
-  | Capabilities set ->
-      Capabilities
-        (List.sort_uniq Path.compare
-           (List.concat_map
-              (function
-                | Types.Capability path -> [ path ]
-                | Capability_parameter p -> context.capabilities p
-                | Capability_projection { name; _ } ->
-                    bug "the associated capability set %s is not normalized" name
-                | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
-              set))
+  | Capabilities set -> Capabilities (capabilities context [] set)
 
 and ground_function context substitution (f : Types.function_type) : Ground.function_type =
   let f = Types.substitute_function substitution f in
@@ -62,18 +70,7 @@ and ground_function context substitution (f : Types.function_type) : Ground.func
   {
     parameters = List.map (fun (m, ty) -> (mode m, ground context [] ty)) f.inputs;
     result = ground_result f.output;
-    uses =
-      List.sort_uniq Path.compare
-        (List.filter
-           (fun path -> not (Path.equal path panic_capability))
-           (List.concat_map
-              (function
-                | Types.Capability path -> [ path ]
-                | Capability_parameter p -> context.capabilities p
-                | Capability_projection { name; _ } ->
-                    bug "the associated capability set %s is not normalized" name
-                | Capability_variable _ -> bug "a set of capabilities the checker left unsolved")
-              f.uses));
+    uses = evidence_for context [] f.uses;
   }
 
 let usize = builtin USize
