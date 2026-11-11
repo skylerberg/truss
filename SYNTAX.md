@@ -1362,7 +1362,8 @@ mut grid.cell(position).visit()
   its own. A part cannot be given up with `own`, and `let` keeps one only by
   copying it.
 - **A lending method yields exactly once on every path.** A path with no
-  `yield`, or with two, is a compile error.
+  `yield`, or with two, is a compile error. A loop body that yields and then
+  returns is one path with one `yield`.
 - A lending method cannot drive a `for` loop or be pulled.
 
 A method can also lend a value that it builds around its parts. This is how
@@ -3132,6 +3133,18 @@ proof Ordered.transitive for Path {
 ```
 
 The law's parameters are read-only.
+
+A proof for a generic `impl` names the type as the `impl` does, with its
+generic parameters and their bounds:
+
+```truss
+proof Ordered.transitive for Box[Item: Ordered] {
+  box_order_is_transitive(first, second: second, third: third)
+}
+```
+
+The parameters can have other names than the `impl`'s, and they have the
+`impl`'s bounds: the law is proven once, for every type that the `impl` is for.
 
 ### Writing specifications
 

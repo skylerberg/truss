@@ -69,6 +69,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
       | Some (Trait_interface interface) ->
           { T.owner = path; name = "Self" } :: of_generics interface.trait_generics
       | Some (Impl_interface interface) -> of_generics interface.impl_generics
+      | Some (Law_proof_interface interface) -> of_generics interface.generics
       | _ -> []
     in
     declared key.path

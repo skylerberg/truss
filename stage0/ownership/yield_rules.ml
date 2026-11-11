@@ -13,6 +13,10 @@ let add left right = match (left, right) with Zero, other | other, Zero -> other
 (* The yield counts at the ends of the paths through a body. *)
 let yield_counts (body : Core.block) : count list =
   let returned = ref [] in
+  (* For each enclosing loop, innermost first: the counts of the paths that
+     left it by [break], and of those that ended an iteration by
+     [continue]. *)
+  let loops = ref [] in
   let rec block counts (body : Core.block) =
     let counts = List.fold_left statement counts body.statements in
     match body.value with Some value -> evaluated counts value | None -> counts
@@ -30,9 +34,22 @@ let yield_counts (body : Core.block) : count list =
     | Yield _ -> List.map (fun count -> add count One) counts
     | Evaluate value | Let { value = Value value; _ } -> evaluated counts value
     | For { body; _ } | While { body; _ } ->
-        if block [ Zero ] body <> [ Zero ] then
-          List.concat_map (fun count -> [ count; add count Many ]) counts
-        else counts
+        let broken = ref [] and continued = ref [] in
+        loops := (broken, continued) :: !loops;
+        (* The paths at the start of an iteration: those that reach the
+           loop, and those that reach the end of the body or a [continue].
+           A body whose every path returns adds none, so the paths after
+           the loop are those that reached it. There are three counts, so
+           the set stops growing. *)
+        let rec before_iteration reached =
+          continued := [];
+          let ended = block reached body in
+          let next = List.sort_uniq compare (reached @ ended @ !continued) in
+          if next = reached then reached else before_iteration next
+        in
+        let reached = before_iteration (List.sort_uniq compare counts) in
+        loops := List.tl !loops;
+        List.sort_uniq compare (reached @ !broken)
     (* Every branch runs, so the yields of the branches add up. *)
     | Parallel branches | Concurrent branches -> List.fold_left statement counts branches
     | Let { value = Place _; _ } | Assign _ | Compound_assign _ | Proof _ | Assert _ -> counts
@@ -47,6 +64,19 @@ let yield_counts (body : Core.block) : count list =
     | Return _ ->
         returned := counts @ !returned;
         []
+    | Break -> (
+        match !loops with
+        | (broken, _) :: _ ->
+            broken := counts @ !broken;
+            []
+        | [] -> counts)
+    | Continue -> (
+        match !loops with
+        | (_, continued) :: _ ->
+            continued := counts @ !continued;
+            []
+        | [] -> counts)
+    | Task_exit { exit; _ } -> expression counts exit
     | Block body -> block counts body
     | _ -> counts
   in

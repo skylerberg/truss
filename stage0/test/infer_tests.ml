@@ -450,6 +450,26 @@ let () =
          proof Ordered.agrees_with_equal for Pair {\n\
         \  let _ = same(first, second: second)\n\
          }\n");
+  test "a law's proof for a generic impl is checked under its own generic parameters" (fun () ->
+      fine
+        "type Box[Item](item: Item)\n\n\
+         fn smaller[Item: Ordered](first: Box[Item], second: Box[Item]) -> Bool {\n\
+        \  first.item < second.item\n\
+         }\n\n\
+         impl Equal for Box[Item: Equal] {\n\
+        \  fn equal(self, other: Box[Item]) -> Bool {\n\
+        \    self.item == other.item\n\
+        \  }\n\
+         }\n\n\
+         impl Ordered for Box[Item: Ordered] {\n\
+        \  fn compare(self, other: Box[Item]) -> Ordering {\n\
+        \    self.item.compare(other.item)\n\
+        \  }\n\
+         }\n\n\
+         proof Ordered.transitive for Box[Element: Ordered] {\n\
+        \  let _ = smaller(first, second: second)\n\
+        \  let _ = first.item < third.item\n\
+         }\n");
   test "a law's proof names no parameter of another law" (fun () ->
       one_diagnostic
         "type Pair(first: UInt8, second: UInt8)\n\

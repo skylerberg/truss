@@ -387,6 +387,60 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
 
 (* [impl]s *)
 
+(* The prover checks a law once, for every instantiation of the [impl]'s
+   generic parameters, and reads the proof for all of them. So the proof
+   can assume of a parameter only what the [impl] requires of it: with a
+   bound that the [impl] lacks, the law would be taken as proven for types
+   that the proof's reasoning does not cover. The proof's parameters are
+   the [impl]'s by position. *)
+let check_proof_bounds state (written : type_head) (generics : T.generic list)
+    (impl : T.impl_interface) =
+  if List.length generics = List.length impl.impl_generics then begin
+    let renaming : T.substitution =
+      List.map2
+        (fun (proof : T.generic) (of_impl : T.generic) ->
+          ( proof.generic,
+            match of_impl.kind with
+            | Type_generic _ -> T.Type (T.Parameter of_impl.generic)
+            | Value_generic -> T.Value (T.Value_parameter of_impl.generic)
+            | Capability_generic -> T.Capabilities [ T.Capability_parameter of_impl.generic ] ))
+        generics impl.impl_generics
+    in
+    let impl_bounds parameter =
+      List.concat_map
+        (fun (generic : T.generic) ->
+          match generic.kind with
+          | Type_generic bounds when generic.generic = parameter -> bounds
+          | _ -> [])
+        impl.impl_generics
+    in
+    List.iteri
+      (fun index ((proof : T.generic), (of_impl : T.generic)) ->
+        match proof.kind with
+        | Type_generic bounds ->
+            List.iter
+              (fun (bound : T.trait_reference) ->
+                if
+                  Option.is_none
+                    (Impls.implements state.database ~bounds:impl_bounds
+                       (T.Parameter of_impl.generic)
+                       (T.substitute_trait renaming bound))
+                then
+                  let span =
+                    match List.nth_opt written.generics index with
+                    | Some (generic : generic_parameter) -> generic.span
+                    | None -> written.span
+                  in
+                  report state Unsatisfied_bound span
+                    (Printf.sprintf
+                       "The `impl` does not require `%s: %s`, so this proof cannot assume it: the \
+                        law is proven for every type that the `impl` is for."
+                       proof.generic.name (T.show_trait bound)))
+              bounds
+        | Value_generic | Capability_generic -> ())
+      (List.combine generics impl.impl_generics)
+  end
+
 let show_signature (signature : T.signature) =
   let mode = function T.Read -> "" | Mut -> "mut " | Own -> "own " in
   Printf.sprintf "(%s)%s"
@@ -777,16 +831,33 @@ let check state =
             check_private_in_public state (signature_types lowered) span
         (* A law's proof is of a law its trait has, as a type that
            implements the trait keeps it. *)
-        | None, Law_proof { law; type_; _ }, Law_proof_interface { trait; for_type; _ } ->
+        | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ }
+          -> (
             (match Query.demand database Summary.trait_header trait.trait with
             | Some header when not (List.mem law.text header.laws) ->
                 report state Unknown_member law.span
                   (Printf.sprintf "`%s` has no law `%s`." (T.show_trait trait) law.text)
             | _ -> ());
-            if (not (T.is_error for_type)) && Option.is_none (implements state for_type trait) then
-              report state No_impl type_.span
-                (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
-                   (T.show for_type) (T.show_trait trait))
+            (* A head with the wrong number of parameters is reported as that. *)
+            let arity_matches =
+              match for_type with
+              | T.Named { path; _ } -> (
+                  match Query.demand database Summary.generics_of path with
+                  | Some expected -> List.length expected = List.length generics
+                  | None -> true)
+              | _ -> true
+            in
+            if arity_matches && not (T.is_error for_type) then
+              match implements state for_type trait with
+              | None ->
+                  report state No_impl type_.span
+                    (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
+                       (T.show for_type) (T.show_trait trait))
+              | Some (Impls.From_impl { impl; _ }) ->
+                  Option.iter
+                    (check_proof_bounds state type_ generics)
+                    (Impls.impl_interface database impl)
+              | Some _ -> ())
         | None, Type_definition { name; body; clauses; _ }, Type_interface interface ->
             (match body with
             | Fields fields -> check_duplicates state "field" (field_names fields)

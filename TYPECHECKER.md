@@ -737,7 +737,13 @@ written inside it, and neither check depends on the other:
   trait. Its body is checked with the law's parameters in scope, as read-only
   locals. Their types are the law's, with `Self` and the trait's parameters
   replaced by the proof's type and trait arguments. The core form of the proof
-  has those parameters, so that the prover binds them to the law's values.
+  has those parameters, so that the prover binds them to the law's values. The
+  proof names its type as an `impl` does, with generic parameters of its own,
+  which its interface has. The prover checks a law once for every
+  instantiation of the `impl`, so the proof's parameters must have exactly the
+  `impl`'s bounds: with fewer, the type would not implement the trait, and
+  with a bound that the `impl` lacks, the law would be taken as proven for
+  types that the proof's reasoning does not cover.
 - **A method that overrides a provided method** must have exactly the provided
   method's signature. The provided method must be pure, have a `time` clause,
   and mutate none of its arguments, so that its body can serve as its
@@ -1507,7 +1513,10 @@ fixes.
 - **A `lends` method yields exactly once on every path,** as Swift checks its
   `_read` and `_modify` accessors. The checker reports a path that has no
   `yield` or more than one. Every branch of a `parallel` block runs, so the
-  yields of its branches are added. The yielded part has the mode that the
+  yields of its branches are added. A loop is counted by its paths: those that
+  reach the end of the body or a `continue` start another iteration, and those
+  that `break` or `return` do not, so a body that yields and then returns
+  yields once. The yielded part has the mode that the
   signature states, and can be a part of `self` or a value that the method
   created. A `lends` method cannot drive a `for` loop or be pulled.
 - **A lending call borrows its whole receiver,** for the rest of the caller's

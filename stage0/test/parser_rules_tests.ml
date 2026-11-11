@@ -134,6 +134,10 @@ let () =
         "(public (theorem keeps[Element] ((items: List[Element])) (ensures true) (block)))";
       definition "proof Monoid.associative for Int64 {\n  lemma()\n}"
         "(proof Monoid.associative for Int64 (block (call lemma)))");
+  test "a law's proof names its type as an impl does, with generic parameters" (fun () ->
+      definition "proof Ordered.transitive for Box[Item: Ordered] {\n  lemma()\n}"
+        "(proof Ordered.transitive for Box[Item: Ordered] (block (call lemma)))";
+      error "proof Ordered.transitive for any Shown {}" ~code:Unexpected_token ~at:"any");
   test "a test's name is a plain string" (fun () ->
       error "test \"a${b}\" {}" ~code:Interpolation_not_allowed ~at:"\"a");
   test "an impl takes no visibility" (fun () ->
