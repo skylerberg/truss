@@ -491,10 +491,9 @@ with its number of paths. No step goes around a loop: each loop is cut at
 its head by its invariant, as below. The right side of `&&`, `||`, or
 `==>` runs on only one path, so when it changes a local, as a call with a
 `mut` argument does, that path joins the one where it did not run, as the
-two arms of an `if` do. What the right side of `||` spends is joined the
-same way. What the right side of `&&` spends is counted as if it ran,
-which is an upper bound, and is joined only for a counter that counts
-exactly. A `match` arm's guard runs only where its patterns matched, so
+two arms of an `if` do. What the right side spends is counted as if it
+ran, which is an upper bound, and is joined the same way only for a
+counter that counts exactly. A `match` arm's guard runs only where its patterns matched, so
 the next arm is tried where they did not, joined with where they did and
 the guard, which may change locals the same way, was false. A binding
 that a pattern lends `mut` is a local of the arm. Wherever the arm ends,
@@ -920,8 +919,10 @@ The prover adds a ghost counter for each resource that has a cost clause:
 | `allocated_bytes` | The bytes of each allocation, and each callee's `allocated_bytes` |
 | `calls(target)` | Each call to the target, and each callee's count for it |
 
-- **A specification spends nothing.** A `requires`, an `ensures`, an
-  invariant, or a bound never runs, so what it calls is not counted.
+- **A specification spends nothing.** A `requires`, an `ensures`, a
+  type's or a loop's invariant, a law, or a bound never runs, so what it
+  calls is not counted, wherever it is read: an invariant read to check a
+  value's validity counts nothing either.
 - **A counter is an `Integer` on each path,** increased at each call and
   each iteration, so costs are proven by the same verification conditions
   as everything else. Where paths join, a counter is what the path taken

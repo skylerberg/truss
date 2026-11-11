@@ -1703,21 +1703,23 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
    [&&] keeps what its right side binds, as an [is] does. *)
 and short_circuit context frame right ~runs ~otherwise ~binds combine =
   let after, right_value = value context (restrict frame runs) right in
-  (* Where the right side binds, as [&&] does, what it spends is an upper
-     bound on what the expression spends, which is all a counter that
-     bounds from above needs. Elsewhere, and for a counter that counts
-     exactly, the paths where it ran and did not run are joined. *)
+  (* What the right side spends is an upper bound on what the expression
+     spends, which is all a counter that bounds from above needs; for one
+     that counts exactly, the paths where it ran and did not run are
+     joined. *)
   let counts_exactly =
     List.exists (fun (counter : Costs.counter) -> counter.counting = Exactly) context.counters
   in
   let changed =
     Locals.exists (fun id term -> Locals.find_opt id after.locals <> Some term) frame.locals
     || after.self <> frame.self
-    || ((counts_exactly || not binds) && after.spent <> frame.spent)
+    || (counts_exactly && after.spent <> frame.spent)
   in
   if not changed then
     Some
-      ((if binds then { after with condition = frame.condition } else frame), combine right_value)
+      ( (if binds then { after with condition = frame.condition }
+         else { frame with spent = after.spent }),
+        combine right_value )
   else
     match
       join context ~value_type:T.bool
@@ -3161,9 +3163,14 @@ and what_a_lambda_does context function_type term ~called ~arguments ~start_fres
 (* A clause's value: a specification, which never runs, so it spends
    nothing whatever it calls. *)
 and clause_value context frame (clause : expression) =
+  specification context (fun () -> value context frame clause)
+
+(* Reading what never runs, as a specification, which spends nothing. *)
+and specification : 'a. _ -> (unit -> 'a) -> 'a =
+ fun context read ->
   let saved = context.counters in
   context.counters <- [];
-  Fun.protect ~finally:(fun () -> context.counters <- saved) (fun () -> value context frame clause)
+  Fun.protect ~finally:(fun () -> context.counters <- saved) read
 
 (* A lambda whose body is functional, as a function in the logic: applied,
    it is its body. Lambdas with the same body over the same captured values
@@ -3532,7 +3539,7 @@ and law_fact context frame source ~substitution (law : law) =
       let range =
         L.conjunction (List.map2 (fun symbol ty -> in_range ty (L.Symbol symbol)) symbols types)
       in
-      match block_value context inside law.body with
+      match specification context (fun () -> block_value context inside law.body) with
       | Some (_, holds) ->
           Some
             (L.Forall
@@ -3853,7 +3860,8 @@ and tagged_template context frame (node : expression) texts (made : expression) 
           assume_valid context frame tag_type result;
           List.iter
             (fun (clause : expression) ->
-              assume context frame (snd (value context { entry with result = Some result } clause)))
+              assume context frame
+                (snd (clause_value context { entry with result = Some result } clause)))
             own.ensures;
           let frame =
             spend context frame
@@ -4921,7 +4929,8 @@ and validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = []) t
       | Some (source, written) -> (
           let inner = type_frame context frame source ty ~self:(Some term) in
           try
-            L.conjunction (List.map (fun invariant -> snd (value context inner invariant)) written)
+            L.conjunction
+              (List.map (fun invariant -> snd (clause_value context inner invariant)) written)
           with Unsupported _ | Foreign_unsupported _ when assuming -> L.Boolean true)
       | None -> L.Boolean true
     in
@@ -6999,7 +7008,7 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
         List.iter
           (fun (clause : expression) ->
             let _, term =
-              value context { at with result; yielded = Some yielded; finished } clause
+              clause_value context { at with result; yielded = Some yielded; finished } clause
             in
             oblige context at Ensures (span_of at.source clause.origin)
               (Printf.sprintf "`%s` may not hold %s." (quote at.source clause.origin) when_)
@@ -8491,7 +8500,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       | _ ->
           List.iter
             (fun (ensured : expression) ->
-              let _, term = value context frame ensured in
+              let _, term = clause_value context frame ensured in
               oblige context frame Ensures (at frame ensured)
                 (Printf.sprintf "`%s` may not hold when the function returns."
                    (quote source ensured.origin))
@@ -8626,7 +8635,7 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
         List.iter
           (fun clause -> assume context start (snd (clause_value context inside clause)))
           law.requires;
-        match block_value context inside law.body with
+        match specification context (fun () -> block_value context inside law.body) with
         | Some (_, holds) ->
             oblige context start Law at
               (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (T.show_trait trait) law.name
@@ -8660,7 +8669,7 @@ let type_ database (source : source) ~path =
       let at_value = { start with self = Some value_; old_self = Some value_ } in
       List.iter
         (fun invariant ->
-          let after, holds = value context at_value invariant in
+          let after, holds = clause_value context at_value invariant in
           assume context after holds)
         invariants;
       Option.iter
