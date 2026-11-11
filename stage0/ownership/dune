@@ -6,13 +6,11 @@
   path
   well_known
   types
-  checked
   core
   core_walk
   infer
   interface
   resolve
   syntax
-  syntax_walk
   diagnostic
   source))

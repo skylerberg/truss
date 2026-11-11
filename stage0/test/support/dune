@@ -10,11 +10,9 @@
   workspace
   diagnostic
   documents
-  source
   types
   resolve
   interface
   infer
   core
-  core_walk
-  type_checker))
+  core_walk))
