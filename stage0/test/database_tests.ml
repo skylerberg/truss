@@ -133,7 +133,8 @@ let () =
       | 0 ->
           (* A request is a directory, and the answer its count of errors, or
              [-1] to stop. *)
-          Database.serve ~handle:(fun ~progress directory ->
+          Database.serve ~key:(Database.server_key directory) ~handle:(fun ~progress request ->
+              let directory = request in
               progress "working";
               if directory = "stop" then begin
                 Database.stop ();
@@ -145,7 +146,7 @@ let () =
           let progressed = ref false in
           let call request =
             match
-              Database.call ~program:"/nonexistent"
+              Database.call ~program:"/nonexistent" ~key:(Database.server_key directory)
                 ~progress:(fun text -> if text = "working" then progressed := true)
                 request
             with
@@ -458,6 +459,45 @@ let base_of session =
       | Error message ->
           fail "%s" message;
           None)
+
+let () =
+  test "a worktree that a background process serves is compared through a snapshot of its state"
+    (fun () ->
+      fresh_store ();
+      let root = repository () in
+      let other = Filename.concat (Lazy.force scratch) (Printf.sprintf "served-%d" !counter) in
+      git root [ "worktree"; "add"; "-q"; other; "-b"; "served" ];
+      add_caller other;
+      let key = Database.server_key other in
+      match Unix.fork () with
+      | 0 ->
+          Database.serve ~key ~handle:(fun ~progress:_ request ->
+              if request = "stop" then begin
+                Database.stop ();
+                -1
+              end
+              else errors request);
+          Unix._exit 0
+      | child ->
+          let call request =
+            match Database.call ~program:"/nonexistent" ~key ~progress:ignore request with
+            | Ok (count : int) -> count
+            | Error message ->
+                fail "%s" message;
+                -2
+          in
+          ignore (call other);
+          change_interface root;
+          let mine, _ = session root in
+          (match Database.other_worktrees mine with
+          | [ found ] when Database.root found = Unix.realpath other -> (
+              match Database.overlap_with mine found with
+              | Error message -> fail "%s" message
+              | Ok [] -> fail "found no overlap"
+              | Ok _ -> ())
+          | found -> fail "compared with [%s]" (String.concat "; " (List.map Database.root found)));
+          ignore (call "stop");
+          ignore (Unix.waitpid [] child))
 
 let () =
   test "comparing with the base finds the changed signature" (fun () ->

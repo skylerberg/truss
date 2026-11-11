@@ -435,7 +435,7 @@ let handle ~progress request =
   in
   { output = Buffer.contents buffer; outcome }
 
-let serve () = Database.serve ~handle
+let serve key = Database.serve ~key ~handle
 
 (* The command's first word, and whether it is one that runs no code of a
    worktree, which the client runs itself. *)
@@ -467,14 +467,16 @@ let request arguments =
     columns = Output.columns ();
   }
 
-(* Asks a running background process, without starting one. *)
-let ask_running arguments =
-  Database.call ~start_server:false ~progress:Output.eprint (request arguments)
+(* Asks each running background process, without starting one. *)
+let ask_running arguments : (response, string) result list =
+  List.map
+    (fun key -> Database.call ~start_server:false ~key ~progress:Output.eprint (request arguments))
+    (Database.servers ())
 
-(* [truss clean]: stops the background process, which holds the store
-   open, and deletes the store. *)
+(* [truss clean]: stops every background process, each of which holds the
+   store open, and deletes the store. *)
 let clean_store () =
-  ignore (ask_running [ "stop" ] : (response, string) result);
+  ignore (ask_running [ "stop" ]);
   Database.reset ();
   let directory = Database.store_directory () in
   match remove directory with
@@ -482,6 +484,22 @@ let clean_store () =
   | exception Unix.Unix_error (error, _, _) ->
       Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
       2
+
+(* The directory a command line is about: what [-C] names, from the current
+   directory, or the current directory. Its project's background process is
+   the one that answers. *)
+let directory_of arguments =
+  let rec named = function
+    | "-C" :: directory :: _ -> Some directory
+    | option :: _ when String.length option > 2 && String.starts_with ~prefix:"-C" option ->
+        Some (String.sub option 2 (String.length option - 2))
+    | _ :: rest -> named rest
+    | [] -> None
+  in
+  match named arguments with
+  | Some directory when Filename.is_relative directory -> Filename.concat (Sys.getcwd ()) directory
+  | Some directory -> directory
+  | None -> Sys.getcwd ()
 
 (* Runs a command line as the client: the command in its own process, or
    in the background process. *)
@@ -495,16 +513,27 @@ let client argv =
   | None | Some "new" -> local ()
   | _ when no_server -> local ()
   | Some ("status" | "stop") -> (
-      match (ask_running arguments : (response, string) result) with
-      | Ok response ->
-          Output.print response.output;
-          finish response.outcome
-      | Error message ->
-          Output.eprint_line message;
-          0)
+      match ask_running arguments with
+      | [] ->
+          Output.eprint_line "No background process is running.";
+          0
+      | answers ->
+          List.fold_left
+            (fun status answer ->
+              match answer with
+              | Ok response ->
+                  Output.print response.output;
+                  max status (finish response.outcome)
+              | Error message ->
+                  Output.eprint_line message;
+                  status)
+            0 answers)
   | Some _ -> (
       match
-        (Database.call ~progress:Output.eprint (request arguments) : (response, string) result)
+        (Database.call
+           ~key:(Database.server_key (directory_of arguments))
+           ~progress:Output.eprint (request arguments)
+          : (response, string) result)
       with
       | Ok response ->
           Output.print response.output;

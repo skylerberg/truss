@@ -525,20 +525,61 @@ type overlap = Session.Graph.overlap =
 (* A commit of a worktree's files as they are, for merging. *)
 let commit_of_worktree root = Git.snapshot ~directory:root
 
-(* The same project in another worktree is at the same place under its
-   worktree's top. *)
+(* Where a root is in git: its repository's common directory, and its
+   place under its worktree's top. Neither changes while a process runs. *)
+let git_places : (string, string option * string option) Hashtbl.t = Hashtbl.create 8
+
+let git_place root =
+  match Hashtbl.find_opt git_places root with
+  | Some place -> place
+  | None ->
+      let place = (Git.common_directory root, Git.prefix root) in
+      Hashtbl.replace git_places root place;
+      place
+
+(* The sessions of the same project in the other worktrees of its
+   repository: those open in this process, and for each other worktree that
+   a background process serves, a snapshot of the state that process saves,
+   brought up to date with the worktree's files. The same project in another
+   worktree is at the same place under its worktree's top. *)
 let other_worktrees session =
   let root = root session in
-  let common = Git.common_directory root and prefix = Git.prefix root in
-  List.filter
-    (fun other ->
-      match Session.attachment other with
-      | Project { kind = Worktree other_root; _ } ->
-          other_root <> root && common <> None
-          && Git.common_directory other_root = common
-          && Git.prefix other_root = prefix
-      | _ -> false)
-    (Session.all ())
+  let common, prefix = git_place root in
+  let same_project other_root =
+    other_root <> root && common <> None && git_place other_root = (common, prefix)
+  in
+  let open_here =
+    List.filter
+      (fun other ->
+        match Session.attachment other with
+        | Project { kind = Worktree other_root; _ } ->
+            Session.key other = other_root && same_project other_root
+        | _ -> false)
+      (Session.all ())
+  in
+  let held = List.map Session.key open_here in
+  let served =
+    List.filter_map
+      (fun (other_root, name) ->
+        if
+          List.mem other_root held
+          || (not (same_project other_root))
+          || (not (String.equal name (session_name other_root)))
+          || (not (Sys.file_exists other_root))
+          || not (Session.Server.running other_root)
+        then None
+        else
+          Option.map
+            (fun snapshot ->
+              attach_project snapshot ~kind:(Worktree other_root) (Files.of_directory other_root);
+              update snapshot;
+              ignore (Engine.stabilize (Session.engine snapshot));
+              snapshot)
+            (Session.snapshot ~key:("snapshot:" ^ other_root) ~pointer:name
+               ~version:(Session.identity ()) ~bases:(fun () -> [ Lazy.force !standard ])))
+      (List.sort_uniq compare (Session.homes ()))
+  in
+  open_here @ served
 
 let commit_of session =
   match (project session).kind with
@@ -803,8 +844,22 @@ let kept () =
        (fun artifact -> (identity, artifact))
        (Session.find_result ~kind:"package" ~key:(standard_key identity)))
 
-let serve ~handle = Session.Server.serve ~idle:watch ~keep:kept ~handle
-let call = Session.Server.call
+(* What names the background process for a directory: its project's root.
+   A directory in no project is served by a process of its own. *)
+let server_key directory = Option.value (root_of directory) ~default:""
+
+(* A process serves one project, and ends when the project's directory is
+   gone. *)
+let serve ~key ~handle =
+  Session.Server.serve ~key
+    ~alive:(fun () -> key = "" || Sys.file_exists key)
+    ~idle:watch ~keep:kept ~handle
+
+let call ?program ?start_server ?key ~progress request =
+  let key = match key with Some key -> key | None -> server_key (Sys.getcwd ()) in
+  Session.Server.call ?program ?start_server ~key ~progress request
+
+let servers = Session.Server.serving
 let stop = Session.Server.stop
 let store_directory = Session.Server.store_directory
 

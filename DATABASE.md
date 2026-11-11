@@ -34,8 +34,8 @@ makes both possible. It:
 - answers questions about dependencies in terms of definitions: what reads
   a definition, what a change affected, what each `todo` blocks, and where
   two worktrees' changes overlap
-- runs as one background process per user and compiler, serving every
-  worktree and every command
+- runs as a background process for each project being worked on, so
+  commands in different worktrees are answered at once
 
 It does not:
 
@@ -844,31 +844,42 @@ chooses a version itself.
 
 ### The background process
 
-One background process per user and compiler serves every session on the
-machine, as Gradle's daemon and Bazel's server do. The first command starts
-it, detached from the terminal, with its output in `servers/server.log`, and
-it exits after three hours without a request, the default of both, or
-within a minute of its compiler being built again, since the new compiler's
-clients start a process of their own.
+Each project has a background process of its own, for each compiler, as
+each workspace has a Bazel server of its own. A command's client asks the
+process of the project its directory is in, which `-C` can name; the first
+command starts it, detached from the terminal, with its output in
+`servers/server.log`. It exits after three hours without a request, when
+its project's directory is gone, or within a minute of its compiler being
+built again, since the new compiler's clients start processes of their own.
 
+- **Commands in different projects are answered at once,** and so are
+  commands in different worktrees of one project, since each worktree's
+  copy of the project has a process of its own. This is what lets many
+  agents, each in a worktree, work at the same time: none waits for
+  another's test run. Commands in one worktree are answered one at a time.
+- **The processes share the store, and nothing in memory.** Two worktrees
+  whose states start from one whole state share its values on disk, and
+  each process holds its own nodes for it. A process finds as a fact what
+  another computed.
 - **It holds nothing that is not in the store.** What a session computed is
-  written when its command is done. The process keeps each session's engine
-  in memory so that the next command finds it there, and shares one base
-  between every session opened from it.
+  written when its command is done. The process keeps its session's engine
+  in memory so that the next command finds it there.
 - **Clients connect through a Unix socket** in `servers/`, named by the
-  compiler's identity. A socket's path has a limit of about 100 bytes, so a
+  compiler's identity and a hash of the project's root, with a file beside
+  it that says the root, by which `truss status` and `truss stop` find
+  every process. A socket's path has a limit of about 100 bytes, so a
   store with a long path puts the socket in `/tmp/truss-UID`, named by a
   hash of where it would have been. Both directories are the user's alone,
   and the one in `/tmp` is used only if it is: what travels over the socket
   is marshaled, so another user who could put a socket there could run code
   as this one. A lock beside it in the store keeps to one process per
-  compiler.
+  project and compiler.
 - **Without the background process,** as in CI, `--no-server` runs a
   command in its own process, against the same store. It takes the
   session's pointer lock first, so a pointer never has two writers, and it
   refuses, saying why, while the background process has that session open.
-- **Requests are answered one at a time.** Requests, progress, and answers
-  travel as OCaml's marshaled values, which is safe because the socket is
+- **A process answers one request at a time.** Requests, progress, and
+  answers travel as OCaml's marshaled values, which is safe because the socket is
   named by the compiler's identity, so both ends are the same program.
 - **It runs its client's own code.** The request and the answer are the
   client's own types, and the handler the client gives may send progress,
@@ -1021,10 +1032,12 @@ involved.
 
 ### When overlaps are found
 
-- **As work happens.** The background process sees every worktree of a
-  repository, which it tells by their common git directory. A `check` lists
-  where its worktree's changes meet those of every other open worktree of the
-  repository, in a section of its own. Overlaps are not diagnostics: nothing
+- **As work happens.** A `check` lists where its worktree's changes meet
+  those of every other worktree of the repository that a background process
+  serves, in a section of its own. It tells the worktrees of one repository
+  by their common git directory, and reads each other worktree through a
+  snapshot: the state that worktree's process last saved, opened without
+  its lock and brought up to date with the worktree's files. Overlaps are not diagnostics: nothing
   is wrong with either worktree's code, and every diagnostic in Truss is an
   error.
 - **Against a branch,** `overlap --with BRANCH` compares with the branch's
@@ -1148,10 +1161,13 @@ with the same inputs.
   really meet.
 - **Watching files with FSEvents and inotify,** in place of scanning stamps
   each second.
-- **Answering several requests at once.** The background process answers one
-  at a time, and a test run holds it until the run ends. States never change
-  each other and a base never changes, so sessions can be brought up to date
-  in parallel with no change to any stage.
+- **Answering several requests about one worktree at once.** A project's
+  background process answers one request at a time, and a test run holds it
+  until the run ends. A second command in the same worktree waits.
+- **Sharing a whole state in memory between worktrees.** Each background
+  process loads the whole state its session starts from. With one process
+  for every worktree, ten worktrees of a project held one copy in memory;
+  now they hold ten, and share only the store.
 - **Unrooting every stale root.** The diagnostics of a module that is
   removed stop being a root. Other roots stay until a driver unroots them:
   the key of a test that was deleted is still a root, and is still

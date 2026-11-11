@@ -29,18 +29,59 @@ let private_temporary_directory () =
   | _ | (exception Unix.Unix_error _) ->
       failwith (directory ^ " is not a directory that only this user can use.")
 
-(* The socket's address, and its lock beside it in the store. A socket's
-   path has a short limit, about 100 bytes, so one under a long store path
-   goes in a directory of the user's own in /tmp, named by a hash of where it
+(* A background process serves one key, which a client gives: a project's
+   root. Its socket and its lock are named by the compiler's identity and a
+   hash of the key, and a file beside them says the key. A socket's path
+   has a short limit, about 100 bytes, so one under a long store path goes
+   in a directory of the user's own in /tmp, named by a hash of where it
    would have been. *)
-let server_path identity = Filename.concat (servers_directory ()) (Identity.short identity)
+let server_path identity key =
+  Filename.concat (servers_directory ())
+    (Identity.short identity ^ "-" ^ String.sub (Blake3.to_hex (Blake3.hash key)) 0 16)
 
-let socket_path identity =
-  let path = server_path identity ^ ".socket" in
+let socket_path identity key =
+  let path = server_path identity key ^ ".socket" in
   if String.length path < 100 then path
   else
     Filename.concat (private_temporary_directory ())
       (String.sub (Blake3.to_hex (Blake3.hash path)) 0 16 ^ ".socket")
+
+(* Whether a process holds a lock file's lock. *)
+let locked path =
+  match Unix.openfile path [ O_RDWR; O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error _ -> false
+  | descriptor ->
+      Fun.protect
+        ~finally:(fun () -> Unix.close descriptor)
+        (fun () ->
+          match Unix.lockf descriptor F_TEST 0 with
+          | () -> false
+          | exception Unix.Unix_error _ -> true)
+
+(* The key this process serves, if it is a background process. *)
+let served : string option ref = ref None
+
+(* Whether a background process of this compiler serves a key now. A
+   process does not test its own lock: closing any descriptor of a file
+   gives up the process's lock on it. *)
+let running key =
+  !served = Some key
+  || locked (server_path (Identity.compute (Store.default_directory ())) key ^ ".lock")
+
+(* The keys that background processes of this compiler serve now. *)
+let serving () =
+  let identity = Identity.compute (Store.default_directory ()) in
+  let prefix = Identity.short identity ^ "-" in
+  let directory = servers_directory () in
+  Array.to_list (Sys.readdir directory)
+  |> List.filter_map (fun entry ->
+      if String.starts_with ~prefix entry && Filename.check_suffix entry ".key" then
+        let path = Filename.concat directory entry in
+        match In_channel.with_open_bin path In_channel.input_all with
+        | key when running key -> Some key
+        | _ | (exception Sys_error _) -> None
+      else None)
+  |> List.sort compare
 
 let idle_limit = 3. *. 3600.
 
@@ -53,22 +94,28 @@ type 'response message = Progress of string | Final of 'response
 let stopping = ref false
 let stop () = stopping := true
 
-let serve ~idle ~keep ~handle =
+let serve ~key ~alive ~idle ~keep ~handle =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let identity = Core.identity () in
-  let path = socket_path identity in
-  let lock = Unix.openfile (server_path identity ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644 in
+  let path = socket_path identity key in
+  let lock =
+    Unix.openfile (server_path identity key ^ ".lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
+  in
   match Unix.lockf lock F_TLOCK 0 with
   | exception Unix.Unix_error _ -> ()
   | () ->
       Core.serving := true;
+      served := Some key;
+      Out_channel.with_open_bin
+        (server_path identity key ^ ".key")
+        (fun out -> output_string out key);
       (try Unix.unlink path with Unix.Unix_error _ -> ());
       let socket = Unix.socket ~cloexec:true PF_UNIX SOCK_STREAM 0 in
       Unix.bind socket (ADDR_UNIX path);
       Unix.listen socket 16;
       let last = ref (Unix.time ()) in
       let last_collection = ref 0. in
-      while (not !stopping) && Unix.time () -. !last < idle_limit do
+      while (not !stopping) && Unix.time () -. !last < idle_limit && alive () do
         match Unix.select [ socket ] [] [] 1.0 with
         | exception Unix.Unix_error (EINTR, _, _) -> ()
         | [], _, _ ->
@@ -101,10 +148,11 @@ let serve ~idle ~keep ~handle =
       done;
       Core.reset ();
       (try Unix.unlink path with Unix.Unix_error _ -> ());
+      (try Sys.remove (server_path identity key ^ ".key") with Sys_error _ -> ());
       Unix.close lock
 
 (* Starts the background process, detached from the client's terminal. *)
-let start program =
+let start program key =
   let log = Filename.concat (servers_directory ()) "server.log" in
   match Unix.fork () with
   | 0 -> (
@@ -116,7 +164,7 @@ let start program =
           Unix.dup2 null Unix.stdin;
           Unix.dup2 out Unix.stdout;
           Unix.dup2 out Unix.stderr;
-          (try Unix.execv program [| program; "__serve" |] with _ -> ());
+          (try Unix.execv program [| program; "__serve"; key |] with _ -> ());
           Unix._exit 1
       | _ -> Unix._exit 0)
   | child -> ignore (Unix.waitpid [] child)
@@ -131,18 +179,20 @@ let connect path =
 
 let store_directory () = Store.default_directory ()
 
-let call ?program ?(start_server = true) ~progress request =
+(* Answers a request through the background process that serves a key,
+   starting it if it is not running. *)
+let call ?program ?(start_server = true) ~key ~progress request =
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
   let identity = Identity.compute (Store.default_directory ()) in
-  let path = socket_path identity in
   let program = Option.value program ~default:(Identity.executable ()) in
+  let path = socket_path identity key in
   let rec attempt tries =
     match connect path with
     | Some socket -> Some socket
     | None ->
         if tries = 0 || not start_server then None
         else begin
-          if tries = 50 then start program;
+          if tries = 50 then start program key;
           Unix.sleepf 0.1;
           attempt (tries - 1)
         end
@@ -170,5 +220,5 @@ let call ?program ?(start_server = true) ~progress request =
       | exception _ ->
           (try Unix.close socket with Unix.Unix_error _ -> ());
           Error
-            "the background process ended while answering; see its log in the store's \
-             servers              directory.")
+            "the background process ended while answering; see its log in the store's servers \
+             directory.")

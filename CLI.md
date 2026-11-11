@@ -729,15 +729,20 @@ results in memory makes each command O(change). The code database's
 background process is that process, as DATABASE.md's "The background
 process" describes, and the command line is its client:
 
-- **A command that reads code starts it if it is not running,** as Bazel
-  and Gradle do, sends it the command line and the current directory, and
-  shows what it answers. It runs the command line's own code, from that
+- **A command that reads code asks its project's background process,
+  and starts it if it is not running,** as Bazel and Gradle do. The project
+  is the one the command's directory is in, which is the current directory
+  or the one `-C` names. Each project has a process of its own, so commands
+  in different worktrees are answered at once. The command sends the
+  command line and the current directory, and shows what the process
+  answers. It runs the command line's own code, from that
   directory, so the answer is the same as in the command's own process.
   What a command writes to standard error, such as the status line, comes
   to the command as it is written, and its output and exit status when it is
   done.
-- **It ends after three hours without a command,** or on `truss stop`, and
-  `truss status` lists its sessions. `truss sync` brings a worktree's
+- **A process ends after three hours without a command,** when its
+  project's directory is gone, or on `truss stop`, which stops every
+  project's process. `truss status` lists the sessions of each. `truss sync` brings a worktree's
   session up to date and does nothing else.
 - **`--no-server` and `TRUSS_NO_SERVER=1` run a command in its own
   process,** against the same store, for CI, where a process that lives past
