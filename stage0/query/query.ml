@@ -11,6 +11,7 @@ type phase =
   | Bodies
   | Checks
   | Proofs
+  | Verdicts
   | Diagnostics
   | Lowering
   | Linking
@@ -26,11 +27,12 @@ let rank = function
   | Bodies -> 5
   | Checks -> 6
   | Proofs -> 7
-  | Diagnostics -> 8
-  | Lowering -> 9
-  | Linking -> 10
-  | Recursion -> 11
-  | Keys -> 12
+  | Verdicts -> 8
+  | Diagnostics -> 9
+  | Lowering -> 10
+  | Linking -> 11
+  | Recursion -> 12
+  | Keys -> 13
 
 let phase_name = function
   | Syntax -> "syntax"
@@ -40,6 +42,7 @@ let phase_name = function
   | Bodies -> "bodies"
   | Checks -> "checks"
   | Proofs -> "proofs"
+  | Verdicts -> "verdicts"
   | Diagnostics -> "diagnostics"
   | Lowering -> "lowering"
   | Linking -> "linking"
@@ -57,5 +60,6 @@ let get context input key =
   match Incremental.read context input key with Some value -> value | None -> raise Not_found
 
 let demand = Incremental.demand
+let known = Incremental.known
 
 exception Cycle = Incremental.Cycle
