@@ -193,7 +193,7 @@ and expression_kind =
 
 (* A string literal: its tag, and its texts alternating with its
    interpolations, starting and ending with a text, as in the lexer's token.
-   How it was written is the source text under its span. *)
+   Its spelling is the source text under its span. *)
 and string_literal = {
   tag : path option;
   first : text;
