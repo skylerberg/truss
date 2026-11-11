@@ -117,7 +117,7 @@ let specification =
    the body of a function that is not [transparent] leaves this result
    equal, so no proof in a package that depends on this one runs again. *)
 let exported_specification =
-  Query.query ~name:"exported_specification" ~phase:Bodies ~show:Resolve.Names.show_key
+  Query.query ~name:"exported_specification" ~phase:Phases.bodies ~show:Resolve.Names.show_key
     (fun database key ->
       Option.map
         (fun form ->
@@ -132,7 +132,7 @@ let specification_of_path =
     (of_path ~written:specification)
 
 let exported_specification_of_path =
-  Query.query ~name:"exported_specification_of_path" ~phase:Bodies ~show:Path.show
+  Query.query ~name:"exported_specification_of_path" ~phase:Phases.bodies ~show:Path.show
     (of_path ~written:exported_specification)
 
 (* The packages whose [impl]s met a bound in a definition. *)
