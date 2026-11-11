@@ -557,7 +557,8 @@ A callee's clauses are read with the call's type arguments. A call the type
 checker resolved to an `impl` reads the `impl`'s clauses with its trait's,
 and the `impl`'s own `requires` when it states any. A call through a bound
 or through `any` reads the trait's, and a call through a bound on `Self`,
-read where `Self` is a known type, reaches that type's `impl`. A capability
+read where `Self` is a known type, reaches that type's `impl`, written or
+derived. A capability
 call uses the capability method's contract.
 
 - **A tagged template is a call** of its tag's `from_template` with the
