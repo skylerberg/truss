@@ -3403,6 +3403,22 @@ let () =
 (* Lambdas under a quantifier *)
 
 let () =
+  test "a lambda in a quantifier that captures a bound value is known for each one" (fun () ->
+      proven
+        "fn apply(change: (fn(Bool) -> Bool cost time finite), value: Bool) -> Bool\n\
+        \  ensures result == change(value)\n\
+        \  cost time finite\n\
+         {\n\
+        \  change(value)\n\
+         }\n\n\
+         theorem each_captured(items: List[Bool])\n\
+        \  ensures forall i in 0..items.length() =>\n\
+        \    apply(fn(_) {\n\
+        \      var kept = items[i]\n\
+        \      kept\n\
+        \    }, value: false) == items[i]\n\
+         {\n\
+         }\n");
   test "a lambda in a quantifier that captures no bound value is known for every argument"
     (fun () ->
       proven

@@ -1456,13 +1456,14 @@ test the prover itself:
   nested quantifiers, each fact is about values made for every
   combination of bound names, and with them the solver runs out of steps
   even with triggers chosen.
-- **A lambda inside a quantifier that captures one of its bound values,
-  or with a functional lambda inside it,** whose body is not functional is
-  applied as a function the solver knows nothing more about: its arguments
-  are not alone in what it can differ by, and a functional lambda's symbol
-  is named after what it captures, which would be one function for every
-  argument. A lambda that captures no bound value is one function for
-  every one of them, and is read as it is outside a quantifier.
+- **A lambda with a functional lambda inside it,** whose body is not
+  functional, is applied as a function the solver knows nothing more
+  about: a functional lambda's symbol is named after what it captures,
+  which would be one function for every argument. A lambda inside a
+  quantifier is known by what its body does for every argument: one that
+  captures none of the quantifier's bound values is read as it is outside
+  it, and one that captures some says what it does for each of them,
+  closed over the quantifier.
 - **More in a diagnostic.** A note at a clause in another file, which a
   message names by its file and line instead, and a
   fix that adds an obligation about parameters alone to the function as a
