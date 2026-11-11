@@ -1,0 +1,29 @@
+; The compiler's version: a digest of its own source, without the standard
+; library's text and the tests. The action runs in a sandbox, so it sees
+; source files only, and no generated file such as the embedded library.
+
+(executable
+ (name digest)
+ (modules digest))
+
+(rule
+ (target compiler_version.ml)
+ (deps
+  (sandbox always)
+  (source_tree %{workspace_root}/stage0))
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    ./digest.exe
+    %{workspace_root}/stage0
+    %{ocaml_version}
+    %{profile}
+    %{system}
+    %{architecture}
+    %{version:zarith}
+    %{version:cmdliner}))))
+
+(library
+ (name compiler_version)
+ (modules compiler_version))

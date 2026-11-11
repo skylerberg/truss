@@ -3,9 +3,8 @@
 
    An interpolation holds tokens, so these functions take [scan], the
    scanner's function for the next item, as an argument. Every function for
-   a construct that must end on its line returns how it ended: [Cut_off]
-   means it stopped at the end of the line after an error already reported,
-   and its caller then ends too. *)
+   a construct that must end on its line returns how it ended. When one
+   returns [Unterminated], its caller ends at the same position. *)
 
 open Token
 open Cursor
@@ -15,9 +14,9 @@ let maximum_nesting = 32
 
 type scan = Cursor.t -> inline:bool -> nesting:int -> Cursor.item
 
-(* A string's texts and interpolations as they are read. Texts are taken
-   only when an interpolation starts or the string ends, so the result
-   always alternates, starting and ending with a text. *)
+(* A string's texts and interpolations as they are scanned. A text is
+   completed only when an interpolation starts or the string ends, so the
+   result always alternates, starting and ending with a text. *)
 type builder = {
   buffer : Buffer.t;
   mutable text_start : int;
@@ -60,7 +59,7 @@ let next kind start stop ~ending =
       span = span start stop;
       first_line_break = None;
       blank_line = false;
-      cut_off = ending = Cut_off;
+      unterminated = ending = Unterminated;
     }
 
 (* An interpolation, at its delimiter: `${`, or the `$`s and `{` of a raw
@@ -85,7 +84,7 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
           |];
         span = span start cursor.position;
       },
-      Cut_off )
+      Unterminated )
   end
   else begin
     cursor.position <- start + delimiter_length;
@@ -93,9 +92,14 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
     let finished = ref false and closed = ref false and ending = ref Closed in
     let end_of_input position =
       Layout.End
-        { position; first_line_break = None; blank_line = false; cut_off = !ending = Cut_off }
+        {
+          position;
+          first_line_break = None;
+          blank_line = false;
+          unterminated = !ending = Unterminated;
+        }
     in
-    let pull () =
+    let next_input () =
       if !finished then end_of_input cursor.position
       else
         match scan cursor ~inline:true ~nesting:(nesting + 1) with
@@ -104,7 +108,7 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
               "An interpolation cannot contain a line break. Move the expression into a `let` \
                before the string.";
             finished := true;
-            ending := Cut_off;
+            ending := Unterminated;
             end_of_input cursor.position
         | Token { kind = Punctuation (Close Curly); start = brace; _ } when !braces = 0 ->
             finished := true;
@@ -116,13 +120,15 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
             | Punctuation (Close Curly) -> decr braces
             | _ -> ());
             incr count;
-            if token_ending = Cut_off then begin
+            if token_ending = Unterminated then begin
               finished := true;
-              ending := Cut_off
+              ending := Unterminated
             end;
             next kind token_start cursor.position ~ending:token_ending
     in
-    let tokens = Layout.interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics pull in
+    let tokens =
+      Layout.interpolation ~source:cursor.source ~diagnostics:cursor.diagnostics next_input
+    in
     let interpolation_span = span start cursor.position in
     if !closed && !count = 0 then
       report cursor ~code:Empty_interpolation
@@ -174,11 +180,11 @@ and scan_ordinary cursor ~scan ~tag ~nesting =
         report cursor ~code:Unterminated_string
           ~fixes:[ Diagnostic.fix "Close the string" [ Diagnostic.insert position "\"" ] ]
           (span literal_start position) message;
-        (Cut_off, position)
+        (Unterminated, position)
       end
       else begin
         report cursor ~code:Unterminated_string (span literal_start position) message;
-        (Cut_off, position)
+        (Unterminated, position)
       end
     end
     else if current = quote then begin
@@ -188,11 +194,11 @@ and scan_ordinary cursor ~scan ~tag ~nesting =
     else if current = Char.code '\\' then
       match scan_escape cursor builder.buffer with
       | `Continue -> loop ()
-      | `End_of_line -> (Cut_off, cursor.position)
+      | `End_of_line -> (Unterminated, cursor.position)
     else if current = dollar && byte cursor (position + 1) = Char.code '{' then begin
       let interpolation, ending = scan_interpolation cursor ~scan ~nesting ~delimiter_length:2 in
       add_interpolation builder interpolation;
-      match ending with Closed -> loop () | Cut_off -> (Cut_off, cursor.position)
+      match ending with Closed -> loop () | Unterminated -> (Unterminated, cursor.position)
     end
     else if current = dollar then begin
       Buffer.add_char builder.buffer '$';
@@ -296,12 +302,12 @@ and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
   let literal_start =
     match tag with Some (_, (tag_span : span)) -> tag_span.start | None -> delimiter_start
   in
-  let after = delimiter_start + dollars + quotes in
-  let line_end = end_of_line cursor after in
-  let multi_line = skip_spaces cursor after = line_end in
+  let delimiter_stop = delimiter_start + dollars + quotes in
+  let line_end = end_of_line cursor delimiter_stop in
+  let multi_line = skip_spaces cursor delimiter_stop = line_end in
   let form = Raw { quotes; dollars; multi_line } in
   if not multi_line then begin
-    cursor.position <- after;
+    cursor.position <- delimiter_stop;
     scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~quotes
   end
   else if nesting > 0 then begin
@@ -309,10 +315,11 @@ and scan_raw cursor ~scan ~tag ~nesting ~dollars ~quotes =
       "An interpolation cannot contain a line break, so it cannot hold a multi-line string. Move \
        the expression into a `let` before the string.";
     cursor.position <- line_end;
-    (literal ~tag ~form (builder after) after, Cut_off)
+    (literal ~tag ~form (builder delimiter_stop) delimiter_stop, Unterminated)
   end
   else
-    ( scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes ~after ~line_end,
+    ( scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes ~delimiter_stop
+        ~line_end,
       Closed )
 
 (* A run of `$` in a raw string's body: text, or the start of an
@@ -369,7 +376,7 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
             `%s` is a one-line string. For several lines, start the text on the line after the \
             opening `%s`."
            delimiter delimiter);
-      (Cut_off, position)
+      (Unterminated, position)
     end
     else if current = quote then begin
       let run = run_length cursor position quote in
@@ -386,7 +393,7 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
     else if current = dollar then
       match raw_dollars cursor builder ~scan ~dollars ~nesting with
       | Closed -> loop ()
-      | Cut_off -> (Cut_off, cursor.position)
+      | Unterminated -> (Unterminated, cursor.position)
     else begin
       Source_text.read_character cursor builder.buffer ~context:Raw_string;
       loop ()
@@ -395,15 +402,17 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
   let ending, stop = loop () in
   (literal ~tag ~form builder stop, ending)
 
-(* A multi-line raw string's body is read line by line. Each line keeps its
-   pieces, so that the indentation can be removed once the closing line is
-   found. An unterminated one runs to the end of the file, as in Rust,
+(* A multi-line raw string's body is scanned line by line. Each line's
+   texts and interpolations are stored separately, so that the indentation
+   can be removed once the closing line is found. An unterminated one runs to the end of the file, as in Rust,
    Python, and Go, with a note at the line where it seems to end. *)
-and scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes ~after ~line_end =
+and scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes ~delimiter_stop
+    ~line_end =
   match read_raw_lines cursor ~scan ~dollars ~quotes ~line_end with
-  | `Closed (lines, closing) -> build_multi_line cursor ~tag ~form ~quotes ~after lines closing
+  | `Closed (lines, closing) ->
+      build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing
   | `Unterminated lines ->
-      cursor.ended_inside_error <- true;
+      cursor.unterminated_at_end <- true;
       let delimiter = String.make quotes '"' in
       let notes =
         (match guess_raw_string_end cursor ~literal_start ~line_end with
@@ -417,15 +426,17 @@ and scan_multi_line_raw cursor ~scan ~tag ~form ~literal_start ~dollars ~quotes 
         @
         (* Python's empty triple-quoted string opens a raw string here. *)
         if quotes = 6 && dollars = 0 then
-          [ (span (after - quotes) after, "For an empty string, write `\"\"`.") ]
+          [ (span (delimiter_stop - quotes) delimiter_stop, "For an empty string, write `\"\"`.") ]
         else []
       in
-      report cursor ~code:Unterminated_string ~notes (span literal_start after)
+      report cursor ~code:Unterminated_string ~notes
+        (span literal_start delimiter_stop)
         (Printf.sprintf
            "This raw string is never closed, so it runs to the end of the file. Close it with `%s` \
             on a line of its own."
            delimiter);
-      build_multi_line cursor ~tag ~form ~quotes ~after lines (`Unterminated cursor.position)
+      build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines
+        (`Unterminated cursor.position)
 
 and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
   cursor.position <- line_end;
@@ -467,7 +478,7 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
               `Closed (List.rev !lines, `After_text position)
             end
             else begin
-              (* A longer run after text is an error, and is kept as text. *)
+              (* A longer run after text is an error, and is text. *)
               if run > quotes then
                 too_many_quotes cursor ~start:position ~run ~quotes ~multi_line:true;
               Buffer.add_string builder.buffer (String.make run '"');
@@ -475,8 +486,8 @@ and read_raw_lines cursor ~scan ~dollars ~quotes ~line_end =
             end
           end
           else if current = dollar then begin
-            (* A cut-off interpolation stops at the end of the line, where a
-               line break is legal in this string. *)
+            (* An unterminated interpolation stops at the end of the line,
+               where a line break is legal in this string. *)
             ignore (raw_dollars cursor builder ~scan ~dollars ~nesting:0);
             content ()
           end
@@ -545,7 +556,7 @@ and guess_raw_string_end cursor ~literal_start ~line_end =
   search line_end
 
 (* Removes the indentation and joins the lines. *)
-and build_multi_line cursor ~tag ~form ~quotes ~after lines closing =
+and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
   let indentation, delimiter_start =
     match closing with
     | `Own_line (indentation, delimiter_start) -> (indentation, delimiter_start)
@@ -562,7 +573,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~after lines closing =
         (indentation, start)
     | `Unterminated position -> (common_indentation lines, position)
   in
-  let show whitespace =
+  let describe_whitespace whitespace =
     if whitespace = "" then "no indentation"
     else
       let rec groups index =
@@ -583,7 +594,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~after lines closing =
       in
       String.concat " then " (groups 0)
   in
-  let joined = builder after in
+  let joined = builder delimiter_stop in
   List.iteri
     (fun index (((first : text), rest) as line) ->
       if index > 0 then Buffer.add_char joined.buffer '\n';
@@ -617,7 +628,8 @@ and build_multi_line cursor ~tag ~form ~quotes ~after lines closing =
             (Printf.sprintf
                "Every line of a multi-line raw string starts with the indentation of its closing \
                 delimiter, which is %s. This line starts with %s."
-               (show indentation) (show line_whitespace));
+               (describe_whitespace indentation)
+               (describe_whitespace line_whitespace));
           String.sub value at (String.length value - at)
         end
       in

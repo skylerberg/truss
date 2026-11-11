@@ -1426,19 +1426,6 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       | None -> unsupported (at frame node) "a float literal without a float type")
   | Boolean value -> Some (frame, L.Boolean value)
   | String text -> Some (frame, text_value context frame (type_of context frame node) text)
-  | Interpolated { pieces; _ } ->
-      (* A new [String], about which nothing more is known, since each part
-         is written out by its [Display]. *)
-      let frame =
-        List.fold_left
-          (fun frame (piece : piece) ->
-            match piece with
-            | Text _ -> frame
-            | Displayed { value = shown; _ } -> fst (operand_value context frame shown))
-          frame pieces
-      in
-      let frame = spend context frame (unknown_amount context frame) in
-      Some (frame, arrive context frame "string" (type_of context frame node))
   | Template { literals; call = made } -> Some (tagged_template context frame node literals made)
   | Use place -> Some (place_value context frame place)
   | Copy operand -> Some (operand_value context frame operand)

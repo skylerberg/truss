@@ -129,16 +129,10 @@ and kind =
   | Integer of Z.t  (** A literal of a built-in integer type, of [Integer], or of [Character]. *)
   | Float of float  (** A float literal, already rounded to the precision of its type. *)
   | Boolean of bool
-  | String of string  (** A string literal without interpolation. *)
-  | Interpolated of {
-      pieces : piece list;
-      builder_new : callee;  (** [TextBuilder.new] *)
-      builder_write : callee;  (** [TextBuilder.write], used for each {!Text} piece. *)
-      builder_finish : callee;  (** [TextBuilder.finish] *)
-    }
-      (** A string literal with interpolation. The result is the concatenation of the pieces. This
-          node will be desugared into the builder calls once the standard library gives them [time]
-          clauses. *)
+  | String of string
+      (** A string literal without interpolation. One with interpolation is a {!Block} of calls: of
+          [TextBuilder.new], of [TextBuilder.write] for each piece of text, of the [display] of each
+          value, and of [TextBuilder.finish]. *)
   | Template of { literals : string list; call : expression }
       (** A tagged string, such as [Sql"select ${column}"]. [call] is the call of the tag's
           [from_template] that produces the value; its argument is the constructed [Template]
@@ -165,8 +159,9 @@ and kind =
     }
   | Construct of { variant : string option; fields : (string * operand option) list }
       (** Constructs a record, or a variant of a sum type; the node's type says which type. [fields]
-          lists every field in declaration order. A field with [None] takes its default value, which
-          is in the type's core form. A range expression such as [1..5] is desugared to this.
+          has every field once: first the fields that the code gives, in the order written, which is
+          the order of evaluation, and then each field with [None], which takes its default value
+          from the type's core form. A range expression such as [1..5] is desugared to this.
 
           A field that is a [Value] is moved into the constructed value. A field that is a [Place]
           is lent to it: the constructed value holds the place's value and does not own it. Only a
@@ -269,13 +264,6 @@ and kind =
 and capture = { local : local; type_ : Types.ty }
 and specification_function = Log | Power | Time | Calls
 and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
-
-(** One piece of an interpolated string. *)
-and piece =
-  | Text of string
-  | Displayed of { value : operand; display : callee }
-      (** An interpolated value, converted to text by [display] (its [Display.display]). The value
-          is only borrowed. *)
 
 (** How a collection literal is constructed. *)
 and construction =
@@ -423,8 +411,7 @@ and pattern_kind =
       (** Binds the matched value to a local. [mode] is [Own] if the binding owns the value, and
           [Read] or [Mut] if it borrows part of the scrutinee. *)
   | Variant of { variant : string; fields : (string * pattern) list }
-      (** The fields that the pattern matches, by name, in declaration order. Fields not listed are
-          ignored. *)
+      (** The fields that the pattern matches, by name. Fields not listed are ignored. *)
   | Record of (string * pattern) list
   | Literal of expression
       (** An {!Integer} or {!Boolean} literal, or a constant of a built-in type. The scrutinee is

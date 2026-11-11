@@ -66,7 +66,7 @@ let let_mut cursor ~(let_token : Token.t) ~(mut_token : Token.t) =
 (* [&x] and [&mut x]: arguments are marked with [mut] or [own], never [&]. *)
 let address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next : Token.t) =
   let marked = match next.kind with Keyword Mut -> "`mut x`" | _ -> "`x`" in
-  (* Between two words, as in [match& x], a space keeps them apart. *)
+  (* Between two words, as in [match& x], a space keeps them separate tokens. *)
   let separator =
     match before with
     | Some { kind = Upper _ | Lower _ | Keyword _ | Reserved _ | Integer _ | Float _; span; _ }
@@ -130,8 +130,8 @@ let turbofish cursor ~(colons : Token.t) ~(less : Token.t) ~(greater : Token.t) 
       Diagnostic.replace greater.span "]";
     ]
 
-(* The singular of a plural English noun, for the plurals that are plain
-   to undo: [items] and [entries], but not [statuses] or [classes]. *)
+(* The singular of a plural English noun whose plural is regular: [items]
+   and [entries], but not [statuses] or [classes]. *)
 let singular word =
   let length = String.length word in
   let ends suffix = String.ends_with ~suffix word in
@@ -143,8 +143,8 @@ let singular word =
   else None
 
 (* The name a lambda's parameter gets in place of [it]: the singular of the
-   collection's name, as in [items.map(fn(item) { item.name })], when that
-   is plain to work out, and otherwise [element]. *)
+   collection's name, as in [items.map(fn(item) { item.name })], when
+   [singular] can derive it, and otherwise [element]. *)
 let parameter_name (callee : expression) =
   let receiver = match callee.kind with Member (receiver, _) -> Some receiver | _ -> None in
   let candidate =

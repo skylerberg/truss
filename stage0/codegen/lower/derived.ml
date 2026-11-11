@@ -185,7 +185,8 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
                         (Read, field_ty, field_place other variant field);
                       ]
                     ~destination:result_place))
-            (typed_fields (shape_fields st ty variant)));
+            (Interface.Environment.in_declared_order context.database type_path ~variant ~name:fst
+               (typed_fields (shape_fields st ty variant))));
       finish b (Goto done_);
       start b done_
   | "Default", "default", [] -> (

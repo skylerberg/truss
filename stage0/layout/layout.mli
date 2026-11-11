@@ -1,10 +1,10 @@
 (** Inserts [Newline] tokens and matches brackets.
 
-    Each function pulls raw tokens until [End_of_file] and returns the tokens, ending with
-    [End_of_file]. Layout makes each token from its raw token, adding the line-break flags. Brackets
-    in the result are always balanced: zero-width closers are inserted for openers that are never
-    closed, and closers that match nothing are dropped. An unclosed bracket's fix closes it where
-    the indentation says it was meant to close. *)
+    Each function calls its last argument for the next raw token until it returns [End], and returns
+    the tokens, ending with [End_of_file]. Layout makes each token from its raw token, adding the
+    line-break flags. Brackets in the result are always balanced: zero-width closers are inserted
+    for openers that are never closed, and closers that match nothing are dropped. An unclosed
+    bracket's fix closes it where the indentation says it was meant to close. *)
 
 type input =
   | Next of {
@@ -12,21 +12,20 @@ type input =
       span : Source.span;
       first_line_break : Source.span option;
       blank_line : bool;
-      cut_off : bool;
+      unterminated : bool;
     }
       (** The next token, with the first line break before it, if any, whether a blank line came
-          before it, and whether it is a string cut off at the end of its line, an error already
-          reported. *)
+          before it, and whether it is an unterminated string, an error already reported. *)
   | End of {
       position : int;
       first_line_break : Source.span option;
       blank_line : bool;
-      cut_off : bool;
+      unterminated : bool;
     }
-      (** The end of the input. [cut_off] says whether it ended at an error the scanner already
-          reported: an interpolation cut off by a line break, or a file that ends inside an
-          unterminated comment or string. Brackets left open are then closed without another error.
-      *)
+      (** The end of the input. [unterminated] says whether it ends inside an unterminated
+          construct, an error the scanner already reported: an interpolation that a line break
+          ended, or a file that ends inside a comment or a raw string. Brackets left open are then
+          closed without another error. *)
 
 val can_end : Token.kind -> bool
 (** Whether a token can end a statement. *)

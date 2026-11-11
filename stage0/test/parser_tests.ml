@@ -170,7 +170,40 @@ let () =
         ^ "\n}"
       in
       if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
-  test "an inner statement cut off by an inserted closer leaves the outer one reported" (fun () ->
+  test "nested loop bodies count toward the limit" (fun () ->
+      let text =
+        "fn f() {\n"
+        ^ String.concat "" (List.init 300 (fun _ -> "while x {\n"))
+        ^ String.concat "" (List.init 300 (fun _ -> "}\n"))
+        ^ "}"
+      in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "nested blocks without expressions count toward the limit" (fun () ->
+      let text =
+        "fn f() {\n"
+        ^ String.concat "" (List.init 300 (fun _ -> "parallel {\n"))
+        ^ String.concat "" (List.init 300 (fun _ -> "}\n"))
+        ^ "}"
+      in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  let chain ~first ~link ~last =
+    first ^ String.concat "" (List.init 10_001 (fun _ -> link)) ^ last
+  in
+  test "a chain of binary operators longer than the limit is one error" (fun () ->
+      let text = chain ~first:"fn f() {\n  let x = 1" ~link:" + 1" ~last:"\n}" in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "a chain of postfix operations longer than the limit is one error" (fun () ->
+      let text = chain ~first:"fn f() {\n  let x = a" ~link:".b" ~last:"\n}" in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "a chain of else if branches longer than the limit is one error" (fun () ->
+      let text = chain ~first:"fn f() {\n  if a {}" ~link:" else if a {}" ~last:"\n}" in
+      if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
+  test "a chain longer than the nesting limit is not nested" (fun () ->
+      let text =
+        "fn f() {\n  let x = 1" ^ String.concat "" (List.init 300 (fun _ -> " + a.b")) ^ "\n}"
+      in
+      if codes (snd (parse text)) <> [] then fail "a diagnostic");
+  test "an inserted closer in an inner statement leaves errors in the outer one reported" (fun () ->
       let _, diagnostics = parse "fn f() {\n  let x = run(fn() { g( }) +\n}" in
       if codes diagnostics <> [ "lexer.unclosed_bracket"; "parser.unexpected_token" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)))
@@ -188,8 +221,8 @@ let () =
       let file, _ = parse text in
       match file.definitions with
       | [ around; method_ ] ->
-          if around.within <> None then fail "the impl is inside something";
-          if method_.within <> Some 0 then fail "the method is not inside the impl";
+          if around.container <> None then fail "the impl is inside something";
+          if method_.container <> Some 0 then fail "the method is not inside the impl";
           if method_.text <> "fn now(self) -> Instant {\n    todo\n  }" then
             fail "the method's text is %S" method_.text;
           if method_.base <> 25 then fail "the method starts at %d" method_.base
@@ -444,7 +477,8 @@ let () =
       expression "\"a${b + 1}c\"" "\"a${(+ b 1)}c\"";
       expression "database::SqlQuery\"select ${id}\"" "database::SqlQuery\"select ${id}\"";
       expression "\"${names.join(\", \")}\"" "\"${(call (. names join) \", \")}\"");
-  test "nothing more is reported at the end of an interpolation a line break cut off" (fun () ->
+  test "no missing token is reported at the end of an interpolation that a line break ended"
+    (fun () ->
       let _, diagnostics = parse "fn f() {\n  let x = \"\"\"a ${b ? c\n  \"\"\"\n}" in
       if
         List.filter (fun code -> String.starts_with ~prefix:"parser." code) (codes diagnostics)

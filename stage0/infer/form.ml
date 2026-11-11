@@ -161,21 +161,21 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
       | [ left; right ] -> Compare { comparison = Equal; left; right }
       | _ -> bug "`equal` does not have exactly two arguments")
   | Constructor { type_; variant; type_arguments } ->
-      Construct
-        {
-          variant;
-          fields =
-            List.mapi
-              (fun index (field : T.field) ->
-                ( field.field_name,
-                  Option.map
-                    (fun (argument : C.argument) ->
-                      operand argument.mode (build_expression_by_id state argument.expression))
-                    (List.find_opt
-                       (fun (argument : C.argument) -> argument.parameter = index)
-                       recorded.arguments) ))
-              (constructor_fields state type_ variant type_arguments);
-        }
+      let declared = constructor_fields state type_ variant type_arguments in
+      let written =
+        List.map
+          (fun (argument : C.argument) ->
+            ( (List.nth declared argument.parameter).field_name,
+              Some (operand argument.mode (build_expression_by_id state argument.expression)) ))
+          recorded.arguments
+      in
+      let defaulted =
+        List.filter_map
+          (fun (field : T.field) ->
+            if List.mem_assoc field.field_name written then None else Some (field.field_name, None))
+          declared
+      in
+      Construct { variant; fields = written @ defaulted }
   | Built_in_operator -> bug "an operator is recorded as a call"
   | Function_value | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> (
       let function_value = Option.map (build_expression state) function_value in
@@ -301,23 +301,23 @@ let constant_place state ~origin (path : Path.t) : Core.place =
   | Some type_ -> Constant { path; type_; origin }
   | None -> bug "the constant `%s` has no type" (Path.show path)
 
+(* A record constructed from a value for each of its fields. *)
+let record fields : Core.kind =
+  Construct
+    {
+      variant = None;
+      fields = List.map (fun (name, value) -> (name, Some (Core.Value value))) fields;
+    }
+
 (* A range expression used as a value: a [Construct] of the [Range]
    record. *)
 let range_record state (value : expression) start stop ~inclusive : Core.kind =
-  match (start, stop, type_of state value) with
-  | Some start, Some stop, T.Named { path; arguments } ->
+  match (start, stop) with
+  | Some start, Some stop ->
       let start = build_expression state start in
       let stop = build_expression state stop in
       let inclusive = synthetic_expression state ~origin:value.id T.bool (Core.Boolean inclusive) in
-      Construct
-        {
-          variant = None;
-          fields =
-            List.map2
-              (fun (field : T.field) given -> (field.field_name, Some (Core.Value given)))
-              (constructor_fields state path None arguments)
-              [ start; stop; inclusive ];
-        }
+      record [ ("start", start); ("stop", stop); ("inclusive", inclusive) ]
   | _ -> bug "a range without both bounds is valid only inside a slice"
 
 (* The capabilities that a type implements, each with its [impl] and the
@@ -373,33 +373,91 @@ let checked_template state (literal : string_literal) =
   | Some template -> template
   | None -> bug "the checker recorded no template for a string literal"
 
-(* An untagged string literal: a [String] if it has no interpolation, and
-   an [Interpolated] if it has. *)
-let untagged_string state (literal : string_literal) : Core.kind =
+(* An untagged string literal. Without interpolation it is a [String]. With
+   interpolation it is desugared to a block: make a [TextBuilder], write
+   each piece of text to it, write each value to it with the value's
+   [display], and finish the builder. *)
+let untagged_string state ~origin (literal : string_literal) : Core.kind =
   match literal.rest with
   | [] -> String literal.first.value
   | rest ->
-      let piece (written : Syntax.text) : Core.piece list =
-        if written.value = "" then [] else [ Text written.value ]
+      let make = synthetic_expression state ~origin in
+      let statement kind : Core.statement = { id = fresh_node_id state; origin; kind } in
+      let builder_type = T.named (Well_known.path Text_builder) [] in
+      let builder = fresh_synthetic_local state in
+      let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
+      let call callee arguments : Core.kind = Call { callee; arguments; lends = None; uses = [] } in
+      let let_builder =
+        statement
+          (Let
+             {
+               pattern =
+                 {
+                   id = fresh_node_id state;
+                   origin;
+                   type_ = builder_type;
+                   kind = Bind { local = builder; name = "builder"; mutable_ = true; mode = Own };
+                 };
+               value = Value (make builder_type (call (builder_method "new" Static) []));
+               else_ = None;
+             })
       in
-      let pieces =
-        piece literal.first
-        @ List.concat
-            (List.map2
-               (fun (part, after) (conversion : C.call option) ->
-                 let value = operand Read (build_expression state part) in
-                 match conversion with
-                 | Some call ->
-                     Core.Displayed { value; display = callee call.callee } :: piece after
-                 | None -> bug "an interpolated value has no `display`")
-               rest (checked_template state literal).part_conversions)
+      let write (written : Syntax.text) =
+        if written.value = "" then []
+        else
+          [
+            statement
+              (Evaluate
+                 (make T.unit
+                    (call (builder_method "write" Mut)
+                       [
+                         Passed { mode = Mut; value = Place builder_place };
+                         Passed
+                           {
+                             mode = Read;
+                             value =
+                               Value
+                                 (make
+                                    (T.named (Well_known.path String_slice) [])
+                                    (String written.value));
+                           };
+                       ])));
+          ]
       in
-      Interpolated
+      let display part (conversion : C.call option) =
+        match conversion with
+        | Some recorded ->
+            statement
+              (Evaluate
+                 (make T.unit
+                    (Call
+                       {
+                         callee = callee recorded.callee;
+                         arguments =
+                           [
+                             Passed
+                               { mode = Read; value = operand Read (build_expression state part) };
+                             Passed { mode = Mut; value = Place builder_place };
+                           ];
+                         lends = None;
+                         uses = recorded.uses;
+                       })))
+        | None -> bug "an interpolated value has no `display`"
+      in
+      Block
         {
-          pieces;
-          builder_new = builder_method "new" Static;
-          builder_write = builder_method "write" Mut;
-          builder_finish = builder_method "finish" Own;
+          statements =
+            (let_builder :: write literal.first)
+            @ List.concat
+                (List.map2
+                   (fun (part, after) conversion -> display part conversion :: write after)
+                   rest (checked_template state literal).part_conversions);
+          value =
+            Some
+              (make string_type
+                 (call (builder_method "finish" Own)
+                    [ Passed { mode = Own; value = Value (make builder_type (Use builder_place)) } ]));
+          diverges = false;
         }
 
 (* A list literal, desugared to a block: allocate storage with capacity for
@@ -506,17 +564,6 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
     | None -> bug "a tagged string has no `from_template`"
   in
   let make = synthetic_expression state ~origin:value.id in
-  let record path arguments given =
-    Core.Construct
-      {
-        variant = None;
-        fields =
-          List.map2
-            (fun (field : T.field) given -> (field.field_name, Some (Core.Value given)))
-            (constructor_fields state path None arguments)
-            given;
-      }
-  in
   let list element elements =
     make
       (T.named (Well_known.path List) [ element ])
@@ -527,8 +574,8 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
     List.map
       (fun (written : Syntax.text) ->
         make literal_type
-          (record (Well_known.path Literal) []
-             [ make (T.named (Well_known.path String_slice) []) (String written.value) ]))
+          (record
+             [ ("text", make (T.named (Well_known.path String_slice) []) (String written.value)) ]))
       (literal.first :: List.map snd literal.rest)
   in
   let parts =
@@ -545,7 +592,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
   let template =
     make
       (T.named (Well_known.path Template) [ part ])
-      (record (Well_known.path Template) [ T.Type part ] [ texts; list part parts ])
+      (record [ ("literals", texts); ("parts", list part parts) ])
   in
   Template
     {

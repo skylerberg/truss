@@ -46,7 +46,7 @@ let input ~name ~show ?(equal = ( = )) ?(about = fun _ -> None) () =
 
 let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'value option =
   let engine = context.engine in
-  (match context.frame with None when not engine.frozen -> settle engine | _ -> ());
+  (match context.frame with None when not engine.frozen -> settle ~through:0 engine | _ -> ());
   match find_input engine input key with
   | Some cell ->
       record context cell.input_node;
@@ -172,7 +172,7 @@ let demand (context : context) (query : ('key, 'value) query) (key : 'key) : 'va
   | Some frame ->
       if query.phase > frame.owner.phase then
         phase_error frame.owner (Printf.sprintf "%s(%s)" query.name (query.show key))
-  | None -> if not engine.frozen then settle engine);
+  | None -> if not engine.frozen then settle ~through:query.phase engine);
   let cell =
     match find_result engine query key with
     | Some cell -> cell
@@ -201,3 +201,22 @@ let demand (context : context) (query : ('key, 'value) query) (key : 'key) : 'va
       if frame.cyclic = None then frame.cyclic <- Some labels
   | Some _, _ -> ());
   match result with Ok value -> value | Error exception_ -> raise exception_
+
+(* The result a state holds for a query and key, if nothing that changed
+   could have reached it. The phases before the query's are brought up to
+   date, and what reads their changes within the query's phase is marked,
+   so a result that is not marked is current. Nothing of the query's phase
+   is computed, no read is recorded, and the result is not kept. *)
+let known (context : context) (query : ('key, 'value) query) (key : 'key) : 'value option =
+  let engine = context.engine in
+  if context.frame <> None then invalid_arg "Incremental.known: called while a query runs";
+  if not engine.frozen then begin
+    settle ~through:(query.phase - 1) engine;
+    mark_seeds engine query.phase
+  end;
+  match find_result engine query key with
+  | Some cell when not (cell.node.marked || cell.node.busy) -> (
+      match load engine cell with
+      | Some (Value value) -> Some value
+      | Some (Raised _) | None -> None)
+  | Some _ | None -> None

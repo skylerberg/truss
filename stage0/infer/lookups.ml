@@ -133,7 +133,8 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Binding | Module _ -> bug "the name `%s` is not resolved" text
 
 (* A variant used as a value. A variant without fields is a value. A variant
-   with fields is a function that constructs it. *)
+   with one field is a function that constructs it. A variant with more
+   fields is not a function, because its fields have no order. *)
 and variant_value state (value : expression) type_path variant ~arguments =
   let type_ = T.Named { path = type_path; arguments } in
   state.tables.meanings.(value.id) <- Some (Variant_value { type_; variant });
@@ -144,14 +145,22 @@ and variant_value state (value : expression) type_path variant ~arguments =
         List.find_opt (fun (written : T.variant) -> written.variant_name = variant) variants
       with
       | Some { fields = None; _ } -> type_
-      | Some { fields = Some fields; _ } ->
+      | Some { fields = Some [ field ]; _ } ->
           T.Function
             {
-              inputs = List.map (fun (field : T.field) -> (T.Own, field.field_type)) fields;
+              inputs = [ (T.Own, field.field_type) ];
               output = Returns type_;
               uses = [];
               costs = [ { amortized = false; resource = Time; bound = Order_of } ];
             }
+      | Some { fields = Some fields; _ } ->
+          error state Not_a_value value.span
+            (Printf.sprintf
+               "`%s` has %d fields, so it is not a function: a function takes its arguments by \
+                position, and fields have no order. Build it with named fields, as in `%s(%s)`."
+               variant (List.length fields) variant
+               (String.concat ", "
+                  (List.map (fun (field : T.field) -> field.field_name ^ ": ...") fields)))
       | None ->
           error state Unknown_variant value.span
             (Printf.sprintf "`%s` has no variant `%s`." (T.show type_) variant))

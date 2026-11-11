@@ -82,11 +82,15 @@ type session = {
   mutable pointed : bool;  (** Whether the pointer names the state as it is *)
 }
 
+(* The standard library as a state of its own, for working on the library. *)
+type library = { library_engine : Engine.t; library_pointer : Store.pointer }
+
 type state = {
   store : Store.t;
   identity : string;
-  standard : Engine.t;  (** The standard library, a fixed base under every state *)
+  standard : Engine.t Lazy.t;  (** The standard library, a fixed base under every state *)
   sessions : (string, session) Hashtbl.t;  (** By root, or by ["commit:" ^ id] *)
+  libraries : (string, library) Hashtbl.t;  (** By name *)
 }
 
 let state : state option ref = ref None
@@ -125,7 +129,13 @@ let current () =
       let store = Store.open_ (Store.default_directory ()) in
       let identity = Identity.compute (Store.directory store) in
       let fresh =
-        { store; identity; standard = stored_standard store identity; sessions = Hashtbl.create 8 }
+        {
+          store;
+          identity;
+          standard = lazy (stored_standard store identity);
+          sessions = Hashtbl.create 8;
+          libraries = Hashtbl.create 1;
+        }
       in
       state := Some fresh;
       fresh
@@ -653,12 +663,14 @@ let read_record pointer : record option =
 let logging = ref false
 
 let new_engine state =
-  let engine = Engine.create ~log:!logging ~bases:[ state.standard ] () in
+  let engine = Engine.create ~log:!logging ~bases:[ Lazy.force state.standard ] () in
   Engine.attach engine state.store ~version:state.identity;
   engine
 
 let open_state state artifact =
-  Engine.open_ ~log:!logging state.store ~version:state.identity ~bases:[ state.standard ] artifact
+  Engine.open_ ~log:!logging state.store ~version:state.identity
+    ~bases:[ Lazy.force state.standard ]
+    artifact
 
 (* Writes what changed in a session's state since it was last written, as a
    difference over the artifact it was opened from or last wrote, and points
@@ -1253,6 +1265,80 @@ let trial_engine state session =
 
 let trial session = trial_engine (current ()) session
 
+(* The standard library as a state of its own *)
+
+let library_prefix = Printf.sprintf "library-%s-" (String.sub Compiler_version.digest 0 16)
+
+(* The inputs of the [standard] package, set from sources: each module's
+   text, and the package with its modules. The text of a module that the
+   state holds and the sources do not is removed. *)
+let set_library engine (modules : (Path.module_ * string) list) =
+  (match read (Engine.context engine) Workspace.packages Path.standard_package with
+  | Some (package : Workspace.package) ->
+      List.iter
+        (fun module_ ->
+          if not (List.mem_assoc module_ modules) then
+            Engine.remove engine Workspace.file_text module_)
+        package.modules
+  | None -> ());
+  load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[] modules
+
+let write_library ?full library =
+  let artifact = Engine.write ?full library.library_engine in
+  Store.point library.library_pointer (Marshal.to_string { artifact; files = [] } [])
+
+let open_library ?(modules = Standard_library.modules) name =
+  let state = current () in
+  match Hashtbl.find_opt state.libraries name with
+  | Some library ->
+      set_library library.library_engine modules;
+      Ok library
+  | None ->
+      let pointer = Store.pointer state.store (library_prefix ^ name) in
+      if not (Store.lock pointer) then
+        Error (Printf.sprintf "The library state `%s` is open in another process." name)
+      else begin
+        Store.refresh state.store;
+        let version = Compiler_version.digest in
+        let opened =
+          Option.bind (read_record pointer) (fun record ->
+              Engine.open_ ~log:!logging state.store ~version ~bases:[] record.artifact)
+        in
+        let engine =
+          match opened with
+          | Some engine -> engine
+          | None ->
+              let engine = Engine.create ~log:!logging () in
+              Engine.attach engine state.store ~version;
+              engine
+        in
+        let library = { library_engine = engine; library_pointer = pointer } in
+        (* A process that opens the state pays its size already, so this is
+           when its differences are folded into one whole state. *)
+        let debt = Engine.debt engine in
+        let library =
+          if debt.differences > max (debt.whole / 2) 256 then begin
+            write_library ~full:true library;
+            match
+              Option.bind (Engine.artifact engine)
+                (Engine.open_ ~log:!logging state.store ~version ~bases:[])
+            with
+            | Some engine -> { library with library_engine = engine }
+            | None -> library
+          end
+          else library
+        in
+        set_library library.library_engine modules;
+        Hashtbl.replace state.libraries name library;
+        Ok library
+      end
+
+let library_engine library = library.library_engine
+
+let save_library library =
+  if Engine.unwritten library.library_engine then write_library library
+  else Engine.record library.library_engine
+
 (* Choosing versions *)
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
@@ -1467,6 +1553,11 @@ let reset () =
   | None -> ()
   | Some s ->
       Hashtbl.iter (fun _ session -> save s session) s.sessions;
+      Hashtbl.iter
+        (fun _ library ->
+          save_library library;
+          Store.unlock library.library_pointer)
+        s.libraries;
       Store.close s.store;
       Engine.forget_bases ();
       state := None
@@ -1544,6 +1635,13 @@ let collect state =
       worktrees;
     Option.iter keep
       (Store.find_result state.store ~kind:"package" ~key:(standard_key state.identity));
+    List.iter
+      (fun name ->
+        if String.starts_with ~prefix:library_prefix name then
+          Option.iter
+            (fun (record : record) -> keep record.artifact)
+            (read_record (Store.pointer state.store name)))
+      (Store.pointers state.store);
     Store.collect state.store ~budget:(budget ()) ~live:(Hashtbl.mem live)
   end
 

@@ -78,17 +78,6 @@ let expression_children visit (node : expression) =
      the visitor. *)
   | Method_time _ ->
       ()
-  | Interpolated { pieces; builder_new; builder_write; builder_finish } ->
-      visit.callee builder_new;
-      List.iter
-        (function
-          | Text _ -> ()
-          | Displayed { value; display } ->
-              operand visit value;
-              visit.callee display)
-        pieces;
-      visit.callee builder_write;
-      visit.callee builder_finish
   | Template { call; _ } -> visit.expression call
   | Use found -> place visit found
   | Copy value -> operand visit value

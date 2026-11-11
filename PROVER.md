@@ -298,8 +298,9 @@ and `reads` clauses):
 - **Text is its bytes.** `String`, `StringSlice`, and a template's
   `Literal` are modeled by their UTF-8 bytes. A plain string literal is a
   `String` with those bytes, which costs nothing. One with interpolations
-  is a new `String` known only by its type, since each part is written out
-  by its `Display`. A string pattern matches text by its bytes.
+  is the calls that the core form has for it, of the text builder's methods
+  and of each value's `display`, so it is known by their contracts and
+  costs what they cost. A string pattern matches text by its bytes.
 
 ### Mathematical collections
 
