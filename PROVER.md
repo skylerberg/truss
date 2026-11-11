@@ -447,7 +447,16 @@ decides when a body is a definition. In the solver:
   the `requires` of its arguments.
 - **A named function passed for such a parameter** must accept every
   argument the parameter's type promises it, and keep the type's cost
-  clauses.
+  clauses. A function-typed parameter passed on for another callee's
+  parameter must be promised what its own `requires` asks.
+- **A function type keeps no `requires`.** A function with a `requires`,
+  or a function-typed parameter whose type has one, used as a value
+  anywhere but in a call or passed straight to a parameter, such as bound
+  to a local or stored in a field, must accept every argument of its type.
+- **A callback's `requires` names the callee's parameters as the caller
+  passed them.** A call through the callback, in the callee, shows it with
+  the parameters' values on entry, which is what the caller showed it
+  with, even where a `mut` parameter has changed since.
 
 Callers' proofs depend on whether a body is a definition, and on the body
 itself when it is. Both are in the trace of every proof that used the
@@ -477,8 +486,8 @@ path defines. So what a body gives its queries grows with the body, not
 with its number of paths. No step goes around a loop: each loop is cut at
 its head by its invariant, as below. The right side of `&&`, `||`, or
 `==>` runs on only one path, so when it changes a local, as a call with a
-`mut` argument does, that path joins the one where it did not run, as the
-two arms of an `if` do. A `match` arm's guard runs only where its patterns matched, so
+`mut` argument does, or spends anything, that path joins the one where it
+did not run, as the two arms of an `if` do. A `match` arm's guard runs only where its patterns matched, so
 the next arm is tried where they did not, joined with where they did and
 the guard, which may change locals the same way, was false. A binding
 that a pattern lends `mut` is a local of the arm. Wherever the arm ends,
@@ -915,7 +924,9 @@ The prover adds a ghost counter for each resource that has a cost clause:
   capacity, running a test, and reaching the system may allocate; nothing
   else does.
 - **A `calls(target)` counter** counts each call through a function value
-  or of a capability's method. A callee that is passed the function value,
+  or of a capability's method. A call through a value of the target's type
+  counts where the value equals the target, so a call through an alias,
+  such as `if flag { visit } else { other }`, counts. A callee that is passed the function value,
   or uses the capability, counts what its own `calls` clause about it says;
   one that can reach neither counts nothing; and one passed a lambda that
   captures the function value is known by no bound.
