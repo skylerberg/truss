@@ -78,7 +78,7 @@ internal fn accept(listener: Int32) -> Result[network::Accepted, Int32] {
   }
   let _ = intrinsic::libc_fcntl_setfd_cloexec(descriptor)
   let handle = handles::of_descriptor(descriptor)
-  without_blocking(descriptor)?
+  calls::without_blocking(descriptor)?
   match address_from(intrinsic::storage_view(from)) {
     Some(peer) => Ok(network::Accepted(handle: own handle, peer: plain(peer)))
     None => Err(intrinsic::libc_einval())
@@ -276,16 +276,8 @@ fn opened(family: Int32, kind: Int32) -> Result[intrinsic::Handle, Int32] {
   }
   let handle = intrinsic::handle_from(descriptor)
   let _ = intrinsic::libc_fcntl_setfd_cloexec(descriptor)
-  without_blocking(descriptor)?
+  calls::without_blocking(descriptor)?
   Ok(own handle)
-}
-
-fn without_blocking(descriptor: Int32) -> Result[Unit, Int32] {
-  let flags = intrinsic::libc_fcntl_getfl(descriptor)
-  if flags < 0 {
-    return Err(intrinsic::libc_errno())
-  }
-  calls::done(intrinsic::libc_fcntl_setfl(descriptor, flags: flags | intrinsic::libc_o_nonblock()))
 }
 
 fn bound(address: network::SocketAddress, kind: Int32) -> Result[intrinsic::Handle, Int32] {

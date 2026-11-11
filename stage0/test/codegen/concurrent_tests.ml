@@ -1224,6 +1224,108 @@ fn main(arguments: List[String]) -> ExitCode
 }
 |})
 
+(* A child's pipes. Each of the child's two outputs is larger than a pipe
+   holds, so the child ends only if both are read as it writes them. *)
+
+let child_lines =
+  {|use standard::processes
+
+fn lines(count: Int64) -> processes::Command {
+  processes::Command.new("awk")
+    .argument("BEGIN { for (i = 0; i < ${count}; i++) { print \"out-line-\" i; print \"err-line-\" i > \"/dev/stderr\" } }")
+    .output(processes::Redirect.Capture)
+    .error_output(processes::Redirect.Capture)
+}
+|}
+
+let () =
+  test "on threads, tasks read and write the pipes of child processes with any number of threads"
+    (fun () ->
+      expect_with_each_thread_count
+        ~expected:"captured 110890 and 110890\ncaptured from many\nechoed 262144\n"
+        (child_lines
+       ^ {|
+fn echoed(through: mut processes::Child, count: USize) -> USize
+  uses Tasks, Handles, Panic
+{
+  var input = mut through.take_input().unwrap()
+  var output = mut through.take_output().unwrap()
+  var got: USize = 0
+  concurrent {
+    {
+      var block: List[UInt8] = []
+      for _ in 0..4096 {
+        mut block.push(65)
+      }
+      var written: USize = 0
+      while written < count {
+        written += mut input.write(block.slice()).unwrap()
+      }
+      let _ = own input.close()
+    }
+    {
+      var heard: List[UInt8] = []
+      var open = true
+      while open {
+        mut heard.clear()
+        let read = mut output.read(mut heard, limit: 65536).unwrap()
+        got += read
+        open = read > 0
+      }
+    }
+  }
+  got
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console, Processes, Handles, Panic
+{
+  match Processes.run(lines(8000)) {
+    Ok(output) => Console.print_line("captured ${output.output.length()} and ${output.error_output.length()}")
+    Err(error) => Console.print_line("run: ${error}")
+  }
+  concurrent for index in 0..12 {
+    match Processes.run(lines(7)) {
+      Ok(output) => {
+        if output.output.length() != 77 || output.error_output.length() != 77 {
+          Console.print_line("child ${index} gave ${output.output.length()} and ${output.error_output.length()}")
+        }
+      }
+      Err(error) => Console.print_line("run: ${error}")
+    }
+  }
+  Console.print_line("captured from many")
+  let cat = processes::Command.new("cat")
+    .input(processes::Redirect.Pipe)
+    .output(processes::Redirect.Pipe)
+  match Processes.spawn(cat) {
+    Ok(child) => {
+      var through = own child
+      Console.print_line("echoed ${echoed(mut through, count: 262144)}")
+      let _ = mut through.wait()
+    }
+    Err(error) => Console.print_line("spawn: ${error}")
+  }
+  ExitCode.success
+}
+|}
+        ));
+  test "in a program with one thread, both of a child's outputs are captured whole" (fun () ->
+      expect_main ~expected:"captured 110890 and 110890\n"
+        (child_lines
+       ^ {|
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  match Processes.run(lines(8000)) {
+    Ok(output) => Console.print_line("captured ${output.output.length()} and ${output.error_output.length()}")
+    Err(error) => Console.print_line("run: ${error}")
+  }
+  ExitCode.success
+}
+|}
+        ))
+
 (* Cancelling a task that waits *)
 
 let () =
@@ -1347,6 +1449,38 @@ fn main(arguments: List[String]) -> ExitCode
   uses Tasks, Clock, Console, Signals
 {
   Console.print_line(signal_or_time_out())
+  ExitCode.success
+}
+|});
+  test "on threads, a cancelled task returns from a wait for a child's output" (fun () ->
+      expect_threaded ~expected:"run: cancelled\ntimed out\n"
+        {|use standard::processes
+
+fn run_or_time_out() -> String
+  uses Tasks, Clock, Console, Processes
+{
+  concurrent {
+    {
+      let slow = processes::Command.new("sleep")
+        .argument("5")
+        .output(processes::Redirect.Capture)
+        .error_output(processes::Redirect.Capture)
+      match Processes.run(slow) {
+        Ok(_) => Console.print_line("run: ended")
+        Err(error) => Console.print_line("run: ${error}")
+      }
+    }
+    {
+      Clock.sleep(Duration.nanoseconds(100000000))
+      return "timed out"
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console, Processes
+{
+  Console.print_line(run_or_time_out())
   ExitCode.success
 }
 |})
