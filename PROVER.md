@@ -1287,6 +1287,12 @@ Each obligation the prover could not prove is an error, with the shared
   at its run-time check if the code is wrong.
 - **A note at the clause.** A call's `requires` that may not hold has a
   note at that clause, where the callee is in the same file.
+- **A fix that moves the clause up.** Where a callee's `requires` that may
+  not hold names only the definition's parameters as they arrive,
+  constants, and literals, the diagnostic has a fix that adds it to the
+  definition as a `requires`, written with the call's arguments for the
+  callee's parameters: `halve(count)` against `requires count < 100`
+  gives `requires count < 100` on the caller.
 - **A state for every obligation.** Each obligation, shown or not, has a
   state at its position, for a language server to show; the diagnostics
   are the states that were not shown.
@@ -1418,7 +1424,9 @@ test the prover itself:
   message names by its file and line instead, the
   branches a counterexample's path takes, listed by position, and a
   fix that adds an obligation about parameters alone to the function as a
-  `requires`. DESIGN.md's other fixes, checking it with an `if`, using the
+  `requires` for obligations other than a callee's `requires`, such as an
+  overflow, which needs the obligation written back as Truss. DESIGN.md's
+  other fixes, checking it with an `if`, using the
   checked version of the operation, and `uses Panic`, change what the code
   means, so the message is to name them without applying them.
 - **Proof programs as a data structure of their own,** made from a body

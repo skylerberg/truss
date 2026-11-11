@@ -3251,6 +3251,34 @@ let () =
         \  List.filled(value: 0, count: count)\n\
          }\n")
 
+(* Fixes *)
+
+let () =
+  test "a callee's requires about the caller's parameters is offered as the caller's" (fun () ->
+      let database =
+        Support.setup
+          [
+            ( "app::main",
+              "fn halve(count: UInt32) -> UInt32\n\
+              \  requires count < 100\n\
+               {\n\
+              \  count / 2\n\
+               }\n\n\
+               fn quarter(count: UInt32) -> UInt32 {\n\
+              \  halve(count) / 2\n\
+               }\n" );
+          ]
+      in
+      match check database (Support.module_of "app::main") with
+      | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count < 100`" -> ()
+      | found ->
+          fail "%s"
+            (String.concat "; "
+               (List.map
+                  (fun (d : Diagnostic.t) ->
+                    String.concat ", " (List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes))
+                  found)))
+
 (* Definitions under a quantifier *)
 
 let () =
