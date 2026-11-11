@@ -410,9 +410,13 @@ decides when a body is a definition. In the solver:
   the body of a `public transparent fn`, of a trait's provided method, and
   of a derived method, and no other. So another function, and a method an
   `impl` writes, is known there by its contract, and editing its body
-  proves nothing in a package that depends on it again. An obligation that
-  is not proven, whose query names such a callee, says so, and names the
-  fixes: an `ensures` that says what is needed, or, for a function,
+  proves nothing in a package that depends on it again. Where an
+  obligation is not proven and its query names such a callee, the
+  definition is translated again with every callee read as its own package
+  reads it, and the same obligation of that translation is asked; where it
+  proves, the message says that the callee's body is not visible and that
+  with it the obligation would be proven, and names the fixes: an
+  `ensures` that says what is needed, or, for a function,
   `public transparent fn`.
 - **Called on a quantifier's bound values,** a definition with no
   `requires` is stated once, for every argument, since a fact about one
@@ -1436,10 +1440,11 @@ test the prover itself:
 - **An amortized replacement of a map's value.** A `Set` or a `Map` from
   another package holds a potential the prover knows through its methods'
   clauses, and inserting a new element or key is amortized. Replacing the
-  value under a key that is there is not: the potential of the entries
-  after it follows from the sum law of `Sequence.update` taken at the
-  potential's own measure, which the solver runs out of steps finding and
-  no `assert` in the library can name.
+  value under a key that is there is not: the value is changed through
+  `List`'s `Index` lend of the entry, and what a list's potential is after
+  such a lend follows only from `at`'s `ensures`, which say nothing of
+  sums. Saying it there, for every measure, would be one more quantified
+  fact at every index into a list that is changed.
 - **More in a diagnostic.** A note at a clause in another file, which a
   message names by its file and line instead, the
   branches a counterexample's path takes, listed by position, and a
