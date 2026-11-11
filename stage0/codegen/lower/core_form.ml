@@ -1901,6 +1901,9 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
   in
   let reached = local st.b (Raw (Integer UInt32)) in
   let lent = ref None and waiting = ref [] in
+  (* What the method's own scopes owned at a [yield] that the caller went
+     on from. *)
+  let owned_at_a_yield = ref [] in
   (* A value the method makes to lend is the caller's statement's to drop,
      after the method has gone on, whichever [yield] made it. *)
   let yield_into = if several then Some (temporary st ty) else None in
@@ -1911,14 +1914,20 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
           emit st.b (Assign (at pointer, Use (Address { place; writable })));
           lent := Some (at pointer / Deref)
       | None -> lent := Some place);
-      let owns_nothing =
-        List.for_all
-          (fun (scope : scope) -> scope.owned = [])
-          (List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes)
-      in
+      let scopes = List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes in
+      let owns_nothing = List.for_all (fun (scope : scope) -> scope.owned = []) scopes in
       if (not several) && Method_yields.each_is_last body && owns_nothing then
         finish st.b (Goto resume)
       else begin
+        List.iter
+          (fun (scope : scope) ->
+            List.iter
+              (function
+                | Drop_value place when not (List.mem place !owned_at_a_yield) ->
+                    owned_at_a_yield := place :: !owned_at_a_yield
+                | _ -> ())
+              scope.owned)
+          scopes;
         emit st.b
           (Assign (at reached, Use (Constant (Integer (UInt32, Z.of_int (List.length !waiting))))));
         waiting := resume :: !waiting;
@@ -1950,6 +1959,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
             finished = current st.b;
             selector = local st.b (Raw (Integer UInt32));
             ways = [];
+            owned = !owned_at_a_yield;
           }
         :: scope.owned;
       start st.b goes_on);

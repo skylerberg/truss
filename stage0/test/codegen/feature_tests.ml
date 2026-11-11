@@ -161,6 +161,82 @@ test "lent" {
   assert holder.label() == "label 1"
 }
 |};
+  (* The caller goes on from either [yield], and only the first has
+     [label] in scope. *)
+  passes "a lending method owns a value at one of its yields and not at another"
+    {|type Pair(first: String, second: String)
+
+fn Pair.chosen(self, pick: Bool) lends String {
+  if pick {
+    let label = "picked ${self.first}"
+    yield self.first
+    let _ = label.length()
+  } else {
+    yield self.second
+  }
+}
+
+test "lent from either yield" {
+  let pair = Pair(first: "one", second: "two")
+  assert pair.chosen(true) == "one"
+  assert pair.chosen(false) == "two"
+  var seen = 0
+  for pick in [true, false, true] {
+    if pair.chosen(pick).length() == 3 {
+      seen += 1
+    }
+  }
+  assert seen == 3
+}
+|};
+  passes "a lending method yields inside a loop over a yielding method that owns a value"
+    {|type Bag(items: List[String])
+
+fn Bag.matching(self, prefix: StringSlice) yields String {
+  let wanted = prefix.to_string()
+  for item in self.items {
+    if item.slice().starts_with(wanted.slice()) {
+      yield item
+    }
+  }
+}
+
+fn Bag.first_matching(self, prefix: StringSlice) lends Option[String] {
+  for item in self.matching(prefix) {
+    yield Some(item)
+    return
+  }
+  yield None
+}
+
+test "the first match, and none" {
+  let bag = Bag(items: ["pear", "fig", "plum"])
+  assert bag.first_matching("f") == Some("fig")
+  assert bag.first_matching("p") == Some("pear")
+  assert bag.first_matching("x") is None
+}
+|};
+  passes "a lending method lends to change from either of two yields, one with a value in scope"
+    {|type Slots(first: List[Int64], second: Int64)
+
+fn Slots.slot(mut self, pick: Bool) lends mut Int64 {
+  if pick {
+    let label = "slot ${self.second}"
+    yield mut self.first[0]
+    let _ = label.length()
+  } else {
+    yield mut self.second
+  }
+}
+
+test "changed through either yield" {
+  var slots = Slots(first: [1, 2], second: 5)
+  mut slots.slot(true) += 10
+  mut slots.slot(false) += 100
+  assert slots.first[0] == 11
+  assert slots.second == 105
+}
+|};
   passes "a lending method goes on when its caller's statement leaves early"
     {|type Counted(value: Int64, finished: Int64)
 
