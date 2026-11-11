@@ -3279,6 +3279,31 @@ let () =
                     String.concat ", " (List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes))
                   found)))
 
+(* Contracts under a quantifier *)
+
+let () =
+  test "a callee's ensures under its requires holds for every bound value" (fun () ->
+      proven
+        "fn counted_up(count: USize) -> USize\n\
+        \  requires count < 1000\n\
+        \  ensures result == count\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  var reached: USize = 0\n\
+        \  while reached < count\n\
+        \    invariant reached <= count\n\
+        \    decreases count - reached\n\
+        \  {\n\
+        \    reached += 1\n\
+        \  }\n\
+        \  reached\n\
+         }\n\n\
+         theorem each_counted(items: List[USize])\n\
+        \  requires forall i in 0..items.length() => items[i] < 1000\n\
+        \  ensures forall i in 0..items.length() => counted_up(items[i]) == items[i]\n\
+         {\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =

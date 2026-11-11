@@ -418,10 +418,10 @@ decides when a body is a definition. In the solver:
   `requires` is stated once, for every argument, since a fact about one
   call would name the bound values. So `forall a: Pair => forall b: Pair
   => (a < b) == ...` unfolds a derived `compare`, which has a body as a
-  written one would. A function with no `requires` that is known by its
-  contract alone, as one in another package that is not `transparent` is,
+  written one would. A function known by its contract alone, as one in
+  another package that is not `transparent` is, or one with a `requires`,
   has its `ensures` stated once in the same way, for every argument its
-  parameters' types admit.
+  parameters' types admit where its `requires` holds.
 - **Recursive definitions unfold once per use.** A definition that
   unfolded itself forever would never be finished, so a call to a function
   inside its own unfolding is left as the function applied to its
@@ -1420,12 +1420,14 @@ test the prover itself:
 - **Contracts for the intrinsic module's system calls.** The environment's
   entries, a view's address, and what a C function returns beyond what its
   row of the table says are known only by their types.
-- **Facts under a quantifier.** A fact that names a quantifier's bound
-  name, such as what the `ensures` of a callee with a `requires` says of a
-  call on it, is not kept. Closed over the quantifier it would be true, but the standard
-  library's maps state nested quantifiers over calls, each call's facts
-  are about values made for every combination of bound names, and with
-  them the solver runs out of steps even with triggers chosen.
+- **Facts under a quantifier.** A pure callee's contract and definition
+  are stated once for every argument, but any other fact that names a
+  quantifier's bound name, such as what is known of a value made in the
+  quantifier's body by an operation, is not kept. Closed over the
+  quantifier it would be true, but the standard library's maps state
+  nested quantifiers, each fact is about values made for every
+  combination of bound names, and with them the solver runs out of steps
+  even with triggers chosen.
 - **A lambda inside a quantifier, or with a functional lambda inside it,**
   whose body is not functional is applied as a function the solver knows
   nothing more about: inside a quantifier its arguments are not alone in
