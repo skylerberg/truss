@@ -163,7 +163,7 @@ let load published name version ~hash =
                  dependencies;
              usize_bits = 32;
            }
-            : Type_checker.Manifest.package),
+            : Manifest.package),
           List.map
             (fun (name, version) -> { Lock.name; version; hash = hash_of name version; holds = [] })
             record )
@@ -317,5 +317,19 @@ let () =
           "Nothing in the build uses `acme::units`";
           "`truss::http` is said to hold Clock, and the manifests grant it nothing";
         ])
+
+(* The registry selects versions and writes lock files from manifests
+   alone. A stage of the compiler among its libraries would link the
+   compiler into every tool that reads a registry. *)
+let () =
+  test "the registry lists no stage of the compiler" (fun () ->
+      let text = In_channel.with_open_bin "../../stage0/registry/dune" In_channel.input_all in
+      let libraries =
+        String.split_on_char ' '
+          (String.map (fun c -> if c = '\n' || c = '(' || c = ')' then ' ' else c) text)
+      in
+      List.iter
+        (fun stage -> if List.mem stage libraries then fail "the registry lists %s" stage)
+        [ "type_checker"; "workspace"; "query"; "parser"; "resolve"; "interface"; "infer" ])
 
 let () = finish ()

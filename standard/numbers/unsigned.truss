@@ -11,6 +11,7 @@ impl Equal for UInt8 {
 
 impl Ordered for UInt8 {
   fn compare(self, other: UInt8) -> Ordering
+    ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
   {
     if intrinsic::less(self, right: other) {
@@ -132,43 +133,43 @@ public let UInt8.minimum: UInt8 = 0
 
 public let UInt8.maximum: UInt8 = 255
 
-public fn UInt8.checked_add(self, other: UInt8) -> Option[UInt8]
+public transparent fn UInt8.checked_add(self, other: UInt8) -> Option[UInt8]
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
-public fn UInt8.checked_subtract(self, other: UInt8) -> Option[UInt8]
+public transparent fn UInt8.checked_subtract(self, other: UInt8) -> Option[UInt8]
   cost time O(1)
 {
   if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
-public fn UInt8.checked_multiply(self, other: UInt8) -> Option[UInt8]
+public transparent fn UInt8.checked_multiply(self, other: UInt8) -> Option[UInt8]
   cost time O(1)
 {
   if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
-public fn UInt8.wrapping_add(self, other: UInt8) -> UInt8
+public transparent fn UInt8.wrapping_add(self, other: UInt8) -> UInt8
   cost time O(1)
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
-public fn UInt8.wrapping_subtract(self, other: UInt8) -> UInt8
+public transparent fn UInt8.wrapping_subtract(self, other: UInt8) -> UInt8
   cost time O(1)
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
-public fn UInt8.wrapping_multiply(self, other: UInt8) -> UInt8
+public transparent fn UInt8.wrapping_multiply(self, other: UInt8) -> UInt8
   cost time O(1)
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
 
-public fn UInt8.saturating_add(self, other: UInt8) -> UInt8
+public transparent fn UInt8.saturating_add(self, other: UInt8) -> UInt8
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) {
@@ -182,6 +183,8 @@ impl TryFrom[Int8] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int8) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int8, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -192,6 +195,8 @@ impl TryFrom[Int16] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int16) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 255)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int16, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -202,6 +207,8 @@ impl TryFrom[Int32] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int32) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 255)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int32, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -212,6 +219,8 @@ impl TryFrom[Int64] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int64) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 255)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int64, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -222,6 +231,8 @@ impl TryFrom[ISize] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own ISize) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 255)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[ISize, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -232,6 +243,8 @@ impl TryFrom[UInt16] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt16) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 255)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[UInt16, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -242,6 +255,8 @@ impl TryFrom[UInt32] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt32) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 255)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[UInt32, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -252,6 +267,8 @@ impl TryFrom[UInt64] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt64) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 255)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[UInt64, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -262,6 +279,8 @@ impl TryFrom[USize] for UInt8 {
   type Error = core::ConversionError
 
   fn try_from(value: own USize) -> Result[UInt8, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 255)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[USize, UInt8](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -278,6 +297,7 @@ impl Equal for UInt16 {
 
 impl Ordered for UInt16 {
   fn compare(self, other: UInt16) -> Ordering
+    ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
   {
     if intrinsic::less(self, right: other) {
@@ -399,43 +419,43 @@ public let UInt16.minimum: UInt16 = 0
 
 public let UInt16.maximum: UInt16 = 65535
 
-public fn UInt16.checked_add(self, other: UInt16) -> Option[UInt16]
+public transparent fn UInt16.checked_add(self, other: UInt16) -> Option[UInt16]
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
-public fn UInt16.checked_subtract(self, other: UInt16) -> Option[UInt16]
+public transparent fn UInt16.checked_subtract(self, other: UInt16) -> Option[UInt16]
   cost time O(1)
 {
   if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
-public fn UInt16.checked_multiply(self, other: UInt16) -> Option[UInt16]
+public transparent fn UInt16.checked_multiply(self, other: UInt16) -> Option[UInt16]
   cost time O(1)
 {
   if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
-public fn UInt16.wrapping_add(self, other: UInt16) -> UInt16
+public transparent fn UInt16.wrapping_add(self, other: UInt16) -> UInt16
   cost time O(1)
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
-public fn UInt16.wrapping_subtract(self, other: UInt16) -> UInt16
+public transparent fn UInt16.wrapping_subtract(self, other: UInt16) -> UInt16
   cost time O(1)
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
-public fn UInt16.wrapping_multiply(self, other: UInt16) -> UInt16
+public transparent fn UInt16.wrapping_multiply(self, other: UInt16) -> UInt16
   cost time O(1)
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
 
-public fn UInt16.saturating_add(self, other: UInt16) -> UInt16
+public transparent fn UInt16.saturating_add(self, other: UInt16) -> UInt16
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) {
@@ -449,6 +469,8 @@ impl TryFrom[Int8] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int8) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int8, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -459,6 +481,8 @@ impl TryFrom[Int16] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int16) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int16, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -469,6 +493,8 @@ impl TryFrom[Int32] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int32) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 65535)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int32, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -479,6 +505,8 @@ impl TryFrom[Int64] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int64) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 65535)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int64, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -489,6 +517,8 @@ impl TryFrom[ISize] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own ISize) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 65535)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[ISize, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -505,6 +535,8 @@ impl TryFrom[UInt32] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt32) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 65535)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[UInt32, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -515,6 +547,8 @@ impl TryFrom[UInt64] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt64) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 65535)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[UInt64, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -525,6 +559,8 @@ impl TryFrom[USize] for UInt16 {
   type Error = core::ConversionError
 
   fn try_from(value: own USize) -> Result[UInt16, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 65535)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[USize, UInt16](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -541,6 +577,7 @@ impl Equal for UInt32 {
 
 impl Ordered for UInt32 {
   fn compare(self, other: UInt32) -> Ordering
+    ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
   {
     if intrinsic::less(self, right: other) {
@@ -662,43 +699,43 @@ public let UInt32.minimum: UInt32 = 0
 
 public let UInt32.maximum: UInt32 = 4294967295
 
-public fn UInt32.checked_add(self, other: UInt32) -> Option[UInt32]
+public transparent fn UInt32.checked_add(self, other: UInt32) -> Option[UInt32]
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
-public fn UInt32.checked_subtract(self, other: UInt32) -> Option[UInt32]
+public transparent fn UInt32.checked_subtract(self, other: UInt32) -> Option[UInt32]
   cost time O(1)
 {
   if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
-public fn UInt32.checked_multiply(self, other: UInt32) -> Option[UInt32]
+public transparent fn UInt32.checked_multiply(self, other: UInt32) -> Option[UInt32]
   cost time O(1)
 {
   if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
-public fn UInt32.wrapping_add(self, other: UInt32) -> UInt32
+public transparent fn UInt32.wrapping_add(self, other: UInt32) -> UInt32
   cost time O(1)
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
-public fn UInt32.wrapping_subtract(self, other: UInt32) -> UInt32
+public transparent fn UInt32.wrapping_subtract(self, other: UInt32) -> UInt32
   cost time O(1)
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
-public fn UInt32.wrapping_multiply(self, other: UInt32) -> UInt32
+public transparent fn UInt32.wrapping_multiply(self, other: UInt32) -> UInt32
   cost time O(1)
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
 
-public fn UInt32.saturating_add(self, other: UInt32) -> UInt32
+public transparent fn UInt32.saturating_add(self, other: UInt32) -> UInt32
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) {
@@ -712,6 +749,8 @@ impl TryFrom[Int8] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int8) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int8, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -722,6 +761,8 @@ impl TryFrom[Int16] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int16) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int16, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -732,6 +773,8 @@ impl TryFrom[Int32] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int32) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int32, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -742,6 +785,8 @@ impl TryFrom[Int64] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int64) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 4294967295)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int64, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -752,6 +797,8 @@ impl TryFrom[ISize] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own ISize) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value && value <= 4294967295)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[ISize, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -774,6 +821,8 @@ impl TryFrom[UInt64] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt64) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 4294967295)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[UInt64, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -784,6 +833,8 @@ impl TryFrom[USize] for UInt32 {
   type Error = core::ConversionError
 
   fn try_from(value: own USize) -> Result[UInt32, core::ConversionError]
+    ensures (result is Ok(_)) == (value <= 4294967295)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[USize, UInt32](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -800,6 +851,7 @@ impl Equal for UInt64 {
 
 impl Ordered for UInt64 {
   fn compare(self, other: UInt64) -> Ordering
+    ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
   {
     if intrinsic::less(self, right: other) {
@@ -921,43 +973,43 @@ public let UInt64.minimum: UInt64 = 0
 
 public let UInt64.maximum: UInt64 = 18446744073709551615
 
-public fn UInt64.checked_add(self, other: UInt64) -> Option[UInt64]
+public transparent fn UInt64.checked_add(self, other: UInt64) -> Option[UInt64]
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
-public fn UInt64.checked_subtract(self, other: UInt64) -> Option[UInt64]
+public transparent fn UInt64.checked_subtract(self, other: UInt64) -> Option[UInt64]
   cost time O(1)
 {
   if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
-public fn UInt64.checked_multiply(self, other: UInt64) -> Option[UInt64]
+public transparent fn UInt64.checked_multiply(self, other: UInt64) -> Option[UInt64]
   cost time O(1)
 {
   if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
-public fn UInt64.wrapping_add(self, other: UInt64) -> UInt64
+public transparent fn UInt64.wrapping_add(self, other: UInt64) -> UInt64
   cost time O(1)
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
-public fn UInt64.wrapping_subtract(self, other: UInt64) -> UInt64
+public transparent fn UInt64.wrapping_subtract(self, other: UInt64) -> UInt64
   cost time O(1)
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
-public fn UInt64.wrapping_multiply(self, other: UInt64) -> UInt64
+public transparent fn UInt64.wrapping_multiply(self, other: UInt64) -> UInt64
   cost time O(1)
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
 
-public fn UInt64.saturating_add(self, other: UInt64) -> UInt64
+public transparent fn UInt64.saturating_add(self, other: UInt64) -> UInt64
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) {
@@ -971,6 +1023,8 @@ impl TryFrom[Int8] for UInt64 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int8) -> Result[UInt64, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int8, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -981,6 +1035,8 @@ impl TryFrom[Int16] for UInt64 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int16) -> Result[UInt64, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int16, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -991,6 +1047,8 @@ impl TryFrom[Int32] for UInt64 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int32) -> Result[UInt64, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int32, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -1001,6 +1059,8 @@ impl TryFrom[Int64] for UInt64 {
   type Error = core::ConversionError
 
   fn try_from(value: own Int64) -> Result[UInt64, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int64, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -1011,6 +1071,8 @@ impl TryFrom[ISize] for UInt64 {
   type Error = core::ConversionError
 
   fn try_from(value: own ISize) -> Result[UInt64, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[ISize, UInt64](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -1051,6 +1113,7 @@ impl Equal for USize {
 
 impl Ordered for USize {
   fn compare(self, other: USize) -> Ordering
+    ensures result == (if self < other { Ordering.Less } else if self == other { Ordering.Equal } else { Ordering.Greater })
     cost time O(1)
   {
     if intrinsic::less(self, right: other) {
@@ -1172,43 +1235,43 @@ public let USize.minimum: USize = 0
 
 public let USize.maximum: USize = 18446744073709551615
 
-public fn USize.checked_add(self, other: USize) -> Option[USize]
+public transparent fn USize.checked_add(self, other: USize) -> Option[USize]
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
 }
 
-public fn USize.checked_subtract(self, other: USize) -> Option[USize]
+public transparent fn USize.checked_subtract(self, other: USize) -> Option[USize]
   cost time O(1)
 {
   if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
 }
 
-public fn USize.checked_multiply(self, other: USize) -> Option[USize]
+public transparent fn USize.checked_multiply(self, other: USize) -> Option[USize]
   cost time O(1)
 {
   if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
 }
 
-public fn USize.wrapping_add(self, other: USize) -> USize
+public transparent fn USize.wrapping_add(self, other: USize) -> USize
   cost time O(1)
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
-public fn USize.wrapping_subtract(self, other: USize) -> USize
+public transparent fn USize.wrapping_subtract(self, other: USize) -> USize
   cost time O(1)
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
-public fn USize.wrapping_multiply(self, other: USize) -> USize
+public transparent fn USize.wrapping_multiply(self, other: USize) -> USize
   cost time O(1)
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
 
-public fn USize.saturating_add(self, other: USize) -> USize
+public transparent fn USize.saturating_add(self, other: USize) -> USize
   cost time O(1)
 {
   if intrinsic::add_overflows(self, right: other) {
@@ -1222,6 +1285,8 @@ impl TryFrom[Int8] for USize {
   type Error = core::ConversionError
 
   fn try_from(value: own Int8) -> Result[USize, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int8, USize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -1232,6 +1297,8 @@ impl TryFrom[Int16] for USize {
   type Error = core::ConversionError
 
   fn try_from(value: own Int16) -> Result[USize, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int16, USize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -1242,6 +1309,8 @@ impl TryFrom[Int32] for USize {
   type Error = core::ConversionError
 
   fn try_from(value: own Int32) -> Result[USize, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int32, USize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -1252,6 +1321,8 @@ impl TryFrom[Int64] for USize {
   type Error = core::ConversionError
 
   fn try_from(value: own Int64) -> Result[USize, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[Int64, USize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -1262,6 +1333,8 @@ impl TryFrom[ISize] for USize {
   type Error = core::ConversionError
 
   fn try_from(value: own ISize) -> Result[USize, core::ConversionError]
+    ensures (result is Ok(_)) == (0 <= value)
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[ISize, USize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
@@ -1290,6 +1363,7 @@ impl TryFrom[UInt64] for USize {
   type Error = core::ConversionError
 
   fn try_from(value: own UInt64) -> Result[USize, core::ConversionError]
+    ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
     if intrinsic::fits[UInt64, USize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }

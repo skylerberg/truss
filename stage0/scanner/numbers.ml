@@ -46,14 +46,44 @@ let scan_end text start =
   for index = start to stop - 1 do
     if not (is_digit text.[index] || text.[index] = '_') then only_digits := false
   done;
-  let stop =
-    if !only_digits && stop + 1 < length && text.[stop] = '.' && is_digit text.[stop + 1] then
-      run (stop + 1)
+  (* C++'s digit separator, as in `1'000`, is part of the number. *)
+  let rec quoted_groups stop =
+    if stop + 1 < length && text.[stop] = '\'' && is_digit text.[stop + 1] then
+      quoted_groups (run (stop + 1))
     else stop
   in
+  let stop = if !only_digits then quoted_groups stop else stop in
+  let hexadecimal = is_radix_prefix text start && Char.lowercase_ascii text.[start + 1] = 'x' in
+  let is_hexadecimal_digit c = is_digit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') in
+  (* C's hexadecimal float, as in `0x1.8p3`, is one token too. Its exponent
+     is required, which tells it from a method call on a hexadecimal
+     literal, as in `0xFF.abs()`. *)
+  let hexadecimal_fraction stop =
+    let rec digits_end position =
+      if position < length && is_hexadecimal_digit text.[position] then digits_end (position + 1)
+      else position
+    in
+    let marker = digits_end (stop + 1) in
+    marker > stop + 1
+    && marker + 1 < length
+    && (text.[marker] = 'p' || text.[marker] = 'P')
+    && (is_digit text.[marker + 1]
+       || marker + 2 < length
+          && (text.[marker + 1] = '+' || text.[marker + 1] = '-')
+          && is_digit text.[marker + 2])
+  in
+  let stop =
+    if
+      stop + 1 < length
+      && text.[stop] = '.'
+      && ((!only_digits && is_digit text.[stop + 1]) || (hexadecimal && hexadecimal_fraction stop))
+    then run (stop + 1)
+    else stop
+  in
+  let exponent_marker c = if hexadecimal then c = 'p' || c = 'P' else c = 'e' || c = 'E' in
   if
-    (not (is_radix_prefix text start))
-    && (text.[stop - 1] = 'e' || text.[stop - 1] = 'E')
+    ((not (is_radix_prefix text start)) || hexadecimal)
+    && exponent_marker text.[stop - 1]
     && stop + 1 < length
     && (text.[stop] = '+' || text.[stop] = '-')
     && is_digit text.[stop + 1]
@@ -223,6 +253,12 @@ let check_radix text =
         (if rest <> "" then
            if rest_is_suffix then
              if digits = "" then [] else [ suffix_issue text ~offset:digits_end ~fixed ]
+           else if base = 16 && digits <> "" && (rest.[0] = '.' || rest.[0] = 'p' || rest.[0] = 'P')
+           then
+             [
+               issue ~fixable:false Number_hexadecimal_float
+                 "Truss has no hexadecimal floats. Write the value as a decimal float." 0 length;
+             ]
            else
              [
                issue ~fixable:false Number_invalid_digit
@@ -412,4 +448,37 @@ let check_decimal text =
         [ ("Write `" ^ octal ^ "` (octal)", octal); ("Write `" ^ fixed ^ "` (decimal)", fixed) ]
       else [ ("Write `" ^ fixed ^ "`", fixed) ])
 
-let check text = if is_radix_prefix text 0 then check_radix text else check_decimal text
+(* A decimal literal whose digits are grouped with `'`, as in C++: the fix
+   groups them with `_`, and corrects whatever else is wrong with it. *)
+let check_quoted text =
+  let grouped = String.map (fun c -> if c = '\'' then '_' else c) text in
+  let checked = check_decimal grouped in
+  let offset = String.index text '\'' in
+  {
+    value = checked.value;
+    problem =
+      Some
+        {
+          code = Number_underscore;
+          message = Printf.sprintf "Digits are grouped with `_`, as in `%s`." grouped;
+          start = offset;
+          stop = offset + 1;
+        };
+    fixes =
+      (match checked.problem with
+      | None -> [ ("Write `" ^ grouped ^ "`", grouped) ]
+      | Some _ -> checked.fixes);
+  }
+
+let check text =
+  if is_radix_prefix text 0 then check_radix text
+  else if String.contains text '\'' then check_quoted text
+  else check_decimal text
+
+(* A float written with no digit after its `.`, as in `1.`, or none before
+   it, as in `.5`: the value of [text], the literal with the missing `0`
+   written, or [None] when that is not one valid float. *)
+let float_with_zero text =
+  match check_decimal text with
+  | { value = Token.Float _ as value; problem = None; _ } -> Some value
+  | _ -> None

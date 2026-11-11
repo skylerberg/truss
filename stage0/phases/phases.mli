@@ -1,6 +1,9 @@
 (** The compiler's phases, in order: each reads the ones before it. A stage declares its queries in
     one of them. *)
 
+val project : Query.phase
+(** A project's packages, their modules and text, and the registry packages of its build *)
+
 val syntax : Query.phase
 (** A file's tokens and trees *)
 

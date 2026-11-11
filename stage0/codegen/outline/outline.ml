@@ -164,16 +164,16 @@ let outline_fork env ~first_number (f : Lir.function_) =
       let in_a_region =
         List.fold_left (fun all region -> Blocks.union region.blocks all) Blocks.empty regions
       in
+      (* The locals of the code around the regions. Only code that can run
+         counts: after a loop whose body always fails, the loop's own
+         blocks that follow the body cannot, and the locals that they name
+         are still the loop's alone. *)
       let outside =
-        let found = ref (Locals.of_list f.parameters) in
-        Array.iteri
-          (fun number block ->
-            if not (Blocks.mem number in_a_region) then
-              found := Locals.union (block_locals block) !found)
-          blocks;
-        (* A region's start names the locals of its part of the range,
-           which are the region's to read, not the code's around it. *)
-        !found
+        List.fold_left
+          (fun found number ->
+            if Blocks.mem number in_a_region then found
+            else Locals.union (block_locals blocks.(number)) found)
+          (Locals.of_list f.parameters) (Lir.reverse_postorder blocks)
       in
       (* The locals that each region's code refers to. The locals of the
          region's own mark are excluded. *)
@@ -257,6 +257,19 @@ let outline_fork env ~first_number (f : Lir.function_) =
                   else Hashtbl.replace own original (local info))
               used;
             let captured = List.rev !captured in
+            (* The chunks of a fork run at the same time, so one that gave a
+               shared local a whole new value would race with the others.
+               The type checker lets no program do that, so it would be a
+               local of the compiler's that belongs to each run. *)
+            (match region.kind with
+            | Chunk _ ->
+                List.iter
+                  (fun (_, original) ->
+                    if Locals.mem original (List.nth assigned index) then
+                      bug "local %d is given a value in the chunks of fork %d, which share it"
+                        original fork)
+                  captured
+            | Branch | Task _ -> ());
             let place (p : Lir.place) : Lir.place =
               match p.root with
               | Static _ -> p

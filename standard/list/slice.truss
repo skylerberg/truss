@@ -337,7 +337,7 @@ public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Opti
   find_with_table(self, needle: needle, table: table.slice())
 }
 
-public fn Slice[Element: Ordered].is_sorted(self) -> Bool
+public transparent fn Slice[Element: Ordered].is_sorted(self) -> Bool
   cost time finite
 {
   forall i in 1..self.length() => self[i - 1] <= self[i]

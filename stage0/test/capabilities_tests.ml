@@ -289,13 +289,8 @@ let () =
               "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n" );
           ]
       in
-      Engine.set (Engine.of_context database) Workspace.packages "app"
-        {
-          name = "app";
-          dependencies = [ { package = "clock_library"; capabilities = [] } ];
-          modules = [ module_of "app::main" ];
-          usize_bits = 32;
-        };
+      Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
+        ~dependencies:[ { package = "clock_library"; capabilities = [] } ];
       match codes (check database (module_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
       | found -> fail "found [%s]" (String.concat "; " found))
@@ -303,13 +298,8 @@ let () =
 let () =
   let with_grant files granted =
     let database = setup files in
-    Engine.set (Engine.of_context database) Workspace.packages "app"
-      {
-        name = "app";
-        dependencies = [ { package = "clock_library"; capabilities = granted } ];
-        modules = [ module_of "app::main" ];
-        usize_bits = 32;
-      };
+    Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
+      ~dependencies:[ { package = "clock_library"; capabilities = granted } ];
     codes (check database (module_of "app::main"))
   in
   let library =
@@ -422,14 +412,9 @@ let () =
    each with what it is granted. *)
 let codes_with_grants files grants =
   let database = setup files in
-  Engine.set (Engine.of_context database) Workspace.packages "app"
-    {
-      name = "app";
-      dependencies =
-        List.map (fun (package, capabilities) -> { Workspace.package; capabilities }) grants;
-      modules = [ module_of "app::main" ];
-      usize_bits = 32;
-    };
+  Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
+    ~dependencies:
+      (List.map (fun (package, capabilities) -> { Workspace.package; capabilities }) grants);
   (database, codes (check database (module_of "app::main")))
 
 let expect_codes ~expected (_, found) =
@@ -946,44 +931,441 @@ let () =
          \  sum\n\
           }\n")
         "capabilities.not_available");
-  test "a cursor whose method uses a capability does not meet a Cursor bound" (fun () ->
-      one_diagnostic
-        (readings
-       ^ "fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element] {\n\
-         \  mut source.next()\n\
-          }\n\n\
-          fn first() -> Option[Int64]\n\
-         \  uses Meter\n\
-          {\n\
-         \  var cursor = readings(3)\n\
-         \  pull(mut cursor)\n\
-          }\n")
-        "types.unsatisfied_bound");
-  test "a method that Cursor provides cannot run a cursor whose method uses a capability" (fun () ->
-      one_diagnostic
-        (readings
-       ^ "fn length() -> USize\n\
-         \  uses Meter\n\
-          {\n\
-         \  var cursor = readings(3)\n\
-         \  own cursor.count()\n\
-          }\n")
-        "capabilities.not_available");
-  test "a cursor whose method uses no capability meets a Cursor bound" (fun () ->
+  test "a cursor whose method uses a capability meets a Cursor bound" (fun () ->
       fine
-        "fn counted(count: Int64) yields Int64 {\n\
-        \  var index = 0\n\
-        \  while index < count {\n\
-        \    yield index\n\
-        \    index += 1\n\
-        \  }\n\
-         }\n\n\
-         fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element] {\n\
-        \  mut source.next()\n\
-         }\n\n\
-         fn first() -> Option[Int64] {\n\
-        \  var cursor = counted(3)\n\
-        \  pull(mut cursor)\n\
-         }\n")
+        (readings
+       ^ {|fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+{
+  mut source.next()
+}
+
+fn first() -> Option[Int64]
+  uses Meter
+{
+  var cursor = readings(3)
+  pull(mut cursor)
+}
+|}
+        ));
+  test "a generic function that advances a cursor needs the cursor's capabilities" (fun () ->
+      one_diagnostic
+        {|fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element] {
+  mut source.next()
+}
+|}
+        "capabilities.not_available");
+  test "a call that passes a cursor needs the capabilities of the cursor's method" (fun () ->
+      one_diagnostic
+        (readings
+       ^ {|fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+{
+  mut source.next()
+}
+
+fn first() -> Option[Int64] {
+  var cursor = provide Fixed(value: 7) {
+    readings(3)
+  }
+  pull(mut cursor)
+}
+|}
+        )
+        "capabilities.not_available");
+  test "a method that Cursor provides needs the capabilities of the cursor's method" (fun () ->
+      one_diagnostic
+        (readings
+       ^ {|fn length() -> USize {
+  var cursor = provide Fixed(value: 7) {
+    readings(3)
+  }
+  own cursor.count()
+}
+|}
+        )
+        "capabilities.not_available");
+  test "a method that Cursor provides runs where the cursor's capabilities are available" (fun () ->
+      fine
+        (readings
+       ^ {|fn length() -> USize
+  uses Meter
+{
+  var cursor = readings(3)
+  own cursor.count()
+}
+|}
+        ));
+  test "a cursor whose method uses no capability needs none" (fun () ->
+      fine
+        {|fn counted(count: Int64) yields Int64 {
+  var index = 0
+  while index < count {
+    yield index
+    index += 1
+  }
+}
+
+fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+{
+  mut source.next()
+}
+
+fn first() -> Option[Int64] {
+  var cursor = counted(3)
+  pull(mut cursor)
+}
+
+fn length() -> USize {
+  counted(3).count()
+}
+|});
+  test "a cursor whose method uses a capability cannot be an any value" (fun () ->
+      one_diagnostic
+        (readings
+       ^ {|fn boxed() -> any Cursor[Element = Int64]
+  uses Meter
+{
+  any readings(3)
+}
+|})
+        "types.no_impl")
+
+(* Associated capability sets *)
+
+let feed =
+  {|capability Meter {
+  fn read() -> Int64
+}
+
+trait Feed {
+  capability Uses
+
+  fn pull(mut self) -> Option[Int64]
+    uses Self.Uses
+
+  fn skip(mut self)
+    uses Self.Uses
+  {
+    let _ = mut self.pull()
+  }
+}
+
+type Counter(next: Int64)
+
+impl Feed for Counter {
+  fn pull(mut self) -> Option[Int64] {
+    self.next += 1
+    Some(self.next)
+  }
+}
+
+type Gauge(last: Int64)
+
+impl Feed for Gauge {
+  capability Uses = Meter
+
+  fn pull(mut self) -> Option[Int64]
+    uses Meter
+  {
+    self.last = Meter.read()
+    Some(self.last)
+  }
+}
+
+type Twice[Source](source: Source)
+
+impl Feed for Twice[Source: Feed] {
+  capability Uses = Source.Uses
+
+  fn pull(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    let _ = mut self.source.pull()
+    mut self.source.pull()
+  }
+}
+
+fn drain[Source: Feed](source: mut Source) -> Int64
+  uses Source.Uses
+{
+  var total = 0
+  while mut source.pull() is Some(value) {
+    total += value
+  }
+  total
+}
+
+|}
+
+let () =
+  test "an impl that leaves out an associated capability set has the empty set" (fun () ->
+      fine
+        (feed
+       ^ {|fn f() -> Int64 {
+  var counter = Counter(next: 0)
+  mut counter.skip()
+  drain(mut counter)
+}
+|}
+        ));
+  test "a call needs the capabilities of the set that the impl defines" (fun () ->
+      one_diagnostic
+        (feed ^ {|fn f() -> Int64 {
+  var gauge = Gauge(last: 0)
+  drain(mut gauge)
+}
+|})
+        "capabilities.not_available");
+  test "a provided method needs the capabilities of the set that the impl defines" (fun () ->
+      one_diagnostic
+        (feed ^ {|fn f() {
+  var gauge = Gauge(last: 0)
+  mut gauge.skip()
+}
+|})
+        "capabilities.not_available");
+  test "a set defined from a parameter's set is the argument's set" (fun () ->
+      fine
+        (feed
+       ^ {|fn metered() -> Int64
+  uses Meter
+{
+  var twice = Twice(source: Gauge(last: 0))
+  mut twice.skip()
+  drain(mut twice)
+}
+
+fn pure() -> Int64 {
+  var twice = Twice(source: Twice(source: Counter(next: 0)))
+  drain(mut twice)
+}
+|}
+        );
+      one_diagnostic
+        (feed
+       ^ {|fn f() -> Int64 {
+  var twice = Twice(source: Twice(source: Gauge(last: 0)))
+  drain(mut twice)
+}
+|}
+        )
+        "capabilities.not_available");
+  test "a method of an impl can use only the set that the impl defines" (fun () ->
+      one_diagnostic
+        (feed
+       ^ {|type Greedy(last: Int64)
+
+impl Feed for Greedy {
+  fn pull(mut self) -> Option[Int64]
+    uses Meter
+  {
+    Some(Meter.read())
+  }
+}
+|}
+        )
+        "types.impl_uses");
+  test "an impl defines only a set that its trait declares, and only once" (fun () ->
+      one_diagnostic
+        (feed
+       ^ {|type Other(last: Int64)
+
+impl Feed for Other {
+  capability Grants = Meter
+
+  fn pull(mut self) -> Option[Int64] {
+    Some(self.last)
+  }
+}
+|}
+        )
+        "types.extra_member";
+      one_diagnostic
+        (feed
+       ^ {|type Other(last: Int64)
+
+impl Feed for Other {
+  capability Uses = Meter
+  capability Uses = Clock
+
+  fn pull(mut self) -> Option[Int64] {
+    Some(self.last)
+  }
+}
+|}
+        )
+        "types.extra_member");
+  test "a set cannot be defined from itself" (fun () ->
+      one_diagnostic
+        (feed
+       ^ {|type Other(last: Int64)
+
+impl Feed for Other {
+  capability Uses = Self.Uses
+
+  fn pull(mut self) -> Option[Int64] {
+    Some(self.last)
+  }
+}
+|}
+        )
+        "types.unknown_associated_capability");
+  test "an associated capability set is of a trait that declares it" (fun () ->
+      one_diagnostic "trait Named {\n  fn name(self) -> String\n    uses Self.Uses\n}\n"
+        "types.unknown_associated_capability";
+      one_diagnostic "fn f[Source](source: Source)\n  uses Source.Uses\n{\n}\n"
+        "types.unknown_associated_capability";
+      one_diagnostic "fn f()\n  uses Self.Uses\n{\n}\n" "types.misplaced_self_type";
+      one_diagnostic "fn f()\n  uses Source.Uses\n{\n}\n" "resolve.not_a_generic_parameter";
+      one_diagnostic "fn f[capability Granted]()\n  uses Granted.Uses\n{\n}\n"
+        "types.unknown_associated_type");
+  test "a trait's methods can use a set that a required trait declares" (fun () ->
+      let rewind =
+        {|trait Rewind: Feed {
+  fn back(mut self) -> Option[Int64]
+    uses Self.Uses
+
+  fn back_twice(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    let _ = mut self.back()
+    mut self.back()
+  }
+}
+
+impl Rewind for Gauge {
+  fn back(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    self.last = Meter.read()
+    Some(self.last)
+  }
+}
+
+fn rewind[Source: Rewind](source: mut Source) -> Option[Int64]
+  uses Source.Uses
+{
+  let _ = mut source.pull()
+  mut source.back_twice()
+}
+
+|}
+      in
+      fine
+        (feed ^ rewind
+       ^ {|fn f() -> Option[Int64]
+  uses Meter
+{
+  var gauge = Gauge(last: 0)
+  rewind(mut gauge)
+}
+|}
+        );
+      one_diagnostic
+        (feed ^ rewind
+       ^ {|fn f() -> Option[Int64] {
+  var gauge = Gauge(last: 0)
+  mut gauge.back_twice()
+}
+|})
+        "capabilities.not_available");
+  test "a function type can use an associated capability set" (fun () ->
+      let apply =
+        {|fn apply[Source: Feed](
+  source: mut Source,
+  run: (fn(mut Source) -> Option[Int64] uses Source.Uses),
+) -> Option[Int64]
+  uses Source.Uses
+{
+  run(mut source)
+}
+
+|}
+      in
+      fine
+        (feed ^ apply
+       ^ {|fn metered() -> Option[Int64]
+  uses Meter
+{
+  var gauge = Gauge(last: 0)
+  apply(mut gauge, run: fn(feed) { mut feed.pull() })
+}
+
+fn pure() -> Option[Int64] {
+  var counter = Counter(next: 0)
+  apply(mut counter, run: fn(feed) { mut feed.pull() })
+}
+|}
+        );
+      one_diagnostic
+        (feed ^ apply
+       ^ {|fn f() -> Option[Int64]
+  uses Meter
+{
+  var counter = Counter(next: 0)
+  apply(mut counter, run: fn(feed) {
+    let _ = Meter.read()
+    mut feed.pull()
+  })
+}
+|}
+        )
+        "capabilities.lambda_uses");
+  test "a capability parameter adds to an associated capability set" (fun () ->
+      let folded =
+        {|fn folded[Source: Feed, capability Granted](
+  source: mut Source,
+  step: (fn(Int64) -> Int64 uses Granted),
+) -> Int64
+  uses Source.Uses, Granted
+{
+  match mut source.pull() {
+    Some(value) => step(value)
+    None => 0
+  }
+}
+
+|}
+      in
+      fine
+        (feed ^ folded
+       ^ {|fn f() -> Int64
+  uses Meter
+{
+  var counter = Counter(next: 0)
+  folded(mut counter, step: fn(value) { value + Meter.read() })
+}
+|}
+        );
+      one_diagnostic
+        (feed ^ folded
+       ^ {|fn f() -> Int64 {
+  var gauge = Gauge(last: 0)
+  folded(mut gauge, step: fn(value) { value })
+}
+|}
+        )
+        "capabilities.not_available");
+  test "an any value hides only a type whose associated capability sets are empty" (fun () ->
+      fine
+        (feed
+       ^ {|fn boxed() -> any Feed {
+  any Counter(next: 0)
+}
+
+fn through(feed: mut any Feed) -> Option[Int64] {
+  mut feed.pull()
+}
+|}
+        );
+      one_diagnostic (feed ^ "fn boxed() -> any Feed {\n  any Gauge(last: 0)\n}\n") "types.no_impl";
+      one_diagnostic
+        (feed ^ {|fn boxed[Source: Feed](source: own Source) -> any Feed {
+  any source
+}
+|})
+        "types.no_impl")
 
 let () = finish ()

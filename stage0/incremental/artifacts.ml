@@ -13,8 +13,7 @@ let record_fact engine store (node : node) reads =
   match node.cell with
   | Result (query, _) when query.saved -> (
       match fingerprint engine node with
-      | None -> ()
-      | Some value -> (
+      | Some value when node.stored -> (
           let parts =
             List.fold_right
               (fun read found ->
@@ -32,7 +31,10 @@ let record_fact engine store (node : node) reads =
                 store.add ~kind:"reads" ~key
                   (Marshal.to_string
                      (List.map (fun (read, _) -> (name read, key_bytes read)) parts)
-                     [])))
+                     []))
+      (* A result that raised, or whose bytes are not in the store, is no
+         fact: there would be no value to give. *)
+      | Some _ | None -> ())
   | _ -> ()
 
 let unsaved_nodes engine =
@@ -46,7 +48,7 @@ let record engine =
   | None -> ()
   | Some store ->
       List.iter
-        (fun node -> record_fact engine store node (lazy (traced_reads engine node)))
+        (fun node -> record_fact engine store node (lazy (current_reads engine node)))
         (unsaved_nodes engine)
 
 (* An artifact: a state, or what changed in one since an earlier artifact.
@@ -58,6 +60,8 @@ type saved_node = {
   saved_value : string option;  (** A fingerprint; [None] for an input that is not set *)
   saved_reads : int list;
   saved_root : bool;
+  saved_stored : bool;  (** Whether the store has the value's bytes *)
+  saved_opaque : bool;
 }
 
 let artifact_header store = "truss artifact " ^ store.version ^ "\n"
@@ -74,7 +78,7 @@ type artifact = {
 
 (* The same reads in the same order name the same nodes. *)
 let same_reads engine reads (base : node) =
-  List.map identity reads = List.map identity (traced_reads engine base)
+  List.map identity reads = List.map identity (current_reads engine base)
 
 let write ?(full = false) engine =
   let store = require_store engine in
@@ -98,7 +102,14 @@ let write ?(full = false) engine =
           let set =
             match node.cell with Input (_, { slot = Set _ | Stored; _ }) -> true | _ -> false
           in
-          if node.root || set then reach node)
+          (* A copy of a fixed base's node is the state's result where the
+             base's is not: it read an input the state replaced. It is
+             written whether or not anything reaches it, or a state opened
+             from this one would read the base's result in its place. *)
+          let replaces_fixed =
+            match node.below with Some base -> base.engine.fixed | None -> false
+          in
+          if node.root || set || replaces_fixed then reach node)
         (nodes engine);
       by_id (Hashtbl.fold (fun _ node found -> node :: found) reached [])
     end
@@ -126,6 +137,7 @@ let write ?(full = false) engine =
         place
   in
   let written (node : node) saved_value saved_reads =
+    ensure_stored engine node;
     node.written <- true;
     node.superseding <- not full;
     Some
@@ -135,10 +147,12 @@ let write ?(full = false) engine =
         saved_value;
         saved_reads;
         saved_root = node.root;
+        saved_stored = node.stored;
+        saved_opaque = node.opaque;
       }
   in
   let save (node : node) =
-    let reads = lazy (traced_reads engine node) in
+    let reads = lazy (current_reads engine node) in
     if Hashtbl.mem engine.unsaved node.id then record_fact engine store node reads;
     (* A copy that came out as the base's node, reading the same, is the
            base's node, and is not written, unless an earlier difference
@@ -168,10 +182,8 @@ let write ?(full = false) engine =
         | Some value ->
             if as_below () then None
             else written node (Some value) (List.map place (Lazy.force reads))
-        | None ->
-            (* A result with no fingerprint takes the place of an earlier
-                   one the chain holds. *)
-            if node.written && not full then written node None [] else None)
+        (* A result that was never computed. *)
+        | None -> None)
     | Unfilled -> None
   in
   let first = List.filter_map save candidates in
@@ -301,6 +313,8 @@ let fill engine (artifacts : artifact list) =
                 | node ->
                     node.fingerprint <- saved.saved_value;
                     node.root <- saved.saved_root;
+                    node.stored <- saved.saved_stored;
+                    node.opaque <- saved.saved_opaque;
                     node.written <- true;
                     node.superseding <- true;
                     (match node.cell with
@@ -338,7 +352,7 @@ let fill engine (artifacts : artifact list) =
       let readers = Hashtbl.fold (fun _ reader found -> reader :: found) node.readers [] in
       List.iter (fun read -> remove_reader engine read node) node.reads;
       node.reads <- [];
-      node.fingerprint <- None;
+      forget_fingerprint node;
       (match node.cell with
       | Input (_, cell) -> cell.slot <- Unset
       | Result (_, cell) -> cell.outcome <- None

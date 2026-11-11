@@ -261,7 +261,24 @@ let rec expression ?context cursor (value : expression) =
       let group = binary_group operator in
       operand group ~right:false left;
       operand group ~right:true right
-  | Is { value = left; _ } -> operand Comparison ~right:false left
+  | Is { value = left; pattern; _ } ->
+      (match (left.kind, pattern.kind) with
+      (* [!response is Ok(_)]: [!] binds tighter than [is], so it negates
+         [response], and a negated value is a [Bool], which no variant
+         matches. *)
+      | Prefix (Not, _), Variant _ ->
+          let whole = Cursor.absolute cursor value.span in
+          Cursor.report cursor Not_before_is
+            (Source.span whole.start (whole.start + 1))
+            "`!` binds tighter than `is`, so this negates the value before the pattern is tested. \
+             To negate the test, put it in parentheses."
+            ~fixes:
+              [
+                Diagnostic.fix "Negate the test"
+                  [ Diagnostic.insert (whole.start + 1) "("; Diagnostic.insert whole.stop ")" ];
+              ]
+      | _ -> ());
+      operand Comparison ~right:false left
   | Range { start; stop; _ } ->
       Option.iter (operand Range_group ~right:false) start;
       Option.iter (operand Range_group ~right:true) stop

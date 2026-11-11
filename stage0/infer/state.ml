@@ -408,18 +408,26 @@ let resolve_capabilities state (capabilities : T.capability list) =
    solutions, projections normalized, and capability variables replaced
    by their solutions. An unsolved inference variable becomes an error.
    While the core form is built, a hole becomes [Never]. *)
-let final state type_ =
-  let type_ =
-    T.map
-      (function
-        | T.Variable _ | T.Literal _ -> Some (unsolved state)
-        | T.Hole when Option.is_some state.form.tables_with_holes -> Some T.Never
-        | _ -> None)
-      (normalize state type_)
-  in
-  match state.capability_solution with
-  | Some _ -> T.map_capabilities (resolve_capabilities state) type_
-  | None -> type_
+let rec final state type_ =
+  T.map ~capabilities:(final_capabilities state)
+    (function
+      | T.Variable _ | T.Literal _ -> Some (unsolved state)
+      | T.Hole when Option.is_some state.form.tables_with_holes -> Some T.Never
+      | _ -> None)
+    (normalize state type_)
+
+(* The final form of a set of capabilities: each associated capability set
+   replaced by the capabilities that the [impl] of its type defines, and
+   each capability variable replaced by its solution. *)
+and final_capabilities state capabilities =
+  resolve_capabilities state
+    (Impls.normalize_capabilities state.database ~bounds:(bounds state)
+       (List.map
+          (function
+            | T.Capability_projection { base; trait; name } ->
+                T.Capability_projection { base = final state base; trait; name }
+            | capability -> capability)
+          capabilities))
 
 let final_argument state = function
   | T.Type type_ -> T.Type (final state type_)
@@ -427,7 +435,7 @@ let final_argument state = function
       match Unify.resolve_value state.unifier value with
       | T.Value_variable _ -> T.Type (unsolved state)
       | value -> T.Value value)
-  | T.Capabilities capabilities -> T.Capabilities (resolve_capabilities state capabilities)
+  | T.Capabilities capabilities -> T.Capabilities (final_capabilities state capabilities)
 
 (* Unifies two types. Projections are normalized first, so [C.Key] unifies
    with the type that the [impl] assigns to [Key]. *)
@@ -958,12 +966,11 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
           (fun capability -> not (List.mem capability wanted_function.uses))
           given_function.uses
       in
-      (* If either set has a capability variable, the check waits until
-         the variables are solved: a subset constraint requires the value's
+      (* If either set is not known yet, the check waits until the
+         definition is checked: a subset constraint requires the value's
          [uses] to be within the expected type's. *)
       let unknown =
-        T.has_capability_variable given_function.uses
-        || T.has_capability_variable wanted_function.uses
+        T.capabilities_unsolved given_function.uses || T.capabilities_unsolved wanted_function.uses
       in
       let proven = T.costs_imply ~given:given_function.costs ~wanted:wanted_function.costs in
       if
@@ -990,16 +997,6 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
 
 (* Bounds *)
 
-let show_capability = function
-  | T.Capability (Top { name; _ }) -> name
-  | T.Capability path -> Path.show path
-  | T.Capability_parameter { name; _ } -> name
-  | T.Capability_variable _ -> "_"
-
-let shown_capabilities capabilities =
-  String.concat ", "
-    (List.map (fun capability -> "`" ^ show_capability capability ^ "`") capabilities)
-
 (* Requires a type to satisfy a trait bound. The check is deferred until
    the type is inferred. The type must implement the trait, and each
    associated type that the bound fixes must unify with the one the [impl]
@@ -1017,20 +1014,6 @@ let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
       else begin
         (match implements state type_ trait with
         | None -> unmet type_ None
-        (* The [next] of a yielding method's cursor uses the method's
-           capabilities, and [Cursor.next] uses none. Code that has only the
-           bound cannot give them to the cursor. *)
-        | Some _
-          when Well_known.is Cursor trait.trait && Impls.cursor_uses state.database type_ <> [] ->
-            report state Unsatisfied_bound at
-              (Printf.sprintf
-                 "This cursor is not a `Cursor` here: its `next` uses %s, and `Cursor.next` uses \
-                  no capability. Loop over the cursor with `for`, or call its `next`, where %s \
-                  available."
-                 (shown_capabilities (Impls.cursor_uses state.database type_))
-                 (match Impls.cursor_uses state.database type_ with
-                 | [ _ ] -> "it is"
-                 | _ -> "they are"))
         | Some evidence ->
             check_evidence_grants state at evidence;
             List.iter

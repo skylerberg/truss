@@ -108,7 +108,7 @@ public fn Character.is_alphanumeric(self) -> Bool
   self.is_alphabetic() || self.is_numeric()
 }
 
-public fn Character.is_whitespace(self) -> Bool
+public transparent fn Character.is_whitespace(self) -> Bool
   cost time O(1)
 {
   let code = self.code()
@@ -131,34 +131,34 @@ public fn Character.is_lowercase(self) -> Bool
   if code < 128 { code >= 97 && code <= 122 } else { unicode_tables::is_lowercase(code) }
 }
 
-public fn Character.is_control(self) -> Bool
+public transparent fn Character.is_control(self) -> Bool
   cost time O(1)
 {
   let code = self.code()
   code < 32 || (code >= 127 && code < 160)
 }
 
-public fn Character.is_ascii_digit(self) -> Bool
+public transparent fn Character.is_ascii_digit(self) -> Bool
   cost time O(1)
 {
   let code = self.code()
   code >= 48 && code <= 57
 }
 
-public fn Character.is_ascii_alphabetic(self) -> Bool
+public transparent fn Character.is_ascii_alphabetic(self) -> Bool
   cost time O(1)
 {
   let code = self.code()
   (code >= 97 && code <= 122) || (code >= 65 && code <= 90)
 }
 
-public fn Character.is_ascii_alphanumeric(self) -> Bool
+public transparent fn Character.is_ascii_alphanumeric(self) -> Bool
   cost time O(1)
 {
   self.is_ascii_digit() || self.is_ascii_alphabetic()
 }
 
-public fn Character.is_ascii_punctuation(self) -> Bool
+public transparent fn Character.is_ascii_punctuation(self) -> Bool
   cost time O(1)
 {
   let code = self.code()
@@ -166,7 +166,7 @@ public fn Character.is_ascii_punctuation(self) -> Bool
     || (code >= 123 && code <= 126)
 }
 
-public fn Character.is_ascii_hexadecimal_digit(self) -> Bool
+public transparent fn Character.is_ascii_hexadecimal_digit(self) -> Bool
   cost time O(1)
 {
   let code = self.code()

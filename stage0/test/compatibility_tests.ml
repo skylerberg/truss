@@ -187,6 +187,45 @@ let () =
       match show (changes square with_impl) with
       | [ found ] when Documents.find found "is new: the `impl` of" ~occurrence:1 >= 0 -> ()
       | found -> fail "found [%s]" (String.concat "; " found));
+  test "an impl whose associated capability set gains a capability breaks" (fun () ->
+      let feed uses =
+        Printf.sprintf
+          "public trait Feed {\n\
+          \  capability Uses\n\
+          \  fn pull(self) -> Int64\n\
+          \    uses Self.Uses\n\
+           }\n\n\
+           public type Gauge(last: Int64)\n\n\
+           impl Feed for Gauge {\n\
+           %s  fn pull(self) -> Int64 {\n\
+          \    self.last\n\
+          \  }\n\
+           }\n"
+          uses
+      in
+      let gains = show (changes (feed "") (feed "  capability Uses = Clock\n")) in
+      (match gains with
+      | [ found ]
+        when Documents.find found "breaks:" ~occurrence:1 = 0
+             && Documents.find found "has `Clock` in its `Uses`, which it did not" ~occurrence:1
+                >= 0 ->
+          ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+      (match show (changes (feed "  capability Uses = Clock\n") (feed "")) with
+      | [ found ]
+        when Documents.find found "grows:" ~occurrence:1 = 0
+             && Documents.find found "has fewer capabilities in its `Uses`" ~occurrence:1 >= 0 ->
+          ()
+      | found -> fail "found [%s]" (String.concat "; " found));
+      expect (feed "  capability Uses = Clock\n") (feed "  capability Uses = Clock\n") []);
+  test "a trait that loses an associated capability set breaks" (fun () ->
+      let feed member =
+        Printf.sprintf "public trait Feed {\n%s  fn pull(self) -> Int64\n}\n" member
+      in
+      expect (feed "  capability Uses\n") (feed "")
+        [ "breaks: lib::shapes::Feed no longer has an associated capability set it did" ];
+      expect (feed "") (feed "  capability Uses\n")
+        [ "grows: lib::shapes::Feed has an associated capability set more" ]);
   test "a package that ran on every target and now runs only on 64-bit ones is told" (fun () ->
       if not (snd (changes ~usize_bits:(32, 64) "" "")) then fail "not told";
       if snd (changes ~usize_bits:(64, 64) "" "") || snd (changes ~usize_bits:(64, 32) "" "") then

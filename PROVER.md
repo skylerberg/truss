@@ -405,11 +405,23 @@ decides when a body is a definition. In the solver:
   reads what the prover cannot, such as an opaque type's fields from
   another package, is not unfolded, and the function is known by its
   contract alone.
+- **A body is read across packages only where it is exported.** A caller
+  in another package reads the callee's exported specification, which has
+  the body of a `public transparent fn`, of a trait's provided method, and
+  of a derived method, and no other. So another function, and a method an
+  `impl` writes, is known there by its contract, and editing its body
+  proves nothing in a package that depends on it again. An obligation that
+  is not proven, whose query names such a callee, says so, and names the
+  fixes: an `ensures` that says what is needed, or, for a function,
+  `public transparent fn`.
 - **Called on a quantifier's bound values,** a definition with no
   `requires` is stated once, for every argument, since a fact about one
   call would name the bound values. So `forall a: Pair => forall b: Pair
   => (a < b) == ...` unfolds a derived `compare`, which has a body as a
-  written one would.
+  written one would. A function with no `requires` that is known by its
+  contract alone, as one in another package that is not `transparent` is,
+  has its `ensures` stated once in the same way, for every argument its
+  parameters' types admit.
 - **Recursive definitions unfold once per use.** A definition that
   unfolded itself forever would never be finished, so a call to a function
   inside its own unfolding is left as the function applied to its
@@ -1131,12 +1143,14 @@ plus what happens before and after:
   change in potential of what it changed, so a caller with a plain bound
   pays for the potential it consumed from what it was given: a function
   that pushes `count` times can promise `O(count + items.length())`.
-- **A callee with a plain and an amortized bound** on the same resource,
-  such as `List.pop`, is counted by the one of the kind the caller
-  promises. A plain bound on a call says nothing of the potential the call
-  leaves in what it changes, which an amortized caller pays for, so such a
-  caller counts the amortized one; a plain caller counts the plain one,
-  which the potential the call takes does not raise.
+- **A plain and an amortized bound on one resource** count on counters of
+  their own. A callee with both, such as `List.pop`, is counted on each
+  counter by the clause of the counter's kind. A plain bound on a call
+  says nothing of the potential the call leaves in what it changes, which
+  an amortized bound pays for, so an amortized counter counts the
+  amortized clause; a plain counter counts the plain one, which the
+  potential the call takes does not raise. So a definition can state both,
+  and each is proven, its recursive calls included, by its own counting.
 - **A loop that spends or saves potential** is bounded by what it has spent
   plus the potential the values it changes hold, which is what telescopes:
   each iteration's bound is on what it spends plus the growth of that
@@ -1178,7 +1192,9 @@ regular-expression parser. Stage0 runs two kinds of code while proving.
 - **A call whose arguments are all known:** a pure function with a `time`
   clause, compiled rather than for specifications only, not generic,
   reached directly rather than through a bound, with every argument an
-  integer or `Bool` literal and a result of one of those. Each such call a
+  integer or `Bool` literal and a result of one of those, in the package
+  of the definition proven or `transparent`, since running a body reads
+  it. Each such call a
   query mentions is run, as a `Call_evaluation` instance (see CODEGEN.md,
   "Code run while compiling"), and its result is a fact of the query, so
   `count_up(7)` is known to be `7` though nothing in `count_up`'s contract
@@ -1282,9 +1298,10 @@ Each obligation the prover could not prove is an error, with the shared
 A definition's obligations are made again when something they read
 changed, as DATABASE.md describes for every query. A caller reads its
 callee's specification, whose body is there only where the callee is a
-function in the logic, and the callee's text only to report something about
-it, so editing or reformatting the body of any other function makes no
-caller's obligations again. A definition's outcome is a saved result worked
+function in the logic, and, from another package, only where it is
+`transparent`, and the callee's text only to report something about it, so
+editing or reformatting the body of any other function makes no caller's
+obligations again. A definition's outcome is a saved result worked
 out from its obligations and from what the solver and running code were
 told, which are the database's inputs, so a definition whose reads have not
 changed is neither translated nor asked anything again, in this process or
@@ -1376,8 +1393,8 @@ test the prover itself:
   architecture, a view's address, and what a C function returns beyond
   what its row of the table says are known only by their types.
 - **Facts under a quantifier.** A fact that names a quantifier's bound
-  name, such as what a callee's `ensures` says of a call on it, is not
-  kept. Closed over the quantifier it would be true, but the standard
+  name, such as what the `ensures` of a callee with a `requires` says of a
+  call on it, is not kept. Closed over the quantifier it would be true, but the standard
   library's maps state nested quantifiers over calls, each call's facts
   are about values made for every combination of bound names, and with
   them the solver runs out of steps even with triggers chosen.

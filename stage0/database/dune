@@ -9,6 +9,8 @@
   session
   path
   workspace
+  manifest
+  project
   diagnostic
   standard_library
   compiler_version

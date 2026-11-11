@@ -3142,6 +3142,83 @@ let () =
         \  }\n\
          }\n")
 
+(* Bodies across packages *)
+
+(* The diagnostics of [app::main], in a package that depends on [lib], whose
+   one module is [lib::numbers]. *)
+let across library program =
+  let database = Engine.context (Engine.create ()) in
+  Database.load_standard (Engine.of_context database);
+  Database.load_package (Engine.of_context database) ~name:"lib" ~dependencies:[]
+    [ (Support.module_of "lib::numbers", library) ];
+  Database.load_package (Engine.of_context database) ~name:"app"
+    ~dependencies:[ { package = "lib"; capabilities = [] } ]
+    [ (Support.module_of "app::main", "use lib::numbers\n\n" ^ program) ];
+  check database (Support.module_of "app::main")
+
+let doubling marker =
+  "public " ^ marker
+  ^ "fn double(n: Int64) -> Int64\n\
+    \  requires n < 1000 && n > -1000\n\
+    \  cost time O(1)\n\
+     {\n\
+    \  n * 2\n\
+     }\n"
+
+let () =
+  test "a caller in another package reads a transparent function's body" (fun () ->
+      match
+        across (doubling "transparent ")
+          "fn twice(n: Int64) -> Int64\n\
+          \  requires n < 1000 && n > -1000\n\
+          \  ensures result == n + n\n\
+           {\n\
+          \  numbers::double(n)\n\
+           }\n"
+      with
+      | [] -> ()
+      | found ->
+          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)));
+  test "a caller in another package does not read a body that is not transparent" (fun () ->
+      match
+        across (doubling "")
+          "fn twice(n: Int64) -> Int64\n\
+          \  requires n < 1000 && n > -1000\n\
+          \  ensures result == n + n\n\
+           {\n\
+          \  numbers::double(n)\n\
+           }\n"
+      with
+      | [ diagnostic ] ->
+          if not (contains diagnostic.message "is not visible in this package") then
+            fail "message %S" diagnostic.message
+      | found -> fail "%d diagnostics" (List.length found));
+  test "a call in another package is not run unless its function is transparent" (fun () ->
+      match
+        across (doubling "")
+          "fn eight() -> Int64\n  ensures result == 8\n{\n  numbers::double(4)\n}\n"
+      with
+      | [ _ ] -> ()
+      | found -> fail "%d diagnostics" (List.length found))
+(* Plain and amortized bounds together *)
+
+let () =
+  test "a recursive function proves a plain and an amortized bound, each by its own counting"
+    (fun () ->
+      proven
+        "fn shift_left_all(items: mut List[Int64], position: USize)\n\
+        \  requires position <= items.length()\n\
+        \  ensures items.length() == old(items.length())\n\
+        \  decreases position\n\
+        \  cost time O(position)\n\
+        \  cost amortized time O(position)\n\
+         {\n\
+        \  if position >= 2 {\n\
+        \    mut items.swap(position - 1, second: position - 2)\n\
+        \    shift_left_all(mut items, position: position - 1)\n\
+        \  }\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =
@@ -4170,7 +4247,7 @@ let again before after =
   (match prove () with
   | [] -> ()
   | found -> fail "before the edit: %s" (String.concat "; " (Support.codes found)));
-  Engine.set engine Workspace.file_text module_ after;
+  Database.Testing.set_text engine module_ after;
   Engine.clear_log engine;
   let solved = Solver.solved solver in
   (match prove () with

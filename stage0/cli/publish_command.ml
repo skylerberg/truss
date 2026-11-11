@@ -51,7 +51,7 @@ let record (project : Project.t) registry (package : Project.package) =
   in
   let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
   let dependencies ~code name =
-    match Query.find project.context Workspace.packages name with
+    match Workspace.package project.context name with
     | Some (found : Workspace.package) ->
         let used = if code then Database.code_packages session name else [] in
         List.filter_map

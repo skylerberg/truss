@@ -43,14 +43,15 @@ let fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
   [ T.Capability_variable unifier.capability_variable_count ]
 
-(* Unifies two capability sets. Sets without capability variables unify
-   only if they are equal. If either set has a capability variable, the
-   equality is deferred until the variables are solved, and unification
-   succeeds for now. *)
+(* Unifies two capability sets. Two sets that are both known unify only if
+   they are equal. If either set has a capability variable, or an associated
+   capability set of a type that is not inferred yet, the equality is
+   deferred until the definition is checked, and unification succeeds for
+   now. *)
 let unify_capabilities unifier left right =
   let left = List.sort_uniq compare left and right = List.sort_uniq compare right in
   left = right
-  || (T.has_capability_variable left || T.has_capability_variable right)
+  || (T.capabilities_unsolved left || T.capabilities_unsolved right)
      && begin
        unifier.deferred_capability_equalities <-
          (left, right) :: unifier.deferred_capability_equalities;
@@ -92,7 +93,16 @@ let rec zonk unifier (type_ : T.ty) : T.ty =
 and zonk_argument unifier = function
   | T.Type type_ -> T.Type (zonk unifier type_)
   | T.Value value -> T.Value (resolve_value unifier value)
-  | T.Capabilities _ as capabilities -> capabilities
+  | T.Capabilities capabilities -> T.Capabilities (zonk_capabilities unifier capabilities)
+
+and zonk_capabilities unifier capabilities =
+  List.map
+    (function
+      | T.Capability_projection { base; trait; name } ->
+          T.Capability_projection
+            { base = zonk unifier base; trait = zonk_trait unifier trait; name }
+      | capability -> capability)
+    capabilities
 
 and zonk_trait unifier (trait : T.trait_reference) =
   {
@@ -110,6 +120,7 @@ and zonk_function unifier (function_type : T.function_type) =
       | Returns type_ -> Returns (zonk unifier type_)
       | Yields (mode, type_) -> Yields (mode, zonk unifier type_)
       | Lends (mode, type_) -> Lends (mode, zonk unifier type_));
+    uses = zonk_capabilities unifier function_type.uses;
   }
 
 let rec occurs unifier index (type_ : T.ty) =

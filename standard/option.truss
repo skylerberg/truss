@@ -5,19 +5,19 @@ public type Option[Value] =
   | None
   derives Equal, Hash, Ordered
 
-public fn Option[Value].is_some(self) -> Bool
+public transparent fn Option[Value].is_some(self) -> Bool
   cost time O(1)
 {
   self is Some(_)
 }
 
-public fn Option[Value].is_none(self) -> Bool
+public transparent fn Option[Value].is_none(self) -> Bool
   cost time O(1)
 {
   self is None
 }
 
-public fn Option[Value: Equal].contains(self, value: Value) -> Bool
+public transparent fn Option[Value: Equal].contains(self, value: Value) -> Bool
   cost time finite
 {
   match self {
@@ -26,7 +26,7 @@ public fn Option[Value: Equal].contains(self, value: Value) -> Bool
   }
 }
 
-public fn Option[Value].unwrap_or(own self, default: own Value) -> Value
+public transparent fn Option[Value].unwrap_or(own self, default: own Value) -> Value
   cost time O(1)
 {
   match own self {

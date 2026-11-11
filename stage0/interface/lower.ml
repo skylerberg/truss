@@ -13,6 +13,8 @@ type context = {
   self_type : T.ty option;  (** What [Self] means here. *)
   self_trait : T.trait_reference option;  (** In a trait, the trait [Self] implements. *)
   self_associated : (string * T.ty) list;  (** In an [impl], its associated types. *)
+  self_capabilities : (string * T.capability list) list;
+      (** In an [impl], each associated capability set that its trait declares. *)
   diagnostics : Diagnostic.t list ref;  (** Shared by every copy of the context. *)
   named : (span * T.ty) list ref;  (** Each named type lowered, for checking its bounds. *)
 }
@@ -25,6 +27,7 @@ let create database resolved =
     self_type = None;
     self_trait = None;
     self_associated = [];
+    self_capabilities = [];
     diagnostics = ref [];
     named = ref [];
   }
@@ -48,7 +51,8 @@ let parameter_of context (name : name) =
   | Some (Capability_parameter _) ->
       Error
         (reported context Unknown_associated_type name.span
-           (Printf.sprintf "`%s` is a capability parameter, which has no associated types."
+           (Printf.sprintf
+              "`%s` is a capability parameter, which has no associated types or capability sets."
               name.text))
   | Some (Unknown report) -> Error report
   | _ -> bug "`%s` is not resolved as a generic parameter" name.text
@@ -133,14 +137,13 @@ and self_associated context (span : span) (key : name) =
                     (Printf.sprintf "`%s` declares no associated type `%s`." (T.show_trait trait)
                        key.text))))
 
-(* Whether a trait, or a trait it requires, declares the associated type. *)
-and declares context trait name = Option.is_some (declaring context trait name)
-
-and declaring context trait name =
+(* The trait that declares an associated type, or with [capability] an
+   associated capability set: the trait itself, or one that it requires. *)
+and declaring ?(capability = false) context trait name =
   List.find_opt
     (fun path ->
       match Query.demand context.database Summary.trait_header path with
-      | Some header -> List.mem name header.associated
+      | Some header -> List.mem name (if capability then header.capabilities else header.associated)
       | None -> false)
     (Summary.trait_closure context.database trait)
 
@@ -293,24 +296,79 @@ and trait_reference ?(capability = false) context (path : path_type) :
 and trait_bounds context paths =
   List.filter_map (fun path -> Result.to_option (trait_reference context path)) paths
 
-and capability context (path : path_type) : T.capability option =
+and capability_path context (path : path_type) : T.capability list =
   let shown = show_path path.path in
   match target context path.path.last with
-  | Some (Capability_parameter parameter) -> Some (T.Capability_parameter parameter)
+  | Some (Capability_parameter parameter) -> [ T.Capability_parameter parameter ]
   | Some (Type_parameter _) ->
       report context Not_a_capability path.span
         (Printf.sprintf
            "`%s` is a type parameter. A capability parameter is declared `capability %s`." shown
            shown);
-      None
-  | Some (Definition (Capability, path_)) -> Some (T.Capability path_)
+      []
+  | Some (Definition (Capability, path_)) -> [ T.Capability path_ ]
   | Some (Definition _) ->
       report context Not_a_capability path.span (Printf.sprintf "`%s` is not a capability." shown);
-      None
-  | Some (Unknown _) -> None
+      []
+  | Some (Unknown _) -> []
   | _ -> bug "`%s` is not resolved as a capability" shown
 
-and capabilities context paths = List.sort_uniq compare (List.filter_map (capability context) paths)
+(* The associated capability set of a type whose [impl] is not known here:
+   the projection through the first of [traits] that declares the set, or
+   that requires the trait that does. *)
+and capability_projection context base traits (key : name) =
+  List.find_map
+    (fun (bound : T.trait_reference) ->
+      Option.map
+        (fun declaring_trait ->
+          let trait =
+            if Path.equal declaring_trait bound.trait then { bound with associated = [] }
+            else { T.trait = declaring_trait; trait_arguments = []; associated = [] }
+          in
+          T.Capability_projection { base; trait; name = key.text })
+        (declaring ~capability:true context bound.trait key.text))
+    traits
+
+and capability context (written : capability_reference) : T.capability list =
+  match written.kind with
+  | Capability_path path -> capability_path context path
+  | Self_capabilities key -> (
+      match List.assoc_opt key.text context.self_capabilities with
+      | Some set -> set
+      | None -> (
+          match (self context written.span, context.self_trait) with
+          | Error _, _ -> []
+          | Ok _, None ->
+              report context Unknown_associated_capability key.span
+                (Printf.sprintf
+                   "`Self.%s` names an associated capability set of a trait, and `Self` is not in \
+                    a trait or in an `impl` of one here."
+                   key.text);
+              []
+          | Ok self, Some trait -> (
+              match capability_projection context self [ trait ] key with
+              | Some projection -> [ projection ]
+              | None ->
+                  report context Unknown_associated_capability key.span
+                    (Printf.sprintf "`%s` declares no associated capability set `%s`."
+                       (T.show_trait trait) key.text);
+                  [])))
+  | Associated_capabilities (base, key) -> (
+      match parameter_of context base with
+      | Error _ -> []
+      | Ok parameter -> (
+          let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
+          match capability_projection context (T.Parameter parameter) bounds key with
+          | Some projection -> [ projection ]
+          | None ->
+              report context Unknown_associated_capability key.span
+                (Printf.sprintf "No bound of `%s` declares an associated capability set `%s`."
+                   parameter.name key.text);
+              []))
+
+and capabilities context written =
+  List.sort_uniq compare (List.concat_map (capability context) written)
+
 and mode = function None -> T.Read | Some Mut -> T.Mut | Some Own -> T.Own
 
 and function_type_ context (written : function_type) : T.function_type =
@@ -321,13 +379,15 @@ and function_type_ context (written : function_type) : T.function_type =
         written.inputs;
     output =
       T.Returns (match written.output with Some output -> type_ context output | None -> T.unit);
-    uses =
-      capabilities context
-        (List.concat_map
-           (fun (clause : clause) -> match clause.kind with Uses paths -> paths | _ -> [])
-           written.clauses);
+    uses = uses context written.clauses;
     costs = costs context written.clauses;
   }
+
+and uses context clauses =
+  capabilities context
+    (List.concat_map
+       (fun (clause : clause) -> match clause.kind with Uses written -> written | _ -> [])
+       clauses)
 
 (* A function type's cost clauses. What [calls] counts there is a
    capability's calls: a type cannot name a parameter, whose calls a
@@ -477,12 +537,6 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
     | Some (Yields (written_mode, result)) -> T.Yields (mode written_mode, type_ context result)
     | Some (Lends (written_mode, result)) -> T.Lends (mode written_mode, type_ context result)
   in
-  let uses =
-    capabilities context
-      (List.concat_map
-         (fun (clause : clause) -> match clause.kind with Uses paths -> paths | _ -> [])
-         written.clauses)
-  in
   let terminates = terminates written.clauses in
   let result_type =
     match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
@@ -492,7 +546,7 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
     receiver;
     parameters;
     output;
-    uses;
+    uses = uses context written.clauses;
     terminates;
     specification_only =
       (* [Model]'s method returns a mathematical value. *)

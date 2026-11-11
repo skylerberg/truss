@@ -23,13 +23,13 @@ impl Model for Map[Key: Hash + Ordered, Value] {
   }
 }
 
-public fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key: Key) -> Bool
+public transparent fn contains_equal_key[Key: Equal, Value](map: FiniteMap[Key, Value], key: Key) -> Bool
   cost time finite
 {
   exists other: Key => map.contains_key(other) && other == key
 }
 
-public fn Map[Key: Hash + Ordered, Value].length(self) -> USize
+public transparent fn Map[Key: Hash + Ordered, Value].length(self) -> USize
   ensures result == self.model().size()
   cost time O(1)
 {
@@ -133,7 +133,7 @@ internal fn Map[Key: Hash + Ordered, Value].replace_value_at(mut self, position:
   previous
 }
 
-public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
+public transparent fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == contains_equal_key(self.model(), key: key)
   cost time O(self.length() * time(Key.equal))
 {
@@ -267,7 +267,9 @@ public fn Map[Key: Hash + Ordered, Value].seeded() -> Map[Key, Value]
 
 public fn Map[Key: Hash + Ordered, Value].collect[Source: Cursor[Element = Entry[Key, Value]]](
   source: own Source,
-) -> Map[Key, Value] {
+) -> Map[Key, Value]
+  uses Source.Uses
+{
   var map: Map[Key, Value] = [:]
   mut map.extend(own source)
   map
@@ -398,7 +400,9 @@ public fn Map[Key: Hash + Ordered, Value].retain(
 public fn Map[Key: Hash + Ordered, Value].extend[Source: Cursor[Element = Entry[Key, Value]]](
   mut self,
   entries: own Source,
-) {
+)
+  uses Source.Uses
+{
   var cursor = own entries
   while mut cursor.next() is Some(entry)
     invariant forall i in 0..self.entries.length() => forall j in 0..self.entries.length() =>

@@ -6,32 +6,98 @@ let unmarshal bytes = Marshal.from_string bytes 0
 (* The fingerprint of an input that is not set. *)
 let unset = String.make 32 '\000'
 
+(* An exception's bytes: its constructor's name and its arguments. An
+   exception is a block whose first field is its constructor, or for one
+   with no arguments, the constructor itself, which is how [Printexc] reads
+   one too. *)
+let exception_bytes (raised : exn) =
+  let block = Obj.repr raised in
+  let name = Printexc.exn_slot_name raised in
+  if Obj.tag block = Obj.object_tag then name
+  else
+    name ^ "\000"
+    ^ bytes_of (Array.init (Obj.size block - 1) (fun index -> Obj.field block (index + 1)))
+
+(* A fingerprint that equals no other: for an outcome that has no bytes,
+   which is then equal only to itself. *)
+let random = lazy (Random.State.make_self_init ())
+let nonces = ref 0
+
+let nonce () =
+  incr nonces;
+  Blake3.hash
+    (Printf.sprintf "nonce %d %d %d %d" !nonces
+       (Random.State.bits (Lazy.force random))
+       (Random.State.bits (Lazy.force random))
+       (Random.State.bits (Lazy.force random)))
+
+let forget_fingerprint (node : node) =
+  node.fingerprint <- None;
+  node.stored <- false;
+  node.opaque <- false
+
+(* A node's fingerprint: the hash of its outcome's bytes. Every input that
+   is set and every result that has an outcome has one. A value's bytes are
+   put in the store where its query is saved. An exception's bytes are its
+   name and arguments, and are never stored: an exception read back would
+   not be the one a handler matches. An outcome with no bytes, which is a
+   value or an exception that holds a function, is [opaque]: its fingerprint
+   is a nonce, so it compares equal to no other computation's, and what
+   reads it is computed again whenever it is. *)
 let fingerprint engine (node : node) =
   match node.fingerprint with
   | Some fingerprint -> Some fingerprint
   | None -> (
-      match engine.store with
-      | None -> None
-      | Some store ->
-          let bytes =
-            match node.cell with
-            | Input (_, { slot = Set value; _ }) -> Some (bytes_of value)
-            | Result (_, { outcome = Some (Value value); _ }) -> (
-                (* A value that holds functions has no bytes. *)
-                try Some (bytes_of value) with Invalid_argument _ -> None)
-            | _ -> None
-          in
-          Option.map
-            (fun bytes ->
-              let fingerprint = if keeps_bytes node then store.put bytes else Blake3.hash bytes in
-              node.fingerprint <- Some fingerprint;
-              fingerprint)
-            bytes)
+      let set fingerprint =
+        node.fingerprint <- Some fingerprint;
+        Some fingerprint
+      in
+      let opaque () =
+        node.opaque <- true;
+        set (nonce ())
+      in
+      match node.cell with
+      | Input (_, { slot = Set value; _ }) -> (
+          let bytes = bytes_of value in
+          match engine.store with
+          | Some store -> set (store.put bytes)
+          | None -> set (Blake3.hash bytes))
+      | Result (query, { outcome = Some (Value value); _ }) -> (
+          match bytes_of value with
+          | bytes -> (
+              match engine.store with
+              | Some store when query.saved ->
+                  node.stored <- true;
+                  set (store.put bytes)
+              | _ -> set (Blake3.hash bytes))
+          | exception Invalid_argument _ -> opaque ())
+      | Result (_, { outcome = Some (Raised raised); _ }) -> (
+          match exception_bytes raised with
+          | bytes -> set (Blake3.hash ("raised\000" ^ bytes))
+          | exception Invalid_argument _ -> opaque ())
+      | _ -> None)
+
+(* Puts a value's bytes in the store, if its fingerprint was worked out
+   before the engine had one. *)
+let ensure_stored engine (node : node) =
+  match (engine.store, node.cell) with
+  | Some store, Input (_, { slot = Set value; _ }) -> ignore (store.put (bytes_of value))
+  | Some store, Result (query, { outcome = Some (Value value); _ })
+    when query.saved && (not node.stored) && not node.opaque ->
+      ignore (store.put (bytes_of value));
+      node.stored <- true
+  | _ -> ()
 
 (* What a fact's key takes of a node: its fingerprint, or that it is an
-   input that is not set. *)
+   input that is not set. An opaque node gives none, since its fingerprint
+   will never be met again. *)
 let key_part engine (node : node) =
-  match node.cell with Input (_, { slot = Unset; _ }) -> Some unset | _ -> fingerprint engine node
+  match node.cell with
+  | Input (_, { slot = Unset; _ }) -> Some unset
+  | _ -> (
+      match fingerprint engine node with
+      | Some fingerprint when not node.opaque -> Some fingerprint
+      | _ -> None)
 
 let stored_bytes engine (node : node) =
   match (node.fingerprint, engine.store) with
@@ -59,7 +125,7 @@ let input_value engine (cell : ('key, 'value) input_cell) : 'value option =
 let load engine (cell : ('key, 'value) result_cell) : 'value outcome option =
   match cell.outcome with
   | Some outcome -> Some outcome
-  | None when not (keeps_bytes cell.node) -> None
+  | None when not cell.node.stored -> None
   | None -> (
       match (cell.node.fingerprint, engine.store) with
       | Some fingerprint, Some store -> (
@@ -82,46 +148,8 @@ let same_outcomes (query : ('key, 'value) query) left right =
   | Raised left, Raised right -> same_exception left right
   | _ -> false
 
-(* What a result read, as a state and a fact record it: each node it read,
-   in the order they were first read. A read that has no fingerprint,
-   because it raised or its value holds functions, cannot be compared, so
-   it is gone through, to what it read in turn. *)
-let traced_reads engine (node : node) =
-  let seen = Hashtbl.create 16 in
-  let found = ref [] in
-  let rec visit (read : node) =
-    let read = resolve engine read in
-    if not (Hashtbl.mem seen read.id) then begin
-      Hashtbl.replace seen read.id ();
-      if is_input read || fingerprint engine read <> None then found := read :: !found
-      else List.iter visit read.reads
-    end
-  in
-  List.iter visit node.reads;
-  List.rev !found
-
-(* Whether what read a node recorded the node itself, or what it read. *)
-let stops (node : node) =
-  is_input node || node.fingerprint <> None
-  || match node.cell with Result (_, { outcome = Some (Value _); _ }) -> true | _ -> false
-
-(* A node's reads changed, so every result that recorded its reads through
-   it has other reads than it was written with, and is written again. A
-   base's result is copied into the engine for that. *)
-let resave engine (node : node) =
-  if not (stops node) then begin
-    let seen = Hashtbl.create 8 in
-    let rec above (node : node) =
-      List.iter
-        (fun (reader : node) ->
-          if not (Hashtbl.mem seen reader.id) then begin
-            Hashtbl.replace seen reader.id ();
-            if stops reader then Hashtbl.replace engine.unsaved reader.id reader else above reader
-          end)
-        (readers_here engine node ~phase:None)
-    in
-    above node
-  end
+(* What a result read, as the engine sees each node now. *)
+let current_reads engine (node : node) = List.map (resolve engine) node.reads
 
 let fact_key store (node : node) (parts : (node * string) list) =
   Blake3.hash

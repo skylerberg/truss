@@ -59,6 +59,9 @@ and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
 and capability =
   | Capability of Path.t
   | Capability_parameter of parameter
+  | Capability_projection of { base : ty; trait : trait_reference; name : string }
+      (** An associated capability set of a type that is not known yet: [Source.Uses]. Its trait
+          reference fixes no associated type, so that two projections of one set are equal. *)
   | Capability_variable of int
       (** The set a call's capability parameter stands for, while a definition is checked: it is
           what the functions passed for the parameter use, which is known once the whole definition
@@ -108,20 +111,24 @@ val substitute : substitution -> ty -> ty
 val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
+val substitute_capabilities : substitution -> capability list -> capability list
 
-val map : (ty -> ty option) -> ty -> ty
+val map : ?capabilities:(capability list -> capability list) -> (ty -> ty option) -> ty -> ty
 (** Rewrites a type from the outside in: where [f] gives a replacement, it is used as it is, and
     elsewhere the type's parts are rewritten. Every part is visited: arguments, function inputs and
-    outputs, [any] and projection traits. *)
+    outputs, [any] and projection traits. [capabilities] rewrites each set of capabilities among
+    those parts: the [uses] of a function type, and a capability argument. *)
 
 val map_capabilities : (capability list -> capability list) -> ty -> ty
 (** A type with every set of capabilities in it rewritten: the [uses] of each function type and each
     capability argument, at any depth. *)
 
 val map_argument_capabilities : (capability list -> capability list) -> argument -> argument
-
 val has_capability_variable : capability list -> bool
-(** Whether a set has a {!Capability_variable} in it, so that what it holds is not known yet. *)
+
+val capabilities_unsolved : capability list -> bool
+(** Whether what a set holds is not known yet: it has a {!Capability_variable}, or an associated
+    capability set of a type that is not inferred yet. *)
 
 val equal : ty -> ty -> bool
 (** Structural: types are nominal, so two [Named] types are equal when they name the same definition
@@ -148,6 +155,7 @@ val costs_imply : given:cost list -> wanted:cost list -> bool
 val show : ty -> string
 (** As written in Truss: [List[Option[Int64]]], [fn(Int64) -> Bool]. *)
 
+val show_capability : capability -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string
 
@@ -236,6 +244,8 @@ type trait_interface = {
   trait_generics : generic list;  (** Not counting [Self]. *)
   requires : trait_reference list;
   associated_types : associated_type list;
+  associated_capabilities : string list;
+      (** The associated capability sets the trait declares, as in [capability Uses]. *)
   methods : trait_method list;
   laws : (string * (string * ty) list) list;
       (** Each law's name, and its parameters' names and types. A proof of the law names them. *)
@@ -249,6 +259,9 @@ type impl_interface = {
   implements : trait_reference;  (** Its associated types are in [associated]. *)
   for_type : ty;
   impl_uses : capability list;
+  capability_sets : (string * capability list) list;
+      (** The associated capability sets the [impl] defines, sorted by name. A set that the trait
+          declares and the [impl] leaves out is empty. *)
   impl_methods : (string * Path.receiver * signature) list;
   impl_broken : bool;  (** Whether the header did not parse, so it satisfies nothing it names. *)
 }

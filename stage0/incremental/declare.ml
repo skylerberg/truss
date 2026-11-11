@@ -59,13 +59,18 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
         let cell = make_input engine input key ~below:None in
         Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
         record context cell.input_node;
+        (* What a driver only observed is collected again. *)
+        if context.frame = None && context.observing then begin
+          defer_collection engine cell.input_node;
+          sweep engine
+        end;
         None
       end
 
 let change engine (cell : ('key, 'value) input_cell) slot =
   let node = cell.input_node in
   cell.slot <- slot;
-  node.fingerprint <- None;
+  forget_fingerprint node;
   node.changed_at <- tick engine;
   engine.activity <- engine.activity + 1;
   Hashtbl.replace engine.unsaved node.id node;

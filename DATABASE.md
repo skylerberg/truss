@@ -350,40 +350,63 @@ The engine relies on these, and its tests and its audit check them:
   timestamps. Early cutoff and
   fingerprints compare values, so an unstable value would defeat both.
 - **Its value holds no functions,** unless the query gives its own equality.
-  A value that holds functions has no fingerprint, and is computed again
-  where it is needed.
+  A value that holds a function has no bytes, so it is *opaque*: its
+  fingerprint is a nonce, equal to no other computation's. It is never a
+  fact, and what reads it is computed again whenever it is.
 - **It answers for any key.** A query may be asked for a result that nothing
   will read once the state is up to date, so it must give an answer, such as
   `None`, for a key that no longer names anything.
 - **An exception is an outcome.** A query that raises keeps its exception
   like a value, so its readers see the same exception until something it read
-  changes. An exception has no fingerprint. Absence is better told with an
-  option, and the stages do so, except for an input that is not set, which
-  `Query.get` reports as `Not_found`.
+  changes. An exception's fingerprint is the hash of its constructor's name
+  and its arguments, so a result that raises as it did before stops a change
+  like any result that comes out the same. Its bytes are never stored: a
+  state opened later holds the fingerprint, and computes the result again
+  when something needs the exception itself. Absence is better told with an
+  option, and the stages do so.
 
 ## Inputs
 
-A session's inputs are:
+An input is a file's text, and little else. What a project's packages are,
+which module each file is, and what is wrong between its manifests are not
+inputs: they are queries over the files, in `Project`, of the first phase.
 
 | Input | Key | Value |
 |---|---|---|
-| A package | Its name | Its manifest: dependencies, grants, and `usize_bits`, and its modules |
-| A module's text | Its module path | The file's text |
-| The layout | The session | Each package's directory and name, every manifest, lock file, and module file, each module's file, the project's test time limit, and each registry package of the build with its version and hash |
+| A file's text | Its root and its path in it | The text |
+| A root's files | The root | The paths of its manifests, lock file, and module files |
+| The roots | The session | The roots whose packages are in the build without being selected: the project's and the standard library's |
 | A file's stamp | Its path from the project's root | What says the file has not changed: for a file on disk, its size, modification time, and inode; for a commit's or a trial's, the hash of its text |
-| A manifest's text | Its package's directory | The file's text |
-| The lock file's text | The session | The text of `truss.lock` at the project's root |
-| The wanted keys | How instances are lowered | The tests and programs whose keys have been asked for |
+| An unavailable package | The hash of its files | Why a registry package's files could not be had |
+| The wanted keys | How instances are lowered | The tests and programs whose keys a driver is about to demand |
+| What the solver said | A request's key | The answer |
 
-The layout, the stamps, and the manifests' and the lock file's texts are the
-database's own, so that a restart reads only the files whose stamps
-changed. The wanted keys
-are code generation's, which says which tests' keys a driver is about to ask
-for (see CODEGEN.md's "Test results"). A module's text
-is set from the file system, or from git for a commit (see
-[Sessions](#sessions)). Lexing and parsing are queries: a file is lexed and
-split again when its text changes, and a definition whose tree comes out the
-same, as one that only moved does, changes nothing that read it.
+A *root* is a tree of files: the project being worked on, the standard
+library, or a registry package's files. The last two inputs are stages': a
+stage declares an input, and a driver sets it through its session.
+
+| Query | Result |
+|---|---|
+| `Project.layout`, of a root | The root's packages, each module file's module, and what is wrong with a manifest by itself |
+| `Project.selection` | The registry packages of the build, those whose files are not inputs yet, what is wrong with the lock file, and the lock file the manifests give |
+| `Project.build` | Where each package of the build is: its root and directory |
+| `Project.package`, of a name | A package's dependencies, grants, `usize_bits`, and modules |
+| `Project.module_text`, of a module | The text of the module's file |
+| `Project.problems` | What the project's manifests and lock file show to be wrong |
+
+- **The stages read a package and a module's text as queries.** A stage
+  cannot tell a project's package from a registry package or the standard
+  library.
+- **An edit to a module's text changes one input,** and no query of the
+  project reads it but that module's text. A manifest that renames a
+  package changes the layout, and each module's text is found under its new
+  path with no file read again.
+- **Nothing is derived by hand.** The database sets a file's text when its
+  stamp changed and removes it when the file is gone. It keeps no list of
+  packages or modules of its own, so there is none to bring in line.
+- **Lexing and parsing are queries:** a file is lexed and split again when
+  its text changes, and a definition whose tree comes out the same, as one
+  that only moved does, changes nothing that read it.
 
 ## Fingerprints and facts
 
@@ -399,10 +422,10 @@ rebuilt from the facts and the files.
 ### Fingerprints
 
 A node's *fingerprint* is the BLAKE3 hash of its value's bytes. An input
-that is set has one, and so has every result that is a value its bytes can
-be made from. A result that raised, or whose value holds functions, has
-none, and neither has an input that is not set, which is told apart from one
-that is.
+that is set has one, and so has every result: a value's is the hash of its
+bytes, an exception's the hash of its name and arguments, and an opaque
+outcome's a nonce. An input that is not set has none, and is told apart
+from one that is.
 
 - **Every hash is BLAKE3,** written in stage0 from the specification and
   tested against the official test vectors, since `digestif`, the OCaml
@@ -439,8 +462,9 @@ A saved result is kept as a *fact*: its fingerprint, under a key made of
 - each node the result read, in the order they were first read, with its
   fingerprint
 
-A read that has no fingerprint cannot be compared, so it is gone through, to
-what it read in turn.
+A result that raised, or that is opaque, is no fact: there is no value to
+give for it. A result that read an opaque result is none either, since that
+read's fingerprint will not be met again.
 
 - **A fact found is the result.** It was computed from reads with exactly
   these fingerprints, and a query is a function of what it reads, so
@@ -786,22 +810,23 @@ in one repository may each have a package called `tools`.
 
 A session's build is its project's packages and the registry packages they
 use, at the versions SYNTAX.md's "The lock file" and DESIGN.md's "Choosing
-versions" give. The database works those out each time it reads the
-project's files, from the lock file and the records of the packages it
-names, and never chooses a version itself.
+versions" give. Which those are is a query, `Project.selection`, over the
+lock file and the records of the packages it names. The database never
+chooses a version itself.
 
 - **A registry package's files are in the store,** in `packages/`, a
   directory named by the hash of the files, as [The store](#the-store)
   lists. One that is not there is fetched from the registry, and kept only
-  if it has that hash. What is read of a package is kept by its hash for as
-  long as the process lives, since it never changes, so a scan that finds
-  the build unchanged reads no file of one.
-- **A registry package is a package like any other to the stages:** the
-  package input, with the dependencies and grants of its manifest, and the
-  text of each of its modules. They are set when the package enters the
-  build or its version changes, and taken away when it leaves. Its results
-  are computed when something reads them, so a project pays for what it
-  uses of a package.
+  if it has that hash.
+- **A registry package's files are inputs of a root of their own,** named
+  by their hash. The selection names each package it needs whose files are
+  not inputs yet; the database fetches those and sets them, which reaches
+  the selection, and asks again, since a package's record can name more.
+  They are set once, since they never change, and removed when the build no
+  longer selects the package.
+- **A registry package is a package like any other to the stages.** Its
+  results are computed when something reads them, so a project pays for
+  what it uses of a package.
 - **A project's package of the same name takes its place,** as DESIGN.md's
   "Projects" decides: the name is then the project's package, and no line
   of the lock file is for it.
@@ -862,18 +887,12 @@ clients start a process of their own.
   read, such as one deleted since its directory was listed, is not there,
   and is read by the first scan that can. So a scan that fails part way
   leaves nothing that looks read and was not.
-- **A file's text follows its module.** A module is named by its package,
-  so a manifest that renames a package, or a new manifest above a file,
-  gives the file's module another path, and the text is set under that path
-  though the file's stamp is the same.
 - **While no request is waiting, the process scans every open worktree each
   second,** and brings each state up to date, so diagnostics are current
   before anyone asks for them, and overlaps are found as work happens.
-- **A scan that finds every file as it was does nothing more.** The
-  packages, the modules, and what is wrong between manifests are worked out
-  again only when a file changed, was added, or was removed, or while a
-  problem is outstanding, since a problem can be one the files do not show,
-  such as a package that could not be fetched.
+- **A scan that finds every file as it was sets nothing,** so no query of
+  the project is computed again. A package that could not be fetched is
+  tried again once in each process.
 - **Scanning is O(files) in stamps.** FSEvents on macOS and inotify on Linux
   would make it O(change), but OCaml reaches them only through C bindings,
   which stage0 has none of yet. Since a command scans anyway, adding them

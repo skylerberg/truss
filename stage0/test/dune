@@ -56,6 +56,7 @@
   path
   well_known
   workspace
+  project
   resolve
   standard_library
   support
@@ -74,6 +75,7 @@
   package_checks
   syntax_walk
   type_checker
+  manifest
   registry
   compatibility)
  (deps

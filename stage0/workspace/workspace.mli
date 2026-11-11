@@ -5,10 +5,10 @@
     definition whose tree comes out the same, as one that only moved does, changes nothing that
     reads it. *)
 
-type dependency = { package : string; capabilities : string list }
+type dependency = Manifest.dependency = { package : string; capabilities : string list }
 (** A dependency from the manifest, with the capabilities it is granted. *)
 
-type package = {
+type package = Project.package = {
   name : string;
   dependencies : dependency list;
   modules : Path.module_ list;
@@ -16,9 +16,6 @@ type package = {
       (** 64 when the manifest says the package runs only on 64-bit targets, and 32 otherwise, so
           that its code holds for both widths of [USize]. *)
 }
-
-val packages : (string, package) Query.input
-val file_text : (Path.module_, string) Query.input
 
 val file_path : Path.module_ -> string
 (** [weather/forecast/hourly.truss], as in diagnostics. *)

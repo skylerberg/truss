@@ -172,6 +172,39 @@ test "a value is read from a reader and written to a writer" {
   }
 }
 
+fn pointed(text: StringSlice, path: StringSlice) -> Option[String] {
+  match json::parse(text) {
+    Ok(document) => {
+      match document.pointer(path) {
+        Some(found) => Some(found.to_text())
+        None => None
+      }
+    }
+    Err(_) => None
+  }
+}
+
+test "a pointer finds the value at a path of member names and positions" {
+  let text = "{\"a\": {\"b\": [10, {\"c\": true}]}, \"\": 1, \"m/n\": 2, \"k~l\": 3, \"01\": 4}"
+  assert pointed(text, path: "/a/b") == Some("[10,{\"c\":true}]")
+  assert pointed(text, path: "/a/b/0") == Some("10")
+  assert pointed(text, path: "/a/b/1/c") == Some("true")
+  assert pointed(text, path: "/") == Some("1")
+  assert pointed(text, path: "/m~1n") == Some("2")
+  assert pointed(text, path: "/k~0l") == Some("3")
+  assert pointed(text, path: "/01") == Some("4")
+  assert pointed("[5]", path: "") == Some("[5]")
+  assert pointed(text, path: "/a/b/2") is None
+  assert pointed(text, path: "/a/b/01") is None
+  assert pointed(text, path: "/a/b/-") is None
+  assert pointed(text, path: "/a/b/+1") is None
+  assert pointed(text, path: "/a/x") is None
+  assert pointed(text, path: "/a/b/0/c") is None
+  assert pointed(text, path: "a") is None
+  assert pointed(text, path: "/k~2l") is None
+  assert pointed(text, path: "/k~") is None
+}
+
 test "a template builds a value around the values written in it" {
   let name = "Ada \"the first\""
   let count: Int64 = 3

@@ -655,7 +655,7 @@ let () =
               (Interface.Impls.implements database ~bounds:(fun _ -> []) point (trait "Equal" [])))
       in
       if not (Query.demand database asker ()) then fail "no impl of Equal";
-      Engine.set (Engine.of_context database) Workspace.file_text (module_of "app::main")
+      Database.Testing.set_text (Engine.of_context database) (module_of "app::main")
         (base ^ "\nimpl Hash for Point {\n  fn hash(self, hasher: mut Hasher) {}\n}\n");
       Engine.clear_log (Engine.of_context database);
       ignore (Query.demand database asker ());

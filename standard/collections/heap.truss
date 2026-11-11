@@ -16,6 +16,7 @@ fn sift_up[Element: Ordered](items: mut List[Element], position: USize, largest_
   ensures items.length() == old(items.length())
   decreases position
   cost time O(log(position) * time(Element.compare))
+  cost amortized time O(log(position) * time(Element.compare))
 {
   if position >= 2 && comes_before(items[position - 1], second: items[position / 2 - 1], largest_first: largest_first) {
     mut items.swap(position - 1, second: position / 2 - 1)
@@ -112,7 +113,7 @@ public fn collections::Heap[Element: Ordered].is_empty(self) -> Bool
 
 public fn collections::Heap[Element: Ordered].push(mut self, item: own Element)
   ensures self.length() == old(self.length()) + 1
-  cost time finite
+  cost amortized time O(log(old(self.length()) + 1) * time(Element.compare))
 {
   mut self.items.push(own item)
   sift_up(mut self.items, position: self.items.length(), largest_first: self.largest_first)
@@ -171,7 +172,9 @@ public fn collections::Heap[Element: Ordered].reserve(mut self, additional: USiz
   mut self.items.reserve(additional)
 }
 
-public fn collections::Heap[Element: Ordered].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
+public fn collections::Heap[Element: Ordered].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
+  uses Source.Uses
+{
   var cursor = own items
   while mut cursor.next() is Some(item) {
     mut self.push(own item)

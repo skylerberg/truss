@@ -886,7 +886,7 @@ let () =
       let database = setup [ ("app::main", text "1") ] in
       let module_ = module_of "app::main" in
       ignore (Infer.diagnostics database module_);
-      Engine.set (Engine.of_context database) Workspace.file_text module_ (text "2");
+      Database.Testing.set_text (Engine.of_context database) module_ (text "2");
       Engine.clear_log (Engine.of_context database);
       ignore (Infer.diagnostics database module_);
       if List.mem "checked(app::main::caller)" (Engine.executed (Engine.of_context database)) then

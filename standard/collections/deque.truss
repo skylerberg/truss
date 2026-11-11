@@ -18,7 +18,9 @@ public fn collections::Deque[Element].with_capacity(capacity: USize) -> collecti
 
 public fn collections::Deque[Element].collect[Source: Cursor[Element = Element]](
   source: own Source,
-) -> collections::Deque[Element] {
+) -> collections::Deque[Element]
+  uses Source.Uses
+{
   collections::Deque(front: [], back: List.collect(own source))
 }
 
@@ -58,7 +60,7 @@ public fn collections::Deque[Element].push_back(mut self, item: own Element)
 public fn collections::Deque[Element].pop_front(mut self) -> Option[Element]
   ensures (result is None) == (old(self.length()) == 0)
   ensures self.length() + (if old(self.length()) > 0 { 1 } else { 0 }) == old(self.length())
-  cost time finite
+  cost amortized time O(1)
 {
   if self.front.is_empty() && !self.back.is_empty() {
     let half = self.back.length() - self.back.length() / 2
@@ -73,7 +75,7 @@ public fn collections::Deque[Element].pop_front(mut self) -> Option[Element]
 public fn collections::Deque[Element].pop_back(mut self) -> Option[Element]
   ensures (result is None) == (old(self.length()) == 0)
   ensures self.length() + (if old(self.length()) > 0 { 1 } else { 0 }) == old(self.length())
-  cost time finite
+  cost amortized time O(1)
 {
   if self.back.is_empty() && !self.front.is_empty() {
     let half = self.front.length() - self.front.length() / 2
@@ -192,7 +194,9 @@ public fn collections::Deque[Element: Equal].contains(self, item: Element) -> Bo
   false
 }
 
-public fn collections::Deque[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
+public fn collections::Deque[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
+  uses Source.Uses
+{
   var cursor = own items
   while mut cursor.next() is Some(item) {
     mut self.push_back(own item)

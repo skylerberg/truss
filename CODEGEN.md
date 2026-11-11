@@ -624,7 +624,11 @@ places, may own a value and which may not. Then each `drop(place)` becomes:
 - **a drop behind a flag,** where the place owns a value on some paths and
   not others, as after `if ready { consume(own item) }`. A flag is a `Bool`
   local, set where the place is given a value and cleared where it is moved
-  or dropped.
+  or dropped. It starts false, as every local starts zeroed, and is written
+  at the function's entry only for a parameter, which holds a value there.
+  So the flag of a local is named only where the local is, which matters
+  where a part of the function becomes a function of its own (see
+  [Outlining](#outlining)).
 
 A place can also be given a value in parts. A record holds a value once
 every field with something to drop does, as when a `List` literal fills
@@ -1090,12 +1094,12 @@ the end it drops nothing. A method whose yields go through a recursive call has
 no fixed-size state, so the type checker reports any pull of it, as
 DESIGN.md says.
 
-A cursor of a method with no `uses` clause implements the prelude's
-`Cursor` trait, by an `impl` that the compiler derives for the yielding
-function. A call of that `impl`'s `next`, which generic code reaches
-through a bound, is a call of the state machine. It passes no evidence,
-which is why the type checker gives a cursor of a method with a `uses`
-clause no such `impl`.
+A cursor of a yielding method implements the prelude's `Cursor` trait, by
+an `impl` that the compiler derives for the yielding function. A call of
+that `impl`'s `next`, which generic code reaches through a bound, is a
+call of the state machine. The `impl`'s associated capability set `Uses`
+is the method's `uses` clause, so the call passes the method's evidence
+after the cursor, as a `next` written on the cursor's own type does.
 The methods that the trait gives a body, such as `count` and `skip`, are
 instances of the trait's code for the cursor's type, as for any `impl`. So
 `any Cursor[Element = Int64]` gets an ordinary vtable.
@@ -1136,6 +1140,20 @@ for `parallel` code.
 - **Capability parameters are part of the instance.** `for_each[Item,
   capability Granted]` is compiled once for each set `Granted` stands for,
   and passes on that set's evidence.
+- **An associated capability set is decided by the instance.** A function
+  that uses `Source.Uses` is compiled once for each type that `Source`
+  stands for. Each instance takes evidence for the capabilities that the
+  type's `impl` defines as `Uses`: none for a `List`'s cursor, and
+  `FileRead` for the cursor of a method that uses `FileRead`. A method that
+  a trait gives a body and that uses `Self.Uses` takes the evidence of its
+  `impl`'s set in the same way. A set that an `impl` defines from another,
+  as `capability Uses = Source.Uses`, is replaced until only capabilities
+  are left, so the signature of an instance names no set.
+- **A call through `any` passes no evidence for an associated capability
+  set.** The type checker converts a value to `any` only where each set of
+  its type is empty, since the caller cannot name the capabilities of the
+  type that the value hides. So the set of an `any` type is empty, and an
+  entry of an `any` table takes the same evidence as the method it calls.
 - **Function types with `uses`** take evidence when called, like functions,
   after their parameters. A lambda's code reaches only that evidence. A
   callback stored in an `own` parameter gets its evidence from whoever
@@ -1388,11 +1406,20 @@ and the statement a fork:
   another region is reached through the function's environment, which
   holds the address of each. The type checker has shown that the branches
   change no place that another uses, so the addresses are never written
-  through at the same time.
+  through at the same time. Unreachable code around the region does not
+  count: after a loop whose body always fails, the blocks that step the
+  loop cannot run, and the loop's index is still the region's alone.
 - **The locals of a loop's part** are the function's parameters.
 - **No two regions share a local that one of them gives a whole new
   value.** No program can do that, so it would be a temporary of the
   compiler's used twice, and `Outline` stops at it.
+- **The parts of a loop share no local that the loop's body gives a whole
+  new value.** The parts run at the same time, each on its own thread, so
+  such a local would be a data race. A drop flag is the case that
+  matters: the flag of a value that the body owns is the body's own, so
+  each part has its own. A flag that the parts shared would let one part
+  drop a value that another had moved, which is a double free. `Outline`
+  stops at any such local.
 
 The fork is `fork(branches)` for a block and `fork_range(body, environment,
 first, last)` for a loop. A fork inside a region is outlined after the

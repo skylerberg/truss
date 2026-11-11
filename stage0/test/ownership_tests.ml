@@ -2229,4 +2229,45 @@ let () =
          }\n"
         "ownership.view_escapes")
 
+(* Short-circuit operators *)
+
+let () =
+  let take = "type Box(items: List[Int64])\n\nfn take(box: own Box) -> Bool {\n  true\n}\n\n" in
+  let moved_twice what condition =
+    test (what ^ " may have evaluated its right operand") (fun () ->
+        one_diagnostic
+          (take
+          ^ Printf.sprintf
+              "fn f(flag: Bool, box: own Box) -> Bool {\n\
+              \  let first = %s\n\
+              \  first && take(own box)\n\
+               }\n"
+              condition)
+          "ownership.use_after_move")
+  in
+  moved_twice "`&&`" "flag && take(own box)";
+  moved_twice "`||`" "flag || take(own box)";
+  moved_twice "a negated `&&`" "!(flag && take(own box))";
+  test "an operand that is evaluated last sees the moves of the operands before it" (fun () ->
+      one_diagnostic
+        (take
+       ^ "fn f(flag: Bool, box: own Box) -> Bool {\n  flag && take(own box) && take(own box)\n}\n")
+        "ownership.use_after_move";
+      one_diagnostic
+        (take
+       ^ "fn f(flag: Bool, box: own Box) -> Bool {\n  (flag || take(own box)) && take(own box)\n}\n"
+        )
+        "ownership.use_after_move");
+  test "a move in the right operand is the only move of the place" (fun () ->
+      fine (take ^ "fn f(flag: Bool, box: own Box) -> Bool {\n  flag && take(own box)\n}\n");
+      fine (take ^ "fn f(flag: Bool, box: own Box) -> Bool {\n  flag || !take(own box)\n}\n"));
+  test "the moves in a chain of thousands of `&&` are checked" (fun () ->
+      let chain = String.concat " && " (List.init 4000 (fun _ -> "flag")) in
+      one_diagnostic
+        (take
+        ^ Printf.sprintf
+            "fn f(flag: Bool, box: own Box) -> Bool {\n  %s && take(own box) && take(own box)\n}\n"
+            chain)
+        "ownership.use_after_move")
+
 let () = finish ()

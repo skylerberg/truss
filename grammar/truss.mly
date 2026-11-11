@@ -160,7 +160,12 @@ clause:
   | COST cost { () }
 
 capability_list:
-  | separated_nonempty_list(COMMA, path_type) { () }
+  | separated_nonempty_list(COMMA, capability_reference) { () }
+
+capability_reference:
+  | path_type { () }
+  | SELF_TYPE DOT UPPER { () }
+  | UPPER DOT UPPER { () }
 
 /* A cost clause starts with one or two words: `time ...`, `calls(...) ...`,
    or `amortized time ...`. Whether a second word is a resource or `finite` is
@@ -305,6 +310,7 @@ trait_member:
   | signature block { () }
   | TYPE UPPER { () }
   | TYPE UPPER COLON bound_list { () }
+  | CAPABILITY UPPER { () }
   | LAW LOWER parameters list(law_requires) newline_opt block { () }
 
 law_requires:
@@ -320,6 +326,7 @@ impl_uses:
 impl_item:
   | signature newline_opt block { () }
   | TYPE UPPER EQ type_expression { () }
+  | CAPABILITY UPPER EQ capability_list { () }
 
 capability_definition:
   | CAPABILITY UPPER newline_opt LBRACE newline_separated(signature) RBRACE { () }

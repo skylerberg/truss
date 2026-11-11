@@ -71,10 +71,16 @@ let generics_of =
                 | _ -> None)
           | None -> None))
 
-type trait_header = { associated : string list; required : Path.t list; laws : string list }
+type trait_header = {
+  associated : string list;
+  capabilities : string list;
+  required : Path.t list;
+  laws : string list;
+}
 
-(* A trait's associated type names, the traits it requires, as resolution
-   named them, and the names of its laws. *)
+(* The names of a trait's associated types, of its associated capability
+   sets, and of its laws, and the traits it requires, as resolution named
+   them. *)
 let trait_header =
   Query.query ~name:"trait_header" ~phase:Phases.resolution ~show:Path.show
     (fun database (path : Path.t) ->
@@ -98,13 +104,19 @@ let trait_header =
                 match line.kind with Associated_type (name, _) -> Some name.text | _ -> None)
               members
           in
+          let capabilities =
+            List.filter_map
+              (fun (line : trait_member line) ->
+                match line.kind with Associated_capability name -> Some name.text | _ -> None)
+              members
+          in
           let laws =
             List.filter_map
               (fun (line : trait_member line) ->
                 match line.kind with Law law -> Some law.name.text | _ -> None)
               members
           in
-          Some { associated; required; laws }
+          Some { associated; capabilities; required; laws }
       | _ -> None)
 
 (* The traits a trait requires, directly or not, with itself first. Stops

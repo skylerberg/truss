@@ -109,6 +109,7 @@ type container =
       trait_generics : T.generic list;
       requires : T.trait_reference list;
       associated_types : T.associated_type list;
+      associated_capabilities : string list;
       laws : (string * (string * T.ty) list) list;
     }
   | Capability_parts
@@ -117,6 +118,7 @@ type container =
       implements : T.trait_reference;
       for_type : T.ty;
       impl_uses : T.capability list;
+      capability_sets : (string * T.capability list) list;
     }
   | Broken of Diagnostic.reported  (** An [impl] whose trait name does not resolve to a trait. *)
 
@@ -146,7 +148,13 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
                     T.associated_name = name.text;
                     associated_bounds = Lower.trait_bounds context bounds;
                   }
-            | Law _ | Trait_member_error -> None)
+            | Associated_capability _ | Law _ | Trait_member_error -> None)
+          members
+      in
+      let associated_capabilities =
+        List.filter_map
+          (fun (line : trait_member line) ->
+            match line.kind with Associated_capability name -> Some name.text | _ -> None)
           members
       in
       let laws =
@@ -163,10 +171,11 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
                             Some (name.text, Lower.type_ context type_)
                         | Self_parameter _ | Parameter_error -> None)
                       law.parameters )
-            | Associated_type _ | Trait_member_error -> None)
+            | Associated_type _ | Associated_capability _ | Trait_member_error -> None)
           members
       in
-      (Trait_parts { trait_generics; requires; associated_types; laws }, context)
+      ( Trait_parts { trait_generics; requires; associated_types; associated_capabilities; laws },
+        context )
   | Impl { trait_; type_ = head; uses; members } -> (
       let impl_generics, for_type = head_type context path head in
       match Lower.trait_reference ~capability:true context trait_ with
@@ -180,7 +189,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
                    | Associated_definition (name, written) ->
                        Some
                          (name.text, Lower.type_ { context with self_type = Some for_type } written)
-                   | Impl_member_error -> None)
+                   | Capability_definition _ | Impl_member_error -> None)
                  members)
           in
           let implements = { implements with associated } in
@@ -192,8 +201,59 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
               self_associated = associated;
             }
           in
+          (* A set can name the sets defined before it. A set that named
+             itself, or a set defined after it, would have no value. *)
+          let capability_sets =
+            List.fold_left
+              (fun sets (line : impl_member line) ->
+                match line.kind with
+                | Capability_definition (name, written) ->
+                    let set =
+                      Lower.capabilities { context with self_capabilities = sets } written
+                    in
+                    let defined_by_this_impl = function
+                      | T.Capability_projection { base; trait; _ } ->
+                          T.equal base for_type && Path.equal trait.trait implements.trait
+                      | _ -> false
+                    in
+                    if List.exists defined_by_this_impl set then begin
+                      Lower.report context Unknown_associated_capability name.span
+                        (Printf.sprintf
+                           "`%s` is defined from itself, or from a set that this `impl` defines \
+                            after it."
+                           name.text);
+                      sets
+                    end
+                    else if List.mem_assoc name.text sets then sets
+                    else (name.text, set) :: sets
+                | Associated_definition _ | Impl_member_error -> sets)
+              [] members
+          in
+          let declared =
+            match Query.demand context.database Summary.trait_header implements.trait with
+            | Some header -> header.capabilities
+            | None -> []
+          in
+          let context =
+            {
+              context with
+              self_capabilities =
+                List.map
+                  (fun name ->
+                    (name, Option.value ~default:[] (List.assoc_opt name capability_sets)))
+                  declared;
+            }
+          in
           ( Impl_parts
-              { impl_generics; implements; for_type; impl_uses = Lower.capabilities context uses },
+              {
+                impl_generics;
+                implements;
+                for_type;
+                impl_uses = Lower.capabilities context uses;
+                capability_sets =
+                  List.sort compare
+                    (List.filter (fun (name, _) -> List.mem name declared) capability_sets);
+              },
             context ))
   | _ -> (Capability_parts, context)
 
@@ -205,6 +265,7 @@ type header = {
   self_type : T.ty option;
   self_trait : T.trait_reference option;
   self_associated : (string * T.ty) list;
+  self_capabilities : (string * T.capability list) list;
   header_bounds : (T.parameter * T.trait_reference list) list;
   header_generics : T.generic list;
       (** The generic parameters of an [impl], which precede those of a method written inside it. A
@@ -239,6 +300,7 @@ let header =
                          self_type = context.self_type;
                          self_trait = context.self_trait;
                          self_associated = context.self_associated;
+                         self_capabilities = context.self_capabilities;
                          header_bounds = bounds_of context;
                          header_generics;
                          header_uses;
@@ -311,6 +373,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
             self_type = within.self_type;
             self_trait = within.self_trait;
             self_associated = within.self_associated;
+            self_capabilities = within.self_capabilities;
           }
         in
         match definition.kind with
@@ -396,12 +459,15 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         | Trait _ | Capability _ | Impl _ -> (
             match lower_container context path definition with
             | Broken report, context -> (Error_interface report, context)
-            | Trait_parts { trait_generics; requires; associated_types; laws }, context ->
+            | ( Trait_parts
+                  { trait_generics; requires; associated_types; associated_capabilities; laws },
+                context ) ->
                 ( Trait_interface
                     {
                       trait_generics;
                       requires;
                       associated_types;
+                      associated_capabilities;
                       laws;
                       methods = trait_methods ~is_capability:false;
                       is_capability = false;
@@ -414,19 +480,22 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
                       trait_generics = [];
                       requires = [];
                       associated_types = [];
+                      associated_capabilities = [];
                       laws = [];
                       methods = trait_methods ~is_capability:true;
                       is_capability = true;
                       broken_methods = broken_methods ();
                     },
                   context )
-            | Impl_parts { impl_generics; implements; for_type; impl_uses }, context ->
+            | ( Impl_parts { impl_generics; implements; for_type; impl_uses; capability_sets },
+                context ) ->
                 ( Impl_interface
                     {
                       impl_generics;
                       implements;
                       for_type;
                       impl_uses;
+                      capability_sets;
                       impl_methods =
                         List.filter_map
                           (fun (name, receiver, interface, _) ->
@@ -641,6 +710,7 @@ let impl_interface =
               implements = { trait = path; trait_arguments = []; associated = [] };
               for_type = T.Error report;
               impl_uses = [];
+              capability_sets = [];
               impl_methods = [];
               impl_broken = true;
             }

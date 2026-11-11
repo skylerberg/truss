@@ -8,7 +8,7 @@
    Each run makes a graph of queries over a few inputs. What a query reads
    depends on what it has read so far, so its reads change as the inputs
    do; some queries divide their result, so that it often comes out the
-   same; some are saved; and the queries are spread over the phases. After
+   same; some raise; some are saved; and the queries are spread over the phases. After
    each random step every engine is audited against a new engine with no
    bases and the same inputs.
 
@@ -61,9 +61,15 @@ and compute database index =
         !total + Option.value (Query.find database value_input (choice / 4 mod inputs)) ~default:7
     else
       let other = choice / 4 mod index in
-      total := !total + Query.demand database (Lazy.force queries).(phase_of other) other
+      total :=
+        !total
+        +
+          try Query.demand database (Lazy.force queries).(phase_of other) other
+          with Failure _ -> 13
   done;
   (* Some results come out the same for many inputs. *)
+  (* Some results are exceptions. *)
+  if index mod 5 = 4 && !total mod 3 = 0 then failwith (string_of_int (!total mod 4));
   if index mod 3 = 0 then !total / 64 else !total land 0xFFFF
 
 let node index = (Lazy.force queries).(phase_of index)
@@ -141,8 +147,9 @@ let apply world step =
   match step.change with
   | Set (key, value) -> Engine.set engine value_input key value
   | Remove key -> Engine.remove engine value_input key
-  | Get index -> ignore (Engine.get engine (node index) index)
-  | Observe index -> ignore (Query.demand (Engine.observer engine) (node index) index)
+  | Get index -> ( try ignore (Engine.get engine (node index) index) with Failure _ -> ())
+  | Observe index -> (
+      try ignore (Query.demand (Engine.observer engine) (node index) index) with Failure _ -> ())
   | Unroot index -> Engine.unroot engine (node index) index
   | Stabilize -> ignore (Engine.stabilize engine)
   | Reopen { full } ->

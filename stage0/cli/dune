@@ -7,7 +7,6 @@
   unix
   compiler_bug
   cmdliner
-  zarith
   source
   diagnostic
   syntax
@@ -16,18 +15,17 @@
   query
   workspace
   resolve
-  types
   checked
   infer
   inspect
   interface
   type_checker
+  manifest
   registry
   memory_layout
   libc
   toolchain
   build
-  instance
   lir
   unicode
   compile

@@ -29,14 +29,13 @@ let setup files =
   List.iter
     (fun (name, text) ->
       let module_ = module_of name in
-      Engine.set (Engine.of_context database) Workspace.file_text module_ text;
       Hashtbl.replace by_package module_.package
-        (module_ :: Option.value ~default:[] (Hashtbl.find_opt by_package module_.package)))
+        ((module_, text) :: Option.value ~default:[] (Hashtbl.find_opt by_package module_.package)))
     all;
   Hashtbl.iter
     (fun package modules ->
-      Engine.set (Engine.of_context database) Workspace.packages package
-        { Workspace.name = package; dependencies = []; modules = List.rev modules; usize_bits = 32 })
+      Database.load_package (Engine.of_context database) ~name:package ~dependencies:[]
+        (List.rev modules))
     by_package;
   database
 
@@ -488,7 +487,7 @@ let () =
       let database = setup [ ("app::main", text "2") ] in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Engine.set (Engine.of_context database) Workspace.file_text module_ (text "3");
+      Database.Testing.set_text (Engine.of_context database) module_ (text "3");
       Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
       let resolved =
@@ -502,7 +501,7 @@ let () =
       let database = setup [ ("app::main", "fn first() -> Int64 { 1 }\n") ] in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Engine.set (Engine.of_context database) Workspace.file_text module_
+      Database.Testing.set_text (Engine.of_context database) module_
         "\n\nfn first() -> Int64 { 1 }\n";
       Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
@@ -530,7 +529,7 @@ let () =
       in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Engine.set (Engine.of_context database) Workspace.file_text module_
+      Database.Testing.set_text (Engine.of_context database) module_
         "fn z() {}\n\nfn a() -> Int64 { 1 }\n\nfn f() -> Int64 { a() }\n";
       Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
@@ -599,18 +598,11 @@ let () =
   let with_geometry ~dependencies text =
     let database = setup [ ("app::main", text) ] in
     let engine = Engine.of_context database in
-    Engine.set engine Workspace.file_text geometry
-      "public fn length(value: Int64) -> Int64 {\n  value\n}\n";
-    Engine.set engine Workspace.packages "acme::geometry"
-      { name = "acme::geometry"; dependencies = []; modules = [ geometry ]; usize_bits = 32 };
-    Engine.set engine Workspace.packages "app"
-      {
-        name = "app";
-        dependencies =
-          List.map (fun package -> { Workspace.package; capabilities = [] }) dependencies;
-        modules = [ module_of "app::main" ];
-        usize_bits = 32;
-      };
+    Database.load_package engine ~name:"acme::geometry" ~dependencies:[]
+      [ (geometry, "public fn length(value: Int64) -> Int64 {\n  value\n}\n") ];
+    Database.Testing.set_manifest engine ~name:"app"
+      ~dependencies:
+        (List.map (fun package -> { Workspace.package; capabilities = [] }) dependencies);
     database
   in
   let uses_both =

@@ -266,7 +266,8 @@ let tasks_use ?(solved = fun (_ : int) : Types.capability list -> []) (body : bl
   let rec used (capability : Types.capability) =
     match capability with
     | Capability path -> if Path.equal path tasks_capability then found := Uses_tasks
-    | Capability_parameter _ -> if !found = No_tasks then found := Through_parameter
+    | Capability_parameter _ | Capability_projection _ ->
+        if !found = No_tasks then found := Through_parameter
     | Capability_variable variable -> List.iter used (solved variable)
   in
   block

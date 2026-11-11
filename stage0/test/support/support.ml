@@ -40,6 +40,8 @@ let checked ~check database name =
    - no type contains an inference variable, a hole, or an error;
    - every generic parameter that appears is declared by the definition
      or by its enclosing type, trait, or impl, and never by a callee;
+   - every associated capability set that appears is of a generic
+     parameter or of an associated type of one;
    - the expression of a [Lent] place is a call of a lending method;
    - a [mut] parameter receives a place or a slice, and an [own] parameter
      receives a value;
@@ -82,13 +84,18 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     if not (List.mem found own) then
       wrong "%s mentions `%s`, a generic parameter of `%s`" what found.name (Path.show found.owner)
   in
-  let capabilities what =
+  let rec capabilities what =
     List.iter (function
       | T.Capability _ -> ()
       | T.Capability_parameter found -> parameter what found
+      | T.Capability_projection { base; trait = reference; name } ->
+          (match base with
+          | Parameter _ | Projection _ -> ()
+          | _ -> wrong "%s contains `%s.%s`, which is not normalized" what (T.show base) name);
+          type_ what base;
+          trait what reference
       | T.Capability_variable _ -> wrong "%s contains a capability inference variable" what)
-  in
-  let rec type_ what (found : T.ty) =
+  and type_ what (found : T.ty) =
     match found with
     | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter (argument what) arguments
     | Parameter named -> parameter what named

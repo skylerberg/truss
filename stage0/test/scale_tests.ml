@@ -51,7 +51,7 @@ let show work =
 let edit database name text =
   let engine = Engine.of_context database in
   let before = Engine.counters engine in
-  Engine.set engine Workspace.file_text (module_of name) text;
+  Database.Testing.set_text engine (module_of name) text;
   ignore (Engine.stabilize engine);
   let after = Engine.counters engine in
   {
