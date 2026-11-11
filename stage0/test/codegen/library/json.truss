@@ -171,3 +171,19 @@ test "a value is read from a reader and written to a writer" {
     assert json::read_from(mut broken) is Err(Parse(_))
   }
 }
+
+test "a template builds a value around the values written in it" {
+  let name = "Ada \"the first\""
+  let count: Int64 = 3
+  let tags: List[json::Value] = [json::Value.from("a"), json::Value.from(true)]
+  let built = json::Value"""{"name": ${name.slice()}, "count": ${count}, "tags": ${own tags}, "nested": [ ${false} , null, 1.5]}"""
+  assert built.to_text() == "{\"name\":\"Ada \\\"the first\\\"\",\"count\":3,\"tags\":[\"a\",true],\"nested\":[false,null,1.5]}"
+  let whole = json::Value"${count}"
+  let inner = json::Value"""{"id": ${count}}"""
+  let members: Map[String, json::Value] = [:]
+  let outer = json::Value"""[${own inner}, ${own members}]"""
+  assert outer.to_text() == "[{\"id\":3},{}]"
+  assert whole.to_int64() == Some(3)
+  let plain = json::Value" [1, 2] "
+  assert plain.to_text() == "[1,2]"
+}

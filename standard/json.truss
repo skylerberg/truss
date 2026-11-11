@@ -99,6 +99,10 @@ type ParsedValue(value: Value, end: USize)
 
 type ParsedString(text: String, end: USize)
 
+let part_marker: UInt8 = 1
+
+let no_parts: List[Value] = []
+
 fn with_position(text: StringSlice, failure: Failure) -> ParseError
   cost time finite
 {
@@ -368,7 +372,14 @@ fn parse_literal(text: StringSlice, from: USize, word: StringSlice, value: own V
   Ok(ParsedValue(value: own value, end: from + word.length()))
 }
 
-fn parse_array(text: StringSlice, from: USize, depth: USize) -> Result[ParsedValue, Failure]
+fn parse_array(
+  text: StringSlice,
+  from: USize,
+  depth: USize,
+  parts: Slice[Value],
+  next_part: mut USize,
+  in_template: Bool,
+) -> Result[ParsedValue, Failure]
   requires from < text.length()
   requires depth > 0
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
@@ -385,7 +396,14 @@ fn parse_array(text: StringSlice, from: USize, depth: USize) -> Result[ParsedVal
     invariant index <= text.length()
     decreases text.length() - index
   {
-    let item = parse_value(text, from: index, depth: depth - 1)?
+    let item = parse_value(
+      text,
+      from: index,
+      depth: depth - 1,
+      parts: parts,
+      next_part: mut next_part,
+      in_template: in_template,
+    )?
     let next = skip_whitespace(text, from: item.end)
     mut items.push(own item.value)
     if next == text.length() {
@@ -402,7 +420,14 @@ fn parse_array(text: StringSlice, from: USize, depth: USize) -> Result[ParsedVal
   Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
 }
 
-fn parse_object(text: StringSlice, from: USize, depth: USize) -> Result[ParsedValue, Failure]
+fn parse_object(
+  text: StringSlice,
+  from: USize,
+  depth: USize,
+  parts: Slice[Value],
+  next_part: mut USize,
+  in_template: Bool,
+) -> Result[ParsedValue, Failure]
   requires from < text.length()
   requires depth > 0
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
@@ -430,7 +455,14 @@ fn parse_object(text: StringSlice, from: USize, depth: USize) -> Result[ParsedVa
     if text.byte(colon) != 58 {
       return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: colon))
     }
-    let member = parse_value(text, from: skip_whitespace(text, from: colon + 1), depth: depth - 1)?
+    let member = parse_value(
+      text,
+      from: skip_whitespace(text, from: colon + 1),
+      depth: depth - 1,
+      parts: parts,
+      next_part: mut next_part,
+      in_template: in_template,
+    )?
     let next = skip_whitespace(text, from: member.end)
     mut members.insert(own name.text, value: own member.value)
     if next == text.length() {
@@ -447,7 +479,14 @@ fn parse_object(text: StringSlice, from: USize, depth: USize) -> Result[ParsedVa
   Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
 }
 
-fn parse_value(text: StringSlice, from: USize, depth: USize) -> Result[ParsedValue, Failure]
+fn parse_value(
+  text: StringSlice,
+  from: USize,
+  depth: USize,
+  parts: Slice[Value],
+  next_part: mut USize,
+  in_template: Bool,
+) -> Result[ParsedValue, Failure]
   requires from <= text.length()
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
   decreases depth, 1
@@ -462,9 +501,9 @@ fn parse_value(text: StringSlice, from: USize, depth: USize) -> Result[ParsedVal
       return Err(Failure(kind: ParseErrorKind.TooDeep, offset: from))
     }
     return if byte == 123 {
-      parse_object(text, from: from, depth: depth)
+      parse_object(text, from: from, depth: depth, parts: parts, next_part: mut next_part, in_template: in_template)
     } else {
-      parse_array(text, from: from, depth: depth)
+      parse_array(text, from: from, depth: depth, parts: parts, next_part: mut next_part, in_template: in_template)
     }
   }
   if byte == 34 {
@@ -483,21 +522,44 @@ fn parse_value(text: StringSlice, from: USize, depth: USize) -> Result[ParsedVal
   if byte == 45 || (48 <= byte && byte <= 57) {
     return parse_number(text, from: from)
   }
+  if byte == part_marker && in_template {
+    let value = if next_part < parts.length() { parts[next_part].copy() } else { Value.Null }
+    next_part = next_part.saturating_add(1)
+    return Ok(ParsedValue(value: own value, end: from + 1))
+  }
   Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: from))
+}
+
+fn parse_document(
+  text: StringSlice,
+  maximum_depth: USize,
+  parts: Slice[Value],
+  in_template: Bool,
+) -> Result[Value, Failure]
+  cost time finite
+{
+  var next_part: USize = 0
+  let start = skip_whitespace(text, from: 0)
+  let step = parse_value(
+    text,
+    from: start,
+    depth: maximum_depth,
+    parts: parts,
+    next_part: mut next_part,
+    in_template: in_template,
+  )?
+  let end = skip_whitespace(text, from: step.end)
+  if end < text.length() {
+    return Err(Failure(kind: ParseErrorKind.TrailingCharacters, offset: end))
+  }
+  Ok(own step.value)
 }
 
 public fn parse(text: StringSlice, maximum_depth: USize = 128) -> Result[Value, ParseError]
   cost time finite
 {
-  let start = skip_whitespace(text, from: 0)
-  match parse_value(text, from: start, depth: maximum_depth) {
-    Ok(step) => {
-      let end = skip_whitespace(text, from: step.end)
-      if end < text.length() {
-        return Err(with_position(text, failure: Failure(kind: ParseErrorKind.TrailingCharacters, offset: end)))
-      }
-      Ok(own step.value)
-    }
+  match parse_document(text, maximum_depth: maximum_depth, parts: no_parts.slice(), in_template: false) {
+    Ok(value) => Ok(own value)
     Err(failure) => Err(with_position(text, failure: failure))
   }
 }
@@ -857,14 +919,54 @@ impl FromTemplate for Value {
   fn from_template(template: Template[Value]) -> Value
     requires is_valid_template(template.literals)
   {
-    todo
+    match template_text(template.literals) {
+      Some(text) => {
+        match parse_document(
+          text.slice(),
+          maximum_depth: text.length(),
+          parts: template.parts.slice(),
+          in_template: true,
+        ) {
+          Ok(value) => value
+          Err(_) => Value.Null
+        }
+      }
+      None => Value.Null
+    }
   }
+}
+
+fn template_text(literals: Slice[text::Literal]) -> Option[String]
+  cost time finite
+{
+  var joined = ""
+  var index: USize = 0
+  while index < literals.length()
+    invariant index <= literals.length()
+    decreases literals.length() - index
+  {
+    let literal = literals[index].text()
+    if literal.contains("\u{1}") {
+      return None
+    }
+    if index > 0 {
+      mut joined.push("\u{1}")
+    }
+    mut joined.push(literal)
+    index += 1
+  }
+  Some(own joined)
 }
 
 public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
   cost time finite
 {
-  todo
+  match template_text(literals) {
+    Some(text) => {
+      parse_document(text.slice(), maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
+    }
+    None => false
+  }
 }
 
 impl From[Bool] for Value {

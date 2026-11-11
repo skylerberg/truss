@@ -615,3 +615,34 @@ test "sort_by_key orders a list by what a function gives for each element" {
   mut numbers.sort_by_key(fn(number) { (number - offset) * (number - offset) })
   assert numbers == [3, 2, -1, -5]
 }
+
+test "min_by and max_by lend the least and the greatest element by a comparison" {
+  let words: List[String] = ["pear", "fig", "banana", "kiwi", "plum", "yam"]
+  assert words.min_by(fn(first, second) { first.length().compare(second.length()) }) == Some("fig")
+  assert words.max_by(fn(first, second) { first.length().compare(second.length()) }) == Some("banana")
+  assert words.min_by(fn(first, second) { first.compare(second) }) == Some("banana")
+  assert words.max_by(fn(first, second) { first.compare(second) }) == Some("yam")
+  assert words[3..].min_by(fn(first, second) { first.length().compare(second.length()) }) == Some("yam")
+  assert words[3..].max_by(fn(first, second) { first.length().compare(second.length()) }) == Some("plum")
+  let one: List[Int64] = [4]
+  assert one.min_by(fn(first, second) { first.compare(second) }) == Some(4)
+  assert one.max_by(fn(first, second) { first.compare(second) }) == Some(4)
+  let none: List[Int64] = []
+  assert none.min_by(fn(first, second) { first.compare(second) }) is None
+  assert none.max_by(fn(first, second) { first.compare(second) }) is None
+}
+
+test "append_slice adds a copy of each element of a slice" {
+  var numbers: List[Int64] = [1, 2]
+  let more: List[Int64] = [3, 4, 5]
+  mut numbers.append_slice(more[1..])
+  assert numbers == [1, 2, 4, 5]
+  mut numbers.append_slice(more[..0])
+  assert numbers == [1, 2, 4, 5]
+  var words: List[String] = []
+  let names: List[String] = ["a", "b"]
+  mut words.append_slice(names.slice())
+  mut words.append_slice(names.slice())
+  assert words == ["a", "b", "a", "b"]
+  assert names == ["a", "b"]
+}

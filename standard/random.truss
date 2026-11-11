@@ -153,9 +153,12 @@ public fn Generator.fraction(mut self, low: Float64, high: Float64) -> Float64
 
 public fn Generator.normal(mut self, mean: Float64 = 0.0, deviation: Float64 = 1.0) -> Float64
   requires deviation >= 0.0
-  cost time finite
+  cost time O(1)
 {
-  todo
+  let first = 1.0 - mut self.unit()
+  let second = mut self.unit()
+  let radius = (-2.0 * first.logarithm()).square_root()
+  mean + deviation * radius * (6.283185307179586 * second).cosine()
 }
 
 public fn Generator.chance(mut self, probability: Float64) -> Bool
@@ -210,9 +213,28 @@ public fn Generator.choose[Element](mut self, items: Slice[Element]) -> Option[U
 public fn Generator.sample(mut self, population: USize, count: USize) -> List[USize]
   requires count <= population
   ensures result.length() == count
-  cost time O(count)
+  ensures forall i in 0..result.length() => result.model()[i] < population
+  cost time finite
 {
-  todo
+  var chosen: List[USize] = List.with_capacity(count)
+  let start = population - count
+  var position = start
+  while position < population
+    invariant start <= position
+    invariant position <= population
+    invariant chosen.length() == position - start
+    invariant forall i in 0..chosen.length() => chosen.model()[i] < population
+    decreases population - position
+  {
+    let candidate = mut self.index(position + 1)
+    if chosen.contains(candidate) {
+      mut chosen.push(position)
+    } else {
+      mut chosen.push(candidate)
+    }
+    position += 1
+  }
+  chosen
 }
 
 public fn bytes(count: USize) -> List[UInt8]

@@ -374,6 +374,17 @@ internal fn starts_authority(text: StringSlice, from: USize) -> Bool
   text.length() - from >= 2 && text.byte(from) == 47 && text.byte(from + 1) == 47
 }
 
+internal fn authority_end(text: StringSlice, from: USize) -> USize
+  requires from <= text.length()
+  requires starts_authority(text, from: from)
+  ensures from + 2 <= result
+  ensures result <= text.length()
+  cost time O(result - from)
+  cost allocations == 0
+{
+  find_first_of(text, from: from + 2, to: text.length(), first: 47, second: 63, third: 35)
+}
+
 internal fn build_url(scheme: own String, authority: own Option[Authority], rest: own PathQueryFragment) -> Url
   cost time O(1)
 {
@@ -641,7 +652,7 @@ public fn parse(text: StringSlice) -> Result[Url, ParseError]
   var from = colon + 1
   var authority: Option[Authority] = None
   if starts_authority(text, from: from) {
-    let end = find_first_of(text, from: from + 2, to: text.length(), first: 47, second: 63, third: 35)
+    let end = authority_end(text, from: from)
     authority = Some(parse_authority(text, from: from + 2, to: end)?)
     from = end
   }
@@ -1024,12 +1035,81 @@ impl FromTemplate for Url {
   fn from_template(template: Template[Component]) -> Url
     requires is_valid_template(template.literals)
   {
-    todo
+    var text = ""
+    var index: USize = 0
+    while index < template.literals.length()
+      invariant index <= template.literals.length()
+      decreases template.literals.length() - index
+    {
+      mut text.push(template.literals[index].text())
+      if index < template.parts.length() {
+        mut text.push(template.parts[index].text.slice())
+      }
+      index += 1
+    }
+    match parse(text.slice()) {
+      Ok(url) => url
+      Err(_) => Url(
+        scheme: "",
+        user_information: None,
+        host: None,
+        port: None,
+        path: "",
+        query: None,
+        fragment: None,
+      )
+    }
   }
+}
+
+internal fn template_text(literals: Slice[text::Literal], part: StringSlice) -> String
+  cost time finite
+{
+  var text = ""
+  var index: USize = 0
+  while index < literals.length()
+    invariant index <= literals.length()
+    decreases literals.length() - index
+  {
+    if index > 0 {
+      mut text.push(part)
+    }
+    mut text.push(literals[index].text())
+    index += 1
+  }
+  text
+}
+
+internal fn path_start(text: StringSlice) -> USize
+  ensures result <= text.length()
+  cost time O(text.length())
+{
+  let colon = scheme_end(text)
+  if colon == text.length() {
+    return colon
+  }
+  if starts_authority(text, from: colon + 1) {
+    authority_end(text, from: colon + 1)
+  } else {
+    colon + 1
+  }
+}
+
+internal fn parses_with_parts_after_authority(literals: Slice[text::Literal], part: StringSlice) -> Bool
+  requires literals.length() > 0
+  cost time finite
+{
+  let text = template_text(literals, part: part)
+  if !(parse(text.slice()) is Ok(_)) {
+    return false
+  }
+  literals.length() == 1 || path_start(text.slice()) <= literals[0].text().length()
 }
 
 public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
   cost time finite
 {
-  todo
+  literals.length() > 0
+    && parses_with_parts_after_authority(literals, part: "~")
+    && parses_with_parts_after_authority(literals, part: "")
 }
