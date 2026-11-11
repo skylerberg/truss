@@ -651,9 +651,7 @@ let check database (key : Names.key) =
           (since interface_named !(context.named))
         @ state.diagnostics;
       finalize state;
-      (match lowered.interface with
-      | Function_interface { transparent = true; _ } -> Transparent.check state
-      | _ -> ());
+      Exported_parts.check state lowered;
       (* Whether a recorded type contains a type that [unwanted] accepts. *)
       let any_type unwanted =
         let contains table =

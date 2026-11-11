@@ -390,12 +390,19 @@ the change invalidates nothing beyond the definition:
   the body of a function only when the function is `public transparent`, so
   editing any other body re-proves nothing in a package that depends on this
   one. `transparent` is part of the signature, and it is an error on a function
-  whose body cannot be a definition. The body of a `transparent` function
-  calls only public functions and names only public constants
-  (`types.private_in_transparent`). The contract of a function that other
-  packages cannot see is not compared between releases, so a change to it
-  would break their proofs with no change reported. A hidden field can be
-  read, because a change to the field changes the body.
+  whose body cannot be a definition.
+- **What another package's proofs read names only what is public.** Those
+  proofs read the `requires`, `ensures`, and `cost` of every definition that
+  the package can call, and the body of a `transparent` function. A function
+  or a constant that such a clause or body names must be public
+  (`types.private_in_public`). The contract of a function that other packages
+  cannot see is not compared between releases, so a change to it would break
+  their proofs with no change reported. A definition that other packages can
+  call is a public function, method, or theorem, a method of a public trait
+  or capability, and a method of an `impl` of a public trait for a public
+  type. A `transparent` body can read a hidden field, because a change to
+  the field changes the body. Type invariants, laws, and the `requires` of a
+  function-typed parameter are not checked yet.
 - **A default is separate from the signature,** as DESIGN.md requires: callers
   read only whether a parameter has a default.
 - **A type's invariants are separate from its shape.** Strengthening an
