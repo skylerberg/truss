@@ -164,7 +164,7 @@ let last_name (module_ : Path.module_) =
 
 (* The modules a file imports, by the name code writes them with. *)
 let imports =
-  Query.query ~name:"imports" ~phase:Syntax ~saved:true ~show:Path.show_module
+  Query.query ~name:"imports" ~phase:Phases.syntax ~saved:true ~show:Path.show_module
     (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       List.map
@@ -243,7 +243,7 @@ let builtin_items () =
       Intrinsic.operations
 
 let entries =
-  Query.query ~name:"entries" ~phase:Syntax ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"entries" ~phase:Phases.syntax ~show:Path.show_module (fun database module_ ->
       if module_ = Intrinsic.module_ then builtin_items ()
       else plain_items (Query.demand database Workspace.file module_).definitions)
 
@@ -252,7 +252,7 @@ module String_map = Map.Make (String)
 (* A module's entries by name, the first of each name, so that each lookup
    by name is a logarithmic one rather than a pass over the module. *)
 let entry_index =
-  Query.query ~name:"entry_index" ~phase:Declarations ~show:Path.show_module
+  Query.query ~name:"entry_index" ~phase:Phases.declarations ~show:Path.show_module
     (fun database module_ ->
       List.fold_left
         (fun index (entry : entry) ->
@@ -262,7 +262,7 @@ let entry_index =
 
 (* The first definition with that name in the module. *)
 let find =
-  Query.query ~name:"find" ~phase:Declarations ~saved:true
+  Query.query ~name:"find" ~phase:Phases.declarations ~saved:true
     ~show:(fun ((module_ : Path.module_), name) -> Path.show_module module_ ^ "::" ^ name)
     (fun database (module_, name) ->
       if module_exists database module_ then
@@ -348,7 +348,7 @@ let owner database ~from (head : type_head) =
   | None -> top from (spell_path head.path)
 
 let declarations =
-  Query.query ~name:"declarations" ~phase:Declarations ~show:Path.show_module ~saved:true
+  Query.query ~name:"declarations" ~phase:Phases.declarations ~show:Path.show_module ~saved:true
     (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       let counts = Hashtbl.create 16 in
@@ -473,14 +473,15 @@ end)
 (* All declarations of a package, module by module. Each index of the
    package is built from this list in one pass. *)
 let package_declarations =
-  Query.query ~name:"package_declarations" ~phase:Declarations ~show:Fun.id (fun database package ->
+  Query.query ~name:"package_declarations" ~phase:Phases.declarations ~show:Fun.id
+    (fun database package ->
       List.concat_map
         (fun module_ -> Query.demand database declarations module_)
         (Query.demand database Workspace.modules package))
 
 (* A package's methods and member constants by owner and name. *)
 let member_index =
-  Query.query ~name:"member_index" ~phase:Declarations ~show:Fun.id (fun database package ->
+  Query.query ~name:"member_index" ~phase:Phases.declarations ~show:Fun.id (fun database package ->
       List.fold_left
         (fun index (declaration : declaration) ->
           match declaration.path with
@@ -498,7 +499,7 @@ let member_index =
    the order they are declared. A method written inside a trait is declared
    as that trait's, so this reads no trait's interface. *)
 let trait_index =
-  Query.query ~name:"trait_index" ~phase:Declarations ~show:Fun.id (fun database package ->
+  Query.query ~name:"trait_index" ~phase:Phases.declarations ~show:Fun.id (fun database package ->
       let declared = Query.demand database package_declarations package in
       let traits =
         List.filter_map
@@ -526,7 +527,7 @@ let trait_index =
 
 (* The traits of a package that declare a method with a name. *)
 let traits_declaring =
-  Query.query ~name:"traits_declaring" ~phase:Declarations ~saved:true
+  Query.query ~name:"traits_declaring" ~phase:Phases.declarations ~saved:true
     ~show:(fun (package, name) -> package ^ " " ^ name)
     (fun database (package, name) ->
       Option.value ~default:[]
@@ -537,7 +538,7 @@ let traits_declaring =
    nothing about where in a file they are, so moving one changes nothing
    that looked it up. *)
 let members =
-  Query.query ~name:"members" ~phase:Declarations ~saved:true
+  Query.query ~name:"members" ~phase:Phases.declarations ~saved:true
     ~show:(fun (owner, name) -> Path.show owner ^ "." ^ name)
     (fun database ((owner : Path.t), name) ->
       Option.value ~default:[]
@@ -555,7 +556,7 @@ end)
 
 (* A module's declarations by path and ordinal. *)
 let declaration_index =
-  Query.query ~name:"declaration_index" ~phase:Declarations ~show:Path.show_module
+  Query.query ~name:"declaration_index" ~phase:Phases.declarations ~show:Path.show_module
     (fun database module_ ->
       List.fold_left
         (fun index (declaration : declaration) ->
@@ -565,13 +566,13 @@ let declaration_index =
 
 (* A module's definitions, by their index in the file. *)
 let items =
-  Query.query ~name:"items" ~phase:Syntax ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"items" ~phase:Phases.syntax ~show:Path.show_module (fun database module_ ->
       Array.of_list (Query.demand database Workspace.file module_).definitions)
 
 (* Where a definition is: its module, its declaration, and its place in its
    file. *)
 let locate =
-  Query.query ~name:"locate" ~phase:Declarations ~show:show_key (fun database key ->
+  Query.query ~name:"locate" ~phase:Phases.declarations ~show:show_key (fun database key ->
       Option.map
         (fun declaration -> (key.module_, declaration))
         (Declaration_map.find_opt (key.path, key.ordinal)
@@ -579,7 +580,7 @@ let locate =
 
 (* The trait, the [impl], or the capability a method is written inside. *)
 let container =
-  Query.query ~name:"container" ~phase:Declarations ~show:show_key (fun database key ->
+  Query.query ~name:"container" ~phase:Phases.declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with
       | Some (module_, { container = Some index; _ }) ->
           Option.map key_of
@@ -591,7 +592,7 @@ let container =
 (* The methods written inside a trait, an [impl], or a capability, in the
    order they are written. *)
 let contained =
-  Query.query ~name:"contained" ~phase:Declarations ~show:show_key (fun database key ->
+  Query.query ~name:"contained" ~phase:Phases.declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with
       | Some (module_, { index; _ }) ->
           List.filter_map
@@ -604,7 +605,7 @@ let contained =
    definition that only moved then has the same tree, and invalidates no
    result that reads it. *)
 let definition =
-  Query.query ~name:"definition" ~phase:Declarations ~show:show_key ~saved:true
+  Query.query ~name:"definition" ~phase:Phases.declarations ~show:show_key ~saved:true
     ~about:(fun key -> Some { path = key.path; part = Some "tree" })
     (fun database key ->
       match Query.demand database locate key with
@@ -615,7 +616,7 @@ let definition =
 (* The names of the parameters of a trait's law, in order. The body of a
    proof of the law names them. *)
 let law_parameters =
-  Query.query ~name:"law_parameters" ~phase:Declarations
+  Query.query ~name:"law_parameters" ~phase:Phases.declarations
     ~show:(fun ((trait : Path.t), law) -> Path.show trait ^ "." ^ law)
     (fun database ((trait : Path.t), law) ->
       match trait with
@@ -648,12 +649,13 @@ let law_parameters =
    invalidates no result that reads its form. Code that displays a node's
    source text demands this query. *)
 let spans =
-  Query.query ~name:"spans" ~phase:Declarations ~show:show_key (fun database key ->
+  Query.query ~name:"spans" ~phase:Phases.declarations ~show:show_key (fun database key ->
       Option.map Syntax_walk.spans (Query.demand database definition key))
 
 (* Where a definition starts in its file, for showing its diagnostics. *)
 let base =
-  Query.query ~name:"base" ~phase:Declarations ~show:show_key ~saved:true (fun database key ->
+  Query.query ~name:"base" ~phase:Phases.declarations ~show:show_key ~saved:true
+    (fun database key ->
       match Query.demand database locate key with
       | None -> None
       | Some (module_, declaration) ->
@@ -677,7 +679,7 @@ let per_definition database module_ of_definition =
    its file, so that editing another definition changes nothing that reads
    it. *)
 let text =
-  Query.query ~name:"text" ~phase:Declarations ~show:show_key (fun database key ->
+  Query.query ~name:"text" ~phase:Phases.declarations ~show:show_key (fun database key ->
       match Query.demand database locate key with
       | None -> None
       | Some (module_, declaration) ->

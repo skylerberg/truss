@@ -2,6 +2,7 @@
  (name package_checks)
  (libraries
   query
+  phases
   path
   types
   checked

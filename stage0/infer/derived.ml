@@ -470,4 +470,4 @@ let form database (path : Path.t) : Core.t option =
 
 (* The core form of a method of a derived [impl], by the method's path. It
    is generated once, however many instances of the method are compiled. *)
-let core = Query.query ~name:"derived" ~phase:Bodies ~show:Path.show form
+let core = Query.query ~name:"derived" ~phase:Phases.bodies ~show:Path.show form

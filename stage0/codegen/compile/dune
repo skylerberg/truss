@@ -6,6 +6,7 @@
   path
   well_known
   query
+  phases
   resolve
   interface
   workspace

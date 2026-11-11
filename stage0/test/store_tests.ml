@@ -173,7 +173,7 @@ let () =
 let version = "test"
 let value_input = Query.input ~name:"saved_value" ~show:(fun () -> "") ()
 
-let unit_query name ?saved ?portable ?(phase = Query.Syntax) compute =
+let unit_query name ?saved ?portable ?(phase = Phases.syntax) compute =
   Query.query ~name ~phase ?saved ?portable ~show:(fun () -> "") compute
 
 let doubled =
@@ -184,8 +184,8 @@ let through_unsaved =
   unit_query "unsaved_middle" (fun database () -> Query.get database value_input () + 1)
 
 let reads_through =
-  unit_query "saved_reads_through" ~saved:true ~portable:true ~phase:Bodies (fun database () ->
-      Query.demand database through_unsaved () * 10)
+  unit_query "saved_reads_through" ~saved:true ~portable:true ~phase:Phases.bodies
+    (fun database () -> Query.demand database through_unsaved () * 10)
 
 let other_input = Query.input ~name:"saved_other" ~show:(fun () -> "") ()
 
@@ -345,11 +345,11 @@ let right_text =
       snd (Query.get database pair_input ()))
 
 let both_texts =
-  unit_query "unsaved_both_texts" ~phase:Declarations (fun database () ->
+  unit_query "unsaved_both_texts" ~phase:Phases.declarations (fun database () ->
       (Query.demand database left_text (), Query.demand database right_text ()))
 
 let reads_both =
-  unit_query "saved_reads_both" ~saved:true ~phase:Bodies (fun database () ->
+  unit_query "saved_reads_both" ~saved:true ~phase:Phases.bodies (fun database () ->
       let left, right = Query.demand database both_texts () in
       String.length left + String.length right)
 
@@ -388,7 +388,7 @@ let leaf =
   unit_query "saved_leaf" ~saved:true (fun database () -> Query.get database value_input ())
 
 let top =
-  unit_query "saved_top" ~saved:true ~phase:Bodies (fun database () ->
+  unit_query "saved_top" ~saved:true ~phase:Phases.bodies (fun database () ->
       if Query.get database switch_input () then Query.demand database leaf () else 0)
 
 let maybe_input = Query.input ~name:"saved_maybe" ~show:(fun () -> "") ()
@@ -477,11 +477,11 @@ let layer_unsaved =
   unit_query "layer_unsaved" (fun database () -> Query.get database layer_value () + 1)
 
 let reads_layer =
-  unit_query "reads_layer" ~saved:true ~phase:Bodies (fun database () ->
+  unit_query "reads_layer" ~saved:true ~phase:Phases.bodies (fun database () ->
       Query.demand database layer_unsaved () + Query.get database own_value ())
 
 let reads_reader =
-  unit_query "reads_reader" ~saved:true ~phase:Bodies (fun database () ->
+  unit_query "reads_reader" ~saved:true ~phase:Phases.bodies (fun database () ->
       10 * Query.demand database reads_layer ())
 
 let () =

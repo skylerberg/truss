@@ -758,7 +758,7 @@ let check database (key : Names.key) =
   | _ -> None
 
 let checked =
-  Query.query ~name:"checked" ~phase:Bodies ~show:Names.show_key ~saved:true
+  Query.query ~name:"checked" ~phase:Phases.bodies ~show:Names.show_key ~saved:true
     ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
     (fun database key ->
       Compiler_bug.within ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
