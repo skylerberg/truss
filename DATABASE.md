@@ -288,6 +288,13 @@ value, and the function that computes it, and says:
   by definition, and a result about no definition, such as a lookup by name,
   is passed through when answering them.
 
+A query is declared when its module is initialized. A state that is opened
+leaves out each result of a query that is not declared, with everything
+that read it, since it could not be checked; so a query declared later, as
+one inside a lazy value is until the value is first forced, would have its
+readers computed again in every process. Once the database has opened its
+store, declaring a query is an error.
+
 Nothing a stage can call changes an input or names a session.
 
 ### What a query must be
