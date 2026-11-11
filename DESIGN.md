@@ -2147,7 +2147,9 @@ effect: code that does it declares `uses Tasks`.
   waits while it is empty, and `close` ends the loops of the tasks that
   receive from it. A channel of capacity 0 holds no message, and its
   `send` returns when a task has received the message, as on Go's
-  unbuffered channels and Kotlin's rendezvous channels. A message is
+  unbuffered channels and Kotlin's rendezvous channels. The messages of
+  one sender are received in the order it sent them, as on Go's and
+  Rust's channels; the messages of two senders interleave in any order. A message is
   owned, so sending one moves it and copies nothing. Its type is `Storable`, so never a view type, since what a view
   views could be gone before the message is received. A function's type
   does not say what the value holds, and neither does an `any` type whose

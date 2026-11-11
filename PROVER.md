@@ -418,10 +418,10 @@ decides when a body is a definition. In the solver:
   `requires` is stated once, for every argument, since a fact about one
   call would name the bound values. So `forall a: Pair => forall b: Pair
   => (a < b) == ...` unfolds a derived `compare`, which has a body as a
-  written one would. A function with no `requires` that is known by its
-  contract alone, as one in another package that is not `transparent` is,
+  written one would. A function known by its contract alone, as one in
+  another package that is not `transparent` is, or one with a `requires`,
   has its `ensures` stated once in the same way, for every argument its
-  parameters' types admit.
+  parameters' types admit where its `requires` holds.
 - **Recursive definitions unfold once per use.** A definition that
   unfolded itself forever would never be finished, so a call to a function
   inside its own unfolding is left as the function applied to its
@@ -575,6 +575,14 @@ read where `Self` is a known type, reaches that type's `impl`, written or
 derived, when the bounds on the `impl`'s parameters hold under the bounds
 of the definition proven. A capability
 call uses the capability method's contract.
+
+- **Channels.** A channel's `receive` and `send` have no `time` clause,
+  since waiting may never end, so a function that must end cannot wait on
+  one. A message that is received is known by its type's invariant, as a
+  capability call's result is. That one sender's messages are received in
+  the order it sent them is about two tasks' histories, which no contract
+  of one task's code can state, so the prover states nothing about the
+  order of messages; the library's tests check it under many schedules.
 
 - **A tagged template is a call** of its tag's `from_template` with the
   template: its literal texts, each a `Literal` whose model is its bytes,
@@ -1412,12 +1420,14 @@ test the prover itself:
 - **Contracts for the intrinsic module's system calls.** The environment's
   entries, a view's address, and what a C function returns beyond what its
   row of the table says are known only by their types.
-- **Facts under a quantifier.** A fact that names a quantifier's bound
-  name, such as what the `ensures` of a callee with a `requires` says of a
-  call on it, is not kept. Closed over the quantifier it would be true, but the standard
-  library's maps state nested quantifiers over calls, each call's facts
-  are about values made for every combination of bound names, and with
-  them the solver runs out of steps even with triggers chosen.
+- **Facts under a quantifier.** A pure callee's contract and definition
+  are stated once for every argument, but any other fact that names a
+  quantifier's bound name, such as what is known of a value made in the
+  quantifier's body by an operation, is not kept. Closed over the
+  quantifier it would be true, but the standard library's maps state
+  nested quantifiers, each fact is about values made for every
+  combination of bound names, and with them the solver runs out of steps
+  even with triggers chosen.
 - **A lambda inside a quantifier, or with a functional lambda inside it,**
   whose body is not functional is applied as a function the solver knows
   nothing more about: inside a quantifier its arguments are not alone in
@@ -1449,11 +1459,6 @@ test the prover itself:
   reported as code the prover cannot read: the iterations after it are
   cancelled and run to their ends, which the loop's invariant would have
   to say of where the exit is.
-- **Channels.** A channel's `receive` and `send` have no `time` clause, so
-  a function that must end cannot wait on one. A message that is received
-  is known by its type's invariant, as a capability call's result is. What
-  a channel's contract should say about the order of messages is not
-  decided.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.
