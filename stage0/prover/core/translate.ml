@@ -381,31 +381,36 @@ let scope_facts context names =
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     context.scopes
 
-(* A goal with the facts of each quantifier it skolemizes as hypotheses:
-   each [forall] where the goal holds it, and each [exists] where it holds
-   it negated. The facts hold for every value, so the goal means the same. *)
-let rec with_quantifier_facts context positive term =
-  let facts () = Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term) in
+(* A term with the facts of each quantifier in it. A fact holds for every
+   value of the bound names, so [forall x => p], [forall x => facts && p],
+   and [forall x => facts ==> p] mean the same, and so do the [exists]
+   forms. The form chosen gives the solver the facts wherever it has a
+   value of [x]: where the query holds the quantifier, as a fact does, the
+   solver instantiates a [forall] and skolemizes an [exists], and either
+   way [facts && p] states them; where the query holds it negated, as it
+   does a goal, [facts ==> p] does. Each is stated inside its quantifier,
+   so it is instantiated only when the quantifier is. *)
+let rec with_quantifier_facts context ~holds term =
+  let inside body =
+    match Hashtbl.find_opt context.quantifier_facts term with
+    | None | Some [] -> body
+    | Some facts ->
+        if holds then L.( &&& ) (L.conjunction facts) body else L.( ==> ) (L.conjunction facts) body
+  in
   match term with
-  | L.Forall (bound, body) when positive ->
-      let body = with_quantifier_facts context positive body in
-      L.Forall
-        (bound, match facts () with [] -> body | facts -> L.( ==> ) (L.conjunction facts) body)
-  | L.Exists (bound, body) when not positive ->
-      let body = with_quantifier_facts context positive body in
-      L.Exists
-        (bound, match facts () with [] -> body | facts -> L.( &&& ) (L.conjunction facts) body)
+  | L.Forall (bound, body) -> L.Forall (bound, inside (with_quantifier_facts context ~holds body))
+  | L.Exists (bound, body) -> L.Exists (bound, inside (with_quantifier_facts context ~holds body))
   | L.Apply ((("and" | "or") as operator), parts) ->
-      L.Apply (operator, List.map (with_quantifier_facts context positive) parts)
+      L.Apply (operator, List.map (with_quantifier_facts context ~holds) parts)
   | L.Apply ("=>", [ premise; conclusion ]) ->
       L.Apply
         ( "=>",
           [
-            with_quantifier_facts context (not positive) premise;
-            with_quantifier_facts context positive conclusion;
+            with_quantifier_facts context ~holds:(not holds) premise;
+            with_quantifier_facts context ~holds conclusion;
           ] )
   | L.Apply ("not", [ inner ]) ->
-      L.Apply ("not", [ with_quantifier_facts context (not positive) inner ])
+      L.Apply ("not", [ with_quantifier_facts context ~holds:(not holds) inner ])
   | term -> term
 
 (* A fact of mathematics, true on every path. One that names a bound
@@ -413,7 +418,8 @@ let rec with_quantifier_facts context positive term =
    many such facts and the solver spends its steps on them, but kept with
    its quantifier. *)
 let fact context frame term =
-  if not (L.mentions frame.bound term) then context.facts <- term :: context.facts
+  if not (L.mentions frame.bound term) then
+    context.facts <- with_quantifier_facts context ~holds:true term :: context.facts
   else in_scope context frame term
 
 (* A fact is guarded by its path's condition, and kept with its
@@ -424,7 +430,7 @@ let assume context frame term =
   | _ ->
       let guarded = L.( ==> ) frame.condition term in
       if not (L.mentions frame.bound term || L.mentions frame.bound frame.condition) then
-        context.facts <- guarded :: context.facts
+        context.facts <- with_quantifier_facts context ~holds:true guarded :: context.facts
       else in_scope context frame guarded
 
 (* An obligation is shown by its own query, and is a fact for what comes
@@ -521,7 +527,7 @@ let truss_of_goal context term =
 let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
   match
     obligation_at ?evaluation context frame code span message
-      (with_quantifier_facts context true goal)
+      (with_quantifier_facts context ~holds:false goal)
   with
   | Some obligation ->
       (* Without a fix of its own, a goal about the parameters alone is

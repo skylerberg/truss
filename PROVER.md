@@ -861,15 +861,22 @@ is about one result for each `i`, not one result for all of them.
 
 What is known of such a value, as the range of `items[i].count_ones()`, is
 a fact about the bound names, which is not stated for every value of them:
-the standard library's maps state nested quantifiers, and with a fact for
-every combination of bound names the solver runs out of steps. It is a
-hypothesis instead, inside each quantifier that the solver skolemizes: a
-`forall` in an obligation's goal where the goal holds it, an `exists` where
-the goal holds it negated, and the quantifiers around an obligation in a
-quantifier's body. Skolemized, the bound names are constants, so the
-facts are about them alone and cost the solver no instantiation. A fact
-holds for every value of the bound names, so `forall i in 0..n => p` and
-`forall i in 0..n => facts ==> p` mean the same.
+as quantified facts of their own, each with its own triggers, the
+standard library's nested quantifiers made the solver run out of steps.
+Each is stated inside its quantifier instead, so the solver has it exactly
+where it has a value of the bound names and nowhere else. A fact holds for
+every value of the bound names, so `forall i in 0..n => p`,
+`forall i in 0..n => facts && p`, and `forall i in 0..n => facts ==> p`
+mean the same, and so do the `exists` forms; the form is chosen by the
+quantifier's place in the query:
+
+| The query holds the quantifier | Solver | Form |
+|---|---|---|
+| as it is, as a fact or a `requires` | instantiates a `forall`, skolemizes an `exists` | `facts && p` |
+| negated, as an obligation's goal | skolemizes a `forall`, instantiates an `exists` | `facts ==> p` |
+
+An obligation in a quantifier's body is closed over the quantifiers around
+it with their facts as hypotheses, in the second form.
 
 ### The canonical form
 
@@ -1496,15 +1503,6 @@ test the prover itself:
   on `USize` are 64-bit code, so a 32-bit translation would read facts
   that contradict its own ranges. Code generation builds only for 64-bit
   targets, so no program runs with a width its proofs did not assume.
-- **Facts under an assumed quantifier.** A quantifier that is a fact,
-  such as a `requires`, a callee's `ensures`, or an obligation shown before,
-  has no hypotheses from its body: stated for every value of the bound
-  names, they are the facts that make the solver run out of steps. A
-  pure callee's contract and definition are stated once for every argument
-  either way.
-- **Proof states in the language server.** `Prover.states` gives each
-  obligation's state at its position, proven or not with the diagnostic
-  that says why; the language server, `truss lsp`, is not built yet.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.
