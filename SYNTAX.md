@@ -3120,7 +3120,8 @@ proof Monoid.associative for Int64 {
 ```
 
 The body is checked as the law's own body is, so it can name the law's
-parameters, with `Self` the type that the proof is for. A law that holds by
+parameters, with `Self` the type that the proof is for, and the law's
+`requires` hold in it. A law that holds by
 induction is proven by a theorem that calls itself, which the proof calls
 with the law's values:
 

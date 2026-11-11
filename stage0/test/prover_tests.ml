@@ -3055,6 +3055,37 @@ let () =
       not_proven "theorem t(word: UInt64)\n  ensures word.count_ones() == 0\n{\n}\n"
         "prover.ensures")
 
+(* Proofs of laws *)
+
+let () =
+  test "a law's proof names the law's parameters, where its requires hold" (fun () ->
+      proven
+        "trait Sized {\n\
+        \  fn size(self) -> Int64\n\
+        \    cost time finite\n\n\
+        \  law at_least_one(value: Self)\n\
+        \    requires value.size() > 0\n\
+        \  {\n\
+        \    value.size() >= 1\n\
+        \  }\n\
+         }\n\n\
+         type Box(n: Int64)\n\n\
+         impl Sized for Box {\n\
+        \  fn size(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.n\n\
+        \  }\n\
+         }\n\n\
+         theorem needs(value: Box)\n\
+        \  requires value.size() > 0\n\
+        \  ensures value.size() >= 1\n\
+         {\n\
+         }\n\n\
+         proof Sized.at_least_one for Box {\n\
+        \  needs(value)\n\
+         }\n")
+
 (* Concurrent code *)
 
 let early_return ensures =

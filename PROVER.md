@@ -728,9 +728,11 @@ may be none, so what the body assumes holds only for them. A pure call's
   concrete type whose `impl`'s laws are proven. Each hand-written `impl`
   must prove each law, under the code `prover.law`, from the `impl`'s
   method contracts and definitions and the body of its `proof` definition,
-  if there is one. That body is a `proof` block: its facts are known, but
-  the law is shown from where it started, so a proof that never ends
-  shows nothing. A law's own proof never uses that law.
+  if there is one. That body is a `proof` block. Its parameters are bound
+  by position to the law's arguments, and the law's `requires` are
+  assumed. Its facts are known, but the law is shown from where it
+  started, so a proof that never ends shows nothing. A law's own proof
+  never uses that law.
 - **A derived `Equal`** is the solver's equality, or its definition field
   by field, as [Equality](#equality) says. Nothing is proven for a derived
   implementation, as DESIGN.md says.
