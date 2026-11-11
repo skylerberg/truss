@@ -334,6 +334,25 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
       | _ -> ())
     clauses
 
+(* A type argument is a type or a [USize] value, so no argument can be
+   written for a capability parameter of a type or of a trait. A signature
+   or a field could then not name the type with the capabilities that its
+   value uses. *)
+let check_no_capability_parameter state what (name : name) (generics : generic_parameter list) =
+  List.iter
+    (fun (generic : generic_parameter) ->
+      match generic.kind with
+      | Capability_parameter parameter ->
+          report state Misplaced_capability_parameter generic.span
+            (Printf.sprintf
+               "Only a function can take a capability parameter. No type argument can \
+                be                 written for `%s`, so no signature or field could name %s `%s` \
+                with the                 capabilities that it uses. Write the capabilities in the \
+                function type, as in                 `(fn() uses Clock)`."
+               parameter.text what name.text)
+      | Type_parameter _ | Value_parameter _ | Generic_error -> ())
+    generics
+
 (* Traits *)
 
 let check_trait_cycle state (requires : path_type list) =
@@ -913,7 +932,8 @@ let check state =
                     (check_proof_bounds state type_ generics)
                     (Impls.impl_interface database impl)
               | Some _ -> ())
-        | None, Type_definition { name; body; clauses; _ }, Type_interface interface ->
+        | None, Type_definition { name; generics; body; clauses }, Type_interface interface ->
+            check_no_capability_parameter state "the type" name generics;
             (match body with
             | Fields fields -> check_duplicates state "field" (field_names fields)
             | Variants variants ->
@@ -940,7 +960,8 @@ let check state =
                       variants
                 | _ -> [])
                 name.span
-        | None, Trait { name; requires; _ }, Trait_interface trait ->
+        | None, Trait { name; generics; requires; _ }, Trait_interface trait ->
+            check_no_capability_parameter state "the trait" name generics;
             check_trait_cycle state requires;
             check_private_in_public state
               (List.map (fun (bound : T.trait_reference) -> T.Any bound) trait.requires

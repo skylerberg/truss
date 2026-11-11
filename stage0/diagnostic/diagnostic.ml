@@ -156,6 +156,7 @@ module Code = struct
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
+    | Misplaced_capability_parameter
     | Arity
     | Unsatisfied_bound
     | Private_in_public
@@ -410,6 +411,7 @@ module Code = struct
     | Not_a_type -> "not_a_type"
     | Not_a_trait -> "not_a_trait"
     | Not_a_capability -> "not_a_capability"
+    | Misplaced_capability_parameter -> "misplaced_capability_parameter"
     | Arity -> "arity"
     | Unsatisfied_bound -> "unsatisfied_bound"
     | Private_in_public -> "private_in_public"
