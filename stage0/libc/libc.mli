@@ -285,6 +285,11 @@ type function_ =
   | Descriptor_wait
       (** The runtime's: waits until the descriptor has become ready in the direction since the
           ticket was issued *)
+  | Descriptors_watch
+      (** The runtime's: returns a ticket for a later [Descriptors_wait] by the same task *)
+  | Descriptors_wait
+      (** The runtime's: waits until one of several descriptors has become readable since the ticket
+          was issued *)
   | Sleep  (** The runtime's: waits for a time, or until the calling task is cancelled *)
   | Tasks_open
       (** The runtime's task functions, which the real [Tasks] implementation calls. This one

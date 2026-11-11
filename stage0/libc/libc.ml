@@ -242,6 +242,8 @@ type function_ =
   | Signals_wait
   | Descriptor_watch
   | Descriptor_wait
+  | Descriptors_watch
+  | Descriptors_wait
   | Sleep
   | Tasks_open
   | Tasks_join
@@ -326,6 +328,8 @@ let functions =
     Signals_wait;
     Descriptor_watch;
     Descriptor_wait;
+    Descriptors_watch;
+    Descriptors_wait;
     Sleep;
     Tasks_open;
     Tasks_join;
@@ -410,6 +414,8 @@ let function_name = function
   | Signals_wait -> "signals_wait"
   | Descriptor_watch -> "descriptor_watch"
   | Descriptor_wait -> "descriptor_wait"
+  | Descriptors_watch -> "descriptors_watch"
+  | Descriptors_wait -> "descriptors_wait"
   | Sleep -> "sleep"
   | Tasks_open -> "tasks_open"
   | Tasks_join -> "tasks_join"
@@ -1106,7 +1112,8 @@ let describe function_ =
         ]
         ~headers:[]
   | (Descriptor_watch | Descriptor_wait) as waiting ->
-      (* The runtime's. A socket that tasks wait for does not block: a call
+      (* The runtime's. A socket or a pipe that tasks wait for does not
+         block: a call
          that would block fails with [EAGAIN]. The caller takes a ticket
          before the call and waits on it after [EAGAIN], so that it does
          not miss the descriptor becoming ready between the two. The wait
@@ -1126,6 +1133,26 @@ let describe function_ =
           (everywhere "int32_t") (Returns Int32)
           [ descriptor; writing; ("ticket", Value UInt64, everywhere "uint64_t") ]
           ~headers:[]
+  | Descriptors_watch ->
+      (* The runtime's. A caller that reads several descriptors, none of
+         which blocks, takes a ticket, reads each until a read would block,
+         and waits on the ticket for any of them to become readable. The
+         wait skips a negative descriptor. It returns 1 when the caller is
+         to read again, and 0 with [errno] set to [EINTR] if the calling
+         task is cancelled. *)
+      row
+        ~symbol:(everywhere "t_runtime_descriptors_watch")
+        (everywhere "uint64_t") (Returns UInt64) [] ~headers:[]
+  | Descriptors_wait ->
+      row
+        ~symbol:(everywhere "t_runtime_descriptors_wait")
+        (everywhere "int32_t") (Returns Int32)
+        [
+          ("descriptors", Elements (Int32, counted "count"), everywhere "const int32_t *");
+          ("count", Value USize, size);
+          ("ticket", Value UInt64, everywhere "uint64_t");
+        ]
+        ~headers:[]
   | Sleep ->
       (* The runtime's. It waits for the time and returns 0, or returns 1 as
          soon as the calling task is cancelled. *)
@@ -1173,15 +1200,15 @@ let blocks = function
       false
   (* The runtime's own functions that wait park the calling task, or count
      its thread as blocked, themselves. *)
-  | Signals_wait | Descriptor_watch | Descriptor_wait | Sleep | Tasks_open | Tasks_join
-  | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock
-  | Tasks_unlock | Tasks_yield ->
+  | Signals_wait | Descriptor_watch | Descriptor_wait | Descriptors_watch | Descriptors_wait | Sleep
+  | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait | Tasks_wake
+  | Tasks_lock | Tasks_unlock | Tasks_yield ->
       false
 
 let of_the_runtime = function
-  | Addresses_of_host | Signals_wait | Descriptor_watch | Descriptor_wait | Sleep | Tasks_open
-  | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock
-  | Tasks_unlock | Tasks_yield ->
+  | Addresses_of_host | Signals_wait | Descriptor_watch | Descriptor_wait | Descriptors_watch
+  | Descriptors_wait | Sleep | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled
+  | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ->
       true
   | _ -> false
 

@@ -22,6 +22,14 @@ internal fn retry_when_ready(descriptor: Int32, writing: Bool, ticket: UInt64) -
   }
 }
 
+internal fn without_blocking(descriptor: Int32) -> Result[Unit, Int32] {
+  let flags = intrinsic::libc_fcntl_getfl(descriptor)
+  if flags < 0 {
+    return Err(intrinsic::libc_errno())
+  }
+  done(intrinsic::libc_fcntl_setfl(descriptor, flags: flags | intrinsic::libc_o_nonblock()))
+}
+
 internal fn write_fully(descriptor: Int32, bytes: intrinsic::View[UInt8]) -> Result[Unit, Int32] {
   let length = intrinsic::view_length(bytes)
   var written: USize = 0
@@ -49,6 +57,7 @@ internal fn read_onto_end(
   descriptor: Int32,
   buffer: mut intrinsic::Storage[UInt8],
   count: USize,
+  waiting: Bool = true,
 ) -> Result[USize, Int32]
   ensures !(result is Ok(got) && (got > count
     || intrinsic::storage_length(buffer) != old(intrinsic::storage_length(buffer)) + got))
@@ -60,7 +69,7 @@ internal fn read_onto_end(
   let length = intrinsic::storage_length(buffer)
   var ticket = watch(descriptor, writing: false)
   var got = intrinsic::libc_read(descriptor, buffer: mut buffer, count: count)
-  while got < 0 && retry_when_ready(descriptor, writing: false, ticket: ticket)
+  while got < 0 && retry_read(descriptor, ticket: ticket, waiting: waiting)
     invariant identical(intrinsic::storage_model(buffer), old(intrinsic::storage_model(buffer)))
     invariant intrinsic::storage_capacity(buffer) >= length + count
     invariant got <= count
@@ -74,6 +83,14 @@ internal fn read_onto_end(
     let read: USize = intrinsic::convert(got)
     intrinsic::storage_lengthen(mut buffer, by: read)
     Ok(read)
+  }
+}
+
+fn retry_read(descriptor: Int32, ticket: UInt64, waiting: Bool) -> Bool {
+  if waiting {
+    retry_when_ready(descriptor, writing: false, ticket: ticket)
+  } else {
+    retry_after_signal()
   }
 }
 

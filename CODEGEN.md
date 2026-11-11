@@ -1214,30 +1214,41 @@ and the pool's threads run the tasks that are ready:
   of the thread's own computation could block for long, and would hold
   that computation up after its wait had ended.
 - **A call that blocks holds its thread.** The C library's rows that can
-  block, such as `read` of a file or a pipe and `waitpid`, are named in
-  the table, and lowering brackets each call with `blocking_begin` and
-  `blocking_end`. Most such calls return at once, so the bracket only
+  block, such as `read` of a file or of standard input and `waitpid`, are
+  named in the table, and lowering brackets each call with `blocking_begin`
+  and `blocking_end`. Most such calls return at once, so the bracket only
   records the tick at which the call began. The monitor, a thread of the
   runtime that ticks every millisecond while tasks are ready, counts a
-  thread as blocked once its call has lasted a whole tick, as Go's
-  `sysmon` does. A thread that counted as blocked from the start of each
-  call would call a spare thread for every short read.
-- **A sleep and a wait for a socket park the task.** A sleep puts a timer
-  in a heap that is ordered by deadline. A thread of the runtime sleeps
-  until the earliest deadline, then wakes that timer's key. The standard
-  library's sockets do not block: a call that would block fails with
+  thread as blocked once its call has lasted a whole tick, as Go's `sysmon`
+  does. A thread that counted as blocked from the start of each call would
+  call a spare thread for every short read.
+- **A sleep and a wait for a socket or a child's pipe park the task.** A
+  sleep puts a timer in a heap that is ordered by deadline. A thread of the
+  runtime sleeps until the earliest deadline, then wakes that timer's key.
+  The standard library's sockets, and its ends of the pipes that it opens to
+  a child process, do not block: a call that would block fails with
   `EAGAIN`. The library takes a ticket for the descriptor and direction
   before the call (`descriptor_watch`) and waits on it after `EAGAIN`
   (`descriptor_wait`), so it does not miss the descriptor becoming ready
-  between the two. The runtime registers the descriptor at its first
-  wait with the system's poller, `epoll` on Linux and `kqueue` on macOS,
-  edge-triggered and for both directions. A thread of the runtime takes
-  the poller's reports and wakes the key of the descriptor and
-  direction. The time limit that a program sets on a socket
-  (`SO_RCVTIMEO`, `SO_SNDTIMEO`) applies only to a blocking call, so the
-  wait reads it and starts a timer for it. `close` goes through the
-  runtime, which forgets the registration, because the system gives a
-  closed descriptor's number to the next one that is opened.
+  between the two. The runtime registers the descriptor at its first wait
+  with the system's poller, `epoll` on Linux and `kqueue` on macOS,
+  edge-triggered and for both directions. A thread of the runtime takes the
+  poller's reports and wakes the key of the descriptor and direction. The
+  time limit that a program sets on a socket (`SO_RCVTIMEO`, `SO_SNDTIMEO`)
+  applies only to a blocking call, so the wait reads it and starts a timer
+  for it. `close` goes through the runtime, which forgets the registration,
+  because the system gives a closed descriptor's number to the next one that
+  is opened.
+- **One wait covers several descriptors.** `Processes.run` reads a child's
+  output and its error output as the child writes them, since a child that
+  fills one pipe while the program waits for the other never ends. The
+  library takes a ticket (`descriptors_watch`), reads each pipe until a read
+  would block, and waits on the ticket (`descriptors_wait`). The wait
+  registers each descriptor with a key of the calling task instead of the
+  descriptor's own, so a report that any of them is readable wakes the task.
+  A later wait for one of them alone registers it with its own key again. Go
+  reads the two pipes in two goroutines, which the library cannot do: it has
+  no `Tasks`.
 - **Spare threads run tasks in place of blocked threads.** A thread is
   blocked once the monitor has counted its call, while it waits and is
   not a task, and while it sleeps until a `parallel` branch that another
@@ -2276,10 +2287,14 @@ a command line can hold.
 - **A `parallel for` over any other method at once.** A collection that
   cannot give its parts by position needs a way to split itself in two,
   as Rust's rayon and Java's `Spliterator` have.
-- **A wait for a pipe, a terminal, or a file that parks the task.** Only
-  the standard library's sockets do not block. A read of a pipe or of
-  standard input, and a wait for a child process, hold a thread. A read
-  of a file cannot be waited for with `epoll` or `kqueue` at all.
+- **A wait for standard input, a terminal, a child's exit, or a file that
+  parks the task.** Each holds a thread. The standard library makes only the
+  descriptors that it opens itself non-blocking: a descriptor that the
+  program inherits shares its mode with the processes that share it, so
+  making standard input non-blocking would change it for the shell. A wait
+  for a child to exit is a blocking `waitpid`; Go's `Process.Wait` holds a
+  thread too. A read of a file cannot be waited for with `epoll` or `kqueue`
+  at all.
 - **More tasks at once than the operating system allows mappings.** Each
   task's stack is a mapping with a guard page. Linux allows a process
   about sixty-five thousand mappings by default, which is about thirty
