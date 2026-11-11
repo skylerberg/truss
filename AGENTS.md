@@ -66,3 +66,28 @@ It does not mean everyday vocabulary.
    sentences in the part you touch.
 
 Before you commit, reread what you wrote against rules 1 to 7.
+
+## Testing
+
+CI is the full gate. It runs every test suite and every proof of the
+standard library on the pull request merged with `main`. Do not repeat it
+on the development machine, which every session shares.
+
+Before you push, run only:
+
+1. `dune build`, and `dune build @fmt` if OCaml changed.
+2. The test suites of the libraries that the change edits: for a change in
+   `stage0/parser`, the parser's suites. Run a suite as its executable,
+   such as `stage0/test/parser_tests.exe`.
+3. For a change under `standard/`, the check and the proofs of the modules
+   that the change edits, and their tests.
+
+Then push. If CI reports a failure, fix it and push again.
+
+- Do not run `dune build @runtest`, `dune test`, or the proofs of the whole
+  standard library.
+- A change that only alters what compiles, such as a moved module or an
+  edited `dune` file, needs the build and nothing else.
+- A change to documents alone needs no local check.
+- CI runs on Linux only. Run a changed sequence of system calls in a loop
+  on the development machine as well.
