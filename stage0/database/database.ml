@@ -1610,22 +1610,40 @@ let rec make_directory path =
     try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
   end
 
+(* Only the user may reach the background process: what travels over its
+   socket is marshaled, and reading marshaled bytes from another user would
+   let that user run code as this one. *)
 let servers_directory () =
   let directory = Filename.concat (Store.default_directory ()) "servers" in
   make_directory directory;
+  (try Unix.chmod directory 0o700 with Unix.Unix_error _ -> ());
   directory
+
+(* A directory in /tmp that is the user's alone. Another user could have
+   made one of this name first, so it is used only if it is a directory,
+   this user's, and closed to everyone else. *)
+let private_temporary_directory () =
+  let directory = Printf.sprintf "/tmp/truss-%d" (Unix.getuid ()) in
+  (try Unix.mkdir directory 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  match Unix.lstat directory with
+  | { st_kind = S_DIR; st_uid; st_perm; _ } when st_uid = Unix.getuid () && st_perm land 0o077 = 0
+    ->
+      directory
+  | _ | (exception Unix.Unix_error _) ->
+      failwith (directory ^ " is not a directory that only this user can use.")
 
 (* The socket's address, and its lock beside it in the store. A socket's
    path has a short limit, about 100 bytes, so one under a long store path
-   goes in /tmp, named by a hash of where it would have been. *)
+   goes in a directory of the user's own in /tmp, named by a hash of where it
+   would have been. *)
 let server_path identity = Filename.concat (servers_directory ()) (Identity.short identity)
 
 let socket_path identity =
   let path = server_path identity ^ ".socket" in
   if String.length path < 100 then path
   else
-    Printf.sprintf "/tmp/truss-%d-%s.socket" (Unix.getuid ())
-      (String.sub (Blake3.to_hex (Blake3.hash path)) 0 16)
+    Filename.concat (private_temporary_directory ())
+      (String.sub (Blake3.to_hex (Blake3.hash path)) 0 16 ^ ".socket")
 
 let idle_limit = 3. *. 3600.
 let session_idle_limit = 3600.
@@ -1649,32 +1667,53 @@ let drop_idle state now =
       Hashtbl.remove state.sessions key)
     idle
 
-(* Keeps the store within its budget: everything the state of a worktree
-   that still exists refers to is kept, and so is the standard library's;
-   the pointer of a worktree that is gone is removed. *)
+(* Removes the pointer of each worktree whose directory is gone, of any
+   compiler, and its line in the list of worktrees. A new worktree looks
+   through every pointer for the state nearest to it, so those of worktrees
+   that are gone must not gather. *)
+let prune state =
+  let known = known_worktrees state in
+  let live, dead = List.partition (fun (root, _) -> Sys.file_exists root) known in
+  if dead <> [] then begin
+    List.iter (fun (_, name) -> Store.remove_pointer (Store.pointer state.store name)) dead;
+    let file = worktrees_file state in
+    let partial = file ^ ".partial" in
+    try
+      Out_channel.with_open_bin partial (fun out ->
+          List.iter (fun (root, name) -> Printf.fprintf out "%s\t%s\n" root name) live);
+      Sys.rename partial file
+    with Sys_error _ -> ()
+  end
+
+(* Keeps the store within its budget. What the state of a worktree of this
+   compiler refers to is kept, and so are the standard library's state and
+   each named state of the library. A state another compiler wrote can be
+   read only by that compiler, so its values are not kept; that compiler
+   finds its state gone, and starts from its files. *)
 let collect state =
+  prune state;
+  Store.compact state.store;
   if Store.size state.store > budget () then begin
     let live = Hashtbl.create 4096 in
-    let keep artifact =
-      List.iter (fun name -> Hashtbl.replace live name ()) (Engine.values_in state.store artifact)
+    let keep ~version artifact =
+      List.iter
+        (fun name -> Hashtbl.replace live name ())
+        (Engine.values_in state.store ~version artifact)
     in
-    let worktrees = known_worktrees state in
-    List.iter
-      (fun (root, name) ->
-        let pointer = Store.pointer state.store name in
-        if Sys.file_exists root then
-          Option.iter (fun (record : record) -> keep record.artifact) (read_record pointer)
-        else Store.remove_pointer pointer)
-      worktrees;
-    Option.iter keep
-      (Store.find_result state.store ~kind:"package" ~key:(standard_key state.identity));
+    let keep_pointer ~version name =
+      Option.iter
+        (fun (record : record) -> keep ~version record.artifact)
+        (read_record (Store.pointer state.store name))
+    in
+    let sessions = session_prefix state in
     List.iter
       (fun name ->
-        if String.starts_with ~prefix:library_prefix name then
-          Option.iter
-            (fun (record : record) -> keep record.artifact)
-            (read_record (Store.pointer state.store name)))
+        if String.starts_with ~prefix:sessions name then keep_pointer ~version:state.identity name
+        else if String.starts_with ~prefix:library_prefix name then
+          keep_pointer ~version:Compiler_version.digest name)
       (Store.pointers state.store);
+    Option.iter (keep ~version:state.identity)
+      (Store.find_result state.store ~kind:"package" ~key:(standard_key state.identity));
     Store.collect state.store ~budget:(budget ()) ~live:(Hashtbl.mem live)
   end
 
@@ -1722,7 +1761,7 @@ let serve ~handle =
             (let state = current () in
              watch state;
              Hashtbl.iter (fun _ session -> fold state session) state.sessions);
-            if now -. !last_collection > 600. then begin
+            if now -. !last_collection > 60. then begin
               last_collection := now;
               collect (current ())
             end

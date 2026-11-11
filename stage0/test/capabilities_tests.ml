@@ -890,4 +890,100 @@ let () =
          }\n"
         "types.mismatch")
 
+(* The cursor of a yielding method that uses a capability *)
+
+let readings =
+  "capability Meter {\n\
+  \  fn read() -> Int64\n\
+   }\n\n\
+   type Fixed(value: Int64)\n\n\
+   impl Meter for Fixed {\n\
+  \  fn read(self) -> Int64 {\n\
+  \    self.value\n\
+  \  }\n\
+   }\n\n\
+   fn readings(count: Int64) yields Int64\n\
+  \  uses Meter\n\
+   {\n\
+  \  var index = 0\n\
+  \  while index < count {\n\
+  \    yield Meter.read()\n\
+  \    index += 1\n\
+  \  }\n\
+   }\n\n"
+
+let () =
+  test "the next of a cursor needs the capabilities of the cursor's method" (fun () ->
+      one_diagnostic
+        (readings
+       ^ "fn first() -> Option[Int64] {\n\
+         \  var cursor = provide Fixed(value: 7) {\n\
+         \    readings(3)\n\
+         \  }\n\
+         \  mut cursor.next()\n\
+          }\n")
+        "capabilities.not_available");
+  test "the next of a cursor is fine where the method's capabilities are available" (fun () ->
+      fine
+        (readings
+       ^ "fn first() -> Option[Int64]\n\
+         \  uses Meter\n\
+          {\n\
+         \  var cursor = readings(3)\n\
+         \  mut cursor.next()\n\
+          }\n"));
+  test "a for loop over a cursor needs the capabilities of the cursor's method" (fun () ->
+      one_diagnostic
+        (readings
+       ^ "fn total() -> Int64 {\n\
+         \  var cursor = provide Fixed(value: 7) {\n\
+         \    readings(3)\n\
+         \  }\n\
+         \  var sum = 0\n\
+         \  for reading in mut cursor {\n\
+         \    sum += reading\n\
+         \  }\n\
+         \  sum\n\
+          }\n")
+        "capabilities.not_available");
+  test "a cursor whose method uses a capability does not meet a Cursor bound" (fun () ->
+      one_diagnostic
+        (readings
+       ^ "fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element] {\n\
+         \  mut source.next()\n\
+          }\n\n\
+          fn first() -> Option[Int64]\n\
+         \  uses Meter\n\
+          {\n\
+         \  var cursor = readings(3)\n\
+         \  pull(mut cursor)\n\
+          }\n")
+        "types.unsatisfied_bound");
+  test "a method that Cursor provides cannot run a cursor whose method uses a capability" (fun () ->
+      one_diagnostic
+        (readings
+       ^ "fn length() -> USize\n\
+         \  uses Meter\n\
+          {\n\
+         \  var cursor = readings(3)\n\
+         \  own cursor.count()\n\
+          }\n")
+        "capabilities.not_available");
+  test "a cursor whose method uses no capability meets a Cursor bound" (fun () ->
+      fine
+        "fn counted(count: Int64) yields Int64 {\n\
+        \  var index = 0\n\
+        \  while index < count {\n\
+        \    yield index\n\
+        \    index += 1\n\
+        \  }\n\
+         }\n\n\
+         fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element] {\n\
+        \  mut source.next()\n\
+         }\n\n\
+         fn first() -> Option[Int64] {\n\
+        \  var cursor = counted(3)\n\
+        \  pull(mut cursor)\n\
+         }\n")
+
 let () = finish ()

@@ -25,6 +25,7 @@ open Syntax
 module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
+module Impls = Interface.Impls
 open State
 
 let panic : T.capability = Capability (Well_known.path Panic)
@@ -48,12 +49,6 @@ let report checking ?(fixes = []) code (origin : Core.origin) message =
   checking.state.diagnostics <-
     Diagnostic.make ~fixes ~code:(Capabilities code) (Source.span span.start span.stop) message
     :: checking.state.diagnostics
-
-let show_capability = function
-  | T.Capability (Top { name; _ }) -> name
-  | T.Capability path -> Path.show path
-  | T.Capability_parameter { name; _ } -> name
-  | T.Capability_variable _ -> "_"
 
 let union left right = List.sort_uniq compare (left @ right)
 
@@ -233,6 +228,10 @@ let rec check_expression checking scope (node : Core.expression) =
       (* Taking a function as a value lets the holder call it, so the grants
          are checked here as they are for a call. *)
       check_callee_grants checking node.origin (Function { path; type_arguments = [] })
+  | Cursor_next cursor ->
+      check_children checking scope (`Expression node);
+      require_available checking scope node.origin
+        (Impls.cursor_uses checking.state.database (Core_walk.place_type cursor))
   | Call call -> (
       check_children checking scope (`Expression node);
       check_callee_grants checking node.origin call.callee;
@@ -241,6 +240,20 @@ let rec check_expression checking scope (node : Core.expression) =
         call.uses;
       match call.callee with
       | Intrinsic { operation; _ } -> require_intrinsic_uses checking scope node.origin operation
+      (* A method that [Cursor] provides is the trait's code, which uses no
+         capability and so has none to give to the cursor's [next]. *)
+      | Trait_method { name; self_type; evidence = Impl { impl; _ }; _ }
+        when Option.is_some (Impls.cursor_of_impl impl) -> (
+          match Impls.cursor_uses checking.state.database self_type with
+          | [] -> ()
+          | uses ->
+              report checking Not_available node.origin
+                (Printf.sprintf
+                   "`%s` is `Cursor`'s own code, which uses no capability, and the `next` of this \
+                    cursor uses %s. Loop over the cursor with `for`, or call its `next`, where %s \
+                    available."
+                   name (shown_capabilities uses)
+                   (match uses with [ _ ] -> "it is" | _ -> "they are")))
       | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> ())
   | _ -> check_children checking scope (`Expression node)
 
@@ -284,11 +297,15 @@ and check_statement checking scope (statement : Core.statement) =
           check_expression checking scope start;
           check_expression checking scope stop
       | Yielding_call call -> check_expression checking scope call
-      | Cursor { cursor; next } ->
+      | Cursor { cursor; next } -> (
           Core_walk.place
             { Core_walk.ignore_all with expression = check_expression checking scope }
             cursor;
-          Option.iter (require_callee_uses checking scope statement.origin) next);
+          match next with
+          | Some next -> require_callee_uses checking scope statement.origin next
+          | None ->
+              require_available checking scope statement.origin
+                (Impls.cursor_uses checking.state.database (Core_walk.place_type cursor))));
       check_children checking scope (`Pattern pattern);
       check_loop_clauses checking clauses;
       check_block checking

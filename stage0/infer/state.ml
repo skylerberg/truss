@@ -987,6 +987,16 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
 
 (* Bounds *)
 
+let show_capability = function
+  | T.Capability (Top { name; _ }) -> name
+  | T.Capability path -> Path.show path
+  | T.Capability_parameter { name; _ } -> name
+  | T.Capability_variable _ -> "_"
+
+let shown_capabilities capabilities =
+  String.concat ", "
+    (List.map (fun capability -> "`" ^ show_capability capability ^ "`") capabilities)
+
 (* Requires a type to satisfy a trait bound. The check is deferred until
    the type is inferred. The type must implement the trait, and each
    associated type that the bound fixes must unify with the one the [impl]
@@ -1004,6 +1014,20 @@ let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
       else begin
         (match implements state type_ trait with
         | None -> unmet type_ None
+        (* The [next] of a yielding method's cursor uses the method's
+           capabilities, and [Cursor.next] uses none. Code that has only the
+           bound cannot give them to the cursor. *)
+        | Some _
+          when Well_known.is Cursor trait.trait && Impls.cursor_uses state.database type_ <> [] ->
+            report state Unsatisfied_bound at
+              (Printf.sprintf
+                 "This cursor is not a `Cursor` here: its `next` uses %s, and `Cursor.next` uses \
+                  no capability. Loop over the cursor with `for`, or call its `next`, where %s \
+                  available."
+                 (shown_capabilities (Impls.cursor_uses state.database type_))
+                 (match Impls.cursor_uses state.database type_ with
+                 | [ _ ] -> "it is"
+                 | _ -> "they are"))
         | Some evidence ->
             check_evidence_grants state at evidence;
             List.iter

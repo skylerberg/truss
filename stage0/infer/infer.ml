@@ -55,7 +55,9 @@ let core_of_path =
    body of a function in the logic, which the body defines: one that
    terminates, uses no capability, mutates none of its arguments, and
    returns its result. It reads the body that a trait provides for a method,
-   to compare it with the method of an [impl] that replaces it. *)
+   to compare it with the method of an [impl] that replaces it. It never
+   reads the body of a theorem: a call of a theorem asserts the [requires]
+   and assumes the [ensures]. *)
 let callers_read_body database (path : Path.t) =
   let provided =
     match path with
@@ -64,16 +66,17 @@ let callers_read_body database (path : Path.t) =
     | _ -> false
   in
   provided
-  ||
-  match Interface.Impls.signature database path with
-  | Some signature -> (
-      signature.terminates && signature.uses = []
-      && (match signature.receiver with Some (Mut, _) -> false | _ -> true)
-      && List.for_all
-           (fun (parameter : Types.parameter_info) -> parameter.mode <> Types.Mut)
-           signature.parameters
-      && match signature.output with Returns _ -> true | Yields _ | Lends _ -> false)
-  | None -> true
+  || Interface.Summary.kind_of database path <> Some Theorem
+     &&
+     match Interface.Impls.signature database path with
+     | Some signature -> (
+         signature.terminates && signature.uses = []
+         && (match signature.receiver with Some (Mut, _) -> false | _ -> true)
+         && List.for_all
+              (fun (parameter : Types.parameter_info) -> parameter.mode <> Types.Mut)
+              signature.parameters
+         && match signature.output with Returns _ -> true | Yields _ | Lends _ -> false)
+     | None -> true
 
 (* A form without the body of its function, with the counts of the nodes
    that are left. *)

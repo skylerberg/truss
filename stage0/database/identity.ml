@@ -2,7 +2,7 @@
    saved result means something only to the compiler that saved it, so the
    key of every fact holds it, and each worktree's pointer and the
    background process's socket are named by it. The hash is remembered by
-   the executable's path, size, modification time, and inode, so that it is
+   the executable's path, size, modification and change times, and inode, so that it is
    worked out once per build of the compiler. *)
 
 let executable () =
@@ -13,7 +13,9 @@ let compute directory =
   match Unix.stat path with
   | exception Unix.Unix_error _ -> "unknown"
   | stat -> (
-      let tag = Printf.sprintf "%s %d %.0f %d" path stat.st_size stat.st_mtime stat.st_ino in
+      let tag =
+        Printf.sprintf "%s %d %h %h %d" path stat.st_size stat.st_mtime stat.st_ctime stat.st_ino
+      in
       let remembered = Filename.concat directory "identities" in
       let known =
         try
