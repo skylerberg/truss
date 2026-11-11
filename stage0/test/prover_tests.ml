@@ -3279,6 +3279,31 @@ let () =
                     String.concat ", " (List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes))
                   found)))
 
+(* Facts under a quantifier *)
+
+let () =
+  test "a fact made in a quantifier's body is a hypothesis of the goal" (fun () ->
+      proven
+        "fn counted(items: List[UInt32]) -> Bool\n\
+        \  ensures forall i in 0..items.length() => items[i].count_ones() <= 32\n\
+         {\n\
+        \  true\n\
+         }\n");
+  test "a bitwise operation under a quantifier is defined for each bound value" (fun () ->
+      proven
+        "theorem low_byte(items: List[UInt32])\n\
+        \  ensures forall i in 0..items.length() => (items[i] & 255) <= 255\n\
+         {\n\
+         }\n");
+  test "a fact made in a quantifier's body proves nothing false" (fun () ->
+      not_proven
+        "fn counted(items: List[UInt32]) -> Bool\n\
+        \  ensures forall i in 0..items.length() => items[i].count_ones() <= 31\n\
+         {\n\
+        \  true\n\
+         }\n"
+        "prover.ensures")
+
 (* Contracts under a quantifier *)
 
 let () =
