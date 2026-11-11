@@ -288,6 +288,11 @@ type context = {
   ranking : bool;
       (** Whether the definition proven may show a recursive call ends by being on a part of its
           parameters, the one use of the order of parts, which is stated only then. *)
+  mutable scopes : (string * L.term list ref) list;
+      (** Each quantifier whose body is being read, innermost first, by its bound symbol, with the
+          facts made in its body that name it. *)
+  quantifier_facts : (L.term, L.term list) Hashtbl.t;
+      (** Each quantifier read, with the facts its body made that name its bound symbol. *)
   mutable validating : T.ty list;
       (** The types whose invariants are being read, around this point. A type is valid inside the
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
@@ -359,20 +364,68 @@ let closed_over_binders frame term =
              (L.conjunction (List.map (fun (_, _, premise) -> premise) outermost_first))
              term ))
 
-(* A fact of mathematics, true on every path. Inside a quantifier, one that
-   names a bound symbol is left out, which is always sound: closed over the
-   quantifier it would be true, but a body's calls give many such facts,
-   and the solver spends its steps on them. *)
+(* A fact that names bound symbols, kept with the innermost quantifier
+   whose symbol it names, where every bound symbol it names is a
+   quantifier's. A goal that quantifiers are skolemized in has it as a
+   hypothesis, where it costs the solver nothing to instantiate. *)
+let in_scope context frame term =
+  let named = List.filter (fun name -> L.mentions [ name ] term) frame.bound in
+  if List.for_all (fun name -> List.mem_assoc name context.scopes) named then
+    match List.find_opt (fun (name, _) -> List.mem name named) context.scopes with
+    | Some (_, facts) -> facts := term :: !facts
+    | None -> ()
+
+(* The facts of the quantifiers whose bound symbols are [names]. *)
+let scope_facts context names =
+  List.concat_map
+    (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
+    context.scopes
+
+(* A goal with the facts of each quantifier it skolemizes as hypotheses:
+   each [forall] where the goal holds it, and each [exists] where it holds
+   it negated. The facts hold for every value, so the goal means the same. *)
+let rec with_quantifier_facts context positive term =
+  let facts () = Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term) in
+  match term with
+  | L.Forall (bound, body) when positive ->
+      let body = with_quantifier_facts context positive body in
+      L.Forall
+        (bound, match facts () with [] -> body | facts -> L.( ==> ) (L.conjunction facts) body)
+  | L.Exists (bound, body) when not positive ->
+      let body = with_quantifier_facts context positive body in
+      L.Exists
+        (bound, match facts () with [] -> body | facts -> L.( &&& ) (L.conjunction facts) body)
+  | L.Apply ((("and" | "or") as operator), parts) ->
+      L.Apply (operator, List.map (with_quantifier_facts context positive) parts)
+  | L.Apply ("=>", [ premise; conclusion ]) ->
+      L.Apply
+        ( "=>",
+          [
+            with_quantifier_facts context (not positive) premise;
+            with_quantifier_facts context positive conclusion;
+          ] )
+  | L.Apply ("not", [ inner ]) ->
+      L.Apply ("not", [ with_quantifier_facts context (not positive) inner ])
+  | term -> term
+
+(* A fact of mathematics, true on every path. One that names a bound
+   symbol is not stated for every value of it, since a body's calls give
+   many such facts and the solver spends its steps on them, but kept with
+   its quantifier. *)
 let fact context frame term =
   if not (L.mentions frame.bound term) then context.facts <- term :: context.facts
+  else in_scope context frame term
 
-(* A fact is guarded by its path's condition, and left out where either
-   names a bound symbol, as [fact] says. *)
+(* A fact is guarded by its path's condition, and kept with its
+   quantifier where either names a bound symbol, as [fact] says. *)
 let assume context frame term =
-  if not (L.mentions frame.bound term || L.mentions frame.bound frame.condition) then
-    match term with
-    | L.Boolean true -> ()
-    | _ -> context.facts <- L.( ==> ) frame.condition term :: context.facts
+  match term with
+  | L.Boolean true -> ()
+  | _ ->
+      let guarded = L.( ==> ) frame.condition term in
+      if not (L.mentions frame.bound term || L.mentions frame.bound frame.condition) then
+        context.facts <- guarded :: context.facts
+      else in_scope context frame guarded
 
 (* An obligation is shown by its own query, and is a fact for what comes
    after it. Inside a quantifier it is shown for each value the
@@ -466,7 +519,10 @@ let truss_of_goal context term =
   if !named then printed else None
 
 let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
-  match obligation_at ?evaluation context frame code span message goal with
+  match
+    obligation_at ?evaluation context frame code span message
+      (with_quantifier_facts context true goal)
+  with
   | Some obligation ->
       (* Without a fix of its own, a goal about the parameters alone is
          offered as a [requires]. *)
@@ -494,6 +550,12 @@ and obligation_at ?evaluation context frame code span message goal =
   else if not (L.mentions frame.bound goal || L.mentions frame.bound frame.condition) then
     Some (make_obligation ?evaluation context frame code span message goal)
   else
+    let names = List.map (fun (name, _, _) -> name) frame.binders in
+    let goal =
+      match scope_facts context names with
+      | [] -> goal
+      | facts -> L.( ==> ) (L.conjunction facts) goal
+    in
     match closed_over_binders frame (L.( ==> ) frame.condition goal) with
     | Some closed ->
         Some
@@ -2227,7 +2289,13 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
         { body_frame with binders = (bound_symbol, sort, premise) :: body_frame.binders }
         premise
     in
-    let after, body_value = value context body_frame body in
+    let facts = ref [] in
+    context.scopes <- (bound_symbol, facts) :: context.scopes;
+    let after, body_value =
+      Fun.protect
+        ~finally:(fun () -> context.scopes <- List.tl context.scopes)
+        (fun () -> value context body_frame body)
+    in
     let bound = [ (bound_symbol, sort) ] in
     (* In code, a quantifier over a range runs its body once for each value
        in it, which costs that many times what the body spends, when that
@@ -2254,9 +2322,13 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
                     if spent = Costs.zero then Costs.zero else unknown_amount context frame counter)
       | _ -> frame
     in
-    match quantifier with
-    | Forall -> Some (frame, L.Forall (bound, L.( ==> ) premise body_value))
-    | Exists -> Some (frame, L.Exists (bound, L.( &&& ) premise body_value))
+    let term =
+      match quantifier with
+      | Forall -> L.Forall (bound, L.( ==> ) premise body_value)
+      | Exists -> L.Exists (bound, L.( &&& ) premise body_value)
+    in
+    if !facts <> [] then Hashtbl.replace context.quantifier_facts term (List.rev !facts);
+    Some (frame, term)
   in
   context.fresh <- context.fresh + 1;
   let symbol = Printf.sprintf "bound.%d" context.fresh in
@@ -9022,6 +9094,8 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     declarations = [];
     declared = Hashtbl.create 64;
     facts = [];
+    scopes = [];
+    quantifier_facts = Hashtbl.create 16;
     unfolded = Hashtbl.create 64;
     obligations = [];
     fresh = 0;

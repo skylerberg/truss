@@ -859,6 +859,18 @@ the quantifier's bound names in the logic, since it can differ for each of
 their values: `forall i in 0..items.length() => same(items[i]) == items[i]`
 is about one result for each `i`, not one result for all of them.
 
+What is known of such a value, as the range of `items[i].count_ones()`, is
+a fact about the bound names, which is not stated for every value of them:
+the standard library's maps state nested quantifiers, and with a fact for
+every combination of bound names the solver runs out of steps. It is a
+hypothesis instead, inside each quantifier that the solver skolemizes: a
+`forall` in an obligation's goal where the goal holds it, an `exists` where
+the goal holds it negated, and the quantifiers around an obligation in a
+quantifier's body. Skolemized, the bound names are constants, so the
+facts are about them alone and cost the solver no instantiation. A fact
+holds for every value of the bound names, so `forall i in 0..n => p` and
+`forall i in 0..n => facts ==> p` mean the same.
+
 ### The canonical form
 
 A query's text is canonical, so that its hash can be its cache key:
@@ -1484,14 +1496,12 @@ test the prover itself:
   on `USize` are 64-bit code, so a 32-bit translation would read facts
   that contradict its own ranges. Code generation builds only for 64-bit
   targets, so no program runs with a width its proofs did not assume.
-- **Facts under a quantifier.** A pure callee's contract and definition
-  are stated once for every argument, but any other fact that names a
-  quantifier's bound name, such as what is known of a value made in the
-  quantifier's body by an operation, is not kept. Closed over the
-  quantifier it would be true, but the standard library's maps state
-  nested quantifiers, each fact is about values made for every
-  combination of bound names, and with them the solver runs out of steps
-  even with triggers chosen.
+- **Facts under an assumed quantifier.** A quantifier that is a fact,
+  such as a `requires`, a callee's `ensures`, or an obligation shown before,
+  has no hypotheses from its body: stated for every value of the bound
+  names, they are the facts that make the solver run out of steps. A
+  pure callee's contract and definition are stated once for every argument
+  either way.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.
