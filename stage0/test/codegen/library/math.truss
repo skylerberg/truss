@@ -31,6 +31,22 @@ test "the mean, the variance, and the standard deviation of a sample" {
   assert math::mean(none) is None
 }
 
+test "the median is the middle value, or the mean of the two middle values" {
+  let odd: List[Float64] = [5.0, 1.0, 3.0]
+  let even: List[Float64] = [4.0, 1.0, 3.0, 2.0]
+  let one: List[Float64] = [7.5]
+  let none: List[Float64] = []
+  assert math::median(odd) == Some(3.0)
+  assert math::median(even) == Some(2.5)
+  assert math::median(one) == Some(7.5)
+  assert math::median(none) is None
+  assert odd == [5.0, 1.0, 3.0]
+  let large: List[Float64] = [1.0e308, 1.5e308]
+  assert math::median(large) == Some(1.25e308)
+  let unknown: List[Float64] = [2.0, Float64.not_a_number, 1.0]
+  assert math::median(unknown) is Some(middle) && middle.is_nan()
+}
+
 fn big(text: StringSlice) -> math::BigInteger {
   match math::BigInteger.parse_radix(text, radix: 10) {
     Ok(value) => value
