@@ -6,7 +6,7 @@ public let Character.replacement: Character = Character"\u{FFFD}"
 
 public let Character.maximum: Character = Character"\u{10FFFF}"
 
-internal fn Character.code(self) -> UInt32
+public transparent fn Character.code(self) -> UInt32
   ensures result <= 1114111
   ensures result < 55296 || result > 57343
   cost time O(1)
