@@ -56,7 +56,7 @@ internal fn Set[Element: Hash + Ordered].index_of(self, element: Element) -> USi
   match_index
 }
 
-public transparent fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
+public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
   ensures result == contains_equal(self.model(), value: element)
   cost time O(self.length() * time(Element.equal))
 {

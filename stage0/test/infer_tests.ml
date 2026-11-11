@@ -1712,4 +1712,49 @@ let () =
   test "a field's default's arithmetic must stay within its type" (fun () ->
       one_diagnostic "type Settings(retries: UInt8 = 250 + 10)\n" "types.constant_overflow")
 
+(* The body of a transparent function *)
+
+let () =
+  let transparent body =
+    Printf.sprintf
+      "public transparent fn shown(value: Int64) -> Int64\n  cost time O(1)\n{\n  %s\n}\n" body
+  in
+  let helper visibility =
+    Printf.sprintf "%sfn half(value: Int64) -> Int64\n  cost time O(1)\n{\n  value - 1\n}\n\n"
+      visibility
+  in
+  test "a transparent body calls only functions that other packages can call" (fun () ->
+      one_diagnostic (helper "internal " ^ transparent "half(value)") "types.private_in_transparent";
+      one_diagnostic (helper "" ^ transparent "half(value)") "types.private_in_transparent";
+      fine (helper "public " ^ transparent "half(value)");
+      fine (helper "public transparent " ^ transparent "half(value) + value"));
+  test "a transparent body names only constants that other packages can name" (fun () ->
+      one_diagnostic
+        ("internal let limit: Int64 = 10\n\n" ^ transparent "value + limit")
+        "types.private_in_transparent";
+      fine ("public let limit: Int64 = 10\n\n" ^ transparent "value + limit"));
+  test "a transparent body calls only public methods, and can read a hidden field" (fun () ->
+      let meter visibility =
+        Printf.sprintf
+          "public opaque type Meter(reading: Int64)\n\n\
+          \           %sfn Meter.raw(self) -> Int64\n\
+          \            cost time O(1)\n\
+          \           {\n\
+          \            self.reading\n\
+          \           }\n\n\
+          \           public transparent fn Meter.shown(self) -> Int64\n\
+          \            cost time O(1)\n\
+          \           {\n\
+          \            self.raw() + self.reading\n\
+          \           }\n"
+          visibility
+      in
+      one_diagnostic (meter "internal ") "types.private_in_transparent";
+      fine (meter "public "));
+  test "a function that is not transparent can call a function that other packages cannot"
+    (fun () ->
+      fine
+        (helper "internal "
+       ^ "public fn hidden(value: Int64) -> Int64\n  cost time O(1)\n{\n  half(value)\n}\n"))
+
 let () = finish ()

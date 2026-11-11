@@ -133,7 +133,7 @@ internal fn Map[Key: Hash + Ordered, Value].replace_value_at(mut self, position:
   previous
 }
 
-public transparent fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
+public fn Map[Key: Hash + Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == contains_equal_key(self.model(), key: key)
   cost time O(self.length() * time(Key.equal))
 {
