@@ -380,9 +380,18 @@ type running = {
 
 let not_running = { template = (fun _ -> None); call = (fun _ -> None) }
 
+(* What the world outside the prover says of a definition's proof: the
+   solver, of a query, and running code, of a template's check or a call's
+   value. A definition's outcome is worked out from what it is told. *)
+type teller = {
+  solve : values:string list -> L.query -> Solver.answer;
+  template : Translate.evaluation -> evaluated option;
+  call : Translate.known_call -> Z.t option;
+}
+
 (* What running code gives of the calls a query mentions, as facts, which
    are only as true as the compiled code, which the prover trusts. *)
-let given running (obligation : Translate.obligation) =
+let given (teller : teller) (obligation : Translate.obligation) =
   List.filter_map
     (fun (known : Translate.known_call) ->
       Option.map
@@ -390,12 +399,12 @@ let given running (obligation : Translate.obligation) =
           L.equal known.term
             (if known.result_is_bool then L.Boolean (not (Z.equal value Z.zero))
              else L.Integer value))
-        (running.call known))
+        (teller.call known))
     obligation.known_calls
 
 (* An obligation's query, or another of its own, with a choice of
    constants for its bounds. *)
-let query_with ?query running (obligation : Translate.obligation) choice =
+let query_with ?query teller (obligation : Translate.obligation) choice =
   let query = Option.value query ~default:obligation.query in
   let pins =
     List.map
@@ -405,7 +414,7 @@ let query_with ?query running (obligation : Translate.obligation) choice =
   in
   (* The same query, not a copy, when nothing is added, so the solver finds
      what it made of it before. *)
-  match pins @ given running obligation with
+  match pins @ given teller obligation with
   | [] -> query
   | added -> { query with facts = query.facts @ added }
 
@@ -432,43 +441,29 @@ let choices (obligations : Translate.obligation list) =
   in
   all groups
 
-(* The queries a definition's obligations are first asked: each with the
-   first choice of constants, leaving out those that running code
-   decides. *)
-let first_queries running (obligations : Translate.obligation list) =
-  let first = List.hd (choices obligations) in
-  List.filter_map
-    (fun (obligation : Translate.obligation) ->
-      if obligation.evaluation <> None then None
-      else Some (List.map fst obligation.values, query_with running obligation first))
-    obligations
-
-let answers ?(running = not_running) solver (obligations : Translate.obligation list) =
-  ignore (Solver.solve_all solver (first_queries running obligations));
+let answers (teller : teller) (obligations : Translate.obligation list) =
   let solve (obligation : Translate.obligation) choice =
-    let query = query_with running obligation choice in
+    let query = query_with teller obligation choice in
     let values = List.map fst obligation.values in
     (* A clause running code decides is decided so, and the solver never
        asked. *)
-    match Option.bind obligation.evaluation running.template with
+    match Option.bind obligation.evaluation teller.template with
     | Some Holds -> Solved Proven
     | Some Fails -> Ran_false
     | Some Too_long -> Ran_too_long
     | None -> (
         let asked query =
-          match Solver.solve solver ~values query with
+          match teller.solve ~values query with
           | Solver.Proven -> Solver.Proven
           | first -> (
-              match exactly query with
-              | Some exact -> Solver.solve solver ~values exact
-              | None -> first)
+              match exactly query with Some exact -> teller.solve ~values exact | None -> first)
         in
         match (asked query, obligation.contracts_alone) with
         | Solver.Out_of_steps, Some query -> (
             (* Without its callees' definitions, a query is about their
                contracts alone, which can be enough where unfolding is too
                much for the solver. *)
-            match asked (query_with ~query running obligation choice) with
+            match asked (query_with ~query teller obligation choice) with
             | Solver.Proven -> Solved Proven
             | _ -> Solved Out_of_steps)
         | Solver.Counterexample _, _ when obligation.locals <> [] -> (
@@ -476,7 +471,7 @@ let answers ?(running = not_running) solver (obligations : Translate.obligation 
                asked for only now, so that a query that proves keeps its
                key. *)
             let values = values @ List.map fst obligation.locals in
-            match Solver.solve solver ~values query with
+            match teller.solve ~values query with
             | Solver.Counterexample _ as answer -> Solved answer
             | _ -> Solved (asked query))
         | answer, _ -> Solved answer)
@@ -506,7 +501,7 @@ type state = {
   failure : Diagnostic.t option;
 }
 
-let definition_states ?running database solver (key : Names.key) =
+let definition_states teller database (key : Names.key) =
   let source_span span = source_span (within database key span) in
   match Query.demand database proof key with
   | Not_proven_here -> []
@@ -556,51 +551,125 @@ let definition_states ?running database solver (key : Names.key) =
                       else ""));
             },
             obligation.cited ))
-        (answers ?running solver outcome.obligations)
+        (answers teller outcome.obligations)
 
-(* The solver, and what runs code, for [outcome]: a query cannot be given
-   them, so each driver below sets them before it asks. The solver is
-   pinned, and its version and step limit are in the compiler's source,
-   which keys every saved result, so an outcome is the same whichever
-   solver asked. *)
-let solving : (Solver.t * running) option ref = ref None
+(* What the prover asks the world outside, and what it was told, kept by
+   what was asked. *)
+type asked =
+  | Solve of Solver.request
+  | Run_template of Translate.evaluation
+  | Run_call of Translate.known_call
 
-(* Each definition's states, solved: a saved result, so a definition whose
-   reads have not changed is not translated again. *)
+type told =
+  | Solver_said of Solver.canonical
+  | Template_ran of evaluated option
+  | Call_ran of Z.t option
+
+let asked_key = function
+  | Solve request -> "solve " ^ Solver.request_key request
+  | Run_template evaluation ->
+      "template " ^ Digest.to_hex (Digest.string (Marshal.to_string evaluation []))
+  | Run_call call -> "call " ^ Digest.to_hex (Digest.string (Marshal.to_string call []))
+
+let told : (string, told) Query.input = Query.input ~name:"told" ~show:Fun.id ()
+
+(* A definition's outcome: its states, once everything they ask is told,
+   or what is still to be asked. *)
+type outcome = Decided of (state * (Names.key * Syntax.span) option) list | Waiting of asked list
+
+(* Each definition's outcome, from its obligations and what the world
+   outside was told of them: a saved result, so a definition whose reads have
+   not changed is neither translated nor told anything again. What is not
+   told yet is asked for, and the outcome waits for it. *)
 let outcome =
   Query.query ~name:"proof_outcome" ~phase:Verdicts ~saved:true ~show:Names.show_key
     (fun database key ->
-      match !solving with
-      | Some (solver, running) -> definition_states ~running database solver key
-      | None -> invalid_arg "Prover.outcome: no solver")
+      let waiting = ref [] in
+      let tell asked placeholder read =
+        match Query.find database told (asked_key asked) with
+        | Some said -> read said
+        | None ->
+            if not (List.mem asked !waiting) then waiting := asked :: !waiting;
+            placeholder
+      in
+      let teller =
+        {
+          solve =
+            (fun ~values query ->
+              let request = Solver.request ~values query in
+              tell (Solve request) Solver.Out_of_steps (function
+                | Solver_said canonical -> Solver.read request canonical
+                | _ -> Solver.Out_of_steps));
+          template =
+            (fun evaluation ->
+              tell (Run_template evaluation) None (function Template_ran ran -> ran | _ -> None));
+          call =
+            (fun call -> tell (Run_call call) None (function Call_ran ran -> ran | _ -> None));
+        }
+      in
+      let states = definition_states teller database key in
+      match !waiting with [] -> Decided states | asked -> Waiting (List.rev asked))
 
-(* The queries of every definition of the modules whose outcome is not
-   known, solved together, several at once, so that reading each
-   definition's outcome after finds them solved. *)
-let solve_ahead ?(running = not_running) database solver modules =
-  solving := Some (solver, running);
-  ignore
-    (Solver.solve_all solver
-       (List.concat_map
-          (fun module_ ->
-            List.concat_map
-              (fun declaration ->
-                let key = Names.key_of declaration in
-                match Query.known database outcome key with
-                | Some _ -> []
-                | None -> (
-                    match
-                      (Query.demand database Names.base key, Query.demand database proof key)
-                    with
-                    | Some _, Obligations outcome -> first_queries running outcome.obligations
-                    | _ -> []))
-              (Query.demand database Names.declarations module_))
-          modules))
+(* Tells each input what the world outside says: the solver, several at
+   once, and running code. The driver sets them, so its database can save
+   them with its state. *)
+let told_of ~(running : running) solver asked =
+  let requests = List.filter_map (function Solve request -> Some request | _ -> None) asked in
+  let answers = List.combine requests (Solver.ask_all solver requests) in
+  List.map
+    (fun asked ->
+      ( asked_key asked,
+        match asked with
+        | Solve request -> Solver_said (List.assq request answers)
+        | Run_template evaluation -> Template_ran (running.template evaluation)
+        | Run_call call -> Call_ran (running.call call) ))
+    asked
+
+let engine_tell database said =
+  let engine = Engine.of_context database in
+  List.iter (fun (key, value) -> Engine.set engine told key value) said
+
+(* Each definition of the modules decided: their outcomes are asked for
+   together, what they wait for is asked of the world outside together, and
+   so on until none waits, which takes a round or two, since an obligation
+   asks again only after an answer such as running out of steps. *)
+let solve_ahead ?(running = not_running) ?tell database solver modules =
+  let tell = Option.value tell ~default:(engine_tell database) in
+  let keys =
+    List.concat_map
+      (fun module_ ->
+        List.filter_map
+          (fun declaration ->
+            let key = Names.key_of declaration in
+            match Query.demand database Names.base key with Some _ -> Some key | None -> None)
+          (Query.demand database Names.declarations module_))
+      modules
+  in
+  let rec round keys =
+    let waiting =
+      List.filter_map
+        (fun key ->
+          match Query.demand database outcome key with
+          | Decided _ -> None
+          | Waiting asked -> Some (key, asked))
+        keys
+    in
+    if waiting <> [] then begin
+      tell (told_of ~running solver (List.sort_uniq compare (List.concat_map snd waiting)));
+      round (List.map fst waiting)
+    end
+  in
+  round keys
+
+let decided database key =
+  match Query.demand database outcome key with
+  | Decided states -> states
+  | Waiting _ -> invalid_arg "Prover.decided: an outcome still waits"
 
 (* Each definition's states, in the file's offsets. A failure of a clause
    that another definition of the file states has a note at that clause. *)
-let moved_states ?(running = not_running) database solver module_ =
-  solve_ahead ~running database solver [ module_ ];
+let moved_states ?(running = not_running) ?tell database solver module_ =
+  solve_ahead ~running ?tell database solver [ module_ ];
   List.filter_map
     (fun declaration ->
       let key = Names.key_of declaration in
@@ -635,7 +704,7 @@ let moved_states ?(running = not_running) database solver module_ =
                          | None -> failure)
                        state.failure;
                  })
-               (Query.demand database outcome key))
+               (decided database key))
       | None -> None)
     (Query.demand database Names.declarations module_)
 
@@ -645,14 +714,14 @@ let in_order list =
       compare (left.span, left.code) (right.span, right.code))
     list
 
-let states ?running database solver module_ =
-  List.concat (moved_states ?running database solver module_)
+let states ?running ?tell database solver module_ =
+  List.concat (moved_states ?running ?tell database solver module_)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
 (* The failures among the states. The same failure on another path of one
    definition, as a second index into the same list with the same index
    is, is reported once. *)
-let diagnostics ?running database solver module_ =
+let diagnostics ?running ?tell database solver module_ =
   List.concat_map
     (fun states ->
       List.fold_left
@@ -663,5 +732,5 @@ let diagnostics ?running database solver module_ =
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
-    (moved_states ?running database solver module_)
+    (moved_states ?running ?tell database solver module_)
   |> in_order

@@ -4,6 +4,7 @@
   logic
   solver
   query
+  engine
   path
   well_known
   types
