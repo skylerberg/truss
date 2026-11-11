@@ -5663,12 +5663,10 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                       :: context.facts
                 | None -> ())
         | None -> ())
-    | None
-      when List.for_all (fun (part : part) -> part.requires = []) contract.parts
-           && List.exists (L.mentions after.bound) own_arguments -> (
-        (* Known by its contract alone and called on a quantifier's bound
-           values, the callee's [ensures] is stated once, for every valid
-           argument. *)
+    | (None | Some _) when List.exists (L.mentions after.bound) own_arguments -> (
+        (* Called on a quantifier's bound values, a callee known by its
+           contract alone, or with a [requires], has its [ensures] stated
+           once, for every valid argument where its [requires] holds. *)
         match !applied_as with
         | Some (symbol, sorts) ->
             once context ("contract of " ^ symbol) (fun () ->
@@ -5695,8 +5693,14 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                            input)
                        own_bound inputs)
                 in
+                let readable clause inside =
+                  match snd (clause_value context inside clause) with
+                  | term when not (made_since context mark term) -> Some term
+                  | _ -> None
+                  | exception (Unsupported _ | Foreign_unsupported _) -> None
+                in
                 let ensured =
-                  List.concat_map
+                  List.filter_map
                     (fun (part : part) ->
                       let inside =
                         {
@@ -5708,13 +5712,16 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                           checking = false;
                         }
                       in
-                      List.filter_map
-                        (fun clause ->
-                          match snd (clause_value context inside clause) with
-                          | term when not (made_since context mark term) -> Some term
-                          | _ -> None
-                          | exception (Unsupported _ | Foreign_unsupported _) -> None)
-                        part.ensures)
+                      let required =
+                        List.map (fun clause -> readable clause inside) part.requires
+                      in
+                      match List.filter_map (fun clause -> readable clause inside) part.ensures with
+                      | [] -> None
+                      | _ when List.mem None required -> None
+                      | ensures ->
+                          Some
+                            L.(
+                              conjunction (List.filter_map Fun.id required) ==> conjunction ensures))
                     contract.parts
                 in
                 if ensured <> [] && not (made_since context mark valid) then
