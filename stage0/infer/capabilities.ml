@@ -475,13 +475,19 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
 
 (* Data race prevention. A monitor locks its methods through [Tasks]: code
    generation wraps each method with [Tasks.lock] and [Tasks.unlock], using
-   the implementation of [Tasks] in the same [provide], or else the one
-   that is available at the [provide]. If neither exists, the methods have
-   no lock, and two tasks could run a [mut self] method at the same time.
-   That happens when the only implementation of [Tasks] is provided in a
-   nested [provide], or when the body uses a capability parameter that is
-   instantiated with [Tasks]. An implementation of [Tasks] itself is not a
-   monitor. *)
+   the implementation of [Tasks] in the same [provide], or else the one that
+   is available at the [provide]. If the body uses [Tasks] and neither
+   exists, the only implementation of [Tasks] is provided in a nested
+   [provide]. The methods then have no lock, and two tasks could run a [mut
+   self] method at the same time.
+
+   A body that can use [Tasks] only through a capability parameter is not
+   checked here. Each instance of the function receives evidence for the
+   capabilities that the parameter is instantiated with, so evidence for
+   [Tasks] exists at the [provide] exactly in the instances that can start
+   tasks, and code generation adds the lock in those.
+
+   An implementation of [Tasks] itself is not a monitor. *)
 let check_monitor_lock checking ~solved available implementations =
   let state = checking.state in
   let provides_tasks (implementation : Core.implementation) =
@@ -501,12 +507,12 @@ let check_monitor_lock checking ~solved available implementations =
         if implementation.mode = Mut && not (provides_tasks implementation) then
           report checking Monitor_needs_tasks implementation.origin
             (Printf.sprintf
-               "`%s` is provided `mut`, and the body of this `provide` can use `Tasks`, so two \
-                tasks could call its methods at the same time. Its methods are locked through \
-                `Tasks`, but `Tasks` is not available at this `provide`, and no implementation in \
-                it provides `Tasks`. Without the lock, the two calls are a data race. Provide the \
-                implementation of `Tasks` in this `provide` or in an enclosing one, or declare \
-                `uses Tasks`."
+               "`%s` is provided `mut`, and the body of this `provide` uses `Tasks`, so two tasks \
+                could call its methods at the same time. Its methods are locked through `Tasks`, \
+                but `Tasks` is provided only inside the body: it is not available at this \
+                `provide`, and no implementation in it provides `Tasks`. Without the lock, the two \
+                calls are a data race. Provide the implementation of `Tasks` in this `provide` or \
+                in an enclosing one."
                (T.show implementation.type_)))
       implementations
 
@@ -630,8 +636,10 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
   in
   List.iter
     (fun (available, implementations, body) ->
-      if Core_walk.can_use_tasks ~solved body then begin
-        check_monitor_callbacks checking implementations;
-        check_monitor_lock checking ~solved available implementations
-      end)
+      match Core_walk.tasks_use ~solved body with
+      | No_tasks -> ()
+      | Through_parameter -> check_monitor_callbacks checking implementations
+      | Uses_tasks ->
+          check_monitor_callbacks checking implementations;
+          check_monitor_lock checking ~solved available implementations)
     (List.rev checking.provides)
