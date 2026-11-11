@@ -59,7 +59,7 @@ public fn List[Element].length(self) -> USize
   intrinsic::storage_length(self.storage)
 }
 
-public fn List[Element].is_empty(self) -> Bool
+public transparent fn List[Element].is_empty(self) -> Bool
   cost time O(1)
   cost allocations == 0
 {
@@ -421,7 +421,7 @@ public fn List[Element].collect[Source: Cursor[Element = Element]](source: own S
   items
 }
 
-public fn List[Element].capacity(self) -> USize
+public transparent fn List[Element].capacity(self) -> USize
   ensures result >= self.length()
   cost time O(1)
   cost allocations == 0
@@ -585,21 +585,16 @@ public fn List[Element].append(mut self, other: own List[Element])
 public fn List[Element: Copyable].append_slice(mut self, items: Slice[Element])
   ensures self.length() == old(self.length()) + items.length()
   ensures identical(self.model(), old(self.model()).concatenate(items.model()))
-  cost time O(old(self.length()) + items.length() * (1 + time(Element.copy)))
+  cost amortized time O(items.length() * (1 + time(Element.copy)))
 {
-  let count = items.length()
-  growth::reserve(mut self.storage, additional: count)
-  let capacity = intrinsic::storage_capacity(self.storage)
-  for index in 0..count
+  for index in 0..items.length()
     invariant self.model().length() == old(self.model()).length() + yielded.length()
     invariant forall i in 0..old(self.model()).length() =>
       identical(self.model()[i], old(self.model())[i])
     invariant forall i in 0..yielded.length() =>
       identical(self.model()[old(self.model()).length() + i], items.model()[i])
-    invariant intrinsic::storage_capacity(self.storage) == capacity
-    invariant capacity >= old(self.model()).length() + count
   {
-    intrinsic::storage_push(mut self.storage, value: items[index].copy())
+    mut self.push(items[index].copy())
   }
 }
 

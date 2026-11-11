@@ -13,7 +13,7 @@ public fn String.is_ascii(self) -> Bool
   self.slice().is_ascii()
 }
 
-public fn String.is_boundary(self, offset: USize) -> Bool
+public transparent fn String.is_boundary(self, offset: USize) -> Bool
   cost time O(1)
 {
   self.slice().is_boundary(offset)

@@ -13,13 +13,13 @@ impl Model for Set[Element: Hash + Ordered] {
   }
 }
 
-public fn contains_equal[Element: Equal](set: FiniteSet[Element], value: Element) -> Bool
+public transparent fn contains_equal[Element: Equal](set: FiniteSet[Element], value: Element) -> Bool
   cost time finite
 {
   exists other: Element => set.contains(other) && other == value
 }
 
-public fn Set[Element: Hash + Ordered].length(self) -> USize
+public transparent fn Set[Element: Hash + Ordered].length(self) -> USize
   ensures result == self.model().size()
   cost time O(1)
 {
@@ -56,7 +56,7 @@ internal fn Set[Element: Hash + Ordered].index_of(self, element: Element) -> USi
   match_index
 }
 
-public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
+public transparent fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
   ensures result == contains_equal(self.model(), value: element)
   cost time O(self.length() * time(Element.equal))
 {

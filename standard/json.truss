@@ -674,13 +674,13 @@ public fn Value.number(value: Float64) -> Option[Value]
   }
 }
 
-public fn Value.is_null(self) -> Bool
+public transparent fn Value.is_null(self) -> Bool
   cost time O(1)
 {
   self is Null
 }
 
-public fn Value.to_bool(self) -> Option[Bool]
+public transparent fn Value.to_bool(self) -> Option[Bool]
   cost time O(1)
 {
   match self {
@@ -689,7 +689,7 @@ public fn Value.to_bool(self) -> Option[Bool]
   }
 }
 
-public fn Value.to_int64(self) -> Option[Int64]
+public transparent fn Value.to_int64(self) -> Option[Int64]
   cost time O(1)
 {
   match self {
@@ -698,7 +698,7 @@ public fn Value.to_int64(self) -> Option[Int64]
   }
 }
 
-public fn Value.to_float64(self) -> Option[Float64]
+public transparent fn Value.to_float64(self) -> Option[Float64]
   cost time O(1)
 {
   match self {
@@ -707,7 +707,7 @@ public fn Value.to_float64(self) -> Option[Float64]
   }
 }
 
-public fn Value.text(self) -> Option[StringSlice]
+public transparent fn Value.text(self) -> Option[StringSlice]
   cost time O(1)
 {
   match self {
@@ -716,7 +716,7 @@ public fn Value.text(self) -> Option[StringSlice]
   }
 }
 
-public fn Value.items(self) -> Option[Slice[Value]]
+public transparent fn Value.items(self) -> Option[Slice[Value]]
   cost time O(1)
 {
   match self {
@@ -765,10 +765,131 @@ public fn Value.get_index(self, index: USize) lends Option[Value]
   }
 }
 
+fn pointer_token_end(path: StringSlice) -> USize
+  requires path.length() > 0
+  ensures 1 <= result
+  ensures result <= path.length()
+  cost time finite
+{
+  var index: USize = 1
+  while index < path.length() && path.byte(index) != 47
+    invariant 1 <= index
+    invariant index <= path.length()
+    decreases path.length() - index
+  {
+    index += 1
+  }
+  index
+}
+
+fn unescaped_pointer_token(token: StringSlice) -> Option[String]
+  cost time finite
+{
+  var name = ""
+  var run: USize = 0
+  var index: USize = 0
+  while index < token.length()
+    invariant run <= index
+    invariant index <= token.length()
+    decreases token.length() - index
+  {
+    if token.byte(index) != 126 {
+      index += 1
+    } else {
+      if index + 1 == token.length() {
+        return None
+      }
+      let escaped = token.byte(index + 1)
+      if escaped != 48 && escaped != 49 {
+        return None
+      }
+      mut name.push(token.part(run, to: index))
+      if escaped == 48 {
+        mut name.push("~")
+      } else {
+        mut name.push("/")
+      }
+      index += 2
+      run = index
+    }
+  }
+  mut name.push(token.part(run, to: token.length()))
+  Some(own name)
+}
+
+fn pointer_array_index(token: StringSlice) -> Option[USize]
+  cost time finite
+{
+  if token.length() == 0 || (token.length() > 1 && token.byte(0) == 48) {
+    return None
+  }
+  var index: USize = 0
+  while index < token.length()
+    invariant index <= token.length()
+    decreases token.length() - index
+  {
+    if token.byte(index) < 48 || token.byte(index) > 57 {
+      return None
+    }
+    index += 1
+  }
+  match USize.parse_radix(token, radix: 10) {
+    Ok(position) => Some(position)
+    Err(_) => None
+  }
+}
+
+fn Value.pointer_targets(self, path: StringSlice) yields Value
+  decreases path.length()
+  cost time finite
+{
+  if path.length() == 0 {
+    yield self
+    return
+  }
+  if path.byte(0) != 47 {
+    return
+  }
+  let end = pointer_token_end(path)
+  let token = path.part(1, to: end)
+  let rest = path.part(end, to: path.length())
+  match self {
+    Object(members) => {
+      match unescaped_pointer_token(token) {
+        Some(name) => {
+          if members.contains(name) {
+            for found in members[name].pointer_targets(rest) {
+              yield found
+            }
+          }
+        }
+        None => {}
+      }
+    }
+    Array(items) => {
+      match pointer_array_index(token) {
+        Some(index) => {
+          if index < items.length() {
+            for found in items[index].pointer_targets(rest) {
+              yield found
+            }
+          }
+        }
+        None => {}
+      }
+    }
+    _ => {}
+  }
+}
+
 public fn Value.pointer(self, path: StringSlice) lends Option[Value]
   cost time finite
 {
-  todo
+  for found in self.pointer_targets(path) {
+    yield Some(found)
+    return
+  }
+  yield None
 }
 
 fn push_newline(output: mut String, indent: USize, level: USize)
