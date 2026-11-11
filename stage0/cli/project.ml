@@ -127,7 +127,8 @@ let dependency_packages t =
   let rec visit name =
     List.iter
       (fun (dependency : Workspace.dependency) ->
-        if dependency.package <> "standard" && not (Hashtbl.mem seen dependency.package) then begin
+        if dependency.package <> Path.standard_package && not (Hashtbl.mem seen dependency.package)
+        then begin
           Hashtbl.replace seen dependency.package ();
           visit dependency.package
         end)

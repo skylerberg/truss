@@ -203,7 +203,7 @@ let reachable_packages database package =
     end
   in
   visit package;
-  visit "standard";
+  visit Path.standard_package;
   Hashtbl.fold (fun package () packages -> package :: packages) seen []
 
 (* The nodes a node reaches by one edge, from [package]'s point of view:
