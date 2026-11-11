@@ -168,6 +168,9 @@ fn addresses(texts: intrinsic::View[UInt8], starts: intrinsic::View[USize]) -> i
   ensures intrinsic::storage_model(result)[intrinsic::storage_length(result) - 1] == 0
 {
   let first = intrinsic::view_address(texts)
+  proof {
+    assert intrinsic::view_length(texts) == 0 || first >= 1
+  }
   let count = intrinsic::view_length(starts)
   var all: intrinsic::Storage[USize] = intrinsic::storage_with_capacity(count + 1)
   for index in 0..count
