@@ -156,8 +156,10 @@ Every stage of stage0 is tested the same way:
   library, named after it. `library_tests` builds every file's tests into
   one program and runs it, so a new test adds its own code to that build
   and no build of its own. A test of what a library function returns goes
-  there. A test written in OCaml that compiles a program of its own is for
-  the compiler: a diagnostic, generated code, or a whole program's output.
+  there. A test of a panic goes in the module `panics`: each of its tests
+  must panic with a message that contains the test's name. A test written
+  in OCaml that compiles a program of its own is for the compiler: a
+  diagnostic, generated code, or a whole program's output.
 - **Every test checks the code database too.** When a test ends, the harness
   computes every result the test's engines hold again, in a new engine with
   the same inputs, and fails the test if one differs. So a query that is not

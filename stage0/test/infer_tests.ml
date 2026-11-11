@@ -149,7 +149,7 @@ let () =
           | Some _ -> fail "`%s` is another call" written
           | None -> fail "`%s` has no call" written)
         [ "first < second"; "second < third"; "first < third" ]);
-  test "an operand may be what an operator's method gives" (fun () ->
+  test "an operand can be the result of an operator's method" (fun () ->
       fine "fn f(left: Int64, right: Int64) -> Int64 {\n  left + right.multiply(2)\n}\n");
   test "a type without the operator's trait is an error" (fun () ->
       one_diagnostic "type Point(x: Int64)\n\nfn f(point: Point) -> Point {\n  point + point\n}\n"
@@ -181,7 +181,7 @@ let () =
          ^ "fn f(source: Int64, destination: Int64) {\n  copy_file(source, destination)\n}\n"));
   test "a missing argument is an error" (fun () ->
       one_diagnostic (functions ^ "fn f() {\n  copy_file(1)\n}\n") "types.missing_argument");
-  test "a parameter with a default may be left out" (fun () ->
+  test "an argument for a parameter with a default can be omitted" (fun () ->
       let text = "fn connect(host: Int64, port: UInt16 = 443) {}\n\nfn f() {\n  connect(1)\n}\n" in
       let value, checked = expression_at text "connect(1)" 1 in
       match checked.calls.(value.id) with
@@ -397,7 +397,7 @@ let () =
       fine "fn f() {\n  var names: List[String] = []\n}\n");
   test "a body's value must have the result type" (fun () ->
       one_diagnostic "fn f() -> Int64 {\n  true\n}\n" "types.mismatch");
-  test "an arm of type Never is left out of the match's type" (fun () ->
+  test "an arm of type Never does not contribute to the type of the match" (fun () ->
       fine
         "fn f(found: Option[Int64]) -> Int64 {\n\
         \  match found {\n\
@@ -1117,7 +1117,7 @@ let () =
   test "a loop variable's type comes from the loop's header" (fun () ->
       one_diagnostic "fn f() {\n  for i in 0..10 {\n    let small: UInt8 = i\n  }\n}\n"
         "types.mismatch");
-  test "a mistake is not reported again as a type that cannot be worked out" (fun () ->
+  test "a mistake is not reported again as a type that cannot be inferred" (fun () ->
       let database =
         setup
           [ ("app::main", "fn f(items: List[Int64]) {\n  let _ = items.map(undefined_thing)\n}\n") ]
@@ -1196,7 +1196,7 @@ let () =
   test "the string + fix keeps escapes" (fun () ->
       one_diagnostic "fn f(name: String) -> String {\n  \"a\\\"b\" + name\n}\n"
         "types.string_addition" ~fixed:"fn f(name: String) -> String {\n  \"a\\\"b${name}\"\n}\n");
-  test "a lambda cannot change what it captures" (fun () ->
+  test "a lambda cannot mutate a captured variable" (fun () ->
       one_diagnostic
         "fn f(items: List[Int64]) {\n\
         \  var count = 0\n\
@@ -1326,7 +1326,7 @@ let () =
          \  let _ = check\n\
           }\n")
         "types.unsatisfied_bound");
-  test "an `is` test settles the type of what it tests before its pattern is checked" (fun () ->
+  test "the scrutinee of an `is` is inferred before its pattern is checked" (fun () ->
       fine
         "type Span(ticks: Int64)\n\n\
          impl Divide[Int64] for Span {\n\
@@ -1338,7 +1338,7 @@ let () =
          fn f(span: Span) -> Bool {\n\
         \  span / 0 is None\n\
          }\n");
-  test "a `for` over a call to `each` binds what the call yields" (fun () ->
+  test "a `for` over a call of `each` binds the yielded elements" (fun () ->
       fine
         "fn total(items: List[Int64]) -> Int64 {\n\
         \  var sum = 0\n\
@@ -1448,15 +1448,16 @@ let () =
       fine (lists "Console");
       one_diagnostic (lists "Clock") "types.mismatch";
       one_diagnostic (lists "Console.print_line") "types.mismatch");
-  test "what a function type's calls counts is a capability, or one of its methods" (fun () ->
+  test "the target of `calls` in a function type is a capability or one of its methods" (fun () ->
       one_diagnostic "type Point(x: Int64)\n\nfn f(run: (fn() cost calls(Point) <= 1)) {}\n"
         "types.not_a_capability";
       one_diagnostic "fn f(run: (fn() uses Clock cost calls(Clock.later) <= 1)) {}\n"
         "types.unknown_member";
       one_diagnostic "fn f(visit: fn(), run: (fn() cost calls(visit) <= 1)) {}\n"
         "types.not_a_capability");
-  test "what a clause's calls counts is a function parameter, a capability, or its method"
-    (fun () ->
+  test
+    "the target of `calls` in a clause is a function parameter, a capability, or a capability's \
+     method" (fun () ->
       let clause counted =
         "type Point(x: Int64)\n\n\
          fn f(count: Int64, visit: (fn() cost time finite))\n\
@@ -1469,7 +1470,7 @@ let () =
       one_diagnostic (clause "count") "types.not_callable";
       one_diagnostic (clause "Point") "types.not_a_capability";
       one_diagnostic (clause "Clock.later") "types.unknown_member");
-  test "a method with generic parameters of its own cannot be called through any" (fun () ->
+  test "a method with generic parameters is not object-safe" (fun () ->
       one_diagnostic
         "trait Visitor {\n\
         \  fn visit[Other](self, other: Other) -> Int64\n\

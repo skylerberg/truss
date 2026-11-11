@@ -97,7 +97,7 @@ let () =
          {\n\
          }\n"
         "capabilities.not_available");
-  test "a specification may not use what the function declares" (fun () ->
+  test "a specification cannot use the function's capabilities" (fun () ->
       one_diagnostic
         "fn stamp() -> Bool\n\
         \  uses Clock\n\
@@ -111,7 +111,7 @@ let () =
          {\n\
          }\n"
         "capabilities.not_available");
-  test "a loop's invariant may not use what the function declares" (fun () ->
+  test "a loop invariant cannot use the function's capabilities" (fun () ->
       one_diagnostic
         "fn stamp() -> Bool\n\
         \  uses Clock\n\
@@ -179,7 +179,7 @@ let () =
         \  })\n\
          }\n"
         "capabilities.lambda_uses");
-  test "a loop over a value needs what its each uses" (fun () ->
+  test "a loop over a value needs the capabilities that its `each` uses" (fun () ->
       one_diagnostic
         "type Ticker()\n\n\
          fn Ticker.each(self) yields Instant\n\
@@ -193,7 +193,7 @@ let () =
         \  }\n\
          }\n"
         "capabilities.not_available");
-  test "a loop over a value may use what the function declares" (fun () ->
+  test "a loop over a value can use the function's capabilities" (fun () ->
       fine
         "type Ticker()\n\n\
          fn Ticker.each(self) yields Instant\n\
@@ -208,7 +208,8 @@ let () =
         \    let _ = tick\n\
         \  }\n\
          }\n");
-  test "a capability parameter is what the lambdas passed for it use" (fun () ->
+  test "a capability parameter is instantiated with the capabilities of the lambdas passed for it"
+    (fun () ->
       fine
         "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\
         \  uses Granted\n\
@@ -277,7 +278,7 @@ let () =
         "capabilities.provide_mark")
 
 let () =
-  test "a dependency may use only what it is granted" (fun () ->
+  test "a dependency can use only the capabilities that it is granted" (fun () ->
       let database =
         setup
           [
@@ -333,7 +334,7 @@ let () =
       \  }\n\
        }\n" )
   in
-  test "a dependency's trait method may use only what it is granted" (fun () ->
+  test "a dependency's trait method can use only the granted capabilities" (fun () ->
       match
         with_grant
           [
@@ -350,7 +351,7 @@ let () =
       with
       | "capabilities.not_granted" :: _ -> ()
       | found -> fail "found [%s]" (String.concat "; " found));
-  test "a dependency's trait method may use what it is granted" (fun () ->
+  test "a dependency's trait method can use a granted capability" (fun () ->
       match
         with_grant
           [
@@ -367,7 +368,8 @@ let () =
       with
       | [] -> ()
       | found -> fail "found [%s]" (String.concat "; " found));
-  test "providing a dependency's type checks what its impls use" (fun () ->
+  test "providing a dependency's type checks the grants for the capabilities of its impls"
+    (fun () ->
       match
         with_grant
           [
@@ -463,10 +465,11 @@ let () =
       \  stamp()\n\
        }\n" )
   in
-  test "a dependency's function taken as a value may use only what it is granted" (fun () ->
+  test "a function value of a dependency's function can use only the granted capabilities"
+    (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (codes_with_grants [ value; time ] [ ("clock_library", []) ]));
-  test "a dependency's function taken as a value may use what it is granted" (fun () ->
+  test "a function value of a dependency's function can use a granted capability" (fun () ->
       expect_codes ~expected:[]
         (codes_with_grants [ value; time ] [ ("clock_library", [ "Clock" ]) ]));
   let bound =
@@ -484,17 +487,16 @@ let () =
       \  first(timers::Timer())\n\
        }\n" )
   in
-  test "an impl of a dependency that meets a bound may use only what the dependency is granted"
+  test "an impl of a dependency that satisfies a bound can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (codes_with_grants [ bound; sources; timers ]
            [ ("framework", [ "Clock" ]); ("plugins", []) ]));
-  test "an impl of a dependency that meets a bound may use what the dependency is granted"
-    (fun () ->
+  test "an impl of a dependency that satisfies a bound can use a granted capability" (fun () ->
       expect_codes ~expected:[]
         (codes_with_grants [ bound; sources; timers ]
            [ ("framework", [ "Clock" ]); ("plugins", [ "Clock" ]) ]));
-  test "an impl of a dependency made into an any value may use only what the dependency is granted"
+  test "an impl of a dependency behind an `any` value can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (codes_with_grants
@@ -576,8 +578,7 @@ let () =
       in
       expect_codes ~expected:[] (database, found);
       if problems database <> [] then fail "reported");
-  test "a dependency nothing uses is reported whatever kinds of definition the package holds"
-    (fun () ->
+  test "an unused dependency is reported for every kind of definition in the package" (fun () ->
       let database, found =
         codes_with_grants
           [
@@ -611,7 +612,7 @@ let () =
       in
       expect_codes ~expected:[] (database, found);
       match problems database with [ Unused "clock_library" ] -> () | _ -> fail "not reported");
-  test "a package with an error is not told that a dependency is unused" (fun () ->
+  test "an unused dependency is not reported for a package with an error" (fun () ->
       let database, _ =
         codes_with_grants
           [ ("app::main", "fn f() -> Int64 {\n  true\n}\n"); time ]
@@ -703,21 +704,25 @@ let () =
          \  action()\n\
           }\n")
         "types.mismatch");
-  test "a capability parameter is what the functions passed for it use" (fun () ->
-      fine (ticks ^ "fn f() -> Instant\n  uses Clock\n{\n  each_time(tick)\n}\n"));
-  test "what a function passed for a capability parameter uses must be available" (fun () ->
+  test "a capability parameter is instantiated with the capabilities of the functions passed for it"
+    (fun () -> fine (ticks ^ "fn f() -> Instant\n  uses Clock\n{\n  each_time(tick)\n}\n"));
+  test "the capabilities of a function passed for a capability parameter must be available"
+    (fun () ->
       one_diagnostic
         (ticks ^ "fn f() -> Instant {\n  each_time(tick)\n}\n")
         "capabilities.not_available");
-  test "what a lambda in parentheses uses is passed for a capability parameter" (fun () ->
+  test "a capability parameter is instantiated with the capabilities of a parenthesized lambda"
+    (fun () ->
       one_diagnostic
         (ticks ^ "fn f() -> Instant {\n  each_time((fn() { Clock.now() }))\n}\n")
         "capabilities.not_available");
-  test "what a function in a branch uses is passed for a capability parameter" (fun () ->
+  test "a capability parameter is instantiated with the capabilities of a function in a branch"
+    (fun () ->
       one_diagnostic
         (ticks ^ "fn f(fast: Bool) -> Instant {\n  each_time(if fast { still } else { tick })\n}\n")
         "capabilities.not_available");
-  test "what a lambda in a branch uses is passed for a capability parameter" (fun () ->
+  test "a capability parameter is instantiated with the capabilities of a lambda in a branch"
+    (fun () ->
       one_diagnostic
         (ticks
        ^ "fn f(fast: Bool) -> Instant {\n\
@@ -732,7 +737,7 @@ let () =
           {\n\
          \  each_time(action)\n\
           }\n"));
-  test "a function's own capability parameter stands for itself in a lambda's type" (fun () ->
+  test "a function's own capability parameter is rigid in a lambda's type" (fun () ->
       one_diagnostic
         "fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
         \  uses Mine\n\
@@ -741,7 +746,7 @@ let () =
         \  again()\n\
          }\n"
         "capabilities.lambda_uses");
-  test "a function's own capability parameter stands for itself in a binding's type" (fun () ->
+  test "a function's own capability parameter is rigid in a binding's type" (fun () ->
       one_diagnostic
         (ticks
        ^ "fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
@@ -762,7 +767,8 @@ let () =
         \    action()\n\
         \  }\n\
          }\n");
-  test "a function calling itself needs what it passes for its capability parameter" (fun () ->
+  test "a recursive call needs the capabilities that it passes for its capability parameter"
+    (fun () ->
       let repeat uses =
         ticks
         ^ "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
@@ -782,13 +788,14 @@ let later =
      }\n\n"
 
 let () =
-  test "what a call gives uses what was passed for its capability parameter" (fun () ->
+  test "a call's result has the capabilities that were passed for the capability parameter"
+    (fun () ->
       one_diagnostic
         (later ^ "fn f() -> Instant {\n  let kept = later(tick)\n  kept()\n}\n")
         "capabilities.not_available";
       fine (later ^ "fn f() -> Instant\n  uses Clock\n{\n  let kept = later(tick)\n  kept()\n}\n");
       fine (later ^ "fn f() -> Instant {\n  let kept = later(still)\n  kept()\n}\n"));
-  test "what a call gives must be within the function type it meets" (fun () ->
+  test "a call's result must fit the function type that it is checked against" (fun () ->
       one_diagnostic
         (later
        ^ "fn f()\n  uses Clock\n{\n  let kept: fn() -> Instant = later(tick)\n  let _ = kept\n}\n")
@@ -801,7 +808,7 @@ let () =
          \  let kept: (fn() -> Instant uses Clock) = later(tick)\n\
          \  let _ = kept\n\
           }\n"));
-  test "a variable assigned another function uses what either does" (fun () ->
+  test "a variable that is assigned a second function has the capabilities of both" (fun () ->
       one_diagnostic
         (later ^ "fn f() -> Instant {\n  var kept = later(still)\n  kept = tick\n  kept()\n}\n")
         "capabilities.not_available";
@@ -814,7 +821,9 @@ let () =
          \  kept = tick\n\
          \  kept()\n\
           }\n"));
-  test "a type's capability parameter is what its fields' functions use" (fun () ->
+  test
+    "a type's capability parameter is instantiated with the capabilities of its fields' functions"
+    (fun () ->
       let holder =
         ticks ^ "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n\n"
       in

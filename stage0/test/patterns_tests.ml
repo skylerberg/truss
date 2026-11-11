@@ -228,7 +228,7 @@ let () =
         \  }\n\
          }\n"
         []);
-  test "a constant whose value is not worked out covers nothing else" (fun () ->
+  test "a constant whose value is not evaluated at compile time covers only itself" (fun () ->
       expect
         "let made: Int64 = 3 << 0\n\n\
          fn f(n: Int64) -> Int64 {\n\
