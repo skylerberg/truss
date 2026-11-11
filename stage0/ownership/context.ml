@@ -33,6 +33,9 @@ let plain context type_ = Interface.Impls.plain context.database ~bounds:context
 let copyable context type_ = Interface.Impls.copyable context.database ~bounds:context.bounds type_
 let is_view context type_ = Interface.Impls.is_view context.database ~bounds:context.bounds type_
 
+let holds_function context type_ =
+  Interface.Impls.holds_function context.database ~bounds:context.bounds type_
+
 (* Whether the callee declares the parameter at [position] as an [own]
    parameter of a function type, where a method's receiver is position 0.
    The callee may store a function that it receives through such a
