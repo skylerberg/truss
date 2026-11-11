@@ -402,7 +402,14 @@ type signature = {
   terminates : bool;
   specification_only : bool;
   stores_functions : string list;
+  transparent : bool;
 }
+
+let body_is_definition (signature : signature) =
+  signature.terminates && signature.uses = []
+  && (match signature.receiver with Some (Mut, _) -> false | _ -> true)
+  && List.for_all (fun (parameter : parameter_info) -> parameter.mode <> Mut) signature.parameters
+  && match signature.output with Returns _ -> true | Yields _ | Lends _ -> false
 
 let map_signature f (signature : signature) =
   {

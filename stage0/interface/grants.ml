@@ -22,8 +22,7 @@ let capability database ~package written : Path.t option =
   let found (module_ : Path.module_) name =
     match Query.demand database Names.find (module_, name) with
     | Some { kind = Capability; visibility; _ }
-      when module_.package = package
-           || match visibility with Public | Public_opaque -> true | _ -> false ->
+      when module_.package = package || Syntax.is_public visibility ->
         Some (Path.Top { module_; name })
     | _ -> None
   in

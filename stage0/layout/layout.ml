@@ -30,7 +30,7 @@ let can_begin = function
       true
   | Keyword
       ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
-      | Opaque | Requires | Uses | With | Yields ) ->
+      | Opaque | Requires | Transparent | Uses | With | Yields ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
 

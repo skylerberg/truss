@@ -27,6 +27,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
       terminates = true;
       specification_only = false;
       stores_functions = [];
+      transparent = false;
     }
   in
   let value = p "Value" and element = p "Element" in
@@ -196,6 +197,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
            [ input ~mode:Own "work" (T.Function work); input "item" item ])
         with
         stores_functions = [ "work" ];
+        transparent = false;
       }
   | Tasks_spawn ->
       let item = T.builtin UInt64 in
@@ -207,6 +209,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
            [ input "group" item; input ~mode:Own "work" (T.Function work); input "item" item ])
         with
         stores_functions = [ "work" ];
+        transparent = false;
       }
   | Shared_new | Shared_update | Shared_key -> (
       let storable : T.trait_reference =

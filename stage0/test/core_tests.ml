@@ -1099,6 +1099,33 @@ let () =
       | Function { body = None; _ } -> ()
       | _ -> fail "the body is in the specification");
       check_core_invariants database key form);
+  test "the specification that other packages read has the body of a transparent function only"
+    (fun () ->
+      let exported modifier =
+        let database =
+          setup
+            [
+              ( "app::main",
+                Printf.sprintf
+                  "public%s fn double(value: Int64) -> Int64\n\
+                  \  cost time O(1)\n\
+                   {\n\
+                  \  value + value\n\
+                   }\n"
+                  modifier );
+            ]
+        in
+        List.find_map
+          (fun (declaration : Resolve.Names.declaration) ->
+            Query.demand database Infer.exported_specification (Resolve.Names.key_of declaration))
+          (Query.demand database Resolve.Names.declarations (module_of "app::main"))
+      in
+      (match exported " transparent" with
+      | Some { definition = Function { body = Some _; _ }; _ } -> ()
+      | _ -> fail "the body of a transparent function is not in the exported specification");
+      match exported "" with
+      | Some { definition = Function { body = None; _ }; _ } -> ()
+      | _ -> fail "the body of a function that is not transparent is in the exported specification");
   test "a theorem's specification has no body" (fun () ->
       let _, _, form =
         specification "theorem doubled(value: Int64)\n  ensures value + value == 2 * value\n{\n}\n"

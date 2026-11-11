@@ -20,24 +20,29 @@ let finish cursor start visibility kind : definition =
     id = Cursor.fresh_id cursor;
   }
 
-(* [public], [public opaque], or [internal], with the tokens that spelled
-   it, and, for [public opaque], both of its tokens. *)
+(* [public], [public opaque], [public transparent], or [internal], with the
+   tokens that spelled it. [modifier] is the token of [public] and the token
+   of the [opaque] or [transparent] after it. *)
 type written_visibility = {
   visibility : visibility;
   tokens : Token.t list;
-  opaque : (Token.t * Token.t) option;
+  modifier : (Token.t * Token.t) option;
 }
 
 let visibility cursor =
   match Cursor.peek_kind cursor with
-  | Keyword Public ->
+  | Keyword Public -> (
       let public = Cursor.next cursor in
-      if Cursor.is_keyword cursor Opaque then
-        let opaque = Cursor.next cursor in
-        { visibility = Public_opaque; tokens = [ public; opaque ]; opaque = Some (public, opaque) }
-      else { visibility = Public; tokens = [ public ]; opaque = None }
-  | Keyword Internal -> { visibility = Internal; tokens = [ Cursor.next cursor ]; opaque = None }
-  | _ -> { visibility = Private; tokens = []; opaque = None }
+      let modified visibility =
+        let modifier = Cursor.next cursor in
+        { visibility; tokens = [ public; modifier ]; modifier = Some (public, modifier) }
+      in
+      match Cursor.peek_kind cursor with
+      | Keyword Opaque -> modified Public_opaque
+      | Keyword Transparent -> modified Public_transparent
+      | _ -> { visibility = Public; tokens = [ public ]; modifier = None })
+  | Keyword Internal -> { visibility = Internal; tokens = [ Cursor.next cursor ]; modifier = None }
+  | _ -> { visibility = Private; tokens = []; modifier = None }
 
 (* Removes a visibility keyword that is not allowed, with the space after
    it. *)
@@ -539,7 +544,7 @@ type empty = |
    without a body that an example in a document may show. *)
 let top_level cursor ~function_ =
   let start = cursor.Cursor.index in
-  let { visibility; tokens = visibility_tokens; opaque } = visibility cursor in
+  let { visibility; tokens = visibility_tokens; modifier } = visibility cursor in
   let no_visibility what =
     remove_visibility cursor Misplaced_visibility visibility_tokens
       (Printf.sprintf "%s takes no visibility: nothing refers to it by name." what)
@@ -575,16 +580,30 @@ let top_level cursor ~function_ =
           "a definition: `fn`, `type`, `trait`, `impl`, `capability`, `let`, `test`, `theorem`, or \
            `proof`"
   in
-  (match (opaque, kind) with
-  | Some _, Left (Type_definition _) | None, _ -> ()
-  | Some (public, opaque), _ ->
-      (* With the space before it, after [public]. *)
-      let before = public.span.stop in
-      Cursor.report cursor Misplaced_opaque opaque.span "Only a type can be `opaque`."
+  (* The fix removes the modifier with the space before it, after [public].
+     A definition that takes no visibility at all has that reported, with
+     every visibility token removed. *)
+  (match (visibility, modifier, kind) with
+  | _, None, _
+  | Public_opaque, Some _, Left (Type_definition _)
+  | Public_transparent, Some _, (Left (Function _) | Right _)
+  | _, Some _, Left (Impl _ | Test _ | Law_proof _) ->
+      ()
+  | _, Some (public, word), _ ->
+      let (code : Diagnostic.Code.parser), message, spelled =
+        if visibility = Public_opaque then
+          (Diagnostic.Code.Misplaced_opaque, "Only a type can be `opaque`.", "opaque")
+        else
+          ( Misplaced_transparent,
+            "Only a function or a method of a type can be `transparent`.",
+            "transparent" )
+      in
+      Cursor.report cursor code word.span message
         ~fixes:
           [
-            Diagnostic.fix "Remove `opaque`"
-              [ Diagnostic.delete (Source.span before opaque.span.stop) ];
+            Diagnostic.fix
+              (Printf.sprintf "Remove `%s`" spelled)
+              [ Diagnostic.delete (Source.span public.span.stop word.span.stop) ];
           ]);
   if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the definition";
   Either.map ~left:(finish cursor start visibility) ~right:(fun other -> (visibility, other)) kind

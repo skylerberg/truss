@@ -24,8 +24,7 @@ let package_modules database package =
 (* Whether the packages a command is about can see a definition: anything
    in them, and only what is public elsewhere. *)
 let visible (project : Project.t) (declaration : Names.declaration) =
-  Project.is_own project declaration.module_
-  || match declaration.visibility with Public | Public_opaque -> true | _ -> false
+  Project.is_own project declaration.module_ || Syntax.is_public declaration.visibility
 
 let owner_of : Path.t -> Path.t option = function
   | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
@@ -56,8 +55,7 @@ let resolve (project : Project.t) text =
   | Some (package, []), _ ->
       (* A package: what it makes public. *)
       List.filter
-        (fun (d : Names.declaration) ->
-          match d.visibility with Public | Public_opaque -> true | _ -> false)
+        (fun (d : Names.declaration) -> Syntax.is_public d.visibility)
         (in_package package)
   | _, Some module_ -> List.filter (visible project) (declarations database module_)
   | _, None -> (

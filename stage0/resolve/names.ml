@@ -283,7 +283,7 @@ let visible ~(from : Path.module_) (module_ : Path.module_) visibility =
   match visibility with
   | Private -> false
   | Internal -> module_.package = from.package
-  | Public | Public_opaque -> true
+  | Public | Public_opaque | Public_transparent -> true
 
 type module_lookup =
   | Found_module of Path.module_ * [ `Import of string | `Package ]

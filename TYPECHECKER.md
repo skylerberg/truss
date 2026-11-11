@@ -385,7 +385,12 @@ the change invalidates nothing beyond the definition:
   provides for a method, which an `impl`'s method that replaces it is compared
   with. The parameters and the contract are built before the body, so their
   nodes are numbered the same whatever the body is. Editing a body that the
-  specification leaves out leaves the specification equal.
+  specification leaves out leaves the specification equal. A second result,
+  the exported specification, is what a proof in another package reads. It has
+  the body of a function only when the function is `public transparent`, so
+  editing any other body re-proves nothing in a package that depends on this
+  one. `transparent` is part of the signature, and it is an error on a function
+  whose body cannot be a definition.
 - **A default is separate from the signature,** as DESIGN.md requires: callers
   read only whether a parameter has a default.
 - **A type's invariants are separate from its shape.** Strengthening an

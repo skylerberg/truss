@@ -406,11 +406,12 @@ function.
 ## Definitions
 
 Each definition is chosen by its first token, after an optional `public`,
-`public opaque`, or `internal`. The rules that the grammar leaves to a check
+`public opaque`, `public transparent`, or `internal`. The rules that the grammar leaves to a check
 are checked as the definition is parsed, where the tokens and their spans
 are available for fixes:
 
 - `opaque` only before `type`, with a fix that removes it
+- `transparent` only before `fn`, with a fix that removes it
 - no visibility on an `impl`, a test, or a law's proof, with a fix that
   removes it
 - `self` only as a method's first parameter. A method is declared

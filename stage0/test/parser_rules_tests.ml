@@ -152,7 +152,21 @@ let () =
       error "public proof A.b for C {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"proof A.b for C {}");
   test "only a type is opaque" (fun () ->
-      error "public opaque fn f() {}" ~code:Misplaced_opaque ~at:"opaque" ~fixed:"public fn f() {}")
+      error "public opaque fn f() {}" ~code:Misplaced_opaque ~at:"opaque" ~fixed:"public fn f() {}");
+  test "a function and a method of a type can be transparent" (fun () ->
+      definition "public transparent fn f() {}" "(public transparent (fn f () (block)))";
+      definition "public transparent fn Meters.zero() {}"
+        "(public transparent (fn Meters.zero () (block)))");
+  test "only a function is transparent" (fun () ->
+      error "public transparent type Meters(value: Int64)" ~code:Misplaced_transparent
+        ~at:"transparent" ~fixed:"public type Meters(value: Int64)";
+      error "public transparent trait Shown {}" ~code:Misplaced_transparent ~at:"transparent"
+        ~fixed:"public trait Shown {}";
+      error "public transparent let limit: Int64 = 1" ~code:Misplaced_transparent ~at:"transparent"
+        ~fixed:"public let limit: Int64 = 1");
+  test "an impl with a visibility and a modifier has one diagnostic" (fun () ->
+      error "public transparent impl A for B {}" ~code:Misplaced_visibility ~at:"public"
+        ~fixed:"impl A for B {}")
 
 (* Precedence and combinations that need parentheses *)
 
