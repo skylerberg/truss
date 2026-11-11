@@ -1,4 +1,5 @@
 use standard::map
+use standard::random
 
 fn order(map: Map[String, Int64]) -> String {
   var text = ""
@@ -162,4 +163,13 @@ test "a map takes keys of other types" {
   assert squares.length() == 20 && squares[7] == 49 && squares.get(20) is None
   mut squares.retain(fn(entry) { entry.key % 2 == 0 })
   assert squares.length() == 10 && squares.contains(18) && !squares.contains(7)
+}
+
+test "a seeded map starts empty and holds what is put in it" {
+  provide random::SeededRandom.new(11) {
+    var seeded: Map[String, Int64] = Map.seeded()
+    assert seeded.is_empty()
+    mut seeded.insert("one", value: 1)
+    assert seeded.contains("one") && seeded.length() == 1
+  }
 }

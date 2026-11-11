@@ -77,9 +77,23 @@ public fn mean(values: Slice[Float64]) -> Option[Float64]
 
 public fn median(values: Slice[Float64]) -> Option[Float64]
   ensures (result is None) == (values.length() == 0)
-  cost time O(values.length() * log(values.length()))
+  cost time O(values.length() + values.length() * log(values.length()))
 {
-  todo
+  if values.length() == 0 {
+    return None
+  }
+  for value in values {
+    if value.is_nan() {
+      return Some(value)
+    }
+  }
+  let sorted = values.sorted()
+  let middle = sorted.length() / 2
+  if sorted.length() % 2 == 1 {
+    Some(sorted[middle])
+  } else {
+    Some(sorted[middle - 1] / 2.0 + sorted[middle] / 2.0)
+  }
 }
 
 public fn variance(values: Slice[Float64]) -> Option[Float64]

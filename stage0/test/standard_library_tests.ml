@@ -70,26 +70,50 @@ let solver =
       prerr_endline message;
       exit 1
 
-(* [TRUSS_PROOF_WEIGHTS=1] measures the weights: each module is checked and
-   proven by itself, and the run prints [Proof_weights] again, with each
-   module's processor time, the solver's included, in hundredths of a
-   second. With no directory of solver answers, that is what a module
-   costs a run that starts from nothing. *)
-let measuring = Sys.getenv_opt "TRUSS_PROOF_WEIGHTS" = Some "1"
+(* [TRUSS_PROOF_WEIGHTS] measures weights. Its value is [all], or the names
+   of modules with commas between them, such as
+   [standard::regex,standard::math]. Each module it names is checked and
+   proven by itself, and the run prints [Proof_weights] again, with the
+   processor time of each measured module, the solver's included, in
+   hundredths of a second, and the recorded weight of every other module.
+   With no directory of solver answers, that is what a module costs a run
+   that starts from nothing. *)
+let measured_modules =
+  match Sys.getenv_opt "TRUSS_PROOF_WEIGHTS" with
+  | None | Some "" -> None
+  | Some "all" -> Some (fun _ -> true)
+  | Some names ->
+      let names = String.split_on_char ',' names in
+      let known =
+        List.map (fun (module_, _) -> Path.show_module module_) Standard_library.modules
+      in
+      List.iter
+        (fun name ->
+          if not (List.mem name known) then begin
+            prerr_endline
+              ("TRUSS_PROOF_WEIGHTS names `" ^ name ^ "`, which is not a module of the library.");
+            exit 2
+          end)
+        names;
+      Some (fun name -> List.mem name names)
 
 let processor_time () =
   let times = Unix.times () in
   times.tms_utime +. times.tms_stime +. times.tms_cutime +. times.tms_cstime
 
-let measure database ~tell =
+let measure database ~tell ~is_measured =
   let measured =
     List.map
-      (fun ((module_ : Path.module_), source) ->
-        let start = processor_time () in
-        if Type_checker.diagnostics database module_ = [] then
-          ignore (Prover.diagnostics ~tell database solver module_);
-        let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
-        (Path.show_module module_, max 1 spent, letters source))
+      (fun (((module_ : Path.module_), source) as entry) ->
+        let name = Path.show_module module_ in
+        if is_measured name then begin
+          let start = processor_time () in
+          if Type_checker.diagnostics database module_ = [] then
+            ignore (Prover.diagnostics ~tell database solver module_);
+          let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
+          (name, max 1 spent, letters source)
+        end
+        else (name, weight entry, letters source))
       Standard_library.modules
   in
   let total_weight = List.fold_left (fun total (_, weight, _) -> total + weight) 0 measured in
@@ -97,6 +121,19 @@ let measure database ~tell =
   print_endline "let weights =\n  [";
   List.iter (fun (name, weight, _) -> Printf.printf "    (%S, %d);\n" name weight) measured;
   Printf.printf "  ]\n\nlet letters_for_one = %d\n" (max 1 (total_letters / max 1 total_weight))
+
+(* A run prints how long each stage and each module took, and how many
+   queries the solver ran and did not read from its kept answers, so the
+   log of a slow job names what was slow. *)
+let timed label work =
+  let start = Unix.gettimeofday () in
+  let solved = Solver.solved solver in
+  let result = work () in
+  Printf.printf "%6.1f s, %d queries solved: %s\n%!"
+    (Unix.gettimeofday () -. start)
+    (Solver.solved solver - solved)
+    label;
+  result
 
 (* [TRUSS_PROOF_STATE] names a state of the library in the code database's
    store. A run that names one starts from what the last such run saved,
@@ -135,19 +172,26 @@ let () =
     | Some session -> List.iter (fun (key, told) -> Database.set session Prover.told key told) said
     | None -> Support.tell database said
   in
-  if measuring then begin
-    measure database ~tell;
-    exit 0
-  end;
+  Option.iter
+    (fun is_measured ->
+      measure database ~tell ~is_measured;
+      exit 0)
+    measured_modules;
   let checked =
-    List.map
-      (fun ((module_ : Path.module_), _) -> (module_, Type_checker.diagnostics database module_))
-      modules
+    timed "type checking" (fun () ->
+        List.map
+          (fun ((module_ : Path.module_), _) ->
+            (module_, Type_checker.diagnostics database module_))
+          modules)
   in
   test "the code database kept every result of checking the standard library current" (fun () ->
-      List.iter (fun problem -> fail "%s" problem) (Engine.audit engine));
-  Prover.solve_ahead ~tell database solver
-    (List.filter_map (fun (module_, errors) -> if errors = [] then Some module_ else None) checked);
+      timed "auditing the code database" (fun () ->
+          List.iter (fun problem -> fail "%s" problem) (Engine.audit engine)));
+  timed "solving ahead" (fun () ->
+      Prover.solve_ahead ~tell database solver
+        (List.filter_map
+           (fun (module_, errors) -> if errors = [] then Some module_ else None)
+           checked));
   List.iter
     (fun ((module_ : Path.module_), errors) ->
       test
@@ -158,9 +202,12 @@ let () =
             List.iter (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
           in
           match errors with
-          | [] -> report (Prover.diagnostics ~tell database solver module_)
+          | [] ->
+              report
+                (timed (Path.show_module module_) (fun () ->
+                     Prover.diagnostics ~tell database solver module_))
           | errors -> report errors))
     checked;
-  Option.iter Database.save_session session
+  timed "saving the state" (fun () -> Option.iter Database.save_session session)
 
 let () = finish ()

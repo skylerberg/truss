@@ -1,3 +1,5 @@
+use standard::random
+
 fn order(set: Set[Int64]) -> String {
   var text = ""
   for element in set {
@@ -115,4 +117,13 @@ test "a copy of a set changes on its own" {
   let roomy: Set[Int64] = Set.with_capacity(8)
   let fresh: Set[Int64] = Set.default()
   assert roomy.is_empty() && roomy == fresh
+}
+
+test "a seeded set starts empty and holds what is put in it" {
+  provide random::SeededRandom.new(11) {
+    var seeded: Set[Int64] = Set.seeded()
+    assert seeded.is_empty()
+    mut seeded.insert(4)
+    assert seeded.contains(4) && seeded.length() == 1
+  }
 }

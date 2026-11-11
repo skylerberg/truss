@@ -123,7 +123,7 @@ public fn Set[Element: Hash + Ordered].seeded() -> Set[Element]
   uses Random
   ensures result.length() == 0
 {
-  todo
+  Set(elements: [])
 }
 
 public fn Set[Element: Hash + Ordered].collect[Source: Cursor[Element = Element]](source: own Source) -> Set[Element]

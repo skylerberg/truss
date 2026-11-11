@@ -265,7 +265,7 @@ public fn Map[Key: Hash + Ordered, Value].seeded() -> Map[Key, Value]
   uses Random
   ensures result.length() == 0
 {
-  todo
+  Map(entries: [])
 }
 
 public fn Map[Key: Hash + Ordered, Value].collect[Source: Cursor[Element = Entry[Key, Value]]](

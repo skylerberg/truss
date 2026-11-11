@@ -1,6 +1,6 @@
 (* What each module of the standard library costs to prove, for dealing the modules out to the
-   jobs that prove them. `TRUSS_PROOF_WEIGHTS=1 ./standard_library_tests.exe` prints this file's
-   definitions again. *)
+   jobs that prove them. `TRUSS_PROOF_WEIGHTS=all ./standard_library_tests.exe` prints this file's
+   definitions again, and a list of module names in place of `all` measures those modules only. *)
 
 let weights =
   [
@@ -32,8 +32,8 @@ let weights =
     ("standard::list::slice", 5334);
     ("standard::list::views", 639);
     ("standard::log", 19);
-    ("standard::map", 2093);
-    ("standard::math", 8416);
+    ("standard::map", 1465);
+    ("standard::math", 5899);
     ("standard::network", 942);
     ("standard::numbers::float_math", 942);
     ("standard::numbers::floats", 64);
@@ -45,9 +45,9 @@ let weights =
     ("standard::option", 54);
     ("standard::processes", 96);
     ("standard::random", 365);
-    ("standard::regex", 42);
+    ("standard::regex", 1135);
     ("standard::result", 34);
-    ("standard::set", 1727);
+    ("standard::set", 997);
     ("standard::simulation", 887);
     ("standard::specification", 1);
     ("standard::streams", 264);
