@@ -101,11 +101,12 @@ Every fact the prover must show, and where it comes from:
 | `unreachable` is never reached | Each `unreachable`, including the ones after guards that the type checker added |
 | A call's `requires` holds | Each call, including calls to theorems in proofs and calls in specifications |
 | An `ensures` holds | Each way a function returns, and for a lending or yielding method, each `yield` and each way it ends |
-| A type's invariant holds | Each value built or updated with `with`, each argument and returned value, each `mut` parameter when its function ends, and each `yield` where a method may end |
+| A type's invariant holds | Each value built or updated with `with`, each argument and returned value, each `mut` parameter when its function ends, each part handed out by a `yield`, each part lent `mut` when the lend ends, each value a loop changes at the end of each iteration, and each `yield` where a method may end |
 | A loop invariant holds | On entry to the loop, and at the end of each iteration |
 | A loop's `cost` holds | On entry to the loop, and at the end of each iteration |
 | A callback's `requires` holds | Each call through a function-typed parameter whose type has a `requires` |
-| A function passed as a callback accepts what it is promised | Each named function passed where a parameter's type has a `requires`: that `requires` implies the function's own |
+| A function passed as a callback accepts what it is promised | Each named function or function-typed parameter passed where a parameter's type has a `requires`: that `requires` implies the function's own |
+| A function value accepts every argument of its type | Each function with a `requires`, and each function-typed parameter whose type has one, used as a value anywhere but in a call or passed to a parameter |
 | Recursion and loops end | Each call in a cycle of the call graph, and each loop, in a function with a `time` clause |
 | A cost clause holds | Each function with one (see [Costs](#costs)) |
 | A law holds | Each law of each trait an `impl` implements by hand |
@@ -119,7 +120,9 @@ Every fact the prover must show, and where it comes from:
 
 An obligation names its kind, its definition, and its position within the
 definition, as every result does. A test's obligations are proven like any
-function's; that its run checks them too changes nothing here.
+function's; that its run checks them too changes nothing here. A
+constant's value has the obligations of any expression, so `1 << 8` as a
+`UInt8` is reported where the constant is defined.
 
 - **An index is a call.** `items[i]` reaches the `impl` of `Index` for its
   collection, whose `requires` is the bound, so every index into a `List`
@@ -448,7 +451,16 @@ decides when a body is a definition. In the solver:
   the `requires` of its arguments.
 - **A named function passed for such a parameter** must accept every
   argument the parameter's type promises it, and keep the type's cost
-  clauses.
+  clauses. A function-typed parameter passed on for another callee's
+  parameter must be promised what its own `requires` asks.
+- **A function type keeps no `requires`.** A function with a `requires`,
+  or a function-typed parameter whose type has one, used as a value
+  anywhere but in a call or passed straight to a parameter, such as bound
+  to a local or stored in a field, must accept every argument of its type.
+- **A callback's `requires` names the callee's parameters as the caller
+  passed them.** A call through the callback, in the callee, shows it with
+  the parameters' values on entry, which is what the caller showed it
+  with, even where a `mut` parameter has changed since.
 
 Callers' proofs depend on whether a body is a definition, and on the body
 itself when it is. Both are in the trace of every proof that used the
@@ -474,14 +486,23 @@ and of Why3's, cut down to what Truss needs. The walk is in the passive form
 of Flanagan and Saxe ("Avoiding Exponential Explosion", 2001): every value
 is a term, every fact is guarded by the condition of the path it holds on,
 and where paths join, each local that differs gets a fresh symbol that each
-path defines. So what a body gives its queries grows with the body, not
+path defines. So does the joined condition, which every later fact on the
+path names instead of repeating each branch's condition. So what a body gives its queries grows with the body, not
 with its number of paths. No step goes around a loop: each loop is cut at
 its head by its invariant, as below. The right side of `&&`, `||`, or
 `==>` runs on only one path, so when it changes a local, as a call with a
 `mut` argument does, that path joins the one where it did not run, as the
-two arms of an `if` do. A `match` arm's guard runs only where its patterns matched, so
+two arms of an `if` do, and so does one where the right side spends
+anything, since what it spends is known only where it ran. A `match` arm's guard runs only where its patterns matched, so
 the next arm is tried where they did not, joined with where they did and
-the guard, which may change locals the same way, was false.
+the guard, which may change locals the same way, was false. A binding
+that a pattern lends `mut` is a local of the arm. Wherever the arm ends,
+by its end or by a `return`, `break`, or `continue`, what the binding holds
+is stored back into the part of the scrutinee it was lent from.
+
+A `mut` slice argument's bounds are the values computed for the argument,
+and what the callee changes is stored back through them, so the bounds
+are not evaluated a second time after the call.
 
 A `parallel` block's branches change disjoint places, so they are read
 one after another. A `concurrent` block's are too: they change disjoint
@@ -537,8 +558,10 @@ call uses the capability method's contract.
   entry, every place the body may change is havocked, the invariants are
   assumed, and the body runs once from there, after which the invariants
   are asserted again. The places a body may change are the locals, or
-  `self`, that it assigns to, passes `mut`, or loops over `mut`, so nothing
-  else loses what was known about it.
+  `self`, that it assigns to, passes `mut`, loops over `mut`, or matches
+  with a pattern that binds part of it `mut`, so nothing else loses what
+  was known about it. The condition runs at the head of each iteration,
+  so what it changes is in that set, and what it spends is the iteration's.
 - **Validity is an invariant of every loop.** Each value a loop changes
   that is valid on entry is valid at the head of each iteration, and is
   asserted valid at the end of each one. A body may break a value's
@@ -831,10 +854,27 @@ cycle can only be seen across definitions:
   as DESIGN.md's [Termination](DESIGN.md#termination) describes. An `impl`
   used where a bound needs it is an edge from the code that uses it to every
   method of that `impl`.
-- **Cycles cannot cross packages.** Packages do not depend on each other in
-  a cycle, and a function in one package reaches another package's
-  functions only through what code in the first package names, so every
-  cycle lies within one package's graph.
+- **A trait's method is a node.** A call through `any`, or through a
+  bound on `Self` in a trait's provided body, is an edge to it, and it has
+  an edge to the trait's provided body and to each `impl`'s own method of
+  that name. A call that reaches an `impl` that leaves the method to its
+  trait is an edge to the provided body. So provided methods that call
+  each other, and a method that reaches itself through `any`, are cycles.
+  A call through a bound on another type parameter is no edge of its own:
+  it reaches the `impl` for the type the parameter is given where the
+  generic code is used, which is an edge there. Code is made for each type
+  a generic function is used with, so `List[Element].equal` calling
+  `Element.equal` reaches the `equal` of a smaller type, not itself.
+- **A type's fields cannot make a function value call itself.** The type
+  checker rejects a type that occurs in the input of a function type with
+  a `time` clause in its own fields, the strict positivity that Coq,
+  Agda, and Dafny ask of recursive types. Without it, `type Knot(run: fn
+  (Knot) -> Bool cost time finite)` lets a function apply itself with no
+  edge of the call graph between the two.
+- **Cycles can cross packages through traits.** A dependency's code
+  reaches this package's code only through a trait's method, so a walk
+  reads each node's edges from its own package's graph, and a trait's
+  method reaches the `impl`s of every package the program depends on.
 - **Each edge in a cycle through a function with a `time` clause, or
   through a theorem, is an obligation:** the callee's measure, with the
   call's arguments, is smaller than the caller's. A measure is the
@@ -860,9 +900,11 @@ cycle can only be seen across definitions:
   a `decreases` clause proves that it decreases on every iteration and
   stays at or above zero. Without one, the prover tries one measure, which
   is the simple case DESIGN.md mentions: for a condition `a < b` or
-  `a <= b`, the measure `b - a`, and for `a > b` or `a >= b`, `a - b`. If
-  that measure does not work, the loop needs a `decreases` clause, which
-  the error says.
+  `a <= b`, the measure `b - a`, and for `a > b` or `a >= b`, `a - b`. The
+  measure is read again at the end of each iteration, so it is tried only
+  when `a` and `b` are functional: a call with a `mut` argument in either
+  would run twice. If that measure does not work, the loop needs a
+  `decreases` clause, which the error says.
 
 ## Costs
 
@@ -877,8 +919,10 @@ The prover adds a ghost counter for each resource that has a cost clause:
 | `allocated_bytes` | The bytes of each allocation, and each callee's `allocated_bytes` |
 | `calls(target)` | Each call to the target, and each callee's count for it |
 
-- **A specification spends nothing.** A `requires`, an `ensures`, an
-  invariant, or a bound never runs, so what it calls is not counted.
+- **A specification spends nothing.** A `requires`, an `ensures`, a
+  type's or a loop's invariant, a law, or a bound never runs, so what it
+  calls is not counted, wherever it is read: an invariant read to check a
+  value's validity counts nothing either.
 - **A counter is an `Integer` on each path,** increased at each call and
   each iteration, so costs are proven by the same verification conditions
   as everything else. Where paths join, a counter is what the path taken
@@ -905,7 +949,9 @@ The prover adds a ghost counter for each resource that has a cost clause:
   capacity, running a test, and reaching the system may allocate; nothing
   else does.
 - **A `calls(target)` counter** counts each call through a function value
-  or of a capability's method. A callee that is passed the function value,
+  or of a capability's method. A call through a value of the target's type
+  counts where the value equals the target, so a call through an alias,
+  such as `if flag { visit } else { other }`, counts. A callee that is passed the function value,
   or uses the capability, counts what its own `calls` clause about it says;
   one that can reach neither counts nothing; and one passed a lambda that
   captures the function value is known by no bound.
@@ -1262,7 +1308,11 @@ test the prover itself:
   builds tests and `truss run` with run-time checks of what the prover
   proves, and `truss build` without them, as CODEGEN.md describes.
 - **The build** refuses a package with an obligation that is not proven,
-  and a program whose `main` can reach a hole in a proof.
+  and a program whose `main` can reach a hole in a proof. A dependency's
+  proofs are the program's too, since the build leaves out the run-time
+  checks they stand for: `truss check` and `truss build` prove every package
+  the command's packages depend on, but the standard library, whose proofs
+  are checked where it is released.
 
 ## Not built
 

@@ -11,10 +11,12 @@ type t = { files : file list; problems : string list }
    none, and with [proofs], the prover's too. Each file lists at most
    [Diagnostic.limit]. *)
 let gather ?(proofs = false) (project : Project.t) =
+  (* A dependency's proofs are the program's too: a build leaves out the
+     run-time checks its proofs stand for. *)
   let checked =
     List.map
       (fun module_ -> (module_, Database.diagnostics project.session module_))
-      (Project.modules project)
+      (if proofs then Project.program_modules project else Project.modules project)
   in
   (* A file is proven once it checks, since the prover reads what type
      checking makes. *)

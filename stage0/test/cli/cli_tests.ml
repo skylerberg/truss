@@ -128,6 +128,21 @@ let () =
       let project = Project.load (Filename.concat root "one") in
       expect_strings ~expected:[ "one" ] (names project);
       if not (Report.clean (Report.gather project)) then fail "has diagnostics");
+  test "a dependency's failed proof is the program's" (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
+            ("app/main.truss", "use lib::arith\n\nfn two() -> UInt8 {\n  arith::bump(1)\n}\n");
+            ("lib/truss.toml", manifest_of "lib");
+            ("lib/arith.truss", "public fn bump(count: UInt8) -> UInt8 {\n  count + 1\n}\n");
+          ]
+      in
+      let project = Project.load (Filename.concat root "app") in
+      let report = Report.gather ~proofs:true project in
+      if not (List.exists (fun (file : Report.file) -> file.module_.package = "lib") report.files)
+      then fail "the dependency's overflow is not reported");
   test "a package with no [project] above it is a project by itself" (fun () ->
       let root =
         directory
