@@ -489,8 +489,11 @@ path defines. So what a body gives its queries grows with the body, not
 with its number of paths. No step goes around a loop: each loop is cut at
 its head by its invariant, as below. The right side of `&&`, `||`, or
 `==>` runs on only one path, so when it changes a local, as a call with a
-`mut` argument does, or spends anything, that path joins the one where it
-did not run, as the two arms of an `if` do. A `match` arm's guard runs only where its patterns matched, so
+`mut` argument does, that path joins the one where it did not run, as the
+two arms of an `if` do. What the right side of `||` spends is joined the
+same way. What the right side of `&&` spends is counted as if it ran,
+which is an upper bound, and is joined only for a counter that counts
+exactly. A `match` arm's guard runs only where its patterns matched, so
 the next arm is tried where they did not, joined with where they did and
 the guard, which may change locals the same way, was false. A binding
 that a pattern lends `mut` is a local of the arm. Wherever the arm ends,
@@ -862,6 +865,12 @@ cycle can only be seen across definitions:
   generic code is used, which is an edge there. Code is made for each type
   a generic function is used with, so `List[Element].equal` calling
   `Element.equal` reaches the `equal` of a smaller type, not itself.
+- **A type's fields cannot make a function value call itself.** The type
+  checker rejects a type that occurs in the input of a function type with
+  a `time` clause in its own fields, the strict positivity that Coq,
+  Agda, and Dafny ask of recursive types. Without it, `type Knot(run: fn
+  (Knot) -> Bool cost time finite)` lets a function apply itself with no
+  edge of the call graph between the two.
 - **Cycles can cross packages through traits.** A dependency's code
   reaches this package's code only through a trait's method, so a walk
   reads each node's edges from its own package's graph, and a trait's

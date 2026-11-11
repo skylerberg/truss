@@ -1706,22 +1706,21 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
    [&&] keeps what its right side binds, as an [is] does. *)
 and short_circuit context frame right ~runs ~otherwise ~binds combine =
   let after, right_value = value context (restrict frame runs) right in
-  (* What the right side spends is an upper bound on what the expression
-     spends, which is all a counter that bounds from above needs; one that
-     counts exactly needs the two paths apart. *)
+  (* Where the right side binds, as [&&] does, what it spends is an upper
+     bound on what the expression spends, which is all a counter that
+     bounds from above needs. Elsewhere, and for a counter that counts
+     exactly, the paths where it ran and did not run are joined. *)
   let counts_exactly =
     List.exists (fun (counter : Costs.counter) -> counter.counting = Exactly) context.counters
   in
   let changed =
     Locals.exists (fun id term -> Locals.find_opt id after.locals <> Some term) frame.locals
     || after.self <> frame.self
-    || (counts_exactly && after.spent <> frame.spent)
+    || ((counts_exactly || not binds) && after.spent <> frame.spent)
   in
   if not changed then
     Some
-      ( (if binds then { after with condition = frame.condition }
-         else { frame with spent = after.spent }),
-        combine right_value )
+      ((if binds then { after with condition = frame.condition } else frame), combine right_value)
   else
     match
       join context ~value_type:T.bool
@@ -7438,7 +7437,7 @@ and invariants (clauses : loop_clause list) =
 and check_invariants context frame clauses ~when_ =
   List.iter
     (fun (invariant : expression) ->
-      let _, term = value context frame invariant in
+      let _, term = clause_value context frame invariant in
       oblige context frame Invariant (at frame invariant)
         (Printf.sprintf "The loop invariant `%s` may not hold %s."
            (quote frame.source invariant.origin)
@@ -7449,7 +7448,7 @@ and check_invariants context frame clauses ~when_ =
 and assume_invariants context frame clauses =
   List.iter
     (fun (invariant : expression) ->
-      let _, term = value context { frame with checking = false } invariant in
+      let _, term = clause_value context { frame with checking = false } invariant in
       assume context frame term)
     (invariants clauses)
 
