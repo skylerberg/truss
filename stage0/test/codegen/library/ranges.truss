@@ -1,0 +1,92 @@
+fn collected(range: Range[Int64]) -> List[Int64] {
+  var items: List[Int64] = []
+  for value in range {
+    mut items.push(value)
+  }
+  items
+}
+
+fn backwards(range: Range[Int64]) -> List[Int64] {
+  var items: List[Int64] = []
+  for value in range.reversed() {
+    mut items.push(value)
+  }
+  items
+}
+
+fn stepped(range: Range[Int64], step: USize) -> List[Int64] {
+  var items: List[Int64] = []
+  for value in range.step_by(step) {
+    mut items.push(value)
+  }
+  items
+}
+
+test "a range yields its values in order" {
+  assert collected(2..6) == [2, 3, 4, 5]
+  assert collected(2..=6) == [2, 3, 4, 5, 6]
+  assert collected(-2..2) == [-2, -1, 0, 1]
+  assert collected(5..5).is_empty()
+  assert collected(5..=5) == [5]
+  assert collected(6..2).is_empty()
+  assert collected(6..=2).is_empty()
+}
+
+test "a range yields its values from the last to the first" {
+  assert backwards(2..6) == [5, 4, 3, 2]
+  assert backwards(2..=6) == [6, 5, 4, 3, 2]
+  assert backwards(5..5).is_empty()
+  assert backwards(5..=5) == [5]
+  assert backwards(6..2).is_empty()
+}
+
+test "a range yields every value a step apart" {
+  assert stepped(0..10, step: 3) == [0, 3, 6, 9]
+  assert stepped(0..=9, step: 3) == [0, 3, 6, 9]
+  assert stepped(0..=10, step: 3) == [0, 3, 6, 9]
+  assert stepped(0..10, step: 5) == [0, 5]
+  assert stepped(0..=10, step: 5) == [0, 5, 10]
+  assert stepped(0..3, step: 10) == [0]
+  assert stepped(3..=3, step: 2) == [3]
+  assert stepped(3..3, step: 2).is_empty()
+  assert stepped(0..4, step: 1) == [0, 1, 2, 3]
+}
+
+test "a range has a length when it fits" {
+  assert (2..6).length() == Some(4)
+  assert (2..=6).length() == Some(5)
+  assert (6..2).length() == Some(0)
+  assert (5..5).length() == Some(0)
+  assert (5..=5).length() == Some(1)
+  let whole: Range[UInt64] = UInt64.minimum..=UInt64.maximum
+  assert whole.length() is None
+  let nearly: Range[UInt64] = UInt64.minimum..UInt64.maximum
+  assert nearly.length() == Some(USize.maximum)
+}
+
+test "a range of a narrow type reaches its largest value without overflowing" {
+  var total: UInt64 = 0
+  var count: USize = 0
+  let high: Range[UInt8] = 250..=255
+  for value in high {
+    total += UInt64.from(value)
+    count += 1
+  }
+  assert count == 6 && total == 1515
+  var low: List[Int8] = []
+  let bottom: Range[Int8] = -128..=-126
+  for value in bottom.reversed() {
+    mut low.push(value)
+  }
+  assert low == [-126, -127, -128]
+}
+
+test "a range of characters yields each character" {
+  var text = ""
+  let letters: Range[Character] = Character"a"..=Character"e"
+  for letter in letters {
+    mut text.push_character(letter)
+  }
+  assert text == "abcde"
+  assert letters.length() == Some(5)
+}
