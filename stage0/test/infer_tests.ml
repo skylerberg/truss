@@ -86,6 +86,7 @@ let () =
         "type Duration2(nanoseconds: Int64)\n\n\
          impl Multiply[Int64] for Duration2 {\n\
         \  type Output = Duration2\n\
+        \  fn multiply_is_defined(self, right: Int64) -> Bool { true }\n\
         \  fn multiply(self, right: Int64) -> Duration2 { todo }\n\
          }\n\n\
          fn f(duration: Duration2) -> Duration2 {\n\
@@ -904,6 +905,7 @@ let () =
         "type Span2(length: Int64)\n\n\
          impl Multiply[Int64] for Span2 {\n\
         \  type Output = Span2\n\
+        \  fn multiply_is_defined(self, right: Int64) -> Bool { true }\n\
         \  fn multiply(self, right: Int64) -> Span2 { todo }\n\
          }\n\n\
          fn f(span: Span2) -> Int64 {\n\
@@ -1331,6 +1333,7 @@ let () =
         "type Span(ticks: Int64)\n\n\
          impl Divide[Int64] for Span {\n\
         \  type Output = Option[Span]\n\n\
+        \  fn divide_is_defined(self, right: Int64) -> Bool { true }\n\n\
         \  fn divide(self, right: Int64) -> Option[Span] {\n\
         \    todo\n\
         \  }\n\

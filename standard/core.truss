@@ -153,32 +153,62 @@ public trait Storable {}
 
 public trait Add[Right] {
   type Output
+
+  fn add_is_defined(self, right: Right) -> Bool
+    cost time finite
+
   fn add(self, right: Right) -> Self.Output
+    requires self.add_is_defined(right)
 }
 
 public trait Subtract[Right] {
   type Output
+
+  fn subtract_is_defined(self, right: Right) -> Bool
+    cost time finite
+
   fn subtract(self, right: Right) -> Self.Output
+    requires self.subtract_is_defined(right)
 }
 
 public trait Multiply[Right] {
   type Output
+
+  fn multiply_is_defined(self, right: Right) -> Bool
+    cost time finite
+
   fn multiply(self, right: Right) -> Self.Output
+    requires self.multiply_is_defined(right)
 }
 
 public trait Divide[Right] {
   type Output
+
+  fn divide_is_defined(self, right: Right) -> Bool
+    cost time finite
+
   fn divide(self, right: Right) -> Self.Output
+    requires self.divide_is_defined(right)
 }
 
 public trait Remainder[Right] {
   type Output
+
+  fn remainder_is_defined(self, right: Right) -> Bool
+    cost time finite
+
   fn remainder(self, right: Right) -> Self.Output
+    requires self.remainder_is_defined(right)
 }
 
 public trait Negate {
   type Output
+
+  fn negate_is_defined(self) -> Bool
+    cost time finite
+
   fn negate(self) -> Self.Output
+    requires self.negate_is_defined()
 }
 
 public trait Model {
