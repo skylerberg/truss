@@ -17,6 +17,7 @@ let headers =
 #include <pthread.h>
 #include <sched.h>
 #include <stdatomic.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -260,6 +261,19 @@ void *t_runtime_reallocate(void *pointer, t_usize old_size, t_usize size, t_usiz
 
 let threads =
   {|
+/* The size of the main thread's stack. Every other stack has the same
+   size, so that the recursion depth limit is the same on each. */
+static size_t t_stack_size(void) {
+  struct rlimit limit;
+  size_t stack = (size_t)8 << 20;
+  if (getrlimit(RLIMIT_STACK, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY &&
+      limit.rlim_cur >= ((rlim_t)1 << 16) && limit.rlim_cur <= ((rlim_t)1 << 30))
+    stack = (size_t)limit.rlim_cur;
+  return stack;
+}
+
+#ifndef T_IN_ORDER
+
 /* The alternate signal stack that the runtime installed on a thread it
    created: the stack's memory, and the alternate stack that the thread
    had before. */
@@ -293,18 +307,192 @@ static void t_thread_signal_stack_remove(struct t_thread_signal_stack *installed
   free(installed->memory);
 }
 
-/* The attributes of a thread that the runtime creates: a stack as large as
-   the main thread's, so that the recursion depth limit is the same on
-   every thread. */
+/* The attributes of a thread that the runtime creates. */
 static void t_thread_attributes(pthread_attr_t *attributes) {
-  struct rlimit limit;
-  size_t stack = (size_t)8 << 20;
-  if (getrlimit(RLIMIT_STACK, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY &&
-      limit.rlim_cur >= ((rlim_t)1 << 16) && limit.rlim_cur <= ((rlim_t)1 << 30))
-    stack = (size_t)limit.rlim_cur;
   pthread_attr_init(attributes);
-  pthread_attr_setstacksize(attributes, stack);
+  pthread_attr_setstacksize(attributes, t_stack_size());
 }
+
+#endif
+
+/* What the sanitizers need to know about a switch to another stack. */
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define T_ADDRESS_SANITIZER 1
+#endif
+#if __has_feature(thread_sanitizer)
+#define T_THREAD_SANITIZER 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__) && !defined(T_ADDRESS_SANITIZER)
+#define T_ADDRESS_SANITIZER 1
+#endif
+#if defined(__SANITIZE_THREAD__) && !defined(T_THREAD_SANITIZER)
+#define T_THREAD_SANITIZER 1
+#endif
+
+#ifdef T_ADDRESS_SANITIZER
+void __sanitizer_start_switch_fiber(void **fake_stack_save, const void *bottom, size_t size);
+void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_old,
+                                     size_t *size_old);
+void __asan_unpoison_memory_region(void const volatile *address, size_t size);
+#endif
+#ifdef T_THREAD_SANITIZER
+void *__tsan_get_current_fiber(void);
+void *__tsan_create_fiber(unsigned flags);
+void __tsan_destroy_fiber(void *fiber);
+void __tsan_switch_to_fiber(void *fiber, unsigned flags);
+#endif
+
+/* Stacks.
+
+   A coroutine runs on a stack of its own: memory from [mmap] with a guard
+   page below it, so that an overflow faults and is reported as any stack
+   overflow is. A stack is as large as the main thread's. Its pages take
+   memory only once they are touched. A few stacks that are no longer used
+   are kept for the next coroutine. */
+#define T_STACK_CACHE 64
+
+static pthread_mutex_t t_stack_lock = PTHREAD_MUTEX_INITIALIZER;
+static void *t_stack_cache[T_STACK_CACHE];
+static size_t t_stack_cached;
+static size_t t_stack_bytes;
+static size_t t_stack_guard;
+
+/* The lowest address of a stack's usable memory. */
+static void *t_stack_acquire(void) {
+  pthread_mutex_lock(&t_stack_lock);
+  if (t_stack_bytes == 0) {
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    t_stack_guard = page;
+    t_stack_bytes = (t_stack_size() + page - 1) / page * page;
+  }
+  void *low = t_stack_cached > 0 ? t_stack_cache[--t_stack_cached] : NULL;
+  pthread_mutex_unlock(&t_stack_lock);
+  if (low != NULL) return low;
+  int flags = MAP_PRIVATE | MAP_ANON;
+#ifdef MAP_NORESERVE
+  flags |= MAP_NORESERVE;
+#endif
+#ifdef MAP_STACK
+  flags |= MAP_STACK;
+#endif
+  char *mapping = mmap(NULL, t_stack_guard + t_stack_bytes, PROT_READ | PROT_WRITE, flags, -1, 0);
+  if (mapping == MAP_FAILED) t_out_of_memory();
+  if (mprotect(mapping, t_stack_guard, PROT_NONE) != 0) t_out_of_memory();
+  return mapping + t_stack_guard;
+}
+
+static void t_stack_release(void *low) {
+#ifdef T_ADDRESS_SANITIZER
+  /* What the frames of the last coroutine left poisoned must not be
+     reported against the next one. */
+  __asan_unpoison_memory_region(low, t_stack_bytes);
+#endif
+  pthread_mutex_lock(&t_stack_lock);
+  if (t_stack_cached < T_STACK_CACHE) {
+    t_stack_cache[t_stack_cached++] = low;
+    low = NULL;
+  }
+  pthread_mutex_unlock(&t_stack_lock);
+  if (low != NULL) munmap((char *)low - t_stack_guard, t_stack_guard + t_stack_bytes);
+}
+
+/* Switching stacks.
+
+   A context is the stack pointer of code that is not running. Its
+   callee-saved registers are on its stack, below that pointer, and the
+   address it goes on at is the return address of its call of
+   [t_context_switch]. The function saves the caller's registers and stack
+   pointer in [from] and loads those of [to]. */
+struct t_context {
+  void *stack_pointer;
+};
+
+void t_context_switch(struct t_context *from, const struct t_context *to);
+
+#ifdef __APPLE__
+#define T_ASSEMBLY_NAME(name) "_" name
+#else
+#define T_ASSEMBLY_NAME(name) name
+#endif
+
+#if defined(__x86_64__)
+__asm__(".text\n"
+        ".globl " T_ASSEMBLY_NAME("t_context_switch") "\n"
+        ".p2align 4\n"
+        T_ASSEMBLY_NAME("t_context_switch") ":\n"
+        "  pushq %rbp\n"
+        "  pushq %rbx\n"
+        "  pushq %r12\n"
+        "  pushq %r13\n"
+        "  pushq %r14\n"
+        "  pushq %r15\n"
+        "  movq %rsp, (%rdi)\n"
+        "  movq (%rsi), %rsp\n"
+        "  popq %r15\n"
+        "  popq %r14\n"
+        "  popq %r13\n"
+        "  popq %r12\n"
+        "  popq %rbx\n"
+        "  popq %rbp\n"
+        "  retq\n");
+
+/* A context that starts [entry] on an empty stack: the registers that the
+   switch pops, the address it returns to, and a word that leaves the
+   stack pointer where a call would. */
+static void t_context_start(struct t_context *context, void *low, size_t size, void (*entry)(void)) {
+  uint64_t *top = (uint64_t *)(((uintptr_t)low + size) & ~(uintptr_t)15);
+  *--top = 0;
+  *--top = (uint64_t)(uintptr_t)entry;
+  for (int saved = 0; saved < 6; saved++) *--top = 0;
+  context->stack_pointer = top;
+}
+#elif defined(__aarch64__)
+__asm__(".text\n"
+        ".globl " T_ASSEMBLY_NAME("t_context_switch") "\n"
+        ".p2align 2\n"
+        T_ASSEMBLY_NAME("t_context_switch") ":\n"
+        "  sub sp, sp, #160\n"
+        "  stp x19, x20, [sp, #0]\n"
+        "  stp x21, x22, [sp, #16]\n"
+        "  stp x23, x24, [sp, #32]\n"
+        "  stp x25, x26, [sp, #48]\n"
+        "  stp x27, x28, [sp, #64]\n"
+        "  stp x29, x30, [sp, #80]\n"
+        "  stp d8, d9, [sp, #96]\n"
+        "  stp d10, d11, [sp, #112]\n"
+        "  stp d12, d13, [sp, #128]\n"
+        "  stp d14, d15, [sp, #144]\n"
+        "  mov x9, sp\n"
+        "  str x9, [x0]\n"
+        "  ldr x9, [x1]\n"
+        "  mov sp, x9\n"
+        "  ldp x19, x20, [sp, #0]\n"
+        "  ldp x21, x22, [sp, #16]\n"
+        "  ldp x23, x24, [sp, #32]\n"
+        "  ldp x25, x26, [sp, #48]\n"
+        "  ldp x27, x28, [sp, #64]\n"
+        "  ldp x29, x30, [sp, #80]\n"
+        "  ldp d8, d9, [sp, #96]\n"
+        "  ldp d10, d11, [sp, #112]\n"
+        "  ldp d12, d13, [sp, #128]\n"
+        "  ldp d14, d15, [sp, #144]\n"
+        "  add sp, sp, #160\n"
+        "  ret\n");
+
+/* A context that starts [entry] on an empty stack: the registers that the
+   switch loads, with [entry] as the address it returns to. */
+static void t_context_start(struct t_context *context, void *low, size_t size, void (*entry)(void)) {
+  uint64_t *top = (uint64_t *)(((uintptr_t)low + size) & ~(uintptr_t)15);
+  uint64_t *saved = top - 20;
+  memset(saved, 0, 160);
+  saved[11] = (uint64_t)(uintptr_t)entry;
+  context->stack_pointer = saved;
+}
+#else
+#error "the runtime has no context switch for this processor"
+#endif
 
 /* Coroutines.
 
@@ -313,64 +501,74 @@ static void t_thread_attributes(pthread_attr_t *attributes) {
    time, such as a test's, runs each task as a coroutine: it resumes the
    task it chose, and a task that must block suspends.
 
-   Each coroutine is a thread. [running] says whether the coroutine or its
-   resumer runs, and the other one blocks on [switched] until [running]
-   changes. Exactly one of the two runs at any time, so the data they
-   share needs no other lock. */
+   A resume switches to the coroutine's stack on the calling thread, and a
+   suspend switches back, so the two never run at the same time and no
+   thread is created. */
 struct t_coroutine {
-  pthread_t thread;
-  pthread_mutex_t lock;
-  pthread_cond_t switched;
-  int running;
+  struct t_context context; /* The coroutine, while it is suspended */
+  struct t_context resumer; /* The code that resumed it, while it runs */
+  void *stack;
   int finished;
   void (*code)(void *environment, uint64_t item);
   void *environment;
   uint64_t item;
+#ifdef T_ADDRESS_SANITIZER
+  const void *resumer_stack;
+  size_t resumer_stack_size;
+#endif
+#ifdef T_THREAD_SANITIZER
+  void *fiber;
+  void *resumer_fiber;
+#endif
 };
 
 static _Thread_local struct t_coroutine *t_coroutine_self;
 
-static void t_coroutine_switch(struct t_coroutine *coroutine, int to_coroutine) {
-  coroutine->running = to_coroutine;
-  pthread_cond_broadcast(&coroutine->switched);
-  while (coroutine->running == to_coroutine && !coroutine->finished)
-    pthread_cond_wait(&coroutine->switched, &coroutine->lock);
+/* Switches from the coroutine to the code that resumed it. A coroutine
+   that has finished never runs again. */
+static void t_coroutine_leave(struct t_coroutine *coroutine) {
+#ifdef T_ADDRESS_SANITIZER
+  void *fake = NULL;
+  __sanitizer_start_switch_fiber(coroutine->finished ? NULL : &fake, coroutine->resumer_stack,
+                                 coroutine->resumer_stack_size);
+#endif
+#ifdef T_THREAD_SANITIZER
+  __tsan_switch_to_fiber(coroutine->resumer_fiber, 0);
+#endif
+  t_context_switch(&coroutine->context, &coroutine->resumer);
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_finish_switch_fiber(fake, &coroutine->resumer_stack,
+                                  &coroutine->resumer_stack_size);
+#endif
 }
 
-static void *t_coroutine_main(void *argument) {
-  struct t_coroutine *coroutine = argument;
-  t_coroutine_self = coroutine;
-  struct t_thread_signal_stack signal_stack;
-  t_thread_signal_stack_install(&signal_stack);
-  pthread_mutex_lock(&coroutine->lock);
-  while (!coroutine->running) pthread_cond_wait(&coroutine->switched, &coroutine->lock);
-  pthread_mutex_unlock(&coroutine->lock);
+/* Where a coroutine starts, on its own stack. It never returns: its
+   function's return switches to the resumer for the last time. */
+static void t_coroutine_entry(void) {
+  struct t_coroutine *coroutine = t_coroutine_self;
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_finish_switch_fiber(NULL, &coroutine->resumer_stack,
+                                  &coroutine->resumer_stack_size);
+#endif
   coroutine->code(coroutine->environment, coroutine->item);
-  t_thread_signal_stack_remove(&signal_stack);
-  pthread_mutex_lock(&coroutine->lock);
   coroutine->finished = 1;
-  coroutine->running = 0;
-  pthread_cond_broadcast(&coroutine->switched);
-  pthread_mutex_unlock(&coroutine->lock);
-  return NULL;
+  t_coroutine_leave(coroutine);
+  t_runtime_compiler_bug();
 }
 
 t_usize t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void *environment,
-                               uint64_t item) {
+                                  uint64_t item) {
   struct t_coroutine *coroutine = malloc(sizeof *coroutine);
   if (coroutine == NULL) t_out_of_memory();
-  pthread_mutex_init(&coroutine->lock, NULL);
-  pthread_cond_init(&coroutine->switched, NULL);
-  coroutine->running = 0;
+  coroutine->stack = t_stack_acquire();
   coroutine->finished = 0;
   coroutine->code = code;
   coroutine->environment = environment;
   coroutine->item = item;
-  pthread_attr_t attributes;
-  t_thread_attributes(&attributes);
-  int failed = pthread_create(&coroutine->thread, &attributes, t_coroutine_main, coroutine);
-  pthread_attr_destroy(&attributes);
-  if (failed) t_out_of_memory();
+  t_context_start(&coroutine->context, coroutine->stack, t_stack_bytes, t_coroutine_entry);
+#ifdef T_THREAD_SANITIZER
+  coroutine->fiber = __tsan_create_fiber(0);
+#endif
   return (t_usize)coroutine;
 }
 
@@ -379,14 +577,26 @@ t_usize t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item)
    coroutine. */
 uint8_t t_runtime_coroutine_resume(t_usize handle) {
   struct t_coroutine *coroutine = (struct t_coroutine *)handle;
-  pthread_mutex_lock(&coroutine->lock);
-  t_coroutine_switch(coroutine, 1);
-  int finished = coroutine->finished;
-  pthread_mutex_unlock(&coroutine->lock);
-  if (!finished) return 1;
-  pthread_join(coroutine->thread, NULL);
-  pthread_mutex_destroy(&coroutine->lock);
-  pthread_cond_destroy(&coroutine->switched);
+  struct t_coroutine *resumer = t_coroutine_self;
+  t_coroutine_self = coroutine;
+#ifdef T_ADDRESS_SANITIZER
+  void *fake = NULL;
+  __sanitizer_start_switch_fiber(&fake, coroutine->stack, t_stack_bytes);
+#endif
+#ifdef T_THREAD_SANITIZER
+  coroutine->resumer_fiber = __tsan_get_current_fiber();
+  __tsan_switch_to_fiber(coroutine->fiber, 0);
+#endif
+  t_context_switch(&coroutine->resumer, &coroutine->context);
+#ifdef T_ADDRESS_SANITIZER
+  __sanitizer_finish_switch_fiber(fake, NULL, NULL);
+#endif
+  t_coroutine_self = resumer;
+  if (!coroutine->finished) return 1;
+#ifdef T_THREAD_SANITIZER
+  __tsan_destroy_fiber(coroutine->fiber);
+#endif
+  t_stack_release(coroutine->stack);
   free(coroutine);
   return 0;
 }
@@ -396,9 +606,7 @@ uint8_t t_runtime_coroutine_resume(t_usize handle) {
 void t_runtime_coroutine_suspend(void) {
   struct t_coroutine *coroutine = t_coroutine_self;
   if (coroutine == NULL) t_runtime_compiler_bug();
-  pthread_mutex_lock(&coroutine->lock);
-  t_coroutine_switch(coroutine, 0);
-  pthread_mutex_unlock(&coroutine->lock);
+  t_coroutine_leave(coroutine);
 }
 
 /* Shared values.
