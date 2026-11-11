@@ -487,9 +487,12 @@ let describe function_ =
         [ ("descriptor", Value Int32, everywhere "int") ]
         ~headers:[ "unistd.h" ]
   | Errno ->
-      row (everywhere "int *") (Points_at Int32) []
-        ~symbol:(by_os (function Linux -> "__errno_location" | Macos -> "__error"))
-        ~headers:[ "errno.h" ]
+      (* The runtime's function, and not the C library's own, which a
+         compiler may assume returns the same address on every call. A task
+         that has parked may go on on another thread, where the address
+         differs. *)
+      row (everywhere "int *") (Points_at Int32) [] ~symbol:(everywhere "t_runtime_errno")
+        ~headers:[]
   | Clock_gettime ->
       row (everywhere "int") (Returns Int32)
         [
@@ -1122,6 +1125,27 @@ let describe function_ =
       | _ -> returns_flag [])
 
 let available system function_ = (describe function_).on system.os
+
+(* Every function is named, so that a new row says whether it blocks. *)
+let blocks = function
+  | Write | Read | Pread | Pwrite | Open | Fsync | Waitpid | Poll | Nanosleep | Connect | Accept
+  | Sendto | Recvfrom | Addresses_of_host ->
+      true
+  | Close | Errno | Clock_gettime | Getentropy | Getenv | Posix_spawnp | Snprintf | Strtod | Strtof
+  | Fork | Pipe | Kill | Sysconf | Exit | Lseek | Ftruncate | Fstat | Stat | Lstat | Mkdir | Remove
+  | Rename | Symlink | Link | Chmod | Utimensat | Readlink | Realpath | Getcwd | Gethostname
+  | Getpid | Proc_pidpath | Fcntl_dupfd_cloexec | Fcntl_setfd_cloexec
+  | Posix_spawn_file_actions_init | Posix_spawn_file_actions_destroy
+  | Posix_spawn_file_actions_adddup2 | Posix_spawn_file_actions_addopen
+  | Posix_spawn_file_actions_addchdir | Getdents64 | Getattrlistbulk | Ioctl_tiocgwinsz | Tcgetattr
+  | Tcsetattr | Socket | Bind | Listen | Getsockname | Getpeername | Shutdown | Setsockopt
+  | Getsockopt | Fcntl_getfl | Fcntl_setfl ->
+      false
+  (* The runtime's own functions that wait park the calling task, or count
+     its thread as blocked, themselves. *)
+  | Signals_wait | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch
+  | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ->
+      false
 
 let of_the_runtime = function
   | Addresses_of_host | Signals_wait | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled
