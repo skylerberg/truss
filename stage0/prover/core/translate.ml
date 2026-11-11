@@ -1953,7 +1953,8 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
   else
     match (operation, operands) with
     | (Add | Subtract | Multiply | Divide | Remainder), [ left; right ] ->
-        (frame, arithmetic context frame node ty operation left right)
+        let operand = match arguments with first :: _ -> Some first | [] -> None in
+        (frame, arithmetic ?operand context frame node ty operation left right)
     | Negate, [ inner ] ->
         let negated = L.Apply ("-", [ inner ]) in
         if bounds ty <> None then
@@ -2020,7 +2021,8 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
         (frame, term)
     | _ -> unsupported span "this operator"
 
-and arithmetic context frame (node : expression) ty (operation : Intrinsic.operation) left right =
+and arithmetic ?operand context frame (node : expression) ty (operation : Intrinsic.operation) left
+    right =
   let source = frame.source in
   let span = at frame node in
   let exact =
@@ -2046,6 +2048,10 @@ and arithmetic context frame (node : expression) ty (operation : Intrinsic.opera
           (L.not_ L.(equal left (Integer low) &&& equal right (int (-1))))
   | Some _ ->
       oblige context frame Overflow span
+        ~fixes:
+          (match operand with
+          | Some operand -> overflow_fix context frame ty operation operand left right
+          | None -> [])
         (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (T.show ty))
         (in_range ty exact)
   | None -> ());
@@ -5399,30 +5405,76 @@ and requires_fix context frame (part : part) (clause : expression) term (values 
         end
     in
     go 0;
-    let required = Buffer.contents buffer in
-    let text = Lazy.force frame.source.text in
-    (* The body's brace starts a line where the header has clauses, and
-       ends its first line where it has none. *)
-    let rec line_brace from =
-      match String.index_from_opt text from '\n' with
-      | Some at when at + 1 < String.length text && text.[at + 1] = '{' -> Some (at + 1)
-      | Some at -> line_brace (at + 1)
-      | None -> None
-    in
-    let edit =
-      match line_brace 0 with
-      | Some at -> Some (Diagnostic.insert at ("  requires " ^ required ^ "\n"))
-      | None -> (
-          match String.index_opt text '{' with
-          | Some at when at > 0 && text.[at - 1] = ' ' ->
-              Some
-                (Diagnostic.replace (Source.span (at - 1) at) ("\n  requires " ^ required ^ "\n"))
-          | _ -> None)
-    in
-    match edit with
-    | Some edit when written <> [] || part.parameters = [] ->
-        [ Diagnostic.fix (Printf.sprintf "Add `requires %s`" required) [ edit ] ]
-    | _ -> []
+    if written <> [] || part.parameters = [] then add_requires frame (Buffer.contents buffer)
+    else []
+
+(* A fix that adds a [requires] to the definition proven, before its body's
+   brace, which starts a line where the header has clauses and ends its
+   first line where it has none. *)
+and add_requires frame required =
+  let text = Lazy.force frame.source.text in
+  let rec line_brace from =
+    match String.index_from_opt text from '\n' with
+    | Some at when at + 1 < String.length text && text.[at + 1] = '{' -> Some (at + 1)
+    | Some at -> line_brace (at + 1)
+    | None -> None
+  in
+  let edit =
+    match line_brace 0 with
+    | Some at -> Some (Diagnostic.insert at ("  requires " ^ required ^ "\n"))
+    | None -> (
+        match String.index_opt text '{' with
+        | Some at when at > 0 && text.[at - 1] = ' ' ->
+            Some (Diagnostic.replace (Source.span (at - 1) at) ("\n  requires " ^ required ^ "\n"))
+        | _ -> None)
+  in
+  match edit with
+  | Some edit -> [ Diagnostic.fix (Printf.sprintf "Add `requires %s`" required) [ edit ] ]
+  | None -> []
+
+(* A fix for an overflow of an operation on the definition's parameters
+   and a literal: the bound the other operand must be within, as a
+   [requires], which an operation [count + 1] on a [UInt8] gives as
+   [requires count <= 254]. *)
+and overflow_fix context frame ty (operation : Intrinsic.operation) (operand : expression) left
+    right =
+  let rec free = function
+    | L.Symbol name -> [ name ]
+    | L.Integer _ | L.Boolean _ | L.Bits _ -> []
+    | L.Apply (_, arguments) -> List.concat_map free arguments
+    | L.Forall _ | L.Exists _ -> [ "" ]
+  in
+  match (bounds ty, right) with
+  | Some (low, high), L.Integer k
+    when frame.source.key = Some context.home
+         && free left <> []
+         && List.for_all (fun name -> List.mem name context.entry) (free left) -> (
+      let text = quote frame.source operand.origin in
+      let text =
+        if
+          String.for_all
+            (fun c ->
+              c = '_' || c = '.'
+              || (c >= 'a' && c <= 'z')
+              || (c >= 'A' && c <= 'Z')
+              || (c >= '0' && c <= '9'))
+            text
+        then text
+        else "(" ^ text ^ ")"
+      in
+      let clause relation limit =
+        if Z.leq low limit && Z.leq limit high then
+          add_requires frame (Printf.sprintf "%s %s %s" text relation (Z.to_string limit))
+        else []
+      in
+      match operation with
+      | Add when Z.sign k > 0 -> clause "<=" (Z.sub high k)
+      | Add when Z.sign k < 0 -> clause ">=" (Z.sub low k)
+      | Subtract when Z.sign k > 0 -> clause ">=" (Z.add low k)
+      | Subtract when Z.sign k < 0 -> clause "<=" (Z.add high k)
+      | Multiply when Z.sign k > 0 && Z.sign low = 0 -> clause "<=" (Z.div high k)
+      | _ -> [])
+  | _ -> []
 
 (* A call to a function whose contract the prover reads: its [requires]
    must hold, its [ensures] holds after, and a recursive call decreases. *)

@@ -3341,6 +3341,22 @@ let () =
          }\n"
         "prover.ensures")
 
+(* Overflow fixes *)
+
+let () =
+  test "an overflow with a literal offers the bound as a requires" (fun () ->
+      let database =
+        Support.setup [ ("app::main", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ]
+      in
+      match check database (Support.module_of "app::main") with
+      | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count <= 254`" -> ()
+      | found ->
+          fail "%s"
+            (String.concat "; "
+               (List.map
+                  (fun (d : Diagnostic.t) ->
+                    String.concat ", " (List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes))
+                  found)))
 (* Counterexample paths *)
 
 let () =
