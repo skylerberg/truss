@@ -477,3 +477,69 @@ test "files within a directory resolve a path to one below the directory, or ref
     }
   }
 }
+
+fn glob_matches(pattern: StringSlice, path: StringSlice) -> Bool {
+  match files::Glob.parse(pattern) {
+    Ok(glob) => glob.matches(Path.new(path))
+    Err(_) => false
+  }
+}
+
+fn glob_error(pattern: StringSlice) -> Option[USize] {
+  match files::Glob.parse(pattern) {
+    Ok(_) => None
+    Err(error) => Some(error.offset)
+  }
+}
+
+test "a glob matches the characters of one name" {
+  assert glob_matches("*.truss", path: "main.truss")
+  assert !glob_matches("*.truss", path: "main.ml")
+  assert !glob_matches("*.truss", path: "source/main.truss")
+  assert glob_matches("ma?n.*", path: "main.truss")
+  assert !glob_matches("ma?n", path: "man")
+  assert glob_matches("*a*b*c*", path: "xxaxxbxxc")
+  assert !glob_matches("*a*b*c*", path: "xxaxxcxxb")
+  assert glob_matches("[a-c]at", path: "bat") && !glob_matches("[a-c]at", path: "dat")
+  assert glob_matches("[!a-c]at", path: "dat") && !glob_matches("[!a-c]at", path: "bat")
+  assert glob_matches("[abc-]x", path: "-x") && glob_matches("[abc-]x", path: "cx")
+  assert glob_matches("\\*literal", path: "*literal") && !glob_matches("\\*literal", path: "xliteral")
+  assert glob_matches("caf?", path: "café") && !glob_matches("caf?", path: "caf")
+  assert glob_matches("*", path: ".hidden")
+  assert !glob_matches("exact", path: "exactly") && !glob_matches("exactly", path: "exact")
+}
+
+test "a glob's ** matches any number of directories" {
+  assert glob_matches("source/**/*.truss", path: "source/main.truss")
+  assert glob_matches("source/**/*.truss", path: "source/a/b/c/list.truss")
+  assert !glob_matches("source/**/*.truss", path: "tests/main.truss")
+  assert glob_matches("**/README", path: "README") && glob_matches("**/README", path: "a/b/README")
+  assert glob_matches("a/**", path: "a") && glob_matches("a/**", path: "a/b/c")
+  assert glob_matches("**/a/**/b", path: "x/a/y/z/b") && !glob_matches("**/a/**/b", path: "x/b/y/a")
+  assert glob_matches("/etc/*.conf", path: "/etc/app.conf") && !glob_matches("/etc/*.conf", path: "etc/app.conf")
+}
+
+test "parse rejects a glob that is not valid and says where" {
+  assert glob_error("a**") == Some(1)
+  assert glob_error("**a/b") == Some(0)
+  assert glob_error("x/[abc") == Some(2)
+  assert glob_error("[]") == Some(0)
+  assert glob_error("trailing\\") == Some(8)
+  assert glob_error("fine/**/*.[ch]") is None
+  assert "${files::GlobError(offset: 3)}" == "the glob is not valid at byte 3"
+}
+
+test "find lists the paths below a directory that a glob matches" {
+  var memory = project()
+  provide mut memory {
+    assert files::Glob.parse("**/*.truss") is Ok(glob)
+      && glob.find(path_of("/project")) is Ok(found)
+      && found.length() == 2
+      && "${found[0]}" == "/project/source/main.truss"
+      && "${found[1]}" == "/project/source/library/list.truss"
+    assert files::Glob.parse("/project/*") is Ok(absolute)
+      && absolute.find(path_of("/project")) is Ok(top)
+      && top.length() == 2
+    assert files::Glob.parse("*") is Ok(star) && star.find(path_of("/none")) is Err(NotFound)
+  }
+}
