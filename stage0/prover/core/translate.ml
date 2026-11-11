@@ -70,9 +70,10 @@ type obligation = {
       (** The constants of each [O(...)] bound the query mentions, which each try pins. *)
   evaluation : evaluation option;  (** Running code that decides it, where there is any. *)
   known_calls : known_call list;  (** The calls its query mentions that running code can give. *)
-  decisions : (string * L.term * L.term) list;
-      (** Each [if] of the definition before it, in order: its condition's text, where it is
-          reached, and its condition, whose values a counterexample tells. *)
+  decisions : (string * string option * L.term * L.term) list;
+      (** Each [if] and [match] arm of the definition before it, in order: what to say where its
+          condition holds and, for an [if], where it does not, where it is reached, and its
+          condition, whose values a counterexample tells. *)
   hidden : (string * bool) list;
       (** The callees its query mentions whose bodies would define them but are not visible in this
           package, each with whether it can be marked [transparent], as a method of an [impl]
@@ -255,7 +256,8 @@ type context = {
       (** Each type's elements and model as a buffer's, where it is one. *)
   mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
   mutable known_calls : known_call list;  (** Each call running code can give a value. *)
-  mutable decisions : (string * L.term * L.term) list;  (** Each [if] read so far, reversed. *)
+  mutable decisions : (string * string option * L.term * L.term) list;
+      (** Each [if] and [match] arm read so far, reversed. *)
   mutable iteration_returns : (Core.origin * T.ty option) list;
       (** Each [return] from an iteration of a [concurrent for], by its loop, with the type of its
           value: taken where the loop ends. *)
@@ -2051,9 +2053,14 @@ and arithmetic context frame (node : expression) ty (operation : Intrinsic.opera
 
 and if_ context frame (node : expression) condition (then_ : block) (else_ : block option) =
   let frame, test = value context frame condition in
-  if frame.checking && frame.source.key = Some context.home then
-    context.decisions <-
-      (quote frame.source condition.origin, frame.condition, test) :: context.decisions;
+  (if frame.checking && frame.source.key = Some context.home then
+     let text = quote frame.source condition.origin in
+     context.decisions <-
+       ( Printf.sprintf "`%s` is true" text,
+         Some (Printf.sprintf "`%s` is false" text),
+         frame.condition,
+         test )
+       :: context.decisions);
   let then_result = block_value context (restrict frame test) then_ in
   let otherwise = restrict frame (L.not_ test) in
   let else_result =
@@ -5101,6 +5108,19 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
                 (L.Boolean true, current) arm_.patterns scrutinee_values
             in
             let entered = restrict bound condition in
+            (match arm_.patterns with
+            | _ :: _ when current.checking && current.source.key = Some context.home ->
+                context.decisions <-
+                  ( Printf.sprintf "the arm `%s` is taken"
+                      (String.concat ", "
+                         (List.map
+                            (fun (pattern : pattern) -> quote current.source pattern.origin)
+                            arm_.patterns)),
+                    None,
+                    current.condition,
+                    condition )
+                  :: context.decisions
+            | _ -> ());
             let entered, passed_over =
               match arm_.guard with
               | Some guard ->

@@ -1315,8 +1315,9 @@ Each obligation the prover could not prove is an error, with the shared
   its fields. An agent can turn these values into a test, which then fails
   at its run-time check if the code is wrong.
 - **The path.** With the values, each `if` the counterexample's path
-  reaches, by whether its condition holds there, asked of the same model:
-  "On that path, `up` is true, `count > 100` is true." A condition is asked
+  reaches, by whether its condition holds there, and each arm of a `match`
+  it takes, asked of the same model: "On that path, `up` is true,
+  `count > 100` is true", or "the arm `Some(count)` is taken." A condition is asked
   by its term, not added to the query, so a query that proves keeps its
   text.
 - **A note at the clause.** A call's `requires` that may not hold has a
@@ -1462,8 +1463,7 @@ test the prover itself:
   sums. Saying it there, for every measure, would be one more quantified
   fact at every index into a list that is changed.
 - **More in a diagnostic.** A note at a clause in another file, which a
-  message names by its file and line instead, the branches of a `match`
-  on a counterexample's path, as its `if`s are listed, and a
+  message names by its file and line instead, and a
   fix that adds an obligation about parameters alone to the function as a
   `requires` for obligations other than a callee's `requires`, such as an
   overflow, which needs the obligation written back as Truss. DESIGN.md's

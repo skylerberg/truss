@@ -250,17 +250,18 @@ let counterexample members (obligation : Translate.obligation) answer_values =
           (List.assoc_opt symbol answer_values))
       (List.rev obligation.values @ List.rev obligation.locals)
   in
-  (* Each [if] the path reaches, by whether its condition holds there. *)
+  (* Each [if] the path reaches, by whether its condition holds there, and
+     each arm of a [match] it takes. *)
   let path =
     List.filter_map Fun.id
       (List.mapi
-         (fun index (text, _, _) ->
+         (fun index (holding, failing, _, _) ->
            match
              ( List.assoc_opt (Printf.sprintf "reached.%d" index) answer_values,
                List.assoc_opt (Printf.sprintf "condition.%d" index) answer_values )
            with
-           | Some "true", Some holds when holds = "true" || holds = "false" ->
-               Some (Printf.sprintf "`%s` is %s" text holds)
+           | Some "true", Some "true" -> Some holding
+           | Some "true", Some "false" -> failing
            | _ -> None)
          obligation.decisions)
   in
@@ -741,7 +742,7 @@ let question_request =
                 if question.with_locals then
                   List.concat
                     (List.mapi
-                       (fun index (_, reached, condition) ->
+                       (fun index (_, _, reached, condition) ->
                          [
                            (Printf.sprintf "reached.%d" index, reached);
                            (Printf.sprintf "condition.%d" index, condition);

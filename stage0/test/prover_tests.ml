@@ -3360,6 +3360,18 @@ let () =
            }\n"
       in
       if not (contains found "On that path, `up` is true, `count > 100` is true.") then
+        fail "message %S" found);
+  test "a counterexample says which arm of a match its path takes" (fun () ->
+      let found =
+        message
+          "fn bump(found: Option[UInt8]) -> UInt8 {\n\
+          \  match found {\n\
+          \    Some(count) => count + 1\n\
+          \    None => 0\n\
+          \  }\n\
+           }\n"
+      in
+      if not (contains found "On that path, the arm `Some(count)` is taken.") then
         fail "message %S" found)
 
 (* Definitions under a quantifier *)
