@@ -350,16 +350,20 @@ The engine relies on these, and its tests and its audit check them:
   timestamps. Early cutoff and
   fingerprints compare values, so an unstable value would defeat both.
 - **Its value holds no functions,** unless the query gives its own equality.
-  A value that holds functions has no fingerprint, and is computed again
-  where it is needed.
+  A value that holds a function has no bytes, so it is *opaque*: its
+  fingerprint is a nonce, equal to no other computation's. It is never a
+  fact, and what reads it is computed again whenever it is.
 - **It answers for any key.** A query may be asked for a result that nothing
   will read once the state is up to date, so it must give an answer, such as
   `None`, for a key that no longer names anything.
 - **An exception is an outcome.** A query that raises keeps its exception
   like a value, so its readers see the same exception until something it read
-  changes. An exception has no fingerprint. Absence is better told with an
-  option, and the stages do so, except for an input that is not set, which
-  `Query.get` reports as `Not_found`.
+  changes. An exception's fingerprint is the hash of its constructor's name
+  and its arguments, so a result that raises as it did before stops a change
+  like any result that comes out the same. Its bytes are never stored: a
+  state opened later holds the fingerprint, and computes the result again
+  when something needs the exception itself. Absence is better told with an
+  option, and the stages do so.
 
 ## Inputs
 
@@ -418,10 +422,10 @@ rebuilt from the facts and the files.
 ### Fingerprints
 
 A node's *fingerprint* is the BLAKE3 hash of its value's bytes. An input
-that is set has one, and so has every result that is a value its bytes can
-be made from. A result that raised, or whose value holds functions, has
-none, and neither has an input that is not set, which is told apart from one
-that is.
+that is set has one, and so has every result: a value's is the hash of its
+bytes, an exception's the hash of its name and arguments, and an opaque
+outcome's a nonce. An input that is not set has none, and is told apart
+from one that is.
 
 - **Every hash is BLAKE3,** written in stage0 from the specification and
   tested against the official test vectors, since `digestif`, the OCaml
@@ -458,8 +462,9 @@ A saved result is kept as a *fact*: its fingerprint, under a key made of
 - each node the result read, in the order they were first read, with its
   fingerprint
 
-A read that has no fingerprint cannot be compared, so it is gone through, to
-what it read in turn.
+A result that raised, or that is opaque, is no fact: there is no value to
+give for it. A result that read an opaque result is none either, since that
+read's fingerprint will not be met again.
 
 - **A fact found is the result.** It was computed from reads with exactly
   these fingerprints, and a query is a function of what it reads, so

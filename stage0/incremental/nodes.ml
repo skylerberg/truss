@@ -84,7 +84,11 @@ and node = {
   mutable verified_at : int;
   mutable root : bool;  (** Demanded by a driver: maintained across changes, and never collected *)
   mutable alive : bool;
-  mutable fingerprint : string option;  (** The name of its value in the store *)
+  mutable fingerprint : string option;
+      (** The hash of its outcome's bytes, worked out when first needed *)
+  mutable stored : bool;  (** Whether the store has its value's bytes, under its fingerprint *)
+  mutable opaque : bool;
+      (** Whether its outcome has no bytes, so that its fingerprint is of this one computation *)
   mutable identity : string option;
   mutable written : bool;  (** In the chain of artifacts *)
   mutable superseding : bool;  (** In one of the chain's differences *)
@@ -288,9 +292,6 @@ let subject (node : node) =
 let is_input (node : node) = match node.cell with Input _ -> true | Result _ | Unfilled -> false
 let is_fixed (node : node) = node.engine.fixed
 
-let keeps_bytes (node : node) =
-  match node.cell with Input _ -> true | Result (query, _) -> query.saved | Unfilled -> false
-
 (* Bytes are written without sharing, so that they follow from the value
    alone: which of a value's parts are one block in memory differs between a
    value computed from results in memory and the same value computed from
@@ -329,6 +330,8 @@ let new_node engine ~phase ~below =
       root = false;
       alive = true;
       fingerprint = None;
+      stored = false;
+      opaque = false;
       identity = None;
       written = false;
       superseding = false;

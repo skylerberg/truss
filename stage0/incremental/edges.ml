@@ -82,8 +82,7 @@ let commit_reads engine (node : node) (reads : node list) =
         remove_reader engine read node;
         defer_collection engine read
       end)
-    old;
-  List.length old <> List.length reads || List.exists2 ( != ) old reads
+    old
 
 (* Copies a base's node into an engine, where a change may have reached it.
    The copy holds the same result and reads what the base's node read, as
@@ -106,6 +105,8 @@ let shadow engine (base : node) =
         | Unfilled -> invalid_arg "Incremental: a node with no cell"
       in
       own.fingerprint <- base.fingerprint;
+      own.stored <- base.stored;
+      own.opaque <- base.opaque;
       own.identity <- base.identity;
       own.root <- base.root;
       own.written <- true;

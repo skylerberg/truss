@@ -65,7 +65,7 @@ and verify : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cel
     node.verified_at <- engine.clock;
     engine.tally.confirmations <- engine.tally.confirmations + 1
   end
-  else if not (adopt engine query cell (traced_reads engine node)) then compute engine query cell
+  else if not (adopt engine query cell (current_reads engine node)) then compute engine query cell
 
 and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cell -> unit =
  fun engine query cell ->
@@ -101,7 +101,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
         end)
       (List.rev frame.read)
   in
-  if commit_reads engine node reads then resave engine node;
+  commit_reads engine node reads;
   (* A result whose old value is in the store and was never read is
      compared by fingerprint, without reading the old value. *)
   let first = cell.outcome = None && node.fingerprint = None in
@@ -111,7 +111,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
         let changed = not (same_outcomes query old outcome) in
         if changed then begin
           cell.outcome <- Some outcome;
-          node.fingerprint <- None
+          forget_fingerprint node
         end;
         changed
     | None, None ->
@@ -119,7 +119,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
         true
     | None, Some old -> (
         cell.outcome <- Some outcome;
-        node.fingerprint <- None;
+        forget_fingerprint node;
         match fingerprint engine node with Some now -> now <> old | None -> true)
   in
   if changed then begin
@@ -176,10 +176,12 @@ and adopt :
             | None -> false
             | Some found ->
                 let unchanged = had && fingerprint engine node = Some found in
-                if commit_reads engine node (List.map fst parts) then resave engine node;
+                commit_reads engine node (List.map fst parts);
                 if not unchanged then begin
                   cell.outcome <- None;
                   node.fingerprint <- Some found;
+                  node.stored <- true;
+                  node.opaque <- false;
                   node.changed_at <- tick engine;
                   engine.changed <- node :: engine.changed;
                   engine.tally.changes <- engine.tally.changes + 1;
