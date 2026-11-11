@@ -808,6 +808,16 @@ let rec structural context ?(seen = []) (ty : T.ty) =
 
 (* Whether a term is a value of a type: within its bounds, and for a
    [Character], a Unicode scalar value, so never a surrogate. *)
+(* The size of a built-in scalar on the 64-bit targets the address space
+   is taken from. A type of another size, which may be zero, has none. *)
+let scalar_bytes element : int option =
+  match T.builtin_of element with
+  | Some (Int8 | UInt8 | Bool) -> Some 1
+  | Some (Int16 | UInt16) -> Some 2
+  | Some (Int32 | UInt32 | Float32 | Character) -> Some 4
+  | Some (Int64 | UInt64 | USize | ISize | Float64) -> Some 8
+  | _ -> None
+
 let in_range ty term =
   match bounds ty with
   | Some (low, high) ->
@@ -2925,15 +2935,20 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
                 kind)
             kind);
       L.Symbol (symbol operation)
-  | View_address, element :: _ when T.equal element (T.builtin UInt8) -> (
-      (* A view's bytes lie in memory, so they end within the address space,
-         and a view with any is not at zero. *)
-      match operands with
-      | [ view ] ->
+  | View_address, element :: _ when scalar_bytes element <> None -> (
+      (* A view's elements lie in memory, so they end within the address
+         space, and a view with any is not at zero. *)
+      match (operands, scalar_bytes element) with
+      | [ view ], Some bytes ->
           let length = sequence_length context element (buffer_model context View element view) in
           assume context frame
             L.(
-              Apply ("<=", [ Apply ("+", [ known; length ]); Integer (Z.shift_left Z.one 64) ])
+              Apply
+                ( "<=",
+                  [
+                    Apply ("+", [ known; Apply ("*", [ int bytes; length ]) ]);
+                    Integer (Z.shift_left Z.one 64);
+                  ] )
               &&& (Apply (">", [ length; int 0 ]) ==> Apply (">=", [ known; int 1 ])));
           known
       | _ -> known)

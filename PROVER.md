@@ -1414,8 +1414,10 @@ A proof is as trustworthy as:
   answer for the whole run, and at most one operating system and one
   architecture is the one; a handle's descriptor is a function of the
   handle, the one `handle_from` made it from; an environment entry, a C
-  string without its end, has no zero byte; and a view of bytes ends
-  within the address space, and is not at zero where it has any
+  string without its end, has no zero byte; and a view of a built-in
+  scalar, an integer, a float, a `Bool`, or a `Character`, ends below
+  2^64 with each element at its size on a 64-bit target, which also holds
+  on a 32-bit target, and is not at zero where it has any elements
 - the standard library's contracts whose bodies end in any other
   intrinsic, which the prover knows only by its type, so they are relied
   on and not proven
@@ -1469,8 +1471,8 @@ test the prover itself:
 
 - **Contracts for the intrinsic module's system calls.** What a C function
   returns beyond what its row of the table says is known only by its type,
-  and so is the address of a view of anything but bytes, whose elements'
-  size the prover does not know.
+  and so is the address of a view of any type but a built-in scalar, whose
+  size is the code generator's and may be zero.
 - **Facts under a quantifier.** A pure callee's contract and definition
   are stated once for every argument, but any other fact that names a
   quantifier's bound name, such as what is known of a value made in the
