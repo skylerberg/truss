@@ -343,7 +343,7 @@ public transparent fn Slice[Element: Ordered].is_sorted(self) -> Bool
   forall i in 1..self.length() => self[i - 1] <= self[i]
 }
 
-theorem at_most_then_less[Element: Ordered](first: Element, second: Element, third: Element)
+internal theorem at_most_then_less[Element: Ordered](first: Element, second: Element, third: Element)
   requires first <= second
   requires second < third
   ensures first < third
@@ -351,7 +351,7 @@ theorem at_most_then_less[Element: Ordered](first: Element, second: Element, thi
 {
 }
 
-theorem less_then_at_most[Element: Ordered](first: Element, second: Element, third: Element)
+internal theorem less_then_at_most[Element: Ordered](first: Element, second: Element, third: Element)
   requires first < second
   requires second <= third
   ensures first < third
@@ -359,7 +359,7 @@ theorem less_then_at_most[Element: Ordered](first: Element, second: Element, thi
 {
 }
 
-theorem less_is_not_equal[Element: Ordered](first: Element, second: Element)
+internal theorem less_is_not_equal[Element: Ordered](first: Element, second: Element)
   requires first < second
   ensures !(first == second)
   ensures !(second == first)
@@ -367,16 +367,30 @@ theorem less_is_not_equal[Element: Ordered](first: Element, second: Element)
 {
 }
 
-theorem greater_is_less_reversed[Element: Ordered](first: Element, second: Element)
+internal theorem greater_is_less_reversed[Element: Ordered](first: Element, second: Element)
   requires first.compare(second) == Ordering.Greater
   ensures second < first
   cost time finite
 {
 }
 
-theorem equal_by_compare[Element: Ordered](first: Element, second: Element)
+internal theorem equal_by_compare[Element: Ordered](first: Element, second: Element)
   requires first.compare(second) == Ordering.Equal
   ensures first == second
+  cost time finite
+{
+}
+
+internal theorem equal_is_at_most_reversed[Element: Ordered](first: Element, second: Element)
+  requires first.compare(second) == Ordering.Equal
+  ensures second <= first
+  cost time finite
+{
+}
+
+internal theorem at_most_is_not_less_reversed[Element: Ordered](first: Element, second: Element)
+  requires first <= second
+  ensures !(second < first)
   cost time finite
 {
 }
