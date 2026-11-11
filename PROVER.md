@@ -486,7 +486,8 @@ and of Why3's, cut down to what Truss needs. The walk is in the passive form
 of Flanagan and Saxe ("Avoiding Exponential Explosion", 2001): every value
 is a term, every fact is guarded by the condition of the path it holds on,
 and where paths join, each local that differs gets a fresh symbol that each
-path defines. So what a body gives its queries grows with the body, not
+path defines. So does the joined condition, which every later fact on the
+path names instead of repeating each branch's condition. So what a body gives its queries grows with the body, not
 with its number of paths. No step goes around a loop: each loop is cut at
 its head by its invariant, as below. The right side of `&&`, `||`, or
 `==>` runs on only one path, so when it changes a local, as a call with a
