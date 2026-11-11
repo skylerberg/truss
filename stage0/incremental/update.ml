@@ -224,30 +224,47 @@ let lowest engine =
   in
   find 0
 
-let rec settle engine =
+(* Marks what reads a result that changed, for one phase. *)
+let mark_seeds engine phase =
+  let seeds = engine.seeds.(phase) in
+  engine.seeds.(phase) <- [];
+  engine.waiting <- engine.waiting - List.length seeds;
+  List.iter (mark engine) seeds
+
+(* Brings the marked results of one phase up to date, newest first: a result
+   marked later reads one marked earlier, and checking it may show that the
+   earlier one is no longer read. A result leaves the queue only once it is
+   no longer marked. One whose query raises a fatal exception goes back, so
+   that it is never written as if it were current. *)
+let rec settle_marks engine phase =
+  match engine.marks.(phase) with
+  | [] -> ()
+  | node :: rest ->
+      engine.marks.(phase) <- rest;
+      engine.waiting <- engine.waiting - 1;
+      if node.alive && node.marked then (
+        (* Nothing reads it and no request kept it, so it is dropped: left
+            marked, it would be written and opened as if it were current. *)
+        try if wanted node then ensure engine node else consider engine node
+        with fatal ->
+          engine.marks.(phase) <- node :: engine.marks.(phase);
+          engine.waiting <- engine.waiting + 1;
+          raise fatal);
+      sweep engine;
+      settle_marks engine phase
+
+(* Brings the phases up to and including [through] up to date. The later
+   ones keep what is queued for them. *)
+let rec settle ?(through = phases - 1) engine =
   if engine.waiting > 0 then
     match lowest engine with
     | None -> engine.waiting <- 0
+    | Some phase when phase > through -> ()
     | Some phase ->
-        let seeds = engine.seeds.(phase) in
-        engine.seeds.(phase) <- [];
-        engine.waiting <- engine.waiting - List.length seeds;
-        List.iter (mark engine) seeds;
-        (* Newest first: a result marked later reads one marked earlier, and
-           checking it may show that the earlier one is no longer read. *)
-        let marked = engine.marks.(phase) in
-        engine.marks.(phase) <- [];
-        engine.waiting <- engine.waiting - List.length marked;
-        (* Nothing reads it and no request kept it, so it is dropped: left
-           marked, it would be written and opened as if it were current. *)
-        List.iter
-          (fun (node : node) ->
-            if node.alive && node.marked then
-              if wanted node then ensure engine node else consider engine node;
-            sweep engine)
-          marked;
+        mark_seeds engine phase;
+        settle_marks engine phase;
         sweep engine;
-        settle engine
+        settle ~through engine
 
 let check_can_change engine =
   if engine.frozen then invalid_arg "Incremental: a frozen engine cannot change";
