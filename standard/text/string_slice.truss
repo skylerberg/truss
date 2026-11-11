@@ -1,5 +1,6 @@
 use standard::core
 use standard::intrinsic
+use standard::text::unicode_tables
 
 public fn StringSlice.is_empty(self) -> Bool
   ensures result == (self.length() == 0)
@@ -922,16 +923,95 @@ public fn StringSlice.reversed(self) -> String
   String(storage: own output)
 }
 
-public fn StringSlice.to_uppercase(self) -> String
-  cost time O(self.length())
+internal fn push_scalar(output: mut String, code: UInt32)
+  cost amortized time O(1)
 {
-  todo
+  if code <= 1114111 && (code < 55296 || code > 57343) {
+    mut output.push_character(intrinsic::convert(code))
+  }
+}
+
+internal fn push_expansion(output: mut String, expansion: unicode_tables::Expansion)
+  cost amortized time O(1)
+{
+  push_scalar(mut output, code: expansion.first)
+  if expansion.second != 0 {
+    push_scalar(mut output, code: expansion.second)
+  }
+  if expansion.third != 0 {
+    push_scalar(mut output, code: expansion.third)
+  }
+}
+
+public fn StringSlice.to_uppercase(self) -> String
+  cost time finite
+{
+  var output = ""
+  var offset: USize = 0
+  while offset < self.length()
+    invariant offset <= self.length()
+    decreases self.length() - offset
+  {
+    let decoded = self.decode(offset)
+    match unicode_tables::uppercase_expansion_of(decoded.character.code()) {
+      Some(expansion) => push_expansion(mut output, expansion: expansion)
+      None => mut output.push_character(decoded.character.to_uppercase())
+    }
+    offset += decoded.length
+  }
+  output
 }
 
 public fn StringSlice.to_lowercase(self) -> String
-  cost time O(self.length())
+  cost time finite
 {
-  todo
+  var output = ""
+  var after_sigma = ""
+  var sigma_is_undecided = false
+  var follows_cased = false
+  var offset: USize = 0
+  while offset < self.length()
+    invariant offset <= self.length()
+    decreases self.length() - offset
+  {
+    let decoded = self.decode(offset)
+    let code = decoded.character.code()
+    let cased = unicode_tables::is_cased(code)
+    let ignorable = unicode_tables::is_case_ignorable(code)
+    if !ignorable && sigma_is_undecided {
+      if cased {
+        mut output.push("σ")
+      } else {
+        mut output.push("ς")
+      }
+      mut output.push(after_sigma.slice())
+      after_sigma = ""
+      sigma_is_undecided = false
+    }
+    if code == 931 {
+      if follows_cased {
+        sigma_is_undecided = true
+      } else {
+        mut output.push("σ")
+      }
+    } else if sigma_is_undecided {
+      mut after_sigma.push_character(decoded.character.to_lowercase())
+    } else {
+      match unicode_tables::lowercase_expansion_of(code) {
+        Some(expansion) => push_expansion(mut output, expansion: expansion)
+        None => mut output.push_character(decoded.character.to_lowercase())
+      }
+    }
+    if !ignorable {
+      follows_cased = cased
+    }
+    offset += decoded.length
+  }
+  if sigma_is_undecided {
+    mut output.push("ς")
+    mut output.push(after_sigma.slice())
+  }
+  output
 }
 
 public fn StringSlice.to_ascii_uppercase(self) -> String
