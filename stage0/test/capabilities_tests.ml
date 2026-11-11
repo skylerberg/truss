@@ -806,29 +806,12 @@ let () =
          \  kept = tick\n\
          \  kept()\n\
           }\n"));
-  test
-    "a type's capability parameter is instantiated with the capabilities of its fields' functions"
-    (fun () ->
-      let holder =
-        ticks ^ "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n\n"
-      in
-      one_diagnostic
-        (holder
-       ^ "fn f() -> Instant {\n\
-         \  let holder = Holder(action: tick)\n\
-         \  let action = holder.action\n\
-         \  action()\n\
-          }\n")
-        "capabilities.not_available";
-      fine
-        (holder
-       ^ "fn f() -> Instant\n\
-         \  uses Clock\n\
-          {\n\
-         \  let holder = Holder(action: tick)\n\
-         \  let action = holder.action\n\
-         \  action()\n\
-          }\n"))
+  test "a type and a trait cannot take a capability parameter" (fun () ->
+      one_diagnostic "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n"
+        "types.misplaced_capability_parameter";
+      one_diagnostic "trait Runs[capability Granted] {\n  fn run(self)\n    uses Granted\n}\n"
+        "types.misplaced_capability_parameter";
+      fine "type Holder(action: (fn() -> Instant uses Clock))\n")
 
 (* Function values and the costs their types promise *)
 

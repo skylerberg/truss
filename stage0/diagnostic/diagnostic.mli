@@ -164,6 +164,7 @@ module Code : sig
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
+    | Misplaced_capability_parameter
     | Arity
     | Unsatisfied_bound
     | Private_in_public

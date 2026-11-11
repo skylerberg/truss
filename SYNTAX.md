@@ -1123,6 +1123,10 @@ public fn for_each[Item, capability Granted](
 `visit` promises to terminate, so `for_each` can promise a `time` bound.
 `time(visit)` stands for the time one call to `visit` takes.
 
+Only a function or a method takes a capability parameter. A type that holds
+a function writes the capabilities in the field's type, as in
+`type Timer(tick: (fn() uses Clock))`.
+
 A function-typed parameter can be called but not kept, so it accepts lambdas
 that capture local variables. To store the function, declare the parameter
 `own`. It then accepts only functions that capture nothing, such as named

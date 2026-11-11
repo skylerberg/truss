@@ -523,9 +523,9 @@ different types, as in Rust.
 - **The expected type must list every capability that the function uses.** A
   function that `uses Clock` is never a `fn()`, in an argument, a `let`, a
   `return`, a field, or an assignment. Where the expected type lists a
-  capability parameter of the callee or of the constructed type, the parameter
-  is instantiated with the capabilities that the function uses, as [What code
-  may call](#what-code-may-call) describes.
+  capability parameter of the callee, the parameter is instantiated with the
+  capabilities that the function uses, as [What code may
+  call](#what-code-may-call) describes.
 - **The checker accepts weaker costs that the constants of the two types
   show:** an exact count is within any bound that it does not exceed, a count
   is `O(...)`, and every bound is `finite`. The type of a named function has
@@ -1741,11 +1741,14 @@ the error is fixed.
 - **A lambda's body can use the capabilities in the `uses` of the lambda's
   type,** which is the function type that the lambda is checked against.
 - **A capability parameter is instantiated with a set of capabilities, which is
-  inferred at each use of its function, method, or type.** A call of
+  inferred at each call of its function or method.** A call of
   `for_each[capability Granted]` has its own set for `Granted`, as it has its
-  own type for a type parameter. So does a value of a type that has a
-  capability parameter. The set appears in every type that was instantiated
-  from that use: the function type that a lambda is checked against, the type
+  own type for a type parameter. Only a function or a method takes a
+  capability parameter: a type argument is a type or a `USize` value, so no
+  argument could be written for a capability parameter of a type or of a
+  trait, and no signature or field could name the type
+  (`types.misplaced_capability_parameter`). The set appears in every type
+  that was instantiated from that use: the function type that a lambda is checked against, the type
   of the call's result, and the type of a local that stores the result. It is
   the least set that satisfies the constraints on it: the capabilities that
   each function converted to such a type uses beyond the `uses` of the type,

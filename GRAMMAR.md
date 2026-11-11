@@ -406,6 +406,8 @@ bound            = path_type { "+" path_type } ;
 ```
 
 A `LOWER_NAME` generic parameter is a value, and its type must be `USize`.
+Only a function, a method, or a theorem takes a `capability` parameter; on a
+type or a trait it is an error of the type checker.
 
 ### Traits, implementations, and capabilities
 
