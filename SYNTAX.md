@@ -1475,7 +1475,9 @@ A yielding method gives out parts one after another:
 - **A cursor of a method with a `uses` clause needs those capabilities at each
   `next`,** and in a `for` loop over it, because `next` runs the method's
   code. Each `next` uses the implementation that is provided where `next`
-  is called, not the one that was provided where the cursor was made. The
+  is called, not the one that was provided where the cursor was made. Two
+  cursors that are advanced in turn share that implementation, so two
+  cursors that each read a line from the console read alternate lines. The
   cursor's `Uses` is the method's `uses` clause, so a generic function that
   advances a cursor declares `uses Source.Uses`, and a call of it with this
   cursor needs the same capabilities (see
