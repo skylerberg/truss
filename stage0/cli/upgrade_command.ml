@@ -14,7 +14,7 @@ let wanted text =
         (String.sub text 0 at, Some (String.sub text (at + 1) (String.length text - at - 1)))
     | None -> (text, None)
   in
-  (match Type_checker.Manifest.name_parts name with
+  (match Manifest.name_parts name with
   | Some [ _; _ ] -> ()
   | _ ->
       Project.cannot_run

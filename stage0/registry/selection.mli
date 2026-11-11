@@ -5,7 +5,7 @@ type package = {
   name : string;
   version : Version.t;
   hash : string;
-  manifest : Type_checker.Manifest.package;
+  manifest : Manifest.package;
   record : Lock.t;  (** What the package was published with *)
 }
 (** A registry package of a build. *)
@@ -23,8 +23,7 @@ val choose :
   lock:Lock.t ->
   roots:(string * string) list ->
   local:(string -> bool) ->
-  load:
-    (string -> Version.t -> hash:string -> (Type_checker.Manifest.package * Lock.t, string) result) ->
+  load:(string -> Version.t -> hash:string -> (Manifest.package * Lock.t, string) result) ->
   package list * problem list
 (** The registry packages of a build, in order of name. [roots] are the dependencies of the
     project's packages, each with the package that names it, [local] says whether a name is a
@@ -33,12 +32,12 @@ val choose :
     published package that its record names, and not one that only its tests use, which the record
     leaves out. *)
 
-val holds : project:Workspace.dependency list -> package list -> (string * string list) list
+val holds : project:Manifest.dependency list -> package list -> (string * string list) list
 (** The capabilities each package of a build holds: those its users in the build grant it, of the
     ones each user holds itself. A project's own packages, whose entries [project] is, hold
     everything. *)
 
-val lock : project:Workspace.dependency list -> package list -> Lock.t
+val lock : project:Manifest.dependency list -> package list -> Lock.t
 (** The lock file of a build: a line for each of its registry packages. *)
 
 val differences : written:Lock.t -> current:Lock.t -> string list

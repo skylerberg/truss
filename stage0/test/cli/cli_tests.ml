@@ -371,8 +371,8 @@ let () =
              (Database.problems project.session))
       then fail "problems: %s" (String.concat "; " (Database.problems project.session)));
   test "a time limit of 0 is malformed, at its line" (fun () ->
-      match Type_checker.Manifest.parse "[package]\nname = \"a\"\n[test]\ntime_limit = 0\n" with
-      | exception Type_checker.Manifest.Malformed (4, _) -> ()
+      match Manifest.parse "[package]\nname = \"a\"\n[test]\ntime_limit = 0\n" with
+      | exception Manifest.Malformed (4, _) -> ()
       | _ -> fail "accepted")
 
 (* Checking and fixing *)

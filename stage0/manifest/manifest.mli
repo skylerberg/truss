@@ -1,10 +1,12 @@
 (** Reading a manifest, [truss.toml], in the part of TOML a manifest is written in. *)
 
+type dependency = { package : string; capabilities : string list }
+(** A dependency, with the capabilities it is granted. *)
+
 type package = {
   name : string;  (** One name, or an owner and a name joined by [::] *)
   truss : string option;  (** The version of Truss the package is written for *)
-  dependencies : Workspace.dependency list;
-      (** Each dependency's name and the capabilities it is granted *)
+  dependencies : dependency list;  (** Each dependency's name and the capabilities it is granted *)
   usize_bits : int;  (** 64 when [[package]] says [usize_bits = 64], and 32 otherwise *)
 }
 

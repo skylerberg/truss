@@ -20,6 +20,7 @@
   inspect
   interface
   type_checker
+  manifest
   registry
   memory_layout
   libc

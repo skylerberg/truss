@@ -2,7 +2,7 @@ type package = {
   name : string;
   version : Version.t;
   hash : string;
-  manifest : Type_checker.Manifest.package;
+  manifest : Manifest.package;
   record : Lock.t;
 }
 
@@ -53,14 +53,14 @@ let choose ~lock ~roots ~local ~load =
         | Some (version, hash) -> (
             match load name version ~hash with
             | Error reason -> problem (Cannot_load { name; version; reason })
-            | Ok ((manifest : Type_checker.Manifest.package), record) ->
+            | Ok ((manifest : Manifest.package), record) ->
                 found := { name; version; hash; manifest; record } :: !found;
                 List.iter (record_of ~recorded_by:name) record;
                 (* A dependency that a package's record does not name is one
                    only its tests use, which a build that uses the package
                    does not take on. *)
                 List.iter
-                  (fun (dependency : Workspace.dependency) ->
+                  (fun (dependency : Manifest.dependency) ->
                     if Lock.find record dependency.package <> None then
                       visit name dependency.package)
                   manifest.dependencies)
@@ -79,7 +79,7 @@ let holds ~project packages =
   let held = Hashtbl.create 16 in
   let of_ name = Option.value ~default:[] (Hashtbl.find_opt held name) in
   let in_build name = List.exists (fun package -> package.name = name) packages in
-  let grant ~holder (dependency : Workspace.dependency) =
+  let grant ~holder (dependency : Manifest.dependency) =
     in_build dependency.package
     &&
     let given =

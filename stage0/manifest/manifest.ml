@@ -13,10 +13,12 @@
      [test]
      time_limit = 10 *)
 
+type dependency = { package : string; capabilities : string list }
+
 type package = {
   name : string;
   truss : string option;
-  dependencies : Workspace.dependency list;
+  dependencies : dependency list;
   usize_bits : int;
 }
 
@@ -214,7 +216,7 @@ let toolchain_builds version =
   | Some wanted, Some toolchain -> compare wanted toolchain <= 0
   | _ -> false
 
-let dependency (entry : entry) : Workspace.dependency =
+let dependency (entry : entry) : dependency =
   if not (valid_name entry.key) then
     malformed entry.line "`%s` is not a package's name, which is %s." entry.key name_expected;
   if (not entry.quoted) && String.contains entry.key ':' then

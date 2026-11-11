@@ -1,7 +1,7 @@
 (* The tests of reading truss.toml. *)
 
 open Harness
-module Manifest = Type_checker.Manifest
+module Manifest = Manifest
 
 let manifest_block () =
   let text = Documents.read "../../SYNTAX.md" in
