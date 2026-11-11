@@ -18,6 +18,5 @@
   interface
   diagnostic
   source
-  token
   syntax_walk
   zarith))

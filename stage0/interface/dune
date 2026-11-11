@@ -10,9 +10,7 @@
   types
   workspace
   syntax
-  syntax_walk
   resolve
   diagnostic
   source
-  zarith
-  token))
+  zarith))

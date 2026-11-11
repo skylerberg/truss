@@ -2,7 +2,6 @@
  (name proof_fuzz)
  (libraries
   zarith
-  unix
   path
   source
   diagnostic
@@ -12,7 +11,6 @@
   query
   engine
   database
-  workspace
   resolve
   types
   intrinsic
