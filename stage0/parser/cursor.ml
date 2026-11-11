@@ -226,13 +226,14 @@ let recovers : Diagnostic.Code.parser -> bool = function
   | Open_range | Interpolation_not_allowed | Float_pattern | Nesting_too_deep | Cost_word
   | Misplaced_potential | Increment | Double_negation | Match_arm_comma | Conditional_operator
   | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish | Trailing_lambda | As_conversion
-  | Elif | Angle_brackets | Path_separator | Qualified_variant | Macro_call | Tuple ->
+  | Elif | Angle_brackets | Path_separator | Qualified_variant | Macro_call | Tuple | Power_operator
+  | Short_declaration | Pipe_operator | Lambda_annotation | Impl_parameters | Null_coalescing ->
       true
   | Use_after_definition | Let_else_brace | Misplaced_opaque | Misplaced_transparent
   | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
   | Loop_cost_bound | Function_type_names | Misplaced_requires | Specification_only
   | Misplaced_assert | Misplaced_proof | Misplaced_yield | Misplaced_loop_exit | Leaves_parallel
-  | Echo_in_specification | Reserved_name ->
+  | Echo_in_specification | Reserved_name | Not_before_is ->
       false
 
 let report cursor ?notes ?fixes code span message =

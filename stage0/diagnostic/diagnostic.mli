@@ -19,6 +19,12 @@ module Code : sig
     | Strict_equality
     | Character_literal
     | String_prefix
+    | String_delimiter
+    | Attribute
+    | Foreign_operator
+    | Lookalike_character
+    | Lifetime
+    | Number_hexadecimal_float
     | Name_case
     | Name_not_ascii
     | Number_suffix
@@ -81,6 +87,13 @@ module Code : sig
     | Qualified_variant
     | Macro_call
     | Tuple
+    | Power_operator
+    | Short_declaration
+    | Pipe_operator
+    | Lambda_annotation
+    | Impl_parameters
+    | Not_before_is
+    | Null_coalescing
     | Specification_only
     | Misplaced_assert
     | Misplaced_proof

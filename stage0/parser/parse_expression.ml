@@ -147,6 +147,25 @@ let macro_follows cursor ~name_stop =
   && opener.span.start = bang.span.stop
   && match opener.kind with Punctuation (Open (Paren | Square)) -> true | _ -> false
 
+(* Whether [a ?? b] or [a ?: b] follows: a [?], then a [?] or a [:] with no
+   space between them, then the start of an expression. Two forms that are
+   valid Truss are excluded. [a?? - 1] and [a??(b)] apply [?] twice, so the
+   token after [??] is not one that can continue an expression. A map
+   entry whose key ends with [?], as in [[key?: value]], has no space
+   before its [?], so [?:] needs one. *)
+let coalescing_follows cursor =
+  let question = Cursor.peek cursor and second = Cursor.token_at cursor (cursor.Cursor.index + 1) in
+  let third = Cursor.peek_ahead cursor 2 in
+  question.kind = Punctuation Question
+  && second.span.start = question.span.stop
+  && begins_expression third
+  &&
+  match second.kind with
+  | Punctuation Question -> (
+      match third with Punctuation (Open _ | Minus | Dot_dot | Dot_dot_equal) -> false | _ -> true)
+  | Punctuation Colon -> question.span.start > Cursor.previous_stop cursor
+  | _ -> false
+
 (* Whether a comma separates items directly inside the bracket whose opener
    is at [opener], as in a tuple, [(a, b)]. *)
 let has_comma cursor ~opener =
@@ -480,8 +499,10 @@ and parenthesized_expression cursor =
 and expression ?(open_range = false) cursor =
   Cursor.nested cursor (fun cursor ->
       let start = cursor.Cursor.index in
-      let value = binary cursor ~level:0 ~open_range in
+      let value = pipes cursor start (binary cursor ~level:0 ~open_range) in
       match Cursor.peek cursor with
+      | { kind = Punctuation Question; _ } when coalescing_follows cursor ->
+          coalescing cursor start value
       | { kind = Punctuation Question; _ } as question -> (
           match conditional_follows (Cursor.peek_ahead cursor 1) with
           | true ->
@@ -489,6 +510,30 @@ and expression ?(open_range = false) cursor =
               conditional cursor start value question
           | false -> value)
       | _ -> value)
+
+(* [value |> function], from Elixir, F#, and OCaml: reported, and parsed as
+   the call [function(value)]. *)
+and pipes cursor start (value : expression) =
+  match Cursor.peek cursor with
+  | { kind = Foreign Pipe_greater; _ } as operator ->
+      Cursor.advance cursor;
+      let callee = binary cursor ~level:0 ~open_range:false in
+      Habits.pipe_operator cursor ~value ~operator ~callee;
+      pipes cursor start (expression_node cursor start (Call (callee, [ { label = None; value } ])))
+  | _ -> value
+
+(* [a ?? b] and [a ?: b], from C#, JavaScript, Swift, and Kotlin: reported,
+   and parsed as the call [a.unwrap_or(b)]. *)
+and coalescing cursor start (value : expression) =
+  let first = Cursor.next cursor in
+  let second = Cursor.next cursor in
+  let default = binary cursor ~level:0 ~open_range:false in
+  Habits.null_coalescing cursor ~value ~first ~second ~default;
+  let method_ : name =
+    { text = "unwrap_or"; span = Cursor.span cursor first.span; id = Cursor.fresh_id cursor }
+  in
+  let callee = expression_node cursor start (Member (value, method_)) in
+  expression_node cursor start (Call (callee, [ { label = None; value = default } ]))
 
 and binary cursor ~level ~open_range =
   let start = cursor.Cursor.index in
@@ -526,7 +571,25 @@ and binary cursor ~level ~open_range =
             loop
               (expression_node cursor start
                  (Range { start = Some left; operator_span; stop; inclusive })))
-    | _ -> left
+    | _ -> (
+        match Cursor.peek cursor with
+        (* [a ** b], from Python and JavaScript: reported, and parsed as a
+           multiplication, so that both operands are checked. *)
+        | { kind = Foreign Star_star; _ } as power ->
+            Cursor.check_chain_length cursor ~length;
+            Habits.power_operator cursor ~operator:power;
+            Cursor.advance cursor;
+            let right = prefix cursor in
+            loop ~length:(length + 1)
+              (expression_node cursor start
+                 (Binary
+                    {
+                      operator = Multiply;
+                      operator_span = Cursor.span cursor power.span;
+                      left;
+                      right;
+                    }))
+        | _ -> left)
   in
   loop ~length:0 left
 
@@ -726,6 +789,7 @@ and postfix cursor : expression =
     (* A [?] that starts [x ? a : b] is left for [expression], because the
        condition is the whole expression before the [?], as in C and
        JavaScript. *)
+    | Punctuation Question when coalescing_follows cursor -> value
     | Punctuation Question when not (conditional_follows (Cursor.peek_ahead cursor 1)) ->
         Cursor.advance cursor;
         loop (expression_node cursor start (Try value))
@@ -871,6 +935,7 @@ and named cursor start =
       let value =
         path_separators cursor start (expression_node cursor start (Name { modules; last = name }))
       in
+      let value = path_separators cursor start (angle_arguments cursor start value) in
       if brace_record_follows cursor then brace_record cursor start value else value
   | String ({ tag = Some _; _ } as literal) ->
       expression_node cursor start (String (string_literal cursor ~start ~modules literal))
@@ -890,6 +955,26 @@ and path_separators cursor start (value : expression) =
       Cursor.advance cursor;
       let name = Atoms.name cursor (Cursor.next cursor) text in
       path_separators cursor start (expression_node cursor start (Member (value, name)))
+  | _ -> value
+
+(* [List<String>.new()]: angle brackets after an uppercase name in an
+   expression. A [<] there may be a comparison, so the brackets are type
+   arguments only when a [.], a [(], or a [::] follows their closer. *)
+and angle_arguments cursor start (value : expression) =
+  let follows_closer closer =
+    match (Cursor.token_at cursor (closer + 1)).kind with
+    | Punctuation (Dot | Open Paren | Colon_colon) -> true
+    | _ -> false
+  in
+  match if Cursor.is_punctuation cursor Less then angle_closer cursor else None with
+  | Some closer when follows_closer closer -> (
+      let items inner =
+        Cursor.bracketed inner ~item:bracket_item ~recover:(fun span ->
+            Item { kind = Expression_error; span; id = Cursor.fresh_id cursor })
+      in
+      match angle_brackets cursor items with
+      | Some items -> expression_node cursor start (Bracket (value, items))
+      | None -> value)
   | _ -> value
 
 (* [println!(...)] and [vec![...]], from Rust: reported, and parsed as a
@@ -1076,10 +1161,29 @@ and lambda cursor =
   Cursor.advance cursor;
   if not (Cursor.is_punctuation cursor (Open Paren)) then
     Cursor.fail cursor "`(` after `fn` in a lambda";
+  (* A parameter's type and the result's type, as other languages write
+     them, are reported and left out of the tree. *)
+  let parameter cursor =
+    let pattern = Parse_pattern.pattern cursor in
+    if Cursor.is_punctuation cursor Colon then begin
+      let from = Cursor.previous_stop cursor in
+      Cursor.advance cursor;
+      ignore (mode cursor);
+      ignore (type_expression cursor);
+      Habits.lambda_annotation cursor ~from ~stop:(Cursor.previous_stop cursor)
+    end;
+    pattern
+  in
   let parameters =
-    Cursor.bracketed cursor ~item:Parse_pattern.pattern ~recover:(fun span ->
+    Cursor.bracketed cursor ~item:parameter ~recover:(fun span ->
         { kind = Pattern_error; span; id = Cursor.fresh_id cursor })
   in
+  if Cursor.is_punctuation cursor Arrow then begin
+    let from = Cursor.previous_stop cursor in
+    Cursor.advance cursor;
+    ignore (type_expression cursor);
+    Habits.lambda_annotation cursor ~from ~stop:(Cursor.previous_stop cursor)
+  end;
   expression_node cursor start (Lambda { parameters; body = body cursor })
 
 (* [length] is the number of [else if] branches before this [if]. *)
@@ -1399,11 +1503,24 @@ and statement cursor : statement =
       finish (While { condition; clauses = []; body = body cursor })
   | _ -> (
       let target = expression cursor in
-      match assignment_operator (Cursor.peek_kind cursor) with
-      | Some operator ->
+      match (assignment_operator (Cursor.peek_kind cursor), Cursor.peek cursor) with
+      | Some operator, _ ->
           Cursor.advance cursor;
           finish (Assignment { target; operator; value = expression cursor })
-      | None -> finish (Expression target))
+      (* [name := value], from Go: reported, and parsed as the [let] it
+         means. With any other target it is parsed as an assignment. *)
+      | None, ({ kind = Foreign Colon_equal; _ } as operator) -> (
+          Cursor.advance cursor;
+          Habits.short_declaration cursor ~target ~operator;
+          let value = expression cursor in
+          match target.kind with
+          | Name { modules = []; last } ->
+              let pattern : pattern =
+                { kind = Binding_or_constant last; span = target.span; id = Cursor.fresh_id cursor }
+              in
+              finish (Let { mutable_ = false; pattern; annotation = None; value; else_ = None })
+          | _ -> finish (Assignment { target; operator = Assign; value }))
+      | None, _ -> finish (Expression target))
 
 (* After [let] or [var]. The expression before a [let ... else] cannot end
    with [}], so that the [else] cannot be read as part of it. *)

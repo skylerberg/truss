@@ -318,6 +318,11 @@ is `1.0`, `.`, `max`.
 | `1__000`, `1_`, `0x_FF` | `_` goes only between digits. The fix removes the stray `_`. |
 | `0755`, `007`, `00` | A leading zero. When every digit is 0 to 7, the fixes write `0o755` or `755`. Otherwise the fix drops the zeros. Digits after the `.` and in an exponent may start with zeros. |
 
+| `1.` | A float has a digit after its `.`. The fix writes `1.0`. This applies when no name follows the `.`, since `1.max(2)` is a method call. |
+| `.5` | A float has a digit before its `.`. The fix writes `0.5`. This applies when no operand comes before the `.`, since `pair.5` is a member access. |
+| `1'000` | C++'s digit separator. The fix writes `1_000`. |
+| `0x1p3`, `0x1.8p3` | Truss has no hexadecimal floats. No fix. The exponent tells `0x1.8p3` from a method call, `0xFF.abs()`. |
+
 When a number has an error, the token has the value of its valid prefix, or
 0, so that the parser can continue.
 
@@ -340,16 +345,25 @@ literal with many digits cannot make the lexer quadratic.
   its fix, `Character"a"`. The lexer emits the tagged string, so that the
   parser can continue.
 
-The name `f`, `r`, or `b` directly before an ordinary or an empty string is a
-string prefix from another language. The lexer reports the prefix and emits
-the string that the fix writes, as one token:
+A string of another language is reported, and the token is the string that
+its fix writes:
 
 | Written | From | Fix | Token |
 |---|---|---|---|
-| `f"Hello {name}"` | Python | `"Hello ${name}"` | An ordinary string |
-| `r"\d+"` | Python, Rust | `"""\d+"""` | A raw string |
+| `f"Hello {name}"`, `$"Hello {name}"` | Python, C# | `"Hello ${name}"` | An ordinary string |
+| `r"\d+"`, `@"C:\logs"` | Python, Rust, C# | `"""\d+"""`, `"""C:\logs"""` | A raw string |
+| `r#"say "hi" now"#` | Rust | `"""say "hi" now"""`, with more quotes when the text has `"""` | A raw string |
+| `f"""..."""`, `r"""..."""` | Python | The raw string without the prefix | A raw string |
 | `b"bytes"` | Rust, Python | No fix. The message points to `text.bytes()`. | An ordinary string |
 | `b'a'` | Rust, Python | `UInt8"a"` | The tagged string |
+| `'abc'` | Python, JavaScript | `"abc"`, with each `"` in the text escaped | An ordinary string |
+| `` `Hello ${name}` `` on one line | JavaScript | `"Hello ${name}"` | An ordinary string |
+| `“text”`, `‘text’` | Word processors | `"text"` | An ordinary string |
+| `'a` with no closing quote | Rust lifetimes | No fix. Truss has no lifetimes. | None |
+
+- **A quote that touches a name is not a string delimiter.** In `it's` the
+  `'` is an apostrophe, and in `&'a str, &'b str` the text between the two
+  `'`s is not a string: the second `'` is followed by a name.
 
 - **An f-string's fix rewrites its replacement fields.** `{name}` becomes
   `${name}`, and `{{` and `}}` become `{` and `}`. A field that is not an
@@ -380,6 +394,7 @@ it means:
 
 | Written | Fix |
 |---|---|
+| `\(name)` | `${name}`, Swift's interpolation |
 | `\x41` | `\u{41}` |
 | `\u00E9`, `\U0001F600` | `\u{E9}`, `\u{1F600}`, with the leading zeros dropped |
 | `\'` | `'` |
@@ -461,8 +476,8 @@ no table-driven matcher.
 
 ### Rejected sequences
 
-The lexer handles the sequences SYNTAX.md lists: comments, `;`, `===`,
-`!==`, `'`, `` ` ``, `@`, `++`, and `--`. Habits fall into two groups:
+The lexer handles the sequences of other languages that are not Truss
+tokens. Habits fall into two groups:
 
 - **Local fixes.** The fix depends only on the sequence itself. The lexer
   reports it, and emits the tokens of the fixed code, so that the parser
@@ -477,8 +492,29 @@ The lexer handles the sequences SYNTAX.md lists: comments, `;`, `===`,
 | `/* ... */`, nested | local | Nothing. If the comment spans lines, the next token counts as starting a new line. | Remove the comment. An unterminated one runs to the end of the file and has no fix. |
 | `;` | local | At the end of a line, nothing. Mid-line, the next token counts as starting a new line. | Remove the `;`, or replace it with a line break |
 | `===`, `!==` | local | `==`, `!=` | `==`, `!=`. A longer run, such as `====`, is not this habit, and lexes as `==`s. |
-| `@`, `` ` `` | local | Nothing | "Not used in Truss" |
+| `@`, `` ` `` that start no string | local | Nothing | "Not used in Truss" |
+| `#[derive(...)]`, `#![...]` | local | Nothing, up to the end of the line | Remove the attribute. The message points to `derives`. |
+| `<>` | local | `!=` | `!=` |
+| `..<` | local | `..` | `..` |
+| `...` between two operands | local | `..=` | `..=` |
+| `...` with an operand on neither side | local | `todo` | `todo` |
+| `...` before an operand only | local | Nothing | None. Truss has no spread or rest operator. |
+| A look-alike character | local | The ASCII token | The ASCII spelling |
 | `++`, `--` | context | `Foreign` | `i += 1`, `i -= 1`, `-(-x)` |
+| `**` | context | `Foreign` | None. Truss has no power operator. |
+| `:=` | context | `Foreign` | `let name = value` |
+| `\|>` | context | `Foreign` | `function(value)` |
+
+- **Look-alike characters** are a small table chosen by hand, of characters
+  that reach source code from word processors, input methods, and the
+  notation of Lean and Agda. Fullwidth `（ ） ［ ］ ｛ ｝ ， ： ＝` become
+  their ASCII forms; no-break and other Unicode spaces become a space; `–`
+  and `—` become `-`; `≤ ≥ ≠ → ⇒` become `<= >= != -> =>`; and `∀ ∃` become
+  `forall` and `exists`. Curly quotes delimit a string, as the table of
+  strings shows.
+- **`**`, `:=`, and `|>` continue a line,** as the binary operators they are
+  in other languages do, so `value` and `|> function` on the next line are
+  one statement.
 
 - **Comments.** The fix deletes from the start of the comment, together with
   the whitespace before it, to the end of the line. A line left empty is
@@ -687,50 +723,15 @@ cost:
 
 ## Not built
 
-- **Extra help for habits from other languages.** None of these changes what
-  the language accepts, since each is already an error, and until it is
-  built each gets the plain error the grammar implies.
-  - **Numbers:**
+- **Rarer forms of strings from other languages.** Each is already an error,
+  and gets the error of the nearest form that is built:
 
-    | Written | Error and fix |
-    |---|---|
-    | `1.` | The fix writes `1.0`. This applies when nothing that could follow a `.` comes after it. |
-    | `.5` | The fix writes `0.5`. This applies when the `.` follows a token that cannot end an expression. |
-    | `0x1p3`, `0x1.8` | Truss has no hexadecimal floats. Write a decimal float. |
-    | `1'000` | The fix writes `1_000`. |
-
-  - **Strings:**
-
-    | Written | From | Fix |
-    |---|---|---|
-    | `r#"\d+"#` | Rust | `"""\d+"""` |
-    | `f"""..."""`, `r"""..."""` | Python | The raw string without the prefix |
-    | `$"Hello {name}"`, `@"C:\logs"` | C# | `"Hello ${name}"`, `"""C:\logs"""` |
-    | `` `Hello ${name}` `` | JavaScript | `"Hello ${name}"`, or a raw string if it spans lines |
-    | `'abc'` | Python, JavaScript | `"abc"` |
-    | `'a` with no closing quote | Rust lifetimes | No fix. Truss has no lifetimes. |
-    | `\(name)` in a string | Swift | `${name}` |
-
-  - **Other sequences:**
-
-    | Written | Group | Tokens emitted | Fix |
-    |---|---|---|---|
-    | `#[derive(...)]`, `#![...]` | local | Nothing, up to the end of the line | "Truss has no attributes", pointing to `derives` |
-    | `<>` | local | `!=` | `!=` |
-    | `...` | local | `..=` between two operands, otherwise `todo` | `..=`, or `todo` for a placeholder body |
-    | `..<` | local | `..` | `..` |
-    | Look-alike punctuation | local | The ASCII token | The ASCII character |
-    | `**` | context | `Foreign` | No fix. Truss has no power operator. |
-    | `:=` | context | `Foreign` | `let name = value` |
-    | `\|>` | context | `Foreign` | Write the call: `function(value)` |
-
-  - **Look-alike punctuation** is a small, hand-picked table: curly quotes
-    `“ ” ‘ ’` become `"` and `'`; fullwidth `（ ） ［ ］ ｛ ｝ ， ： ； ＝`
-    become their ASCII forms; no-break and other Unicode spaces become a
-    space; `–` and `—` become `-`; `≤ ≥ ≠ → ⇒` become `<= >= != -> =>`; and
-    `∀ ∃` become `forall` and `exists`. These come from pasted documents,
-    input methods, and habits from Lean and Agda. A curly-quoted `“text”`
-    would lex as a string.
+  | Written | From | Fix it would get |
+  |---|---|---|
+  | `$@"..."`, `@$"..."` | C# | A raw string with `${...}` |
+  | A template literal that spans lines | JavaScript | A multi-line raw string |
+  | `b"""..."""`, `rb"..."` | Python | None |
+  | `；`, the fullwidth semicolon | Input methods | A line break, as for `;` |
 - **Lexing one definition at a time.** Outside strings and brackets, the
   lexer's state at a definition keyword in column 0 is empty, so tokens
   before and after an edit could be reused. Nothing needs it yet.

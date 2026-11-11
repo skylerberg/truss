@@ -16,11 +16,16 @@ let can_end = function
   (* No grammar rule accepts the foreign tokens. Because `++` and `--` can
      both end and begin a statement, `i++` on a line of its own is a
      statement of its own, which the parser reports before it continues. *)
-  | Foreign _ -> true
+  | Foreign (Plus_plus | Minus_minus) -> true
+  (* The other foreign tokens are binary operators in the languages they
+     come from, so they continue a line as a binary operator does. *)
+  | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
   | Keyword _ | Reserved _ | Punctuation _ | Newline | End_of_file -> false
 
 let can_begin = function
-  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ | Reserved _ | Foreign _ -> true
+  | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ | Reserved _ -> true
+  | Foreign (Plus_plus | Minus_minus) -> true
+  | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
   | Punctuation (Open _ | Minus | Bang | Tilde) -> true
   | Keyword
       ( Any | Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For

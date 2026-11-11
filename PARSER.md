@@ -445,6 +445,15 @@ against that table, never against a string literal elsewhere.
   `power(...)` parse as ordinary calls; name resolution resolves them, as
   GRAMMAR.md specifies.
 
+### A negation before `is`
+
+`!response is Ok(_)` is valid syntax: `!` binds tighter than `is`, so it
+negates `response`. A negated value is a `Bool`, which no variant matches,
+so `Operators` reports a `!` whose operand is the left operand of an `is`
+with a variant pattern, with the fix `!(response is Ok(_))`. `!flag is true`
+is not reported. The tree matches the source text, so this diagnostic is not
+a recovery.
+
 ## Checks on a whole definition
 
 `Check` walks a definition's tree once with a small context: whether the
@@ -565,6 +574,13 @@ of the fixed code and continues.
 | `vec![1, 2]`, `println!(...)` | A name, `!`, and `(` or `[`, with no space between them | `[1, 2]` for `vec!`; none for the others, whose message says what to write |
 | `todo!()`, `unreachable!()` | `!` and `(` right after the keyword | `todo`, `unreachable`; none when the parentheses hold arguments |
 | `(a, b)`, `(Int64, String)`, `pair.0` | A comma directly inside the parentheses of an expression or a type; a number after `.` | None; the message says that Truss has no tuples and recommends a record |
+| `List<String>.new()` | `<` after an `UPPER` name in an expression, when a `.`, a `(`, or a `::` follows its closer; otherwise the `<` is a comparison | `List[String].new()` |
+| `impl<T> Trait for Box[T]` | `<` right after `impl` | `impl Trait for Box[T]`; none when a parameter has a bound, which belongs on the type after `for` |
+| `fn(x: Int64) -> Int64 { ... }` | `:` after a lambda's parameter, or `->` after its parameters | `fn(x) { ... }` |
+| `a ** b` | The `Foreign` token `**` where a binary operator goes | None; the message says that Truss has no power operator |
+| `count := 0` | The `Foreign` token `:=` after a statement's expression | `let count = 0`; none when the target is not a name |
+| `items \|> sum` | The `Foreign` token `\|>` after an expression | `sum(items)`; none when the right operand is a call, since languages disagree about which argument the value becomes |
+| `a ?? b`, `a ?: b` | `?`, then `?` or `:` with no space between them, then the start of an expression. `a?? - 1` applies `?` twice, and `[key?: value]` is a map entry, so `??` is not followed by `-` or an opener, and `?:` has a space before it | `a.unwrap_or(b)` |
 | `x as Int64` | The reserved word `as` after an expression, with a type after it on the same line | `Int64.from(x)`, then `Int64.try_from(x)`, for a conversion that can lose information, as most casts can |
 | `0.0 =>` in a pattern | A float literal where a pattern begins | None; the message recommends a guard, as in `value if value == 0.0` |
 | `loop {`, `const`, `static` | A `Reserved` token where a statement or a definition starts | `while true {`, `let` |
@@ -623,17 +639,6 @@ report them (see [TYPECHECKER.md](TYPECHECKER.md)).
 
 ## Not built
 
-- **Extra help for more habits from other languages.** Each is already an
-  error, and until it is built gets the error the grammar implies, with no
-  fix:
-
-  | Written | Fix |
-  |---|---|
-  | `fn(x: Int64) { ... }` | `fn(x) { ... }`, since lambdas have no annotations |
-  | `List<String>.new()` in an expression | `List[String].new()`; there a `<` may be a comparison |
-  | `impl<T> Trait for Box<T>` | `impl Trait for Box[T]` |
-  | `!response is Ok(_)` | `!(response is Ok(_))`, because `!` binds tighter than `is` |
-  | `a ?? b`, `a ?: b` | `a.unwrap_or(b)` |
 - **Parsing only the definitions whose text changed.** A definition's tree
   and its relative diagnostics are functions of its tokens, so they could be
   cached by its source text. The tokens have absolute spans, so reuse would
