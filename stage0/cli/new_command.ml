@@ -2,8 +2,7 @@
    [main.truss] with an empty [main]. *)
 
 let manifest name =
-  Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"%s\"\n" name
-    Type_checker.Manifest.truss_version
+  Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"%s\"\n" name Manifest.truss_version
 
 let main = {|fn main(arguments: List[String]) -> ExitCode {
   ExitCode.success
@@ -13,7 +12,7 @@ let main = {|fn main(arguments: List[String]) -> ExitCode {
 (* The directory is named after the package, without its owner. *)
 let run ~directory ~name =
   let directory_name =
-    match Type_checker.Manifest.name_parts name with
+    match Manifest.name_parts name with
     | Some parts -> List.nth parts (List.length parts - 1)
     | None ->
         Project.cannot_run

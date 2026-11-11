@@ -49,7 +49,7 @@ let unused_dependencies (project : Project.t) =
       | Unused dependency ->
           let path = Filename.concat root file in
           let text = In_channel.with_open_bin path In_channel.input_all in
-          Project.write_file path (Type_checker.Manifest.without_dependency text dependency);
+          Project.write_file path (Manifest.without_dependency text dependency);
           Some
             (Json.to_string
                (Json.Object

@@ -1,3 +1,3 @@
 (library
  (name checked)
- (libraries compiler_bug path intrinsic types syntax zarith))
+ (libraries path intrinsic types syntax))

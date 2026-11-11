@@ -6,7 +6,6 @@
   standard_library
   type_checker
   path
-  query
   solver
   prover
   unix))
