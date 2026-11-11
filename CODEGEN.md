@@ -1785,7 +1785,11 @@ as 0 comes back as the port the system chose. Every socket is in the mode
 where a call does not wait, so that a task parks for it. `connect`
 returns at once, and the standard library waits until the socket can be
 written, with the connect's time limit set as the socket's limit for
-sending, and reads how the connection went with `getsockopt`. A read or a
+sending, and reads how the connection went with `getsockopt`. The limit
+is set before `connect` is called. A refusal can arrive before the next
+system call, and on macOS `setsockopt` fails on a socket whose connection
+was refused, so a limit set afterwards would report that failure in place
+of the refusal. A read or a
 write that waits past a time limit set with `setsockopt` is `TimedOut`:
 the runtime's wait applies the limit. A datagram socket
 that is not bound to an address is an IPv6 socket that also carries IPv4,
