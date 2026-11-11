@@ -1069,6 +1069,14 @@ let () =
       | Function { body = None; _ } -> ()
       | _ -> fail "the body is in the specification");
       check_core_invariants database key form);
+  test "a theorem's specification has no body" (fun () ->
+      let _, _, form =
+        specification "theorem doubled(value: Int64)\n  ensures value + value == 2 * value\n{\n}\n"
+          "doubled"
+      in
+      match form.definition with
+      | Function { body = None; _ } -> ()
+      | _ -> fail "the body is in the specification");
   test "the body that a trait provides for a method is in the method's specification" (fun () ->
       let database =
         setup
