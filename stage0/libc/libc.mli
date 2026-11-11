@@ -122,8 +122,6 @@ type number =
   | Istrip
   | Opost
   | Cs8
-  | Sigset_size  (** How many bytes a [sigset_t] takes *)
-  | Sig_block
   | Af_inet
   | Af_inet6
   | Sock_stream
@@ -264,10 +262,6 @@ type function_ =
   | Ioctl_tiocgwinsz  (** [ioctl] with the request [TIOCGWINSZ] *)
   | Tcgetattr
   | Tcsetattr  (** With [TCSAFLUSH] *)
-  | Sigemptyset
-  | Sigaddset
-  | Sigprocmask_block  (** [sigprocmask] with [SIG_BLOCK] *)
-  | Sigwait
   | Socket
   | Bind
   | Connect
@@ -283,6 +277,9 @@ type function_ =
   | Fcntl_getfl  (** [fcntl] with [F_GETFL], and then with [F_SETFL] *)
   | Fcntl_setfl
   | Addresses_of_host  (** The runtime's: a host's addresses, which it gets from [getaddrinfo] *)
+  | Signals_wait
+      (** The runtime's: blocks until one of the signals arrives and returns its number, or 0 if the
+          calling task is cancelled first *)
   | Tasks_open
       (** The runtime's task functions, which the real [Tasks] implementation calls. This one
           creates a task group and returns its handle. *)

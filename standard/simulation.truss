@@ -387,7 +387,7 @@ impl Processes for World {
 }
 
 impl Signals for World {
-  fn wait(mut self, signals: Slice[processes::Signal]) -> processes::Signal {
+  fn wait(mut self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
     todo
   }
 }
