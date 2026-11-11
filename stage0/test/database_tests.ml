@@ -508,6 +508,54 @@ let () =
 
 (* The layers stay apart *)
 
+let library_module name : Path.module_ = { package = Path.standard_package; modules = [ name ] }
+
+let library_function name =
+  Printf.sprintf "internal fn %s(value: Int64) -> Int64 {\n  value\n}\n" name
+
+let open_library modules =
+  match Database.open_library ~modules "tests" with
+  | Ok library -> library
+  | Error message -> failwith message
+
+let check_library library modules =
+  List.iter
+    (fun (module_, _) ->
+      ignore (Engine.get (Database.library_engine library) Type_checker.file_diagnostics module_))
+    modules;
+  Database.save_library library
+
+let () =
+  test "a library state opened again after an edit computes only what the edit reached" (fun () ->
+      fresh_store ~empty:true ();
+      let first = (library_module "first", library_function "first") in
+      let second = (library_module "second", library_function "second") in
+      check_library (open_library [ first; second ]) [ first; second ];
+      Database.reset ();
+      let second = (library_module "second", library_function "other") in
+      let library = open_library [ first; second ] in
+      let engine = Database.library_engine library in
+      Engine.clear_log engine;
+      check_library library [ first; second ];
+      let executed = Engine.executed engine in
+      if not (List.exists (fun label -> contains label "second") executed) then
+        fail "the edited module was not checked again";
+      List.iter
+        (fun label -> if contains label "first" then fail "%s was computed again" label)
+        executed);
+  test "a library state drops the text of a module that is gone from the sources" (fun () ->
+      fresh_store ~empty:true ();
+      let first = (library_module "first", library_function "first") in
+      let second = (library_module "second", library_function "second") in
+      check_library (open_library [ first; second ]) [ first; second ];
+      Database.reset ();
+      let library = open_library [ first ] in
+      let context = Engine.context (Database.library_engine library) in
+      if Query.find context Workspace.file_text (fst second) <> None then
+        fail "the module's text is still set";
+      if List.mem (fst second) (Query.demand context Workspace.modules Path.standard_package) then
+        fail "the package still has the module")
+
 let rec dune_files directory =
   Array.to_list (Sys.readdir directory)
   |> List.concat_map (fun entry ->
