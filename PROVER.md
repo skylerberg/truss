@@ -1459,14 +1459,6 @@ test the prover itself:
   is named after what it captures, which would be one function for every
   argument. A lambda that captures no bound value is one function for
   every one of them, and is read as it is outside a quantifier.
-- **An amortized replacement of a map's value.** A `Set` or a `Map` from
-  another package holds a potential the prover knows through its methods'
-  clauses, and inserting a new element or key is amortized. Replacing the
-  value under a key that is there is not: the value is changed through
-  `List`'s `Index` lend of the entry, and what a list's potential is after
-  such a lend follows only from `at`'s `ensures`, which say nothing of
-  sums. Saying it there, for every measure, would be one more quantified
-  fact at every index into a list that is changed.
 - **More in a diagnostic.** A note at a clause in another file, which a
   message names by its file and line instead, and a
   fix that adds an obligation about parameters alone to the function as a
