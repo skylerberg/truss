@@ -328,29 +328,31 @@ let flush t =
 
 (* Looking up *)
 
-let read_from segment location =
+(* The record must be the key's own: an index that is damaged can name
+   another record's offset. *)
+let read_from segment key location =
   match read_record (channel segment) ~offset:location.offset with
-  | Some (_, _, value) -> Some value
-  | None -> None
+  | Some (_, found, value) when found = key -> Some value
+  | Some _ | None -> None
   | exception Sys_error _ -> None
 
 (* A record this process added, which is in memory until it is written. *)
-let read_own writer location =
+let read_own writer key location =
   let written = writer.size - Buffer.length writer.pending in
   if location.offset >= written then
     Some (Buffer.sub writer.pending (location.offset - written + 1 + key_width + 4) location.length)
-  else read_from writer.segment location
+  else read_from writer.segment key location
 
 let lookup_once t key =
   let own =
     Option.bind t.writer (fun writer ->
-        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_own writer))
+        Option.bind (Hashtbl.find_opt writer.segment.table key) (read_own writer key))
   in
   match own with
   | Some value -> Some value
   | None ->
       List.find_map
-        (fun segment -> Option.bind (find_in segment key) (read_from segment))
+        (fun segment -> Option.bind (find_in segment key) (read_from segment key))
         t.segments
 
 (* A miss looks again for what other processes added, but not more often

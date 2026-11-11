@@ -84,7 +84,9 @@ let set engine (input : ('key, 'value) input) key value =
   let same =
     match find_input engine input key with
     | Some cell -> (
-        match input_value engine cell with Some old -> input.input_equal old value | None -> false)
+        match input_value engine cell with
+        | Some old -> input.input_equal old value
+        | None | (exception Lost _) -> false)
     | None -> false
   in
   if not same then change engine (own_input engine input key) (Set value)
