@@ -1,4 +1,71 @@
 use standard::collections
+use standard::map
+
+fn comes_before[Element: Ordered](first: Element, second: Element, largest_first: Bool) -> Bool
+  cost time O(time(Element.compare))
+{
+  if largest_first {
+    first.compare(second) == Ordering.Greater
+  } else {
+    first.compare(second) == Ordering.Less
+  }
+}
+
+fn sift_up[Element: Ordered](items: mut List[Element], position: USize, largest_first: Bool)
+  requires 1 <= position && position <= items.length()
+  ensures items.length() == old(items.length())
+  decreases position
+  cost time O(log(position) * time(Element.compare))
+{
+  if position >= 2 && comes_before(items[position - 1], second: items[position / 2 - 1], largest_first: largest_first) {
+    mut items.swap(position - 1, second: position / 2 - 1)
+    sift_up(mut items, position: position / 2, largest_first: largest_first)
+  }
+}
+
+fn sift_down[Element: Ordered](
+  items: mut List[Element],
+  position: USize,
+  limit: USize,
+  room: USize,
+  largest_first: Bool,
+)
+  requires 1 <= position
+  requires limit <= items.length()
+  ensures items.length() == old(items.length())
+  decreases room
+  cost time O(log(room) * time(Element.compare))
+{
+  if room >= 2 && position <= limit / 2 {
+    var first = 2 * position
+    if first < limit && comes_before(items[first], second: items[first - 1], largest_first: largest_first) {
+      first = first + 1
+    }
+    if comes_before(items[first - 1], second: items[position - 1], largest_first: largest_first) {
+      mut items.swap(position - 1, second: first - 1)
+      sift_down(mut items, position: first, limit: limit, room: room / 2, largest_first: largest_first)
+    }
+  }
+}
+
+fn heap_of[Element: Ordered](items: own List[Element], largest_first: Bool) -> collections::Heap[Element]
+  ensures result.length() == items.length()
+  cost time O(items.length() * log(items.length()) * time(Element.compare))
+{
+  var ordered = own items
+  let count = ordered.length()
+  var position = count / 2
+  while position >= 1
+    invariant ordered.length() == count
+    invariant position <= count / 2
+    decreases position
+    cost time O((count / 2 - position) * log(count) * time(Element.compare))
+  {
+    sift_down(mut ordered, position: position, limit: count, room: count, largest_first: largest_first)
+    position -= 1
+  }
+  collections::Heap(items: own ordered, largest_first: largest_first)
+}
 
 public fn collections::Heap[Element: Ordered].smallest_first() -> collections::Heap[Element]
   ensures result.length() == 0
@@ -18,18 +85,16 @@ public fn collections::Heap[Element: Ordered].largest_first() -> collections::He
 
 public fn collections::Heap[Element: Ordered].smallest_first_of(items: own List[Element]) -> collections::Heap[Element]
   ensures result.length() == items.length()
-  cost time O(items.length())
-  cost allocations == 0
+  cost time O(items.length() * log(items.length()) * time(Element.compare))
 {
-  todo
+  heap_of(own items, largest_first: false)
 }
 
 public fn collections::Heap[Element: Ordered].largest_first_of(items: own List[Element]) -> collections::Heap[Element]
   ensures result.length() == items.length()
-  cost time O(items.length())
-  cost allocations == 0
+  cost time O(items.length() * log(items.length()) * time(Element.compare))
 {
-  todo
+  heap_of(own items, largest_first: true)
 }
 
 public fn collections::Heap[Element: Ordered].length(self) -> USize
@@ -47,31 +112,49 @@ public fn collections::Heap[Element: Ordered].is_empty(self) -> Bool
 
 public fn collections::Heap[Element: Ordered].push(mut self, item: own Element)
   ensures self.length() == old(self.length()) + 1
-  cost amortized time O(log(self.length()))
+  cost time finite
 {
-  todo
+  mut self.items.push(own item)
+  sift_up(mut self.items, position: self.items.length(), largest_first: self.largest_first)
 }
 
 public fn collections::Heap[Element: Ordered].pop(mut self) -> Option[Element]
   ensures (result is None) == (old(self.length()) == 0)
-  cost time O(log(old(self.length())))
-  cost allocations == 0
+  ensures self.length() + (if old(self.length()) > 0 { 1 } else { 0 }) == old(self.length())
+  cost time O(log(old(self.length())) * time(Element.compare))
 {
-  todo
+  if self.items.is_empty() {
+    return None
+  }
+  mut self.items.swap(0, second: self.items.length() - 1)
+  let first = mut self.items.pop()
+  let count = self.items.length()
+  sift_down(mut self.items, position: 1, limit: count, room: count, largest_first: self.largest_first)
+  first
 }
 
 public fn collections::Heap[Element: Ordered].peek(self) lends Option[Element]
   cost time O(1)
 {
-  todo
+  if self.items.length() > 0 {
+    yield Some(self.items[0])
+  } else {
+    yield None
+  }
 }
 
 public fn collections::Heap[Element: Ordered].replace_first(mut self, item: own Element) -> Option[Element]
   ensures self.length() == (if old(self.length()) == 0 { 1 } else { old(self.length()) })
-  cost time O(log(self.length()))
-  cost allocations == 0
+  cost time finite
 {
-  todo
+  if self.items.is_empty() {
+    mut self.items.push(own item)
+    return None
+  }
+  let first = map::exchange(mut self.items[0], value: own item)
+  let count = self.items.length()
+  sift_down(mut self.items, position: 1, limit: count, room: count, largest_first: self.largest_first)
+  Some(own first)
 }
 
 public fn collections::Heap[Element: Ordered].clear(mut self)
@@ -79,30 +162,59 @@ public fn collections::Heap[Element: Ordered].clear(mut self)
   cost time O(old(self.length()))
   cost allocations == 0
 {
-  todo
+  mut self.items.clear()
 }
 
 public fn collections::Heap[Element: Ordered].reserve(mut self, additional: USize)
   ensures self.length() == old(self.length())
 {
-  todo
+  mut self.items.reserve(additional)
 }
 
 public fn collections::Heap[Element: Ordered].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
-  todo
+  var cursor = own items
+  while mut cursor.next() is Some(item) {
+    mut self.push(own item)
+  }
 }
 
 public fn collections::Heap[Element: Ordered].to_sorted_list(own self) -> List[Element]
   ensures result.length() == self.length()
-  cost time O(self.length() * log(self.length()))
-  cost allocations == 0
+  cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
-  todo
+  let largest_first = self.largest_first
+  var items = own self.items
+  let count = items.length()
+  var unsorted = count
+  while unsorted >= 2
+    invariant items.length() == count
+    invariant unsorted <= count
+    decreases unsorted
+    cost time O((count - unsorted) * log(count) * time(Element.compare))
+  {
+    unsorted -= 1
+    mut items.swap(0, second: unsorted)
+    sift_down(mut items, position: 1, limit: unsorted, room: count, largest_first: largest_first)
+  }
+  mut items.reverse()
+  items
 }
 
 public fn collections::Heap[Element: Ordered].each(own self) yields own Element
   ensures finished ==> yielded.length() == self.length()
-  cost time O(self.length() * log(self.length()))
+  cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
-  todo
+  var remaining = own self
+  while remaining.length() > 0
+    invariant remaining.length() + yielded.length() == self.length()
+    decreases remaining.length()
+    cost time O((self.length() - remaining.length()) * log(self.length()) * time(Element.compare))
+  {
+    match mut remaining.pop() {
+      Some(item) => {
+        yield own item
+      }
+      None => {}
+    }
+  }
 }

@@ -1,7 +1,19 @@
 use standard::map
 
 public opaque type Deque[Element](front: List[Element], back: List[Element])
+  invariant front.length() <= USize.maximum - back.length()
   derives Copyable
+
+internal fn Deque[Element].model_at(self, index: Integer) -> Element
+  requires 0 <= index && index < self.front.model().length() + self.back.model().length()
+  cost time finite
+{
+  if index < self.front.model().length() {
+    self.front.model()[self.front.model().length() - 1 - index]
+  } else {
+    self.back.model()[index - self.front.model().length()]
+  }
+}
 
 public opaque type Heap[Element: Ordered](items: List[Element], largest_first: Bool)
   derives Copyable
