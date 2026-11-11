@@ -564,7 +564,11 @@ let definition_states teller database (key : Names.key) =
         (fun ((obligation : Translate.obligation), (answer : answer)) ->
           let span = source_span obligation.span in
           let failed explained =
-            Some (diagnostic obligation.code span (obligation.message ^ explained))
+            Some
+              {
+                (diagnostic obligation.code span (obligation.message ^ explained)) with
+                fixes = obligation.fixes;
+              }
           in
           (* A body that would have defined a callee is hidden from another
              package's proofs unless the callee is [transparent]. *)
