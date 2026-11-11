@@ -18,8 +18,9 @@ env:
   DUNE_CACHE: enabled
 
 jobs:
-  # The build, the formatting, the opam file, and every test but the
-  # standard library's proofs, in one dune run so that they overlap.
+  # The build, the formatting, the opam file, and the compiler's tests, in
+  # one dune run so that they overlap. The tests of generated code and the
+  # standard library's proofs run in jobs of their own.
   check:
     runs-on: ubuntu-latest
     steps:
@@ -51,6 +52,50 @@ jobs:
 
       - uses: ./.github/actions/z3
 
+      # `@@` names the tests of one directory without its subdirectories,
+      # which leaves out stage0/test/codegen.
+      - name: Build, check formatting and truss.opam, and test the compiler
+        env:
+          TRUSS_SKIP_LIBRARY_PROOFS: "1"
+        run: opam exec -- dune build @default @install @fmt @@stage0/test/runtest @stage0/test/cli/runtest @grammar/runtest
+
+      - name: Check that truss.opam matches dune-project
+        run: git diff --exit-code truss.opam
+
+      # Each save starts from the last one, so the cache is trimmed to keep it
+      # quick to restore.
+      - if: github.event_name == 'push'
+        run: opam exec -- dune cache trim --size=200MB
+
+      - if: github.event_name == 'push'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ~/.cache/dune
+          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+
+  # The tests of generated code, which compile and run C: the longest tests
+  # after the proofs, so they run beside the check, on a runner of their own.
+  codegen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - id: opam
+        uses: ./.github/actions/opam
+        with:
+          opam-version: ${{ env.OPAM_VERSION }}
+          opam-sha256: ${{ env.OPAM_SHA256 }}
+          ocaml-version: ${{ env.OCAML_VERSION }}
+
+      - uses: actions/cache/restore@v6.1.0
+        with:
+          path: ~/.cache/dune
+          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
+          restore-keys: dune-${{ steps.opam.outputs.key }}-
+
+      # The codegen tests include running the prover on templates.
+      - uses: ./.github/actions/z3
+
       # The objects of the C that the tests generate, each kept by the text
       # of its C, the compiler, and its flags. A run starts from main's and
       # compiles only the C that main did not.
@@ -60,13 +105,8 @@ jobs:
           key: objects-${{ github.sha }}
           restore-keys: objects-
 
-      - name: Build, check formatting and truss.opam, and test
-        env:
-          TRUSS_SKIP_LIBRARY_PROOFS: "1"
-        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune build @default @install @fmt @runtest
-
-      - name: Check that truss.opam matches dune-project
-        run: git diff --exit-code truss.opam
+      - name: Test generated code
+        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune build @stage0/test/codegen/runtest
 
       # An object compiled more than two weeks ago is dropped, and compiled
       # again by the next run that needs it, so the cache holds the objects
@@ -79,17 +119,6 @@ jobs:
         with:
           path: ~/.cache/truss-objects
           key: objects-${{ github.sha }}
-
-      # Each save starts from the last one, so the cache is trimmed to keep it
-      # quick to restore.
-      - if: github.event_name == 'push'
-        run: opam exec -- dune cache trim --size=200MB
-
-      - if: github.event_name == 'push'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: ~/.cache/dune
-          key: dune-${{ steps.opam.outputs.key }}-${{ github.sha }}
 
   # The standard library's proofs: the longest test, and the one that grows
   # with the library, so it runs beside the check, dealt out to several
