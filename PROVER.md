@@ -1210,6 +1210,13 @@ plus what happens before and after:
   show it.
 - **A function named as a value** is one unit of time per call when its
   own `time` is a constant.
+- **A lambda whose body is not its definition** is known by what its body
+  does for every argument: each value its body makes is a function of the
+  arguments, and so is a functional lambda inside it that captures one of
+  them, whose definition is then about them too. Inside a quantifier, a
+  lambda that captures none of its bound values is read as it is outside
+  it, and one that captures some says what it does for each of them,
+  closed over the quantifier.
 - **A quantifier in code** spends its range times what its body spends.
 
 ## Running code while proving
@@ -1472,17 +1479,6 @@ test the prover itself:
   nested quantifiers, each fact is about values made for every
   combination of bound names, and with them the solver runs out of steps
   even with triggers chosen.
-- **A lambda with a functional lambda inside it that captures what the
-  body made,** such as the outer lambda's argument, whose body is not
-  functional, is applied as a function the solver knows nothing more
-  about: a functional lambda's symbol is named after what it captures,
-  which would be one function for every argument. A functional lambda
-  inside that captures nothing the body made is one function for every
-  argument, and the outer lambda is known by what its body does. A lambda inside a
-  quantifier is known by what its body does for every argument: one that
-  captures none of the quantifier's bound values is read as it is outside
-  it, and one that captures some says what it does for each of them,
-  closed over the quantifier.
 - **Fixes for goals with arithmetic.** A `requires` from a goal such as
   `count + 1 <= limit` must be written so that its own arithmetic cannot
   overflow, which needs the goal rewritten into bounds on the parameters

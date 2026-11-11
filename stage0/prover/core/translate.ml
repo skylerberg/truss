@@ -3512,23 +3512,19 @@ and what_a_lambda_does context frame ~capture_free function_type term ~called ~a
       (fun index _ -> index < List.length context.declarations - start_declarations)
       context.declarations
   in
-  (* A functional lambda inside, named after what it captures, is one
-     function for every argument only where it captures nothing the body
-     made, the arguments among them. *)
-  let nested_lambda =
-    List.exists
-      (function
-        | L.Constant (name, _) -> (
-            String.starts_with ~prefix:"lambda." name
-            && (not (Hashtbl.mem context.fresh_order name))
-            &&
-            match Hashtbl.find_opt context.lambda_definitions name with
-            | Some defined -> made_since context start_fresh defined
-            | None -> true)
-        | _ -> false)
-      declared_here
+  (* A functional lambda inside is named after what it captures, so where
+     that is something the body made, the arguments among them, its symbol
+     is renamed, as a value the body made is, to a function of the
+     arguments. *)
+  let captures_made name =
+    String.starts_with ~prefix:"lambda." name
+    && (not (Hashtbl.mem context.fresh_order name))
+    &&
+    match Hashtbl.find_opt context.lambda_definitions name with
+    | Some defined -> made_since context start_fresh defined
+    | None -> false
   in
-  if not nested_lambda then begin
+  begin
     let parameters =
       List.mapi
         (fun index (_, input) -> (Printf.sprintf "lambda.argument.%d" index, sort_of context input))
@@ -3546,13 +3542,17 @@ and what_a_lambda_does context frame ~capture_free function_type term ~called ~a
     let functions = Hashtbl.create 8 in
     List.iter
       (function
-        | L.Constant (name, sort) when not (Hashtbl.mem renamed name) -> (
-            match Hashtbl.find_opt context.fresh_order name with
-            | Some made when made > start_fresh && made <= end_fresh ->
-                let over = name ^ ".over" in
-                declare context (L.Function (over, List.map snd parameters, sort));
-                Hashtbl.replace renamed name (L.Apply (over, variables))
-            | _ -> ())
+        | L.Constant (name, sort) when not (Hashtbl.mem renamed name) ->
+            let made_here =
+              match Hashtbl.find_opt context.fresh_order name with
+              | Some made -> made > start_fresh && made <= end_fresh
+              | None -> captures_made name
+            in
+            if made_here then begin
+              let over = name ^ ".over" in
+              declare context (L.Function (over, List.map snd parameters, sort));
+              Hashtbl.replace renamed name (L.Apply (over, variables))
+            end
         | L.Function (name, inputs, sort) when frame.binders <> [] -> (
             match Hashtbl.find_opt context.fresh_order name with
             | Some made when made > start_fresh && made <= end_fresh ->

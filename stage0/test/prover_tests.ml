@@ -3531,6 +3531,16 @@ let () =
          \    }, value: value) == value\n\
           {\n\
           }\n"));
+  test "a lambda with a functional lambda inside that captures its argument is known" (fun () ->
+      proven
+        (applying
+       ^ "theorem returns_its_argument(value: Bool)\n\
+         \  ensures apply(fn(x) {\n\
+         \      var kept = apply(fn(_) { x }, value: true)\n\
+         \      kept\n\
+         \    }, value: value) == value\n\
+          {\n\
+          }\n"));
   test "a functional lambda inside that captures the argument is not one function" (fun () ->
       not_proven
         (applying
