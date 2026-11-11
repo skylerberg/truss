@@ -1,11 +1,14 @@
 (* Each package's call graph, for termination.
 
-   A node is a function, a method, or an [impl]'s method. Its edges are
-   every way it can reach another: a call, naming a function as a value,
-   and using an [impl] where a bound or [any] needs one, which reaches
-   every method of that [impl]. A function reaches another package's
-   functions only through what its own package names, so every cycle lies
-   within one package's graph. *)
+   A node is a function, a method, an [impl]'s method, or a trait's method.
+   Its edges are every way it can reach another: a call, naming a function
+   as a value, and using an [impl] where a bound or [any] needs one, which
+   reaches every method of that [impl]. A call through a bound or [any] is
+   a call of the trait's method, which reaches its provided body and each
+   [impl]'s own method of that name. Through those, a dependency's code
+   can reach this package's, so a walk reads each node's package's graph,
+   and a trait's method reaches the [impl]s of every package the walk
+   starts from depends on. *)
 
 open Syntax
 module Names = Resolve.Names
@@ -18,28 +21,7 @@ type edge =
 
 type t = (Path.t * edge list) list
 
-let receiver_of (parameters : parameter list) : Path.receiver =
-  match parameters with
-  | { kind = Self_parameter None; _ } :: _ -> Read
-  | { kind = Self_parameter (Some Mut); _ } :: _ -> Mut
-  | { kind = Self_parameter (Some Own); _ } :: _ -> Own
-  | _ -> Static
-
-let name_of (signature : signature) =
-  match signature.name with Plain_name name | Member_name (_, name) -> name.text
-
 let head_of (ty : T.ty) = match ty with Named { path; _ } -> Some path | _ -> None
-
-(* The trait, the [impl], or the capability a method is written inside. *)
-let container database (key : Names.key) =
-  Option.bind (Query.demand database Names.container key) (fun (container : Names.key) ->
-      Option.map
-        (fun definition -> (container, definition))
-        (Query.demand database Names.definition container))
-
-(* Whether a definition is a method written inside a trait. *)
-let in_trait database key =
-  match container database key with Some (_, { kind = Trait _; _ }) -> true | _ -> false
 
 (* The traits a trait requires, and itself, so that using an [impl] of
    [Ordered] also uses one of [Equal]. *)
@@ -137,9 +119,18 @@ let edges database impls (body : Core.block) =
     match called with
     | Function { path; _ } ->
         add (Calls path :: List.map (fun impl -> Uses_impl impl) (impls_used database impls called))
-    | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ } ->
-        add [ Calls (Path.Method { owner = impl; name; receiver }) ]
-    | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()
+    | Trait_method { evidence = Impl { impl; _ }; trait; name; receiver; _ } ->
+        let own = Path.Method { owner = impl; name; receiver } in
+        let writes =
+          List.exists
+            (fun (written, _, _, methods) ->
+              Path.equal written impl && List.exists (Path.equal own) methods)
+            impls
+        in
+        add [ Calls (if writes then own else Path.Method { owner = trait.trait; name; receiver }) ]
+    | Trait_method { trait; name; receiver; _ } ->
+        add [ Calls (Path.Method { owner = trait.trait; name; receiver }) ]
+    | Capability_method _ | Intrinsic _ | Indirect _ -> ()
   in
   Core_walk.block
     (Core_walk.deep
@@ -172,10 +163,8 @@ let build database package =
         (fun (declaration : Names.declaration) ->
           let key = Names.key_of declaration in
           match (declaration.kind, Query.demand database Infer.core key) with
-          (* A trait's own method is reached through an [impl], as it always
-             was, and is no node of its own. *)
           | (Function | Method | Theorem), Some { definition = Function { body = Some body; _ }; _ }
-            when not (in_trait database key) ->
+            ->
               [ (declaration.path, edges database impls body) ]
           | _ -> [])
         (Query.demand database Names.declarations module_))
@@ -183,39 +172,81 @@ let build database package =
 
 let graph = Query.query ~phase:Proofs ~name:"call_graph" ~show:Fun.id build
 
-(* The paths an [impl] edge reaches: every method of the [impl]. *)
-let targets graph = function
-  | Calls path -> [ path ]
-  | Uses_impl impl ->
-      List.filter_map
-        (fun (path, _) ->
-          match path with
-          | Path.Method { owner; _ } when Path.equal owner impl -> Some path
-          | _ -> None)
-        graph
+(* The methods an [impl] writes. *)
+let impl_methods database impl =
+  List.concat_map
+    (fun (written, _, _, methods) -> if Path.equal written impl then methods else [])
+    (Query.demand database package_impls (Path.package impl))
 
-(* Whether [from] can reach [target] along the graph's edges. *)
-let reaches (graph : t) ~from ~target =
+(* The packages a walk from [package] can reach: it and every package it
+   depends on, the standard library among them. *)
+let reachable_packages database package =
+  let seen = Hashtbl.create 8 in
+  let rec visit package =
+    if not (Hashtbl.mem seen package) then begin
+      Hashtbl.replace seen package ();
+      List.iter
+        (fun (dependency : Workspace.dependency) -> visit dependency.package)
+        (Query.demand database Workspace.dependencies package)
+    end
+  in
+  visit package;
+  visit "standard";
+  Hashtbl.fold (fun package () packages -> package :: packages) seen []
+
+(* The nodes a node reaches by one edge, from [package]'s point of view:
+   its own edges, read from its package's graph, and for a trait's method,
+   each [impl]'s own method of that name in a package the walk reaches. *)
+let successors database ~packages (path : Path.t) =
+  let own =
+    match
+      List.find_opt
+        (fun (node, _) -> Path.equal node path)
+        (Query.demand database graph (Path.package path))
+    with
+    | Some (_, edges) -> edges
+    | None -> []
+  in
+  let targets = function Calls path -> [ path ] | Uses_impl impl -> impl_methods database impl in
+  let dispatched =
+    match path with
+    | Method { owner; name; receiver } -> (
+        match Query.demand database Interface.Environment.interface owner with
+        | Some (Interface.Environment.Trait_interface _) ->
+            List.concat_map
+              (fun package ->
+                List.filter_map
+                  (fun (impl, trait, _, methods) ->
+                    let method_ = Path.Method { owner = impl; name; receiver } in
+                    if Path.equal trait owner && List.exists (Path.equal method_) methods then
+                      Some method_
+                    else None)
+                  (Query.demand database package_impls package))
+              packages
+        | _ -> [])
+    | _ -> []
+  in
+  List.concat_map targets own @ dispatched
+
+(* Whether [from] can reach [target] along the graph's edges, in the
+   program [package] is part of. *)
+let reaches database ~package ~from ~target =
+  let packages = reachable_packages database package in
   let visited = Hashtbl.create 16 in
   let rec go path =
     Path.equal path target
     || (not (Hashtbl.mem visited path))
        && begin
          Hashtbl.replace visited path ();
-         match List.find_opt (fun (node, _) -> Path.equal node path) graph with
-         | Some (_, edges) -> List.exists (fun edge -> List.exists go (targets graph edge)) edges
-         | None -> false
+         List.exists go (successors database ~packages path)
        end
   in
   go from
 
 (* Whether a function can call itself again: whether something it calls
    reaches back to it. *)
-let recursive (graph : t) path =
-  match List.find_opt (fun (node, _) -> Path.equal node path) graph with
-  | Some (_, edges) ->
-      List.exists
-        (fun edge ->
-          List.exists (fun from -> reaches graph ~from ~target:path) (targets graph edge))
-        edges
-  | None -> false
+let recursive database ~package path =
+  let packages = reachable_packages database package in
+  List.exists
+    (fun from -> reaches database ~package ~from ~target:path)
+    (successors database ~packages path)

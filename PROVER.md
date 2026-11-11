@@ -848,10 +848,16 @@ cycle can only be seen across definitions:
   as DESIGN.md's [Termination](DESIGN.md#termination) describes. An `impl`
   used where a bound needs it is an edge from the code that uses it to every
   method of that `impl`.
-- **Cycles cannot cross packages.** Packages do not depend on each other in
-  a cycle, and a function in one package reaches another package's
-  functions only through what code in the first package names, so every
-  cycle lies within one package's graph.
+- **A trait's method is a node.** A call through a bound or `any` is an
+  edge to it, and it has an edge to the trait's provided body and to each
+  `impl`'s own method of that name. A call that reaches an `impl` that
+  leaves the method to its trait is an edge to the provided body. So
+  provided methods that call each other, and a method that reaches itself
+  through `any`, are cycles.
+- **Cycles can cross packages through traits.** A dependency's code
+  reaches this package's code only through a trait's method, so a walk
+  reads each node's edges from its own package's graph, and a trait's
+  method reaches the `impl`s of every package the program depends on.
 - **Each edge in a cycle through a function with a `time` clause, or
   through a theorem, is an obligation:** the callee's measure, with the
   call's arguments, is smaller than the caller's. A measure is the

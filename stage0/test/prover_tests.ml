@@ -2862,6 +2862,72 @@ let () =
          }\n"
         "prover.requires")
 
+(* Recursion through traits *)
+
+let () =
+  test "provided methods that call each other are recursion" (fun () ->
+      not_proven
+        "trait Ping {\n\
+        \  fn ping(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.pong()\n\
+        \  }\n\n\
+        \  fn pong(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.ping()\n\
+        \  }\n\
+         }\n\n\
+         type Foo()\n\n\
+         impl Ping for Foo {}\n"
+        "prover.termination");
+  test "a call through any that reaches back is recursion" (fun () ->
+      let found =
+        codes
+          "trait Step {\n\
+          \  fn step(own self) -> Int64\n\
+          \    cost time finite\n\
+           }\n\n\
+           fn run(value: own any Step) -> Int64\n\
+          \  cost time finite\n\
+           {\n\
+          \  own value.step()\n\
+           }\n\n\
+           type Foo()\n\n\
+           impl Step for Foo {\n\
+          \  fn step(own self) -> Int64\n\
+          \    cost time finite\n\
+          \  {\n\
+          \    let value: any Step = any self\n\
+          \    run(own value)\n\
+          \  }\n\
+           }\n"
+      in
+      if found <> [ "prover.termination"; "prover.termination" ] then
+        fail "%s" (String.concat ", " found));
+  test "a method that calls itself through any is recursion" (fun () ->
+      not_proven
+        "trait Check {\n\
+        \  fn check(self) -> Bool\n\
+        \    cost time finite\n\
+         }\n\n\
+         type Loop()\n\n\
+         impl Check for Loop {\n\
+        \  fn check(self) -> Bool\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    let other: any Check = any Loop()\n\
+        \    !other.check()\n\
+        \  }\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  cost time finite\n\
+         {\n\
+        \  Loop().check()\n\
+         }\n"
+        "prover.termination")
+
 (* Concurrent code *)
 
 let early_return ensures =

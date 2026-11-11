@@ -221,7 +221,6 @@ type context = {
       (** In a lending or yielding method's body, the type of the parts it hands out. *)
   mutable handing : (expression list * expression list) option;
       (** Its [ensures]: the clauses for each [yield], which mention [result], and the others. *)
-  graph : Call_graph.t;  (** The package's call graph, for recursion in cycles. *)
   home : Names.key;  (** The definition being proven, whose spans and obligations are in it. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
   mutable counters : Costs.counter list;  (** What the code proven counts, for its cost clauses. *)
@@ -2319,8 +2318,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       (fun impl ->
         let reaches_here =
           List.exists
-            (fun method_ -> Call_graph.reaches context.graph ~from:method_ ~target:context.current)
-            (Call_graph.targets context.graph (Uses_impl impl))
+            (fun method_ -> Call_graph.reaches context.database ~package:(Path.package context.current) ~from:method_ ~target:context.current)
+            (Call_graph.impl_methods context.database impl)
         in
         if reaches_here then
           oblige context frame Termination span
@@ -4240,7 +4239,7 @@ and global_value context frame (node : expression) path type_arguments =
 and named_function context frame (node : expression) path type_arguments contract =
   if
     context.terminates && frame.checking
-    && Call_graph.reaches context.graph ~from:path ~target:context.current
+    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path ~target:context.current
   then
     oblige context frame Termination (at frame node)
       (Printf.sprintf
@@ -5016,7 +5015,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
      measure, at the call's arguments, is below the caller's on entry. *)
   if
     context.terminates && frame.checking
-    && Call_graph.reaches context.graph ~from:path ~target:context.current
+    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path ~target:context.current
   then
     begin match (context.measures, own.decreases) with
     | [], [] when Path.equal path context.current && structural_parameters context frame own <> []
@@ -5538,7 +5537,7 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
   let assumed =
     if
       counter.counting = Units
-      && Call_graph.reaches context.graph ~from:path ~target:context.current
+      && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path ~target:context.current
     then
       match List.assoc_opt (Costs.key counter) context.own_constants with
       | Some constants ->
@@ -8009,7 +8008,6 @@ and havoc_parts context frame =
 let new_context database ~home ~current ~terminates ~measures =
   {
     home;
-    graph = Query.demand database Call_graph.graph (Path.package current);
     laws_assumed = [];
     database;
     current;
@@ -8054,9 +8052,7 @@ let new_context database ~home ~current ~terminates ~measures =
     validating = [];
     ranking =
       terminates && measures = []
-      && Call_graph.recursive
-           (Query.demand database Call_graph.graph (Path.package current))
-           current;
+      && Call_graph.recursive database ~package:(Path.package current) current;
     disjoint =
       (match Query.demand database Ownership.ownership home with
       | Some ownership ->
