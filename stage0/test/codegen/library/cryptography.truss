@@ -357,3 +357,173 @@ test "keys and nonces are drawn from the random capability" {
     }
   }
 }
+
+fn stepped_32(start: UInt8, step: UInt8) -> Array[UInt8, 32] {
+  var bytes: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  var value = start
+  let count: USize = 32
+  for index in 0..count {
+    bytes[index] = value
+    value = value.wrapping_add(step)
+  }
+  bytes
+}
+
+fn message_of(count: USize) -> List[UInt8] {
+  var message: List[UInt8] = []
+  for index in 0..count {
+    match UInt8.try_from(index % 253) {
+      Ok(byte) => mut message.push(byte)
+      Err(_) => mut message.push(0)
+    }
+  }
+  message
+}
+
+fn public_key_hex(private: Array[UInt8, 32]) -> String {
+  let public_key = cryptography::AgreementKey.from_bytes(private).public_key()
+  hex::encode(public_key.bytes[..])
+}
+
+fn shared_hex(private: Array[UInt8, 32], their: cryptography::AgreementPublicKey) -> String {
+  match cryptography::AgreementKey.from_bytes(private).agree(their) {
+    Some(secret) => hex::encode(secret.expose()[..])
+    None => "none"
+  }
+}
+
+test "X25519 gives the public keys and the shared secret that OpenSSL produces" {
+  let first = stepped_32(1, step: 3)
+  let second = stepped_32(2, step: 5)
+  assert public_key_hex(first) == "c37077fb432d19c51d6a8c6fdf9dbf06f8471cf12edb1cadab76aeac29917a1e"
+  assert public_key_hex(second) == "b5a8a94cec7ee33acb0fc1501b6180f147542e2cd41ff4cdf20ebcc1521c1b0b"
+  let second_public = cryptography::AgreementKey.from_bytes(second).public_key()
+  let first_public = cryptography::AgreementKey.from_bytes(first).public_key()
+  assert shared_hex(first, their: second_public) == "b1726613cf762380186440efa70706292be62a41153200b0fa2946a8d8971570"
+  assert shared_hex(second, their: first_public) == "b1726613cf762380186440efa70706292be62a41153200b0fa2946a8d8971570"
+  let third = stepped_32(200, step: 3)
+  let fourth = stepped_32(77, step: 5)
+  assert public_key_hex(third) == "eebeea3c07a2a7f60ec9a6fa2b9c069a639a2a3976660561e6ae241099142843"
+  assert shared_hex(third, their: cryptography::AgreementKey.from_bytes(fourth).public_key())
+    == "d799098a349c515afa2eaf6bcf8d967e44419d71c91780e83e22e89bec53551a"
+}
+
+test "X25519 refuses a public key of low order" {
+  let zero: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  assert shared_hex(stepped_32(1, step: 3), their: cryptography::AgreementPublicKey(bytes: zero)) == "none"
+  var one = zero
+  one[0] = 1
+  assert shared_hex(stepped_32(1, step: 3), their: cryptography::AgreementPublicKey(bytes: one)) == "none"
+}
+
+fn signature_hex(seed: Array[UInt8, 32], message: Slice[UInt8]) -> String {
+  let signature = cryptography::SigningKey.from_seed(seed).sign(message)
+  hex::encode(signature.bytes[..])
+}
+
+fn verifying_key_hex(seed: Array[UInt8, 32]) -> String {
+  hex::encode(cryptography::SigningKey.from_seed(seed).verifying_key().bytes()[..])
+}
+
+test "Ed25519 gives the public keys and the signatures that OpenSSL produces" {
+  let first = stepped_32(9, step: 7)
+  assert verifying_key_hex(first) == "5d130de8527df4df802812f4726d29236feb8e22e6a8ae43849fc46a3537045a"
+  assert signature_hex(first, message: message_of(0))
+    == "2b13d2d0eb088d52560da35f7b2bc22058f5df2e93c191a7c8d3bc07aca28069a655ea69a704d02d209ec412e140d0d59e5a5e742510d0afd1df3da32c390a06"
+  assert signature_hex(first, message: message_of(1))
+    == "88040c9b10927e0a0b4aec947ef8b6109057258e5b85b0f1500d5dd1b2e162a28d35d3c6f0faab0b8c1c8d9056a2de1b514beb8134934a2151b342251ae5960c"
+  let second = stepped_32(100, step: 7)
+  assert verifying_key_hex(second) == "6e97550717cdf6ec50c143d6448d5a542c25482242fa5d059f160642fbbf1622"
+  assert signature_hex(second, message: message_of(64))
+    == "6616ccdbd94d6427ab321d3bbcc4321d67e397fa1ddc41761ec39f8008f3e6f332235c5f337176dcea80849a3f41b6f33fd55d47c60f8f86d11c5b49e2a93a05"
+  let third = stepped_32(250, step: 7)
+  assert verifying_key_hex(third) == "f1d261bf7cc781578aa009a0bc61c84a7aac6c1db778880bb67b49e712848a2a"
+  assert signature_hex(third, message: message_of(300))
+    == "bff07bcab1323a7db7518ff6df783ea61a0438043d334aaca45f5bac39cf0b3d32d3bc36ea2d0502720476e1d79e4d4232802294779e6103f16ab1cf52742606"
+}
+
+test "Ed25519 verifies its own signatures and rejects anything that was changed" {
+  let key = cryptography::SigningKey.from_seed(stepped_32(100, step: 7))
+  let verifying_key = key.verifying_key()
+  let message = message_of(64)
+  let signature = key.sign(message)
+  assert verifying_key.verify(message, signature: signature)
+  assert !verifying_key.verify(message_of(63), signature: signature)
+  var changed_message = message_of(64)
+  changed_message[10] = changed_message[10] ^ 1
+  assert !verifying_key.verify(changed_message, signature: signature)
+  var changed_commitment = signature.bytes
+  changed_commitment[3] = changed_commitment[3] ^ 4
+  assert !verifying_key.verify(message, signature: cryptography::Signature(bytes: changed_commitment))
+  var changed_response = signature.bytes
+  changed_response[40] = changed_response[40] ^ 4
+  assert !verifying_key.verify(message, signature: cryptography::Signature(bytes: changed_response))
+  let other = cryptography::SigningKey.from_seed(stepped_32(9, step: 7)).verifying_key()
+  assert !other.verify(message, signature: signature)
+}
+
+test "Ed25519 rejects a response that is not below the group's order" {
+  let key = cryptography::SigningKey.from_seed(stepped_32(100, step: 7))
+  let message = message_of(8)
+  let signature = key.sign(message)
+  let order: Array[UInt8, 32] = [
+    237, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 16,
+  ]
+  var malleated = signature.bytes
+  var carry: UInt16 = 0
+  let count: USize = 32
+  for index in 0..count {
+    let sum = UInt16.from(malleated[index + 32]) + UInt16.from(order[index]) + carry
+    match UInt8.try_from(sum & 255) {
+      Ok(byte) => {
+        malleated[index + 32] = byte
+      }
+      Err(_) => {}
+    }
+    carry = sum >> 8
+  }
+  assert key.verifying_key().verify(message, signature: signature)
+  assert !key.verifying_key().verify(message, signature: cryptography::Signature(bytes: malleated))
+}
+
+test "a verifying key is made only from bytes that name a point of the curve" {
+  let valid = cryptography::SigningKey.from_seed(stepped_32(9, step: 7)).verifying_key().bytes()
+  assert cryptography::VerifyingKey.from_bytes(valid) is Some(_)
+  var invalid = valid
+  invalid[0] = invalid[0] ^ 1
+  var invalid_count = 0
+  if cryptography::VerifyingKey.from_bytes(invalid) is None {
+    invalid_count += 1
+  }
+  invalid[0] = invalid[0] ^ 3
+  if cryptography::VerifyingKey.from_bytes(invalid) is None {
+    invalid_count += 1
+  }
+  invalid[1] = invalid[1] ^ 1
+  if cryptography::VerifyingKey.from_bytes(invalid) is None {
+    invalid_count += 1
+  }
+  assert invalid_count >= 1
+}
+
+test "signing keys and agreement keys are drawn from the random capability" {
+  provide random::SeededRandom.new(5) {
+    let first = cryptography::SigningKey.generate()
+    let second = cryptography::SigningKey.generate()
+    assert first.verifying_key() != second.verifying_key()
+    assert first.verifying_key().verify("message".bytes(), signature: first.sign("message".bytes()))
+    let ours = cryptography::AgreementKey.generate()
+    let theirs = cryptography::AgreementKey.generate()
+    let our_public = ours.public_key()
+    let their_public = theirs.public_key()
+    assert our_public != their_public
+    assert own ours.agree(their_public) is Some(left)
+      && own theirs.agree(our_public) is Some(right)
+      && left.expose() == right.expose()
+  }
+}
