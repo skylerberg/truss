@@ -1203,8 +1203,21 @@ The intrinsic module also has coroutines, for a scheduler written in Truss
 that runs one task at a time. `coroutine_start(work, item)` creates a
 suspended coroutine, `coroutine_resume` runs it until it suspends or its
 function returns, and `coroutine_suspend` switches back to the resumer.
-Each coroutine is a thread of the operating system, and the coroutine and
-its resumer never run at the same time.
+A coroutine has a stack of its own, and a resume or a suspend is a switch
+between two stacks on one thread:
+
+- **The stack** is memory from `mmap`, as large as the main thread's
+  stack, with a guard page below it. An overflow faults on the guard page
+  and is reported as any stack overflow is. The pages take memory only
+  once they are touched, and a few unused stacks are kept for reuse.
+- **The switch** is a function in assembly, for x86-64 and for ARM64. It
+  pushes the callee-saved registers, stores the stack pointer of the code
+  that calls it, loads the stack pointer of the code it switches to, and
+  pops that code's registers. No system call is made and no thread is
+  created.
+- **The sanitizers are told of each switch,** through the fiber functions
+  of AddressSanitizer and ThreadSanitizer, so generated code that runs in
+  a coroutine is checked like any other.
 
 ## Parallelism
 
