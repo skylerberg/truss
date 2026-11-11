@@ -30,6 +30,9 @@ val root : session -> string
 (** The project's root, absolute. *)
 
 val engine : session -> Engine.t
+
+val set_answers : session -> (string * Prover.told) list -> unit
+(** Sets what the solver and run code said, which is how the prover is given its answers. *)
 val context : session -> Query.context
 
 val problems : session -> string list
