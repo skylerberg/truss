@@ -804,6 +804,26 @@ let moved_states ?(running = not_running) ~tell database solver module_ =
                          (base_of cited)
                    | _ -> None
                  in
+                 (* A clause in another file is named by where it is, since a
+                    note is in the diagnostic's own file. *)
+                 let elsewhere =
+                   match cited with
+                   | Some ((cited : Names.key), span) when cited.module_ <> module_ -> (
+                       match
+                         ( base_of cited,
+                           try Some (Query.demand database Workspace.file cited.module_)
+                           with Not_found -> None )
+                       with
+                       | Some offset, Some file ->
+                           let start =
+                             (moved offset (source_span (within database cited span))).start
+                           in
+                           let line, _ = Source.position file.source start in
+                           Printf.sprintf " The clause that must hold is at `%s:%d`."
+                             (Source.path file.source) line
+                       | _ -> "")
+                   | _ -> ""
+                 in
                  {
                    state with
                    span = moved base state.span;
@@ -811,6 +831,7 @@ let moved_states ?(running = not_running) ~tell database solver module_ =
                      Option.map
                        (fun failure ->
                          let failure = Diagnostic.move base failure in
+                         let failure = { failure with message = failure.message ^ elsewhere } in
                          match note with
                          | Some note -> { failure with notes = failure.notes @ [ note ] }
                          | None -> failure)
