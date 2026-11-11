@@ -131,3 +131,9 @@ test "an array is sorted in place, by key, and into a list" {
   mut numbers.sort()
   assert numbers == [1, 2, 3, 4, 5, 6] && numbers.is_sorted()
 }
+
+test "an array lends its least and its greatest element by a comparison" {
+  let numbers: Array[Int64, 5] = [5, 3, 8, 1, 8]
+  assert numbers.min_by(fn(first, second) { first.compare(second) }) == Some(1)
+  assert numbers.max_by(fn(first, second) { first.compare(second) }) == Some(8)
+}

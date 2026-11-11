@@ -1,3 +1,5 @@
+use standard::json
+
 public type Level = Debug | Information | Warning | Error
   derives Equal, Hash, Ordered
 
@@ -108,11 +110,95 @@ public type Format = Lines | Json
 
 public type ConsoleLog(minimum: Level = Level.Information, format: Format = Format.Lines)
 
+fn needs_quotes(text: StringSlice) -> Bool {
+  if text.is_empty() {
+    return true
+  }
+  for index in 0..text.length() {
+    let byte = text.byte(index)
+    if byte <= 32 || byte == 34 || byte == 61 || byte == 127 {
+      return true
+    }
+  }
+  false
+}
+
+fn write_value(output: mut TextBuilder, value: Value, as_json: Bool) {
+  match value {
+    String(text) => {
+      if as_json || needs_quotes(text.slice()) {
+        mut output.write(json::quote(text.slice()).slice())
+      } else {
+        mut output.write(text.slice())
+      }
+    }
+    Integer(number) => number.display(mut output)
+    Float(number) => {
+      if as_json && !number.is_finite() {
+        mut output.write(json::quote("${number}").slice())
+      } else {
+        number.display(mut output)
+      }
+    }
+    Bool(flag) => flag.display(mut output)
+    Duration(duration) => {
+      if as_json {
+        mut output.write(json::quote("${duration}").slice())
+      } else {
+        duration.display(mut output)
+      }
+    }
+    Instant(instant) => {
+      if as_json {
+        mut output.write(json::quote("${instant}").slice())
+      } else {
+        instant.display(mut output)
+      }
+    }
+  }
+}
+
+fn write_line(output: mut TextBuilder, time: Instant, record: Record) {
+  time.display(mut output)
+  mut output.write(" ")
+  record.level.display(mut output)
+  mut output.write(" ")
+  mut output.write(record.message.slice())
+  for index in 0..record.fields.length() {
+    mut output.write(" ")
+    mut output.write(record.fields[index].name.slice())
+    mut output.write("=")
+    write_value(mut output, value: record.fields[index].value, as_json: false)
+  }
+}
+
+fn write_json(output: mut TextBuilder, time: Instant, record: Record) {
+  mut output.write("{\"time\":")
+  mut output.write(json::quote("${time}").slice())
+  mut output.write(",\"level\":")
+  mut output.write(json::quote("${record.level}").slice())
+  mut output.write(",\"message\":")
+  mut output.write(json::quote(record.message.slice()).slice())
+  for index in 0..record.fields.length() {
+    mut output.write(",")
+    mut output.write(json::quote(record.fields[index].name.slice()).slice())
+    mut output.write(":")
+    write_value(mut output, value: record.fields[index].value, as_json: true)
+  }
+  mut output.write("}")
+}
+
 impl Log for ConsoleLog
   uses Console, Clock
 {
   fn record(self, record: Record) {
-    todo
+    var output = TextBuilder.new()
+    match self.format {
+      Lines => write_line(mut output, time: Clock.now(), record: record)
+      Json => write_json(mut output, time: Clock.now(), record: record)
+    }
+    let line = own output.finish()
+    Console.print_error(line.slice())
   }
 
   fn enabled(self, level: Level) -> Bool {
