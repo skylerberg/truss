@@ -201,6 +201,132 @@ let () =
   test "a generic type that swaps its arguments is not growing" (fun () ->
       fine "type Swap[First, Second] =\n  | Stop\n  | indirect Next(next: Swap[Second, First])\n")
 
+(* Strict positivity *)
+
+let shown = "trait Shown {\n  type Part\n}\n\ntype Marker()\n\n"
+let kept = "type Kept[Source: Shown](part: Source.Part)\n\n"
+
+let () =
+  let found text = codes (check (setup [ ("app::main", text) ]) (module_of "app::main")) in
+  let expect expected text =
+    match found text with
+    | found when found = expected -> ()
+    | found -> fail "found [%s]" (String.concat "; " found)
+  in
+  test "a type cannot occur in the input of a function type that has a time clause" (fun () ->
+      one_diagnostic "type Knot(run: (fn(Knot) -> Bool cost time finite))\n"
+        "package.not_strictly_positive");
+  test "a type may occur in the input of a function type that has no time clause" (fun () ->
+      fine "type Button(label: String, on_click: fn(Button))\n");
+  test "a type may occur in the output of a function type that has a time clause" (fun () ->
+      fine "type Lazy(next: (fn() -> Lazy cost time finite))\n");
+  test "a type cannot occur in such an input inside a collection" (fun () ->
+      one_diagnostic "type Knot(runs: List[(fn(Knot) -> Bool cost time finite)])\n"
+        "package.not_strictly_positive");
+  test "a type cannot occur in such an input inside a type without fields" (fun () ->
+      one_diagnostic
+        "type Pending[Element] = todo\n\n\
+         type Knot(runs: Pending[(fn(Knot) -> Bool cost time finite)])\n"
+        "package.not_strictly_positive");
+  test "a type cannot occur in such an input inside another function type's output" (fun () ->
+      one_diagnostic "type Knot(make: fn() -> (fn(Knot) -> Bool cost time finite))\n"
+        "package.not_strictly_positive");
+  test "a type cannot occur in the input of a function type in such an input" (fun () ->
+      one_diagnostic "type Knot(run: (fn(fn(Knot) -> Bool) -> Bool cost time finite))\n"
+        "package.not_strictly_positive");
+  test "a type cannot occur in such an input of an any type's associated type" (fun () ->
+      one_diagnostic
+        "trait Shown {\n\
+        \  type Part\n\
+         }\n\n\
+         type Knot(shown: any Shown[Part = (fn(Knot) -> Bool cost time finite)])\n"
+        "package.not_strictly_positive");
+  test "a type cannot be the argument that a generic type puts in such an input" (fun () ->
+      one_diagnostic
+        "type Callback[Input](run: (fn(Input) -> Bool cost time finite))\n\n\
+         type Wrap(next: Callback[Wrap])\n"
+        "package.not_strictly_positive");
+  test "a generic type may put another type's argument in such an input" (fun () ->
+      fine
+        "type Callback[Input](run: (fn(Input) -> Bool cost time finite))\n\n\
+         type Wrap(next: Callback[Int64], rest: List[Wrap])\n");
+  test "each type of a cycle through such an input is an error" (fun () ->
+      expect
+        [ "package.not_strictly_positive"; "package.not_strictly_positive" ]
+        "type Left =\n\
+        \  | Stop\n\
+        \  | Go(right: List[Right])\n\n\
+         type Right(run: (fn(Int64, Left) -> Bool cost time O(1)))\n");
+  test "a type cannot occur in such an input through an associated type" (fun () ->
+      one_diagnostic
+        (shown ^ "impl Shown for Marker {\n  type Part = (fn(Knot) -> Bool cost time finite)\n}\n\n"
+       ^ kept ^ "type Knot(kept: Kept[Marker])\n")
+        "package.not_strictly_positive");
+  test "an associated type cannot put a type in such an input of itself" (fun () ->
+      one_diagnostic
+        (shown
+       ^ "impl Shown for Marker {\n  type Part = (fn(Kept[Marker]) -> Bool cost time finite)\n}\n\n"
+       ^ kept)
+        "package.not_strictly_positive");
+  test "an associated type cannot make a type contain itself in place" (fun () ->
+      one_diagnostic
+        (shown ^ "impl Shown for Marker {\n  type Part = Kept[Marker]\n}\n\n" ^ kept)
+        "package.needs_indirect");
+  test "an associated type may make a type contain itself in a collection" (fun () ->
+      fine (shown ^ "impl Shown for Marker {\n  type Part = List[Kept[Marker]]\n}\n\n" ^ kept));
+  test "only the impl that makes a type contain itself is an error" (fun () ->
+      one_diagnostic
+        (shown
+       ^ "impl Shown for Marker {\n  type Part = (fn(Kept[Marker]) -> Bool cost time finite)\n}\n\n"
+       ^ kept
+       ^ "type Outer(inner: Kept[Marker])\n\n\
+          type Other()\n\n\
+          impl Shown for Other {\n\
+         \  type Part = List[Kept[Marker]]\n\
+          }\n")
+        "package.not_strictly_positive");
+  test "an associated type may put the associated type of its impl's parameter in such an input"
+    (fun () ->
+      fine
+        (shown ^ kept
+       ^ "type Box[Inner](inner: Inner)\n\n\
+          impl Shown for Box[Inner: Shown] {\n\
+         \  type Part = (fn(Kept[Inner]) -> Bool cost time finite)\n\
+          }\n\n\
+          impl Shown for Marker {\n\
+         \  type Part = Int64\n\
+          }\n\n\
+          type Holder(kept: Kept[Box[Box[Marker]]])\n"));
+  test "an associated type cannot make a type contain itself through another impl's type" (fun () ->
+      one_diagnostic
+        (shown ^ kept
+       ^ "type Box[Inner](inner: Inner)\n\n\
+          impl Shown for Box[Inner: Shown] {\n\
+         \  type Part = Kept[Inner]\n\
+          }\n\n\
+          impl Shown for Marker {\n\
+         \  type Part = (fn(Kept[Box[Marker]]) -> Bool cost time finite)\n\
+          }\n")
+        "package.not_strictly_positive");
+  test "the arguments of an impl's type are generic parameters, as the recursive type check assumes"
+    (fun () ->
+      one_diagnostic
+        (shown ^ kept
+       ^ "type Box[Inner](inner: Inner)\n\nimpl Shown for Box[Marker] {\n  type Part = Int64\n}\n")
+        "resolve.hides_name");
+  test "an associated type cannot make a type contain itself through another impl's definition"
+    (fun () ->
+      one_diagnostic
+        (shown ^ kept
+       ^ "type Box[Inner](inner: Inner)\n\n\
+          impl Shown for Box[Inner: Shown] {\n\
+         \  type Part = Inner.Part\n\
+          }\n\n\
+          impl Shown for Marker {\n\
+         \  type Part = (fn(Kept[Box[Marker]]) -> Bool cost time finite)\n\
+          }\n")
+        "package.not_strictly_positive")
+
 (* Across packages *)
 
 let () =

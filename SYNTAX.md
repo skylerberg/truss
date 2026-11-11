@@ -399,6 +399,14 @@ type Expression =
   collection.
 - A variant that is not recursive may be marked `indirect` too, so that one
   large, rarely used variant does not make every value of the type large.
+- A type cannot occur in the input of a function type that has a `time`
+  clause in its own fields, directly or through the types that it contains:
+  `type Knot(run: (fn(Knot) -> Bool cost time finite))` is a compile error.
+  A function stored in a `Knot` could be called on that `Knot` and call
+  itself through it, so it might not terminate. A function type without a
+  `time` clause may take the type, as in `type Button(label: String,
+  on_click: fn(Button))`. The output of a function type may be the type, as
+  in `type Lazy(next: (fn() -> Lazy cost time finite))`.
 
 ### Single-field records
 

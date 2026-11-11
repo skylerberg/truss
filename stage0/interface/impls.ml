@@ -488,17 +488,19 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
                         else None)))
           candidates
 
-(* The associated type a trait's [impl] for a type chooses, or [None]. *)
-and associated_type database ~bounds type_ (trait : T.trait_reference) name =
+(* The associated type a trait's [impl] for a type chooses, or [None].
+   [defining] collects the [impl] that defines it. *)
+and associated_type database ~bounds ?defining type_ (trait : T.trait_reference) name =
   match List.assoc_opt name trait.associated with
   | Some fixed -> Some fixed
   | None -> (
       match implements database ~bounds ~conditions:false type_ trait with
       | Some (From_impl { impl; substitution }) -> (
           match impl_interface database impl with
-          | Some impl ->
+          | Some interface ->
+              Option.iter (fun defining -> defining := impl :: !defining) defining;
               Option.map (T.substitute substitution)
-                (List.assoc_opt name impl.implements.associated)
+                (List.assoc_opt name interface.implements.associated)
           | None -> None)
       | Some From_bound -> (
           match
@@ -527,23 +529,26 @@ and associated_type database ~bounds type_ (trait : T.trait_reference) name =
 (* Normalizes a type: replaces every projection whose base is known by the
    [impl]'s definition of the associated type. A projection on a generic
    parameter stays, unless a bound fixes it. So does a projection that no
-   [impl] defines, which then equals only itself. *)
-and normalize database ~bounds (type_ : T.ty) : T.ty =
+   [impl] defines, which then equals only itself. [defining] collects the
+   [impl]s whose definitions replace associated types. *)
+and normalize database ~bounds ?defining (type_ : T.ty) : T.ty =
+  let normalize = normalize database ~bounds ?defining in
+  let associated_type = associated_type database ~bounds ?defining in
   T.map
     (function
       | T.Projection { base; trait; name } -> (
-          let base = normalize database ~bounds base in
+          let base = normalize base in
           match base with
           | T.Variable _ | T.Hole -> Some (T.Projection { base; trait; name })
           | T.Error _ -> Some base
           | T.Parameter _ | T.Projection _ -> (
-              match associated_type database ~bounds base trait name with
+              match associated_type base trait name with
               | Some (T.Projection _ as projection) -> Some projection
-              | Some fixed when not (T.is_error fixed) -> Some (normalize database ~bounds fixed)
+              | Some fixed when not (T.is_error fixed) -> Some (normalize fixed)
               | _ -> Some (T.Projection { base; trait; name }))
           | _ -> (
-              match associated_type database ~bounds base trait name with
-              | Some fixed -> Some (normalize database ~bounds fixed)
+              match associated_type base trait name with
+              | Some fixed -> Some (normalize fixed)
               | None -> Some (T.Projection { base; trait; name })))
       | _ -> None)
     type_
@@ -557,6 +562,10 @@ let copyable = has Copyable
 let plain = has Plain
 let is_view = has View
 
-(* The named types a value of a type holds in place. *)
-let held_in_place database ~bounds type_ =
-  Properties.held database ~normalize:(normalize database ~bounds) type_
+let contents database ~bounds type_ =
+  Properties.contents database
+    ~normalize:(fun type_ ->
+      let defining = ref [] in
+      let normalized = normalize database ~bounds ~defining type_ in
+      (normalized, !defining))
+    type_

@@ -1636,8 +1636,21 @@ Cost clauses state proven bounds on what a function consumes.
   recursion as a direct call on a part. Derived implementations are proven
   by the compiler's rule, and functions without a `time` clause need no
   termination, so neither is affected. Truss has no mutable state outside
-  variables, so a function can reach itself only through what its code
-  names, and every such cycle is visible within one package.
+  variables, and a value cannot hold a function that takes the value and
+  promises to terminate, so a function can reach itself only through what
+  its code names, and every such cycle is visible within one package.
+- **A type cannot hold a function that takes the type and promises to
+  terminate.** In its own fields, a type must not occur in the input of a
+  function type that has a `time` clause: at any depth, through type
+  arguments, and through associated types. With `type Knot(run: (fn(Knot)
+  -> Bool cost time finite))`, a function that calls `knot.run(knot)` calls
+  itself when `knot.run` is that function, and no name in its code says so.
+  Its `time` clause would be proven although the function does not
+  terminate. Coq, Lean, and Agda forbid this for every function type, as
+  strict positivity. Truss forbids it only for a function type with a
+  `time` clause, because a function with a `time` clause cannot call a
+  function value whose type has none: `type Button(on_click: fn(Button))`
+  is legal.
 - A loop that runs until a capability says to stop, such as reading until the
   end of a stream, cannot be proven to terminate, because an implementation
   could keep supplying data forever. Such functions have no `time` clause.

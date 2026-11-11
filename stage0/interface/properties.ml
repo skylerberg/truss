@@ -1,5 +1,5 @@
 (* The properties of a type that are derived from its shape: [Copyable],
-   [Plain], the view property, and the types that it holds in place.
+   [Plain], the view property, and the types that it contains.
 
    An opaque type is [Copyable] or [Plain] only when it declares so with
    [derives]. It then has the property under the conditions that its fields
@@ -76,6 +76,22 @@ let has_bound database ~bounds type_ trait =
 
 type property = Copyable | Plain | View
 
+(* How a type occurs in a value of another type. *)
+type occurrence =
+  | In_place  (** In a field of a variant that is not [indirect], or in an array. *)
+  | Indirect
+      (** Behind a pointer: in an [indirect] variant, a collection's storage, an [any], or the
+          output of a function type. *)
+  | Function_input  (** At any depth in the input of a function type that has a [time] clause. *)
+
+(* The occurrence of a type in a value that contains it through another
+   type. *)
+let through outer inner =
+  match (outer, inner) with
+  | Function_input, _ | _, Function_input -> Function_input
+  | In_place, In_place -> In_place
+  | _ -> Indirect
+
 (* The facts that a type definition gives about every instantiation of it,
    as conditions on its type arguments. They are computed once per
    definition. A query about [Option[Option[List[Int64]]]] instantiates
@@ -89,13 +105,11 @@ type facts = {
   plain : T.ty list option;  (** The same for [Plain]. *)
   view : T.ty list option;
       (** The types of which any one makes the type a view. [None] if the type always is one. *)
-  in_place : T.ty list;
-      (** The types that a value holds in place: in a field of a variant that is not [indirect], and
-          not inside a collection's storage, a function, or an [any]. *)
+  contains : (T.ty * occurrence) list;  (** The types that a value contains. *)
 }
 
 (* The facts of a type with no fields. *)
-let empty = { copyable = Some []; plain = Some []; view = Some []; in_place = [] }
+let empty = { copyable = Some []; plain = Some []; view = Some []; contains = [] }
 
 let conditions_of facts = function
   | Copyable -> facts.copyable
@@ -189,28 +203,87 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
                     (conditions database ~facts_of ~resolve ~leaf ~within:(type_ :: within) property)
                     (instantiate ~resolve interface arguments found))))
 
-(* The types that a value of a type holds in place: named types, parameters,
-   and associated types, including those reached through the arguments of
-   generic types that hold their arguments in place. *)
-let rec in_place database ~facts_of ~resolve ?(within = []) (type_ : T.ty) =
-  match type_ with
-  | T.Parameter _ | T.Projection _ -> [ type_ ]
-  | T.Named { path; arguments } -> (
-      match Intrinsic.builtin_of_path path with
-      | Some Array ->
-          List.concat_map (in_place database ~facts_of ~resolve ~within) (type_arguments arguments)
-      | Some _ -> []
-      | None when List.exists (T.equal type_) within || List.length within > limit -> []
-      | None ->
-          type_
-          ::
-          (match Query.demand database Environment.type_interface path with
-          | Some interface ->
-              List.concat_map
-                (in_place database ~facts_of ~resolve ~within:(type_ :: within))
-                (instantiate ~resolve interface arguments (facts_of path).in_place)
-          | None -> []))
-  | _ -> []
+(* A named type that contains itself through its arguments. No type
+   definition's fields name such a type: [Kept[Marker]] is one when
+   [Kept[Source]] has a field of type [Source.Part] and [Marker]'s [impl]
+   defines [Part] as [Kept[Marker]]. *)
+type recursion = {
+  recursive : T.ty;
+  occurrence : occurrence;  (** How the type occurs in itself. *)
+  defining : Path.t list;
+      (** The [impl]s whose definitions of associated types the type contains itself through. *)
+}
+
+(* The types that a value of a type contains. *)
+type contents = {
+  contained : (T.ty * occurrence) list;
+      (** Named types, parameters, and associated types, including those in the arguments of generic
+          types. *)
+  recursions : recursion list;
+}
+
+let function_output : T.result -> T.ty = function
+  | Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
+
+(* [resolve] normalizes a type and gives the [impl]s whose definitions
+   replaced its associated types. *)
+let contents database ~facts_of ~resolve (type_ : T.ty) =
+  let contained = ref [] and recursions = ref [] in
+  (* [enclosing] has each named type whose arguments are being read, with
+     the occurrence in it of the type being visited and the [impl]s whose
+     definitions were read on the way. *)
+  let rec visit ~enclosing occurrence (type_ : T.ty) =
+    let inside ?named ?(defining = []) step =
+      visit
+        ~enclosing:
+          (Option.to_list (Option.map (fun named -> (named, step, defining)) named)
+          @ List.map
+              (fun (other, within, earlier) -> (other, through within step, defining @ earlier))
+              enclosing)
+        (through occurrence step)
+    in
+    match type_ with
+    | T.Parameter _ | T.Projection _ -> contained := (type_, occurrence) :: !contained
+    | T.Function ({ inputs; output; _ } as function_) ->
+        List.iter
+          (fun (_, input) ->
+            inside (if T.terminates function_ then Function_input else Indirect) input)
+          inputs;
+        inside Indirect (function_output output)
+    | T.Any { trait_arguments; associated; _ } ->
+        List.iter (inside Indirect) (type_arguments trait_arguments @ List.map snd associated)
+    | T.Cursor { arguments; _ } -> List.iter (inside Indirect) (type_arguments arguments)
+    | T.Named { path; arguments } -> (
+        match Intrinsic.builtin_of_path path with
+        | Some Array -> List.iter (inside In_place) (type_arguments arguments)
+        | Some _ -> List.iter (inside Indirect) (type_arguments arguments)
+        | None -> (
+            contained := (type_, occurrence) :: !contained;
+            match
+              ( List.find_opt (fun (named, _, _) -> T.equal named type_) enclosing,
+                Query.demand database Environment.type_interface path )
+            with
+            | Some (_, occurrence, defining), _ ->
+                recursions := { recursive = type_; occurrence; defining } :: !recursions
+            | None, Some ({ shape = Record _ | Sum _; _ } as interface)
+              when List.length enclosing <= limit ->
+                let substitution =
+                  Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
+                in
+                List.iter
+                  (fun (condition, step) ->
+                    let condition, defining = resolve (T.substitute substitution condition) in
+                    inside ~named:type_ ~defining step condition)
+                  (facts_of path).contains
+            (* A type without fields can hold its arguments: the specification
+               type [Sequence] holds its elements. *)
+            | None, Some { shape = Todo_type | Builtin_type _ | Error_shape _; _ } ->
+                List.iter (inside Indirect) (type_arguments arguments)
+            | None, _ -> ()))
+    | _ -> ()
+  in
+  visit ~enclosing:[] In_place type_;
+  { contained = List.rev !contained; recursions = List.rev !recursions }
 
 let size type_ =
   let count = ref 0 in
@@ -249,7 +322,7 @@ let facts_from database ~facts_of (interface : T.type_interface) =
           variants
     | Todo_type | Builtin_type _ | Error_shape _ -> []
   in
-  let contents = List.map snd fields in
+  let field_types = List.map snd fields in
   let declared trait = List.exists (Path.equal trait) interface.derives in
   let allocates =
     match interface.shape with
@@ -262,7 +335,7 @@ let facts_from database ~facts_of (interface : T.type_interface) =
   in
   let owned property =
     if undeclared property || (property = Plain && allocates) then None
-    else conditions property contents
+    else conditions property field_types
   in
   match interface.shape with
   | Error_shape _ | Builtin_type _ -> empty
@@ -271,18 +344,19 @@ let facts_from database ~facts_of (interface : T.type_interface) =
       {
         copyable = owned Copyable;
         plain = owned Plain;
-        view = conditions View contents;
-        in_place =
+        view = conditions View field_types;
+        contains =
           List.sort_uniq compare
             (List.concat_map
                (fun (indirect, type_) ->
-                 if indirect then []
-                 else
-                   List.filter
-                     (function
-                       | (T.Parameter _ | T.Projection _) as condition -> small condition
-                       | _ -> false)
-                     (in_place database ~facts_of ~resolve:Fun.id type_))
+                 List.filter_map
+                   (function
+                     | ((T.Parameter _ | T.Projection _) as condition), occurrence
+                       when small condition ->
+                         Some
+                           (condition, through (if indirect then Indirect else In_place) occurrence)
+                     | _ -> None)
+                   (contents database ~facts_of ~resolve:(fun type_ -> (type_, [])) type_).contained)
                fields);
       }
 
@@ -338,7 +412,7 @@ let group =
 
 (* The facts of a group of mutually recursive types, keyed by the group's
    first member. A recursive type is [Copyable] and [Plain] unless a part of
-   it prevents that, and is a view, or holds a type in place, only if a part
+   it prevents that, and is a view, or contains a type, only if a part
    of it does. So the facts are a fixed point: the iteration starts from the
    facts of the types without fields, and each round recomputes every
    member's facts from the others' facts of the previous round, until none
@@ -420,8 +494,6 @@ let storable database ~bounds ~normalize type_ =
     (conditions database ~facts_of:(Query.demand database facts) ~resolve:normalize ~leaf View
        (normalize type_))
 
-(* The named types a value of a type holds in place. *)
-let held database ~normalize type_ =
-  List.filter_map
-    (function T.Named { path; _ } -> Some path | _ -> None)
-    (in_place database ~facts_of:(Query.demand database facts) ~resolve:normalize (normalize type_))
+let contents database ~normalize type_ =
+  contents database ~facts_of:(Query.demand database facts) ~resolve:normalize
+    (fst (normalize type_))
