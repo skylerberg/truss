@@ -289,13 +289,8 @@ let () =
               "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n" );
           ]
       in
-      Engine.set (Engine.of_context database) Workspace.packages "app"
-        {
-          name = "app";
-          dependencies = [ { package = "clock_library"; capabilities = [] } ];
-          modules = [ module_of "app::main" ];
-          usize_bits = 32;
-        };
+      Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
+        ~dependencies:[ { package = "clock_library"; capabilities = [] } ];
       match codes (check database (module_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
       | found -> fail "found [%s]" (String.concat "; " found))
@@ -303,13 +298,8 @@ let () =
 let () =
   let with_grant files granted =
     let database = setup files in
-    Engine.set (Engine.of_context database) Workspace.packages "app"
-      {
-        name = "app";
-        dependencies = [ { package = "clock_library"; capabilities = granted } ];
-        modules = [ module_of "app::main" ];
-        usize_bits = 32;
-      };
+    Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
+      ~dependencies:[ { package = "clock_library"; capabilities = granted } ];
     codes (check database (module_of "app::main"))
   in
   let library =
@@ -422,14 +412,9 @@ let () =
    each with what it is granted. *)
 let codes_with_grants files grants =
   let database = setup files in
-  Engine.set (Engine.of_context database) Workspace.packages "app"
-    {
-      name = "app";
-      dependencies =
-        List.map (fun (package, capabilities) -> { Workspace.package; capabilities }) grants;
-      modules = [ module_of "app::main" ];
-      usize_bits = 32;
-    };
+  Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
+    ~dependencies:
+      (List.map (fun (package, capabilities) -> { Workspace.package; capabilities }) grants);
   (database, codes (check database (module_of "app::main")))
 
 let expect_codes ~expected (_, found) =

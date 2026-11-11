@@ -110,7 +110,7 @@ let manifest_problems t =
 
 (* A package as the session holds it: its dependencies, and the targets it
    runs on. *)
-let manifest t (package : package) = Query.find t.context Workspace.packages package.name
+let manifest t (package : package) = Workspace.package t.context package.name
 
 (* Reads the files again after a command changed some, so only what
    changed is checked again. *)

@@ -319,17 +319,7 @@ let drop_shapes =
 let standard_database =
   lazy
     (let database = Engine.context (Engine.create ()) in
-     List.iter
-       (fun (module_, text) ->
-         Engine.set (Engine.of_context database) Workspace.file_text module_ text)
-       Standard_library.modules;
-     Engine.set (Engine.of_context database) Workspace.packages Path.standard_package
-       {
-         name = Path.standard_package;
-         dependencies = [];
-         modules = List.map fst Standard_library.modules;
-         usize_bits = 64;
-       };
+     Database.load_standard (Engine.of_context database);
      database)
 
 let standard_context : Monomorphic.context =

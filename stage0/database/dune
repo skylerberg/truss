@@ -9,10 +9,11 @@
   session
   path
   workspace
+  manifest
+  project
   diagnostic
   standard_library
   compiler_version
   type_checker
-  manifest
   registry
   resolve))

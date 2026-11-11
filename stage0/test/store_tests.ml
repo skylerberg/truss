@@ -528,4 +528,34 @@ let () =
       if Engine.values_in store ~version:"another" artifact <> [] then fail "its values were read";
       if Engine.values_in store ~version artifact = [] then fail "its own version reads nothing")
 
+let () =
+  test "a result of a fixed base that reads a replaced input is not read from the base again"
+    (fun () ->
+      (* [hundreds] comes out the same for both inputs, so the change stops
+         there, and nothing of the engine's own reads the copy of
+         [doubled]. *)
+      let hundreds =
+        unit_query "fixed_hundreds" (fun database () -> Query.demand database doubled () / 100)
+      in
+      (* The root is of a later phase, so it is not copied with them. *)
+      let top =
+        unit_query "fixed_top" ~phase:Phases.bodies (fun database () ->
+            Query.demand database hundreds ())
+      in
+      let store = Store.open_ (fresh_directory ()) in
+      let base = attached store in
+      Engine.set base value_input () 4;
+      ignore (Engine.get base top ());
+      Engine.freeze ~fixed:true base;
+      let engine = Engine.create ~bases:[ base ] () in
+      Engine.attach engine store ~version;
+      Engine.set engine value_input () 5;
+      ignore (Engine.stabilize engine);
+      let artifact = Engine.write engine in
+      match Engine.open_ store ~version ~bases:[ base ] artifact with
+      | None -> fail "the state did not open"
+      | Some opened ->
+          let value = Engine.get opened doubled () in
+          if value <> 10 then fail "read %d, the base's result" value)
+
 let () = finish ()

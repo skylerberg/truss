@@ -59,6 +59,11 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
         let cell = make_input engine input key ~below:None in
         Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
         record context cell.input_node;
+        (* What a driver only observed is collected again. *)
+        if context.frame = None && context.observing then begin
+          defer_collection engine cell.input_node;
+          sweep engine
+        end;
         None
       end
 

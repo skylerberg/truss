@@ -98,7 +98,14 @@ let write ?(full = false) engine =
           let set =
             match node.cell with Input (_, { slot = Set _ | Stored; _ }) -> true | _ -> false
           in
-          if node.root || set then reach node)
+          (* A copy of a fixed base's node is the state's result where the
+             base's is not: it read an input the state replaced. It is
+             written whether or not anything reaches it, or a state opened
+             from this one would read the base's result in its place. *)
+          let replaces_fixed =
+            match node.below with Some base -> base.engine.fixed | None -> false
+          in
+          if node.root || set || replaces_fixed then reach node)
         (nodes engine);
       by_id (Hashtbl.fold (fun _ node found -> node :: found) reached [])
     end
