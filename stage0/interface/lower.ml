@@ -498,9 +498,7 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
     terminates;
     specification_only =
       (* [Model]'s method returns a mathematical value. *)
-      (match owner with
-        | Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" } -> true
-        | _ -> false)
+      Path.equal owner (Path.core "Model")
       || mentions_integer result_type
       || List.exists
            (fun (parameter : T.parameter_info) -> mentions_integer parameter.type_)

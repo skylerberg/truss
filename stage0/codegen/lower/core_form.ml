@@ -149,7 +149,7 @@ and value_place st (value : Core.expression) : Lir.place =
   let ty =
     match value.kind with
     (* These diverge, so the temporary is never read. *)
-    | Return _ | Break | Continue | Leaving _ -> Monomorphic.builtin Unit
+    | Return _ | Break | Continue | Task_exit _ -> Monomorphic.builtin Unit
     | _ -> ground st value.type_
   in
   let result = temporary st ty in
@@ -418,7 +418,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Implies _ | Result | Old _ | Yielded | Finished | Identical _ | Specification_function _
   | Method_time _ ->
       bug "a specification-only expression in code that runs"
-  | Leaving { tasks; exit } ->
+  | Task_exit { tasks; exit } ->
       (* The task evaluates the return value into a temporary of its own
          before it cancels the group. Several tasks may do so at the same
          time, and only the first to cancel moves its value out. *)

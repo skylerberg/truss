@@ -102,7 +102,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
           List.iter
             (fun (field, field_ty) ->
               let equal = temporary st context.bool in
-              trait_call st ~trait:(core "Equal") ~name:"equal" ~receiver:Read ~self:field_ty
+              trait_call st ~trait:(Path.core "Equal") ~name:"equal" ~receiver:Read ~self:field_ty
                 ~arguments:
                   [
                     (Read, field_ty, field_place self variant field);
@@ -136,7 +136,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
           if variant <> None then write (constant_int UInt64 (Z.of_int index));
           List.iter
             (fun (field, field_ty) ->
-              trait_call st ~trait:(core "Hash") ~name:"hash" ~receiver:Read ~self:field_ty
+              trait_call st ~trait:(Path.core "Hash") ~name:"hash" ~receiver:Read ~self:field_ty
                 ~arguments:
                   [ (Read, field_ty, field_place self variant field); (Mut, hasher_ty, hasher) ]
                 ~destination:(temporary st (Monomorphic.builtin Unit)))
@@ -176,7 +176,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
               when_ b
                 (Copy (at undecided))
                 (fun () ->
-                  trait_call st ~trait:(core "Ordered") ~name:"compare" ~receiver:Read
+                  trait_call st ~trait:(Path.core "Ordered") ~name:"compare" ~receiver:Read
                     ~self:field_ty
                     ~arguments:
                       [
@@ -195,7 +195,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
             List.map
               (fun (field, field_ty) ->
                 let value = temporary st field_ty in
-                trait_call st ~trait:(core "Default") ~name:"default" ~receiver:Static
+                trait_call st ~trait:(Path.core "Default") ~name:"default" ~receiver:Static
                   ~self:field_ty ~arguments:[] ~destination:value;
                 (field, Lir.Move value))
               (typed_fields (shape_fields st ty None))

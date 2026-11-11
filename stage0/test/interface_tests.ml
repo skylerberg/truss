@@ -12,7 +12,7 @@ let check database module_ =
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }
-let standard modules name : Path.t = Top { module_ = { package = "standard"; modules }; name }
+let standard = Path.standard
 let int64 = Types.builtin Int64
 
 (* The standard library *)

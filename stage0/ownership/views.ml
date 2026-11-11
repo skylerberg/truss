@@ -652,7 +652,7 @@ let check context (graph : Graph.t) : task_hazard option =
      branch uses. Two elements of one collection may be disjoint, which is
      left to the prover as a [Disjoint] obligation. *)
   List.iter
-    (fun ({ keyword; branches } : simultaneous_block) ->
+    (fun ({ keyword; branches } : fork_join_block) ->
       let branches = List.map effects branches in
       List.iteri
         (fun index (changes, _) ->
@@ -695,12 +695,12 @@ let check context (graph : Graph.t) : task_hazard option =
                     other_changes))
             branches)
         branches)
-    graph.simultaneous_blocks;
+    graph.fork_join_blocks;
   (* Data races between the iterations of a [parallel for] or [concurrent
      for]: the body can mutate only the locals of one iteration, which are
      the loop's pattern variables and the locals that the body binds. *)
   List.iter
-    (fun ({ keyword; body = range; bound } : simultaneous_loop) ->
+    (fun ({ keyword; body = range; bound } : fork_join_loop) ->
       let bound = ref bound in
       for index = range.first to range.limit - 1 do
         match graph.points.(index).action with Bind locals -> bound := locals @ !bound | _ -> ()
@@ -719,5 +719,5 @@ let check context (graph : Graph.t) : task_hazard option =
                   mutate only its own element and its own locals."
                  keyword))
         (fst (effects range)))
-    graph.simultaneous_loops;
+    graph.fork_join_loops;
   !task_hazard

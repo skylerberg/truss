@@ -40,6 +40,17 @@ type t =
   | Test of { module_ : module_; name : string }
   | Law_proof of { module_ : module_; name : string }  (** ["Monoid.associative for Int64"] *)
 
+val standard : string list -> string -> t
+(** A top-level definition of the standard library: [standard [ "list" ] "List"] is
+    [standard::list::List]. *)
+
+val core : string -> t
+(** A top-level definition of [standard::core], the module of the prelude's traits: [core "Equal"]
+    is [standard::core::Equal]. *)
+
+val core_name : t -> string option
+(** The name of a path, if the path is a top-level definition of [standard::core]. *)
+
 val package : t -> string
 (** The package a definition is in. A method or member constant is in its type's package, as every
     method must be, though it may be written in any file of it, so a path does not say which module

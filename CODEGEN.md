@@ -1347,7 +1347,7 @@ the nested function's parameter.
 ### Early exits
 
 An early exit is a `return`, a `break`, a `continue`, or a `?` that leaves
-a task before the task's end. The core form wraps it in `Leaving`, with the
+a task before the task's end. The core form wraps it in `Task_exit`, with the
 tasks that it ends, innermost first. Lowering handles one task at a time:
 
 1. The task evaluates the return value, if there is one, into a temporary

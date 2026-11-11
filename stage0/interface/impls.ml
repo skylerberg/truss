@@ -16,10 +16,7 @@ let head = function T.Named { path; _ } -> Some path | _ -> None
 let derivable_names = [ "Equal"; "Hash"; "Ordered"; "Default" ]
 
 let derivable (trait : Path.t) =
-  match trait with
-  | Top { module_ = { package = "standard"; modules = [ "core" ] }; name } ->
-      List.mem name derivable_names
-  | _ -> false
+  match Path.core_name trait with Some name -> List.mem name derivable_names | None -> false
 
 (* Every [impl] of a package, written or derived, by trait and type
    constructor. *)
@@ -96,8 +93,7 @@ let impls_in =
         (fun (indexed_trait, impl) -> if Path.equal indexed_trait trait then Some impl else None)
         (impls_for database type_ package))
 
-let cursor_trait : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
+let cursor_trait = Path.core "Cursor"
 
 (* The cursor of a yielding function or method implements [Cursor], and no
    [impl] is written for it. Its [impl] is a derived one, named by the
