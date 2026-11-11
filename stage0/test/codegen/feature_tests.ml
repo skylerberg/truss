@@ -320,7 +320,7 @@ test "a call through any passes no evidence for a set" {
   assert through(mut boxed) == Some(2)
   var cursor: any Cursor[Element = Int64] = any plain(3)
   assert mut cursor.next() == Some(0)
-  assert mut cursor.find(fn(value) { value > 1 }) == Some(2)
+  assert own cursor.last() == Some(2)
 }
 
 test "the methods of Cursor on a cursor that uses a capability" {
