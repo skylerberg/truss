@@ -124,8 +124,9 @@ val inputs_stored : t -> bool
 (** Whether the store still has the value of every input of the state, apart from its fixed bases'.
 *)
 
-val values_in : Store.t -> string -> string list
-(** Every name an artifact's chain refers to in the store, for collecting it. *)
+val values_in : Store.t -> version:string -> string -> string list
+(** Every name an artifact's chain refers to in the store, for collecting it; none for a chain that
+    another version wrote, which only that version can read. *)
 
 val forget_bases : unit -> unit
 

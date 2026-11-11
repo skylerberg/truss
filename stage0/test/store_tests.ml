@@ -133,6 +133,41 @@ let () =
       Store.collect store ~budget:max_int ~live:(fun _ -> false);
       if Store.get store dead <> Some "dead" then fail "removed a value")
 
+let () =
+  test "many small segments are gathered into one, and every record is kept" (fun () ->
+      let directory = fresh_directory () in
+      let names =
+        List.init 40 (fun index ->
+            let writer = Store.open_ directory in
+            let name = Store.put writer (Printf.sprintf "value %d" index) in
+            Store.add_result writer ~kind:"kind" ~key:(string_of_int index) "result";
+            Store.close writer;
+            name)
+      in
+      let store = Store.open_ directory in
+      Store.compact store;
+      Store.close store;
+      let segments = List.length (segment_files directory) in
+      if segments > 2 then fail "%d segments are left" segments;
+      let again = Store.open_ directory in
+      List.iteri
+        (fun index name ->
+          if Store.get again name <> Some (Printf.sprintf "value %d" index) then
+            fail "value %d is gone" index;
+          if Store.find_result again ~kind:"kind" ~key:(string_of_int index) <> Some "result" then
+            fail "result %d is gone" index)
+        names);
+  test "a few small segments are left as they are" (fun () ->
+      let directory = fresh_directory () in
+      for index = 1 to 5 do
+        let writer = Store.open_ directory in
+        ignore (Store.put writer (string_of_int index));
+        Store.close writer
+      done;
+      let store = Store.open_ directory in
+      Store.compact store;
+      if List.length (segment_files directory) <> 5 then fail "the segments were rewritten")
+
 (* States and facts *)
 
 let version = "test"
@@ -483,5 +518,13 @@ let () =
           match Query.find (Engine.context engine) value_input () with
           | _ -> fail "the input was read"
           | exception Engine.Lost _ -> ()))
+
+let () =
+  test "a state another version wrote is not opened, and names nothing to keep" (fun () ->
+      let store, artifact = written () in
+      if Engine.open_ store ~version:"another" ~bases:[] artifact <> None then
+        fail "the state was opened";
+      if Engine.values_in store ~version:"another" artifact <> [] then fail "its values were read";
+      if Engine.values_in store ~version artifact = [] then fail "its own version reads nothing")
 
 let () = finish ()

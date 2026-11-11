@@ -74,7 +74,7 @@ let open_ ?log store ~version ~bases name =
 exception Lost = Incremental.Lost
 
 let inputs_stored = Incremental.inputs_stored
-let values_in store name = Incremental.values_in (store_of store ~version:"") name
+let values_in store ~version name = Incremental.values_in (store_of store ~version) name
 let forget_bases = Incremental.forget_bases
 let audit = Incremental.audit
 let audit_all = Incremental.audit_all
