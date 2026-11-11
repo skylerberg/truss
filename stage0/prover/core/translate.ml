@@ -2805,6 +2805,18 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
                 kind)
             kind);
       L.Symbol (symbol operation)
+  | View_address, element :: _ when T.equal element (T.builtin UInt8) -> (
+      (* A view's bytes lie in memory, so they end within the address space,
+         and a view with any is not at zero. *)
+      match operands with
+      | [ view ] ->
+          let length = sequence_length context element (buffer_model context View element view) in
+          assume context frame
+            L.(
+              Apply ("<=", [ Apply ("+", [ known; length ]); Integer (Z.shift_left Z.one 64) ])
+              &&& (Apply (">", [ length; int 0 ]) ==> Apply (">=", [ known; int 1 ])));
+          known
+      | _ -> known)
   | Environment_entry, _ ->
       (* An entry is a C string without its end, so none of its bytes is
          zero. *)

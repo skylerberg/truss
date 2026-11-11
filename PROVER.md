@@ -1392,8 +1392,9 @@ A proof is as trustworthy as:
   `system_is_macos`, `system_is_x86_64`, and `system_is_arm64` gives one
   answer for the whole run, and at most one operating system and one
   architecture is the one; a handle's descriptor is a function of the
-  handle, the one `handle_from` made it from; and an environment entry,
-  a C string without its end, has no zero byte
+  handle, the one `handle_from` made it from; an environment entry, a C
+  string without its end, has no zero byte; and a view of bytes ends
+  within the address space, and is not at zero where it has any
 - the standard library's contracts whose bodies end in any other
   intrinsic, which the prover knows only by its type, so they are relied
   on and not proven
@@ -1445,9 +1446,10 @@ test the prover itself:
 
 ## Not built
 
-- **Contracts for the intrinsic module's system calls.** A view's address,
-  and what a C function returns beyond what its row of the table says, are
-  known only by their types.
+- **Contracts for the intrinsic module's system calls.** What a C function
+  returns beyond what its row of the table says is known only by its type,
+  and so is the address of a view of anything but bytes, whose elements'
+  size the prover does not know.
 - **Facts under a quantifier.** A pure callee's contract and definition
   are stated once for every argument, but any other fact that names a
   quantifier's bound name, such as what is known of a value made in the
