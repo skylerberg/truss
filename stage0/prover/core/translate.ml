@@ -226,8 +226,6 @@ type context = {
   home : Names.key;  (** The definition being proven, whose spans and obligations are in it. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
   mutable counters : Costs.counter list;  (** What the code proven counts, for its cost clauses. *)
-  mutable amortized : string list;
-      (** The keys of the counters the definition proven has an amortized bound on. *)
   mutable own_constants : (string * Costs.constants) list;
       (** By counter, the constants of the definition's own [O(...)] bounds, which a call back into
           it assumes. *)
@@ -3056,7 +3054,7 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
         in
         match (resource, counting) with
         | Some resource, Some counting ->
-            let counter = { Costs.resource; counting } in
+            let counter = { Costs.resource; counting; amortized = cost.amortized } in
             let constants =
               if counting = Units then begin
                 let constants =
@@ -3073,9 +3071,11 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
         | _ -> None)
       function_type.costs
   in
-  let time_units = { Costs.resource = Time; counting = Units } in
+  let time_units = { Costs.resource = Time; counting = Units; amortized = false } in
   let counts_time =
-    List.exists (fun counter -> Costs.key counter = Costs.key time_units) context.counters
+    List.exists
+      (fun (counter : Costs.counter) -> counter.resource = Time && counter.counting = Units)
+      context.counters
   in
   let times_by_type = List.exists (fun (counter, _, _) -> counter = time_units) promised in
   (* A call back into the definition around it still assumes its bound
@@ -5692,7 +5692,9 @@ and loop_counters locals (body : block) =
       (function
         | Cost cost -> (
             match resource_of cost ~locals with
-            | Some resource -> found := { Costs.resource; counting = counting_of cost } :: !found
+            | Some resource ->
+                found :=
+                  { Costs.resource; counting = counting_of cost; amortized = false } :: !found
             | None -> raise (Foreign_unsupported "this `calls` target"))
         | Invariant _ | Decreases _ -> ())
       clauses
@@ -5827,12 +5829,12 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
             (match (cost.amortized, change) with true, Some change -> change () | _ -> Costs.zero)
   in
   (* A callee with a plain and an amortized bound on the same resource is
-     counted by the one of the kind the definition proven promises: an
+     counted, for each counter, by the clause of the counter's kind: an
      amortized bound pays for the potential the call leaves, which an
-     amortized caller's own bound is about, and a plain one is all a plain
-     caller needs. *)
+     amortized counter is about, and a plain one is all a plain counter
+     needs. *)
   let first_clauses () =
-    let amortized_first = Option.is_some change && List.mem (Costs.key counter) context.amortized in
+    let amortized_first = Option.is_some change && counter.amortized in
     List.find_map
       (fun part ->
         match clauses_of part with
@@ -8344,7 +8346,6 @@ let new_context database ~home ~current ~terminates ~measures =
     handing = None;
     parameters = [];
     counters = [];
-    amortized = [];
     own_constants = [];
     groups = [];
     fresh_order = Hashtbl.create 64;
@@ -8428,7 +8429,9 @@ let promises context (source : source) locals (costs : Core.cost list) ~inherite
           match resource_of cost ~locals with
           | None -> unsupported (span_of source cost.origin) "this `calls` target"
           | Some resource ->
-              let counter = { Costs.resource; counting = counting_of cost } in
+              let counter =
+                { Costs.resource; counting = counting_of cost; amortized = cost.amortized }
+              in
               let key = Costs.key counter in
               (match (cost.resource, resource) with
               | Calls (Function_parameter local), Calls (Through term) ->
@@ -8638,10 +8641,6 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   context.counters <-
     distinct_counters
       (List.map (fun promise -> promise.counter) promised @ loop_counters start.locals body);
-  context.amortized <-
-    List.filter_map
-      (fun promise -> if promise.clause.amortized then Some (Costs.key promise.counter) else None)
-      promised;
   let start =
     {
       start with

@@ -20,7 +20,11 @@ type resource = Time | Allocations | Allocated_bytes | Calls of target
    [cost] clause is counted as its iterations times a bound on each, which
    for [==] must be what every iteration spends. *)
 type counting = Units | At_most | Exactly
-type counter = { resource : resource; counting : counting }
+
+(* An amortized bound has a counter of its own, so that a definition with a
+   plain and an amortized bound on one resource counts each callee by the
+   clause of its kind. *)
+type counter = { resource : resource; counting : counting; amortized : bool }
 
 let target_key = function
   | Through term -> L.show_term term
@@ -33,7 +37,11 @@ let key counter =
     | Allocations -> "allocations"
     | Allocated_bytes -> "allocated_bytes"
     | Calls target -> "calls(" ^ target_key target ^ ")")
-  ^ match counter.counting with Units -> ".units" | At_most -> ".at_most" | Exactly -> ".exactly"
+  ^ (match counter.counting with
+    | Units -> ".units"
+    | At_most -> ".at_most"
+    | Exactly -> ".exactly")
+  ^ if counter.amortized then ".amortized" else ""
 
 (* Whether a [calls] clause about [clause] bounds the calls a counter about
    [counter] counts: the same target, or a whole capability for one of its

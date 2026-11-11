@@ -3142,6 +3142,25 @@ let () =
         \  }\n\
          }\n")
 
+(* Plain and amortized bounds together *)
+
+let () =
+  test "a recursive function proves a plain and an amortized bound, each by its own counting"
+    (fun () ->
+      proven
+        "fn shift_left_all(items: mut List[Int64], position: USize)\n\
+        \  requires position <= items.length()\n\
+        \  ensures items.length() == old(items.length())\n\
+        \  decreases position\n\
+        \  cost time O(position)\n\
+        \  cost amortized time O(position)\n\
+         {\n\
+        \  if position >= 2 {\n\
+        \    mut items.swap(position - 1, second: position - 2)\n\
+        \    shift_left_all(mut items, position: position - 1)\n\
+        \  }\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =
