@@ -39,6 +39,9 @@ val phase : name:string -> after:phase list -> phase
 
 val phase_name : phase -> string
 
+val phase_rank : phase -> int
+(** A phase's place in the order, for the engine: lower for a phase that a higher one may read. *)
+
 type ('key, 'value) query = ('key, 'value) Incremental.query
 
 val query :

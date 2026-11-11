@@ -1061,7 +1061,10 @@ with the same inputs.
   each that differs. With `~flat:true` the new engine has no bases and is
   given their inputs too, so the bases' results are checked as well. The new
   engine finds no facts, since a fact the engine recorded would only be its
-  own result again.
+  own result again. With `~before:PHASE` only the results of the phases
+  before that one are computed again: the library's proof run audits what
+  the type checker computed, and not the proofs, which the state is there
+  to save computing.
 - **Every test audits.** The test harness audits every engine a test made,
   when the test ends. So each test of each stage also tests that the
   database kept every result current, and that the stage's queries are

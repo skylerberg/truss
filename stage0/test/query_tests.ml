@@ -664,4 +664,26 @@ let () =
       if List.exists (fun node -> not (Engine.is_input node)) (Engine.nodes theirs) then
         fail "the other engine holds [%s]" (String.concat "; " (labels (Engine.nodes theirs))))
 
+let () =
+  test "an audit before a phase leaves the later phases' results alone" (fun () ->
+      let engine = Engine.create ~log:true () in
+      Engine.skip_audit engine;
+      let hidden = ref 1 in
+      let source = Query.input ~name:"audit_source" ~show:Fun.id () in
+      let early =
+        Query.query ~name:"audit_early" ~phase:Phases.syntax ~show:Fun.id (fun database key ->
+            String.length (Query.get database source key))
+      in
+      let late =
+        Query.query ~name:"audit_late" ~phase:Phases.proofs ~show:Fun.id (fun database key ->
+            Query.demand database early key + !hidden)
+      in
+      Engine.set engine source "a" "one";
+      ignore (Engine.get engine late "a");
+      (* The later result now differs from what a new engine computes. *)
+      hidden := 2;
+      if Engine.audit ~before:Phases.proofs engine <> [] then
+        fail "the audit computed a result of a later phase";
+      if Engine.audit engine = [] then fail "the whole audit found nothing")
+
 let () = finish ()
