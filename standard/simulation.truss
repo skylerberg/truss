@@ -3,6 +3,7 @@ use standard::environment
 use standard::files
 use standard::intrinsic
 use standard::log
+use standard::map
 use standard::network
 use standard::processes
 use standard::random
@@ -14,11 +15,17 @@ public type Operation = Open | Read | Write | Connect | Accept | Resolve | Spawn
 
 type Fault(operation: Operation, error: SystemError)
 
+type Host(name: String, address: network::IpAddress)
+
+type Program(name: String, arguments: List[String], output: processes::Output)
+
 public opaque type Setup(
   input: List[String],
   environment: environment::FixedEnvironment,
   files: files::MemoryFiles,
   start: Instant,
+  hosts: List[Host],
+  programs: List[Program],
 )
 
 public fn Setup.new() -> Setup {
@@ -36,6 +43,8 @@ public fn Setup.new() -> Setup {
     ),
     files: files::MemoryFiles.new(),
     start: Instant.epoch,
+    hosts: [Host(name: "localhost", address: network::IpAddress.loopback)],
+    programs: [],
   )
 }
 
@@ -58,15 +67,20 @@ public fn Setup.with_input(own self, lines: own List[String]) -> Setup {
 }
 
 public fn Setup.with_host(own self, name: StringSlice, address: network::IpAddress) -> Setup {
-  todo
+  var changed = own self
+  mut changed.hosts.push(Host(name: name.to_string(), address: address))
+  changed
 }
 
 public fn Setup.with_program(
   own self,
   name: StringSlice,
-  respond: own fn(processes::Command) -> processes::Output,
+  arguments: own List[String] = [],
+  output: own processes::Output,
 ) -> Setup {
-  todo
+  var changed = own self
+  mut changed.programs.push(Program(name: name.to_string(), arguments: own arguments, output: own output))
+  changed
 }
 
 public fn Setup.with_time(own self, now: Instant) -> Setup {
@@ -74,6 +88,53 @@ public fn Setup.with_time(own self, now: Instant) -> Setup {
   changed.start = now
   changed
 }
+
+type Listener(local: network::SocketAddress, waiting: List[USize], timeout: Option[Duration], open: Bool)
+
+type Stream(
+  local: network::SocketAddress,
+  peer: network::SocketAddress,
+  other_end: USize,
+  unread: List[UInt8],
+  ended: Bool,
+  receives: Bool,
+  sends: Bool,
+  timeout: Option[Duration],
+)
+
+type Packet(bytes: List[UInt8], from: network::SocketAddress)
+
+type Socket(local: network::SocketAddress, packets: List[Packet], timeout: Option[Duration], open: Bool)
+
+type Endpoint =
+  | Closed
+  | Console(errors: Bool)
+  | Listening(listener: USize)
+  | Connected(stream: USize)
+  | Datagrams(socket: USize)
+  | ChildOutput(pipe: USize)
+  | ChildInput
+  | Child(status: processes::ExitStatus)
+
+type Blocking =
+  | Arriving(listener: USize)
+  | Reading(endpoint: USize, limit: USize)
+  | Receiving(endpoint: USize, limit: USize)
+  | Catching(signals: List[processes::Signal])
+
+type Completion =
+  | Arrival(endpoint: USize, peer: network::SocketAddress)
+  | Bytes(bytes: List[UInt8])
+  | Datagram(bytes: List[UInt8], from: network::SocketAddress)
+  | Caught(signal: processes::Signal)
+
+type Attempt =
+  | Finished(result: Result[Completion, SystemError])
+  | Waiting
+
+type BoundEndpoint(endpoint: USize, local: network::SocketAddress)
+
+type Started(status: processes::ExitStatus, output: List[UInt8], error_output: List[UInt8])
 
 type State(
   console: console::CapturedConsole,
@@ -83,10 +144,588 @@ type State(
   generator: random::Generator,
   faults: List[Fault],
   pending_signals: List[processes::Signal],
+  hosts: List[Host],
+  programs: List[Program],
+  commands: List[List[String]],
+  endpoints: List[Endpoint],
+  listeners: List[Listener],
+  streams: List[Stream],
+  sockets: List[Socket],
+  pipes: List[List[UInt8]],
+  unread_input: List[UInt8],
+  raw_mode: Bool,
+  ports_made: UInt16,
+  processes_made: UInt32,
 )
+
+let world_handles: UInt64 = 4294967296
+
+let input_endpoint: USize = 0
+
+let output_endpoint: USize = 1
+
+let errors_endpoint: USize = 2
+
+fn handle_of(endpoint: USize) -> streams::Handle {
+  streams::Handle.simulated(world_handles.saturating_add(UInt64.from(endpoint)))
+}
+
+fn endpoint_of(handle: streams::Handle) -> Option[USize] {
+  let number = handle.number()
+  if number < world_handles {
+    return None
+  }
+  match USize.try_from(number - world_handles) {
+    Ok(endpoint) => Some(endpoint)
+    Err(_) => None
+  }
+}
+
+fn same_host(first: network::IpAddress, second: network::IpAddress) -> Bool
+  cost time finite
+{
+  first == second || first.is_unspecified() || second.is_unspecified()
+}
+
+fn take_first_bytes(bytes: mut List[UInt8], limit: USize) -> List[UInt8] {
+  let count = if bytes.length() < limit { bytes.length() } else { limit }
+  let rest = mut bytes.split_off(count)
+  map::exchange(mut bytes, value: own rest)
+}
+
+internal fn State.endpoint(self, index: USize) -> Endpoint {
+  if index < self.endpoints.length() { self.endpoints[index] } else { Endpoint.Closed }
+}
+
+internal fn State.add_endpoint(mut self, endpoint: Endpoint) -> USize {
+  let index = self.endpoints.length()
+  mut self.endpoints.push(endpoint)
+  index
+}
+
+internal fn State.port_in_use(self, address: network::SocketAddress, datagrams: Bool) -> Bool {
+  if datagrams {
+    for socket in self.sockets {
+      if socket.open && socket.local.port == address.port && same_host(socket.local.address, second: address.address) {
+        return true
+      }
+    }
+  } else {
+    for listener in self.listeners {
+      if listener.open
+        && listener.local.port == address.port
+        && same_host(listener.local.address, second: address.address)
+      {
+        return true
+      }
+    }
+  }
+  false
+}
+
+internal fn State.claim_address(mut self, address: network::SocketAddress, datagrams: Bool) -> Result[network::SocketAddress, SystemError] {
+  if address.port != 0 {
+    if self.port_in_use(address, datagrams: datagrams) {
+      return Err(SystemError.AddressInUse)
+    }
+    return Ok(address)
+  }
+  while self.ports_made < 16383 {
+    self.ports_made += 1
+    let chosen = network::SocketAddress(address: address.address, port: 49151 + self.ports_made)
+    if !self.port_in_use(chosen, datagrams: datagrams) {
+      return Ok(chosen)
+    }
+  }
+  Err(SystemError.AddressNotAvailable)
+}
+
+internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
+  match mut self.next_fault(Operation.Resolve) {
+    Some(error) => return Err(error)
+    None => {}
+  }
+  match network::IpAddress.parse(host) {
+    Ok(address) => return Ok([address])
+    Err(_) => {}
+  }
+  var addresses: List[network::IpAddress] = []
+  for known in self.hosts {
+    if known.name.slice() == host {
+      mut addresses.push(known.address)
+    }
+  }
+  if addresses.is_empty() { Err(SystemError.HostNotFound) } else { Ok(own addresses) }
+}
+
+internal fn State.listen(mut self, address: network::SocketAddress) -> Result[BoundEndpoint, SystemError] {
+  let local = mut self.claim_address(address, datagrams: false)?
+  let listener = self.listeners.length()
+  mut self.listeners.push(Listener(local: local, waiting: [], timeout: None, open: true))
+  Ok(BoundEndpoint(endpoint: mut self.add_endpoint(Endpoint.Listening(listener: listener)), local: local))
+}
+
+internal fn State.bind_datagrams(mut self, address: network::SocketAddress) -> Result[BoundEndpoint, SystemError] {
+  let local = mut self.claim_address(address, datagrams: true)?
+  let socket = self.sockets.length()
+  mut self.sockets.push(Socket(local: local, packets: [], timeout: None, open: true))
+  Ok(BoundEndpoint(endpoint: mut self.add_endpoint(Endpoint.Datagrams(socket: socket)), local: local))
+}
+
+internal fn State.listener_at(self, address: network::SocketAddress) -> Option[USize] {
+  self.listeners.slice().find_index(fn(listener) {
+    listener.open && listener.local.port == address.port && same_host(listener.local.address, second: address.address)
+  })
+}
+
+internal fn State.connect(mut self, address: network::SocketAddress) -> Result[BoundEndpoint, SystemError] {
+  match mut self.next_fault(Operation.Connect) {
+    Some(error) => return Err(error)
+    None => {}
+  }
+  match self.listener_at(address) {
+    Some(listener) => {
+      let local = mut self.claim_address(
+        network::SocketAddress(address: network::IpAddress.loopback, port: 0),
+        datagrams: false,
+      )?
+      let near = self.streams.length()
+      mut self.streams.push(
+        Stream(
+          local: local,
+          peer: address,
+          other_end: near + 1,
+          unread: [],
+          ended: false,
+          receives: true,
+          sends: true,
+          timeout: None,
+        ),
+      )
+      mut self.streams.push(
+        Stream(
+          local: address,
+          peer: local,
+          other_end: near,
+          unread: [],
+          ended: false,
+          receives: true,
+          sends: true,
+          timeout: None,
+        ),
+      )
+      let far_endpoint = mut self.add_endpoint(Endpoint.Connected(stream: near + 1))
+      if listener < self.listeners.length() {
+        mut self.listeners[listener].waiting.push(far_endpoint)
+      }
+      Ok(BoundEndpoint(endpoint: mut self.add_endpoint(Endpoint.Connected(stream: near)), local: local))
+    }
+    None => Err(SystemError.ConnectionRefused)
+  }
+}
+
+internal fn State.end_sending(mut self, stream: USize) {
+  if stream < self.streams.length() {
+    self.streams[stream].sends = false
+    let other_end = self.streams[stream].other_end
+    if other_end < self.streams.length() {
+      self.streams[other_end].ended = true
+    }
+  }
+}
+
+internal fn State.end_receiving(mut self, stream: USize) {
+  if stream < self.streams.length() {
+    self.streams[stream].receives = false
+    self.streams[stream].unread = []
+  }
+}
+
+internal fn State.shut_down(mut self, endpoint: USize, direction: network::Direction) -> Result[Unit, SystemError] {
+  match self.endpoint(endpoint) {
+    Connected(stream) => {
+      match direction {
+        Receiving => mut self.end_receiving(stream)
+        Sending => mut self.end_sending(stream)
+        Both => {
+          mut self.end_receiving(stream)
+          mut self.end_sending(stream)
+        }
+      }
+      Ok(Unit)
+    }
+    Closed => Err(SystemError.Closed)
+    _ => Err(SystemError.NotConnected)
+  }
+}
+
+internal fn State.set_timeout(
+  mut self,
+  endpoint: USize,
+  direction: network::Direction,
+  timeout: Option[Duration],
+) -> Result[Unit, SystemError] {
+  let receiving = !(direction is Sending)
+  match self.endpoint(endpoint) {
+    Connected(stream) => {
+      if receiving && stream < self.streams.length() {
+        self.streams[stream].timeout = timeout
+      }
+      Ok(Unit)
+    }
+    Listening(listener) => {
+      if receiving && listener < self.listeners.length() {
+        self.listeners[listener].timeout = timeout
+      }
+      Ok(Unit)
+    }
+    Datagrams(socket) => {
+      if receiving && socket < self.sockets.length() {
+        self.sockets[socket].timeout = timeout
+      }
+      Ok(Unit)
+    }
+    Closed => Err(SystemError.Closed)
+    _ => Err(SystemError.InvalidInput)
+  }
+}
+
+internal fn State.timeout_of(self, blocking: Blocking) -> Option[Duration] {
+  match blocking {
+    Arriving(endpoint) => match self.endpoint(endpoint) {
+      Listening(listener) => if listener < self.listeners.length() { self.listeners[listener].timeout } else { None }
+      _ => None
+    }
+    Reading(endpoint, limit: _) => match self.endpoint(endpoint) {
+      Connected(stream) => if stream < self.streams.length() { self.streams[stream].timeout } else { None }
+      _ => None
+    }
+    Receiving(endpoint, limit: _) => match self.endpoint(endpoint) {
+      Datagrams(socket) => if socket < self.sockets.length() { self.sockets[socket].timeout } else { None }
+      _ => None
+    }
+    Catching(_) => None
+  }
+}
+
+internal fn State.close(mut self, endpoint: USize) -> Result[Unit, SystemError] {
+  match self.endpoint(endpoint) {
+    Closed => return Err(SystemError.Closed)
+    Connected(stream) => {
+      mut self.end_receiving(stream)
+      mut self.end_sending(stream)
+    }
+    Listening(listener) => {
+      if listener < self.listeners.length() {
+        self.listeners[listener].open = false
+        let waiting = map::exchange(mut self.listeners[listener].waiting, value: [])
+        for unaccepted in waiting {
+          let _ = mut self.close(unaccepted)
+        }
+      }
+    }
+    Datagrams(socket) => {
+      if socket < self.sockets.length() {
+        self.sockets[socket].open = false
+        self.sockets[socket].packets = []
+      }
+    }
+    _ => {}
+  }
+  if endpoint > errors_endpoint && endpoint < self.endpoints.length() {
+    self.endpoints[endpoint] = Endpoint.Closed
+  }
+  Ok(Unit)
+}
+
+internal fn State.send(mut self, endpoint: USize, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+  match self.endpoint(endpoint) {
+    Connected(stream) => {
+      match mut self.next_fault(Operation.Write) {
+        Some(error) => return Err(error)
+        None => {}
+      }
+      if stream >= self.streams.length() || !self.streams[stream].sends {
+        return Err(SystemError.BrokenPipe)
+      }
+      let other_end = self.streams[stream].other_end
+      if other_end >= self.streams.length() || !self.streams[other_end].receives {
+        return Err(SystemError.BrokenPipe)
+      }
+      mut self.streams[other_end].unread.append_slice(bytes)
+      Ok(bytes.length())
+    }
+    Console(errors) => {
+      let text = String.from_utf8_lossy(bytes)
+      if errors {
+        mut self.console.errors.push(text.slice())
+      } else {
+        mut self.console.output.push(text.slice())
+      }
+      Ok(bytes.length())
+    }
+    ChildInput => Ok(bytes.length())
+    Closed => Err(SystemError.Closed)
+    _ => Err(SystemError.InvalidInput)
+  }
+}
+
+internal fn State.send_to(
+  mut self,
+  endpoint: USize,
+  bytes: Slice[UInt8],
+  address: network::SocketAddress,
+) -> Result[USize, SystemError] {
+  match self.endpoint(endpoint) {
+    Datagrams(socket) => {
+      match mut self.next_fault(Operation.Write) {
+        Some(error) => return Err(error)
+        None => {}
+      }
+      if socket >= self.sockets.length() {
+        return Err(SystemError.Closed)
+      }
+      let from = self.sockets[socket].local
+      let receiver = self.sockets.slice().find_index(fn(other) {
+        other.open && other.local.port == address.port && same_host(other.local.address, second: address.address)
+      })
+      match receiver {
+        Some(index) => mut self.sockets[index].packets.push(Packet(bytes: bytes.to_list(), from: from))
+        None => {}
+      }
+      Ok(bytes.length())
+    }
+    Closed => Err(SystemError.Closed)
+    _ => Err(SystemError.InvalidInput)
+  }
+}
+
+internal fn State.fill_unread_input(mut self) -> Bool {
+  if self.unread_input.length() > 0 {
+    return true
+  }
+  let line = provide mut self.console {
+    Console.read_line()
+  }
+  match line {
+    Some(text) => {
+      self.unread_input = text.to_bytes()
+      mut self.unread_input.push(10)
+      true
+    }
+    None => false
+  }
+}
+
+internal fn State.read_line(mut self) -> Option[String] {
+  if !mut self.fill_unread_input() {
+    return None
+  }
+  var line = map::exchange(mut self.unread_input, value: [])
+  let _ = mut line.pop()
+  Some(String.from_utf8_lossy(line.slice()))
+}
+
+internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Attempt {
+  match blocking {
+    Arriving(endpoint) => match self.endpoint(endpoint) {
+      Listening(listener) => {
+        match mut self.next_fault(Operation.Accept) {
+          Some(error) => return Attempt.Finished(Err(error))
+          None => {}
+        }
+        if listener >= self.listeners.length() || !self.listeners[listener].open {
+          return Attempt.Finished(Err(SystemError.Closed))
+        }
+        if self.listeners[listener].waiting.length() > 0 {
+          let accepted = mut self.listeners[listener].waiting.remove_at(0)
+          match self.endpoint(accepted) {
+            Connected(stream) => {
+              if stream < self.streams.length() {
+                return Attempt.Finished(Ok(Completion.Arrival(endpoint: accepted, peer: self.streams[stream].peer)))
+              }
+            }
+            _ => {}
+          }
+          return Attempt.Finished(Err(SystemError.ConnectionAborted))
+        }
+      }
+      Closed => return Attempt.Finished(Err(SystemError.Closed))
+      _ => return Attempt.Finished(Err(SystemError.InvalidInput))
+    }
+    Reading(endpoint, limit) => match self.endpoint(endpoint) {
+      Connected(stream) => {
+        match mut self.next_fault(Operation.Read) {
+          Some(error) => return Attempt.Finished(Err(error))
+          None => {}
+        }
+        if stream >= self.streams.length() {
+          return Attempt.Finished(Err(SystemError.Closed))
+        }
+        if limit == 0
+          || !self.streams[stream].receives
+          || self.streams[stream].unread.length() > 0
+          || self.streams[stream].ended
+        {
+          return Attempt.Finished(Ok(Completion.Bytes(take_first_bytes(mut self.streams[stream].unread, limit: limit))))
+        }
+      }
+      Console(_) => {
+        if !mut self.fill_unread_input() {
+          return Attempt.Finished(Ok(Completion.Bytes([])))
+        }
+        return Attempt.Finished(Ok(Completion.Bytes(take_first_bytes(mut self.unread_input, limit: limit))))
+      }
+      ChildOutput(pipe) => {
+        if pipe >= self.pipes.length() {
+          return Attempt.Finished(Err(SystemError.Closed))
+        }
+        return Attempt.Finished(Ok(Completion.Bytes(take_first_bytes(mut self.pipes[pipe], limit: limit))))
+      }
+      Closed => return Attempt.Finished(Err(SystemError.Closed))
+      _ => return Attempt.Finished(Err(SystemError.InvalidInput))
+    }
+    Receiving(endpoint, limit) => match self.endpoint(endpoint) {
+      Datagrams(socket) => {
+        match mut self.next_fault(Operation.Read) {
+          Some(error) => return Attempt.Finished(Err(error))
+          None => {}
+        }
+        if socket >= self.sockets.length() || !self.sockets[socket].open {
+          return Attempt.Finished(Err(SystemError.Closed))
+        }
+        if self.sockets[socket].packets.length() > 0 {
+          var packet = mut self.sockets[socket].packets.remove_at(0)
+          return Attempt.Finished(Ok(Completion.Datagram(bytes: take_first_bytes(mut packet.bytes, limit: limit), from: packet.from)))
+        }
+      }
+      Closed => return Attempt.Finished(Err(SystemError.Closed))
+      _ => return Attempt.Finished(Err(SystemError.InvalidInput))
+    }
+    Catching(signals) => {
+      match self.pending_signals.slice().find_index(fn(pending) { signals.contains(pending) }) {
+        Some(index) => return Attempt.Finished(Ok(Completion.Caught(mut self.pending_signals.remove_at(index))))
+        None => {}
+      }
+    }
+  }
+  if cancelled { Attempt.Finished(Err(SystemError.Cancelled)) } else { Attempt.Waiting }
+}
+
+fn begins_with(arguments: Slice[String], beginning: Slice[String]) -> Bool {
+  if beginning.length() > arguments.length() {
+    return false
+  }
+  for index in 0..beginning.length() {
+    if arguments[index] != beginning[index] {
+      return false
+    }
+  }
+  true
+}
+
+internal fn State.program_for(self, command: processes::Command) -> Option[USize] {
+  var chosen: Option[USize] = None
+  var most: USize = 0
+  for index in 0..self.programs.length() {
+    if self.programs[index].name.slice() == command.program()
+      && begins_with(command.argument_list(), beginning: self.programs[index].arguments.slice())
+      && self.programs[index].arguments.length() >= most
+    {
+      chosen = Some(index)
+      most = self.programs[index].arguments.length()
+    }
+  }
+  chosen
+}
+
+internal fn State.start(mut self, command: processes::Command) -> Result[Started, SystemError] {
+  match mut self.next_fault(Operation.Spawn) {
+    Some(error) => return Err(error)
+    None => {}
+  }
+  var words: List[String] = [command.program().to_string()]
+  for argument in command.argument_list() {
+    mut words.push(argument.copy())
+  }
+  mut self.commands.push(own words)
+  match self.program_for(command) {
+    Some(index) => {
+      if index >= self.programs.length() {
+        return Err(SystemError.NotFound)
+      }
+      var started = Started(status: self.programs[index].output.status, output: [], error_output: [])
+      let output = self.programs[index].output.output.copy()
+      let error_output = self.programs[index].output.error_output.copy()
+      match command.output {
+        Inherit => {
+          let text = String.from_utf8_lossy(output.slice())
+          mut self.console.output.push(text.slice())
+        }
+        Discard => {}
+        _ => {
+          started.output = own output
+        }
+      }
+      match command.error_output {
+        Inherit => {
+          let text = String.from_utf8_lossy(error_output.slice())
+          mut self.console.errors.push(text.slice())
+        }
+        Discard => {}
+        _ => {
+          started.error_output = own error_output
+        }
+      }
+      Ok(own started)
+    }
+    None => Err(SystemError.NotFound)
+  }
+}
+
+internal fn State.spawn(mut self, command: processes::Command) -> Result[processes::Child, SystemError] {
+  let started = mut self.start(command)?
+  self.processes_made = self.processes_made.saturating_add(1)
+  let process = mut self.add_endpoint(Endpoint.Child(status: started.status))
+  var input: Option[processes::ChildInput] = None
+  if command.input is Pipe {
+    input = Some(processes::ChildInput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildInput))))
+  }
+  var output: Option[processes::ChildOutput] = None
+  if command.output is Pipe || command.output is Capture {
+    mut self.pipes.push(own started.output)
+    let pipe = self.pipes.length() - 1
+    output = Some(processes::ChildOutput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildOutput(pipe: pipe)))))
+  }
+  var error_output: Option[processes::ChildOutput] = None
+  if command.error_output is Pipe || command.error_output is Capture {
+    mut self.pipes.push(own started.error_output)
+    let pipe = self.pipes.length() - 1
+    error_output = Some(
+      processes::ChildOutput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildOutput(pipe: pipe)))),
+    )
+  }
+  Ok(processes::Child(
+    handle: handle_of(process),
+    identifier: self.processes_made,
+    input: own input,
+    output: own output,
+    error_output: own error_output,
+  ))
+}
 
 internal fn State.take_fault(mut self, operations: Slice[Operation]) -> Option[SystemError] {
   match self.faults.slice().find_index(fn(fault) { operations.contains(fault.operation) }) {
+    Some(index) => {
+      let fault = mut self.faults.remove_at(index)
+      Some(fault.error)
+    }
+    None => None
+  }
+}
+
+internal fn State.next_fault(mut self, operation: Operation) -> Option[SystemError] {
+  match self.faults.slice().find_index(fn(fault) { fault.operation == operation }) {
     Some(index) => {
       let fault = mut self.faults.remove_at(index)
       Some(fault.error)
@@ -120,6 +759,18 @@ public fn World.from(setup: own Setup, seed: UInt64 = 0) -> World {
         generator: generator,
         faults: [],
         pending_signals: [],
+        hosts: own setup.hosts,
+        programs: own setup.programs,
+        commands: [],
+        endpoints: [Endpoint.Console(errors: false), Endpoint.Console(errors: false), Endpoint.Console(errors: true)],
+        listeners: [],
+        streams: [],
+        sockets: [],
+        pipes: [],
+        unread_input: [],
+        raw_mode: false,
+        ports_made: 0,
+        processes_made: 1,
       ),
     ),
     start: setup.start,
@@ -209,6 +860,75 @@ public fn World.deliver(self, signal: processes::Signal)
   intrinsic::shared_update(self.state, input: signal.copy(), change: fn(state, delivered) {
     mut state.pending_signals.push(delivered)
   })
+  Tasks.wake(intrinsic::shared_key(self.state))
+}
+
+public fn World.is_raw_mode(self) -> Bool
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    state.raw_mode
+  })
+}
+
+public fn World.commands(self) -> List[List[String]]
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    state.commands.copy()
+  })
+}
+
+fn World.wake(self)
+  uses Panic
+{
+  provide self.tasks {
+    Tasks.wake(intrinsic::shared_key(self.state))
+  }
+}
+
+fn World.wait_until_done(self, blocking: Blocking, reason: StringSlice) -> Result[Completion, SystemError]
+  uses Panic
+{
+  provide self.tasks {
+    let key = intrinsic::shared_key(self.state)
+    while true {
+      let ticket = Tasks.watch(key)
+      let cancelled = Tasks.cancelled()
+      match intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        mut state.attempt(blocking, cancelled: cancelled)
+      }) {
+        Finished(result) => {
+          Tasks.wake(key)
+          return result
+        }
+        Waiting => Tasks.wait(key, ticket: ticket, reason: reason)
+      }
+    }
+  }
+}
+
+fn World.perform(self, blocking: Blocking, reason: StringSlice) -> Result[Completion, SystemError]
+  uses Panic
+{
+  self.preemption_point()
+  provide self.tasks {
+    let timeout = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      state.timeout_of(blocking)
+    })
+    match timeout {
+      Some(duration) => {
+        concurrent {
+          return self.wait_until_done(blocking, reason: reason)
+          {
+            self.tasks.sleep(duration)
+            return Err(SystemError.TimedOut)
+          }
+        }
+      }
+      None => self.wait_until_done(blocking, reason: reason)
+    }
+  }
 }
 
 impl Console for World
@@ -244,46 +964,28 @@ impl Console for World
   fn read_line(self) -> Option[String] {
     self.preemption_point()
     intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
-      provide mut state.console {
-        Console.read_line()
-      }
+      mut state.read_line()
     })
   }
 
   fn input(self) -> console::Input {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
-      provide mut state.console {
-        Console.input()
-      }
-    })
+    console::Input.from_handle(handle_of(input_endpoint))
   }
 
   fn output(self) -> console::Output {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
-      provide mut state.console {
-        Console.output()
-      }
-    })
+    console::Output.from_handle(handle_of(output_endpoint))
   }
 
   fn error_output(self) -> console::Output {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
-      provide mut state.console {
-        Console.error_output()
-      }
-    })
+    console::Output.from_handle(handle_of(errors_endpoint))
   }
 
   fn terminal(self) -> console::Terminal {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
-      provide mut state.console {
-        Console.terminal()
-      }
-    })
+    console::Terminal.from_handle(handle_of(output_endpoint))
   }
 }
 
@@ -501,27 +1203,51 @@ impl FileWrite for World
   }
 }
 
-impl NetworkClient for World {
+impl NetworkClient for World
+  uses Panic
+{
   fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
-    todo
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.resolve(host)
+    })
   }
 
   fn connect(self, address: network::SocketAddress, timeout: Option[Duration]) -> Result[network::Connection, SystemError] {
-    todo
+    self.preemption_point()
+    let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.connect(address)
+    })?
+    self.wake()
+    Ok(network::Connection.from_handle(handle_of(bound.endpoint), local: bound.local, peer: address))
   }
 
   fn open_datagram(self) -> Result[network::DatagramSocket, SystemError] {
-    todo
+    self.preemption_point()
+    let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.bind_datagrams(network::SocketAddress(address: network::IpAddress.loopback, port: 0))
+    })?
+    Ok(network::DatagramSocket.from_handle(handle_of(bound.endpoint), local: bound.local))
   }
 }
 
-impl NetworkServer for World {
+impl NetworkServer for World
+  uses Panic
+{
   fn listen(self, address: network::SocketAddress) -> Result[network::Listener, SystemError] {
-    todo
+    self.preemption_point()
+    let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.listen(address)
+    })?
+    Ok(network::Listener.from_handle(handle_of(bound.endpoint), local: bound.local))
   }
 
   fn bind_datagram(self, address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
-    todo
+    self.preemption_point()
+    let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.bind_datagrams(address)
+    })?
+    Ok(network::DatagramSocket.from_handle(handle_of(bound.endpoint), local: bound.local))
   }
 }
 
@@ -529,6 +1255,23 @@ impl Handles for World
   uses Panic
 {
   fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
+    match endpoint_of(handle) {
+      Some(endpoint) => {
+        let completion = self.perform(
+          Blocking.Reading(endpoint: endpoint, limit: limit),
+          reason: "reading from a connection that has sent nothing",
+        )?
+        match completion {
+          Bytes(bytes) => {
+            let count = if bytes.length() < limit { bytes.length() } else { limit }
+            streams::append_bytes(mut buffer, bytes: bytes.slice_range(0, stop: count))
+            return Ok(count)
+          }
+          _ => return Err(SystemError.InvalidData)
+        }
+      }
+      None => {}
+    }
     self.preemption_point()
     let now = self.clock_time()
     let read = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
@@ -551,6 +1294,17 @@ impl Handles for World
   }
 
   fn write(self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
+    match endpoint_of(handle) {
+      Some(endpoint) => {
+        self.preemption_point()
+        let sent = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+          mut state.send(endpoint, bytes: bytes)
+        })?
+        self.wake()
+        return Ok(if sent < bytes.length() { sent } else { bytes.length() })
+      }
+      None => {}
+    }
     self.preemption_point()
     let now = self.clock_time()
     let written = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
@@ -660,6 +1414,16 @@ impl Handles for World
 
   fn close(self, handle: own streams::Handle) -> Result[Unit, SystemError] {
     self.preemption_point()
+    match endpoint_of(handle) {
+      Some(endpoint) => {
+        let closed = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+          mut state.close(endpoint)
+        })
+        self.wake()
+        return closed
+      }
+      None => {}
+    }
     intrinsic::shared_update(self.state, input: own handle, change: fn(state, closing) {
       provide mut state.files {
         Handles.close(own closing)
@@ -668,7 +1432,17 @@ impl Handles for World
   }
 
   fn shut_down(self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    match endpoint_of(handle) {
+      Some(endpoint) => {
+        let done = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+          mut state.shut_down(endpoint, direction: direction)
+        })
+        self.wake()
+        done
+      }
+      None => Err(SystemError.NotConnected)
+    }
   }
 
   fn set_timeout(
@@ -677,11 +1451,29 @@ impl Handles for World
     direction: network::Direction,
     timeout: Option[Duration],
   ) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    match endpoint_of(handle) {
+      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        mut state.set_timeout(endpoint, direction: direction, timeout: timeout)
+      })
+      None => Err(SystemError.InvalidInput)
+    }
   }
 
   fn accept(self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
-    todo
+    match endpoint_of(listener) {
+      Some(endpoint) => {
+        let completion = self.perform(
+          Blocking.Arriving(listener: endpoint),
+          reason: "accepting a connection that no task has made",
+        )?
+        match completion {
+          Arrival(endpoint: accepted, peer) => Ok(network::Accepted(handle: handle_of(accepted), peer: peer))
+          _ => Err(SystemError.InvalidData)
+        }
+      }
+      None => Err(SystemError.InvalidInput)
+    }
   }
 
   fn send_to(
@@ -690,7 +1482,17 @@ impl Handles for World
     bytes: Slice[UInt8],
     address: network::SocketAddress,
   ) -> Result[USize, SystemError] {
-    todo
+    self.preemption_point()
+    match endpoint_of(socket) {
+      Some(endpoint) => {
+        let sent = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+          mut state.send_to(endpoint, bytes: bytes, address: address)
+        })
+        self.wake()
+        sent
+      }
+      None => Err(SystemError.InvalidInput)
+    }
   }
 
   fn receive_from(
@@ -699,23 +1501,80 @@ impl Handles for World
     buffer: mut List[UInt8],
     limit: USize,
   ) -> Result[network::Datagram, SystemError] {
-    todo
+    match endpoint_of(socket) {
+      Some(endpoint) => {
+        let completion = self.perform(
+          Blocking.Receiving(endpoint: endpoint, limit: limit),
+          reason: "receiving a datagram that no task has sent",
+        )?
+        match completion {
+          Datagram(bytes, from) => {
+            let count = if bytes.length() < limit { bytes.length() } else { limit }
+            streams::append_bytes(mut buffer, bytes: bytes.slice_range(0, stop: count))
+            Ok(network::Datagram(length: count, from: from))
+          }
+          _ => Err(SystemError.InvalidData)
+        }
+      }
+      None => Err(SystemError.InvalidInput)
+    }
   }
 
   fn wait(self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
-    todo
+    self.preemption_point()
+    match endpoint_of(process) {
+      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        match state.endpoint(endpoint) {
+          Child(status) => Ok(status)
+          Closed => Err(SystemError.Closed)
+          _ => Err(SystemError.InvalidInput)
+        }
+      })
+      None => Err(SystemError.InvalidInput)
+    }
   }
 
   fn signal(self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    match endpoint_of(process) {
+      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        match state.endpoint(endpoint) {
+          Child(_) => Ok(Unit)
+          Closed => Err(SystemError.Closed)
+          _ => Err(SystemError.InvalidInput)
+        }
+      })
+      None => Err(SystemError.InvalidInput)
+    }
   }
 
   fn terminal_size(self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
-    todo
+    self.preemption_point()
+    match endpoint_of(terminal) {
+      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        match state.endpoint(endpoint) {
+          Console(_) => Ok(console::Size(columns: 80, rows: 24))
+          _ => Err(SystemError.Unsupported)
+        }
+      })
+      None => Err(SystemError.Unsupported)
+    }
   }
 
   fn set_raw_mode(self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    match endpoint_of(terminal) {
+      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        match state.endpoint(endpoint) {
+          Console(_) => {
+            state.raw_mode = enabled
+            Ok(Unit)
+          }
+          _ => Err(SystemError.Unsupported)
+        }
+      })
+      None => Err(SystemError.Unsupported)
+    }
   }
 }
 
@@ -821,19 +1680,36 @@ impl Environment for World
   }
 }
 
-impl Processes for World {
+impl Processes for World
+  uses Panic
+{
   fn run(self, command: processes::Command) -> Result[processes::Output, SystemError] {
-    todo
+    self.preemption_point()
+    let started = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.start(command)
+    })?
+    Ok(processes::Output(status: started.status, output: own started.output, error_output: own started.error_output))
   }
 
   fn spawn(self, command: processes::Command) -> Result[processes::Child, SystemError] {
-    todo
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.spawn(command)
+    })
   }
 }
 
-impl Signals for World {
+impl Signals for World
+  uses Panic
+{
   fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
-    todo
+    match self.perform(
+      Blocking.Catching(signals: signals.to_list()),
+      reason: "waiting for a signal that has not been delivered",
+    ) {
+      Ok(Caught(signal)) => Some(signal)
+      _ => None
+    }
   }
 }
 

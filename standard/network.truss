@@ -723,15 +723,34 @@ public fn connect(host: StringSlice, port: UInt16, timeout: Option[Duration] = N
 
 public type HostsAllowed(hosts: Set[String])
 
+fn HostsAllowed.allows(self, host: StringSlice) -> Bool {
+  for allowed in self.hosts {
+    if allowed.slice() == host {
+      return true
+    }
+  }
+  false
+}
+
 impl NetworkClient for HostsAllowed
   uses NetworkClient
 {
   fn resolve(self, host: StringSlice) -> Result[List[IpAddress], SystemError] {
-    todo
+    if self.allows(host) { NetworkClient.resolve(host) } else { Err(SystemError.PermissionDenied) }
   }
 
   fn connect(self, address: SocketAddress, timeout: Option[Duration]) -> Result[Connection, SystemError] {
-    todo
+    for allowed in self.hosts {
+      match NetworkClient.resolve(allowed.slice()) {
+        Ok(addresses) => {
+          if addresses.contains(address.address) {
+            return NetworkClient.connect(address, timeout: timeout)
+          }
+        }
+        Err(_) => {}
+      }
+    }
+    Err(SystemError.PermissionDenied)
   }
 
   fn open_datagram(self) -> Result[DatagramSocket, SystemError] {

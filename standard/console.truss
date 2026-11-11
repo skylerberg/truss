@@ -68,13 +68,64 @@ public fn with_raw_mode[Returned, capability Granted](
 ) -> Result[Returned, SystemError]
   uses Console, Handles, Granted
 {
-  todo
+  var terminal = Console.terminal()
+  mut terminal.set_raw_mode(true)?
+  let returned = run()
+  mut terminal.set_raw_mode(false)?
+  Ok(own returned)
+}
+
+fn remove_last_character(line: mut List[UInt8]) {
+  while line.length() > 0 && line[line.length() - 1] >= 128 && line[line.length() - 1] < 192
+    decreases line.length()
+  {
+    let _ = mut line.pop()
+  }
+  let _ = mut line.pop()
+}
+
+fn hidden_line(terminal: Terminal) -> Result[Option[String], SystemError]
+  uses Handles
+{
+  var line: List[UInt8] = []
+  var typed: List[UInt8] = []
+  while true {
+    mut typed.clear()
+    let count = Handles.read(terminal.handle, buffer: mut typed, limit: 1)?
+    if count == 0 {
+      return Ok(if line.is_empty() { None } else { Some(String.from_utf8_lossy(line.slice())) })
+    }
+    let byte = typed[0]
+    if byte == 10 || byte == 13 {
+      return Ok(Some(String.from_utf8_lossy(line.slice())))
+    }
+    if byte == 3 {
+      return Err(SystemError.Interrupted)
+    }
+    if byte == 4 && line.is_empty() {
+      return Ok(None)
+    }
+    if byte == 8 || byte == 127 {
+      remove_last_character(mut line)
+    } else if byte >= 32 {
+      mut line.push(byte)
+    }
+  }
 }
 
 public fn read_secret(prompt: StringSlice) -> Result[Option[String], SystemError]
   uses Console, Handles
 {
-  todo
+  Console.print(prompt)
+  var terminal = Console.terminal()
+  if mut terminal.set_raw_mode(true) is Err(_) {
+    return Ok(Console.read_line())
+  }
+  let typed = hidden_line(terminal)
+  let restored = mut terminal.set_raw_mode(false)
+  Console.print("\n")
+  restored?
+  typed
 }
 
 public type Color =

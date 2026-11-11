@@ -164,7 +164,7 @@ let () =
      proven: the prover's own tests audit its queries, and auditing them
      here would translate every proof of the library a second time. An
      engine opened from a kept state holds the last run's proofs already,
-     so it is not audited at all: only a run from the sources is. *)
+     so its audit stops before the proofs. *)
   Engine.skip_audit engine;
   let database =
     match session with Some session -> Database.context session | None -> Engine.context engine
@@ -186,10 +186,10 @@ let () =
             (module_, Type_checker.diagnostics database module_))
           modules)
   in
-  if Option.is_none session then
-    test "the code database kept every result of checking the standard library current" (fun () ->
-        timed "auditing the code database" (fun () ->
-            List.iter (fun problem -> fail "%s" problem) (Engine.audit engine)));
+  test "the code database kept every result of checking the standard library current" (fun () ->
+      timed "auditing the code database" (fun () ->
+          let before = Option.map (fun _ -> Phases.proofs) session in
+          List.iter (fun problem -> fail "%s" problem) (Engine.audit ?before engine)));
   timed "solving ahead" (fun () ->
       Prover.solve_ahead ~tell database solver
         (List.filter_map
