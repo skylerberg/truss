@@ -1244,7 +1244,14 @@ Each obligation the prover could not prove is an error, with the shared
 
 A definition's obligations are made again when something they read
 changed, as DATABASE.md describes for every query. The solver is asked
-again only about a query whose text changed:
+again only about a query whose text changed. A definition's outcome is a saved result worked out
+from its obligations and from what the solver and running code were told,
+which are the database's inputs, so a definition whose reads have not
+changed is neither translated nor asked anything again, in this process or
+the next. The driver asks for every outcome, asks the solver and running
+code what they wait for, together, tells the database the answers, and
+asks again, which takes a round or two, since an obligation asks again only
+after an answer such as running out of steps:
 
 | Edit | Solved again |
 |---|---|
