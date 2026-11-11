@@ -1563,7 +1563,7 @@ impl Equal for Slice[Element: Equal] {
   }
 }
 
-internal fn lexicographic[Element: Ordered](
+public transparent fn lexicographic[Element: Ordered](
   first: Sequence[Element],
   second: Sequence[Element],
   from: Integer,

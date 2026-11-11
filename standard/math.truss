@@ -1160,19 +1160,10 @@ impl Negate for BigInteger {
 }
 
 impl Ordered for BigInteger {
-  fn compare(self, other: BigInteger) -> Ordering
-    ensures result == (if self.negative != other.negative {
+  fn compare(self, other: BigInteger) -> Ordering {
+    if self.negative != other.negative {
       if self.negative { Ordering.Less } else { Ordering.Greater }
     } else if self.negative {
-      magnitude_order(other.magnitude.model(), second: self.magnitude.model())
-    } else {
-      magnitude_order(self.magnitude.model(), second: other.magnitude.model())
-    })
-  {
-    if self.negative != other.negative {
-      return if self.negative { Ordering.Less } else { Ordering.Greater }
-    }
-    if self.negative {
       compare_magnitudes(other.magnitude.slice(), second: self.magnitude.slice())
     } else {
       compare_magnitudes(self.magnitude.slice(), second: other.magnitude.slice())
@@ -1599,17 +1590,13 @@ fn key_order(first: DecimalKey, second: DecimalKey) -> Ordering
 }
 
 impl Equal for Decimal {
-  fn equal(self, other: Decimal) -> Bool
-    ensures result == (self.key() == other.key())
-  {
+  fn equal(self, other: Decimal) -> Bool {
     self.key() == other.key()
   }
 }
 
 impl Ordered for Decimal {
-  fn compare(self, other: Decimal) -> Ordering
-    ensures result == key_order(self.key(), second: other.key())
-  {
+  fn compare(self, other: Decimal) -> Ordering {
     key_order(self.key(), second: other.key())
   }
 }

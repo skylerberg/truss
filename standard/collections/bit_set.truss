@@ -248,7 +248,7 @@ public fn collections::BitSet.count_ones(self) -> USize
   ensures result <= self.length()
   ensures (forall i in 0..self.words.length() => self.words.model()[i] == 0) ==> result == 0
   ensures ((forall i in 0..self.length / 64 => self.words.model()[i] == UInt64.maximum)
-    && (self.length % 64 == 0 || self.words.model()[self.length / 64] == used_bits(self.length)))
+    && (self.length % 64 == 0 || self.words.model()[self.length / 64] == power(2, self.length % 64) - 1))
     ==> result == self.length
   cost time O(self.length())
 {
