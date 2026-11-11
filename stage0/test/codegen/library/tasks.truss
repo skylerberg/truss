@@ -73,6 +73,54 @@ test "a closed channel refuses messages and delivers the messages it holds" {
   }
 }
 
+fn produce_from(numbers: tasks::Channel[Int64], first: Int64, count: Int64)
+  uses Tasks
+{
+  for index in 0..count {
+    let _ = numbers.send(first + 2 * index)
+  }
+}
+
+fn with_parity(numbers: List[Int64], parity: Int64) -> List[Int64] {
+  var kept: List[Int64] = []
+  for number in numbers {
+    if number % 2 == parity {
+      mut kept.push(number)
+    }
+  }
+  kept
+}
+
+fn stepping(first: Int64, count: Int64) -> List[Int64] {
+  var numbers: List[Int64] = []
+  for index in 0..count {
+    mut numbers.push(first + 2 * index)
+  }
+  numbers
+}
+
+test "the messages of each sender arrive in the order it sent them" {
+  let seeds: UInt64 = 24
+  for seed in 0..seeds {
+    provide tasks::SeededTasks.new(seed) {
+      let numbers = tasks::Channel[Int64].new(capacity: 2)
+      concurrent {
+        {
+          concurrent {
+            produce_from(numbers, first: 0, count: 6)
+            produce_from(numbers, first: 1, count: 6)
+          }
+          numbers.close()
+        }
+        let received = collect(numbers)
+      }
+      assert received.length() == 12
+      assert with_parity(received, parity: 0) == stepping(0, count: 6)
+      assert with_parity(received, parity: 1) == stepping(1, count: 6)
+    }
+  }
+}
+
 test "send waits while the channel is full and receive waits while it is empty" {
   let capacities: List[USize] = [0, 1, 2, 64]
   let seeds: UInt64 = 24
