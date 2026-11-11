@@ -781,7 +781,7 @@ can be left out, as `port` and `secure` are in `connect(host)`.
 Building a record or a variant follows the same rules, with two differences:
 
 - Fields can be written in any order, because the order of a record's fields
-  has no meaning.
+  has no meaning. Their values are evaluated in the order written.
 - Only a record or variant with exactly one field can take a bare value, as in
   `Some(3)`, `UserId(42)`, and `ConfigError.Malformed(error)`. With more than
   one field, every argument needs a label or a matching name, as in
@@ -1654,7 +1654,8 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 
 A variant with exactly one field can be used as a function, so
 `ConfigError.Unreadable` is a function from `SystemError` to `ConfigError`. The same rule makes
-`names.map(Some)` work.
+`names.map(Some)` work. A variant with more fields is not a function: a
+function takes its arguments by position, and fields have no order.
 
 `?` also works on an `Option` in a function that returns an `Option`. It never
 converts between the two: use `.ok_or(error)?` to turn an `Option` into a

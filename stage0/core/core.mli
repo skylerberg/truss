@@ -165,8 +165,9 @@ and kind =
     }
   | Construct of { variant : string option; fields : (string * operand option) list }
       (** Constructs a record, or a variant of a sum type; the node's type says which type. [fields]
-          lists every field in declaration order. A field with [None] takes its default value, which
-          is in the type's core form. A range expression such as [1..5] is desugared to this.
+          has every field once: first the fields that the code gives, in the order written, which is
+          the order of evaluation, and then each field with [None], which takes its default value
+          from the type's core form. A range expression such as [1..5] is desugared to this.
 
           A field that is a [Value] is moved into the constructed value. A field that is a [Place]
           is lent to it: the constructed value holds the place's value and does not own it. Only a
@@ -423,8 +424,7 @@ and pattern_kind =
       (** Binds the matched value to a local. [mode] is [Own] if the binding owns the value, and
           [Read] or [Mut] if it borrows part of the scrutinee. *)
   | Variant of { variant : string; fields : (string * pattern) list }
-      (** The fields that the pattern matches, by name, in declaration order. Fields not listed are
-          ignored. *)
+      (** The fields that the pattern matches, by name. Fields not listed are ignored. *)
   | Record of (string * pattern) list
   | Literal of expression
       (** An {!Integer} or {!Boolean} literal, or a constant of a built-in type. The scrutinee is

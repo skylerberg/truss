@@ -86,7 +86,7 @@ let field_types context type_ constructor =
 
 let arity context type_ constructor = List.length (fields_of context type_ constructor)
 
-(* A pattern as a space, with its fields in declaration order and the fields
+(* A pattern as a space, with its fields in the order of the shape and the fields
    that it does not name as wildcards. [replace] substitutes one or-pattern,
    by its id, with a subset of its alternatives, to compute what that subset
    covers. *)

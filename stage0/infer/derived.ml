@@ -314,8 +314,13 @@ let form database (path : Path.t) : Core.t option =
             | "Ordered", "compare" -> (
                 let other = given () in
                 let ordering name = node result (Construct { variant = Some name; fields = [] }) in
-                (* Compares field by field. The first pair of fields that is
-                   not equal decides. *)
+                let declared variant fields =
+                  Environment.in_declared_order database type_ ~variant
+                    ~name:(fun ((field : T.field), _) -> field.field_name)
+                    fields
+                in
+                (* Compares field by field, in declaration order. The first
+                   pair of fields that is not equal decides. *)
                 let rec in_turn mine theirs =
                   match (mine, theirs) with
                   | [], _ | _, [] -> ordering "Equal"
@@ -360,7 +365,9 @@ let form database (path : Path.t) : Core.t option =
                 | None | Some [ _ ] ->
                     of_self result (fun variant _ mine ->
                         giving
-                          (of_other other result variant mine ~same:(in_turn mine)
+                          (of_other other result variant mine
+                             ~same:(fun theirs ->
+                               in_turn (declared variant mine) (declared variant theirs))
                              ~different:(fun () -> ordering "Equal")))
                 | Some variants ->
                     (* The index of the other value's variant, to compare
@@ -402,7 +409,9 @@ let form database (path : Path.t) : Core.t option =
                     let compared =
                       of_self result (fun variant index mine ->
                           giving
-                            (of_other other result variant mine ~same:(in_turn mine)
+                            (of_other other result variant mine
+                               ~same:(fun theirs ->
+                                 in_turn (declared variant mine) (declared variant theirs))
                                ~different:(fun () -> by_number index)))
                     in
                     {

@@ -4,6 +4,26 @@ open Memory_layout
 open Codegen_support
 
 let () =
+  passes
+    "a derived ordering compares fields in declaration order, and a construction evaluates its \
+     fields in the order written"
+    {|type Entry(weight: Int64, label: Int64)
+  derives Equal, Ordered
+
+fn next(counter: mut Int64) -> Int64 {
+  counter += 1
+  counter
+}
+
+test "field order" {
+  assert Entry(weight: 1, label: 9) < Entry(weight: 2, label: 0)
+  assert Entry(label: 9, weight: 1) < Entry(label: 0, weight: 2)
+  var counter = 0
+  let entry = Entry(label: next(mut counter), weight: next(mut counter))
+  assert entry.label == 1
+  assert entry.weight == 2
+}
+|};
   passes "a pulled cursor yields each value and then None"
     {|fn count_to(limit: Int64) yields Int64 {
   var i = 1

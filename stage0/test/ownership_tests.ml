@@ -125,6 +125,13 @@ let () =
          \  let _ = Counted(view: items[..1], count: grow(mut items))\n\
           }\n")
         "ownership.changed_while_viewed");
+  test "the fields of a constructor are evaluated in the order written" (fun () ->
+      fine
+        (functions
+       ^ "type Counted(view: Slice[Int64], count: USize)\n\n\
+          fn f(items: mut List[Int64]) {\n\
+         \  let _ = Counted(count: grow(mut items), view: items[..1])\n\
+          }\n"));
   test "an operand that is a copy does not borrow its place" (fun () ->
       fine
         (functions

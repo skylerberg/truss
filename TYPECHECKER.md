@@ -382,6 +382,12 @@ the change invalidates nothing beyond the definition:
   read only whether a parameter has a default.
 - **A type's invariants are separate from its shape.** Strengthening an
   invariant re-checks the type, and no user of the type.
+- **The declaration order of a type's fields is separate from its shape,** as
+  DESIGN.md requires. A shape has its fields in the order of their names, so
+  reordering the fields in the source leaves the shape equal and re-checks no
+  reader of it. The declaration order is a result of its own, which only a
+  derived `Ordered` reads. The order of a sum type's variants is part of its
+  shape.
 
 ## Types
 
@@ -1278,9 +1284,9 @@ So `swap(mut first, second: mut first)` is an error, and `mut items.push(9)` is
 allowed once `middle` is dead, as in SYNTAX.md's example. A loan of a view is
 also a loan of the places that the view views.
 
-The operands of one operation are evaluated in order, and a later operand
-cannot mutate what an earlier operand evaluated to. The operands are the
-arguments of a call, the fields of a constructor, the elements of a literal,
+The operands of one operation are evaluated in the order written, and a later
+operand cannot mutate what an earlier operand evaluated to. The operands are
+the arguments of a call, the fields of a constructor, the elements of a literal,
 the scrutinees of a `match`, the collection and then the keys of an index, and
 the value of an assignment and then the keys of its target.
 
@@ -2190,13 +2196,14 @@ from the type's definition. It is the body that the method would have if it
 were written by hand:
 
 - **`equal`** tests that the other value is the same variant, and then
-  compares each pair of fields in order with `&&`, so it stops at the first
+  compares each pair of fields with `&&`, so it stops at the first
   difference.
 - **`hash`** writes the variant's index, counted from 0 in declaration
   order, and then hashes each field.
 - **`compare`** orders by variant index. For two values of the same
-  variant, it compares the fields in order, and the first pair that is not
-  equal decides.
+  variant, it compares the fields in declaration order, and the first pair
+  that is not equal decides. It is the only method that reads the
+  declaration order of fields.
 - **`default`** constructs the record from the default of each field.
 
 For a sum type, the method matches on `self`, and inside each arm it
@@ -2423,9 +2430,6 @@ list's `each`, which only the `impl`'s method has.
 
 ## Not built
 
-- **The bound on a channel's message.** `Storable` is built, but the standard
-  library's `Channel[Message]` does not bound `Message` by it yet, so a channel
-  of views is still accepted.
 - **An interpolated string as calls.** It is still a node that names the text
   builder's methods and the `display` of each value. It will be desugared to
   those calls once they have `time` clauses.
@@ -2435,9 +2439,3 @@ list's `each`, which only the `impl`'s method has.
   callee's tree. So a change to a callee's body invalidates its callers'
   proofs, which then find the answer to each solver query in the cache, keyed
   by the query's text.
-- **Checked forms stored in a specified encoding.** They are stored as OCaml's
-  marshaled values, as DATABASE.md describes.
-- **A shape that is independent of field order.** DESIGN.md says that
-  reordering a type's fields rebuilds nothing. A shape stores its fields in
-  source order, so reordering them re-checks every reader of the shape. Code
-  generation's layout is already independent of the order.
