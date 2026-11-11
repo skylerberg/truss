@@ -3068,6 +3068,41 @@ let () =
         \  }\n\
          }\n")
 
+(* Equality through written impls *)
+
+let () =
+  test "a derived equality compares a list field as the list's equal does" (fun () ->
+      proven
+        "type Limbs(limbs: List[UInt64])\n\
+        \  derives Equal\n\n\
+         theorem the_same_limbs(first: Limbs, second: Limbs)\n\
+        \  requires first.limbs == second.limbs\n\
+        \  ensures first == second\n\
+         {\n\
+         }\n");
+  test "a law reads an impl of Equal whose bounds hold in the impl it is proven for" (fun () ->
+      proven
+        "trait Named: Equal {\n\
+        \  fn name(self) -> List[UInt64]\n\
+        \    cost time finite\n\n\
+        \  law named_by_its_name(first: Self, second: Self) {\n\
+        \    (first.name() == second.name()) == (first == second)\n\
+        \  }\n\
+         }\n\n\
+         type Wrapped[Item](items: List[Item], name: List[UInt64])\n\n\
+         impl Equal for Wrapped[Item: Equal] {\n\
+        \  fn equal(self, other: Wrapped[Item]) -> Bool {\n\
+        \    self.name == other.name\n\
+        \  }\n\
+         }\n\n\
+         impl Named for Wrapped[Item: Equal] {\n\
+        \  fn name(self) -> List[UInt64]\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.name.copy()\n\
+        \  }\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =
