@@ -539,4 +539,76 @@ let () =
       | [] -> ()
       | problems -> fail "found [%s]" (String.concat "; " problems))
 
+(* A source, a result of an early phase that reads it, and a result of a
+   later phase that reads that. *)
+let two_phases ?(fail_when = fun () -> false) () =
+  let source = Query.input ~name:"known_source" ~show:Fun.id () in
+  let early =
+    Query.query ~name:"known_early" ~phase:Proofs ~show:Fun.id (fun database key ->
+        String.length (Query.get database source key))
+  in
+  let late =
+    Query.query ~name:"known_late" ~phase:Verdicts ~show:Fun.id (fun database key ->
+        if fail_when () then raise Stack_overflow;
+        Query.demand database early key * 2)
+  in
+  (source, early, late)
+
+let () =
+  test "a read outside a query brings the state up to date only through its phase" (fun () ->
+      let engine = Engine.create ~log:true () in
+      let source, early, late = two_phases () in
+      Engine.set engine source "a" "one";
+      ignore (Engine.get engine late "a");
+      Engine.clear_log engine;
+      Engine.set engine source "a" "three";
+      ignore (Engine.get engine early "a");
+      expect_log engine [ "known_early(a)" ];
+      ignore (Engine.stabilize engine);
+      expect_log engine [ "known_late(a)" ]);
+  test "a known result is given until a change could have reached it, and nothing is computed"
+    (fun () ->
+      let engine = Engine.create ~log:true () in
+      let source, _, late = two_phases () in
+      let database = Engine.context engine in
+      Engine.set engine source "a" "one";
+      Engine.set engine source "b" "two";
+      if Query.known database late "a" <> None then fail "a result that was never computed";
+      ignore (Engine.get engine late "a");
+      ignore (Engine.get engine late "b");
+      Engine.clear_log engine;
+      Engine.set engine source "a" "three";
+      if Query.known database late "a" <> None then fail "a result whose read changed";
+      if Query.known database late "b" <> Some 6 then fail "a result no change reached";
+      expect_log engine [ "known_early(a)" ];
+      if Engine.get engine late "a" <> 10 then fail "the result after the change";
+      if Query.known database late "a" <> Some 10 then fail "the result once computed");
+  test "a known result cannot be asked for inside a query" (fun () ->
+      let engine = Engine.create () in
+      let _, early, _ = two_phases () in
+      let asks =
+        Query.query ~name:"known_asks" ~phase:Verdicts ~show:Fun.id (fun database key ->
+            Query.known database early key)
+      in
+      match Engine.get engine asks "a" with
+      | _ -> fail "it answered"
+      | exception Invalid_argument _ -> ());
+  test "a result whose query raised a fatal exception is computed again, not taken for current"
+    (fun () ->
+      let failing = ref false in
+      let engine = Engine.create () in
+      Engine.skip_audit engine;
+      let source, _, late = two_phases ~fail_when:(fun () -> !failing) () in
+      Engine.set engine source "a" "one";
+      ignore (Engine.get engine late "a");
+      Engine.set engine source "a" "three";
+      failing := true;
+      (match Engine.stabilize engine with
+      | _ -> fail "the fatal exception was lost"
+      | exception Stack_overflow -> ());
+      failing := false;
+      ignore (Engine.stabilize engine);
+      if Query.known (Engine.context engine) late "a" <> Some 10 then
+        fail "the result is not the one for the new input")
+
 let () = finish ()

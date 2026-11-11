@@ -1,7 +1,7 @@
-(* The scanner and layout run together as one pipeline: layout pulls each raw
-   token from the scanner as it needs it. Only a file with brackets still
-   open at its end is read twice, the second time with bracket recovery
-   turned on. *)
+(* The scanner and layout run as one pipeline: layout requests each raw
+   token from the scanner when it needs it. Only a file with brackets still
+   open at its end is lexed twice, the second time with bracket recovery
+   enabled. *)
 
 let attempt source ~recovery =
   let diagnostics = Diagnostic.Collector.create () in

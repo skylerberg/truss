@@ -137,6 +137,7 @@ phases are the compiler's own order:
 | Bodies | Checked bodies, moves and loans, patterns, and what else is found in a body |
 | Checks | The rules that span a package |
 | Proofs | Each package's call graph, and each definition's obligations as the solver's queries, which PROVER.md describes |
+| Verdicts | Whether each definition's obligations hold, from the solver's answers |
 | Diagnostics | Every stage's diagnostics for a file |
 | Lowering | What each instance compiles to |
 | Linking | Each instance's own hash, and what it refers to |
@@ -186,8 +187,19 @@ compare those counts for the same edit in a small package and a large one
 - **A result nobody has asked for is computed when first asked for,** by
   running its query, which asks for what it needs in turn. So nothing is
   computed that nobody wants.
-- **A read made outside any query brings the engine up to date first,** so a
-  driver never sees a result that a change has not reached yet.
+- **A read made outside any query first brings the engine up to date
+  through the phase of what it reads,** so a driver never sees a result that
+  a change has not reached yet. Later phases keep what is queued for them
+  until something of theirs is read, or the state is written.
+- **A driver can ask which results are still to be computed.** `Query.known`
+  brings the phases before a query's up to date and gives the result the
+  state holds, if no change could have reached it, computing nothing of the
+  query's own phase. The prover asks this of each definition's verdict, and
+  solves the queries of the others together before it reads their verdicts.
+  Inside a running query it is an error, since the read is not recorded.
+- **A result whose query raised a fatal exception,** such as a stack
+  overflow, stays queued, so it is computed again and never written as
+  current.
 - **Results are recomputed, never patched.** A query is a function of what
   it reads, so computing it again from the same reads gives the same value.
   The engine needs no knowledge of what a query does.
@@ -518,6 +530,30 @@ state that uses it.
 - **A package being worked on is part of its worktree's state,** which is a
   base and a difference like any state.
 
+### The standard library's own state
+
+Work on the standard library edits the sources of a fixed base, and the
+library is built into the compiler, so each edit makes a new compiler
+identity, under which no kept fact is found. `Database.open_library` opens
+the library as a state of its own instead:
+
+- **The `standard` package is the engine's own inputs,** over no base, set
+  from the sources built into the compiler. The text of a module that is
+  gone from the sources is removed.
+- **Its facts are kept under the compiler's version,** not its identity. The
+  version is a digest of the compiler's source and of what it is built
+  with: the OCaml compiler, the build profile, the target, and the linked
+  libraries. Tests, tools, and the library's text are left out. So an edit
+  to the library keeps the version, and the state computes only what the
+  edit reached; a change to the compiler gives a new version.
+- **The state is opened from a pointer the caller names,** so each caller,
+  such as each share of the library's proofs, keeps a state of its own.
+- **It is folded when it is opened,** as a command run in its own process
+  folds a session.
+
+A user's session does not use this: there the library never changes, and is
+a fixed base.
+
 ## The store
 
 The store lives in `$TRUSS_CACHE`, else `$XDG_CACHE_HOME/truss`, else
@@ -533,7 +569,7 @@ the machine. It holds:
 | Object files | Their key, as CODEGEN.md describes | `objects/`, one file each, since a linker reads them by path |
 | A registry package's files | The hash of the files, as SYNTAX.md's "The lock file" defines it | `packages/`, one directory each |
 | A solver's answers | Their key, as PROVER.md describes | `proofs/`, one file each |
-| Pointers | A worktree's session | `pointers/` |
+| Pointers | A worktree's session, or a named state of the standard library | `pointers/` |
 | The compiler's identity, the list of worktrees, and the background process's lock and log | | the top, and `servers/` |
 
 Everything but a pointer is named by what it holds or what made it, and
@@ -604,7 +640,7 @@ minutes it checks, and when the segments take more:
 - **What a live state names is kept:** the artifacts of its chain, and every
   value they name. A worktree's state is live while its directory exists,
   and its pointer is removed once the directory is gone. The standard
-  library's artifact is kept.
+  library's artifact is kept, and so is each named state of the library.
 - **Results are kept while in use:** those this process read or added, and
   those in segments written in the last week.
 - **Survivors are copied into a new segment, and the old ones deleted.**

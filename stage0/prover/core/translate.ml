@@ -185,6 +185,9 @@ type passed = {
   operand : operand option;  (** [None] for a default. *)
   type_ : T.ty;
   term : L.term;
+  run : (L.term * L.term) option;
+      (** A slice argument's bounds, as the argument was evaluated, for writing back what a [mut]
+          callee changes. *)
 }
 
 type context = {
@@ -218,7 +221,6 @@ type context = {
       (** In a lending or yielding method's body, the type of the parts it hands out. *)
   mutable handing : (expression list * expression list) option;
       (** Its [ensures]: the clauses for each [yield], which mention [result], and the others. *)
-  graph : Call_graph.t;  (** The package's call graph, for recursion in cycles. *)
   home : Names.key;  (** The definition being proven, whose spans and obligations are in it. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
   mutable counters : Costs.counter list;  (** What the code proven counts, for its cost clauses. *)
@@ -251,6 +253,12 @@ type context = {
       (** The condition of each path a [todo] ends in the [proof] block being read. *)
   mutable call_targets : (L.term * Core.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
+  mutable passed_values : int list;
+      (** Each named function passed straight to a parameter, which the call checks against what the
+          parameter promises. *)
+  mutable reading_callback : bool;
+      (** Reading a function-typed parameter to call it or pass it, where its [requires] is checked,
+          not lost. *)
   ranking : bool;
       (** Whether the definition proven may show a recursive call ends by being on a part of its
           parameters, the one use of the order of parts, which is stated only then. *)
@@ -751,6 +759,18 @@ let join context ?value_type frames =
   | [ (frame, value) ] -> Some (frame, value)
   | (first, _) :: _ ->
       let condition = L.disjunction (List.map (fun (frame, _) -> frame.condition) frames) in
+      (* The joined condition is named, so that each later fact on the path
+         names it rather than repeating every branch's condition, which
+         would grow with each join. *)
+      let condition =
+        match condition with
+        | L.Boolean _ | L.Symbol _ -> condition
+        | _ when L.mentions first.bound condition -> condition
+        | _ ->
+            let path = fresh context first "path" L.Bool in
+            fact context first (L.equal path condition);
+            path
+      in
       let merged = { first with condition } in
       let define prefix sort pick =
         let values = List.map (fun ((frame : frame), item) -> (frame, pick frame item)) frames in
@@ -951,6 +971,14 @@ let part_of ?(inherited = false) callee =
 
 let body_of callee = match callee.core.definition with Function { body; _ } -> body | _ -> None
 
+(* Whether a pattern binds a part of what it matches [mut]. *)
+let rec lends_mut (pattern : pattern) =
+  match pattern.kind with
+  | Bind { mode = T.Mut; _ } -> true
+  | Variant { fields; _ } | Record fields -> List.exists (fun (_, inner) -> lends_mut inner) fields
+  | Alternatives alternatives -> List.exists lends_mut alternatives
+  | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> false
+
 let holds_todo (body : block) =
   let found = ref false in
   Core_walk.block
@@ -1020,7 +1048,7 @@ let law_unshown database (impl : Path.t) (trait : T.trait_reference) for_type na
    definition: [let], [if], [match], [is], calls, fields, building values,
    [with], operators, and quantifiers, with no [var], assignment, loop,
    [return], or argument lent to change. *)
-let functional_block (body : block) =
+let functional walk =
   let fine = ref true in
   let rec visit =
     {
@@ -1056,8 +1084,13 @@ let functional_block (body : block) =
       pattern;
     !found || match pattern.kind with Bind { mutable_; _ } -> mutable_ | _ -> false
   in
-  Core_walk.block visit body;
+  walk visit;
   !fine
+
+let functional_block (body : block) = functional (fun visit -> Core_walk.block visit body)
+
+let functional_expression (node : expression) =
+  functional (fun visit -> Core_walk.expression visit node)
 
 let make_contract database path ~own ~others ~body =
   let signature = Interface.Impls.signature database path in
@@ -1286,6 +1319,7 @@ and place_value context frame (place : place) =
       | None -> raise (Foreign_unsupported "`self` outside a method"))
   | Constant { path; _ } -> (frame, constant_value context frame path)
   | Local { local; _ } -> (
+      if frame.checking && not context.reading_callback then escaping_callback context frame local;
       match Locals.find_opt local frame.locals with
       | Some term -> (frame, term)
       | None -> raise (Foreign_unsupported "a local the prover did not bind"))
@@ -1304,6 +1338,83 @@ and place_value context frame (place : place) =
 and operand_value context frame = function
   | Place place -> place_value context frame place
   | Value node -> value context frame node
+
+(* A function-typed parameter whose type has a [requires], read as a value
+   other than to call it or pass it to a parameter: the value's type keeps
+   no [requires], so the [requires] must hold for every argument. *)
+and escaping_callback context frame local =
+  match
+    ( List.find_opt (fun (parameter : Core.parameter) -> parameter.local = local) context.parameters,
+      local_type context frame local )
+  with
+  | ( Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ },
+      Some (T.Function function_type) )
+    when List.length inputs = List.length function_type.inputs ->
+      let arguments =
+        List.map
+          (fun (_, input) ->
+            let input = substituted context frame input in
+            let term = arrive context frame "argument" input in
+            assume_valid context frame input term;
+            term)
+          function_type.inputs
+      in
+      check_callback_contract context frame
+        (span_of frame.source (List.hd requires).origin)
+        ~name inputs requires arguments ~promised:(L.Boolean true)
+        ~why:"is used as a value whose type promises nothing of its arguments"
+  | _ -> ()
+
+and reading_callback : 'a. _ -> (unit -> 'a) -> 'a =
+ fun context read ->
+  let saved = context.reading_callback in
+  context.reading_callback <- true;
+  Fun.protect ~finally:(fun () -> context.reading_callback <- saved) read
+
+(* A function-typed parameter passed on for another callee's parameter:
+   what that parameter promises its arguments must imply this one's
+   [requires]. *)
+and check_forwarded_callback context frame (node : expression) (call_ : call) (passed : passed)
+    local values =
+  match
+    List.find_opt (fun (parameter : Core.parameter) -> parameter.local = local) context.parameters
+  with
+  | Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ } -> (
+      match parameter_type context frame call_ passed.position with
+      | Some (T.Function expected) when List.length expected.inputs = List.length inputs ->
+          let arguments =
+            List.map
+              (fun (_, input) ->
+                let input = substituted context frame input in
+                let term = arrive context frame "argument" input in
+                assume_valid context frame input term;
+                term)
+              expected.inputs
+          in
+          let known = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
+          check_callback_contract context frame (at frame node) ~name inputs requires arguments
+            ~promised:
+              (L.conjunction (callback_facts context frame call_ passed.position known arguments))
+            ~why:"is passed for a parameter that may not promise what it requires"
+      | _ -> escaping_callback context frame local)
+  | _ -> ()
+
+(* That a function-typed parameter's [requires], read with its parameters
+   as they were on entry, holds wherever [promised] does. *)
+and check_callback_contract context frame span ~name inputs requires arguments ~promised ~why =
+  let locals =
+    List.fold_left2
+      (fun locals (input, _) term -> Locals.add input term locals)
+      frame.old_locals inputs arguments
+  in
+  let inside = { frame with locals; self = frame.old_self; checking = false } in
+  List.iter
+    (fun (clause : expression) ->
+      oblige context (restrict frame promised) Requires span
+        (Printf.sprintf "`%s` %s, so its `%s` may not hold." name why
+           (quote frame.source clause.origin))
+        (snd (clause_value context inside clause)))
+    requires
 
 and expression_kind context frame (node : expression) : (frame * L.term) option =
   let source = frame.source in
@@ -1579,9 +1690,11 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
    [&&] keeps what its right side binds, as an [is] does. *)
 and short_circuit context frame right ~runs ~otherwise ~binds combine =
   let after, right_value = value context (restrict frame runs) right in
+  (* What the right side spends is known only where it ran, so where it
+     spends anything the paths where it ran and did not run are joined. *)
   let changed =
     Locals.exists (fun id term -> Locals.find_opt id after.locals <> Some term) frame.locals
-    || after.self <> frame.self
+    || after.self <> frame.self || after.spent <> frame.spent
   in
   if not changed then
     Some ((if binds then { after with condition = frame.condition } else frame), combine right_value)
@@ -1973,8 +2086,47 @@ and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
         match argument with
         | Passed { mode; value = operand } when not (is_lambda argument) ->
             let type_ = operand_type context frame operand in
-            let frame, term = operand_value context frame operand in
-            (frame, evaluated @ [ { position; mode; operand = Some operand; type_; term } ])
+            let frame, term, run =
+              match operand with
+              | Value
+                  ({
+                     kind =
+                       Slice
+                         {
+                           base;
+                           call =
+                             {
+                               kind =
+                                 Call
+                                   {
+                                     arguments =
+                                       [
+                                         _;
+                                         Passed { value = Value start; _ };
+                                         Passed { value = Value stop; _ };
+                                       ];
+                                     _;
+                                   };
+                               _;
+                             };
+                         };
+                     _;
+                   } as slice_node) ->
+                  let frame, term, low, high =
+                    slice_run context frame slice_node base ~start:(Some start) ~stop:(Some stop)
+                      ~inclusive:false
+                  in
+                  (frame, term, Some (low, high))
+              | Place (Local _) ->
+                  let frame, term =
+                    reading_callback context (fun () -> operand_value context frame operand)
+                  in
+                  (frame, term, None)
+              | _ ->
+                  let frame, term = operand_value context frame operand in
+                  (frame, term, None)
+            in
+            (frame, evaluated @ [ { position; mode; operand = Some operand; type_; term; run } ])
         | Passed _ | Default -> (frame, evaluated))
       (frame, []) indexed
   in
@@ -1999,6 +2151,7 @@ and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
                 operand = Some (Value lambda_node);
                 type_ = type_of context frame lambda_node;
                 term;
+                run = None;
               }
         | Passed _ -> List.find_opt (fun (passed : passed) -> passed.position = position) evaluated
         | Default -> None)
@@ -2014,18 +2167,27 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
     match call_.callee with
     | Indirect callee ->
         let ty = operand_type context frame callee in
-        let frame, term = operand_value context frame callee in
+        let frame, term = reading_callback context (fun () -> operand_value context frame callee) in
         (frame, Some (ty, term, callee))
     | _ -> (frame, None)
-  in
-  let frame, values =
-    call_arguments context frame node call_ ~facts_for:(fun position known arguments ->
-        callback_facts context frame call_ position known arguments)
   in
   let rec unwidened (node : expression) =
     match node.kind with
     | Convert { conversion = Widen; value = inner } -> unwidened inner
     | _ -> node
+  in
+  List.iter
+    (function
+      | Passed { value = Value given; _ } -> (
+          match unwidened given with
+          | { kind = Function_value _; id; _ } ->
+              context.passed_values <- id :: context.passed_values
+          | _ -> ())
+      | Passed _ | Default -> ())
+    call_.arguments;
+  let frame, values =
+    call_arguments context frame node call_ ~facts_for:(fun position known arguments ->
+        callback_facts context frame call_ position known arguments)
   in
   List.iter
     (fun (passed : passed) ->
@@ -2038,6 +2200,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                   check_named_callback context frame call_ passed named path contract values
               | None -> ())
           | _ -> ())
+      | Some (Place (Local { local; _ })) ->
+          check_forwarded_callback context frame node call_ passed local values
       | _ -> ())
     values;
   (* An index read, which the ownership check may have paired with
@@ -2068,13 +2232,16 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             let changed = arrive context frame "changed" passed.type_ in
             try store context frame place changed
             with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame place)
-        | T.Mut, Some (Value { kind = Slice { base; call }; _ }) -> (
+        | T.Mut, Some (Value { kind = Slice { base; _ }; _ }) -> (
             (* The callee changes the elements of the run the slice views,
                and nothing else of its owner: the slice read again after the
                call is a view of the new run, which the callee's
                postconditions are about. *)
-            try sliced_owner_changed context frame base call
-            with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame base)
+            match passed.run with
+            | Some (start, stop) -> (
+                try sliced_owner_changed context frame base ~start ~stop
+                with Unsupported _ | Foreign_unsupported _ -> havoc_root context frame base)
+            | None -> havoc_root context frame base)
         | _ -> frame)
       frame values
   in
@@ -2136,8 +2303,10 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       (fun impl ->
         let reaches_here =
           List.exists
-            (fun method_ -> Call_graph.reaches context.graph ~from:method_ ~target:context.current)
-            (Call_graph.targets context.graph (Uses_impl impl))
+            (fun method_ ->
+              Call_graph.reaches context.database ~package:(Path.package context.current)
+                ~from:method_ ~target:context.current)
+            (Call_graph.impl_methods context.database impl)
         in
         if reaches_here then
           oblige context frame Termination span
@@ -2249,6 +2418,20 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
             term
         | _ -> arrive context frame "result" result_type
       in
+      (* A function value meets its type's invariants where it returns, as
+         a function does, so its result and what it leaves in a [mut]
+         argument are valid. *)
+      assume_valid context frame result_type result;
+      List.iter
+        (fun (passed : passed) ->
+          match (passed.mode, passed.operand) with
+          | T.Mut, Some operand -> (
+              try
+                assume_valid context frame passed.type_
+                  (snd (operand_value context { frame with checking = false } operand))
+              with Unsupported _ | Foreign_unsupported _ -> ())
+          | _ -> ())
+        values;
       Some (frame, result)
   | Capability_method { capability; name } ->
       with_contract
@@ -2377,6 +2560,10 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
     result_type =
   let known = arrive context frame "result" result_type in
   match (operation, types) with
+  | Shared_update, _ ->
+      (* What [change] returned, which a function value's result is: valid. *)
+      assume_valid context frame result_type known;
+      known
   | ( ( Storage_model | View_model | Storage_empty | Storage_with_capacity | Storage_length
       | Storage_capacity | Storage_set_capacity | Storage_lengthen | Storage_shorten | Storage_push
       | Storage_pop | Storage_insert | Storage_remove | Storage_swap | Storage_at | Storage_at_mut
@@ -2789,6 +2976,28 @@ and lambda context frame (node : expression) (parameters : pattern list) capture
         ended :=
           (match finished with Some (frame, value) -> [ (frame, Some value) ] | None -> [])
           @ context.returns;
+        (* Like a function, it meets its type's invariants where it ends:
+           a call through it assumes so. *)
+        List.iter
+          (fun ((exit_ : frame), returned) ->
+            (match (returned, function_type.output) with
+            | Some term, Returns output ->
+                check_valid context exit_ span
+                  (substituted context frame output)
+                  term ~deep:true ~when_:"for the value this lambda returns"
+            | _ -> ());
+            List.iter2
+              (fun (pattern : pattern) (mode, input) ->
+                match (mode, pattern.kind) with
+                | T.Mut, Bind { local; _ } -> (
+                    match Locals.find_opt local exit_.locals with
+                    | Some term ->
+                        check_valid context exit_ span (substituted context frame input) term
+                          ~deep:true ~when_:"for a `mut` parameter when this lambda ends"
+                    | None -> ())
+                | _ -> ())
+              parameters function_type.inputs)
+          !ended;
         let spent_of (exit_ : frame) counter =
           match List.assoc_opt (Costs.key counter) exit_.spent with
           | Some term -> term
@@ -2934,9 +3143,14 @@ and what_a_lambda_does context function_type term ~called ~arguments ~start_fres
 (* A clause's value: a specification, which never runs, so it spends
    nothing whatever it calls. *)
 and clause_value context frame (clause : expression) =
+  specification context (fun () -> value context frame clause)
+
+(* Reading what never runs, as a specification, which spends nothing. *)
+and specification : 'a. _ -> (unit -> 'a) -> 'a =
+ fun context read ->
   let saved = context.counters in
   context.counters <- [];
-  Fun.protect ~finally:(fun () -> context.counters <- saved) (fun () -> value context frame clause)
+  Fun.protect ~finally:(fun () -> context.counters <- saved) read
 
 (* A lambda whose body is functional, as a function in the logic: applied,
    it is its body. Lambdas with the same body over the same captured values
@@ -3142,12 +3356,14 @@ and check_callback_requires context frame (node : expression) through (values : 
       with
       | Some { callback_contract = Some { inputs; requires }; name; _ }
         when List.length inputs = List.length values ->
+          (* The [requires] names the parameters as the caller passed them,
+             which is what the caller showed it with. *)
           let locals =
             List.fold_left2
               (fun locals (input, _) (passed : passed) -> Locals.add input passed.term locals)
-              frame.locals inputs values
+              frame.old_locals inputs values
           in
-          let inside = { frame with locals; checking = false } in
+          let inside = { frame with locals; self = frame.old_self; checking = false } in
           List.iter
             (fun (clause : expression) ->
               oblige context frame Requires (at frame node)
@@ -3303,7 +3519,7 @@ and law_fact context frame source ~substitution (law : law) =
       let range =
         L.conjunction (List.map2 (fun symbol ty -> in_range ty (L.Symbol symbol)) symbols types)
       in
-      match block_value context inside law.body with
+      match specification context (fun () -> block_value context inside law.body) with
       | Some (_, holds) ->
           Some
             (L.Forall
@@ -3492,6 +3708,11 @@ and list_literal context frame (node : expression) items =
    which must be within the collection, whose model is that run of the
    collection's model. *)
 and slice context frame (node : expression) base ~start ~stop ~inclusive =
+  let frame, viewed, _, _ = slice_run context frame node base ~start ~stop ~inclusive in
+  (frame, viewed)
+
+(* A slice, with its bounds as they were evaluated. *)
+and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
   let span = at frame node in
   let base_type = place_type context frame base in
   let element =
@@ -3543,7 +3764,7 @@ and slice context frame (node : expression) base ~start ~stop ~inclusive =
                    ==> equal inside outside) ))
       | _ -> ())
   | None -> ());
-  (frame, viewed)
+  (frame, viewed, low, high)
 
 (* Whether a clause reads its template parameter only as
    [template.literals], so that a template's parts cannot change it. *)
@@ -3613,7 +3834,8 @@ and tagged_template context frame (node : expression) texts (made : expression) 
           assume_valid context frame tag_type result;
           List.iter
             (fun (clause : expression) ->
-              assume context frame (snd (value context { entry with result = Some result } clause)))
+              assume context frame
+                (snd (clause_value context { entry with result = Some result } clause)))
             own.ensures;
           let frame =
             spend context frame
@@ -4041,7 +4263,8 @@ and global_value context frame (node : expression) path type_arguments =
 and named_function context frame (node : expression) path type_arguments contract =
   if
     context.terminates && frame.checking
-    && Call_graph.reaches context.graph ~from:path ~target:context.current
+    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
+         ~target:context.current
   then
     oblige context frame Termination (at frame node)
       (Printf.sprintf
@@ -4051,6 +4274,38 @@ and named_function context frame (node : expression) path type_arguments contrac
          (Path.show path))
       (L.Boolean false);
   let ty = type_of context frame node in
+  (* A function with a [requires], used as a value anywhere but passed
+     straight to a parameter, which checks it, has a type that keeps no
+     [requires], so it must accept every argument of that type. *)
+  (match (ty, contract.parts) with
+  | T.Function function_type, own :: _
+    when own.requires <> [] && frame.checking && not (List.mem node.id context.passed_values) ->
+      let inputs =
+        List.map
+          (fun (_, input) ->
+            let input = substituted context frame input in
+            let term = arrive context frame "argument" input in
+            assume_valid context frame input term;
+            term)
+          function_type.inputs
+      in
+      if List.length own.parameters = List.length inputs then begin
+        let inside =
+          part_frame frame own
+            ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+            ~substitution:[]
+        in
+        List.iter
+          (fun (clause : expression) ->
+            oblige context frame Requires (at frame node)
+              (Printf.sprintf
+                 "`%s` is used as a value of `%s`, which promises nothing of its arguments, so its \
+                  `%s` may not hold."
+                 (Path.show path) (T.show ty) (quote own.callee clause.origin))
+              (snd (clause_value context inside clause)))
+          own.requires
+      end
+  | _ -> ());
   let instance =
     match List.map (T.substitute_argument frame.substitution) type_arguments with
     | [] -> ""
@@ -4434,6 +4689,51 @@ and fields_match context frame span type_ variant term (fields : (string * patte
       | None -> unsupported span "the field `%s`" name)
     (L.Boolean true, frame) fields
 
+(* Each binding a pattern lends [mut] from the value it matches, with how
+   the value is rebuilt from what the binding holds when the lend ends:
+   through the variants and fields that lead to it, each other field kept. *)
+and lent_bindings context frame (pattern : pattern) ty :
+    (Core.local * (L.term -> L.term -> L.term)) list =
+  match pattern.kind with
+  | Bind { local; mode = T.Mut; _ } -> [ (local, fun _ part -> part) ]
+  | Variant { variant; fields } -> fields_lent context frame ty (Some variant) fields
+  | Record fields -> fields_lent context frame ty None fields
+  | Alternatives alternatives ->
+      if
+        List.exists
+          (fun alternative -> lent_bindings context frame alternative ty <> [])
+          alternatives
+      then
+        unsupported
+          (span_of frame.source pattern.origin)
+          "a `mut` binding in one of several alternatives";
+      []
+  | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> []
+
+and fields_lent context frame ty variant (fields : (string * pattern) list) =
+  match constructors context ty with
+  | Some shape ->
+      let shaped = match List.assoc_opt variant shape with Some fields -> fields | None -> [] in
+      List.concat_map
+        (fun (name, subpattern) ->
+          match List.assoc_opt name shaped with
+          | Some field_type ->
+              List.map
+                (fun (local, rebuild) ->
+                  ( local,
+                    fun whole part ->
+                      L.Apply
+                        ( constructor_name ty variant,
+                          List.map
+                            (fun (other, _) ->
+                              let current = selected context ty variant other whole in
+                              if other = name then rebuild current part else current)
+                            shaped ) ))
+                (lent_bindings context frame subpattern field_type)
+          | None -> [])
+        fields
+  | None -> []
+
 and match_ context frame (node : expression) scrutinees (arms : arm list) =
   let frame, scrutinee_values =
     List.fold_left
@@ -4479,7 +4779,55 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
               | None -> (entered, [])
             in
             untaken := join_frames context (restrict current (L.not_ condition) :: passed_over);
-            block_value context entered arm_.body)
+            (* What an arm leaves in each binding lent [mut] goes back into
+               the scrutinee where the arm ends, however it ends. *)
+            let lent =
+              List.concat
+                (List.map2
+                   (fun pattern (scrutinee, (_, ty)) ->
+                     match scrutinee with
+                     | Place place ->
+                         List.map
+                           (fun binding -> (place, ty, binding))
+                           (lent_bindings context frame pattern ty)
+                     | Value _ -> [])
+                   arm_.patterns
+                   (List.combine scrutinees scrutinee_values))
+            in
+            let write_back (at : frame) =
+              List.fold_left
+                (fun (at : frame) (place, _, (local, rebuild)) ->
+                  match Locals.find_opt local at.locals with
+                  | Some part ->
+                      let _, whole = place_value context { at with checking = false } place in
+                      store context at place (rebuild whole part)
+                  | None -> at)
+                at lent
+            in
+            if lent = [] then block_value context entered arm_.body
+            else begin
+              let returns = List.length context.returns in
+              let exits =
+                Option.map
+                  (fun (exits : loop_exits) ->
+                    (List.length exits.breaks, List.length exits.continues))
+                  frame.loop
+              in
+              let ended = block_value context entered arm_.body in
+              (* Exits are added at the front, so the arm's are the first. *)
+              let rewrite count list f =
+                let added = List.length list - count in
+                List.mapi (fun index item -> if index < added then f item else item) list
+              in
+              context.returns <-
+                rewrite returns context.returns (fun (at, value) -> (write_back at, value));
+              (match (frame.loop, exits) with
+              | Some exits_, Some (breaks, continues) ->
+                  exits_.breaks <- rewrite breaks exits_.breaks write_back;
+                  exits_.continues <- rewrite continues exits_.continues write_back
+              | _ -> ());
+              Option.map (fun (at, term) -> (write_back at, term)) ended
+            end)
       arms
   in
   if carries_value then
@@ -4555,7 +4903,8 @@ and validity context frame ~assuming ?(deep = true) ?(own = true) ?(seen = []) t
       | Some (source, written) -> (
           let inner = type_frame context frame source ty ~self:(Some term) in
           try
-            L.conjunction (List.map (fun invariant -> snd (value context inner invariant)) written)
+            L.conjunction
+              (List.map (fun invariant -> snd (clause_value context inner invariant)) written)
           with Unsupported _ | Foreign_unsupported _ when assuming -> L.Boolean true)
       | None -> L.Boolean true
     in
@@ -4692,7 +5041,9 @@ and contract_call context frame (node : expression) (call_ : call) path contract
      measure, at the call's arguments, is below the caller's on entry. *)
   if
     context.terminates && frame.checking
-    && Call_graph.reaches context.graph ~from:path ~target:context.current
+    && (match call_.callee with Trait_method _ -> Call_graph.dispatched call_.callee | _ -> true)
+    && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
+         ~target:context.current
   then
     begin match (context.measures, own.decreases) with
     | [], [] when Path.equal path context.current && structural_parameters context frame own <> []
@@ -5214,7 +5565,8 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
   let assumed =
     if
       counter.counting = Units
-      && Call_graph.reaches context.graph ~from:path ~target:context.current
+      && Call_graph.reaches context.database ~package:(Path.package context.current) ~from:path
+           ~target:context.current
     then
       match List.assoc_opt (Costs.key counter) context.own_constants with
       | Some constants ->
@@ -5249,8 +5601,9 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
     List.find_map (fun part -> match clauses_of part with [] -> None | found -> Some found) parts
   in
   match counter.resource with
-  | Calls target when not (call_reaches context uses values target) -> Costs.zero
+  | Calls target when call_reaches context after uses values target = L.Boolean false -> Costs.zero
   | Calls (Through term) -> (
+      let reaches = call_reaches context after uses values (Through term) in
       (* Each parameter the function value is passed for must have a
          clause about it. *)
       let receiving =
@@ -5267,7 +5620,7 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
       | Some found
         when (not captured) && List.length found >= List.length receiving && receiving <> [] ->
           List.fold_left (fun total clause -> Costs.plus total (amount clause)) Costs.zero found
-      | _ -> unknown_amount context after counter)
+      | _ -> spent_where reaches (unknown_amount context after counter))
   | _ -> (
       match (first_clauses (), counter.resource, counter.counting, ends_in) with
       | Some (clause :: _), _, _, _ -> amount clause
@@ -5277,19 +5630,43 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
 (* Whether a call can reach a [calls] clause's target: a function value
    passed to it, or captured by a lambda passed to it, or a capability it
    uses. *)
-and call_reaches context uses (values : passed list) (target : Costs.target) =
+and call_reaches context frame uses (values : passed list) (target : Costs.target) =
   match target with
   | Through term ->
-      List.exists
-        (fun (passed : passed) ->
-          passed.term = term || lambda_captures_target context passed.term term)
-        values
+      L.disjunction
+        (List.map
+           (fun (passed : passed) ->
+             if lambda_captures_target context passed.term term then L.Boolean true
+             else may_be_target context frame passed.term passed.type_ term)
+           values)
   | Capability path | Capability_method (path, _) ->
-      List.exists
-        (function
-          | T.Capability used -> Path.equal used path
-          | T.Capability_parameter _ | T.Capability_variable _ -> true)
-        uses
+      L.Boolean
+        (List.exists
+           (function
+             | T.Capability used -> Path.equal used path
+             | T.Capability_parameter _ | T.Capability_variable _ -> true)
+           uses)
+
+(* Whether a function value is a [calls] clause's target: the target
+   itself, or a value of its sort that may equal it, as one chosen by [if]
+   or read from a field may. *)
+and may_be_target context frame term ty target =
+  if term = target then L.Boolean true
+  else
+    match List.assoc_opt target context.call_targets with
+    | Some local -> (
+        match (ty, local_type context frame local) with
+        | T.Function _, Some target_type when sort_of context ty = sort_of context target_type ->
+            L.equal term target
+        | _ -> L.Boolean false)
+    | None -> L.Boolean false
+
+(* An amount spent only where [condition] holds. *)
+and spent_where condition amount =
+  match condition with
+  | L.Boolean true -> amount
+  | L.Boolean false -> Costs.zero
+  | condition -> L.ite condition amount Costs.zero
 
 and lambda_captures_target context lambda target =
   match
@@ -5320,10 +5697,11 @@ and function_value_amount context frame (function_type : T.function_type) callee
   | Allocations -> by_clause T.Allocations
   | Allocated_bytes -> by_clause T.Allocated_bytes
   | Calls (Through term) ->
-      if callee_term = term then L.int 1
-      else if lambda_captures_target context callee_term term then
-        unknown_amount context frame counter
-      else Costs.zero
+      if lambda_captures_target context callee_term term then unknown_amount context frame counter
+      else
+        spent_where
+          (may_be_target context frame callee_term (T.Function function_type) term)
+          (L.int 1)
   | Calls (Capability path | Capability_method (path, _)) ->
       if
         List.exists
@@ -5755,7 +6133,10 @@ and step_amount context frame (call_ : call) (values : passed list) (counter : C
           | None -> unknown_amount context frame counter))
   | Function _ | Trait_method _ | Indirect _ -> (
       match counter.resource with
-      | Calls target when not (call_reaches context call_.uses values target) -> Costs.zero
+      | Calls target ->
+          spent_where
+            (call_reaches context frame call_.uses values target)
+            (unknown_amount context frame counter)
       | _ -> unknown_amount context frame counter)
 
 and indirect context (ty : T.ty) variant =
@@ -5772,7 +6153,12 @@ and indirect context (ty : T.ty) variant =
 (* [log(n)], [power(b, e)], and [time(f)] in a cost bound. *)
 and specification_function context frame (node : expression) (measure : specification_function)
     arguments =
-  let values = List.map (fun argument -> snd (value context frame argument)) arguments in
+  (* A specification function never runs, so a callback read for it is
+     not used as a value. *)
+  let values =
+    reading_callback context (fun () ->
+        List.map (fun argument -> snd (value context frame argument)) arguments)
+  in
   match (measure, values, arguments) with
   | Log, [ n ], [ argument ] ->
       let log = log_of context frame n in
@@ -6595,7 +6981,7 @@ and handing_out context frame (node : statement) (mode : T.mode) (part : operand
         List.iter
           (fun (clause : expression) ->
             let _, term =
-              value context { at with result; yielded = Some yielded; finished } clause
+              clause_value context { at with result; yielded = Some yielded; finished } clause
             in
             oblige context at Ensures (span_of at.source clause.origin)
               (Printf.sprintf "`%s` may not hold %s." (quote at.source clause.origin) when_)
@@ -6691,33 +7077,23 @@ and array_updated context frame (array_type : T.ty) array index part =
 
 (* The owner of a slice lent to change, after the change: as long as it
    was, and the same outside the slice's run. *)
-and sliced_owner_changed context frame (base : place) (call : expression) =
-  match call.kind with
-  | Call
-      {
-        arguments =
-          [ _; Passed { value = Value start_node; _ }; Passed { value = Value stop_node; _ } ];
-        _;
-      } -> (
-      let owner_type = place_type context frame base in
-      let element =
-        match owner_type with
-        | Named { arguments = T.Type element :: _; _ } -> element
-        | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (T.show owner_type)))
-      in
-      let _, start = value context { frame with checking = false } start_node in
-      let _, stop = value context { frame with checking = false } stop_node in
-      let frame, owner = place_value context frame base in
-      let changed = arrive context frame "changed" owner_type in
-      match
-        (model_of context owner_type owner ~element, model_of context owner_type changed ~element)
-      with
-      | Some before, Some after ->
-          run_replaced context frame element ~before ~after ~start ~stop ~run:None;
-          assume_valid context frame owner_type changed;
-          store context frame base changed
-      | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (T.show owner_type))))
-  | _ -> raise (Foreign_unsupported "a slice whose call is not of `slice_range`")
+and sliced_owner_changed context frame (base : place) ~start ~stop =
+  let owner_type = place_type context frame base in
+  let element =
+    match owner_type with
+    | Named { arguments = T.Type element :: _; _ } -> element
+    | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (T.show owner_type)))
+  in
+  let frame, owner = place_value context frame base in
+  let changed = arrive context frame "changed" owner_type in
+  match
+    (model_of context owner_type owner ~element, model_of context owner_type changed ~element)
+  with
+  | Some before, Some after ->
+      run_replaced context frame element ~before ~after ~start ~stop ~run:None;
+      assume_valid context frame owner_type changed;
+      store context frame base changed
+  | _ -> raise (Foreign_unsupported (Printf.sprintf "a slice of `%s`" (T.show owner_type)))
 
 (* That one sequence is another as long, the same outside the run from
    [start] to before [stop], and, where [run] is given, [run]'s elements in
@@ -6912,7 +7288,7 @@ and store_lent context frame (place : place) leave =
 (* What a loop's body may change, which is havocked at its head: the local
    or [self] that each place it assigns to, lends to change, or pulls is
    part of. *)
-and changed_places frame (body : block) : changed =
+and changed_places ?(condition : expression option) frame (body : block) : changed =
   let locals = ref [] and self = ref false in
   let note (place : place) =
     match root_of place with
@@ -6935,6 +7311,20 @@ and changed_places frame (body : block) : changed =
                   | Passed _ | Default -> ())
                 arguments
           | Cursor_next place -> note place
+          | Match { scrutinees; arms; _ } ->
+              List.iteri
+                (fun index scrutinee ->
+                  match scrutinee with
+                  | Place place
+                    when List.exists
+                           (fun (arm_ : arm) ->
+                             match List.nth_opt arm_.patterns index with
+                             | Some pattern -> lends_mut pattern
+                             | None -> false)
+                           arms ->
+                      note place
+                  | Place _ | Value _ -> ())
+                scrutinees
           | _ -> ());
           Core_walk.expression_children visit node);
       statement =
@@ -6948,6 +7338,7 @@ and changed_places frame (body : block) : changed =
       pattern = (fun node -> Core_walk.pattern_children visit node);
     }
   in
+  Option.iter (Core_walk.expression visit) condition;
   Core_walk.block visit body;
   {
     changed_locals =
@@ -7023,7 +7414,7 @@ and invariants (clauses : loop_clause list) =
 and check_invariants context frame clauses ~when_ =
   List.iter
     (fun (invariant : expression) ->
-      let _, term = value context frame invariant in
+      let _, term = clause_value context frame invariant in
       oblige context frame Invariant (at frame invariant)
         (Printf.sprintf "The loop invariant `%s` may not hold %s."
            (quote frame.source invariant.origin)
@@ -7034,7 +7425,7 @@ and check_invariants context frame clauses ~when_ =
 and assume_invariants context frame clauses =
   List.iter
     (fun (invariant : expression) ->
-      let _, term = value context { frame with checking = false } invariant in
+      let _, term = clause_value context { frame with checking = false } invariant in
       assume context frame term)
     (invariants clauses)
 
@@ -7044,7 +7435,9 @@ and measures_of clauses =
 and while_ context frame (node : statement) condition clauses body =
   let span = span_of frame.source node.origin in
   check_invariants context frame clauses ~when_:"on entry to the loop";
-  let changed = changed_places frame body in
+  (* The condition runs at the head of each iteration, so what it changes
+     and what it spends are the iteration's. *)
+  let changed = changed_places ~condition frame body in
   let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
   loop_entry context frame costs;
   let mark = context.fresh and facts_mark = List.length context.facts in
@@ -7057,6 +7450,7 @@ and while_ context frame (node : statement) condition clauses body =
   let iterations = iterations_so_far context head costs in
   let head = loop_head context head costs ~iterations in
   assume_invariants context head clauses;
+  let top = head in
   let head, test = value context head condition in
   let exits = { breaks = []; continues = [] } in
   let inside = { (restrict head test) with loop = Some exits } in
@@ -7067,7 +7461,10 @@ and while_ context frame (node : statement) condition clauses body =
     | ( None,
         Compare
           { comparison = (Less | Less_equal | Greater | Greater_equal) as compared; left; right } )
-      ->
+    (* A guessed measure is read again at the end of each iteration, so its
+       operands must be functional: evaluating one again must not repeat
+       what it changes. *)
+      when functional_expression left && functional_expression right ->
         `Guessed (left, right, compared)
     | None, _ -> `None
   in
@@ -7116,7 +7513,7 @@ and while_ context frame (node : statement) condition clauses body =
   in
   let finished = block_value context inside body in
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
-  loop_iterations context node head costs ~mark
+  loop_iterations context node top costs ~mark
     ~facts:(facts_since context facts_mark @ [ inside.condition ])
     ~ends ~breaks:exits.breaks;
   List.iter
@@ -7525,6 +7922,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
               operand = Some (Place cursor_place);
               type_ = cursor_type;
               term = cursor;
+              run = None;
             };
           ]
           ~havoc_mut
@@ -7644,7 +8042,6 @@ and havoc_parts context frame =
 let new_context database ~home ~current ~terminates ~measures =
   {
     home;
-    graph = Query.demand database Call_graph.graph (Path.package current);
     laws_assumed = [];
     database;
     current;
@@ -7684,12 +8081,12 @@ let new_context database ~home ~current ~terminates ~measures =
     holes = [];
     unfinished = [];
     call_targets = [];
+    passed_values = [];
+    reading_callback = false;
     validating = [];
     ranking =
       terminates && measures = []
-      && Call_graph.recursive
-           (Query.demand database Call_graph.graph (Path.package current))
-           current;
+      && Call_graph.recursive database ~package:(Path.package current) current;
     disjoint =
       (match Query.demand database Ownership.ownership home with
       | Some ownership -> ownership.disjoint
@@ -8076,7 +8473,7 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
       | _ ->
           List.iter
             (fun (ensured : expression) ->
-              let _, term = value context frame ensured in
+              let _, term = clause_value context frame ensured in
               oblige context frame Ensures (at frame ensured)
                 (Printf.sprintf "`%s` may not hold when the function returns."
                    (quote source ensured.origin))
@@ -8211,7 +8608,7 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
         List.iter
           (fun clause -> assume context start (snd (clause_value context inside clause)))
           law.requires;
-        match block_value context inside law.body with
+        match specification context (fun () -> block_value context inside law.body) with
         | Some (_, holds) ->
             oblige context start Law at
               (Printf.sprintf "The law `%s.%s` may not hold for `%s`." (T.show_trait trait) law.name
@@ -8245,7 +8642,7 @@ let type_ database (source : source) ~path =
       let at_value = { start with self = Some value_; old_self = Some value_ } in
       List.iter
         (fun invariant ->
-          let after, holds = value context at_value invariant in
+          let after, holds = clause_value context at_value invariant in
           assume context after holds)
         invariants;
       Option.iter
@@ -8265,6 +8662,16 @@ let test database (source : source) ~path =
   let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Test body -> ignore (block_value context (empty_frame source) body)
+  | _ -> ());
+  outcome context
+
+(* A constant's value is well defined, as any expression is: its
+   arithmetic stays in range, and its shifts and divisions are valid. *)
+let constant database (source : source) ~path =
+  let home = match source.key with Some key -> key | None -> invalid_arg "Translate.constant" in
+  let context = new_context database ~home ~current:path ~terminates:false ~measures:[] in
+  (match source.core.definition with
+  | Constant defined -> ignore (value context (empty_frame source) defined)
   | _ -> ());
   outcome context
 

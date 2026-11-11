@@ -37,7 +37,7 @@ let block_comment cursor =
   in
   let stop, closed = loop 1 (start + 2) in
   cursor.position <- stop;
-  if not closed then cursor.ended_inside_error <- true;
+  if not closed then cursor.unterminated_at_end <- true;
   cursor.line_is_blank <- false;
   (* A comment that spans lines separates the tokens around it like a line
      break. *)

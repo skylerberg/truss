@@ -120,6 +120,31 @@ let reload t =
 
 let modules t = List.map fst t.files
 
+(* The packages the command's packages depend on, directly or not, but
+   the standard library, whose proofs are checked where it is released. *)
+let dependency_packages t =
+  let seen = Hashtbl.create 8 in
+  let rec visit name =
+    List.iter
+      (fun (dependency : Workspace.dependency) ->
+        if dependency.package <> Path.standard_package && not (Hashtbl.mem seen dependency.package)
+        then begin
+          Hashtbl.replace seen dependency.package ();
+          visit dependency.package
+        end)
+      (Query.demand t.context Workspace.dependencies name)
+  in
+  List.iter (fun (package : package) -> visit package.name) t.packages;
+  List.filter
+    (fun name -> not (List.exists (fun (package : package) -> package.name = name) t.packages))
+    (Hashtbl.fold (fun name () names -> name :: names) seen [])
+
+(* The modules a program built from the command's packages is made of,
+   which its proofs are about: theirs, and their dependencies'. *)
+let program_modules t =
+  modules t
+  @ List.concat_map (fun name -> Database.package_modules t.session name) (dependency_packages t)
+
 let file t module_ =
   match List.assoc_opt module_ t.files with
   | Some path -> path

@@ -464,13 +464,13 @@ let definitions (items : definition item list) =
   let inside index =
     List.filter_map
       (fun (item : definition item) ->
-        if item.within = Some index then Some (definition item.value) else None)
+        if item.container = Some index then Some (definition item.value) else None)
       items
   in
   List.concat
     (List.mapi
        (fun index (item : definition item) ->
-         match item.within with
+         match item.container with
          | Some _ -> []
          | None -> [ definition ~methods:(inside index) item.value ])
        items)

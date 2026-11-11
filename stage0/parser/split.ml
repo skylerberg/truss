@@ -1,18 +1,19 @@
-(* Splitting a file into its [use] lines and definitions before parsing them,
-   and a trait, an [impl], or a capability into its methods.
+(* Splits a file into pieces, its [use] lines and definitions, before they
+   are parsed, and finds where a method inside a trait, an [impl], or a
+   capability ends.
 
    The lexer balances brackets, so this needs no parsing: a [Newline] outside
-   every bracket ends an item, unless a [{] follows it, which opens a body
-   that starts on its own line. No item starts with [{], so the rule never
-   splits a definition in two. *)
+   every bracket ends a piece, unless a [{] follows it, which opens a body
+   that starts on a line of its own. No piece starts with [{], so the rule
+   never splits a definition in two. *)
 
 open Token
 
-(* The indexes of an item's first token and one past its last. *)
-type item = { first : int; stop : int }
+(* The indexes of a piece's first token and one past its last. *)
+type piece = { first : int; stop : int }
 
-(* One past the last token of the item that starts at [first]: where its
-   line ends, or the bracket around it closes, or the tokens do. *)
+(* One past the last token of the piece that starts at [first]: the end of
+   its line, the closer of the enclosing bracket, or the end of the tokens. *)
 let stop (tokens : Token.t array) ~first =
   let rec go index depth =
     if index >= Array.length tokens then index
@@ -29,15 +30,15 @@ let stop (tokens : Token.t array) ~first =
   in
   go first 0
 
-let items (tokens : Token.t array) =
-  let rec go index items =
-    if index >= Array.length tokens then List.rev items
+let pieces (tokens : Token.t array) =
+  let rec go index pieces =
+    if index >= Array.length tokens then List.rev pieces
     else
       match tokens.(index).kind with
-      | End_of_file -> List.rev items
-      | Newline -> go (index + 1) items
+      | End_of_file -> List.rev pieces
+      | Newline -> go (index + 1) pieces
       | _ ->
           let stop = max (index + 1) (stop tokens ~first:index) in
-          go stop ({ first = index; stop } :: items)
+          go stop ({ first = index; stop } :: pieces)
   in
   go 0 []

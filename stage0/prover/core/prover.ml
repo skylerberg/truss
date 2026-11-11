@@ -72,6 +72,7 @@ let prove database (key : Names.key) =
                  ~updating_helper:(Translate.is_updating_helper database key.path)
                  ?inherited:(inherited database key.path) database source ~path:key.path)
         | Test, Test _ -> Obligations (Translate.test database source ~path:key.path)
+        | Constant, Constant _ -> Obligations (Translate.constant database source ~path:key.path)
         | Impl, _ ->
             let outcomes = impl_laws database key source in
             Obligations

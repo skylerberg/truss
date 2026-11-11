@@ -10,6 +10,7 @@
   workspace
   diagnostic
   standard_library
+  compiler_version
   type_checker
   registry
   resolve

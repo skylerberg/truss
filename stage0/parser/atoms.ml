@@ -1,15 +1,15 @@
-(* The smallest pieces the other parsing modules share: tree nodes, names,
-   module prefixes, string literals, what can start an expression or a
-   statement, and a mode's keyword. *)
+(* Functions that the other parsing modules share: constructors for tree
+   nodes, parsers for names, module prefixes, string literals, and modes,
+   and the first sets of expressions and statements. *)
 
 open Token
 open Syntax
 
 let expression_node cursor start kind : expression =
-  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
 let type_node cursor start kind : type_expression =
-  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh cursor }
+  { kind; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
 let error_expression cursor start : expression = expression_node cursor start Expression_error
 
@@ -35,7 +35,7 @@ let mode cursor =
   else None
 
 let name cursor (token : Token.t) text : Syntax.name =
-  { text; span = Cursor.span cursor token.span; id = Cursor.fresh cursor }
+  { text; span = Cursor.span cursor token.span; id = Cursor.fresh_id cursor }
 
 let lower cursor what =
   match Cursor.peek_kind cursor with
@@ -77,7 +77,7 @@ let string_literal cursor ~start ~modules (literal : Token.string_literal) ~inte
   let tag =
     Option.map
       (fun (text, span) : Syntax.path ->
-        { modules; last = { text; span = Cursor.span cursor span; id = Cursor.fresh cursor } })
+        { modules; last = { text; span = Cursor.span cursor span; id = Cursor.fresh_id cursor } })
       literal.tag
   in
   {
@@ -87,5 +87,5 @@ let string_literal cursor ~start ~modules (literal : Token.string_literal) ~inte
       Array.to_list
         (Array.map (fun (inner, piece) -> (interpolation inner, text cursor piece)) literal.rest);
     span = Cursor.span_from cursor start;
-    id = Cursor.fresh cursor;
+    id = Cursor.fresh_id cursor;
   }

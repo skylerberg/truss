@@ -23,6 +23,14 @@ let codes text =
   let database = Support.setup [ ("app::main", text) ] in
   Support.codes (check database (Support.module_of "app::main"))
 
+(* A file with diagnostics, all of one code, as a cycle of the call graph
+   gives at each call in it. *)
+let only_code text code =
+  match codes text with
+  | [] -> fail "no diagnostics"
+  | found ->
+      if List.exists (fun other -> other <> code) found then fail "%s" (String.concat ", " found)
+
 (* The message of a file's one diagnostic. *)
 let message text =
   let database = Support.setup [ ("app::main", text) ] in
@@ -266,7 +274,7 @@ let () =
          }\n"
         "prover.termination");
   test "an impl that reaches itself through a generic function cannot be shown to end" (fun () ->
-      not_proven
+      only_code
         "trait Check {\n\
         \  fn check(self) -> Bool\n\
         \    cost time finite\n\
@@ -2653,6 +2661,309 @@ let () =
         \  1\n\
          }\n"
         "prover.invariant")
+
+(* Each expression runs once, and its changes are kept *)
+
+let () =
+  test "a guessed measure is not read from a condition with a mut argument" (fun () ->
+      not_proven
+        "fn take(count: mut Int64) -> Int64\n\
+        \  requires count > -1000\n\
+        \  ensures count == old(count) - 1\n\
+        \  ensures result == old(count)\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  count -= 1\n\
+        \  count + 1\n\
+         }\n\n\
+         fn f()\n\
+        \  cost time finite\n\
+         {\n\
+        \  var i: Int64 = 0\n\
+        \  while take(mut i) < 10\n\
+        \    invariant i > -100\n\
+        \  {\n\
+        \    i += 1\n\
+        \  }\n\
+         }\n"
+        "prover.termination");
+  test "a mut slice's bounds are evaluated once" (fun () ->
+      not_proven
+        "fn set(items: mut Slice[Int64])\n\
+        \  requires items.length() >= 1\n\
+        \  ensures items[0] == 7\n\
+         {\n\
+        \  items[0] = 7\n\
+         }\n\n\
+         fn f(items: mut List[Int64])\n\
+        \  requires items.length() >= 4\n\
+        \  ensures items[1] == old(items[1])\n\
+         {\n\
+        \  var k: USize = 0\n\
+        \  set(mut items[{\n\
+        \    k += 1\n\
+        \    k\n\
+        \  }..3])\n\
+         }\n"
+        "prover.ensures");
+  test "a while condition's mut argument changes the loop's state" (fun () ->
+      not_proven
+        "fn step(count: mut Int64) -> Bool {\n\
+        \  count = count.saturating_add(1)\n\
+        \  count < 3\n\
+         }\n\n\
+         fn f() -> Int64\n\
+        \  ensures result == 0\n\
+         {\n\
+        \  var value: Int64 = 0\n\
+        \  while step(mut value) {}\n\
+        \  value\n\
+         }\n"
+        "prover.ensures");
+  test "a match mut binding is written back to the scrutinee" (fun () ->
+      not_proven
+        "fn f() -> Int64\n\
+        \  ensures result == 1\n\
+         {\n\
+        \  var option: Option[Int64] = Some(1)\n\
+        \  match mut option {\n\
+        \    Some(value) => { value = 5 }\n\
+        \    None => {}\n\
+        \  }\n\
+        \  option.unwrap_or(0)\n\
+         }\n"
+        "prover.ensures");
+  test "a while condition's cost is the iteration's" (fun () ->
+      not_proven
+        "capability Hits {\n\
+        \  fn hit()\n\
+        \    cost time finite\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl Hits for Counter {\n\
+        \  fn hit(mut self) {\n\
+        \    self.count = self.count.saturating_add(1)\n\
+        \  }\n\
+         }\n\n\
+         fn f(count: UInt32, visit: (fn() -> Bool uses Hits cost time finite))\n\
+        \  uses Hits\n\
+        \  cost calls(visit) <= 1\n\
+         {\n\
+        \  var index: UInt32 = 0\n\
+        \  while index < count && visit()\n\
+        \    invariant index <= count\n\
+        \    decreases count - index\n\
+        \  {\n\
+        \    index = index + 1\n\
+        \  }\n\
+         }\n"
+        "prover.cost");
+  test "the right operand of || spends what it spends" (fun () ->
+      not_proven
+        "capability Hits {\n\
+        \  fn hit()\n\
+        \    cost time finite\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl Hits for Counter {\n\
+        \  fn hit(mut self) {\n\
+        \    self.count = self.count.saturating_add(1)\n\
+        \  }\n\
+         }\n\n\
+         fn f(flag: Bool, visit: (fn() -> Bool uses Hits cost time finite)) -> Bool\n\
+        \  uses Hits\n\
+        \  cost calls(visit) == 0\n\
+         {\n\
+        \  flag || visit()\n\
+         }\n"
+        "prover.cost");
+  test "a call through an alias of a function value counts as a call of it" (fun () ->
+      not_proven
+        "capability Hits {\n\
+        \  fn hit()\n\
+        \    cost time finite\n\
+         }\n\n\
+         type Counter(count: Int64)\n\n\
+         impl Hits for Counter {\n\
+        \  fn hit(mut self) {\n\
+        \    self.count = self.count.saturating_add(1)\n\
+        \  }\n\
+         }\n\n\
+         fn f(flag: Bool, visit: (fn() uses Hits cost time finite), other: (fn() uses Hits cost \
+         time finite))\n\
+        \  uses Hits\n\
+        \  cost calls(visit) == 0\n\
+         {\n\
+        \  let g = if flag { visit } else { other }\n\
+        \  g()\n\
+         }\n"
+        "prover.cost");
+  test "a match mut binding's new value is in the scrutinee after the arm" (fun () ->
+      proven
+        "fn f() -> Int64\n\
+        \  ensures result == 5\n\
+         {\n\
+        \  var option: Option[Int64] = Some(1)\n\
+        \  match mut option {\n\
+        \    Some(value) => { value = 5 }\n\
+        \    None => {}\n\
+        \  }\n\
+        \  option.unwrap_or(0)\n\
+         }\n")
+
+(* A function value's requires *)
+
+let () =
+  test "a function with a requires bound to a local must accept every argument" (fun () ->
+      not_proven
+        "fn below_three(index: USize) -> USize\n\
+        \  requires index < 3\n\
+         {\n\
+        \  index\n\
+         }\n\n\
+         fn f() -> USize {\n\
+        \  let g = below_three\n\
+        \  g(5)\n\
+         }\n"
+        "prover.requires");
+  test "a function with a requires passed through a local must accept every argument" (fun () ->
+      not_proven
+        "fn below_one(index: Int64) -> Int64\n\
+        \  requires index < 1\n\
+         {\n\
+        \  index\n\
+         }\n\n\
+         fn call(visit: (fn(index: Int64) -> Int64 requires index < 2)) -> Int64 {\n\
+        \  visit(1)\n\
+         }\n\n\
+         fn f() -> Int64 {\n\
+        \  let g: fn(Int64) -> Int64 = below_one\n\
+        \  call(visit: g)\n\
+         }\n"
+        "prover.requires");
+  test "a callback's requires names a mut parameter as the caller passed it" (fun () ->
+      not_proven
+        "fn grow(limit: mut USize, visit: (fn(index: USize) -> Int64 requires index < limit)) -> \
+         Int64 {\n\
+        \  if limit < 100 { limit = limit + 1 }\n\
+        \  visit(limit - 1)\n\
+         }\n\n\
+         fn f(items: List[Int64]) -> Int64 {\n\
+        \  var n: USize = 0\n\
+        \  grow(mut n, visit: fn(i) { items[i] })\n\
+         }\n"
+        "prover.requires");
+  test "a forwarded callback must be promised what it requires" (fun () ->
+      not_proven
+        "fn call(visit: (fn(index: Int64) -> Int64 requires index < 2)) -> Int64 {\n\
+        \  visit(1)\n\
+         }\n\n\
+         fn forward(visit: (fn(index: Int64) -> Int64 requires index < 1)) -> Int64 {\n\
+        \  call(visit: visit)\n\
+         }\n"
+        "prover.requires");
+  test "a call through a function value gives a valid result" (fun () ->
+      proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         fn take(make: fn() -> Positive) -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  make().n\n\
+         }\n");
+  test "a lambda returns a valid value" (fun () ->
+      not_proven
+        "type Positive(n: Int64)\n\
+        \  invariant n > 0\n\n\
+         fn apply(change: fn(Positive) -> Positive, value: Positive) -> Positive {\n\
+        \  change(value)\n\
+         }\n\n\
+         fn f() -> Positive {\n\
+        \  apply(fn(p) {\n\
+        \    var q = p\n\
+        \    q.n = 0\n\
+        \    q\n\
+        \  }, value: Positive(n: 1))\n\
+         }\n"
+        "prover.invariant");
+  test "a callback with a requires bound to a local must accept every argument" (fun () ->
+      not_proven
+        "fn keep(visit: (fn(index: Int64) -> Int64 requires index < 1)) -> Int64 {\n\
+        \  let g: fn(Int64) -> Int64 = visit\n\
+        \  g(5)\n\
+         }\n"
+        "prover.requires")
+
+(* Recursion through traits *)
+
+let () =
+  test "provided methods that call each other are recursion" (fun () ->
+      only_code
+        "trait Ping {\n\
+        \  fn ping(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.pong()\n\
+        \  }\n\n\
+        \  fn pong(self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.ping()\n\
+        \  }\n\
+         }\n\n\
+         type Foo()\n\n\
+         impl Ping for Foo {}\n"
+        "prover.termination");
+  test "a call through any that reaches back is recursion" (fun () ->
+      only_code
+        "trait Step {\n\
+        \  fn step(own self) -> Int64\n\
+        \    cost time finite\n\
+         }\n\n\
+         fn run(value: own any Step) -> Int64\n\
+        \  cost time finite\n\
+         {\n\
+        \  own value.step()\n\
+         }\n\n\
+         type Foo()\n\n\
+         impl Step for Foo {\n\
+        \  fn step(own self) -> Int64\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    let value: any Step = any self\n\
+        \    run(own value)\n\
+        \  }\n\
+         }\n"
+        "prover.termination");
+  test "a method that calls itself through any is recursion" (fun () ->
+      not_proven
+        "trait Check {\n\
+        \  fn check(self) -> Bool\n\
+        \    cost time finite\n\
+         }\n\n\
+         type Loop()\n\n\
+         impl Check for Loop {\n\
+        \  fn check(self) -> Bool\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    let other: any Check = any Loop()\n\
+        \    !other.check()\n\
+        \  }\n\
+         }\n\n\
+         fn f() -> Bool\n\
+        \  cost time finite\n\
+         {\n\
+        \  Loop().check()\n\
+         }\n"
+        "prover.termination")
+
+(* Constants *)
+
+let () =
+  test "a constant's value is well defined" (fun () ->
+      not_proven "let shifted: UInt8 = 1 << 8\n" "prover.shift");
+  test "a constant whose value is in range proves" (fun () ->
+      proven "let shifted: UInt8 = 1 << 7\n")
 
 (* Integer operations of the intrinsic module *)
 

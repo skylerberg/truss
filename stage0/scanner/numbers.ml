@@ -27,7 +27,7 @@ let is_radix_prefix text start =
   && text.[start] = '0'
   && match text.[start + 1] with 'x' | 'X' | 'b' | 'B' | 'o' | 'O' -> true | _ -> false
 
-(* The end of the number that starts at [start]. The run also takes in name
+(* The end of the number that starts at [start]. The run also includes name
    characters outside ASCII, so that `3é` is one token with one error. *)
 let scan_end text start =
   let length = String.length text in
@@ -161,9 +161,9 @@ let suffix_issue text ~at ~fixed =
 
 let underscore_issue at = issue Number_underscore "`_` can only go between digits." at (at + 1)
 
-(* Picks the problem to report: the leftmost one without an exact fix if
+(* Chooses the problem to report: the leftmost one without an exact fix if
    there is one, and otherwise the leftmost one, with a fix for them all. *)
-let decide value issues fixes =
+let choose_problem value issues fixes =
   let leftmost issues =
     List.fold_left
       (fun best candidate ->
@@ -234,7 +234,7 @@ let check_radix text =
       ]
   in
   let value = Token.Integer (if digits = "" then Z.zero else Z.of_string_base base digits) in
-  decide value issues (fun () -> [ ("Write `" ^ fixed ^ "`", fixed) ])
+  choose_problem value issues (fun () -> [ ("Write `" ^ fixed ^ "`", fixed) ])
 
 (* A run of digits and `_` in a literal, and where it starts in it. *)
 type group = { group : string; at : int }
@@ -247,8 +247,8 @@ let misplaced_underscore group =
 
 type exponent = { marker : char; marker_at : int; sign : string; exponent_digits : group }
 
-(* A decimal literal split into its parts. [rest] is whatever follows the
-   number, such as a type suffix. *)
+(* A decimal literal split into its parts. [rest_at] is the offset of the
+   text after the number, such as a type suffix. *)
 type decimal = { whole : group; fraction : group option; exponent : exponent option; rest_at : int }
 
 let parse_decimal text =
@@ -298,8 +298,8 @@ let check_decimal text =
   let is_float = parts.fraction <> None || parts.exponent <> None in
   let has_float_suffix = rest <> "" && is_float_suffix rest in
   let whole_digits = digits parts.whole in
-  (* The literal with every fixable problem corrected, given the whole part
-     to use. *)
+  (* The literal with every fixable problem corrected, with [whole_part] as
+     its whole part. *)
   let assemble whole_part =
     let fraction_part =
       match parts.fraction with Some fraction -> "." ^ cleaned fraction | None -> ""
@@ -399,7 +399,7 @@ let check_decimal text =
            ~significand:(Z.of_string (whole_digits ^ fraction_digits))
            ~exponent:(Z.sub written_exponent (Z.of_int (String.length fraction_digits))))
   in
-  decide value issues (fun () ->
+  choose_problem value issues (fun () ->
       if octal_possible then
         let octal = assemble ("0o" ^ without_zeros) in
         [ ("Write `" ^ octal ^ "` (octal)", octal); ("Write `" ^ fixed ^ "` (decimal)", fixed) ]

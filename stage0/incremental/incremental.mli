@@ -65,8 +65,16 @@ val read : context -> ('key, 'value) input -> 'key -> 'value option
     the reader. *)
 
 val demand : context -> ('key, 'value) query -> 'key -> 'value
-(** A query's result, computed if it has none. Raises the exception the query raised, or {!Cycle}.
-*)
+(** A query's result, computed if it has none. Raises the exception the query raised, or {!Cycle}. A
+    demand made outside any query first brings the state up to date through the query's phase; later
+    phases keep what is queued for them until something of theirs is read, or {!stabilize}. *)
+
+val known : context -> ('key, 'value) query -> 'key -> 'value option
+(** The result the state holds for a query and key, if no change could have reached it: the phases
+    before the query's are brought up to date, and nothing of the query's own phase is computed. No
+    read is recorded and the result is not kept. [None] for a result the state does not hold, one
+    whose reads may have changed, and one that raised. Raises [Invalid_argument] while a query runs,
+    since a read that is not recorded would make the query's result depend on what is held. *)
 
 (** {1 Engines} *)
 
