@@ -297,6 +297,14 @@ public trait Parse {
   fn parse(text: StringSlice) -> Result[Self, Self.Error]
 }
 
+impl Parse for String {
+  type Error = Never
+
+  fn parse(text: StringSlice) -> Result[String, Never] {
+    Ok(text.to_string())
+  }
+}
+
 public type Utf8Error(valid_up_to: USize)
   derives Equal
 
