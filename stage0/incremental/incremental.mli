@@ -10,6 +10,11 @@ exception Cycle of string list
     cycle has this as its outcome, whether or not it caught it, so a cycle is an error wherever it
     is met. *)
 
+exception Lost of string
+(** The store no longer has the value of an input that a state holds, which names the input. The
+    state cannot be used: an input is what the database gave it, and cannot be computed again. It is
+    never a query's outcome. *)
+
 type subject = { path : Path.t; part : string option }
 (** The definition, and the part of it, that a result is about. *)
 
@@ -226,6 +231,10 @@ val open_ : ?log:bool -> store -> bases:t list -> string -> t option
 
 val frozen_of : store -> bases:t list -> fixed:bool -> string -> t option
 (** The whole state an artifact names, as a frozen base. *)
+
+val inputs_stored : t -> bool
+(** Whether the store still has the value of every input of the state, apart from its fixed bases'.
+*)
 
 val values_in : store -> string -> string list
 (** Every name an artifact's chain refers to in the store, itself included, for collecting the

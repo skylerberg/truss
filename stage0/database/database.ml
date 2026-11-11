@@ -89,7 +89,8 @@ type state = {
   store : Store.t;
   identity : string;
   standard : Engine.t Lazy.t;  (** The standard library, a fixed base under every state *)
-  sessions : (string, session) Hashtbl.t;  (** By root, or by ["commit:" ^ id] *)
+  sessions : (string, session) Hashtbl.t;
+      (** By root, or for a commit, by the project's root and the commit *)
   libraries : (string, library) Hashtbl.t;  (** By name *)
 }
 
@@ -112,8 +113,8 @@ let stored_standard store identity =
       (Engine.open_base store ~version:identity ~bases:[])
   in
   match found with
-  | Some base -> base
-  | None ->
+  | Some base when Engine.inputs_stored base -> base
+  | Some _ | None ->
       let engine = Engine.create () in
       Engine.attach engine store ~version:identity;
       check_standard engine;
@@ -140,6 +141,7 @@ let current () =
       state := Some fresh;
       fresh
 
+let prepare_store () = ignore (Lazy.force (current ()).standard)
 let session_prefix state = Printf.sprintf "session-%s-" (Identity.short state.identity)
 
 let session_name state root =
@@ -289,7 +291,7 @@ let set_published engine (found : published) =
    whose manifest has one of its own and everything below it, and under a
    root without one, which is a project of one package, every other
    directory with a manifest. *)
-let apply session (files : (string * file_contents) list) =
+let apply ?(text = fun _ -> None) session (files : (string * file_contents) list) =
   let module Manifest = Type_checker.Manifest in
   let engine = session.engine in
   let old = current_layout engine in
@@ -539,11 +541,15 @@ let apply session (files : (string * file_contents) list) =
           | None -> None)
       files
   in
+  (* A file that is unchanged is a module whose text is not set when a
+     manifest gave it another package, and so another path. *)
   List.iter
-    (fun (_, module_, contents) ->
+    (fun (path, module_, contents) ->
       match contents with
       | Text text -> Engine.set engine Workspace.file_text module_ text
-      | Unchanged -> ())
+      | Unchanged ->
+          if read (Engine.context engine) Workspace.file_text module_ = None then
+            Option.iter (Engine.set engine Workspace.file_text module_) (text path))
     modules;
   List.iter
     (fun (path, contents) ->
@@ -626,29 +632,36 @@ let apply session (files : (string * file_contents) list) =
     };
   session.problems <- List.rev !problems
 
-(* Reads the files of a directory whose stamps changed, and sets them. *)
+(* Reads the files of a directory whose stamps changed, and sets them. A
+   file that cannot be read, such as one deleted since the directory was
+   listed, is not there. A stamp is set only once its file's text is, so
+   that a scan that fails leaves the file to be read by the next. *)
 let scan session root =
   let engine = session.engine in
-  let files = Worktree.files root in
   let context = Engine.context engine in
-  let contents =
-    List.map
+  let text path =
+    try Some (In_channel.with_open_bin (Filename.concat root path) In_channel.input_all)
+    with Sys_error _ -> None
+  in
+  let found =
+    List.filter_map
       (fun (path, stamp) ->
         match read context stamps path with
-        | Some old when old = stamp -> (path, Unchanged)
-        | _ ->
-            let text = In_channel.with_open_bin (Filename.concat root path) In_channel.input_all in
-            Engine.set engine stamps path stamp;
-            (path, Text text))
-      files
+        | Some old when old = stamp -> Some (path, stamp, Unchanged)
+        | _ -> Option.map (fun text -> (path, stamp, Text text)) (text path))
+      (Worktree.files root)
   in
   let old = current_layout engine in
-  let found = Hashtbl.create (List.length files) in
-  List.iter (fun (path, _) -> Hashtbl.replace found path ()) files;
+  apply ~text session (List.map (fun (path, _, contents) -> (path, contents)) found);
+  let present = Hashtbl.create (List.length found) in
   List.iter
-    (fun path -> if not (Hashtbl.mem found path) then Engine.remove engine stamps path)
-    old.files;
-  apply session contents
+    (fun (path, stamp, contents) ->
+      Hashtbl.replace present path ();
+      match contents with Text _ -> Engine.set engine stamps path stamp | Unchanged -> ())
+    found;
+  List.iter
+    (fun path -> if not (Hashtbl.mem present path) then Engine.remove engine stamps path)
+    old.files
 
 (* A worktree's pointer holds the name of its state's artifact, and each of
    its files' fingerprints, by which a new worktree finds the saved state
@@ -755,8 +768,8 @@ let nearest state (texts : (string * string) list) =
    says whether it came from another state. *)
 let engine_near state texts =
   match Option.bind (nearest state texts) (fun record -> open_state state record.artifact) with
-  | Some engine -> (engine, true)
-  | None -> (new_engine state, false)
+  | Some engine when Engine.inputs_stored engine -> (engine, true)
+  | Some _ | None -> (new_engine state, false)
 
 let fingerprints root =
   List.map
@@ -815,7 +828,7 @@ let open_directory state root =
         Ok session
 
 let open_commit state ~repository commit =
-  let name = "commit:" ^ commit in
+  let name = Printf.sprintf "commit:%s:%s" repository commit in
   match Hashtbl.find_opt state.sessions name with
   | Some session -> Ok session
   | None -> (
@@ -1545,6 +1558,26 @@ let merge_preview session other =
                  if List.mem key sides then None else Some (module_file merged m, code, message))
                (List.sort_uniq compare (keys merged))))
 
+(* Runs a command. If a state it reads has lost an input's value, as after
+   another process collected the store, every open state is discarded with
+   its pointer, and the command is run once more, from the files. *)
+let recovering run =
+  try run ()
+  with Engine.Lost _ ->
+    (match !state with
+    | Some s ->
+        let discard pointer =
+          Store.remove_pointer pointer;
+          Store.unlock pointer
+        in
+        Hashtbl.iter (fun _ session -> Option.iter discard session.pointer) s.sessions;
+        Hashtbl.iter (fun _ library -> discard library.library_pointer) s.libraries;
+        Store.close s.store;
+        Engine.forget_bases ();
+        state := None
+    | None -> ());
+    run ()
+
 let stopping = ref false
 let stop () = stopping := true
 
@@ -1685,12 +1718,13 @@ let serve ~handle =
         | exception Unix.Unix_error (EINTR, _, _) -> ()
         | [], _, _ ->
             let now = Unix.time () in
-            drop_idle state now;
-            watch state;
-            Hashtbl.iter (fun _ session -> fold state session) state.sessions;
+            drop_idle (current ()) now;
+            (let state = current () in
+             watch state;
+             Hashtbl.iter (fun _ session -> fold state session) state.sessions);
             if now -. !last_collection > 600. then begin
               last_collection := now;
-              collect state
+              collect (current ())
             end
         | _ -> (
             match Unix.accept ~cloexec:true socket with
@@ -1702,12 +1736,13 @@ let serve ~handle =
                 (try
                    let request = Marshal.from_channel input in
                    let progress text = send output (Progress text) in
-                   send output (Final (handle ~progress request))
+                   send output (Final (recovering (fun () -> handle ~progress request)))
                  with _ -> ());
                 try Unix.close client with Unix.Unix_error _ -> ()))
       done;
-      Hashtbl.iter (fun _ session -> save state session) state.sessions;
-      Store.close state.store;
+      (let state = current () in
+       Hashtbl.iter (fun _ session -> save state session) state.sessions;
+       Store.close state.store);
       (try Unix.unlink path with Unix.Unix_error _ -> ());
       Unix.close lock
 

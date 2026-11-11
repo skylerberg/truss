@@ -30,25 +30,92 @@ let core =
    - A method that an [impl] inherits from its trait: the core form of the
      trait's default method, and the substitution that maps [Self] and the
      trait's generic parameters to the [impl]'s types. *)
+let of_path ~written database (path : Path.t) =
+  let written path =
+    Option.bind (Query.demand database Interface.Summary.key path) (Query.demand database written)
+  in
+  match (written path, path) with
+  | Some form, _ -> Some (form, [])
+  | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
+      match Query.demand database derived path with
+      | Some form -> Some (form, [])
+      | None ->
+          Option.bind (Interface.Impls.impl_interface database owner)
+            (fun (impl : Types.impl_interface) ->
+              Option.bind (Interface.Impls.trait_substitution database owner) (fun substitution ->
+                  Option.map
+                    (fun form -> (form, substitution))
+                    (written (Method { owner = impl.implements.trait; name; receiver })))))
+  | None, _ -> None
+
 let core_of_path =
-  Query.query ~name:"core_of_path" ~phase:Bodies ~show:Path.show (fun database (path : Path.t) ->
-      let written path =
-        Option.bind (Query.demand database Interface.Summary.key path) (Query.demand database core)
-      in
-      match (written path, path) with
-      | Some form, _ -> Some (form, [])
-      | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
-          match Query.demand database derived path with
-          | Some form -> Some (form, [])
-          | None ->
-              Option.bind (Interface.Impls.impl_interface database owner)
-                (fun (impl : Types.impl_interface) ->
-                  Option.bind (Interface.Impls.trait_substitution database owner)
-                    (fun substitution ->
-                      Option.map
-                        (fun form -> (form, substitution))
-                        (written (Method { owner = impl.implements.trait; name; receiver })))))
-      | None, _ -> None)
+  Query.query ~name:"core_of_path" ~phase:Bodies ~show:Path.show (of_path ~written:core)
+
+(* Whether a caller's proof can read the body of a function. It reads the
+   body of a function in the logic, which the body defines: one that
+   terminates, uses no capability, mutates none of its arguments, and
+   returns its result. It reads the body that a trait provides for a method,
+   to compare it with the method of an [impl] that replaces it. *)
+let callers_read_body database (path : Path.t) =
+  let provided =
+    match path with
+    | Method { owner; _ } ->
+        Option.is_some (Query.demand database Interface.Environment.trait_interface owner)
+    | _ -> false
+  in
+  provided
+  ||
+  match Interface.Impls.signature database path with
+  | Some signature -> (
+      signature.terminates && signature.uses = []
+      && (match signature.receiver with Some (Mut, _) -> false | _ -> true)
+      && List.for_all
+           (fun (parameter : Types.parameter_info) -> parameter.mode <> Types.Mut)
+           signature.parameters
+      && match signature.output with Returns _ -> true | Yields _ | Lends _ -> false)
+  | None -> true
+
+(* A form without the body of its function, with the counts of the nodes
+   that are left. *)
+let without_body (form : Core.t) : Core.t =
+  match form.definition with
+  | Function { parameters; contract; body = Some _ } ->
+      let definition : Core.definition = Function { parameters; contract; body = None } in
+      let nodes = ref 0 and synthetic_locals = ref 0 in
+      let node id = nodes := max !nodes (id + 1) in
+      Core_walk.definition
+        {
+          Core_walk.ignore_all with
+          expression = (fun node_ -> node node_.id);
+          statement = (fun node_ -> node node_.id);
+          pattern =
+            (fun node_ ->
+              node node_.id;
+              match node_.kind with
+              | Bind { local = Synthetic number; _ } ->
+                  synthetic_locals := max !synthetic_locals (number + 1)
+              | _ -> ());
+        }
+        definition;
+      { definition; node_count = !nodes; synthetic_local_count = !synthetic_locals }
+  | _ -> form
+
+(* What a caller's proof reads of a definition: its core form, without the
+   body of a function whose body no caller's proof reads. The parameters
+   and the contract are built before the body, so their nodes are numbered
+   the same whatever the body is. Editing such a body leaves this result
+   equal, and no caller is proven again. *)
+let specification =
+  Query.query ~name:"specification" ~phase:Bodies ~show:Resolve.Names.show_key (fun database key ->
+      Option.map
+        (fun form -> if callers_read_body database key.path then form else without_body form)
+        (Query.demand database core key))
+
+(* As [core_of_path], for what a caller's proof reads of the function or
+   method at a path. *)
+let specification_of_path =
+  Query.query ~name:"specification_of_path" ~phase:Bodies ~show:Path.show
+    (of_path ~written:specification)
 
 (* The packages whose [impl]s met a bound in a definition. *)
 let evidence =

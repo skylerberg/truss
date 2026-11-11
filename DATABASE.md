@@ -489,6 +489,13 @@ from:
   its stead.
 - **Values are read when first needed.** Opening reads the artifacts and no
   value.
+- **An input whose value the store lost is an error, not an input that is
+  not set.** A result can be computed again and an input cannot, so reading
+  one whose bytes are gone, as after another process collected the store,
+  raises `Engine.Lost`, which is never a query's outcome. The database then
+  discards every open state with its pointer and runs the command once
+  more, from the files. A state to start a new worktree from, and the
+  standard library's, are used only if the store has every input's value.
 - **What cannot be checked is left out:** a node of a query this compiler
   does not declare, a node that read a node that cannot be found, and
   everything that read those.
@@ -779,6 +786,14 @@ it exits after three hours without a request, the default of both.
   and reads only the files that differ. So a command always sees every
   change made before it, with no need for the cookie files Watchman uses to
   make late file events safe.
+- **A file's stamp is set only once its text is.** A file that cannot be
+  read, such as one deleted since its directory was listed, is not there,
+  and is read by the first scan that can. So a scan that fails part way
+  leaves nothing that looks read and was not.
+- **A file's text follows its module.** A module is named by its package,
+  so a manifest that renames a package, or a new manifest above a file,
+  gives the file's module another path, and the text is set under that path
+  though the file's stamp is the same.
 - **While no request is waiting, the process scans every open worktree each
   second,** and brings each state up to date, so diagnostics are current
   before anyone asks for them, and overlaps are found as work happens.

@@ -1011,4 +1011,88 @@ let () =
       | _ ->
           fail "expected the derived method with no substitution and the inherited method with one")
 
+(* [Infer.specification] *)
+
+let () =
+  let specification text name =
+    let database = setup [ ("app::main", text) ] in
+    let found =
+      List.find_map
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = Resolve.Names.key_of declaration in
+          if Path.show key.path = "app::main::" ^ name then
+            Option.map
+              (fun form -> (database, key, form))
+              (Query.demand database Infer.specification key)
+          else None)
+        (Query.demand database Resolve.Names.declarations (module_of "app::main"))
+    in
+    match found with
+    | Some found -> found
+    | None -> failwith (Printf.sprintf "`%s` has no specification" name)
+  in
+  let equal first second name =
+    let _, _, first = specification first name and _, _, second = specification second name in
+    first = second
+  in
+  let bump body =
+    "fn bump(counter: mut Int64, by: Int64)\n  requires by > 0\n  cost time O(1)\n{\n  " ^ body
+    ^ "\n}\n"
+  in
+  let double body = "fn double(value: Int64) -> Int64\n  cost time O(1)\n{\n  " ^ body ^ "\n}\n" in
+  test "editing the body of a function that mutates an argument leaves its specification equal"
+    (fun () ->
+      if not (equal (bump "counter += by") (bump "counter = counter + by + 0") "bump") then
+        fail "the specification changed");
+  test "editing the body of a function without a time clause leaves its specification equal"
+    (fun () ->
+      let slow body = "fn slow(value: Int64) -> Int64 {\n  " ^ body ^ "\n}\n" in
+      if not (equal (slow "value") (slow "let same = value\n  same") "slow") then
+        fail "the specification changed");
+  test "editing a clause changes the specification" (fun () ->
+      if
+        equal (bump "counter += by")
+          "fn bump(counter: mut Int64, by: Int64)\n\
+          \  requires by > 1\n\
+          \  cost time O(1)\n\
+           {\n\
+          \  counter += by\n\
+           }\n"
+          "bump"
+      then fail "the specification did not change");
+  test "editing the body of a function in the logic changes its specification" (fun () ->
+      if equal (double "value + value") (double "value * 2") "double" then
+        fail "the specification did not change");
+  test "a specification without its body meets the core form's invariants" (fun () ->
+      let database, key, form = specification (bump "counter += by") "bump" in
+      (match form.definition with
+      | Function { body = None; _ } -> ()
+      | _ -> fail "the body is in the specification");
+      check_core_invariants database key form);
+  test "the body that a trait provides for a method is in the method's specification" (fun () ->
+      let database =
+        setup
+          [
+            ( "app::main",
+              "trait Counted {\n\
+              \  fn count(self) -> Int64\n\
+              \  fn bump(mut self) -> Int64 {\n\
+              \    self.count() + 1\n\
+              \  }\n\
+               }\n" );
+          ]
+      in
+      let found =
+        List.find_map
+          (fun (declaration : Resolve.Names.declaration) ->
+            match declaration.path with
+            | Method { name = "bump"; _ } ->
+                Query.demand database Infer.specification (Resolve.Names.key_of declaration)
+            | _ -> None)
+          (Query.demand database Resolve.Names.declarations (module_of "app::main"))
+      in
+      match found with
+      | Some { definition = Function { body = Some _; _ }; _ } -> ()
+      | _ -> fail "the provided body is not in the specification")
+
 let () = finish ()

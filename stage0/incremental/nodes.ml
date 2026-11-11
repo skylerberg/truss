@@ -1,4 +1,5 @@
 exception Cycle of string list
+exception Lost of string
 
 type subject = { path : Path.t; part : string option }
 

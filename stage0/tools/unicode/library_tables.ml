@@ -1,58 +1,28 @@
-(* The tables of character properties and case mappings that the standard
-   library reads, as Truss source, from the Unicode character database.
-
-   Usage: unicode_tables.exe DIRECTORY > standard/text/unicode_data.truss
-
-   DIRECTORY holds UnicodeData.txt, DerivedCoreProperties.txt,
-   DerivedNormalizationProps.txt, SpecialCasing.txt, CaseFolding.txt, and
-   EastAsianWidth.txt of one version of Unicode. *)
+(* Writes standard/text/unicode_data.truss, the tables of character
+   properties, case mappings, normalization, and grapheme cluster boundaries
+   that the standard library reads, from the Unicode data files in the
+   directory given as the only argument. See regenerate.sh, which downloads those files and checks their
+   hashes first. *)
 
 let directory =
   match Sys.argv with
   | [| _; directory |] -> directory
   | _ ->
-      prerr_endline "usage: unicode_tables.exe DIRECTORY";
+      prerr_endline "usage: library_tables.exe DIRECTORY";
       exit 2
 
-(* The fields of each line of a file that holds data, without its comment. *)
-let lines name =
-  In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all
-  |> String.split_on_char '\n'
-  |> List.filter_map (fun line ->
-      let data =
-        match String.index_opt line '#' with Some at -> String.sub line 0 at | None -> line
-      in
-      if String.trim data = "" then None
-      else Some (List.map String.trim (String.split_on_char ';' data)))
+let records = Ucd.records directory
+let code_point = Ucd.code_point
 
-let code text = int_of_string ("0x" ^ text)
-
-let codes text =
-  List.map code (List.filter (fun part -> part <> "") (String.split_on_char ' ' text))
-
-(* [first..last], or one code point. *)
-let range text =
-  match List.filter (fun part -> part <> "") (String.split_on_char '.' text) with
-  | [ only ] -> (code only, code only)
-  | [ first; last ] -> (code first, code last)
-  | _ -> failwith ("not a range: " ^ text)
-
-(* The ranges sorted, with the ones that touch or overlap joined. *)
-let merged ranges =
-  List.fold_left
-    (fun joined (first, last) ->
-      match joined with
-      | (earlier_first, earlier_last) :: rest when first <= earlier_last + 1 ->
-          (earlier_first, max earlier_last last) :: rest
-      | _ -> (first, last) :: joined)
-    [] (List.sort compare ranges)
-  |> List.rev
+let code_points text =
+  List.map code_point (List.filter (fun part -> part <> "") (String.split_on_char ' ' text))
 
 (* The ranges that a file of [range; property] lines gives a property. *)
 let property rows name =
-  merged
+  Ucd.merge
     (List.filter_map
-       (function ranges :: found :: _ when found = name -> Some (range ranges) | _ -> None)
+       (function
+         | range :: found :: _ when found = name -> Some (Ucd.code_point_range range) | _ -> None)
        rows)
 
 (* A code point of UnicodeData.txt: its general category, its canonical
@@ -74,7 +44,7 @@ let characters =
       (fun (first, characters) fields ->
         match fields with
         | code_text :: name :: category :: _ ->
-            let code = code code_text in
+            let code = code_point code_text in
             let field index = List.nth fields index in
             if String.ends_with ~suffix:", First>" name then (Some code, characters)
             else if String.ends_with ~suffix:", Last>" name then
@@ -105,12 +75,12 @@ let characters =
                 }
                 :: characters )
         | _ -> (first, characters))
-      (None, []) (lines "UnicodeData.txt")
+      (None, []) (records "UnicodeData.txt")
   in
   List.sort (fun a b -> compare a.code b.code) characters
 
 let in_categories names =
-  merged
+  Ucd.merge
     (List.filter_map
        (fun character ->
          if List.mem character.category names then Some (character.code, character.code) else None)
@@ -150,7 +120,7 @@ let category_ranges =
 let simple_mappings mapped =
   List.concat_map
     (fun character ->
-      match mapped character with "" -> [] | text -> [ character.code; code text ])
+      match mapped character with "" -> [] | text -> [ character.code; code_point text ])
     characters
 
 (* A mapping to two or three code points, as [code; first; second; third]
@@ -168,27 +138,28 @@ let special_casing column =
       match fields with
       | code_text :: lower :: _title :: upper :: rest
         when List.for_all (fun field -> field = "") rest -> (
-          match codes (if column = `Upper then upper else lower) with
+          match code_points (if column = `Upper then upper else lower) with
           | [] | [ _ ] -> []
-          | mapped -> [ expansion (code code_text) mapped ])
+          | mapped -> [ expansion (code_point code_text) mapped ])
       | _ -> [])
-    (lines "SpecialCasing.txt")
+    (records "SpecialCasing.txt")
   |> List.sort compare |> List.concat
 
-let case_folding = lines "CaseFolding.txt"
+let case_folding = records "CaseFolding.txt"
 
 let fold_mappings =
   List.concat_map
     (function
       | [ code_text; "C"; mapped; _ ] | [ code_text; "C"; mapped ] ->
-          [ code code_text; code mapped ]
+          [ code_point code_text; code_point mapped ]
       | _ -> [])
     case_folding
 
 let fold_expansions =
   List.concat_map
     (function
-      | code_text :: "F" :: mapped :: _ -> [ expansion (code code_text) (codes mapped) ] | _ -> [])
+      | code_text :: "F" :: mapped :: _ -> [ expansion (code_point code_text) (code_points mapped) ]
+      | _ -> [])
     case_folding
   |> List.sort compare |> List.concat
 
@@ -219,8 +190,8 @@ let decomposition_steps =
       with
       | [] -> ()
       | tag :: parts when tag.[0] = '<' ->
-          Hashtbl.replace steps character.code (`Compatibility, List.map code parts)
-      | parts -> Hashtbl.replace steps character.code (`Canonical, List.map code parts))
+          Hashtbl.replace steps character.code (`Compatibility, List.map code_point parts)
+      | parts -> Hashtbl.replace steps character.code (`Canonical, List.map code_point parts))
     characters;
   steps
 
@@ -279,6 +250,60 @@ let composition_pairs excluded =
     characters
   |> List.sort compare |> List.concat
 
+(* [first; last; properties] for each run of code points with the same
+   properties that decide grapheme cluster boundaries: the grapheme cluster
+   break class, 16 times the Indic conjunct break class, and 64 for
+   Extended_Pictographic. The Hangul syllables are left out, because the
+   library tells LV from LVT by arithmetic. *)
+let grapheme_ranges ~breaks ~core ~emoji =
+  let properties = Hashtbl.create 16384 in
+  let add number ranges =
+    List.iter
+      (fun (first, last) ->
+        for code = first to last do
+          Hashtbl.replace properties code
+            (number lor Option.value ~default:0 (Hashtbl.find_opt properties code))
+        done)
+      ranges
+  in
+  List.iteri
+    (fun index name -> add (index + 1) (property breaks name))
+    [
+      "CR";
+      "LF";
+      "Control";
+      "Extend";
+      "ZWJ";
+      "Regional_Indicator";
+      "Prepend";
+      "SpacingMark";
+      "L";
+      "V";
+      "T";
+    ];
+  let conjunct name =
+    List.filter_map
+      (function
+        | range :: "InCB" :: found :: _ when found = name -> Some (Ucd.code_point_range range)
+        | _ -> None)
+      core
+  in
+  List.iteri
+    (fun index name -> add (16 * (index + 1)) (conjunct name))
+    [ "Consonant"; "Extend"; "Linker" ];
+  add 64 (property emoji "Extended_Pictographic");
+  Hashtbl.fold (fun code found all -> (code, found) :: all) properties []
+  |> List.sort compare
+  |> List.fold_left
+       (fun runs (code, found) ->
+         match runs with
+         | (first, last, earlier) :: rest when last = code - 1 && earlier = found ->
+             (first, code, earlier) :: rest
+         | _ -> (code, code, found) :: runs)
+       []
+  |> List.rev
+  |> List.concat_map (fun (first, last, found) -> [ first; last; found ])
+
 let flat ranges = List.concat_map (fun (first, last) -> [ first; last ]) ranges
 
 let print_table name numbers =
@@ -294,9 +319,11 @@ let print_table name numbers =
   print_string "]\n"
 
 let () =
-  let core = lines "DerivedCoreProperties.txt" in
-  let width = lines "EastAsianWidth.txt" in
-  let normalization = lines "DerivedNormalizationProps.txt" in
+  let core = records "DerivedCoreProperties.txt" in
+  let width = records "EastAsianWidth.txt" in
+  let normalization = records "DerivedNormalizationProps.txt" in
+  let breaks = records "GraphemeBreakProperty.txt" in
+  let emoji = records "emoji-data.txt" in
   let canonical_index, canonical_pool = index_and_pool canonical_decompositions in
   let compatibility_index, compatibility_pool = index_and_pool compatibility_decompositions in
   let tables =
@@ -307,7 +334,7 @@ let () =
       ("lowercase_ranges", flat (property core "Lowercase"));
       ("cased_ranges", flat (property core "Cased"));
       ("case_ignorable_ranges", flat (property core "Case_Ignorable"));
-      ("wide_ranges", flat (merged (property width "W" @ property width "F")));
+      ("wide_ranges", flat (Ucd.merge (property width "W" @ property width "F")));
       ("zero_width_ranges", flat (in_categories [ "Mn"; "Me"; "Cf"; "Cc" ]));
       ("uppercase_mappings", simple_mappings (fun character -> character.upper));
       ("lowercase_mappings", simple_mappings (fun character -> character.lower));
@@ -326,6 +353,7 @@ let () =
       ("compatibility_decomposition_index", compatibility_index);
       ("compatibility_decomposition_pool", compatibility_pool);
       ("composition_pairs", composition_pairs (property normalization "Full_Composition_Exclusion"));
+      ("grapheme_ranges", grapheme_ranges ~breaks ~core ~emoji);
     ]
   in
   List.iteri

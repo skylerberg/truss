@@ -59,6 +59,7 @@ let store_with_standard =
     (let directory = fresh "standard" in
      Database.reset ();
      Unix.putenv "TRUSS_CACHE" directory;
+     Database.prepare_store ();
      Database.flush_store ();
      Database.reset ();
      directory)
@@ -245,6 +246,25 @@ let () =
       expect_errors directory 1;
       Sys.remove (Filename.concat directory "broken.truss");
       expect_errors directory 0);
+  test "a package renamed in its manifest keeps its modules' text" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      expect_errors directory 0;
+      write directory "truss.toml" (manifest "renamed");
+      expect_errors directory 0;
+      Database.reset ();
+      expect_errors directory 0);
+  test "a file that cannot be read is not there, and a change beside it is still seen" (fun () ->
+      fresh_store ();
+      let directory = package () in
+      write directory "other.truss" "internal fn one() -> Int64 {\n  1\n}\n";
+      expect_errors directory 0;
+      write directory "main.truss" "internal fn double(value: Int64) -> Missing {\n  value\n}\n";
+      Unix.chmod (Filename.concat directory "other.truss") 0;
+      let unreadable = errors directory in
+      Unix.chmod (Filename.concat directory "other.truss") 0o644;
+      if unreadable = 0 then fail "the change beside the unreadable file was not seen";
+      if errors directory = 0 then fail "the change was lost once the file could be read");
   test "a malformed manifest is a problem, at its line" (fun () ->
       fresh_store ();
       let directory = package () in

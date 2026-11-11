@@ -15,27 +15,8 @@ let fail format =
       if !failures <= 50 then prerr_endline message)
     format
 
-let read_lines name =
-  let channel = open_in_bin (Filename.concat data_directory name) in
-  let rec loop lines =
-    match input_line channel with
-    | line -> loop (line :: lines)
-    | exception End_of_file ->
-        close_in channel;
-        List.rev lines
-  in
-  loop []
-
-let records name =
-  read_lines name
-  |> List.filter_map (fun line ->
-      let line =
-        match String.index_opt line '#' with Some index -> String.sub line 0 index | None -> line
-      in
-      if String.trim line = "" then None
-      else Some (List.map String.trim (String.split_on_char ';' line)))
-
-let code_point text = int_of_string ("0x" ^ text)
+let records name = Ucd.records data_directory name
+let code_point = Ucd.code_point
 
 let each_in_range text action =
   match String.index_opt text '.' with

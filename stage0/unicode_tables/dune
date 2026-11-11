@@ -1,6 +1,0 @@
-; Writes standard/text/unicode_data.truss from the files of the Unicode
-; character database. It is run by hand when the library moves to a new
-; version of Unicode; IMPLEMENTATION.md says how.
-
-(executable
- (name unicode_tables))
