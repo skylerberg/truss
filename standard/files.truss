@@ -899,8 +899,154 @@ public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry]
   Ok(own entries)
 }
 
-public opaque type Glob(parts: List[String])
+type CharacterRange(first: Character, last: Character)
+
+type GlobToken =
+  | AnyCharacters
+  | AnyCharacter
+  | Literal(character: Character)
+  | OneOf(ranges: List[CharacterRange], negated: Bool)
+
+type GlobComponent =
+  | AnyDirectories
+  | Name(tokens: List[GlobToken])
+
+type ParsedClass(token: GlobToken, end: USize)
+
+public opaque type Glob(components: List[GlobComponent], absolute: Bool)
   derives Copyable
+
+fn wildcard_matches(
+  pattern_length: USize,
+  text_length: USize,
+  is_wildcard: (fn(pattern_index: USize) -> Bool requires pattern_index < pattern_length cost time finite),
+  matches_one: (
+    fn(pattern_index: USize, text_index: USize) -> Bool
+      requires pattern_index < pattern_length && text_index < text_length
+      cost time finite
+  ),
+) -> Bool
+  cost time finite
+{
+  var text: USize = 0
+  var pattern: USize = 0
+  var wildcard: Option[USize] = None
+  var retry: USize = 0
+  while text < text_length
+    invariant text <= text_length
+    invariant pattern <= pattern_length
+    invariant retry <= text
+    invariant !(wildcard is Some(index) && index >= pattern_length)
+    decreases (if wildcard is None { text_length + 1 } else { text_length - retry }),
+      text_length - text,
+      pattern_length - pattern
+  {
+    if pattern < pattern_length && is_wildcard(pattern) {
+      wildcard = Some(pattern)
+      retry = text
+      pattern += 1
+    } else if pattern < pattern_length && matches_one(pattern, text) {
+      text += 1
+      pattern += 1
+    } else {
+      match wildcard {
+        Some(index) => {
+          retry += 1
+          text = retry
+          pattern = index + 1
+        }
+        None => return false
+      }
+    }
+  }
+  while pattern < pattern_length && is_wildcard(pattern)
+    invariant pattern <= pattern_length
+    decreases pattern_length - pattern
+  {
+    pattern += 1
+  }
+  pattern == pattern_length
+}
+
+fn GlobToken.matches(self, character: Character) -> Bool
+  cost time finite
+{
+  match self {
+    AnyCharacters => false
+    AnyCharacter => true
+    Literal(literal) => literal == character
+    OneOf(ranges, negated) => {
+      var listed = false
+      for range in ranges {
+        if range.first <= character && character <= range.last {
+          listed = true
+        }
+      }
+      listed != negated
+    }
+  }
+}
+
+fn name_matches(tokens: Slice[GlobToken], name: StringSlice) -> Bool
+  cost time finite
+{
+  var characters: List[Character] = []
+  for character in name.characters() {
+    mut characters.push(character)
+  }
+  wildcard_matches(
+    tokens.length(),
+    text_length: characters.length(),
+    is_wildcard: fn(index) { tokens[index] is AnyCharacters },
+    matches_one: fn(index, position) { tokens[index].matches(characters[position]) },
+  )
+}
+
+fn parse_class(pattern: StringSlice, from: USize) -> Result[ParsedClass, GlobError]
+  requires from < pattern.length()
+  ensures !(result is Ok(parsed) && (parsed.end <= from || parsed.end > pattern.length()))
+  cost time finite
+{
+  var ranges: List[CharacterRange] = []
+  var index = from + 1
+  var negated = false
+  if index < pattern.length() && (pattern.byte(index) == 33 || pattern.byte(index) == 94) {
+    negated = true
+    index += 1
+  }
+  while index < pattern.length()
+    invariant from < index
+    invariant index <= pattern.length()
+    decreases pattern.length() - index
+  {
+    let decoded = pattern.decode(index)
+    var next = index + decoded.length
+    if decoded.character == Character"]" {
+      if ranges.is_empty() {
+        return Err(GlobError(offset: from))
+      }
+      return Ok(ParsedClass(token: GlobToken.OneOf(ranges: own ranges, negated: negated), end: next))
+    }
+    var first = decoded.character
+    if first == Character"\\" {
+      if next >= pattern.length() {
+        return Err(GlobError(offset: from))
+      }
+      let escaped = pattern.decode(next)
+      first = escaped.character
+      next = next + escaped.length
+    }
+    var last = first
+    if next < pattern.length() && pattern.byte(next) == 45 && next + 1 < pattern.length() && pattern.byte(next + 1) != 93 {
+      let upper = pattern.decode(next + 1)
+      last = upper.character
+      next = next + 1 + upper.length
+    }
+    mut ranges.push(CharacterRange(first: first, last: last))
+    index = next
+  }
+  Err(GlobError(offset: from))
+}
 
 impl FromTemplate for Glob {
   type Part = Never
@@ -919,21 +1065,101 @@ public fn is_valid_glob(literals: Slice[text::Literal]) -> Bool
 }
 
 public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]
-  cost time O(pattern.length())
+  cost time finite
 {
-  todo
+  var components: List[GlobComponent] = []
+  var tokens: List[GlobToken] = []
+  var index: USize = 0
+  while index < pattern.length()
+    invariant index <= pattern.length()
+    decreases pattern.length() - index
+  {
+    let decoded = pattern.decode(index)
+    let next = index + decoded.length
+    if decoded.character == Character"/" {
+      if !tokens.is_empty() {
+        mut components.push(GlobComponent.Name(tokens: own tokens))
+        tokens = []
+      }
+      index = next
+    } else if decoded.character == Character"*" {
+      if next < pattern.length() && pattern.byte(next) == 42 {
+        let after = next + 1
+        if !tokens.is_empty() || (after < pattern.length() && pattern.byte(after) != 47) {
+          return Err(GlobError(offset: index))
+        }
+        mut components.push(GlobComponent.AnyDirectories)
+        index = after
+      } else {
+        mut tokens.push(GlobToken.AnyCharacters)
+        index = next
+      }
+    } else if decoded.character == Character"?" {
+      mut tokens.push(GlobToken.AnyCharacter)
+      index = next
+    } else if decoded.character == Character"[" {
+      let class = parse_class(pattern, from: index)?
+      mut tokens.push(class.token.copy())
+      index = class.end
+    } else if decoded.character == Character"\\" {
+      if next >= pattern.length() {
+        return Err(GlobError(offset: index))
+      }
+      let escaped = pattern.decode(next)
+      mut tokens.push(GlobToken.Literal(character: escaped.character))
+      index = next + escaped.length
+    } else {
+      mut tokens.push(GlobToken.Literal(character: decoded.character))
+      index = next
+    }
+  }
+  if !tokens.is_empty() {
+    mut components.push(GlobComponent.Name(tokens: own tokens))
+  }
+  Ok(Glob(components: own components, absolute: pattern.length() > 0 && pattern.byte(0) == 47))
 }
 
 public fn Glob.matches(self, path: Path) -> Bool
   cost time finite
 {
-  todo
+  if self.absolute != path.is_absolute() {
+    return false
+  }
+  var names: List[String] = []
+  for name in path.components() {
+    mut names.push(name.to_string())
+  }
+  wildcard_matches(
+    self.components.length(),
+    text_length: names.length(),
+    is_wildcard: fn(index) { self.components[index] is AnyDirectories },
+    matches_one: fn(index, position) {
+      match self.components[index] {
+        AnyDirectories => false
+        Name(tokens) => name_matches(tokens.slice(), name: names[position].slice())
+      }
+    },
+  )
 }
 
 public fn Glob.find(self, root: Path) -> Result[List[Path], SystemError]
   uses FileRead
 {
-  todo
+  var found: List[Path] = []
+  for entry in walk(root)? {
+    let matches = if self.absolute {
+      self.matches(entry.path)
+    } else {
+      match entry.path.relative_to(root) {
+        Some(relative) => self.matches(relative)
+        None => false
+      }
+    }
+    if entry.depth > 0 && matches {
+      mut found.push(entry.path.copy())
+    }
+  }
+  Ok(own found)
 }
 
 public type GlobError(offset: USize)
@@ -941,7 +1167,8 @@ public type GlobError(offset: USize)
 
 impl Display for GlobError {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write("the glob is not valid at byte ")
+    self.offset.display(mut output)
   }
 }
 
