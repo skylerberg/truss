@@ -35,25 +35,25 @@ let can_begin = function
   | Punctuation _ | Newline | End_of_file -> false
 
 (* Layout's input from the scanner: the next token with the line breaks
-   before it, or the end of the input. On [Next], [unterminated] marks a
-   string that ends at the end of its line with no closing quote. On [End],
-   it says that the input ends inside an unterminated construct, an error
-   the scanner already reported: an interpolation that a line break ended,
-   or a file that ends inside a comment or a raw string. Brackets left open
-   then are closed without another error. *)
+   before it, or the end of the input. [unterminated_string] marks a string
+   that ends at the end of its line with no closing quote.
+   [ends_unterminated] says that the input ends inside an unterminated
+   construct, an error the scanner already reported: an interpolation that
+   a line break ended, or a file that ends inside a comment or a raw
+   string. Brackets left open then are closed without another error. *)
 type input =
   | Next of {
       kind : Token.kind;
       span : span;
       first_line_break : span option;
       blank_line : bool;
-      unterminated : bool;
+      unterminated_string : bool;
     }
   | End of {
       position : int;
       first_line_break : span option;
       blank_line : bool;
-      unterminated : bool;
+      ends_unterminated : bool;
     }
 
 type mode = File of { recovery : bool } | Interpolation
@@ -279,11 +279,11 @@ let run ~source ~diagnostics ~mode next_input =
       pop current
     end
   in
-  let finish ~position ~first_line_break ~blank_line ~unterminated =
+  let finish ~position ~first_line_break ~blank_line ~ends_unterminated =
     if !stack <> [] then open_at_end := true;
     (match mode with
-    | File _ when unterminated -> close_silently (closer_position first_line_break position)
-    | Interpolation when unterminated -> close_silently position
+    | File _ when ends_unterminated -> close_silently (closer_position first_line_break position)
+    | Interpolation when ends_unterminated -> close_silently position
     | File _ ->
         close_all
           ~position:(closer_position first_line_break position)
@@ -306,9 +306,9 @@ let run ~source ~diagnostics ~mode next_input =
   in
   let rec loop () =
     match next_input () with
-    | End { position; first_line_break; blank_line; unterminated } ->
-        finish ~position ~first_line_break ~blank_line ~unterminated
-    | Next { kind; span; first_line_break; blank_line; unterminated } ->
+    | End { position; first_line_break; blank_line; ends_unterminated } ->
+        finish ~position ~first_line_break ~blank_line ~ends_unterminated
+    | Next { kind; span; first_line_break; blank_line; unterminated_string } ->
         (match mode with
         | File { recovery = true } when !stack <> [] && starts_definition source span.start ->
             close_all
@@ -323,7 +323,7 @@ let run ~source ~diagnostics ~mode next_input =
           when (not ignores_line_breaks) && can_end previous_kind && can_begin kind ->
             emit (token Newline line_break)
         | _ -> ());
-        if unterminated then Hashtbl.replace unterminated_strings span.start ();
+        if unterminated_string then Hashtbl.replace unterminated_strings span.start ();
         let current =
           {
             kind;

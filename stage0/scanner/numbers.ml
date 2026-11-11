@@ -141,8 +141,8 @@ let character_length text offset =
 
 let character_at text offset = String.sub text offset (character_length text offset)
 
-let suffix_issue text ~at ~fixed =
-  let suffix = String.sub text at (String.length text - at) in
+let suffix_issue text ~offset ~fixed =
+  let suffix = String.sub text offset (String.length text - offset) in
   let example =
     match suffix_type suffix with
     | Some (Some type_name) -> Printf.sprintf "`let value: %s = %s`" type_name fixed
@@ -157,9 +157,10 @@ let suffix_issue text ~at ~fixed =
        "Number literals have no type suffixes such as `%s`. A literal takes its type from its \
         context, as in %s."
        suffix example)
-    at (String.length text)
+    offset (String.length text)
 
-let underscore_issue at = issue Number_underscore "`_` can only go between digits." at (at + 1)
+let underscore_issue offset =
+  issue Number_underscore "`_` can only go between digits." offset (offset + 1)
 
 (* Chooses the problem to report: the leftmost one without an exact fix if
    there is one, and otherwise the leftmost one, with a fix for them all. *)
@@ -221,7 +222,7 @@ let check_radix text =
         | _ -> []);
         (if rest <> "" then
            if rest_is_suffix then
-             if digits = "" then [] else [ suffix_issue text ~at:digits_end ~fixed ]
+             if digits = "" then [] else [ suffix_issue text ~offset:digits_end ~fixed ]
            else
              [
                issue ~fixable:false Number_invalid_digit
@@ -237,30 +238,35 @@ let check_radix text =
   choose_problem value issues (fun () -> [ ("Write `" ^ fixed ^ "`", fixed) ])
 
 (* A run of digits and `_` in a literal, and where it starts in it. *)
-type group = { group : string; at : int }
+type group = { group : string; offset : int }
 
 let digits group = without_underscores group.group
 let cleaned group = fst (clean_underscores group.group)
 
 let misplaced_underscore group =
-  Option.map (fun offset -> group.at + offset) (snd (clean_underscores group.group))
+  Option.map (fun underscore -> group.offset + underscore) (snd (clean_underscores group.group))
 
-type exponent = { marker : char; marker_at : int; sign : string; exponent_digits : group }
+type exponent = { marker : char; marker_offset : int; sign : string; exponent_digits : group }
 
-(* A decimal literal split into its parts. [rest_at] is the offset of the
+(* A decimal literal split into its parts. [rest_offset] is the offset of the
    text after the number, such as a type suffix. *)
-type decimal = { whole : group; fraction : group option; exponent : exponent option; rest_at : int }
+type decimal = {
+  whole : group;
+  fraction : group option;
+  exponent : exponent option;
+  rest_offset : int;
+}
 
 let parse_decimal text =
   let length = String.length text in
-  let group_from at =
+  let group_from offset =
     let rec stop index =
       if index < length && (is_digit text.[index] || text.[index] = '_') then stop (index + 1)
       else index
     in
-    { group = String.sub text at (stop at - at); at }
+    { group = String.sub text offset (stop offset - offset); offset }
   in
-  let after group = group.at + String.length group.group in
+  let after group = group.offset + String.length group.group in
   let whole = group_from 0 in
   let fraction =
     if after whole < length && text.[after whole] = '.' then Some (group_from (after whole + 1))
@@ -269,32 +275,32 @@ let parse_decimal text =
   let position = match fraction with Some fraction -> after fraction | None -> after whole in
   let exponent =
     if position < length && (text.[position] = 'e' || text.[position] = 'E') then
-      let digits_at =
+      let digits_offset =
         if position + 1 < length && (text.[position + 1] = '+' || text.[position + 1] = '-') then
           position + 2
         else position + 1
       in
-      let exponent_digits = group_from digits_at in
+      let exponent_digits = group_from digits_offset in
       (* `e` followed by a name character, as in `2em`, is not an exponent. *)
-      if exponent_digits.group = "" && digits_at < length then None
+      if exponent_digits.group = "" && digits_offset < length then None
       else
         Some
           {
             marker = text.[position];
-            marker_at = position;
-            sign = String.sub text (position + 1) (digits_at - position - 1);
+            marker_offset = position;
+            sign = String.sub text (position + 1) (digits_offset - position - 1);
             exponent_digits;
           }
     else None
   in
-  let rest_at =
+  let rest_offset =
     match exponent with Some exponent -> after exponent.exponent_digits | None -> position
   in
-  { whole; fraction; exponent; rest_at }
+  { whole; fraction; exponent; rest_offset }
 
 let check_decimal text =
   let parts = parse_decimal text in
-  let rest = String.sub text parts.rest_at (String.length text - parts.rest_at) in
+  let rest = String.sub text parts.rest_offset (String.length text - parts.rest_offset) in
   let is_float = parts.fraction <> None || parts.exponent <> None in
   let has_float_suffix = rest <> "" && is_float_suffix rest in
   let whole_digits = digits parts.whole in
@@ -330,7 +336,7 @@ let check_decimal text =
   in
   let fixed = assemble (if leading_zero then without_zeros else cleaned parts.whole) in
   let underscore group =
-    match misplaced_underscore group with Some at -> [ underscore_issue at ] | None -> []
+    match misplaced_underscore group with Some offset -> [ underscore_issue offset ] | None -> []
   in
   let issues =
     List.concat
@@ -356,28 +362,29 @@ let check_decimal text =
                 (if exponent.marker = 'E' then
                    [
                      issue Number_uppercase_exponent "The exponent is written with a lowercase `e`."
-                       exponent.marker_at (exponent.marker_at + 1);
+                       exponent.marker_offset (exponent.marker_offset + 1);
                    ]
                  else []);
                 (if digits exponent.exponent_digits = "" then
                    [
                      issue ~fixable:false Number_missing_digits
-                       "The exponent needs digits after `e`." exponent.marker_at
-                       exponent.exponent_digits.at;
+                       "The exponent needs digits after `e`." exponent.marker_offset
+                       exponent.exponent_digits.offset;
                    ]
                  else underscore exponent.exponent_digits);
               ]
         | None -> []);
         (if rest = "" then []
-         else if suffix_type rest <> None then [ suffix_issue text ~at:parts.rest_at ~fixed ]
+         else if suffix_type rest <> None then
+           [ suffix_issue text ~offset:parts.rest_offset ~fixed ]
          else
            [
              issue ~fixable:false Number_followed_by_name
                (Printf.sprintf
                   "A number cannot be followed directly by a name character such as `%s`."
-                  (character_at text parts.rest_at))
-               parts.rest_at
-               (parts.rest_at + character_length text parts.rest_at);
+                  (character_at text parts.rest_offset))
+               parts.rest_offset
+               (parts.rest_offset + character_length text parts.rest_offset);
            ]);
       ]
   in
