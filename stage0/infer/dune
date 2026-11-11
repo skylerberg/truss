@@ -3,6 +3,7 @@
  (libraries
   compiler_bug
   query
+  phases
   path
   well_known
   intrinsic

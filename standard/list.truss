@@ -1,5 +1,6 @@
 use standard::growth
 use standard::intrinsic
+use standard::list::slice
 
 public opaque type List[Element](storage: intrinsic::Storage[Element])
   derives Copyable
@@ -78,6 +79,7 @@ public fn List[Element].pop(mut self) -> Option[Element]
   ensures forall i in 0..self.length() => identical(self.model()[i], old(self.model())[i])
   ensures !(result is Some(item) && !identical(item, old(self.model())[old(self.length()) - 1]))
   cost time O(1)
+  cost amortized time O(1)
   cost allocations == 0
 {
   if self.length() == 0 { None } else { Some(intrinsic::storage_pop(mut self.storage)) }
@@ -196,6 +198,7 @@ public fn List[Element].reverse(mut self)
     self.model().sum(measure) == old(self.model()).sum(measure)
   ensures self.capacity() == old(self.capacity())
   cost time O(self.length())
+  cost amortized time O(self.length())
 {
   var low: USize = 0
   var high = self.length()
@@ -530,13 +533,20 @@ public fn List[Element].split_off(mut self, at: USize) -> List[Element]
   ensures self.length() == at
   ensures result.length() == old(self.length()) - at
   cost time O(result.length())
+  cost amortized time O(result.length())
 {
   let count = self.length() - at
   var tail: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  proof {
+    assert identical(intrinsic::storage_model(tail), Sequence[Element].empty())
+  }
   for _ in 0..count
     invariant intrinsic::storage_length(tail) == yielded.length()
     invariant intrinsic::storage_capacity(tail) == count
     invariant self.length() == old(self.length()) - yielded.length()
+    invariant intrinsic::storage_capacity(self.storage) == old(intrinsic::storage_capacity(self.storage))
+    invariant forall measure: (fn(Element) -> Integer cost time finite) =>
+      self.model().sum(measure) + intrinsic::storage_model(tail).sum(measure) == old(self.model()).sum(measure)
   {
     intrinsic::storage_push(mut tail, value: intrinsic::storage_pop(mut self.storage))
   }
@@ -653,9 +663,23 @@ impl Default for List[Element] {
 }
 
 impl Ordered for List[Element: Ordered] {
-  fn compare(self, other: List[Element]) -> Ordering {
-    todo
+  fn compare(self, other: List[Element]) -> Ordering
+    ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+  {
+    self.slice().compare(other.slice())
   }
+}
+
+proof Ordered.agrees_with_equal for List[Element: Ordered] {
+  slice::lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.antisymmetric for List[Element: Ordered] {
+  slice::lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.transitive for List[Element: Ordered] {
+  slice::lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
 impl Hash for List[Element: Hash] {

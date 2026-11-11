@@ -2,6 +2,7 @@ public opaque type Sequence[Element] = todo
 
 public fn Sequence[Element].empty() -> Sequence[Element]
   ensures result.length() == 0
+  ensures forall measure: (fn(Element) -> Integer cost time finite) => result.sum(measure) == 0
   cost time finite
 {
   todo

@@ -1,5 +1,7 @@
 use standard::core
 use standard::intrinsic
+use standard::numbers::float_math
+use standard::numbers::integer_text
 use standard::text
 
 public let pi: Float64 = 3.141592653589793
@@ -109,7 +111,495 @@ public fn standard_deviation(values: Slice[Float64]) -> Option[Float64]
 public type Division[Number](quotient: Number, remainder: Number)
 
 public opaque type BigInteger(negative: Bool, magnitude: List[UInt64])
+  invariant magnitude.length() == 0 || magnitude[magnitude.length() - 1] != 0
+  invariant magnitude.length() > 0 || !negative
   derives Copyable, Equal, Hash
+
+let half_base: UInt64 = 4294967296
+
+let half_mask: UInt64 = 4294967295
+
+fn trim(limbs: mut List[UInt64])
+  ensures limbs.length() <= old(limbs.length())
+  ensures limbs.length() == 0 || limbs[limbs.length() - 1] != 0
+  cost time finite
+{
+  while limbs.length() > 0 && limbs[limbs.length() - 1] == 0
+    invariant limbs.length() <= old(limbs.length())
+    decreases limbs.length()
+  {
+    let _ = mut limbs.pop()
+  }
+}
+
+fn with_sign(negative: Bool, magnitude: own List[UInt64]) -> BigInteger
+  cost time finite
+{
+  var limbs = own magnitude
+  trim(mut limbs)
+  let is_negative = negative && limbs.length() > 0
+  BigInteger(negative: is_negative, magnitude: own limbs)
+}
+
+fn limbs_order(first: Sequence[UInt64], second: Sequence[UInt64], below: Integer) -> Ordering
+  requires 0 <= below
+  requires below <= first.length()
+  requires below <= second.length()
+  decreases below
+  cost time finite
+{
+  if below == 0 {
+    Ordering.Equal
+  } else if first[below - 1] < second[below - 1] {
+    Ordering.Less
+  } else if first[below - 1] > second[below - 1] {
+    Ordering.Greater
+  } else {
+    limbs_order(first, second: second, below: below - 1)
+  }
+}
+
+fn magnitude_order(first: Sequence[UInt64], second: Sequence[UInt64]) -> Ordering
+  cost time finite
+{
+  if first.length() < second.length() {
+    Ordering.Less
+  } else if first.length() > second.length() {
+    Ordering.Greater
+  } else {
+    limbs_order(first, second: second, below: first.length())
+  }
+}
+
+theorem limbs_order_agrees_with_equal(first: Sequence[UInt64], second: Sequence[UInt64], below: Integer)
+  requires 0 <= below
+  requires below <= first.length()
+  requires below <= second.length()
+  ensures (limbs_order(first, second: second, below: below) == Ordering.Equal)
+    == (forall i in 0..below => first[i] == second[i])
+  decreases below
+  cost time finite
+{
+  if below > 0 {
+    limbs_order_agrees_with_equal(first, second: second, below: below - 1)
+  }
+}
+
+theorem limbs_order_is_antisymmetric(first: Sequence[UInt64], second: Sequence[UInt64], below: Integer)
+  requires 0 <= below
+  requires below <= first.length()
+  requires below <= second.length()
+  ensures (limbs_order(first, second: second, below: below) == Ordering.Less)
+    == (limbs_order(first: second, second: first, below: below) == Ordering.Greater)
+  decreases below
+  cost time finite
+{
+  if below > 0 {
+    limbs_order_is_antisymmetric(first, second: second, below: below - 1)
+  }
+}
+
+theorem limbs_order_is_transitive(
+  first: Sequence[UInt64],
+  second: Sequence[UInt64],
+  third: Sequence[UInt64],
+  below: Integer,
+)
+  requires 0 <= below
+  requires below <= first.length()
+  requires below <= second.length()
+  requires below <= third.length()
+  requires limbs_order(first, second: second, below: below) != Ordering.Greater
+  requires limbs_order(first: second, second: third, below: below) != Ordering.Greater
+  ensures limbs_order(first, second: third, below: below) != Ordering.Greater
+  decreases below
+  cost time finite
+{
+  if below > 0 && first[below - 1] == second[below - 1] && second[below - 1] == third[below - 1] {
+    limbs_order_is_transitive(first, second: second, third: third, below: below - 1)
+  }
+}
+
+fn compare_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> Ordering
+  ensures result == magnitude_order(first.model(), second: second.model())
+  cost time finite
+{
+  if first.length() < second.length() {
+    return Ordering.Less
+  }
+  if first.length() > second.length() {
+    return Ordering.Greater
+  }
+  var index = first.length()
+  while index > 0
+    invariant index <= first.length()
+    invariant limbs_order(first.model(), second: second.model(), below: first.length())
+      == limbs_order(first.model(), second: second.model(), below: index)
+    decreases index
+  {
+    index -= 1
+    if first[index] < second[index] {
+      return Ordering.Less
+    }
+    if first[index] > second[index] {
+      return Ordering.Greater
+    }
+  }
+  Ordering.Equal
+}
+
+fn add_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64]
+  cost time finite
+{
+  let longer = if first.length() < second.length() { second } else { first }
+  let shorter = if first.length() < second.length() { first } else { second }
+  var sum: List[UInt64] = List.with_capacity(longer.length().saturating_add(1))
+  var carry: UInt64 = 0
+  var index: USize = 0
+  while index < longer.length()
+    invariant index <= longer.length()
+    decreases longer.length() - index
+  {
+    let right: UInt64 = if index < shorter.length() { shorter[index] } else { 0 }
+    let partial = longer[index].wrapping_add(right)
+    let total = partial.wrapping_add(carry)
+    carry = if partial < right || total < partial { 1 } else { 0 }
+    mut sum.push(total)
+    index += 1
+  }
+  if carry != 0 {
+    mut sum.push(carry)
+  }
+  sum
+}
+
+fn subtract_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64]
+  requires second.length() <= first.length()
+  cost time finite
+{
+  var difference: List[UInt64] = List.with_capacity(first.length())
+  var borrow: UInt64 = 0
+  var index: USize = 0
+  while index < first.length()
+    invariant index <= first.length()
+    decreases first.length() - index
+  {
+    let left = first[index]
+    let right: UInt64 = if index < second.length() { second[index] } else { 0 }
+    let partial = left.wrapping_subtract(right)
+    mut difference.push(partial.wrapping_subtract(borrow))
+    borrow = if left < right || partial < borrow { 1 } else { 0 }
+    index += 1
+  }
+  trim(mut difference)
+  difference
+}
+
+fn zero_limbs(count: USize) -> List[UInt64]
+  ensures result.length() == count
+  cost time finite
+{
+  var limbs: List[UInt64] = List.with_capacity(count)
+  var index: USize = 0
+  while index < count
+    invariant index <= count
+    invariant limbs.length() == index
+    decreases count - index
+  {
+    mut limbs.push(0)
+    index += 1
+  }
+  limbs
+}
+
+fn multiply_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64]
+  cost time finite
+{
+  if first.length() == 0 || second.length() == 0 {
+    return []
+  }
+  if first.length() > USize.maximum - second.length() {
+    intrinsic::crash("a big integer cannot hold that many limbs".slice())
+  }
+  let count = first.length() + second.length()
+  var product = zero_limbs(count)
+  var outer: USize = 0
+  while outer < first.length()
+    invariant outer <= first.length()
+    invariant product.length() == count
+    decreases first.length() - outer
+  {
+    let factor = first[outer]
+    var carry: UInt64 = 0
+    var inner: USize = 0
+    while inner < second.length()
+      invariant inner <= second.length()
+      invariant product.length() == count
+      decreases second.length() - inner
+    {
+      let low = factor.wrapping_multiply(second[inner])
+      let high = intrinsic::multiply_high(factor, right: second[inner])
+      let with_carry = low.wrapping_add(carry)
+      let total = with_carry.wrapping_add(product[outer + inner])
+      let carries: UInt64 = (if with_carry < low { 1 } else { 0 }) + (if total < with_carry { 1 } else { 0 })
+      product[outer + inner] = total
+      carry = high.wrapping_add(carries)
+      inner += 1
+    }
+    product[outer + second.length()] = carry
+    outer += 1
+  }
+  trim(mut product)
+  product
+}
+
+fn multiply_add_small(limbs: mut List[UInt64], factor: UInt64, addend: UInt64)
+  cost time finite
+{
+  var carry = addend
+  var index: USize = 0
+  while index < limbs.length()
+    invariant index <= limbs.length()
+    invariant limbs.length() == old(limbs.length())
+    decreases limbs.length() - index
+  {
+    let low = limbs[index].wrapping_multiply(factor)
+    let high = intrinsic::multiply_high(limbs[index], right: factor)
+    let total = low.wrapping_add(carry)
+    limbs[index] = total
+    carry = high.wrapping_add(if total < low { 1 } else { 0 })
+    index += 1
+  }
+  if carry != 0 {
+    mut limbs.push(carry)
+  }
+}
+
+fn divide_small(limbs: mut List[UInt64], divisor: UInt64) -> UInt64
+  requires 1 <= divisor
+  requires divisor <= 4294967295
+  ensures result < divisor
+  ensures limbs.length() <= old(limbs.length())
+  ensures limbs.length() == 0 || limbs[limbs.length() - 1] != 0
+  cost time finite
+{
+  var remainder: UInt64 = 0
+  var index = limbs.length()
+  while index > 0
+    invariant index <= limbs.length()
+    invariant limbs.length() == old(limbs.length())
+    invariant remainder < divisor
+    decreases index
+  {
+    index -= 1
+    let limb = limbs[index]
+    let high = remainder * half_base + limb / half_base
+    let middle = high % divisor
+    let low = middle * half_base + limb % half_base
+    limbs[index] = (high / divisor) * half_base + low / divisor
+    remainder = low % divisor
+  }
+  trim(mut limbs)
+  remainder
+}
+
+fn to_digits(limbs: Slice[UInt64]) -> List[UInt64]
+  ensures forall i in 0..result.length() => result.model()[i] <= 4294967295
+  cost time finite
+{
+  var digits: List[UInt64] = List.with_capacity(limbs.length().saturating_multiply(2))
+  var index: USize = 0
+  while index < limbs.length()
+    invariant index <= limbs.length()
+    invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
+    decreases limbs.length() - index
+  {
+    mut digits.push(limbs[index] % half_base)
+    mut digits.push(limbs[index] / half_base)
+    index += 1
+  }
+  while digits.length() > 0 && digits[digits.length() - 1] == 0
+    invariant forall i in 0..digits.length() => digits.model()[i] <= 4294967295
+    decreases digits.length()
+  {
+    let _ = mut digits.pop()
+  }
+  digits
+}
+
+fn from_digits(digits: Slice[UInt64]) -> List[UInt64]
+  cost time finite
+{
+  var limbs: List[UInt64] = List.with_capacity(digits.length() / 2 + 1)
+  var index: USize = 0
+  while index < digits.length()
+    invariant index <= digits.length()
+    decreases digits.length() - index
+  {
+    let low = digits[index] % half_base
+    if digits.length() - index >= 2 {
+      mut limbs.push(low + (digits[index + 1] % half_base) * half_base)
+      index += 2
+    } else {
+      mut limbs.push(low)
+      index += 1
+    }
+  }
+  trim(mut limbs)
+  limbs
+}
+
+fn shifted_digit(digits: Slice[UInt64], index: USize, shift: USize) -> UInt64
+  requires index <= digits.length()
+  requires shift <= 32
+  ensures result <= 4294967295
+  cost time O(1)
+{
+  let here: UInt64 = if index < digits.length() { digits[index] % half_base } else { 0 }
+  let below: UInt64 = if index > 0 { digits[index - 1] % half_base } else { 0 }
+  ((here << shift) | (below >> (32 - shift))) & half_mask
+}
+
+type DigitDivision(quotient: List[UInt64], remainder: List[UInt64])
+
+fn divide_digits(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivision
+  requires divisor.length() >= 2
+  requires dividend.length() >= divisor.length()
+  cost time finite
+{
+  let count = divisor.length()
+  let extra = dividend.length() - count
+  let zeros = (divisor[count - 1] % half_base).leading_zeros()
+  let shift: USize = if zeros >= 32 { zeros - 32 } else { 0 }
+  var scaled: List[UInt64] = List.with_capacity(count)
+  var index: USize = 0
+  while index < count
+    invariant index <= count
+    invariant scaled.length() == index
+    decreases count - index
+  {
+    mut scaled.push(shifted_digit(divisor, index: index, shift: shift))
+    index += 1
+  }
+  var remainder: List[UInt64] = List.with_capacity(dividend.length().saturating_add(1))
+  index = 0
+  while index <= dividend.length()
+    invariant index <= dividend.length() + 1
+    invariant remainder.length() == index
+    decreases dividend.length() + 1 - index
+  {
+    mut remainder.push(shifted_digit(dividend, index: index, shift: shift))
+    index += 1
+  }
+  let leading = scaled[count - 1]
+  let second = scaled[count - 2]
+  if leading == 0 {
+    intrinsic::crash("the divisor of a big integer has a zero leading digit".slice())
+  }
+  var quotient = zero_limbs(extra + 1)
+  var position = extra + 1
+  while position > 0
+    invariant position <= extra + 1
+    invariant remainder.length() == dividend.length() + 1
+    invariant quotient.length() == extra + 1
+    invariant scaled.length() == count
+    decreases position
+  {
+    position -= 1
+    let numerator = (remainder[position + count] % half_base) * half_base + remainder[position + count - 1] % half_base
+    var estimate = numerator / leading
+    var rest = numerator % leading
+    let next = remainder[position + count - 2] % half_base
+    while rest < half_base && estimate > 0 && (estimate >= half_base || estimate.wrapping_multiply(second) > rest * half_base + next)
+      decreases estimate
+    {
+      estimate -= 1
+      rest = rest.wrapping_add(leading)
+    }
+    var borrow: UInt64 = 0
+    var carry: UInt64 = 0
+    index = 0
+    while index < count
+      invariant index <= count
+      invariant borrow <= 1
+      invariant remainder.length() == dividend.length() + 1
+      invariant scaled.length() == count
+      decreases count - index
+    {
+      let product = estimate.wrapping_multiply(scaled[index]).wrapping_add(carry)
+      carry = product / half_base
+      let taken = product % half_base + borrow
+      let target = remainder[position + index] % half_base
+      if target >= taken {
+        remainder[position + index] = target - taken
+        borrow = 0
+      } else {
+        remainder[position + index] = target + half_base - taken
+        borrow = 1
+      }
+      index += 1
+    }
+    let top = remainder[position + count] % half_base
+    let taken = carry % half_base + borrow
+    if top >= taken {
+      remainder[position + count] = top - taken
+      quotient[position] = estimate % half_base
+    } else {
+      var carried: UInt64 = 0
+      index = 0
+      while index < count
+        invariant index <= count
+        invariant carried <= 1
+        invariant remainder.length() == dividend.length() + 1
+        invariant scaled.length() == count
+        decreases count - index
+      {
+        let total = remainder[position + index] % half_base + scaled[index] % half_base + carried
+        remainder[position + index] = total % half_base
+        carried = total / half_base
+        index += 1
+      }
+      remainder[position + count] = (top + half_base - taken + carried) % half_base
+      quotient[position] = estimate.wrapping_subtract(1) % half_base
+    }
+  }
+  var unscaled: List[UInt64] = List.with_capacity(count)
+  index = 0
+  while index < count
+    invariant index <= count
+    invariant remainder.length() == dividend.length() + 1
+    decreases count - index
+  {
+    let here = remainder[index] % half_base
+    let above = remainder[index + 1] % half_base
+    mut unscaled.push(((here >> shift) | (above << (32 - shift))) & half_mask)
+    index += 1
+  }
+  DigitDivision(quotient: own quotient, remainder: own unscaled)
+}
+
+fn divide_magnitudes(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivision
+  cost time finite
+{
+  let divisor_digits = to_digits(divisor)
+  let dividend_digits = to_digits(dividend)
+  if dividend_digits.length() < divisor_digits.length() || divisor_digits.length() == 0 {
+    return DigitDivision(quotient: [], remainder: dividend.to_list())
+  }
+  if divisor_digits.length() == 1 {
+    var quotient = dividend.to_list()
+    var rest: List[UInt64] = []
+    if divisor_digits[0] != 0 {
+      let remainder = divide_small(mut quotient, divisor: divisor_digits[0])
+      if remainder != 0 {
+        mut rest.push(remainder)
+      }
+    }
+    return DigitDivision(quotient: own quotient, remainder: own rest)
+  }
+  let digits = divide_digits(dividend_digits.slice(), divisor: divisor_digits.slice())
+  DigitDivision(quotient: from_digits(digits.quotient.slice()), remainder: from_digits(digits.remainder.slice()))
+}
 
 public fn BigInteger.zero() -> BigInteger
   cost time O(1)
@@ -117,30 +607,169 @@ public fn BigInteger.zero() -> BigInteger
   BigInteger(negative: false, magnitude: [])
 }
 
-public fn BigInteger.from_big_endian_bytes(bytes: Slice[UInt8], negative: Bool = false) -> BigInteger
-  cost time O(bytes.length())
+fn BigInteger.from_limb(value: UInt64) -> BigInteger
+  cost time finite
 {
-  todo
+  if value == 0 {
+    return BigInteger.zero()
+  }
+  BigInteger(negative: false, magnitude: [value])
+}
+
+public fn BigInteger.from_big_endian_bytes(bytes: Slice[UInt8], negative: Bool = false) -> BigInteger
+  cost time finite
+{
+  var limbs: List[UInt64] = List.with_capacity(bytes.length() / 8 + 1)
+  var end = bytes.length()
+  while end > 0
+    invariant end <= bytes.length()
+    decreases end
+  {
+    let start: USize = if end >= 8 { end - 8 } else { 0 }
+    var limb: UInt64 = 0
+    var index = start
+    while index < end
+      invariant start <= index
+      invariant index <= end
+      decreases end - index
+    {
+      limb = (limb << 8) | intrinsic::convert[UInt8, UInt64](bytes[index])
+      index += 1
+    }
+    mut limbs.push(limb)
+    end = start
+  }
+  with_sign(negative, magnitude: own limbs)
 }
 
 public fn BigInteger.to_big_endian_bytes(self) -> List[UInt8]
-  cost time O(self.bit_length())
+  cost time finite
 {
-  todo
+  var bytes: List[UInt8] = List.with_capacity(self.magnitude.length().saturating_multiply(8))
+  var leading = true
+  var index = self.magnitude.length()
+  while index > 0
+    invariant index <= self.magnitude.length()
+    decreases index
+  {
+    index -= 1
+    let limb = self.magnitude[index]
+    var shift: USize = 64
+    while shift > 0
+      invariant shift <= 64
+      invariant shift % 8 == 0
+      decreases shift
+    {
+      shift -= 8
+      let byte: UInt8 = intrinsic::convert((limb >> shift) & 255)
+      if byte != 0 || !leading {
+        mut bytes.push(byte)
+        leading = false
+      }
+    }
+  }
+  bytes
 }
 
 public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[BigInteger, core::ParseIntegerError]
   requires 2 <= radix && radix <= 36
-  cost time O(text.length() * text.length())
+  cost time finite
 {
-  todo
+  var index: USize = 0
+  var negative = false
+  if text.length() > 0 && (text.byte(0) == 45 || text.byte(0) == 43) {
+    negative = text.byte(0) == 45
+    index = 1
+  }
+  if index == text.length() {
+    return Err(core::ParseIntegerError.Empty)
+  }
+  let base: UInt64 = intrinsic::convert(radix)
+  var limbs: List[UInt64] = []
+  while index < text.length()
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    let digit = integer_text::digit_value(text.byte(index))
+    if digit >= base {
+      return Err(core::ParseIntegerError.InvalidDigit(offset: index))
+    }
+    multiply_add_small(mut limbs, factor: base, addend: digit)
+    index += 1
+  }
+  Ok(with_sign(negative, magnitude: own limbs))
+}
+
+type DigitGroup(divisor: UInt64, digits: USize)
+
+fn digit_group(radix: UInt32) -> DigitGroup
+  requires 2 <= radix && radix <= 36
+  ensures 2 <= result.divisor
+  ensures result.divisor <= 4294967295
+  ensures 1 <= result.digits
+  ensures result.digits <= 31
+  cost time O(1)
+{
+  if radix == 10 {
+    DigitGroup(divisor: 1000000000, digits: 9)
+  } else if radix == 16 {
+    DigitGroup(divisor: 268435456, digits: 7)
+  } else if radix == 2 {
+    DigitGroup(divisor: 2147483648, digits: 31)
+  } else if radix == 8 {
+    DigitGroup(divisor: 1073741824, digits: 10)
+  } else {
+    DigitGroup(divisor: intrinsic::convert(radix), digits: 1)
+  }
 }
 
 public fn BigInteger.format(self, radix: UInt32 = 10) -> String
   requires 2 <= radix && radix <= 36
-  cost time O(self.bit_length() * self.bit_length())
+  cost time finite
 {
-  todo
+  let group = digit_group(radix)
+  let base: UInt64 = intrinsic::convert(radix)
+  var limbs = self.magnitude.copy()
+  var digits: List[UInt8] = []
+  var rounds = self.bit_length()
+  while rounds > 0 && limbs.length() > 0
+    decreases rounds
+  {
+    var part = divide_small(mut limbs, divisor: group.divisor)
+    var written: USize = 0
+    while written < group.digits
+      invariant written <= group.digits
+      decreases group.digits - written
+    {
+      mut digits.push(integer_text::digit_character(part % base, uppercase: false))
+      part = part / base
+      written += 1
+    }
+    rounds -= 1
+  }
+  while digits.length() > 0 && digits[digits.length() - 1] == 48
+    decreases digits.length()
+  {
+    let _ = mut digits.pop()
+  }
+  if digits.length() == 0 {
+    return "0"
+  }
+  if self.negative {
+    mut digits.push(45)
+  }
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(digits.length())
+  var index = digits.length()
+  while index > 0
+    invariant index <= digits.length()
+    invariant intrinsic::storage_length(output) == digits.length() - index
+    invariant intrinsic::storage_capacity(output) == digits.length()
+    decreases index
+  {
+    index -= 1
+    intrinsic::storage_push(mut output, value: digits[index])
+  }
+  String(storage: own output)
 }
 
 public fn BigInteger.is_zero(self) -> Bool
@@ -159,61 +788,114 @@ public fn BigInteger.sign(self) -> Int64
   ensures -1 <= result && result <= 1
   cost time O(1)
 {
-  todo
+  if self.negative {
+    -1
+  } else if self.magnitude.is_empty() {
+    0
+  } else {
+    1
+  }
 }
 
 public fn BigInteger.bit_length(self) -> USize
+  ensures result > 0 || self.magnitude.length() == 0
   cost time O(1)
 {
-  todo
+  if self.magnitude.is_empty() {
+    return 0
+  }
+  let top = self.magnitude[self.magnitude.length() - 1]
+  (self.magnitude.length() - 1).saturating_multiply(64).saturating_add(64 - top.leading_zeros())
 }
 
 public fn BigInteger.absolute(self) -> BigInteger
   ensures !result.is_negative()
-  cost time O(self.bit_length())
+  cost time finite
 {
-  todo
+  BigInteger(negative: false, magnitude: self.magnitude.copy())
 }
 
-public fn BigInteger.quotient(self, divisor: BigInteger) -> BigInteger
-  requires !divisor.is_zero()
-  cost time O(self.bit_length() * divisor.bit_length())
+fn BigInteger.division(self, divisor: BigInteger) -> Division[BigInteger]
+  cost time finite
 {
-  todo
-}
-
-public fn BigInteger.remainder(self, divisor: BigInteger) -> BigInteger
-  requires !divisor.is_zero()
-  cost time O(self.bit_length() * divisor.bit_length())
-{
-  todo
+  var parts = divide_magnitudes(self.magnitude.slice(), divisor: divisor.magnitude.slice())
+  Division(
+    quotient: with_sign(self.negative != divisor.negative, magnitude: own parts.quotient),
+    remainder: with_sign(self.negative, magnitude: own parts.remainder),
+  )
 }
 
 public fn BigInteger.quotient_and_remainder(self, divisor: BigInteger) -> Division[BigInteger]
   requires !divisor.is_zero()
-  cost time O(self.bit_length() * divisor.bit_length())
+  cost time finite
 {
-  todo
+  self.division(divisor)
+}
+
+public fn BigInteger.quotient(self, divisor: BigInteger) -> BigInteger
+  requires !divisor.is_zero()
+  cost time finite
+{
+  var division = self.quotient_and_remainder(divisor)
+  own division.quotient
+}
+
+public fn BigInteger.remainder(self, divisor: BigInteger) -> BigInteger
+  requires !divisor.is_zero()
+  cost time finite
+{
+  var division = self.quotient_and_remainder(divisor)
+  own division.remainder
+}
+
+fn BigInteger.floor_division(self, divisor: BigInteger) -> Division[BigInteger]
+  requires !divisor.is_zero()
+  cost time finite
+{
+  var division = self.quotient_and_remainder(divisor)
+  if division.remainder.is_zero() || division.remainder.negative == divisor.negative {
+    return division
+  }
+  Division(
+    quotient: division.quotient.minus(BigInteger.from_limb(1)),
+    remainder: division.remainder.plus(divisor),
+  )
 }
 
 public fn BigInteger.floor_divide(self, divisor: BigInteger) -> BigInteger
   requires !divisor.is_zero()
-  cost time O(self.bit_length() * divisor.bit_length())
+  cost time finite
 {
-  todo
+  var division = self.floor_division(divisor)
+  own division.quotient
 }
 
 public fn BigInteger.floor_modulo(self, divisor: BigInteger) -> BigInteger
   requires !divisor.is_zero()
-  cost time O(self.bit_length() * divisor.bit_length())
+  cost time finite
 {
-  todo
+  var division = self.floor_division(divisor)
+  own division.remainder
 }
 
 public fn BigInteger.power(self, exponent: UInt32) -> BigInteger
   cost time finite
 {
-  todo
+  var result = BigInteger.from_limb(1)
+  var base = self.copy()
+  var remaining = exponent
+  while remaining > 0
+    decreases remaining
+  {
+    if remaining % 2 == 1 {
+      result = result.times(base)
+    }
+    remaining = remaining / 2
+    if remaining > 0 {
+      base = base.times(base)
+    }
+  }
+  result
 }
 
 public fn BigInteger.modular_power(self, exponent: BigInteger, modulus: BigInteger) -> BigInteger
@@ -221,31 +903,124 @@ public fn BigInteger.modular_power(self, exponent: BigInteger, modulus: BigInteg
   requires !modulus.is_zero()
   cost time finite
 {
-  todo
+  let size = modulus.absolute()
+  if size.is_zero() {
+    return BigInteger.zero()
+  }
+  var result = BigInteger.from_limb(1).floor_modulo(size)
+  var base = self.floor_modulo(size)
+  var index: USize = 0
+  while index < exponent.magnitude.length()
+    invariant index <= exponent.magnitude.length()
+    decreases exponent.magnitude.length() - index
+  {
+    var bits = exponent.magnitude[index]
+    var bit: USize = 0
+    while bit < 64 && (bits != 0 || index + 1 < exponent.magnitude.length())
+      invariant bit <= 64
+      decreases 64 - bit
+    {
+      if bits % 2 == 1 {
+        result = result.times(base).floor_modulo(size)
+      }
+      bits = bits / 2
+      base = base.times(base).floor_modulo(size)
+      bit += 1
+    }
+    index += 1
+  }
+  result
 }
 
 public fn BigInteger.greatest_common_divisor(self, other: BigInteger) -> BigInteger
   ensures !result.is_negative()
   cost time finite
 {
-  todo
+  var larger = self.absolute()
+  var smaller = other.absolute()
+  var steps = self.bit_length().saturating_add(other.bit_length()).saturating_multiply(2).saturating_add(2)
+  while steps > 0 && !smaller.is_zero()
+    invariant !larger.is_negative()
+    invariant !smaller.is_negative()
+    decreases steps
+  {
+    let rest = larger.remainder(smaller).absolute()
+    larger = own smaller
+    smaller = own rest
+    steps -= 1
+  }
+  larger
 }
 
 public fn BigInteger.to_float64(self) -> Float64
-  cost time O(1)
+  cost time finite
 {
-  todo
+  let length = self.magnitude.length()
+  if length == 0 {
+    return 0.0
+  }
+  let bits = self.bit_length()
+  if bits > 1024 {
+    return if self.negative { Float64.negative_infinity } else { Float64.infinity }
+  }
+  let high = self.magnitude[length - 1]
+  let zeros = high.leading_zeros()
+  if zeros >= 64 {
+    return 0.0
+  }
+  var top = high << zeros
+  var inexact = false
+  if length >= 2 {
+    let below = self.magnitude[length - 2]
+    if zeros > 0 {
+      top = top | (below >> (64 - zeros))
+      inexact = (below << zeros) != 0
+    } else {
+      inexact = below != 0
+    }
+    var index = length - 2
+    while index > 0 && !inexact
+      invariant index <= length - 2
+      decreases index
+    {
+      index -= 1
+      inexact = self.magnitude[index] != 0
+    }
+  }
+  var mantissa = top >> 11
+  let half = (top >> 10) % 2 == 1
+  if half && (inexact || top % 1024 != 0 || mantissa % 2 == 1) {
+    mantissa += 1
+  }
+  var exponent: UInt64 = intrinsic::convert(bits - 1)
+  if mantissa >= 9007199254740992 {
+    mantissa = mantissa / 2
+    exponent += 1
+  }
+  if exponent > 1023 {
+    return if self.negative { Float64.negative_infinity } else { Float64.infinity }
+  }
+  let sign: UInt64 = if self.negative { 9223372036854775808 } else { 0 }
+  Float64.from_bits(sign | ((exponent + 1023) << 52) | (mantissa % 4503599627370496))
 }
 
 impl From[Int64] for BigInteger {
   fn from(value: own Int64) -> BigInteger {
-    todo
+    if value == 0 {
+      return BigInteger.zero()
+    }
+    let magnitude: UInt64 = if value > 0 {
+      intrinsic::convert(value)
+    } else {
+      intrinsic::convert[Int64, UInt64](-(value + 1)) + 1
+    }
+    BigInteger(negative: value < 0, magnitude: [magnitude])
   }
 }
 
 impl From[UInt64] for BigInteger {
   fn from(value: own UInt64) -> BigInteger {
-    todo
+    BigInteger.from_limb(value)
   }
 }
 
@@ -253,7 +1028,24 @@ impl TryFrom[BigInteger] for Int64 {
   type Error = core::ConversionError
 
   fn try_from(value: own BigInteger) -> Result[Int64, core::ConversionError] {
-    todo
+    if value.magnitude.length() == 0 {
+      return Ok(0)
+    }
+    if value.magnitude.length() > 1 {
+      return Err(core::ConversionError())
+    }
+    let limb = value.magnitude[0]
+    if value.negative {
+      if limb > 9223372036854775808 {
+        return Err(core::ConversionError())
+      }
+      Ok(-intrinsic::convert[UInt64, Int64](limb - 1) - 1)
+    } else {
+      if limb > 9223372036854775807 {
+        return Err(core::ConversionError())
+      }
+      Ok(intrinsic::convert(limb))
+    }
   }
 }
 
@@ -261,8 +1053,54 @@ impl TryFrom[BigInteger] for UInt64 {
   type Error = core::ConversionError
 
   fn try_from(value: own BigInteger) -> Result[UInt64, core::ConversionError] {
-    todo
+    if value.magnitude.length() == 0 {
+      return Ok(0)
+    }
+    if value.negative || value.magnitude.length() > 1 {
+      return Err(core::ConversionError())
+    }
+    Ok(value.magnitude[0])
   }
+}
+
+fn BigInteger.plus_signed(self, negative: Bool, magnitude: Slice[UInt64]) -> BigInteger
+  cost time finite
+{
+  if self.negative == negative {
+    return with_sign(negative, magnitude: add_magnitudes(self.magnitude.slice(), second: magnitude))
+  }
+  match compare_magnitudes(self.magnitude.slice(), second: magnitude) {
+    Equal => BigInteger.zero()
+    Greater => with_sign(self.negative, magnitude: subtract_magnitudes(self.magnitude.slice(), second: magnitude))
+    Less => with_sign(negative, magnitude: subtract_magnitudes(magnitude, second: self.magnitude.slice()))
+  }
+}
+
+fn BigInteger.plus(self, other: BigInteger) -> BigInteger
+  cost time finite
+{
+  self.plus_signed(other.negative, magnitude: other.magnitude.slice())
+}
+
+fn BigInteger.minus(self, other: BigInteger) -> BigInteger
+  cost time finite
+{
+  self.plus_signed(!other.negative, magnitude: other.magnitude.slice())
+}
+
+fn BigInteger.times(self, other: BigInteger) -> BigInteger
+  cost time finite
+{
+  with_sign(
+    self.negative != other.negative,
+    magnitude: multiply_magnitudes(self.magnitude.slice(), second: other.magnitude.slice()),
+  )
+}
+
+fn BigInteger.is_odd(self) -> Bool
+  cost time O(1)
+{
+  self.magnitude.length() > 0 && self.magnitude[0] % 2 == 1
 }
 
 impl Add[BigInteger] for BigInteger {
@@ -275,7 +1113,7 @@ impl Add[BigInteger] for BigInteger {
   }
 
   fn add(self, right: BigInteger) -> BigInteger {
-    todo
+    self.plus(right)
   }
 }
 
@@ -289,7 +1127,7 @@ impl Subtract[BigInteger] for BigInteger {
   }
 
   fn subtract(self, right: BigInteger) -> BigInteger {
-    todo
+    self.minus(right)
   }
 }
 
@@ -303,7 +1141,7 @@ impl Multiply[BigInteger] for BigInteger {
   }
 
   fn multiply(self, right: BigInteger) -> BigInteger {
-    todo
+    self.times(right)
   }
 }
 
@@ -317,13 +1155,92 @@ impl Negate for BigInteger {
   }
 
   fn negate(self) -> BigInteger {
-    todo
+    with_sign(!self.negative, magnitude: self.magnitude.copy())
   }
 }
 
 impl Ordered for BigInteger {
-  fn compare(self, other: BigInteger) -> Ordering {
-    todo
+  fn compare(self, other: BigInteger) -> Ordering
+    ensures result == (if self.negative != other.negative {
+      if self.negative { Ordering.Less } else { Ordering.Greater }
+    } else if self.negative {
+      magnitude_order(other.magnitude.model(), second: self.magnitude.model())
+    } else {
+      magnitude_order(self.magnitude.model(), second: other.magnitude.model())
+    })
+  {
+    if self.negative != other.negative {
+      return if self.negative { Ordering.Less } else { Ordering.Greater }
+    }
+    if self.negative {
+      compare_magnitudes(other.magnitude.slice(), second: self.magnitude.slice())
+    } else {
+      compare_magnitudes(self.magnitude.slice(), second: other.magnitude.slice())
+    }
+  }
+}
+
+proof Ordered.agrees_with_equal for BigInteger {
+  assert (first.magnitude == second.magnitude)
+    == (first.magnitude.length() == second.magnitude.length()
+      && forall i in 0..first.magnitude.length() => first.magnitude.model()[i] == second.magnitude.model()[i])
+  if first.magnitude.length() == second.magnitude.length() {
+    limbs_order_agrees_with_equal(
+      first.magnitude.model(),
+      second: second.magnitude.model(),
+      below: first.magnitude.length(),
+    )
+    limbs_order_agrees_with_equal(
+      second.magnitude.model(),
+      second: first.magnitude.model(),
+      below: first.magnitude.length(),
+    )
+  }
+  if first.negative != second.negative || first.magnitude.length() != second.magnitude.length() {
+    assert first.compare(second) != Ordering.Equal
+    assert !(first == second)
+  } else {
+    assert (first.compare(second) == Ordering.Equal) == (first.magnitude == second.magnitude)
+    assert (first == second) == (first.magnitude == second.magnitude)
+  }
+}
+
+proof Ordered.antisymmetric for BigInteger {
+  if first.magnitude.length() == second.magnitude.length() {
+    limbs_order_is_antisymmetric(
+      first.magnitude.model(),
+      second: second.magnitude.model(),
+      below: first.magnitude.length(),
+    )
+    limbs_order_is_antisymmetric(
+      second.magnitude.model(),
+      second: first.magnitude.model(),
+      below: first.magnitude.length(),
+    )
+  }
+}
+
+proof Ordered.transitive for BigInteger {
+  if first.magnitude.length() == second.magnitude.length()
+    && second.magnitude.length() == third.magnitude.length()
+    && first.negative == second.negative
+    && second.negative == third.negative
+  {
+    if first.negative {
+      limbs_order_is_transitive(
+        third.magnitude.model(),
+        second: second.magnitude.model(),
+        third: first.magnitude.model(),
+        below: first.magnitude.length(),
+      )
+    } else {
+      limbs_order_is_transitive(
+        first.magnitude.model(),
+        second: second.magnitude.model(),
+        third: third.magnitude.model(),
+        below: first.magnitude.length(),
+      )
+    }
   }
 }
 
@@ -335,7 +1252,7 @@ impl Default for BigInteger {
 
 impl Display for BigInteger {
   fn display(self, output: mut TextBuilder) {
-    todo
+    mut output.write(self.format().slice())
   }
 }
 
@@ -360,6 +1277,56 @@ public type Rounding =
 public opaque type Decimal(coefficient: BigInteger, scale: Int32)
   derives Copyable
 
+fn power_of_ten(exponent: UInt32) -> BigInteger
+  cost time finite
+{
+  BigInteger.from_limb(10).power(exponent)
+}
+
+fn scale_gap(larger: Int32, smaller: Int32) -> UInt32
+  requires smaller <= larger
+  cost time O(1)
+{
+  let gap: Int64 = intrinsic::convert[Int32, Int64](larger) - intrinsic::convert[Int32, Int64](smaller)
+  intrinsic::convert(gap)
+}
+
+fn rounded_quotient(dividend: BigInteger, divisor: BigInteger, rounding: Rounding) -> BigInteger
+  cost time finite
+{
+  var division = dividend.division(divisor)
+  if division.remainder.is_zero() {
+    return own division.quotient
+  }
+  let negative = dividend.is_negative() != divisor.is_negative()
+  var away = false
+  if rounding == Rounding.AwayFromZero {
+    away = true
+  } else if rounding == Rounding.Up {
+    away = !negative
+  } else if rounding == Rounding.Down {
+    away = negative
+  } else if rounding != Rounding.TowardZero {
+    let half = division.remainder.absolute()
+    let twice = half.plus(half)
+    let order = compare_magnitudes(twice.magnitude.slice(), second: divisor.magnitude.slice())
+    if order == Ordering.Greater {
+      away = true
+    } else if order == Ordering.Equal {
+      away = rounding == Rounding.HalfAwayFromZero
+        || (rounding == Rounding.HalfToEven && division.quotient.is_odd())
+    }
+  }
+  if !away {
+    return own division.quotient
+  }
+  if negative {
+    division.quotient.minus(BigInteger.from_limb(1))
+  } else {
+    division.quotient.plus(BigInteger.from_limb(1))
+  }
+}
+
 public fn Decimal.new(coefficient: own BigInteger, scale: Int32) -> Decimal
   cost time O(1)
 {
@@ -373,9 +1340,9 @@ public fn Decimal.zero() -> Decimal
 }
 
 public fn Decimal.coefficient(self) -> BigInteger
-  cost time O(self.coefficient.bit_length())
+  cost time finite
 {
-  todo
+  self.coefficient.copy()
 }
 
 public fn Decimal.scale(self) -> Int32
@@ -399,13 +1366,28 @@ public fn Decimal.is_negative(self) -> Bool
 public fn Decimal.absolute(self) -> Decimal
   cost time finite
 {
-  todo
+  Decimal(coefficient: self.coefficient.absolute(), scale: self.scale)
+}
+
+fn Decimal.coefficient_at(self, scale: Int32) -> BigInteger
+  requires self.scale <= scale
+  cost time finite
+{
+  if self.scale == scale {
+    self.coefficient.copy()
+  } else {
+    self.coefficient.times(power_of_ten(scale_gap(scale, smaller: self.scale)))
+  }
 }
 
 public fn Decimal.rounded(self, decimals: Int32, rounding: Rounding = Rounding.HalfToEven) -> Decimal
   cost time finite
 {
-  todo
+  if self.scale <= decimals {
+    return Decimal(coefficient: self.coefficient_at(decimals), scale: decimals)
+  }
+  let divisor = power_of_ten(scale_gap(self.scale, smaller: decimals))
+  Decimal(coefficient: rounded_quotient(self.coefficient, divisor: divisor, rounding: rounding), scale: decimals)
 }
 
 public fn Decimal.quotient(
@@ -417,25 +1399,76 @@ public fn Decimal.quotient(
   requires !divisor.is_zero()
   cost time finite
 {
-  todo
+  let wanted: Int64 = intrinsic::convert[Int32, Int64](decimals) + intrinsic::convert[Int32, Int64](divisor.scale)
+  let shift = wanted - intrinsic::convert[Int32, Int64](self.scale)
+  if shift > 4294967295 || shift < -4294967295 {
+    intrinsic::crash("a decimal cannot hold that many digits".slice())
+  }
+  if shift >= 0 {
+    let numerator = self.coefficient.times(power_of_ten(intrinsic::convert(shift)))
+    Decimal(
+      coefficient: rounded_quotient(numerator, divisor: divisor.coefficient, rounding: rounding),
+      scale: decimals,
+    )
+  } else {
+    let denominator = divisor.coefficient.times(power_of_ten(intrinsic::convert(-shift)))
+    Decimal(
+      coefficient: rounded_quotient(self.coefficient, divisor: denominator, rounding: rounding),
+      scale: decimals,
+    )
+  }
 }
 
 public fn Decimal.to_float64(self) -> Float64
   cost time finite
 {
-  todo
+  let text = "${self}"
+  match float_math::parse_float64(text.slice()) {
+    Ok(value) => value
+    Err(_) => Float64.not_a_number
+  }
 }
 
 public fn Decimal.from_float64(value: Float64) -> Option[Decimal]
   cost time finite
 {
-  todo
+  if !value.is_finite() {
+    return None
+  }
+  let bits = value.to_bits()
+  let biased = (bits / 4503599627370496) % 2048
+  let fraction = bits % 4503599627370496
+  if biased == 0 && fraction == 0 {
+    return Some(Decimal.zero())
+  }
+  var mantissa = if biased == 0 { fraction } else { fraction + 4503599627370496 }
+  var exponent: Int64 = (if biased == 0 { 1 } else { intrinsic::convert[UInt64, Int64](biased) }) - 1075
+  while mantissa % 2 == 0 && exponent < 0
+    invariant -1074 <= exponent
+    invariant exponent <= 972
+    decreases -exponent
+  {
+    mantissa = mantissa / 2
+    exponent += 1
+  }
+  let negative = bits >= 9223372036854775808
+  if exponent >= 0 {
+    var scaled = BigInteger.from_limb(mantissa).times(BigInteger.from_limb(2).power(intrinsic::convert(exponent)))
+    Some(Decimal(coefficient: with_sign(negative, magnitude: own scaled.magnitude), scale: 0))
+  } else {
+    var scaled = BigInteger.from_limb(mantissa).times(BigInteger.from_limb(5).power(intrinsic::convert(-exponent)))
+    Some(Decimal(coefficient: with_sign(negative, magnitude: own scaled.magnitude), scale: intrinsic::convert(-exponent)))
+  }
 }
 
 public fn Decimal.truncated(self) -> BigInteger
   cost time finite
 {
-  todo
+  if self.scale <= 0 {
+    return self.coefficient_at(0)
+  }
+  var division = self.coefficient.division(power_of_ten(scale_gap(self.scale, smaller: 0)))
+  own division.quotient
 }
 
 impl From[Int64] for Decimal {
@@ -460,7 +1493,8 @@ impl Add[Decimal] for Decimal {
   }
 
   fn add(self, right: Decimal) -> Decimal {
-    todo
+    let scale = if self.scale >= right.scale { self.scale } else { right.scale }
+    Decimal(coefficient: self.coefficient_at(scale).plus(right.coefficient_at(scale)), scale: scale)
   }
 }
 
@@ -474,7 +1508,8 @@ impl Subtract[Decimal] for Decimal {
   }
 
   fn subtract(self, right: Decimal) -> Decimal {
-    todo
+    let scale = if self.scale >= right.scale { self.scale } else { right.scale }
+    Decimal(coefficient: self.coefficient_at(scale).minus(right.coefficient_at(scale)), scale: scale)
   }
 }
 
@@ -484,11 +1519,12 @@ impl Multiply[Decimal] for Decimal {
   fn multiply_is_defined(self, right: Decimal) -> Bool
     cost time O(1)
   {
-    true
+    let scale: Int64 = intrinsic::convert[Int32, Int64](self.scale) + intrinsic::convert[Int32, Int64](right.scale)
+    -2147483648 <= scale && scale <= 2147483647
   }
 
   fn multiply(self, right: Decimal) -> Decimal {
-    todo
+    Decimal(coefficient: self.coefficient.times(right.coefficient), scale: self.scale + right.scale)
   }
 }
 
@@ -502,25 +1538,133 @@ impl Negate for Decimal {
   }
 
   fn negate(self) -> Decimal {
-    todo
+    Decimal(coefficient: self.coefficient.negate(), scale: self.scale)
+  }
+}
+
+type DecimalKey(sign: Int64, exponent: Int64, digits: List[UInt8])
+  derives Equal
+
+fn Decimal.key(self) -> DecimalKey
+  cost time finite
+{
+  if self.coefficient.is_zero() {
+    return DecimalKey(sign: 0, exponent: 0, digits: [])
+  }
+  let text = self.coefficient.absolute().format()
+  if text.length() > 4294967295 {
+    intrinsic::crash("a decimal cannot hold that many digits".slice())
+  }
+  let bytes = text.slice()
+  var count = bytes.length()
+  while count > 0 && bytes.byte(count - 1) == 48
+    invariant count <= bytes.length()
+    decreases count
+  {
+    count -= 1
+  }
+  var digits: List[UInt8] = List.with_capacity(count)
+  var index: USize = 0
+  while index < count
+    invariant index <= count
+    decreases count - index
+  {
+    mut digits.push(bytes.byte(index))
+    index += 1
+  }
+  let places: Int64 = intrinsic::convert[USize, Int64](text.length())
+  DecimalKey(
+    sign: self.coefficient.sign(),
+    exponent: places - intrinsic::convert[Int32, Int64](self.scale),
+    digits: own digits,
+  )
+}
+
+fn key_order(first: DecimalKey, second: DecimalKey) -> Ordering
+  cost time finite
+{
+  if first.sign != second.sign {
+    first.sign.compare(second.sign)
+  } else if first.exponent != second.exponent {
+    if first.sign < 0 {
+      second.exponent.compare(first.exponent)
+    } else {
+      first.exponent.compare(second.exponent)
+    }
+  } else if first.sign < 0 {
+    second.digits.compare(first.digits)
+  } else {
+    first.digits.compare(second.digits)
   }
 }
 
 impl Equal for Decimal {
-  fn equal(self, other: Decimal) -> Bool {
-    todo
+  fn equal(self, other: Decimal) -> Bool
+    ensures result == (self.key() == other.key())
+  {
+    self.key() == other.key()
   }
 }
 
 impl Ordered for Decimal {
-  fn compare(self, other: Decimal) -> Ordering {
-    todo
+  fn compare(self, other: Decimal) -> Ordering
+    ensures result == key_order(self.key(), second: other.key())
+  {
+    key_order(self.key(), second: other.key())
   }
+}
+
+theorem key_order_is_transitive(first: DecimalKey, second: DecimalKey, third: DecimalKey)
+  requires key_order(first, second: second) != Ordering.Greater
+  requires key_order(first: second, second: third) != Ordering.Greater
+  ensures key_order(first, second: third) != Ordering.Greater
+  cost time finite
+{
+  assert first.sign <= second.sign
+  assert second.sign <= third.sign
+  if first.sign == second.sign && second.sign == third.sign {
+    if first.sign < 0 {
+      assert third.exponent <= second.exponent
+      assert second.exponent <= first.exponent
+      if first.exponent == second.exponent && second.exponent == third.exponent {
+        assert third.digits <= second.digits
+        assert second.digits <= first.digits
+        assert third.digits <= first.digits
+      }
+    } else {
+      assert first.exponent <= second.exponent
+      assert second.exponent <= third.exponent
+      if first.exponent == second.exponent && second.exponent == third.exponent {
+        assert first.digits <= second.digits
+        assert second.digits <= third.digits
+        assert first.digits <= third.digits
+      }
+    }
+  }
+}
+
+theorem decimal_order_is_transitive(first: Decimal, second: Decimal, third: Decimal)
+  requires first <= second
+  requires second <= third
+  ensures first <= third
+  cost time finite
+{
+  assert first.compare(second) == key_order(first.key(), second: second.key())
+  assert second.compare(third) == key_order(second.key(), second: third.key())
+  assert first.compare(third) == key_order(first.key(), second: third.key())
+  key_order_is_transitive(first.key(), second: second.key(), third: third.key())
+}
+
+proof Ordered.transitive for Decimal {
+  decimal_order_is_transitive(first, second: second, third: third)
 }
 
 impl Hash for Decimal {
   fn hash(self, hasher: mut Hasher) {
-    todo
+    let key = self.key()
+    key.sign.hash(mut hasher)
+    key.exponent.hash(mut hasher)
+    key.digits.hash(mut hasher)
   }
 }
 
@@ -530,16 +1674,136 @@ impl Default for Decimal {
   }
 }
 
+fn write_zeros(output: mut TextBuilder, count: USize)
+  cost time finite
+{
+  var written: USize = 0
+  while written < count
+    invariant written <= count
+    decreases count - written
+  {
+    mut output.write("0")
+    written += 1
+  }
+}
+
 impl Display for Decimal {
   fn display(self, output: mut TextBuilder) {
-    todo
+    if self.coefficient.is_zero() && self.scale <= 0 {
+      mut output.write("0")
+      return
+    }
+    let digits = self.coefficient.absolute().format()
+    if self.coefficient.is_negative() {
+      mut output.write("-")
+    }
+    if self.scale <= 0 {
+      mut output.write(digits.slice())
+      write_zeros(mut output, count: intrinsic::convert(scale_gap(0, smaller: self.scale)))
+      return
+    }
+    let places: USize = intrinsic::convert(scale_gap(self.scale, smaller: 0))
+    if digits.length() > places {
+      let whole = digits.length() - places
+      mut output.write(digits.slice().part(0, to: whole))
+      mut output.write(".")
+      mut output.write(digits.slice().part(whole, to: digits.length()))
+    } else {
+      mut output.write("0.")
+      write_zeros(mut output, count: places - digits.length())
+      mut output.write(digits.slice())
+    }
   }
+}
+
+fn is_decimal_digit(byte: UInt8) -> Bool
+  cost time O(1)
+{
+  48 <= byte && byte <= 57
+}
+
+fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
+  cost time finite
+{
+  if text.length() == 0 {
+    return Err(core::ParseFloatError.Empty)
+  }
+  var index: USize = 0
+  var negative = false
+  if text.byte(0) == 45 || text.byte(0) == 43 {
+    negative = text.byte(0) == 45
+    index = 1
+  }
+  var limbs: List[UInt64] = []
+  var digits: USize = 0
+  var places: USize = 0
+  var after_point = false
+  while index < text.length() && (is_decimal_digit(text.byte(index)) || (text.byte(index) == 46 && !after_point))
+    invariant index <= text.length()
+    invariant digits <= index
+    invariant places <= index
+    decreases text.length() - index
+  {
+    let byte = text.byte(index)
+    if byte == 46 {
+      after_point = true
+    } else {
+      multiply_add_small(mut limbs, factor: 10, addend: intrinsic::convert[UInt8, UInt64](byte - 48))
+      digits += 1
+      if after_point {
+        places += 1
+      }
+    }
+    index += 1
+  }
+  if digits == 0 {
+    return Err(core::ParseFloatError.Invalid(offset: index))
+  }
+  var exponent: Int64 = 0
+  if index < text.length() && (text.byte(index) == 101 || text.byte(index) == 69) {
+    index += 1
+    var exponent_negative = false
+    if index < text.length() && (text.byte(index) == 45 || text.byte(index) == 43) {
+      exponent_negative = text.byte(index) == 45
+      index += 1
+    }
+    let start = index
+    while index < text.length() && is_decimal_digit(text.byte(index))
+      invariant start <= index
+      invariant index <= text.length()
+      invariant 0 <= exponent
+      invariant exponent <= 99999999999
+      decreases text.length() - index
+    {
+      if exponent < 9999999999 {
+        exponent = exponent * 10 + intrinsic::convert[UInt8, Int64](text.byte(index) - 48)
+      }
+      index += 1
+    }
+    if index == start {
+      return Err(core::ParseFloatError.Invalid(offset: index))
+    }
+    if exponent_negative {
+      exponent = -exponent
+    }
+  }
+  if index < text.length() {
+    return Err(core::ParseFloatError.Invalid(offset: index))
+  }
+  if places > 2147483647 {
+    return Err(core::ParseFloatError.Invalid(offset: text.length()))
+  }
+  let scale: Int64 = intrinsic::convert[USize, Int64](places) - exponent
+  if scale < -2147483648 || scale > 2147483647 {
+    return Err(core::ParseFloatError.Invalid(offset: text.length()))
+  }
+  Ok(Decimal(coefficient: with_sign(negative, magnitude: own limbs), scale: intrinsic::convert(scale)))
 }
 
 impl text::Parse for Decimal {
   type Error = core::ParseFloatError
 
   fn parse(text: StringSlice) -> Result[Decimal, core::ParseFloatError] {
-    todo
+    parse_decimal(text)
   }
 }

@@ -16,7 +16,10 @@ type t = {
   stop : int;  (** One past the index of its last token. *)
   base : int;  (** The absolute offset spans in the tree are relative to. *)
   closers : int array;  (** For each opener in the slice, the index of its closer; otherwise -1. *)
-  text : string;  (** The file's text, which the tokens' spans index. *)
+  text : string;
+      (** The definition's source text: the bytes from its first token to the end of its last. The
+          cursor holds no other part of the file, so a parsing function cannot read outside the
+          definition. *)
   diagnostics : Diagnostic.Collector.t;
   mutable index : int;
   mutable depth : int;  (** Expressions, types, patterns, and prefix operators being parsed. *)
@@ -204,7 +207,9 @@ let span_from cursor start_index =
 let absolute cursor (span : Syntax.span) =
   Source.span (span.start + cursor.base) (span.stop + cursor.base)
 
-let text cursor (span : Source.span) = String.sub cursor.text span.start (span.stop - span.start)
+(* The source text under [span], which must lie in the definition. *)
+let text cursor (span : Source.span) =
+  String.sub cursor.text (span.start - cursor.base) (span.stop - span.start)
 
 (* A closer the lexer inserted for an unclosed opener already has its error,
    so the parser reports nothing that is missing before it. *)

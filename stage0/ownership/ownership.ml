@@ -85,7 +85,7 @@ type analysis = {
    callee's [task_hazard], so they demand this query, and two methods that
    loop over each other cannot form a query cycle. *)
 let analysis =
-  Query.query ~name:"ownership_analysis" ~phase:Bodies ~show:Resolve.Names.show_key
+  Query.query ~name:"ownership_analysis" ~phase:Phases.bodies ~show:Resolve.Names.show_key
     (fun database key ->
       Option.map
         (fun ((context : Context.context), (form : Core.t), _, executable) ->
@@ -158,7 +158,7 @@ let check database (key : Resolve.Names.key) : result option =
   | _ -> None
 
 let ownership =
-  Query.query ~name:"ownership" ~phase:Bodies ~show:Resolve.Names.show_key ~saved:true
+  Query.query ~name:"ownership" ~phase:Phases.bodies ~show:Resolve.Names.show_key ~saved:true
     ~about:(fun (key : Resolve.Names.key) ->
       Some { Query.path = key.path; part = Some "ownership" })
     check

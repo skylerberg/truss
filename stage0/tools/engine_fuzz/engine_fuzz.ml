@@ -17,7 +17,18 @@
 
 let inputs = 6
 let nodes = 40
-let phases = [| Query.Syntax; Declarations; Resolution; Interfaces; Bodies; Lowering; Keys |]
+
+let phases =
+  [|
+    Phases.syntax;
+    Phases.declarations;
+    Phases.resolution;
+    Phases.interfaces;
+    Phases.bodies;
+    Phases.lowering;
+    Phases.keys;
+  |]
+
 let phase_of index = index * Array.length phases / nodes
 let value_input : (int, int) Query.input = Query.input ~name:"fuzz_input" ~show:string_of_int ()
 

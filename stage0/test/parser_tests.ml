@@ -257,7 +257,20 @@ let () =
         let parsed, _ = Parser.definition source tokens last in
         (parsed.value.value, parsed.diagnostics)
       in
-      if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ")
+      if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ");
+  test "indenting a method changes neither its tree nor its diagnostics" (fun () ->
+      (* The method has no body, so it has a diagnostic with a fix. *)
+      let method_of ~indentation =
+        let source, tokens, pieces =
+          pieces ("impl Clock for Fixed {\n" ^ indentation ^ "fn now(self) -> Instant\n}")
+        in
+        match Parser.definition source tokens (List.hd pieces) with
+        | _, [ method_ ] ->
+            if Parser.placed method_ = [] then fail "the method has no diagnostic";
+            (method_.value.value, method_.value.text, method_.diagnostics)
+        | _ -> failwith "expected one method"
+      in
+      if method_of ~indentation:"  " <> method_of ~indentation:"\t\t" then fail "the results differ")
 
 (* Node ids *)
 

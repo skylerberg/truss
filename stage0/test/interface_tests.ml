@@ -648,7 +648,7 @@ let () =
       let database = setup [ ("app::main", base) ] in
       let point = Types.named (app "Point") [] in
       let asker =
-        Query.query ~name:"asker" ~phase:Bodies
+        Query.query ~name:"asker" ~phase:Phases.bodies
           ~show:(fun () -> "")
           (fun database () ->
             Option.is_some

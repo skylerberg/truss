@@ -8,8 +8,8 @@
    - [Targets]: what a call reaches, how arguments are passed, evidence,
      literals, cursors, and nested functions
    - [Method_yields]: where a lending or yielding method's [yield]s are
-   - [Core_form]: expressions, statements, patterns, calls, inlining,
-     defaults, and [requires] checks
+   - [Core_form]: expressions, statements, patterns, calls, inlining, and
+     defaults
    - [Constants], [Derived], [Generated]: constants and their evaluators,
      derived implementations, and the instances lowering makes, such as
      capability tables and the program's [main]
@@ -82,10 +82,9 @@ let bind_parameters ?how st (parameters : Core.parameter list) =
 
 (* The start every function from source shares, after its result's slot:
    its parameters, the mask of defaults passed, and the evidence it is
-   given, with its defaults filled in and its [requires] clauses checked.
-   Returns the parameters bound, the mask, and every parameter's local in
-   order. *)
-let begin_body ?how st ~(parameters : Core.parameter list) ~(requires : Core.condition list) =
+   given, with its defaults filled in. Returns the parameters bound, the
+   mask, and every parameter's local in order. *)
+let begin_body ?how st ~(parameters : Core.parameter list) =
   let code = st.frame.code in
   let bound = bind_parameters ?how st parameters in
   let mask =
@@ -96,7 +95,6 @@ let begin_body ?how st ~(parameters : Core.parameter list) ~(requires : Core.con
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
   Option.iter (fun mask -> Core_form.fill_defaults st mask parameters) mask;
-  Core_form.check_requires st requires;
   ( bound,
     mask,
     List.filter_map (fun (arrives, _, _, _) -> arrives) bound @ Option.to_list mask @ evidence )
@@ -110,10 +108,10 @@ let begin_body ?how st ~(parameters : Core.parameter list) ~(requires : Core.con
 let pulled context (yielding : Ground.yielding) :
     Lir.function_ * (Lir.local * (Lir.local * int) option) list =
   let code = code_of context yielding.method_ yielding.type_arguments in
-  let parameters, requires, body = Core_form.body_of context yielding.method_ in
+  let parameters, body = Core_form.body_of context yielding.method_ in
   let st = enter context ~pulling:true (frame_of code ~inlined:[ yielding.method_ ]) in
   let bound, mask, parameter_locals =
-    begin_body st ~how:(Convention.held context.env) ~parameters ~requires
+    begin_body st ~how:(Convention.held context.env) ~parameters
   in
   let owned =
     List.filter_map
@@ -228,11 +226,11 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
 (* Lowers a function or a test that has a body in source. *)
 let source_code context key ~path ~type_arguments : Lir.t =
   let code = code_of context path type_arguments in
-  let parameters, requires, body = Core_form.body_of context path in
+  let parameters, body = Core_form.body_of context path in
   let st = enter context (frame_of code ~inlined:[ path ]) in
   let convention, returns = result_of context code.substitution code.result in
   result_slot st convention;
-  let _, _, parameter_locals = begin_body st ~parameters ~requires in
+  let _, _, parameter_locals = begin_body st ~parameters in
   Core_form.block_into st body (result_place st);
   {
     key;

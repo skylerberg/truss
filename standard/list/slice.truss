@@ -866,7 +866,7 @@ public fn Slice[Element].rotate_right(mut self, by: USize)
 public fn Slice[Element: Copyable].fill(mut self, value: Element)
   ensures self.length() == old(self.length())
   ensures forall i in 0..self.length() => identical(self.model()[i], value)
-  cost time O(self.length())
+  cost time O(self.length() * time(Element.copy))
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
@@ -880,7 +880,7 @@ public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
   requires source.length() == self.length()
   ensures self.length() == old(self.length())
   ensures forall i in 0..self.length() => identical(self.model()[i], source.model()[i])
-  cost time O(self.length())
+  cost time O(self.length() * time(Element.copy))
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
@@ -1563,10 +1563,125 @@ impl Equal for Slice[Element: Equal] {
   }
 }
 
-impl Ordered for Slice[Element: Ordered] {
-  fn compare(self, other: Slice[Element]) -> Ordering {
-    todo
+internal fn lexicographic[Element: Ordered](
+  first: Sequence[Element],
+  second: Sequence[Element],
+  from: Integer,
+) -> Ordering
+  requires 0 <= from
+  decreases first.length() - from
+  cost time finite
+{
+  if from < first.length() && from < second.length() {
+    if first[from].compare(second[from]) == Ordering.Equal {
+      lexicographic(first, second: second, from: from + 1)
+    } else {
+      first[from].compare(second[from])
+    }
+  } else if first.length() < second.length() {
+    Ordering.Less
+  } else if first.length() > second.length() {
+    Ordering.Greater
+  } else {
+    Ordering.Equal
   }
+}
+
+internal theorem lexicographic_agrees_with_equal[Element: Ordered](
+  first: Sequence[Element],
+  second: Sequence[Element],
+  from: Integer,
+)
+  requires 0 <= from
+  ensures (lexicographic(first, second: second, from: from) == Ordering.Equal)
+    == (first.length() == second.length() && forall i in from..first.length() => first[i] == second[i])
+  decreases first.length() - from
+  cost time finite
+{
+  if from < first.length() && from < second.length() {
+    lexicographic_agrees_with_equal(first, second: second, from: from + 1)
+    assert (first[from].compare(second[from]) == Ordering.Equal) == (first[from] == second[from])
+  }
+}
+
+internal theorem lexicographic_is_antisymmetric[Element: Ordered](
+  first: Sequence[Element],
+  second: Sequence[Element],
+  from: Integer,
+)
+  requires 0 <= from
+  ensures (lexicographic(first, second: second, from: from) == Ordering.Less)
+    == (lexicographic(first: second, second: first, from: from) == Ordering.Greater)
+  decreases first.length() - from
+  cost time finite
+{
+  if from < first.length() && from < second.length() {
+    assert (first[from].compare(second[from]) == Ordering.Less)
+      == (second[from].compare(first[from]) == Ordering.Greater)
+    assert (second[from].compare(first[from]) == Ordering.Less)
+      == (first[from].compare(second[from]) == Ordering.Greater)
+    lexicographic_is_antisymmetric(first, second: second, from: from + 1)
+  }
+}
+
+internal theorem lexicographic_is_transitive[Element: Ordered](
+  first: Sequence[Element],
+  second: Sequence[Element],
+  third: Sequence[Element],
+  from: Integer,
+)
+  requires 0 <= from
+  requires lexicographic(first, second: second, from: from) != Ordering.Greater
+  requires lexicographic(first: second, second: third, from: from) != Ordering.Greater
+  ensures lexicographic(first, second: third, from: from) != Ordering.Greater
+  decreases first.length() - from
+  cost time finite
+{
+  if from < first.length() && from < second.length() && from < third.length() {
+    assert first[from] <= second[from]
+    assert second[from] <= third[from]
+    assert first[from] <= third[from]
+    if first[from].compare(third[from]) == Ordering.Equal {
+      assert third[from] <= first[from]
+      assert second[from] <= first[from]
+      assert third[from] <= second[from]
+      lexicographic_is_transitive(first, second: second, third: third, from: from + 1)
+    }
+  }
+}
+
+impl Ordered for Slice[Element: Ordered] {
+  fn compare(self, other: Slice[Element]) -> Ordering
+    ensures result == lexicographic(self.model(), second: other.model(), from: 0)
+  {
+    var index: USize = 0
+    while index < self.length() && index < other.length()
+      invariant index <= self.length()
+      invariant index <= other.length()
+      invariant lexicographic(self.model(), second: other.model(), from: 0)
+        == lexicographic(self.model(), second: other.model(), from: index)
+      decreases self.length() - index
+    {
+      let order = self[index].compare(other[index])
+      if order != Ordering.Equal {
+        return order
+      }
+      index += 1
+    }
+    self.length().compare(other.length())
+  }
+}
+
+proof Ordered.agrees_with_equal for Slice[Element: Ordered] {
+  lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.antisymmetric for Slice[Element: Ordered] {
+  lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.transitive for Slice[Element: Ordered] {
+  lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
 impl Hash for Slice[Element: Hash] {

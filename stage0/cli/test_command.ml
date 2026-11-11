@@ -246,7 +246,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
     let build_ended = ref None in
     (* A sanitized run keeps no results, since it checks what a plain one
        does not. *)
-    let results = if sanitize then None else Some (Database.test_results ()) in
+    let results = if sanitize then None else Some (Compiler.test_results ()) in
     let outcome =
       run_all project compile ~results ~rerun ~progress:(on_progress progress ~build_ended) tests
     in

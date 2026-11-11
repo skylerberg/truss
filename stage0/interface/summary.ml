@@ -11,7 +11,8 @@ module Names = Resolve.Names
    constant is found among its owner's members, since it may be written in
    any file of its package. *)
 let key =
-  Query.query ~name:"key" ~phase:Declarations ~show:Path.show (fun database (path : Path.t) ->
+  Query.query ~name:"key" ~phase:Phases.declarations ~show:Path.show
+    (fun database (path : Path.t) ->
       let find module_ =
         Option.map Names.key_of
           (Names.Declaration_map.find_opt (path, 0)
@@ -51,7 +52,7 @@ let generic_kinds (generics : generic_parameter list) =
    naming it with arguments needs. [None] for a definition whose header did
    not parse, which accepts any arguments. *)
 let generics_of =
-  Query.query ~name:"generics_of" ~phase:Declarations ~show:Path.show
+  Query.query ~name:"generics_of" ~phase:Phases.declarations ~show:Path.show
     (fun database (path : Path.t) ->
       match Intrinsic.builtin_of_path path with
       | Some Array -> Some [ ("Element", Type_kind); ("count", Value_kind) ]
@@ -81,7 +82,7 @@ type trait_header = {
    sets, and of its laws, and the traits it requires, as resolution named
    them. *)
 let trait_header =
-  Query.query ~name:"trait_header" ~phase:Resolution ~show:Path.show
+  Query.query ~name:"trait_header" ~phase:Phases.resolution ~show:Path.show
     (fun database (path : Path.t) ->
       match definition database path with
       | Some (key, { kind = Trait { requires; members; _ }; _ }) ->

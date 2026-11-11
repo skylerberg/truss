@@ -3103,6 +3103,45 @@ let () =
         \  }\n\
          }\n")
 
+(* Amortized moves and copies *)
+
+let () =
+  test "a deque's potential pays for moving half of one list to the other" (fun () ->
+      proven
+        "type Deque[Element](front: List[Element], back: List[Element])\n\
+        \  invariant front.length() <= USize.maximum - back.length()\n\
+        \  cost potential if front.length() > back.length() { 8 * (front.length() - back.length()) \
+         } else { 8 * (back.length() - front.length()) }\n\n\
+         fn Deque[Element].pop_front(mut self) -> Option[Element]\n\
+        \  cost amortized time O(1)\n\
+         {\n\
+        \  if self.front.is_empty() && !self.back.is_empty() {\n\
+        \    let half = self.back.length() - self.back.length() / 2\n\
+        \    var later = mut self.back.split_off(half)\n\
+        \    mut self.back.reverse()\n\
+        \    let earlier = mut self.back.split_off(0)\n\
+        \    mut self.front.append(own earlier)\n\
+        \    mut self.back.append(own later)\n\
+        \  }\n\
+        \  mut self.front.pop()\n\
+         }\n");
+  test "a copy pays for the potential it makes" (fun () ->
+      proven
+        "fn push_copy[Element: Copyable](list: mut List[Element], item: Element)\n\
+        \  cost amortized time O(1 + time(Element.copy))\n\
+         {\n\
+        \  mut list.push(item.copy())\n\
+         }\n");
+  test "a loop of pushed copies is amortized over the copies' time" (fun () ->
+      proven
+        "fn append_copies[Element: Copyable](list: mut List[Element], items: Slice[Element])\n\
+        \  cost amortized time O(items.length() * (1 + time(Element.copy)))\n\
+         {\n\
+        \  for item in items {\n\
+        \    mut list.push(item.copy())\n\
+        \  }\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =

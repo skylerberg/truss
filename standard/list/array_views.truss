@@ -425,7 +425,7 @@ public fn Array[Element, count: USize].rotate_right(mut self, by: USize)
 public fn Array[Element: Copyable, count: USize].fill(mut self, value: Element)
   ensures self.length() == old(self.length())
   ensures forall i in 0..self.length() => identical(self.model()[i], value)
-  cost time O(self.length())
+  cost time O(self.length() * time(Element.copy))
 {
   mut self[..].fill(value)
 }
@@ -434,7 +434,7 @@ public fn Array[Element: Copyable, count: USize].copy_from(mut self, source: Sli
   requires source.length() == self.length()
   ensures self.length() == old(self.length())
   ensures forall i in 0..self.length() => identical(self.model()[i], source.model()[i])
-  cost time O(self.length())
+  cost time O(self.length() * time(Element.copy))
 {
   mut self[..].copy_from(source)
 }

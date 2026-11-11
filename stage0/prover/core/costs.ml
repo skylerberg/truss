@@ -203,15 +203,25 @@ let rec normalize term =
         (* What both choices add is outside the larger of them. *)
         let a = normalize a
         and b = normalize b in
-        let rec summands = function
-          | L.Apply ("+", parts) -> List.concat_map summands parts
+        (* Each summand with its coefficient, so that a term both choices
+           take away is shared as one both add is. *)
+        let rec summands coefficient = function
+          | L.Apply ("+", parts) -> List.concat_map (summands coefficient) parts
+          | L.Apply ("-", [ inner ]) -> summands (Z.neg coefficient) inner
+          | L.Apply ("-", first :: rest) ->
+              summands coefficient first @ List.concat_map (summands (Z.neg coefficient)) rest
+          | L.Apply ("*", [ L.Integer k; inner ]) -> summands (Z.mul coefficient k) inner
           | L.Integer _ -> []
-          | other -> [ other ]
+          | other -> [ (other, coefficient) ]
         in
-        match List.filter (fun part -> List.mem part (summands b)) (summands a) with
+        match List.filter (fun part -> List.mem part (summands Z.one b)) (summands Z.one a) with
         | [] -> L.Apply (name, [ a; b ])
         | common ->
-            let shared = List.fold_left plus zero common in
+            let shared =
+              List.fold_left
+                (fun total (atom, coefficient) -> plus total (times (L.Integer coefficient) atom))
+                zero common
+            in
             L.Apply
               ( "+",
                 [

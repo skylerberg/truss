@@ -89,7 +89,7 @@ let prove database (key : Names.key) =
       | Translate.Foreign_unsupported message -> Unsupported (Syntax.Span.make 0 0, message))
   | _ -> Not_proven_here
 
-let proof = Query.query ~phase:Proofs ~name:"proof" ~show:Names.show_key prove
+let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key prove
 
 (* Messages *)
 
@@ -638,7 +638,7 @@ let show_question question =
    its own, found current when only what the solver said changed, so a
    definition's outcome is worked out again without rendering anything. *)
 let question_request =
-  Query.query ~name:"question_request" ~phase:Verdicts ~saved:true ~show:show_question
+  Query.query ~name:"question_request" ~phase:Phases.verdicts ~saved:true ~show:show_question
     (fun database question ->
       match Query.demand database proof question.definition with
       | Obligations outcome -> (
@@ -662,7 +662,7 @@ let question_request =
    gives goes into the solver's queries, so while any of it is untold, only
    it is asked: a query asked without it would be one no later round asks. *)
 let outcome =
-  Query.query ~name:"proof_outcome" ~phase:Verdicts ~saved:true ~show:Names.show_key
+  Query.query ~name:"proof_outcome" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
     (fun database key ->
       let running_untold = ref [] and solver_untold = ref [] in
       let tell asked placeholder read =

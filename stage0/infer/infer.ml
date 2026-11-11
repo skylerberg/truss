@@ -17,7 +17,7 @@ let diagnostics = Body.diagnostics
 
 (* The core form of a definition. [None] if the definition has an error. *)
 let core =
-  Query.query ~name:"core" ~phase:Bodies ~show:Resolve.Names.show_key (fun database key ->
+  Query.query ~name:"core" ~phase:Phases.bodies ~show:Resolve.Names.show_key (fun database key ->
       Option.bind (Query.demand database checked key) (fun (result : result) -> result.core))
 
 (* The core form of the function or method at a path, with a substitution
@@ -49,7 +49,7 @@ let of_path ~written database (path : Path.t) =
   | None, _ -> None
 
 let core_of_path =
-  Query.query ~name:"core_of_path" ~phase:Bodies ~show:Path.show (of_path ~written:core)
+  Query.query ~name:"core_of_path" ~phase:Phases.bodies ~show:Path.show (of_path ~written:core)
 
 (* Whether a caller's proof can read the body of a function. In the
    function's own package, it reads the body of a function in the logic,
@@ -106,7 +106,8 @@ let without_body (form : Core.t) : Core.t =
    the same whatever the body is. Editing such a body leaves this result
    equal, and no caller is proven again. *)
 let specification =
-  Query.query ~name:"specification" ~phase:Bodies ~show:Resolve.Names.show_key (fun database key ->
+  Query.query ~name:"specification" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
       Option.map
         (fun form ->
           if callers_read_body database ~same_package:true key.path then form else without_body form)
@@ -116,7 +117,7 @@ let specification =
    the body of a function that is not [transparent] leaves this result
    equal, so no proof in a package that depends on this one runs again. *)
 let exported_specification =
-  Query.query ~name:"exported_specification" ~phase:Bodies ~show:Resolve.Names.show_key
+  Query.query ~name:"exported_specification" ~phase:Phases.bodies ~show:Resolve.Names.show_key
     (fun database key ->
       Option.map
         (fun form ->
@@ -127,16 +128,17 @@ let exported_specification =
 (* As [core_of_path], for what a caller's proof reads of the function or
    method at a path. *)
 let specification_of_path =
-  Query.query ~name:"specification_of_path" ~phase:Bodies ~show:Path.show
+  Query.query ~name:"specification_of_path" ~phase:Phases.bodies ~show:Path.show
     (of_path ~written:specification)
 
 let exported_specification_of_path =
-  Query.query ~name:"exported_specification_of_path" ~phase:Bodies ~show:Path.show
+  Query.query ~name:"exported_specification_of_path" ~phase:Phases.bodies ~show:Path.show
     (of_path ~written:exported_specification)
 
 (* The packages whose [impl]s met a bound in a definition. *)
 let evidence =
-  Query.query ~name:"evidence" ~phase:Bodies ~show:Resolve.Names.show_key (fun database key ->
+  Query.query ~name:"evidence" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
       match Query.demand database checked key with
       | Some (result : result) -> result.evidence
       | None -> [])

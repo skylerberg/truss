@@ -226,6 +226,8 @@ type context = {
   home : Names.key;  (** The definition being proven, whose spans and obligations are in it. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
   mutable counters : Costs.counter list;  (** What the code proven counts, for its cost clauses. *)
+  mutable amortized : string list;
+      (** The keys of the counters the definition proven has an amortized bound on. *)
   mutable own_constants : (string * Costs.constants) list;
       (** By counter, the constants of the definition's own [O(...)] bounds, which a call back into
           it assumes. *)
@@ -751,6 +753,20 @@ let type_of context frame (node : expression) = substituted context frame node.t
 let local_type context frame local =
   Option.map (substituted context frame) (Locals.find_opt local frame.types)
 
+(* Whether a term mentions what a value's potential is: a type's potential,
+   or what a growable buffer has saved, which a type that holds one, as a
+   [String] does in its own package, unfolds to. *)
+let mentions_potential term =
+  let rec walk = function
+    | L.Apply (name, arguments) ->
+        String.starts_with ~prefix:"potential." name
+        || String.starts_with ~prefix:"slack." name
+        || List.exists walk arguments
+    | L.Forall (_, body) | L.Exists (_, body) -> walk body
+    | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> false
+  in
+  walk term
+
 (* Paths *)
 
 let restrict frame condition = { frame with condition = L.( &&& ) frame.condition condition }
@@ -823,6 +839,35 @@ let join context ?value_type frames =
             | None -> term)
           first.locals
       in
+      (* [self] and what a lending or yielding method has handed out change
+         along paths too, like locals. *)
+      let self =
+        match first.self_type with
+        | Some ty -> (
+            match define "self" (sort_of context ty) (fun frame _ -> frame.self) with
+            | Some joined -> Some joined
+            | None -> first.self)
+        | None -> first.self
+      in
+      (* What a path spent, in terms of the joined values: on that path each
+         is the path's own, so the potential of a value it changed is the
+         potential of the joined value, which the other paths name too. *)
+      let in_joined (frame : frame) amount =
+        let renamed =
+          Locals.fold
+            (fun id joined renamed ->
+              match Locals.find_opt id frame.locals with
+              | Some own when own <> joined -> (own, joined) :: renamed
+              | _ -> renamed)
+            locals []
+        in
+        let renamed =
+          match (frame.self, self) with
+          | Some own, Some joined when own <> joined -> (own, joined) :: renamed
+          | _ -> renamed
+        in
+        List.fold_left (fun amount (from, into) -> L.replace ~from ~into amount) amount renamed
+      in
       (* A counter where paths join is what the path taken spent: a fresh
          symbol defined as a choice between them, which a loop's bound on
          one iteration can see through. *)
@@ -833,7 +878,8 @@ let join context ?value_type frames =
               List.map
                 (fun ((frame : frame), _) ->
                   ( frame.condition,
-                    match List.assoc_opt key frame.spent with Some t -> t | None -> term ))
+                    in_joined frame
+                      (match List.assoc_opt key frame.spent with Some t -> t | None -> term) ))
                 frames
             in
             match values with
@@ -848,7 +894,10 @@ let join context ?value_type frames =
                         last earlier
                   | [] -> term
                 in
-                if L.mentions first.bound choice then (key, choice)
+                (* A choice that names a potential stays a choice, so that a
+                   loop sees the potential each path changed, which the
+                   potential the loop holds cancels. *)
+                if L.mentions first.bound choice || mentions_potential choice then (key, choice)
                 else
                   let symbol = fresh context first "spent" L.Int in
                   fact context first (L.equal symbol choice);
@@ -859,16 +908,6 @@ let join context ?value_type frames =
         match value_type with
         | Some ty -> define "value" (sort_of context ty) (fun _ value -> value)
         | None -> None
-      in
-      (* [self] and what a lending or yielding method has handed out change
-         along paths too, like locals. *)
-      let self =
-        match first.self_type with
-        | Some ty -> (
-            match define "self" (sort_of context ty) (fun frame _ -> frame.self) with
-            | Some joined -> Some joined
-            | None -> first.self)
-        | None -> first.self
       in
       let handed_out =
         match context.hands_out with
@@ -1439,7 +1478,10 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | String text -> Some (frame, text_value context frame (type_of context frame node) text)
   | Template { literals; call = made } -> Some (tagged_template context frame node literals made)
   | Use place -> Some (place_value context frame place)
-  | Copy operand -> Some (operand_value context frame operand)
+  | Copy operand ->
+      let ty = operand_type context frame operand in
+      let frame, term = operand_value context frame operand in
+      Some (copied context frame ty term, term)
   | Function_value { path; type_arguments } ->
       Some (frame, global_value context frame node path type_arguments)
   | Value_parameter parameter -> Some (frame, value_term context frame (Value_parameter parameter))
@@ -4103,19 +4145,25 @@ and text_value context frame (ty : T.ty) text =
         { frame with condition = L.Boolean true; bound = []; binders = [] }
         ty made;
       let byte = T.builtin UInt8 in
-      match model_of context ty made ~element:byte with
-      | Some model ->
-          context.facts <-
-            L.equal (sequence_length context byte model) (L.int (String.length text))
-            :: context.facts;
-          String.iteri
-            (fun index character ->
-              match sequence_at context byte model (L.int index) with
-              | Some at ->
-                  context.facts <- L.equal at (L.int (Char.code character)) :: context.facts
-              | None -> ())
-            text
-      | None -> ());
+      let holds model =
+        context.facts <-
+          L.equal (sequence_length context byte model) (L.int (String.length text)) :: context.facts;
+        String.iteri
+          (fun index character ->
+            match sequence_at context byte model (L.int index) with
+            | Some at -> context.facts <- L.equal at (L.int (Char.code character)) :: context.facts
+            | None -> ())
+          text
+      in
+      Option.iter holds (model_of context ty made ~element:byte);
+      (* Where its field is seen, the text is also its storage's, which is
+         what its potential is read from. *)
+      match constructors context ty with
+      | Some [ (None, [ (field, Named { path; arguments = [ T.Type element ] }) ]) ]
+        when Intrinsic.builtin_of_path path = Some Storage && T.equal element byte ->
+          holds
+            (buffer_model context Storage byte (L.Apply (selector_name ty None field, [ made ])))
+      | _ -> ());
   made
 
 (* A value's model, by the standard library's [impl] of [Model] for its
@@ -5731,6 +5779,10 @@ and promised_amount context frame (counter : Costs.counter) (bound : bound) ~eva
       if exact_target then g else bounded_amount context frame g
   | (Order_of _ | Finite), _ -> unknown_amount context frame counter
 
+(* How much a potential grew, or zero where it fell or cannot be read. *)
+and growth change =
+  try Costs.at_least_zero (change ()) with Unsupported _ | Foreign_unsupported _ -> Costs.zero
+
 (* What a call to a callee whose clauses are read spends of a counter: its
    clause about the counter's resource, from its first part that has one.
    A call back into the definition proven, through a cycle, assumes its
@@ -5774,8 +5826,23 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
           ~change:
             (match (cost.amortized, change) with true, Some change -> change () | _ -> Costs.zero)
   in
+  (* A callee with a plain and an amortized bound on the same resource is
+     counted by the one of the kind the definition proven promises: an
+     amortized bound pays for the potential the call leaves, which an
+     amortized caller's own bound is about, and a plain one is all a plain
+     caller needs. *)
   let first_clauses () =
-    List.find_map (fun part -> match clauses_of part with [] -> None | found -> Some found) parts
+    let amortized_first = Option.is_some change && List.mem (Costs.key counter) context.amortized in
+    List.find_map
+      (fun part ->
+        match clauses_of part with
+        | [] -> None
+        | found ->
+            let amortized, plain =
+              List.partition (fun (_, _, (cost : Core.cost)) -> cost.amortized) found
+            in
+            Some (if amortized_first then amortized @ plain else plain @ amortized))
+      parts
   in
   match counter.resource with
   | Calls target when call_reaches context after uses values target = L.Boolean false -> Costs.zero
@@ -5799,9 +5866,17 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
           List.fold_left (fun total clause -> Costs.plus total (amount clause)) Costs.zero found
       | _ -> spent_where reaches (unknown_amount context after counter))
   | _ -> (
+      (* [time(T.method)] is the most one call takes plus the potential it
+         makes, so a call that makes potential has paid for it. *)
+      let within_time time =
+        Costs.minus
+          (Costs.plus time (L.int 1))
+          (match change with Some change -> growth change | None -> Costs.zero)
+      in
       match (first_clauses (), counter.resource, counter.counting, ends_in) with
+      | Some ((_, _, { bound = Finite; _ }) :: _), Time, Units, Some time -> within_time time
       | Some (clause :: _), _, _, _ -> amount clause
-      | _, Time, Units, Some time -> Costs.plus time (L.int 1)
+      | _, Time, Units, Some time -> within_time time
       | _ -> unknown_amount context after counter)
 
 (* Whether a call can reach a [calls] clause's target: a function value
@@ -6422,16 +6497,45 @@ and power_of context frame base exponent =
 and method_time context frame (callee : callee) =
   match callee with
   | Trait_method { trait; name; receiver; self_type; _ } ->
-      let self_type = substituted context frame self_type in
-      let symbol =
-        Printf.sprintf "time.method.%s"
-          (Path.show (Path.Method { owner = trait.trait; name; receiver }))
-        ^ "[" ^ type_key self_type ^ "]"
-      in
-      declare context (L.Constant (symbol, L.Int));
-      fact context frame (L.Apply ("<=", [ L.int 1; L.Symbol symbol ]));
-      L.Symbol symbol
+      trait_method_time context frame
+        (Path.Method { owner = trait.trait; name; receiver })
+        (substituted context frame self_type)
   | _ -> raise (Foreign_unsupported "the time of what is not a trait's method")
+
+and trait_method_time context frame (method_ : Path.t) self_type =
+  let symbol =
+    Printf.sprintf "time.method.%s" (Path.show method_) ^ "[" ^ type_key self_type ^ "]"
+  in
+  declare context (L.Constant (symbol, L.Int));
+  fact context frame (L.Apply ("<=", [ L.int 1; L.Symbol symbol ]));
+  L.Symbol symbol
+
+(* A built-in copy: of a [Plain] value that holds no potential, a copy of
+   its bits; of any other, a call of [Copyable.copy], which takes
+   [time(T.copy)] and pays for the potential the copy holds, as a trait's
+   method that promises only that it ends does. *)
+and copied context frame ty term =
+  if
+    context.counters = []
+    || Interface.Impls.plain context.database ~bounds:(current_bounds context) ty
+       && not (try has_potential context ty with Foreign_unsupported _ -> true)
+  then frame
+  else
+    spend context frame (fun (counter : Costs.counter) ->
+        match (counter.resource, counter.counting) with
+        | Time, Units ->
+            let time =
+              trait_method_time context frame
+                (Path.Method
+                   { owner = Interface.Impls.copyable_path; name = "copy"; receiver = Read })
+                ty
+            in
+            let made =
+              try potential context frame ty term
+              with Unsupported _ | Foreign_unsupported _ -> Costs.zero
+            in
+            Costs.minus (Costs.plus time (L.int 1)) made
+        | _ -> unknown_amount context frame counter)
 
 (* Loops' costs. A loop with a [cost] clause about a counter is bounded by
    it: what the loop has spent so far is within the clause at its head, on
@@ -6564,20 +6668,6 @@ and loop_entry context frame costs =
       | Per_iteration _ -> ())
     costs
 
-(* Whether a term mentions what a value's potential is: a type's potential,
-   or what a growable buffer has saved, which a type that holds one, as a
-   [String] does in its own package, unfolds to. *)
-and mentions_potential term =
-  let rec walk = function
-    | L.Apply (name, arguments) ->
-        String.starts_with ~prefix:"potential." name
-        || String.starts_with ~prefix:"slack." name
-        || List.exists walk arguments
-    | L.Forall (_, body) | L.Exists (_, body) -> walk body
-    | L.Symbol _ | L.Integer _ | L.Boolean _ | L.Bits _ -> false
-  in
-  walk term
-
 (* After the body: each bound on one iteration is worked out from what the
    iterations that ended spent, and every iteration, ended or left by
    [break], is shown to be within its counter's bound. An iteration that
@@ -6605,25 +6695,35 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
           let plain (frame : frame) =
             Costs.since ~start:(spent_at head cost.key) (spent_at frame cost.key)
           in
-          let per, spent_in =
+          (* Where an iteration spends or saves potential, what it spends is
+             bounded with the potential the loop holds, which telescopes,
+             or, where that is not found, by itself; otherwise by itself. *)
+          let held_rule =
             match (per_held, cost.held) with
             | Some (per_held, _), Some held
               when List.exists (fun f -> mentions_potential (plain f)) frames ->
-                ( per_held,
-                  fun (frame : frame) ->
-                    Costs.normalize
-                      (Costs.plus (plain frame) (Costs.minus (held frame) (held head))) )
-            | _ -> (per, plain)
-          in
-          let spent = List.map spent_in frames in
-          let most =
-            match spent with
-            | [] -> Costs.zero
-            | first :: rest -> List.fold_left Costs.larger first rest
+                [
+                  ( per_held,
+                    fun (frame : frame) ->
+                      Costs.normalize
+                        (Costs.plus (plain frame) (Costs.minus (held frame) (held head))) );
+                ]
+            | _ -> []
           in
           let facts = facts @ List.map (fun (frame : frame) -> frame.condition) frames in
-          match Costs.bound_on ~varies:(made_since context mark) ~facts most with
-          | Some bound ->
+          let bounded (per, spent_in) =
+            let spent = List.map spent_in frames in
+            let most =
+              match spent with
+              | [] -> Costs.zero
+              | first :: rest -> List.fold_left Costs.larger first rest
+            in
+            Option.map
+              (fun bound -> (per, spent, bound))
+              (Costs.bound_on ~varies:(made_since context mark) ~facts most)
+          in
+          match List.find_map bounded (held_rule @ [ (per, plain) ]) with
+          | Some (per, spent, bound) ->
               fact context head (L.equal per bound);
               List.iter2
                 (fun (frame : frame) spent ->
@@ -8245,6 +8345,7 @@ let new_context database ~home ~current ~terminates ~measures =
     handing = None;
     parameters = [];
     counters = [];
+    amortized = [];
     own_constants = [];
     groups = [];
     fresh_order = Hashtbl.create 64;
@@ -8538,6 +8639,10 @@ let function_ ?(proof = false) ?(updating_helper = false) ?inherited database (s
   context.counters <-
     distinct_counters
       (List.map (fun promise -> promise.counter) promised @ loop_counters start.locals body);
+  context.amortized <-
+    List.filter_map
+      (fun promise -> if promise.clause.amortized then Some (Costs.key promise.counter) else None)
+      promised;
   let start =
     {
       start with

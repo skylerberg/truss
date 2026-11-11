@@ -956,8 +956,8 @@ let check state =
         | None, _, _ -> ())
 
 let diagnostics =
-  Query.query ~name:"interface_diagnostics" ~phase:Interfaces ~saved:true ~show:Names.show_key
-    (fun database key ->
+  Query.query ~name:"interface_diagnostics" ~phase:Phases.interfaces ~saved:true
+    ~show:Names.show_key (fun database key ->
       match
         (Query.demand database Names.definition key, Query.demand database Environment.lowered key)
       with

@@ -278,7 +278,7 @@ let bounds_of (context : Lower.context) =
     (Hashtbl.fold (fun parameter bounds found -> (parameter, bounds) :: found) context.bounds [])
 
 let header =
-  Query.query ~name:"header" ~phase:Interfaces ~show:Names.show_key (fun database key ->
+  Query.query ~name:"header" ~phase:Phases.interfaces ~show:Names.show_key (fun database key ->
       match
         (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
       with
@@ -553,7 +553,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
    query depends on the other. *)
 let rec lowered =
   lazy
-    (Query.query ~name:"lowered" ~phase:Interfaces ~show:Names.show_key (fun database key ->
+    (Query.query ~name:"lowered" ~phase:Phases.interfaces ~show:Names.show_key (fun database key ->
          match
            (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
          with
@@ -574,7 +574,7 @@ let lowered = Lazy.force lowered
 
 (* The interface a path names, from its definition with ordinal 0. *)
 let interface =
-  Query.query ~name:"interface" ~phase:Interfaces ~show:Path.show ~saved:true
+  Query.query ~name:"interface" ~phase:Phases.interfaces ~show:Path.show ~saved:true
     ~about:(fun path -> Some { Query.path; part = Some "interface" })
     (fun database path ->
       match Query.demand database Summary.key path with
@@ -586,7 +586,7 @@ let interface =
    [None], and of each variant of a sum type under its name. A derived
    [Ordered] compares fields in this order, and nothing else reads it. *)
 let declared_fields =
-  Query.query ~name:"declared_fields" ~phase:Interfaces ~show:Path.show (fun database path ->
+  Query.query ~name:"declared_fields" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       let names (written : field list) =
         List.filter_map
           (fun (field : field) ->
@@ -651,7 +651,7 @@ let builtin_shape builtin : T.type_interface =
    a type, and the [Error] shape for a type whose definition did not
    parse. *)
 let type_interface =
-  Query.query ~name:"type_interface" ~phase:Interfaces ~show:Path.show ~saved:true
+  Query.query ~name:"type_interface" ~phase:Phases.interfaces ~show:Path.show ~saved:true
     ~about:(fun path -> Some { Query.path; part = Some "shape" })
     (fun database path ->
       match Intrinsic.builtin_of_path path with
@@ -665,7 +665,7 @@ let type_interface =
 
 (* The signature of a function or a method, wherever it is written. *)
 let signature =
-  Query.query ~name:"signature" ~phase:Interfaces ~show:Path.show ~saved:true
+  Query.query ~name:"signature" ~phase:Phases.interfaces ~show:Path.show ~saved:true
     ~about:(fun path -> Some { Query.path; part = Some "signature" })
     (fun database (path : Path.t) ->
       match Query.demand database interface path with
@@ -694,13 +694,13 @@ let signature_or_report database (path : Path.t) =
       | _ -> broken path)
 
 let trait_interface =
-  Query.query ~name:"trait_interface" ~phase:Interfaces ~show:Path.show (fun database path ->
+  Query.query ~name:"trait_interface" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Trait_interface trait) -> Some trait
       | _ -> None)
 
 let impl_interface =
-  Query.query ~name:"impl_interface" ~phase:Interfaces ~show:Path.show (fun database path ->
+  Query.query ~name:"impl_interface" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Impl_interface impl) -> Some impl
       | Some (Error_interface report) ->
@@ -717,7 +717,7 @@ let impl_interface =
       | _ -> None)
 
 let constant_type =
-  Query.query ~name:"constant_type" ~phase:Interfaces ~show:Path.show (fun database path ->
+  Query.query ~name:"constant_type" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       match Query.demand database interface path with
       | Some (Constant_interface constant) -> Some constant.constant_type
       | Some (Error_interface report) -> Some (T.Error report)

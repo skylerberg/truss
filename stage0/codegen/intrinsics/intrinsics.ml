@@ -107,13 +107,53 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
     emit b (Assign (Storage.length storage, Binary (Add, length storage, amount)))
   in
   let lent place = Some place in
+  (* In a checked build, ends the run with a panic where [failed] holds. A
+     checked build does not wait for proofs, so it checks each operation
+     that is undefined in C, or gives a wrong value, where its precondition
+     does not hold. These are the only checks: no [requires] clause is
+     evaluated when a program runs. *)
+  let panic_if failed message =
+    if checks then begin
+      let holds = local b (Raw Bool) in
+      emit b (Assign (at holds, failed));
+      panic_when (Copy (at holds)) message
+    end
+  in
+  let check_index index count =
+    panic_if (Binary (Greater_equal, index, count)) "index out of bounds"
+  in
+  (* How many more elements a storage has room for. A static storage has a
+     capacity below its length, and has none. *)
+  let room storage : Lir.operand =
+    let room = local b ~name:"room" (Value types.usize) in
+    let any = local b (Raw Bool) in
+    emit b (Assign (at room, Use (usize 0)));
+    emit b (Assign (at any, Binary (Greater, Copy (Storage.capacity storage), length storage)));
+    when_ b
+      (Copy (at any))
+      (fun () ->
+        emit b
+          (Assign (at room, Binary (Subtract, Copy (Storage.capacity storage), length storage))));
+    Copy (at room)
+  in
   match (operation : Intrinsic.operation) with
-  | Storage_at -> lent (element_at (place (argument 0)) (value 1))
+  | Storage_at ->
+      let storage = place (argument 0) in
+      check_index (value 1) (length storage);
+      lent (element_at storage (value 1))
   | Storage_at_mut ->
+      check_index (value 1) (length (place (argument 0)));
       own (argument 0);
       lent (element_at (place (argument 0)) (value 1))
-  | View_at | View_at_mut -> lent (Storage.view_at (place (argument 0)) (value 1))
-  | Array_at_mut -> lent (place (argument 0) / Index (value 1))
+  | View_at | View_at_mut ->
+      let view = place (argument 0) in
+      check_index (value 1) (view_length view);
+      lent (Storage.view_at view (value 1))
+  | Array_at_mut ->
+      (match value_arguments with
+      | [ count ] -> check_index (value 1) (Constant (Integer (USize, count)))
+      | _ -> bug "array_at_mut without the array's length");
+      lent (place (argument 0) / Index (value 1))
   | _ ->
       let integer_argument () =
         match (Memory_layout.of_type env (type_argument 0)).form with
@@ -269,73 +309,101 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
       | Bit_or -> binary Bit_or
       | Bit_xor -> binary Bit_xor
       | Complement -> unary Complement
-      | Shift_left -> binary Shift_left
-      | Shift_right -> binary Shift_right
-      | Convert -> set (Convert (value 0, scalar env (type_argument 1)))
-      | Fits -> (
+      | Shift_left | Shift_right ->
+          (* A shift by the type's width or more, or by a negative amount,
+             is undefined in C. *)
+          (match integer_argument () with
+          | Some integer ->
+              let bits = 8 * Memory_layout.integer_size (Memory_layout.target env) integer in
+              let constant number : Lir.operand = Constant (Integer (integer, Z.of_int number)) in
+              (match integer with
+              | Int8 | Int16 | Int32 | Int64 | ISize ->
+                  panic_if (Binary (Less, value 1, constant 0)) "shift amount out of range"
+              | _ -> ());
+              panic_if (Binary (Greater_equal, value 1, constant bits)) "shift amount out of range"
+          | None -> ());
+          binary (if operation = Shift_left then Shift_left else Shift_right)
+      | Convert | Fits -> (
           (* Whether a value of [Source] fits [Target]: a test of each bound of
          [Target] that [Source] can pass, each of which [Source] can hold. *)
           let target = Memory_layout.target env in
-          match (scalar env (type_argument 0), scalar env (type_argument 1)) with
-          | Integer source, Integer target_integer ->
-              let source_low, source_high =
-                integer_range source (Memory_layout.integer_size target source)
-              in
-              let low, high =
-                integer_range target_integer (Memory_layout.integer_size target target_integer)
-              in
-              let constant value = Lir.Constant (Integer (source, value)) in
-              let tests =
-                (if Z.lt source_low low then [ (Lir.Greater_equal, low) ] else [])
-                @ if Z.gt source_high high then [ (Lir.Less_equal, high) ] else []
-              in
-              let results =
-                List.map
-                  (fun (op, bound) ->
-                    let result = local b (Raw Bool) in
-                    emit b (Assign (at result, Binary (op, value 0, constant bound)));
-                    Lir.Copy (at result))
-                  tests
-              in
-              set
-                (match results with
+          let fits () : Lir.rvalue =
+            match (scalar env (type_argument 0), scalar env (type_argument 1)) with
+            | Integer source, Integer target_integer -> (
+                let source_low, source_high =
+                  integer_range source (Memory_layout.integer_size target source)
+                in
+                let low, high =
+                  integer_range target_integer (Memory_layout.integer_size target target_integer)
+                in
+                let constant value = Lir.Constant (Integer (source, value)) in
+                let tests =
+                  (if Z.lt source_low low then [ (Lir.Greater_equal, low) ] else [])
+                  @ if Z.gt source_high high then [ (Lir.Less_equal, high) ] else []
+                in
+                let results =
+                  List.map
+                    (fun (op, bound) ->
+                      let result = local b (Raw Bool) in
+                      emit b (Assign (at result, Binary (op, value 0, constant bound)));
+                      Lir.Copy (at result))
+                    tests
+                in
+                match results with
                 | [] -> Use (Constant (Bool true))
                 | [ only ] -> Use only
                 | [ first; second ] -> Binary (Bit_and, first, second)
                 | _ -> bug "more than two bounds")
-          | ((Float32 | Float64) as source), Integer target_integer ->
-              (* A float fits an integer type where it is a number and the
+            | ((Float32 | Float64) as source), Integer target_integer ->
+                (* A float fits an integer type where it is a number and the
                  whole number it is cut down to is in the type's range: it
                  is above the least value less one, and below the greatest
                  plus one. The second is a power of two, which every float
                  type holds exactly. Where the first is not held exactly,
                  no float lies between it and the least value. A float
                  that is not a number passes neither test. *)
-              let low, high =
-                integer_range target_integer (Memory_layout.integer_size target target_integer)
-              in
-              let held bound =
-                match source with
-                | Float32 ->
-                    Int32.float_of_bits (Int32.bits_of_float (Z.to_float bound)) = Z.to_float bound
-                    && Z.equal (Z.of_float (Z.to_float bound)) bound
-                | _ -> Z.equal (Z.of_float (Z.to_float bound)) bound
-              in
-              let constant bound : Lir.operand =
-                match source with
-                | Float32 -> Constant (Float32 (Int32.bits_of_float (Z.to_float bound)))
-                | _ -> Constant (Float64 (Int64.bits_of_float (Z.to_float bound)))
-              in
-              let above = local b (Raw Bool) and below = local b (Raw Bool) in
-              let under = Z.pred low in
-              emit b
-                (Assign
-                   ( at above,
-                     if held under then Binary (Ieee_less, constant under, value 0)
-                     else Binary (Ieee_less_equal, constant low, value 0) ));
-              emit b (Assign (at below, Binary (Ieee_less, value 0, constant (Z.succ high))));
-              set (Binary (Bit_and, Copy (at above), Copy (at below)))
-          | _ -> bug "fits between these types")
+                let low, high =
+                  integer_range target_integer (Memory_layout.integer_size target target_integer)
+                in
+                let held bound =
+                  match source with
+                  | Float32 ->
+                      Int32.float_of_bits (Int32.bits_of_float (Z.to_float bound))
+                      = Z.to_float bound
+                      && Z.equal (Z.of_float (Z.to_float bound)) bound
+                  | _ -> Z.equal (Z.of_float (Z.to_float bound)) bound
+                in
+                let constant bound : Lir.operand =
+                  match source with
+                  | Float32 -> Constant (Float32 (Int32.bits_of_float (Z.to_float bound)))
+                  | _ -> Constant (Float64 (Int64.bits_of_float (Z.to_float bound)))
+                in
+                let above = local b (Raw Bool) and below = local b (Raw Bool) in
+                let under = Z.pred low in
+                emit b
+                  (Assign
+                     ( at above,
+                       if held under then Binary (Ieee_less, constant under, value 0)
+                       else Binary (Ieee_less_equal, constant low, value 0) ));
+                emit b (Assign (at below, Binary (Ieee_less, value 0, constant (Z.succ high))));
+                Binary (Bit_and, Copy (at above), Copy (at below))
+            | _ -> bug "fits between these types"
+          in
+          match (operation, scalar env (type_argument 0), scalar env (type_argument 1)) with
+          | Fits, _, _ -> set (fits ())
+          | _, (Float32 | Float64), Integer _ ->
+              (* A float that is out of an integer type's range has no
+                 conversion to it in C. A conversion between integer types
+                 is defined for every value: it keeps the low bits, which
+                 the standard library relies on, as where it hashes a
+                 negative number. *)
+              if checks then begin
+                let within = local b (Raw Bool) in
+                emit b (Assign (at within, fits ()));
+                panic_if (Unary (Not, Copy (at within))) "conversion out of range"
+              end;
+              set (Convert (value 0, scalar env (type_argument 1)))
+          | _ -> set (Convert (value 0, scalar env (type_argument 1))))
       | Square_root -> into Square_root
       | Fused_multiply_add -> into Fused_multiply_add
       | Floor -> into Floor
@@ -359,29 +427,49 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           set (Use (Move (at result)))
       | Storage_length -> set (Use (length (place (argument 0))))
       | Storage_capacity -> set (Use (Copy (Storage.capacity (place (argument 0)))))
-      | Storage_set_capacity -> set_capacity (place (argument 0)) (value 1)
-      | Storage_lengthen -> add_to_length (place (argument 0)) (value 1)
+      | Storage_set_capacity ->
+          let storage = place (argument 0) in
+          panic_if
+            (Binary (Less, value 1, length storage))
+            "a storage's capacity set to less than its length";
+          set_capacity storage (value 1)
+      | Storage_lengthen ->
+          (* The new elements are what the C library wrote into the room. *)
+          let storage = place (argument 0) in
+          if checks then
+            panic_if
+              (Binary (Greater, value 1, room storage))
+              "a storage lengthened to more than its capacity";
+          add_to_length storage (value 1)
       | Storage_shorten ->
           (* Static storage stays static: it is told apart by its capacity,
              and nothing is written to its elements. *)
           let storage = place (argument 0) in
-          if checks then begin
-            let longer = local b (Raw Bool) in
-            emit b (Assign (at longer, Binary (Greater, value 1, length storage)));
-            panic_when (Copy (at longer)) "a storage shortened to more than its length"
-          end;
+          panic_if
+            (Binary (Greater, value 1, length storage))
+            "a storage shortened to more than its length";
           emit b (Assign (Storage.length storage, Use (value 1)))
       | Storage_push ->
           let storage = place (argument 0) in
+          panic_if
+            (Binary (Greater_equal, length storage, Copy (Storage.capacity storage)))
+            "an element pushed to a storage that has no room";
           emit b (Assign (element_at storage (length storage), Use (value 1)));
           add_to_length storage (usize 1)
       | Storage_pop ->
           let storage = place (argument 0) in
+          panic_if
+            (Binary (Equal, length storage, usize 0))
+            "an element popped from an empty storage";
           emit b (Assign (Storage.length storage, Binary (Subtract, length storage, usize 1)));
           set (Use (Move (element_at storage (length storage))))
       | Storage_insert ->
           let storage = place (argument 0) in
           let index = value 1 in
+          panic_if (Binary (Greater, index, length storage)) "index out of bounds";
+          panic_if
+            (Binary (Greater_equal, length storage, Copy (Storage.capacity storage)))
+            "an element inserted into a storage that has no room";
           let after = usize_local "after" in
           let bytes = usize_local "bytes" in
           emit b (Assign (at after, Binary (Add, index, usize 1)));
@@ -397,6 +485,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           emit b (Assign (element_at storage index, Use (value 2)));
           add_to_length storage (usize 1)
       | Storage_remove ->
+          check_index (value 1) (length (place (argument 0)));
           own (argument 0);
           let storage = place (argument 0) in
           let index = value 1 in
@@ -415,6 +504,8 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
             ];
           emit b (Assign (Storage.length storage, Binary (Subtract, length storage, usize 1)))
       | Storage_swap ->
+          check_index (value 1) (length (place (argument 0)));
+          check_index (value 2) (length (place (argument 0)));
           own (argument 0);
           let storage = place (argument 0) in
           let held = local b (Value (element ())) in
@@ -511,6 +602,8 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                ~elements
                ~length:(Constant (Integer (USize, count))))
       | View_swap ->
+          check_index (value 1) (view_length (place (argument 0)));
+          check_index (value 2) (view_length (place (argument 0)));
           let element_at index = Storage.view_at (place (argument 0)) index in
           let held = local b (Value (element ())) in
           emit b (Assign (at held, Use (Move (element_at (value 1)))));
@@ -577,6 +670,8 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           set (Convert (Copy (Storage.view_elements (place (argument 0))), Integer USize))
       | View_slice ->
           let view = place (argument 0) in
+          panic_if (Binary (Greater, value 1, value 2)) "slice out of bounds";
+          panic_if (Binary (Greater, value 2, view_length view)) "slice out of bounds";
           let count = usize_local "count" in
           emit b (Assign (at count, Binary (Subtract, value 2, value 1)));
           set
@@ -749,6 +844,97 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                 | Fixed number -> number_constant number)
               parameters
           in
+          (* A checked build makes sure of what the prover holds each call
+             to: a view has the elements that the function reads, and a
+             storage has the room that it writes into, or the elements that
+             it changes. A function that reads up to a zero is given
+             elements that end with one. *)
+          if checks then begin
+            let position = ref 0 in
+            let passed =
+              List.concat_map
+                (fun (name, (passes : Libc.passes)) ->
+                  match passes with
+                  | Value _ | Elements _ | Room _ | Elements_to_change _ ->
+                      let index = !position in
+                      incr position;
+                      [ (name, Some passes, index) ]
+                  | Written (_, names) ->
+                      (* A count can be one of a structure's numbers, as the
+                         length that [getsockopt] is given and writes. *)
+                      List.map
+                        (fun name ->
+                          let index = !position in
+                          incr position;
+                          (name, None, index))
+                        names
+                  | Always _ | Fixed _ -> [])
+                parameters
+            in
+            let as_usize operand : Lir.operand =
+              let count = usize_local "count" in
+              emit b (Assign (at count, Convert (operand, Integer USize)));
+              Copy (at count)
+            in
+            let counted (extent : Libc.extent) : Lir.operand option =
+              match extent with
+              | Counted { by; each } -> (
+                  match List.find_opt (fun (name, _, _) -> name = by) passed with
+                  | Some (_, _, index) ->
+                      let count = as_usize (value index) in
+                      if each = 1 then Some count
+                      else begin
+                        let scaled = usize_local "count" in
+                        emit b (Assign (at scaled, Binary (Multiply, count, usize each)));
+                        Some (Copy (at scaled))
+                      end
+                  | None -> bug "a C library row counts by %s, which it does not take" by)
+              | Exactly elements -> Some (usize elements)
+              | Number number -> Some (as_usize (number_constant number))
+              | Through_zero -> None
+            in
+            List.iter
+              (fun (_, (passes : Libc.passes option), index) ->
+                match passes with
+                | Some (Room (_, extent)) ->
+                    Option.iter
+                      (fun count ->
+                        panic_if
+                          (Binary (Greater, count, room (place (argument index))))
+                          "a call of the C library with less room than it writes")
+                      (counted extent)
+                | Some (Elements_to_change (_, extent)) ->
+                    Option.iter
+                      (fun count ->
+                        panic_if
+                          (Binary (Greater, count, length (place (argument index))))
+                          "a call of the C library with fewer elements than it changes")
+                      (counted extent)
+                | Some (Elements (element, extent)) -> (
+                    let view = place (argument index) in
+                    match counted extent with
+                    | Some count ->
+                        panic_if
+                          (Binary (Greater, count, view_length view))
+                          "a call of the C library with fewer elements than it reads"
+                    | None ->
+                        let message =
+                          "a call of the C library with text that does not end with a zero"
+                        in
+                        let zero : Lir.operand =
+                          match scalar env (ground element) with
+                          | Integer integer -> Constant (Integer (integer, Z.zero))
+                          | _ -> bug "a C library row reads up to a zero that is not an integer"
+                        in
+                        panic_if (Binary (Equal, view_length view, usize 0)) message;
+                        let last = usize_local "last" in
+                        emit b (Assign (at last, Binary (Subtract, view_length view, usize 1)));
+                        panic_if
+                          (Binary (Not_equal, Copy (Storage.view_at view (Copy (at last))), zero))
+                          message)
+                | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
+              passed
+          end;
           let target = Lir.Foreign (Libc.declaration (Memory_layout.target env).system function_) in
           (* A call that can block is bracketed, so that the runtime knows
              the thread is blocked while it lasts. *)

@@ -65,7 +65,7 @@ let rec fresh_context lowering database =
 (* A pulled method's version, with its drops elaborated. *)
 and pulled =
   lazy
-    (Query.query ~name:"pulled" ~phase:Lowering ~saved:true ~portable:true
+    (Query.query ~name:"pulled" ~phase:Phases.lowering ~saved:true ~portable:true
        ~show:(fun (lowering, yielding) ->
          show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
        (fun database (lowering, yielding) ->
@@ -138,7 +138,7 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
    running code is not a function of what a query reads. *)
 and lowered =
   lazy
-    (Query.query ~name:"lowered_instance" ~phase:Lowering ~saved:true ~portable:true
+    (Query.query ~name:"lowered_instance" ~phase:Phases.lowering ~saved:true ~portable:true
        ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
        (fun database (lowering, key) ->
          Compiler_bug.within ~stage:"Compile"
@@ -165,7 +165,8 @@ let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_s
    worked out by running code refers to the evaluator that works it out,
    whose code is what decides its value. *)
 let linked =
-  Query.query ~name:"linked" ~phase:Linking ~show:show_instance (fun database (lowering, key) ->
+  Query.query ~name:"linked" ~phase:Phases.linking ~show:show_instance
+    (fun database (lowering, key) ->
       match Query.demand database (Lazy.force lowered) (lowering, key) with
       | Evaluate (path, _) ->
           (Blake3.hash "a constant worked out by its evaluator", [ Instance.Evaluator path ])
@@ -175,12 +176,12 @@ let linked =
           (Reachable.own_hash ~references compiled, references))
 
 let own_hash =
-  Query.query ~name:"own_hash" ~phase:Linking ~saved:true ~portable:true ~show:show_instance
+  Query.query ~name:"own_hash" ~phase:Phases.linking ~saved:true ~portable:true ~show:show_instance
     (fun database key -> fst (Query.demand database linked key))
 
 let references =
-  Query.query ~name:"references" ~phase:Linking ~saved:true ~portable:true ~show:show_instance
-    (fun database key -> snd (Query.demand database linked key))
+  Query.query ~name:"references" ~phase:Phases.linking ~saved:true ~portable:true
+    ~show:show_instance (fun database key -> snd (Query.demand database linked key))
 
 (* The tests and programs whose keys have been asked for. The instances
    they reach are those searched for groups that reach each other, so this
@@ -193,8 +194,14 @@ let roots : (lowering, Instance.key list) Query.input =
    reach. It reads what every such instance refers to, and comes out the
    same unless a group forms or changes, so only then does it cost anything
    after it. *)
+(* The roots with more wanted: what a driver sets the input to before it
+   asks for those instances' keys. *)
+let add_roots database lowering wanted =
+  List.sort_uniq Instance.compare
+    (wanted @ Option.value (Query.find database roots lowering) ~default:[])
+
 let recursion =
-  Query.query ~name:"recursion" ~phase:Recursion ~show:show_lowering
+  Query.query ~name:"recursion" ~phase:Phases.recursion ~show:show_lowering
     ~equal:(Reachable.Keys.equal (List.equal Instance.equal))
     (fun database lowering ->
       let wanted = Option.value (Query.find database roots lowering) ~default:[] in
@@ -207,7 +214,7 @@ let recursion =
 
 (* The group an instance is in, if it is in one. *)
 let group =
-  Query.query ~name:"group" ~phase:Keys ~saved:true ~portable:true ~show:show_instance
+  Query.query ~name:"group" ~phase:Phases.keys ~saved:true ~portable:true ~show:show_instance
     (fun database (lowering, key) ->
       Reachable.Keys.find_opt key (Query.demand database recursion lowering))
 
@@ -216,7 +223,7 @@ let group =
    walk from the instance reaches it. *)
 let rec reach =
   lazy
-    (Query.query ~name:"reach" ~phase:Keys ~saved:true ~portable:true ~show:show_instance
+    (Query.query ~name:"reach" ~phase:Phases.keys ~saved:true ~portable:true ~show:show_instance
        (fun database (lowering, key) ->
          let reach_of other = Query.demand database (Lazy.force reach) (lowering, other) in
          match Query.demand database group (lowering, key) with
@@ -238,7 +245,7 @@ let () = ignore (Lazy.force reach)
    a [typedef] in the C, so the LIR can be the same for two widths while
    results such as [USize.maximum] are not. *)
 let test_key_query =
-  Query.query ~name:"test_key" ~phase:Keys ~saved:true ~portable:true
+  Query.query ~name:"test_key" ~phase:Phases.keys ~saved:true ~portable:true
     ~show:(fun (lowering, path) -> show_lowering lowering ^ " " ^ Path.show path)
     (fun database (lowering, path) ->
       Blake3.hash
