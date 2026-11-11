@@ -443,3 +443,24 @@ test "a decimal is made from a float exactly and becomes the nearest float" {
   assert decimal("2.4703282292062328e-324").to_float64().to_bits() == 1
   assert decimal("0").to_float64().to_bits() == 0
 }
+
+test "decimals are equal and ordered by their value, whatever their scale" {
+  assert decimal("1.0") == decimal("1.00") && decimal("1e2") == decimal("100") && decimal("0") == decimal("0.000")
+  assert decimal("-2.50") == decimal("-2.5") && decimal("1.0") != decimal("1.01") && decimal("1") != decimal("-1")
+  assert decimal("1.5") < decimal("1.51") && decimal("1.5") < decimal("2") && decimal("9.99") < decimal("10")
+  assert decimal("0.5") > decimal("0.49999") && decimal("1e3") > decimal("999.999")
+  assert decimal("-1.5") > decimal("-1.51") && decimal("-10") < decimal("-9.99") && decimal("-0.001") < decimal("0")
+  assert decimal("0") < decimal("0.0001") && decimal("-5") < decimal("5")
+  assert decimal("123.456").compare(decimal("123.4560")) == Ordering.Equal
+  assert decimal("0.1").compare(decimal("0.09")) == Ordering.Greater
+  assert decimal("100").compare(decimal("99")) == Ordering.Greater
+  var values: List[math::Decimal] = [decimal("2.5"), decimal("-1"), decimal("2.05"), decimal("0"), decimal("-1.5"), decimal("25e-1")]
+  mut values.sort()
+  assert reads(values[0], expected: "-1.5") && reads(values[1], expected: "-1") && reads(values[2], expected: "0")
+    && reads(values[3], expected: "2.05") && values[4] == decimal("2.5") && values[5] == decimal("2.5")
+  var first = Hasher.new()
+  var second = Hasher.new()
+  decimal("1.50").hash(mut first)
+  decimal("15e-1").hash(mut second)
+  assert first.finish() == second.finish()
+}

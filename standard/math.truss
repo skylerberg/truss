@@ -1542,21 +1542,129 @@ impl Negate for Decimal {
   }
 }
 
+type DecimalKey(sign: Int64, exponent: Int64, digits: List[UInt8])
+  derives Equal
+
+fn Decimal.key(self) -> DecimalKey
+  cost time finite
+{
+  if self.coefficient.is_zero() {
+    return DecimalKey(sign: 0, exponent: 0, digits: [])
+  }
+  let text = self.coefficient.absolute().format()
+  if text.length() > 4294967295 {
+    intrinsic::crash("a decimal cannot hold that many digits".slice())
+  }
+  let bytes = text.slice()
+  var count = bytes.length()
+  while count > 0 && bytes.byte(count - 1) == 48
+    invariant count <= bytes.length()
+    decreases count
+  {
+    count -= 1
+  }
+  var digits: List[UInt8] = List.with_capacity(count)
+  var index: USize = 0
+  while index < count
+    invariant index <= count
+    decreases count - index
+  {
+    mut digits.push(bytes.byte(index))
+    index += 1
+  }
+  let places: Int64 = intrinsic::convert[USize, Int64](text.length())
+  DecimalKey(
+    sign: self.coefficient.sign(),
+    exponent: places - intrinsic::convert[Int32, Int64](self.scale),
+    digits: own digits,
+  )
+}
+
+fn key_order(first: DecimalKey, second: DecimalKey) -> Ordering
+  cost time finite
+{
+  if first.sign != second.sign {
+    first.sign.compare(second.sign)
+  } else if first.exponent != second.exponent {
+    if first.sign < 0 {
+      second.exponent.compare(first.exponent)
+    } else {
+      first.exponent.compare(second.exponent)
+    }
+  } else if first.sign < 0 {
+    second.digits.compare(first.digits)
+  } else {
+    first.digits.compare(second.digits)
+  }
+}
+
 impl Equal for Decimal {
-  fn equal(self, other: Decimal) -> Bool {
-    todo
+  fn equal(self, other: Decimal) -> Bool
+    ensures result == (self.key() == other.key())
+  {
+    self.key() == other.key()
   }
 }
 
 impl Ordered for Decimal {
-  fn compare(self, other: Decimal) -> Ordering {
-    todo
+  fn compare(self, other: Decimal) -> Ordering
+    ensures result == key_order(self.key(), second: other.key())
+  {
+    key_order(self.key(), second: other.key())
   }
+}
+
+theorem key_order_is_transitive(first: DecimalKey, second: DecimalKey, third: DecimalKey)
+  requires key_order(first, second: second) != Ordering.Greater
+  requires key_order(first: second, second: third) != Ordering.Greater
+  ensures key_order(first, second: third) != Ordering.Greater
+  cost time finite
+{
+  assert first.sign <= second.sign
+  assert second.sign <= third.sign
+  if first.sign == second.sign && second.sign == third.sign {
+    if first.sign < 0 {
+      assert third.exponent <= second.exponent
+      assert second.exponent <= first.exponent
+      if first.exponent == second.exponent && second.exponent == third.exponent {
+        assert third.digits <= second.digits
+        assert second.digits <= first.digits
+        assert third.digits <= first.digits
+      }
+    } else {
+      assert first.exponent <= second.exponent
+      assert second.exponent <= third.exponent
+      if first.exponent == second.exponent && second.exponent == third.exponent {
+        assert first.digits <= second.digits
+        assert second.digits <= third.digits
+        assert first.digits <= third.digits
+      }
+    }
+  }
+}
+
+theorem decimal_order_is_transitive(first: Decimal, second: Decimal, third: Decimal)
+  requires first <= second
+  requires second <= third
+  ensures first <= third
+  cost time finite
+{
+  assert first.compare(second) == key_order(first.key(), second: second.key())
+  assert second.compare(third) == key_order(second.key(), second: third.key())
+  assert first.compare(third) == key_order(first.key(), second: third.key())
+  key_order_is_transitive(first.key(), second: second.key(), third: third.key())
+}
+
+proof Ordered.transitive for Decimal {
+  decimal_order_is_transitive(first, second: second, third: third)
 }
 
 impl Hash for Decimal {
   fn hash(self, hasher: mut Hasher) {
-    todo
+    let key = self.key()
+    key.sign.hash(mut hasher)
+    key.exponent.hash(mut hasher)
+    key.digits.hash(mut hasher)
   }
 }
 
