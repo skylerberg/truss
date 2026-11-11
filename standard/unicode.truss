@@ -1,3 +1,6 @@
+use standard::text::string_slice
+use standard::text::unicode_tables
+
 public type Form = Composed | Decomposed | CompatibilityComposed | CompatibilityDecomposed
   derives Equal
 
@@ -28,26 +31,53 @@ public fn is_normalized(text: StringSlice, form: Form = Form.Composed) -> Bool
 }
 
 public fn fold_case(text: StringSlice) -> String
-  cost time O(text.length())
+  cost time finite
 {
-  todo
+  var output = ""
+  for character in text.characters() {
+    let code = character.code()
+    match unicode_tables::fold_expansion_of(code) {
+      Some(expansion) => string_slice::push_expansion(mut output, expansion: expansion)
+      None => mut output.push_character(character.or_scalar(unicode_tables::folded_of(code)))
+    }
+  }
+  output
 }
 
 public fn equal_ignoring_case(first: StringSlice, second: StringSlice) -> Bool
-  cost time O(first.length() + second.length())
+  cost time finite
 {
-  todo
+  fold_case(first) == fold_case(second)
 }
 
 public fn category(character: Character) -> Category
   cost time O(1)
 {
-  todo
+  match unicode_tables::category_number_of(character.code()) {
+    0 => Category.Letter
+    1 => Category.Mark
+    2 => Category.Number
+    3 => Category.Punctuation
+    4 => Category.Symbol
+    5 => Category.Separator
+    6 => Category.Control
+    7 => Category.Format
+    8 => Category.Surrogate
+    9 => Category.PrivateUse
+    _ => Category.Unassigned
+  }
 }
 
 public fn display_width(character: Character) -> USize
   ensures result <= 2
   cost time O(1)
 {
-  todo
+  let code = character.code()
+  if unicode_tables::is_zero_width(code) {
+    0
+  } else if unicode_tables::is_wide(code) {
+    2
+  } else {
+    1
+  }
 }

@@ -1,5 +1,6 @@
 use standard::intrinsic
 use standard::streams
+use standard::unicode
 
 public opaque type Input(handle: streams::Handle)
 
@@ -242,7 +243,11 @@ public fn strip_styles(text: StringSlice) -> String
 public fn display_width(text: StringSlice) -> USize
   cost time O(text.length())
 {
-  todo
+  var width: USize = 0
+  for character in text.characters() {
+    width = width.saturating_add(unicode::display_width(character))
+  }
+  width
 }
 
 public opaque type CapturedConsole(input: List[String], next_line: USize, output: String, errors: String)
