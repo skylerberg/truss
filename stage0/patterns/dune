@@ -2,6 +2,7 @@
  (name patterns)
  (libraries
   query
+  phases
   path
   types
   core

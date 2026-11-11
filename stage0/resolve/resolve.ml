@@ -70,7 +70,7 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
   | Impl _ | Test _ | Definition_error _ -> None
 
 let resolved =
-  Query.query ~name:"resolved" ~phase:Resolution ~show:Names.show_key ~saved:true
+  Query.query ~name:"resolved" ~phase:Phases.resolution ~show:Names.show_key ~saved:true
     ~about:(fun (key : Names.key) -> Some { path = key.path; part = Some "resolved" })
     (fun database (key : Names.key) ->
       match Query.demand database Names.definition key with
@@ -140,7 +140,7 @@ let resolved =
       | None -> None)
 
 let file_diagnostics =
-  Query.query ~name:"file_diagnostics" ~phase:Resolution ~show:Path.show_module ~saved:true
+  Query.query ~name:"file_diagnostics" ~phase:Phases.resolution ~show:Path.show_module ~saved:true
     (fun database module_ ->
       let file = Query.demand database Workspace.file module_ in
       (* An import is used when a name followed by [::] spells it anywhere

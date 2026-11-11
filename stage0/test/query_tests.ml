@@ -10,7 +10,7 @@ let expect_log engine expected =
     fail "expected [%s], ran [%s]" (String.concat "; " expected) (String.concat "; " actual);
   Engine.clear_log engine
 
-let unit_query ?(phase = Query.Syntax) name compute =
+let unit_query ?(phase = Phases.syntax) name compute =
   Query.query ~name ~phase ~show:(fun () -> "") compute
 
 type build = {
@@ -26,15 +26,15 @@ type build = {
 let build () =
   let files = Query.input ~name:"file" ~show:Fun.id () in
   let length =
-    Query.query ~name:"length" ~phase:Syntax ~show:Fun.id (fun database file ->
+    Query.query ~name:"length" ~phase:Phases.syntax ~show:Fun.id (fun database file ->
         String.length (Query.get database files file))
   in
   let parity =
-    Query.query ~name:"parity" ~phase:Bodies ~show:Fun.id (fun database file ->
+    Query.query ~name:"parity" ~phase:Phases.bodies ~show:Fun.id (fun database file ->
         Query.demand database length file mod 2)
   in
   let total =
-    unit_query ~phase:Bodies "total" (fun database () ->
+    unit_query ~phase:Phases.bodies "total" (fun database () ->
         let first = Query.demand database parity "a" in
         first + Query.demand database parity "b")
   in
@@ -90,7 +90,7 @@ let () =
       let engine = Engine.create ~log:true () in
       let files = Query.input ~name:"file" ~show:Fun.id () in
       let present =
-        Query.query ~name:"present" ~phase:Syntax ~show:Fun.id (fun database file ->
+        Query.query ~name:"present" ~phase:Phases.syntax ~show:Fun.id (fun database file ->
             Option.is_some (Query.find database files file))
       in
       if Engine.get engine present "a" then fail "present before it was set";
@@ -165,10 +165,10 @@ let fan count =
   let engine = Engine.create () in
   let source = Query.input ~name:"source" ~show:(fun () -> "") () in
   let hub =
-    unit_query ~phase:Syntax "hub" (fun database () -> Query.get database source () / 1000)
+    unit_query ~phase:Phases.syntax "hub" (fun database () -> Query.get database source () / 1000)
   in
   let reader =
-    Query.query ~name:"reader" ~phase:Bodies ~show:string_of_int (fun database index ->
+    Query.query ~name:"reader" ~phase:Phases.bodies ~show:string_of_int (fun database index ->
         Query.demand database hub () + index)
   in
   Engine.set engine source () 1;
@@ -206,9 +206,9 @@ let () =
         fail "computed %d" (after.computed - before.computed));
   test "a query cannot read one of a later phase" (fun () ->
       let engine = Engine.create () in
-      let late = unit_query ~phase:Bodies "late" (fun _ () -> 1) in
+      let late = unit_query ~phase:Phases.bodies "late" (fun _ () -> 1) in
       let early =
-        unit_query ~phase:Syntax "early" (fun database () -> Query.demand database late ())
+        unit_query ~phase:Phases.syntax "early" (fun database () -> Query.demand database late ())
       in
       match Engine.get engine early () with
       | _ -> fail "read a later phase"
@@ -308,11 +308,11 @@ let () =
       let engine = Engine.create ~log:true () in
       let rec first =
         lazy
-          (Query.query ~name:"first" ~phase:Syntax ~show:Fun.id (fun database key ->
+          (Query.query ~name:"first" ~phase:Phases.syntax ~show:Fun.id (fun database key ->
                Query.demand database (Lazy.force second) key))
       and second =
         lazy
-          (Query.query ~name:"second" ~phase:Syntax ~show:Fun.id (fun database key ->
+          (Query.query ~name:"second" ~phase:Phases.syntax ~show:Fun.id (fun database key ->
                Query.demand database (Lazy.force first) key + 1))
       in
       match Engine.get engine (Lazy.force first) "k" with
@@ -479,7 +479,7 @@ let () =
   test "a new result over a base is told when what it read of the base changes" (fun () ->
       let _, engine, build = over_base () in
       let doubled =
-        unit_query ~phase:Bodies "doubled" (fun database () ->
+        unit_query ~phase:Phases.bodies "doubled" (fun database () ->
             2 * Query.demand database build.total ())
       in
       if Engine.get engine doubled () <> 4 then fail "another result";
@@ -488,7 +488,7 @@ let () =
   test "an input removed over a base is seen as not set" (fun () ->
       let files = Query.input ~name:"file" ~show:Fun.id () in
       let present =
-        Query.query ~name:"present" ~phase:Syntax ~show:Fun.id (fun database file ->
+        Query.query ~name:"present" ~phase:Phases.syntax ~show:Fun.id (fun database file ->
             Option.is_some (Query.find database files file))
       in
       let base = Engine.create () in
@@ -544,11 +544,11 @@ let () =
 let two_phases ?(fail_when = fun () -> false) () =
   let source = Query.input ~name:"known_source" ~show:Fun.id () in
   let early =
-    Query.query ~name:"known_early" ~phase:Proofs ~show:Fun.id (fun database key ->
+    Query.query ~name:"known_early" ~phase:Phases.proofs ~show:Fun.id (fun database key ->
         String.length (Query.get database source key))
   in
   let late =
-    Query.query ~name:"known_late" ~phase:Verdicts ~show:Fun.id (fun database key ->
+    Query.query ~name:"known_late" ~phase:Phases.verdicts ~show:Fun.id (fun database key ->
         if fail_when () then raise Stack_overflow;
         Query.demand database early key * 2)
   in
@@ -587,7 +587,7 @@ let () =
       let engine = Engine.create () in
       let _, early, _ = two_phases () in
       let asks =
-        Query.query ~name:"known_asks" ~phase:Verdicts ~show:Fun.id (fun database key ->
+        Query.query ~name:"known_asks" ~phase:Phases.verdicts ~show:Fun.id (fun database key ->
             Query.known database early key)
       in
       match Engine.get engine asks "a" with
@@ -610,5 +610,30 @@ let () =
       ignore (Engine.stabilize engine);
       if Query.known (Engine.context engine) late "a" <> Some 10 then
         fail "the result is not the one for the new input")
+
+let () =
+  test "a phase reads the phases it was declared after, and those they read" (fun () ->
+      let first = Query.phase ~name:"test_first" ~after:[] in
+      let second = Query.phase ~name:"test_second" ~after:[ first ] in
+      let third = Query.phase ~name:"test_third" ~after:[ second ] in
+      let early = Query.query ~name:"phase_early" ~phase:first ~show:Fun.id (fun _ key -> key) in
+      let late =
+        Query.query ~name:"phase_late" ~phase:third ~show:Fun.id (fun database key ->
+            Query.demand database early key)
+      in
+      let backwards =
+        Query.query ~name:"phase_backwards" ~phase:second ~show:Fun.id (fun database key ->
+            Query.demand database late key)
+      in
+      let engine = Engine.create () in
+      if Engine.get engine late "a" <> "a" then fail "the later phase did not read the earlier";
+      match Engine.get engine backwards "a" with
+      | _ -> fail "a phase read one declared after it"
+      | exception Invalid_argument _ -> ());
+  test "two phases cannot have one name" (fun () ->
+      ignore (Query.phase ~name:"test_twice" ~after:[]);
+      match Query.phase ~name:"test_twice" ~after:[] with
+      | _ -> fail "the second was declared"
+      | exception Invalid_argument _ -> ())
 
 let () = finish ()

@@ -47,7 +47,7 @@ and evaluate database ~visiting path =
     | _ -> None
 
 let value_of =
-  Query.query ~name:"constant_value" ~phase:Interfaces ~saved:true ~show:Path.show
+  Query.query ~name:"constant_value" ~phase:Phases.interfaces ~saved:true ~show:Path.show
     (fun database path -> evaluate database ~visiting:[] path)
 
 (* Whether a constant is declared a [USize], as a type argument needs. *)

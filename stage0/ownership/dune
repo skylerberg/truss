@@ -2,6 +2,7 @@
  (name ownership)
  (libraries
   query
+  phases
   path
   well_known
   types

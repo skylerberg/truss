@@ -4,6 +4,7 @@
   logic
   solver
   query
+  phases
   path
   well_known
   types

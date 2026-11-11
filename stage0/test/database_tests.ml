@@ -623,7 +623,9 @@ let () =
   test "a query cannot be declared once the database has opened its store" (fun () ->
       fresh_store ();
       ignore (session (package ()));
-      match Query.query ~name:"declared_late" ~phase:Syntax ~show:Fun.id (fun _ key -> key) with
+      match
+        Query.query ~name:"declared_late" ~phase:Phases.syntax ~show:Fun.id (fun _ key -> key)
+      with
       | _ -> fail "it was declared"
       | exception Invalid_argument _ -> ())
 

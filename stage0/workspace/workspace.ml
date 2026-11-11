@@ -27,7 +27,7 @@ type file = {
 (* A file's [Source.t] holds a table of lines, which equality compares as
    it would anything else; two parses of the same text give equal files. *)
 let file =
-  Query.query ~name:"file" ~phase:Syntax ~show:Path.show_module (fun database module_ ->
+  Query.query ~name:"file" ~phase:Phases.syntax ~show:Path.show_module (fun database module_ ->
       let text = Query.get database file_text module_ in
       let source = Source.create ~path:(file_path module_) text in
       let tokens, lexer_diagnostics = Lexer.lex source in
@@ -46,19 +46,19 @@ let package database name = Query.find database packages name
    only a package's modules is not worked out again when its dependencies
    change, and the other way round. *)
 let modules =
-  Query.query ~name:"package_modules" ~phase:Syntax ~show:Fun.id (fun database name ->
+  Query.query ~name:"package_modules" ~phase:Phases.syntax ~show:Fun.id (fun database name ->
       match package database name with Some package -> package.modules | None -> [])
 
 let dependencies =
-  Query.query ~name:"package_dependencies" ~phase:Syntax ~show:Fun.id (fun database name ->
+  Query.query ~name:"package_dependencies" ~phase:Phases.syntax ~show:Fun.id (fun database name ->
       match package database name with Some package -> package.dependencies | None -> [])
 
 let usize_bits =
-  Query.query ~name:"package_usize_bits" ~phase:Syntax ~show:Fun.id (fun database name ->
+  Query.query ~name:"package_usize_bits" ~phase:Phases.syntax ~show:Fun.id (fun database name ->
       match package database name with Some package -> package.usize_bits | None -> 32)
 
 let exists =
-  Query.query ~name:"package_exists" ~phase:Syntax ~show:Fun.id (fun database name ->
+  Query.query ~name:"package_exists" ~phase:Phases.syntax ~show:Fun.id (fun database name ->
       Option.is_some (package database name))
 
 let split_path database (names : string list) =
@@ -69,6 +69,6 @@ let split_path database (names : string list) =
   | _ -> None
 
 let module_exists =
-  Query.query ~name:"module_exists" ~phase:Syntax ~saved:true ~show:Path.show_module
+  Query.query ~name:"module_exists" ~phase:Phases.syntax ~saved:true ~show:Path.show_module
     (fun database (module_ : Path.module_) ->
       List.mem module_ (Query.demand database modules module_.package))
