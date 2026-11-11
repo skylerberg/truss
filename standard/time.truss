@@ -1031,15 +1031,7 @@ impl Display for Weekday {
 }
 
 public opaque type Date(days_since_epoch: Int32)
-  derives Plain, Equal, Hash
-
-impl Ordered for Date {
-  fn compare(self, other: Date) -> Ordering
-    cost time finite
-  {
-    self.days_since_epoch.compare(other.days_since_epoch)
-  }
-}
+  derives Plain, Equal, Hash, Ordered
 
 internal type Civil(year: Int64, month: Int64, day: Int64)
 
@@ -1639,12 +1631,6 @@ public fn DateTime.plus(self, duration: Duration) -> Option[DateTime]
   }
 }
 
-public fn DateTime.format(self, layout: Layout) -> String
-  cost time finite
-{
-  todo
-}
-
 impl Display for DateTime {
   fn display(self, output: mut TextBuilder)
   {
@@ -1676,25 +1662,492 @@ public type LocalInstant =
   | Skipped(before: Instant, after: Instant)
   derives Equal
 
-public opaque type TimeZone(name: String, rules: List[UInt8], fixed_offset: Option[Duration])
+type RuleDay(by_weekday: Bool, counts_leap_day: Bool, month: Int64, week: Int64, day: Int64)
+  invariant 1 <= month && month <= 12
+  invariant 1 <= week && week <= 5
+  invariant 0 <= day && day <= 365
+
+type DaylightRule(offset: Int64, start: RuleDay, start_time: Int64, end: RuleDay, end_time: Int64)
+  invariant -1000000 < offset && offset < 1000000
+  invariant -1000000 < start_time && start_time < 1000000
+  invariant -1000000 < end_time && end_time < 1000000
+
+type ZoneRule(standard: Int64, daylight: Option[DaylightRule])
+  invariant -1000000 < standard && standard < 1000000
+
+public opaque type TimeZone(
+  name: String,
+  transitions: List[Int64],
+  offsets: List[Int32],
+  first_offset: Int32,
+  rule: Option[ZoneRule],
+)
+  invariant offsets.length() == transitions.length()
   derives Copyable
+
+fn RuleDay.days(self, year: Int64) -> Int64
+  requires -6000000 < year && year < 6000000
+  ensures -2200001000 < result && result < 2200001000
+  cost time O(1)
+{
+  if !self.by_weekday {
+    let leap_day: Int64 = if !self.counts_leap_day && self.day >= 60 && is_leap(year) { 1 } else { 0 }
+    let from_one: Int64 = if self.counts_leap_day { 0 } else { 1 }
+    return days_from_civil(year, month: 1, day: 1) + self.day - from_one + leap_day
+  }
+  let first = days_from_civil(year, month: self.month, day: 1)
+  let weekday_of_first = (first + 4).floor_modulo(7)
+  let to_weekday = (self.day - weekday_of_first).floor_modulo(7)
+  let length = days_in_month(self.month, leap: is_leap(year))
+  let wanted = to_weekday + 7 * (self.week - 1)
+  first + (if wanted >= length { wanted - 7 } else { wanted })
+}
+
+fn ZoneRule.offset_at(self, seconds: Int64) -> Int64
+  requires -100000000000 < seconds && seconds < 100000000000
+  ensures -1000000 < result && result < 1000000
+  cost time O(1)
+{
+  match self.daylight {
+    None => self.standard
+    Some(daylight) => {
+      let year = civil_from_days((seconds + self.standard).floor_divide(86400)).year
+      let start = daylight.start.days(year) * 86400 + daylight.start_time - self.standard
+      let end = daylight.end.days(year) * 86400 + daylight.end_time - daylight.offset
+      let in_daylight = if start < end {
+        start <= seconds && seconds < end
+      } else {
+        !(end <= seconds && seconds < start)
+      }
+      if in_daylight { daylight.offset } else { self.standard }
+    }
+  }
+}
+
+fn transitions_at_or_before(transitions: Slice[Int64], seconds: Int64) -> USize
+  ensures result <= transitions.length()
+  cost time O(log(transitions.length()))
+{
+  var low: USize = 0
+  var high = transitions.length()
+  while low < high
+    invariant low <= high
+    invariant high <= transitions.length()
+    decreases high - low
+    cost time O(log(transitions.length()) - log(high - low))
+  {
+    let middle = low + (high - low) / 2
+    if transitions[middle] <= seconds {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  low
+}
+
+fn TimeZone.offset_seconds(self, seconds: Int64) -> Int64
+  requires -100000000000 < seconds && seconds < 100000000000
+  ensures -2147483649 < result && result < 2147483648
+  cost time O(log(self.transitions.length()))
+{
+  let passed = transitions_at_or_before(self.transitions.slice(), seconds: seconds)
+  if passed == self.transitions.length() && self.rule is Some(rule) {
+    return rule.offset_at(seconds)
+  }
+  if passed == 0 {
+    return intrinsic::convert(self.first_offset)
+  }
+  intrinsic::convert(self.offsets[passed - 1])
+}
 
 public fn TimeZone.utc() -> TimeZone
   cost time O(1)
 {
-  todo
+  TimeZone(name: "UTC", transitions: [], offsets: [], first_offset: 0, rule: None)
+}
+
+fn write_offset(output: mut TextBuilder, seconds: Int64)
+  requires -360000 < seconds && seconds < 360000
+  cost time finite
+{
+  if seconds == 0 {
+    mut output.write("Z")
+    return
+  }
+  if seconds < 0 {
+    mut output.write("-")
+  } else {
+    mut output.write("+")
+  }
+  let size = if seconds < 0 { -seconds } else { seconds }
+  write_two_digits(mut output, value: size / 3600)
+  mut output.write(":")
+  write_two_digits(mut output, value: (size % 3600) / 60)
+  if size % 60 != 0 {
+    mut output.write(":")
+    write_two_digits(mut output, value: size % 60)
+  }
 }
 
 public fn TimeZone.fixed(offset: Duration) -> Option[TimeZone]
+  cost time finite
+{
+  let nanoseconds = offset.nanoseconds
+  if nanoseconds % 1000000000 != 0 || nanoseconds <= -86400000000000 || nanoseconds >= 86400000000000 {
+    return None
+  }
+  let seconds = nanoseconds / 1000000000
+  var name = TextBuilder.new()
+  write_offset(mut name, seconds: seconds)
+  Some(TimeZone(
+    name: own name.finish(),
+    transitions: [],
+    offsets: [],
+    first_offset: intrinsic::convert(seconds),
+    rule: None,
+  ))
+}
+
+type ZoneHeader(version: UInt8, time_count: USize, type_count: USize, block: USize)
+
+fn big_endian(bytes: Slice[UInt8], at: USize, width: USize) -> Option[UInt64]
+  requires 1 <= width && width <= 8
   cost time O(1)
 {
-  todo
+  if at > bytes.length() || bytes.length() - at < width {
+    return None
+  }
+  var value: UInt64 = 0
+  var index: USize = 0
+  while index < width
+    invariant index <= width
+    decreases width - index
+    cost time O(index)
+  {
+    value = (value << 8) | intrinsic::convert[UInt8, UInt64](bytes[at + index])
+    index += 1
+  }
+  Some(value)
+}
+
+fn count_at(bytes: Slice[UInt8], at: USize) -> Option[USize]
+  ensures !(result is Some(count) && count > 4294967295)
+  cost time O(1)
+{
+  match big_endian(bytes, at: at, width: 4) {
+    Some(value) => Some(intrinsic::convert(value % 4294967296))
+    None => None
+  }
+}
+
+fn read_header(bytes: Slice[UInt8], at: USize, time_width: USize) -> Option[ZoneHeader]
+  requires at <= 1099511627776
+  requires time_width == 4 || time_width == 8
+  ensures !(result is Some(header) && (header.time_count > 4294967295 || header.type_count > 4294967295
+    || header.block > 1000000000000))
+  cost time O(1)
+{
+  if at > bytes.length() || bytes.length() - at < 44 {
+    return None
+  }
+  if bytes[at] != 84 || bytes[at + 1] != 90 || bytes[at + 2] != 105 || bytes[at + 3] != 102 {
+    return None
+  }
+  let utc_count = count_at(bytes, at: at + 20)?
+  let standard_count = count_at(bytes, at: at + 24)?
+  let leap_count = count_at(bytes, at: at + 28)?
+  let time_count = count_at(bytes, at: at + 32)?
+  let type_count = count_at(bytes, at: at + 36)?
+  let character_count = count_at(bytes, at: at + 40)?
+  Some(ZoneHeader(
+    version: bytes[at + 4],
+    time_count: time_count,
+    type_count: type_count,
+    block: time_count * time_width + time_count + type_count * 6 + character_count
+      + leap_count * (time_width + 4) + standard_count + utc_count,
+  ))
+}
+
+type ParsedNumber(value: Int64, end: USize)
+
+fn posix_number(bytes: Slice[UInt8], from: USize, to: USize, most: Int64) -> Option[ParsedNumber]
+  requires from <= to
+  requires to <= bytes.length()
+  requires 0 <= most && most <= 100000
+  ensures !(result is Some(number) && (number.value < 0 || number.value > most || number.end <= from || number.end > to))
+  cost time finite
+{
+  var value: Int64 = 0
+  var index = from
+  while index < to && 48 <= bytes[index] && bytes[index] <= 57
+    invariant from <= index
+    invariant index <= to
+    invariant 0 <= value
+    invariant value <= most
+    decreases to - index
+  {
+    value = value * 10 + intrinsic::convert[UInt8, Int64](bytes[index] - 48)
+    if value > most {
+      return None
+    }
+    index += 1
+  }
+  if index == from {
+    return None
+  }
+  Some(ParsedNumber(value: value, end: index))
+}
+
+fn posix_time(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ParsedNumber]
+  requires from <= to
+  requires to <= bytes.length()
+  ensures !(result is Some(time) && (time.value <= -700000 || time.value >= 700000 || time.end <= from || time.end > to))
+  cost time finite
+{
+  var index = from
+  var negative = false
+  if index < to && (bytes[index] == 45 || bytes[index] == 43) {
+    negative = bytes[index] == 45
+    index += 1
+  }
+  let hours = posix_number(bytes, from: index, to: to, most: 167)?
+  var seconds = hours.value * 3600
+  index = hours.end
+  if index < to && bytes[index] == 58 {
+    let minutes = posix_number(bytes, from: index + 1, to: to, most: 59)?
+    seconds += minutes.value * 60
+    index = minutes.end
+    if index < to && bytes[index] == 58 {
+      let rest = posix_number(bytes, from: index + 1, to: to, most: 59)?
+      seconds += rest.value
+      index = rest.end
+    }
+  }
+  Some(ParsedNumber(value: if negative { -seconds } else { seconds }, end: index))
+}
+
+fn posix_name_end(bytes: Slice[UInt8], from: USize, to: USize) -> Option[USize]
+  requires from <= to
+  requires to <= bytes.length()
+  ensures !(result is Some(end) && (end <= from || end > to))
+  cost time finite
+{
+  var index = from
+  if index < to && bytes[index] == 60 {
+    while index < to && bytes[index] != 62
+      invariant from <= index
+      invariant index <= to
+      decreases to - index
+    {
+      index += 1
+    }
+    if index == to {
+      return None
+    }
+    return Some(index + 1)
+  }
+  while index < to && ((65 <= bytes[index] && bytes[index] <= 90) || (97 <= bytes[index] && bytes[index] <= 122))
+    invariant from <= index
+    invariant index <= to
+    decreases to - index
+  {
+    index += 1
+  }
+  if index - from < 3 {
+    return None
+  }
+  Some(index)
+}
+
+type ParsedRuleDay(day: RuleDay, time: Int64, end: USize)
+
+fn posix_rule_day(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ParsedRuleDay]
+  requires from <= to
+  requires to <= bytes.length()
+  ensures !(result is Some(parsed) && (parsed.time <= -700000 || parsed.time >= 700000 || parsed.end <= from
+    || parsed.end > to))
+  cost time finite
+{
+  if from == to {
+    return None
+  }
+  var day = RuleDay(by_weekday: false, counts_leap_day: true, month: 1, week: 1, day: 0)
+  var index = from
+  if bytes[from] == 77 {
+    let month = posix_number(bytes, from: from + 1, to: to, most: 12)?
+    if month.value < 1 || month.end == to || bytes[month.end] != 46 {
+      return None
+    }
+    let week = posix_number(bytes, from: month.end + 1, to: to, most: 5)?
+    if week.value < 1 || week.end == to || bytes[week.end] != 46 {
+      return None
+    }
+    let weekday = posix_number(bytes, from: week.end + 1, to: to, most: 6)?
+    day = RuleDay(by_weekday: true, counts_leap_day: true, month: month.value, week: week.value, day: weekday.value)
+    index = weekday.end
+  } else if bytes[from] == 74 {
+    let number = posix_number(bytes, from: from + 1, to: to, most: 365)?
+    if number.value < 1 {
+      return None
+    }
+    day = RuleDay(by_weekday: false, counts_leap_day: false, month: 1, week: 1, day: number.value)
+    index = number.end
+  } else {
+    let number = posix_number(bytes, from: from, to: to, most: 365)?
+    day = RuleDay(by_weekday: false, counts_leap_day: true, month: 1, week: 1, day: number.value)
+    index = number.end
+  }
+  if index < to && bytes[index] == 47 {
+    let time = posix_time(bytes, from: index + 1, to: to)?
+    return Some(ParsedRuleDay(day: day, time: time.value, end: time.end))
+  }
+  Some(ParsedRuleDay(day: day, time: 7200, end: index))
+}
+
+fn posix_rule(bytes: Slice[UInt8], from: USize, to: USize) -> Option[ZoneRule]
+  requires from <= to
+  requires to <= bytes.length()
+  cost time finite
+{
+  let standard_name = posix_name_end(bytes, from: from, to: to)?
+  let standard = posix_time(bytes, from: standard_name, to: to)?
+  if standard.end == to {
+    return Some(ZoneRule(standard: -standard.value, daylight: None))
+  }
+  let daylight_name = posix_name_end(bytes, from: standard.end, to: to)?
+  var offset = 3600 - standard.value
+  var index = daylight_name
+  if index < to && bytes[index] != 44 {
+    let daylight = posix_time(bytes, from: index, to: to)?
+    offset = -daylight.value
+    index = daylight.end
+  }
+  if index == to || bytes[index] != 44 {
+    return None
+  }
+  let start = posix_rule_day(bytes, from: index + 1, to: to)?
+  if start.end == to || bytes[start.end] != 44 {
+    return None
+  }
+  let end = posix_rule_day(bytes, from: start.end + 1, to: to)?
+  if end.end != to {
+    return None
+  }
+  Some(ZoneRule(
+    standard: -standard.value,
+    daylight: Some(DaylightRule(
+      offset: offset,
+      start: start.day,
+      start_time: start.time,
+      end: end.day,
+      end_time: end.time,
+    )),
+  ))
+}
+
+fn footer_rule(rules: Slice[UInt8], from: USize) -> Result[Option[ZoneRule], ZoneError]
+  cost time finite
+{
+  if from >= rules.length() || rules[from] != 10 {
+    return Err(ZoneError.MalformedRules)
+  }
+  var end = from + 1
+  while end < rules.length() && rules[end] != 10
+    invariant from < end
+    invariant end <= rules.length()
+    decreases rules.length() - end
+  {
+    end += 1
+  }
+  if end == rules.length() {
+    return Err(ZoneError.MalformedRules)
+  }
+  if end == from + 1 {
+    return Ok(None)
+  }
+  match posix_rule(rules, from: from + 1, to: end) {
+    Some(rule) => Ok(Some(rule))
+    None => Err(ZoneError.MalformedRules)
+  }
 }
 
 public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[TimeZone, ZoneError]
-  cost time O(rules.length() + name.length())
+  cost time finite
 {
-  todo
+  if rules.length() > 1099511627776 {
+    return Err(ZoneError.MalformedRules)
+  }
+  var header = match read_header(rules, at: 0, time_width: 4) {
+    Some(found) => found
+    None => return Err(ZoneError.MalformedRules)
+  }
+  var start: USize = 44
+  var time_width: USize = 4
+  if header.version != 0 {
+    start = 44 + header.block + 44
+    time_width = 8
+    header = match read_header(rules, at: 44 + header.block, time_width: 8) {
+      Some(found) => found
+      None => return Err(ZoneError.MalformedRules)
+    }
+  }
+  if header.type_count == 0 || start > rules.length() || rules.length() - start < header.block {
+    return Err(ZoneError.MalformedRules)
+  }
+  let kinds_start = start + header.time_count * time_width
+  let types_start = kinds_start + header.time_count
+  var transitions: List[Int64] = List.with_capacity(header.time_count)
+  var offsets: List[Int32] = List.with_capacity(header.time_count)
+  var index: USize = 0
+  while index < header.time_count
+    invariant index <= header.time_count
+    invariant transitions.length() == index
+    invariant offsets.length() == index
+    decreases header.time_count - index
+  {
+    let raw = match big_endian(rules, at: start + index * time_width, width: time_width) {
+      Some(found) => found
+      None => return Err(ZoneError.MalformedRules)
+    }
+    let time: Int64 = if time_width == 8 {
+      raw.to_signed_bits()
+    } else {
+      intrinsic::convert(intrinsic::convert[UInt64, UInt32](raw % 4294967296).to_signed_bits())
+    }
+    if index > 0 && time <= transitions[index - 1] {
+      return Err(ZoneError.MalformedRules)
+    }
+    if kinds_start + index >= rules.length() {
+      return Err(ZoneError.MalformedRules)
+    }
+    let kind: USize = intrinsic::convert(rules[kinds_start + index])
+    if kind >= header.type_count {
+      return Err(ZoneError.MalformedRules)
+    }
+    let offset = match big_endian(rules, at: types_start + kind * 6, width: 4) {
+      Some(found) => found
+      None => return Err(ZoneError.MalformedRules)
+    }
+    mut transitions.push(time)
+    mut offsets.push(intrinsic::convert[UInt64, UInt32](offset % 4294967296).to_signed_bits())
+    index += 1
+  }
+  let first = match big_endian(rules, at: types_start, width: 4) {
+    Some(found) => found
+    None => return Err(ZoneError.MalformedRules)
+  }
+  var rule: Option[ZoneRule] = None
+  if time_width == 8 {
+    rule = footer_rule(rules, from: start + header.block)?
+  }
+  Ok(TimeZone(
+    name: name.to_string(),
+    transitions: own transitions,
+    offsets: own offsets,
+    first_offset: intrinsic::convert[UInt64, UInt32](first % 4294967296).to_signed_bits(),
+    rule: rule,
+  ))
 }
 
 public fn TimeZone.name(self) -> StringSlice
@@ -1703,28 +2156,79 @@ public fn TimeZone.name(self) -> StringSlice
   self.name.slice()
 }
 
-public fn TimeZone.parse_iso_offset(self, instant: Instant) -> Duration
-  cost time O(log(self.rules.length()))
+public fn TimeZone.offset(self, instant: Instant) -> Duration
+  cost time O(log(self.transitions.length()))
 {
-  todo
+  Duration(nanoseconds: self.offset_seconds(instant.unix_seconds()) * 1000000000)
 }
 
 public fn TimeZone.to_local(self, instant: Instant) -> DateTime
-  cost time O(log(self.rules.length()))
+  cost time O(log(self.transitions.length()))
 {
-  todo
+  let seconds = instant.unix_seconds()
+  let local = seconds + self.offset_seconds(seconds)
+  let within = local.floor_modulo(86400) * 1000000000 + instant.nanoseconds.floor_modulo(1000000000)
+  DateTime(
+    date: Date(days_since_epoch: intrinsic::convert(local.floor_divide(86400))),
+    time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(within)),
+  )
 }
 
-public fn TimeZone.to_instant(self, local: DateTime) -> LocalInstant
-  cost time O(log(self.rules.length()))
+fn instant_at(seconds: Int64, nanoseconds: Int64) -> Option[Instant]
+  requires 0 <= nanoseconds && nanoseconds < 1000000000
+  cost time O(1)
 {
-  todo
+  match seconds.checked_multiply(1000000000) {
+    Some(whole) => match whole.checked_add(nanoseconds) {
+      Some(total) => Some(Instant(nanoseconds: total))
+      None => None
+    }
+    None => None
+  }
+}
+
+public fn TimeZone.to_instant(self, local: DateTime) -> Option[LocalInstant]
+  cost time O(log(self.transitions.length()))
+{
+  let days: Int64 = intrinsic::convert(local.date.days_since_epoch)
+  let within: Int64 = intrinsic::convert(local.time.nanoseconds_since_midnight)
+  if days < -110000 || days > 110000 {
+    return None
+  }
+  let seconds = days * 86400 + within / 1000000000
+  let fraction = within % 1000000000
+  let before = self.offset_seconds(seconds - 86400)
+  let after = self.offset_seconds(seconds + 86400)
+  let first = seconds - before
+  let second = seconds - after
+  if before == after {
+    return Some(LocalInstant.Unique(instant: instant_at(first, nanoseconds: fraction)?))
+  }
+  let first_holds = self.offset_seconds(first) == before
+  let second_holds = self.offset_seconds(second) == after
+  let earlier = instant_at(if first < second { first } else { second }, nanoseconds: fraction)?
+  let later = instant_at(if first < second { second } else { first }, nanoseconds: fraction)?
+  if first_holds && second_holds {
+    Some(LocalInstant.Ambiguous(earlier: earlier, later: later))
+  } else if first_holds {
+    Some(LocalInstant.Unique(instant: instant_at(first, nanoseconds: fraction)?))
+  } else if second_holds {
+    Some(LocalInstant.Unique(instant: instant_at(second, nanoseconds: fraction)?))
+  } else {
+    Some(LocalInstant.Skipped(before: earlier, after: later))
+  }
 }
 
 public fn TimeZone.format(self, instant: Instant) -> String
   cost time finite
 {
-  todo
+  var output = TextBuilder.new()
+  self.to_local(instant).display(mut output)
+  let offset = self.offset_seconds(instant.unix_seconds())
+  if -360000 < offset && offset < 360000 {
+    write_offset(mut output, seconds: offset)
+  }
+  own output.finish()
 }
 
 public type ZoneError =
@@ -1734,20 +2238,32 @@ public type ZoneError =
 
 impl Display for ZoneError {
   fn display(self, output: mut TextBuilder) {
-    todo
+    match self {
+      UnknownZone => mut output.write("the time zone is not known")
+      MalformedRules => mut output.write("the time zone's rules are malformed")
+    }
+  }
+}
+
+public fn zone(name: StringSlice) -> Result[TimeZone, ZoneError]
+  uses Environment
+{
+  match Environment.zone_rules(name) {
+    Some(rules) => TimeZone.from_rules(name, rules: rules.slice())
+    None => Err(ZoneError.UnknownZone)
   }
 }
 
 public fn local_zone() -> TimeZone
   uses Environment
 {
-  todo
-}
-
-public fn zone(name: StringSlice) -> Result[TimeZone, ZoneError]
-  uses Environment
-{
-  todo
+  match Environment.local_zone() {
+    Some(name) => match zone(name.slice()) {
+      Ok(found) => found
+      Err(_) => TimeZone.utc()
+    }
+    None => TimeZone.utc()
+  }
 }
 
 public opaque type Layout(parts: List[LayoutPart])
@@ -1763,7 +2279,68 @@ type LayoutPart =
   | Second
   | Fraction(digits: UInt8)
   | Weekday
-  | Offset
+
+fn layout_parts(pattern: StringSlice) -> Option[List[LayoutPart]]
+  cost time finite
+{
+  var parts: List[LayoutPart] = []
+  var run: USize = 0
+  var index: USize = 0
+  while index < pattern.length()
+    invariant run <= index
+    invariant index <= pattern.length()
+    decreases pattern.length() - index
+  {
+    if pattern.byte(index) != 37 {
+      index += 1
+    } else {
+      if index > run {
+        mut parts.push(LayoutPart.Text(text: pattern.part(run, to: index).to_string()))
+      }
+      if index + 1 == pattern.length() {
+        return None
+      }
+      var letter = pattern.byte(index + 1)
+      var next = index + 2
+      var digits: UInt8 = 9
+      if 49 <= letter && letter <= 57 {
+        if next == pattern.length() || pattern.byte(next) != 102 {
+          return None
+        }
+        digits = letter - 48
+        letter = 102
+        next += 1
+      }
+      if letter == 89 {
+        mut parts.push(LayoutPart.Year)
+      } else if letter == 109 {
+        mut parts.push(LayoutPart.Month)
+      } else if letter == 100 {
+        mut parts.push(LayoutPart.Day)
+      } else if letter == 72 {
+        mut parts.push(LayoutPart.Hour)
+      } else if letter == 77 {
+        mut parts.push(LayoutPart.Minute)
+      } else if letter == 83 {
+        mut parts.push(LayoutPart.Second)
+      } else if letter == 102 {
+        mut parts.push(LayoutPart.Fraction(digits: digits))
+      } else if letter == 65 {
+        mut parts.push(LayoutPart.Weekday)
+      } else if letter == 37 {
+        mut parts.push(LayoutPart.Text(text: "%"))
+      } else {
+        return None
+      }
+      index = next
+      run = next
+    }
+  }
+  if index > run {
+    mut parts.push(LayoutPart.Text(text: pattern.part(run, to: index).to_string()))
+  }
+  Some(own parts)
+}
 
 impl FromTemplate for Layout {
   type Part = Never
@@ -1771,20 +2348,185 @@ impl FromTemplate for Layout {
   fn from_template(template: Template[Never]) -> Layout
     requires is_valid_layout(template.literals)
   {
-    todo
+    if template.literals.length() != 1 {
+      return Layout(parts: [])
+    }
+    match layout_parts(template.literals[0].text()) {
+      Some(parts) => Layout(parts: own parts)
+      None => Layout(parts: [])
+    }
   }
 }
 
 public fn is_valid_layout(literals: Slice[text::Literal]) -> Bool
   cost time finite
 {
-  todo
+  literals.length() == 1 && layout_parts(literals[0].text()) is Some(_)
+}
+
+public fn DateTime.format(self, layout: Layout) -> String
+  cost time finite
+{
+  let civil = self.date.civil()
+  let within: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
+  let seconds = within / 1000000000
+  var output = TextBuilder.new()
+  var index: USize = 0
+  while index < layout.parts.length()
+    invariant index <= layout.parts.length()
+    decreases layout.parts.length() - index
+  {
+    match layout.parts[index] {
+      Text(text) => mut output.write(text.slice())
+      Year => {
+        let year = if civil.year < 0 { -civil.year } else { civil.year }
+        if civil.year < 0 {
+          mut output.write("-")
+        }
+        mut output.write(year.format(minimum_digits: 4).slice())
+      }
+      Month => write_two_digits(mut output, value: civil.month)
+      Day => write_two_digits(mut output, value: civil.day)
+      Hour => write_two_digits(mut output, value: seconds / 3600)
+      Minute => write_two_digits(mut output, value: (seconds % 3600) / 60)
+      Second => write_two_digits(mut output, value: seconds % 60)
+      Fraction(digits) => {
+        let padded = (within % 1000000000).format(minimum_digits: 9)
+        let shown: USize = intrinsic::convert(digits)
+        if shown <= padded.length() {
+          mut output.write(padded.slice().part(0, to: shown))
+        }
+      }
+      Weekday => self.date.weekday().display(mut output)
+    }
+    index += 1
+  }
+  own output.finish()
+}
+
+type LayoutFields(year: Int64, month: Int64, day: Int64, hour: Int64, minute: Int64, second: Int64, nanosecond: Int64)
+
+fn weekday_name_end(text: StringSlice, from: USize) -> USize
+  requires from <= text.length()
+  ensures from <= result
+  ensures result <= text.length()
+  cost time finite
+{
+  var index = from
+  while index < text.length() && ((65 <= text.byte(index) && text.byte(index) <= 90)
+    || (97 <= text.byte(index) && text.byte(index) <= 122))
+    invariant from <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    index += 1
+  }
+  index
 }
 
 public fn Layout.parse_date_time(self, text: StringSlice) -> Result[DateTime, ParseTimeError]
-  cost time O(text.length())
+  cost time finite
 {
-  todo
+  var fields = LayoutFields(year: 1970, month: 1, day: 1, hour: 0, minute: 0, second: 0, nanosecond: 0)
+  var weekday: Option[String] = None
+  var position: USize = 0
+  var index: USize = 0
+  while index < self.parts.length()
+    invariant index <= self.parts.length()
+    invariant position <= text.length()
+    invariant 0 <= fields.year && fields.year <= 999999999
+    invariant 0 <= fields.month && fields.month <= 999999999
+    invariant 0 <= fields.day && fields.day <= 999999999
+    invariant 0 <= fields.hour && fields.hour <= 999999999
+    invariant 0 <= fields.minute && fields.minute <= 999999999
+    invariant 0 <= fields.second && fields.second <= 999999999
+    invariant 0 <= fields.nanosecond && fields.nanosecond <= 999999999
+    decreases self.parts.length() - index
+  {
+    match self.parts[index] {
+      Text(expected) => {
+        if expected.length() > text.length() - position || !text.matches_at(expected.slice(), offset: position) {
+          return Err(ParseTimeError.Malformed(offset: position))
+        }
+        position += expected.length()
+      }
+      Year => {
+        fields.year = parse_field(text, from: position, width: 4)?
+        position += 4
+      }
+      Month => {
+        fields.month = parse_field(text, from: position, width: 2)?
+        position += 2
+      }
+      Day => {
+        fields.day = parse_field(text, from: position, width: 2)?
+        position += 2
+      }
+      Hour => {
+        fields.hour = parse_field(text, from: position, width: 2)?
+        position += 2
+      }
+      Minute => {
+        fields.minute = parse_field(text, from: position, width: 2)?
+        position += 2
+      }
+      Second => {
+        fields.second = parse_field(text, from: position, width: 2)?
+        position += 2
+      }
+      Fraction(digits) => {
+        let width: USize = intrinsic::convert(digits)
+        if width < 1 || width > 9 {
+          return Err(ParseTimeError.Malformed(offset: position))
+        }
+        var value = parse_field(text, from: position, width: width)?
+        var scaled = width
+        while scaled < 9
+          invariant scaled <= 9
+          invariant 0 <= value
+          invariant value <= 999999999
+          decreases 9 - scaled
+        {
+          if value > 99999999 {
+            return Err(ParseTimeError.OutOfRange)
+          }
+          value = value * 10
+          scaled += 1
+        }
+        fields.nanosecond = value
+        position += width
+      }
+      Weekday => {
+        let end = weekday_name_end(text, from: position)
+        if end == position {
+          return Err(ParseTimeError.Malformed(offset: position))
+        }
+        weekday = Some(text.part(position, to: end).to_string())
+        position = end
+      }
+    }
+    index += 1
+  }
+  if position != text.length() {
+    return Err(ParseTimeError.Malformed(offset: position))
+  }
+  if fields.year > 9999 || fields.month < 1 || fields.month > 12 || fields.day < 1 || fields.day > 31
+    || fields.hour > 23 || fields.minute > 59 || fields.second > 59
+  {
+    return Err(ParseTimeError.OutOfRange)
+  }
+  if fields.day > days_in_month(fields.month, leap: is_leap(fields.year)) {
+    return Err(ParseTimeError.OutOfRange)
+  }
+  let date = match checked_date(fields.year, month: fields.month, day: fields.day) {
+    Some(found) => found
+    None => return Err(ParseTimeError.OutOfRange)
+  }
+  if weekday is Some(name) && name != "${date.weekday()}" {
+    return Err(ParseTimeError.OutOfRange)
+  }
+  let within = (fields.hour * 3600 + fields.minute * 60 + fields.second) * 1000000000 + fields.nanosecond
+  Ok(DateTime(date: date, time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(within))))
 }
 
 public opaque type Stopwatch(started: Duration)

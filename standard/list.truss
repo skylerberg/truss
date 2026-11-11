@@ -1,5 +1,6 @@
 use standard::growth
 use standard::intrinsic
+use standard::list::slice
 
 public opaque type List[Element](storage: intrinsic::Storage[Element])
   derives Copyable
@@ -653,9 +654,23 @@ impl Default for List[Element] {
 }
 
 impl Ordered for List[Element: Ordered] {
-  fn compare(self, other: List[Element]) -> Ordering {
-    todo
+  fn compare(self, other: List[Element]) -> Ordering
+    ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+  {
+    self.slice().compare(other.slice())
   }
+}
+
+proof Ordered.agrees_with_equal for List[Element: Ordered] {
+  slice::lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.antisymmetric for List[Element: Ordered] {
+  slice::lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
+}
+
+proof Ordered.transitive for List[Element: Ordered] {
+  slice::lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
 impl Hash for List[Element: Hash] {

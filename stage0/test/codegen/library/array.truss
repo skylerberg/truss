@@ -137,3 +137,10 @@ test "an array lends its least and its greatest element by a comparison" {
   assert numbers.min_by(fn(first, second) { first.compare(second) }) == Some(1)
   assert numbers.max_by(fn(first, second) { first.compare(second) }) == Some(8)
 }
+test "arrays are ordered by their first different element" {
+  let low: Array[Int64, 3] = [1, 2, 3]
+  let high: Array[Int64, 3] = [1, 3, 0]
+  assert low.compare(high) == Ordering.Less && high.compare(low) == Ordering.Greater
+  assert low.compare(low.copy()) == Ordering.Equal
+  assert low < high && high >= low
+}
