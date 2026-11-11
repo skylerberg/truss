@@ -4,8 +4,10 @@ public opaque type Skip[Source: Cursor](source: Source, left: USize)
 
 impl Cursor for Skip[Source: Cursor] {
   type Element = Source.Element
+  capability Uses = Source.Uses
 
   fn next(mut self) -> Option[Source.Element]
+    uses Self.Uses
   {
     while self.left > 0 {
       self.left -= 1
@@ -22,8 +24,10 @@ public opaque type Take[Source: Cursor](source: Source, left: USize)
 
 impl Cursor for Take[Source: Cursor] {
   type Element = Source.Element
+  capability Uses = Source.Uses
 
   fn next(mut self) -> Option[Source.Element]
+    uses Self.Uses
   {
     if self.left == 0 {
       return None
@@ -37,8 +41,10 @@ public opaque type StepBy[Source: Cursor](source: Source, step: USize, started: 
 
 impl Cursor for StepBy[Source: Cursor] {
   type Element = Source.Element
+  capability Uses = Source.Uses
 
   fn next(mut self) -> Option[Source.Element]
+    uses Self.Uses
   {
     if !self.started {
       self.started = true
@@ -64,8 +70,10 @@ public opaque type Chain[First: Cursor, Second: Cursor[Element = First.Element]]
 
 impl Cursor for Chain[First: Cursor, Second: Cursor[Element = First.Element]] {
   type Element = First.Element
+  capability Uses = First.Uses, Second.Uses
 
   fn next(mut self) -> Option[First.Element]
+    uses Self.Uses
   {
     if !self.first_ended {
       match mut self.first.next() {
@@ -83,8 +91,10 @@ public opaque type Zip[First: Cursor, Second: Cursor](first: First, second: Seco
 
 impl Cursor for Zip[First: Cursor, Second: Cursor] {
   type Element = core::Pair[First.Element, Second.Element]
+  capability Uses = First.Uses, Second.Uses
 
   fn next(mut self) -> Option[core::Pair[First.Element, Second.Element]]
+    uses Self.Uses
   {
     match mut self.first.next() {
       Some(left) => match mut self.second.next() {
@@ -100,8 +110,10 @@ public opaque type Enumerate[Source: Cursor](source: Source, index: USize)
 
 impl Cursor for Enumerate[Source: Cursor] {
   type Element = core::Indexed[Source.Element]
+  capability Uses = Source.Uses
 
   fn next(mut self) -> Option[core::Indexed[Source.Element]]
+    uses Self.Uses
   {
     match mut self.source.next() {
       Some(element) => {
@@ -120,8 +132,10 @@ public opaque type Peekable[Source: Cursor](source: Source, peeked: Option[Optio
 
 impl Cursor for Peekable[Source: Cursor] {
   type Element = Source.Element
+  capability Uses = Source.Uses
 
   fn next(mut self) -> Option[Source.Element]
+    uses Self.Uses
   {
     match mut self.peeked.take() {
       Some(item) => item
@@ -130,7 +144,9 @@ impl Cursor for Peekable[Source: Cursor] {
   }
 }
 
-public fn Peekable[Source: Cursor].peek(mut self) lends Option[Source.Element] {
+public fn Peekable[Source: Cursor].peek(mut self) lends Option[Source.Element]
+  uses Source.Uses
+{
   if self.peeked is None {
     self.peeked = Some(mut self.source.next())
   }

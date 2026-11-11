@@ -413,7 +413,9 @@ public fn List[Element].generate(
   List(storage: own elements)
 }
 
-public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element] {
+public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element]
+  uses Source.Uses
+{
   var items: List[Element] = []
   mut items.extend(own source)
   items
@@ -601,7 +603,9 @@ public fn List[Element: Copyable].append_slice(mut self, items: Slice[Element])
   }
 }
 
-public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
+public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
+  uses Source.Uses
+{
   var cursor = own items
   while mut cursor.next() is Some(item) {
     mut self.push(own item)

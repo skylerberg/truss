@@ -326,10 +326,14 @@ public trait Iterable {
 
 public trait Cursor {
   type Element
+  capability Uses
 
   fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
 
-  fn to_list(own self) -> List[Self.Element] {
+  fn to_list(own self) -> List[Self.Element]
+    uses Self.Uses
+  {
     var cursor = own self
     var items: List[Self.Element] = []
     while mut cursor.next() is Some(item) {
@@ -338,7 +342,9 @@ public trait Cursor {
     items
   }
 
-  fn count(own self) -> USize {
+  fn count(own self) -> USize
+    uses Self.Uses
+  {
     var cursor = own self
     var count: USize = 0
     while mut cursor.next() is Some(_) {
@@ -347,7 +353,9 @@ public trait Cursor {
     count
   }
 
-  fn last(own self) -> Option[Self.Element] {
+  fn last(own self) -> Option[Self.Element]
+    uses Self.Uses
+  {
     var cursor = own self
     var last: Option[Self.Element] = None
     while mut cursor.next() is Some(item) {
@@ -356,7 +364,13 @@ public trait Cursor {
     last
   }
 
-  fn fold[Total](own self, initial: own Total, combine: fn(own Total, own Self.Element) -> Total) -> Total {
+  fn fold[Total, capability Granted](
+    own self,
+    initial: own Total,
+    combine: (fn(own Total, own Self.Element) -> Total uses Granted),
+  ) -> Total
+    uses Self.Uses, Granted
+  {
     var cursor = own self
     var total = own initial
     while mut cursor.next() is Some(item) {
@@ -365,7 +379,9 @@ public trait Cursor {
     total
   }
 
-  fn find(mut self, matching: fn(Self.Element) -> Bool) -> Option[Self.Element] {
+  fn find(mut self, matching: fn(Self.Element) -> Bool) -> Option[Self.Element]
+    uses Self.Uses
+  {
     while mut self.next() is Some(item) {
       if matching(item) {
         return Some(own item)

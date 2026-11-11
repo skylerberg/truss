@@ -37,6 +37,7 @@ and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
 and capability =
   | Capability of Path.t
   | Capability_parameter of parameter
+  | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
 
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
@@ -124,7 +125,16 @@ and substitute_capabilities substitution capabilities =
              match List.assoc_opt parameter substitution with
              | Some (Capabilities replacement) -> replacement
              | _ -> [ capability ])
-         | capability -> [ capability ])
+         | Capability_projection { base; trait; name } ->
+             [
+               Capability_projection
+                 {
+                   base = substitute substitution base;
+                   trait = substitute_trait substitution trait;
+                   name;
+                 };
+             ]
+         | (Capability _ | Capability_variable _) as capability -> [ capability ])
        capabilities)
 
 and substitute_trait substitution (trait : trait_reference) =
@@ -149,42 +159,44 @@ and substitute_function substitution (function_type : function_type) =
     costs = function_type.costs;
   }
 
-(* A type with every set of capabilities in it rewritten: the [uses] of
-   each function type and each capability argument, at any depth. *)
-let rec map_capabilities f type_ =
-  let argument = function
-    | Type type_ -> Type (map_capabilities f type_)
-    | Capabilities capabilities -> Capabilities (f capabilities)
-    | Value _ as value -> value
-  in
-  let trait (reference : trait_reference) =
-    {
-      reference with
-      trait_arguments = List.map argument reference.trait_arguments;
-      associated =
-        List.map (fun (name, type_) -> (name, map_capabilities f type_)) reference.associated;
-    }
-  in
-  match type_ with
-  | Named { path; arguments } -> Named { path; arguments = List.map argument arguments }
-  | Projection { base; trait = reference; name } ->
-      Projection { base = map_capabilities f base; trait = trait reference; name }
-  | Function function_type ->
-      Function
+let rec map ?(capabilities = Fun.id) f type_ =
+  match f type_ with
+  | Some replacement -> replacement
+  | None -> (
+      let map = map ~capabilities f in
+      let argument = function
+        | Type type_ -> Type (map type_)
+        | Capabilities set -> Capabilities (capabilities set)
+        | Value _ as value -> value
+      in
+      let trait (reference : trait_reference) =
         {
-          function_type with
-          inputs =
-            List.map (fun (mode, type_) -> (mode, map_capabilities f type_)) function_type.inputs;
-          output =
-            (match function_type.output with
-            | Returns type_ -> Returns (map_capabilities f type_)
-            | Yields (mode, type_) -> Yields (mode, map_capabilities f type_)
-            | Lends (mode, type_) -> Lends (mode, map_capabilities f type_));
-          uses = f function_type.uses;
+          reference with
+          trait_arguments = List.map argument reference.trait_arguments;
+          associated = List.map (fun (name, type_) -> (name, map type_)) reference.associated;
         }
-  | Any reference -> Any (trait reference)
-  | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
-  | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_
+      in
+      match type_ with
+      | Named { path; arguments } -> Named { path; arguments = List.map argument arguments }
+      | Projection { base; trait = reference; name } ->
+          Projection { base = map base; trait = trait reference; name }
+      | Function function_type ->
+          Function
+            {
+              function_type with
+              inputs = List.map (fun (mode, type_) -> (mode, map type_)) function_type.inputs;
+              output =
+                (match function_type.output with
+                | Returns type_ -> Returns (map type_)
+                | Yields (mode, type_) -> Yields (mode, map type_)
+                | Lends (mode, type_) -> Lends (mode, map type_));
+              uses = capabilities function_type.uses;
+            }
+      | Any reference -> Any (trait reference)
+      | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
+      | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
+
+let map_capabilities f type_ = map ~capabilities:f (fun _ -> None) type_
 
 let map_argument_capabilities f = function
   | Type type_ -> Type (map_capabilities f type_)
@@ -193,37 +205,6 @@ let map_argument_capabilities f = function
 
 let has_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
-
-let rec map f type_ =
-  match f type_ with
-  | Some replacement -> replacement
-  | None -> (
-      let argument = function Type type_ -> Type (map f type_) | value -> value in
-      let trait (reference : trait_reference) =
-        {
-          reference with
-          trait_arguments = List.map argument reference.trait_arguments;
-          associated = List.map (fun (name, type_) -> (name, map f type_)) reference.associated;
-        }
-      in
-      match type_ with
-      | Named { path; arguments } -> Named { path; arguments = List.map argument arguments }
-      | Projection { base; trait = reference; name } ->
-          Projection { base = map f base; trait = trait reference; name }
-      | Function function_type ->
-          Function
-            {
-              function_type with
-              inputs = List.map (fun (mode, type_) -> (mode, map f type_)) function_type.inputs;
-              output =
-                (match function_type.output with
-                | Returns type_ -> Returns (map f type_)
-                | Yields (mode, type_) -> Yields (mode, map f type_)
-                | Lends (mode, type_) -> Lends (mode, map f type_));
-            }
-      | Any reference -> Any (trait reference)
-      | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
-      | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
 
 let equal left right = left = right
 let is_error = function Error _ -> true | _ -> false
@@ -248,6 +229,14 @@ and argument_unsolved = function
 and trait_unsolved trait =
   List.exists argument_unsolved trait.trait_arguments
   || List.exists (fun (_, type_) -> contains_unsolved type_) trait.associated
+
+let capabilities_unsolved capabilities =
+  List.exists
+    (function
+      | Capability_variable _ -> true
+      | Capability_projection { base; _ } -> contains_unsolved base
+      | Capability _ | Capability_parameter _ -> false)
+    capabilities
 
 let terminates (function_type : function_type) =
   List.exists (fun (cost : cost) -> cost.resource = Time) function_type.costs
@@ -288,7 +277,13 @@ let show_resource = function
       Printf.sprintf "calls(%s%s)" (path_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
-let rec show = function
+let rec show_capability = function
+  | Capability path -> path_name path
+  | Capability_parameter { name; _ } -> name
+  | Capability_projection { base; name; _ } -> show base ^ "." ^ name
+  | Capability_variable _ -> "_"
+
+and show = function
   | Named { path; arguments = [] } -> path_name path
   | Named { path; arguments } ->
       Printf.sprintf "%s[%s]" (path_name path)
@@ -312,15 +307,7 @@ and show_argument = function
   | Value (Value_parameter { name; _ }) -> name
   | Value (Value_variable _) -> "_"
   | Capabilities capabilities ->
-      "{"
-      ^ String.concat ", "
-          (List.map
-             (function
-               | Capability path -> path_name path
-               | Capability_parameter { name; _ } -> name
-               | Capability_variable _ -> "_")
-             capabilities)
-      ^ "}"
+      "{" ^ String.concat ", " (List.map show_capability capabilities) ^ "}"
 
 and show_trait trait =
   let arguments = List.map show_argument trait.trait_arguments in
@@ -343,14 +330,7 @@ and show_function (function_type : function_type) =
     | Lends (written, type_) -> " lends " ^ mode written ^ show type_
   in
   let base = Printf.sprintf "fn(%s)%s" inputs output in
-  let uses =
-    List.map
-      (function
-        | Capability path -> path_name path
-        | Capability_parameter { name; _ } -> name
-        | Capability_variable _ -> "_")
-      function_type.uses
-  in
+  let uses = List.map show_capability function_type.uses in
   let costs =
     List.map
       (fun (cost : cost) ->
@@ -498,6 +478,7 @@ type trait_interface = {
   trait_generics : generic list;
   requires : trait_reference list;
   associated_types : associated_type list;
+  associated_capabilities : string list;
   methods : trait_method list;
   laws : (string * (string * ty) list) list;
   is_capability : bool;
@@ -509,6 +490,7 @@ type impl_interface = {
   implements : trait_reference;
   for_type : ty;
   impl_uses : capability list;
+  capability_sets : (string * capability list) list;
   impl_methods : (string * Path.receiver * signature) list;
   impl_broken : bool;
 }

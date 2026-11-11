@@ -274,18 +274,7 @@ let rec type_expression state scope (type_ : type_expression) =
   | Path_type path -> path_type state scope path
   | Any_type path -> path_type state scope path
   | Self_type _ -> ()
-  | Associated (base, _) -> (
-      match String_map.find_opt base.text scope.types with
-      | Some parameter -> set state base parameter
-      | None ->
-          set state base
-            (Unknown
-               (reported state Not_a_generic_parameter base.span
-                  (Printf.sprintf
-                     "`%s.%s` names an associated type, so `%s` must be a generic parameter here."
-                     base.text
-                     (match type_.kind with Associated (_, name) -> name.text | _ -> "")
-                     base.text))))
+  | Associated (base, member) -> associated_base state scope base member "type"
   | Function_type { inputs; input_names; output; clauses } ->
       List.iter (fun (_, input) -> type_expression state scope input) inputs;
       Option.iter (type_expression state scope) output;
@@ -294,6 +283,25 @@ let rec type_expression state scope (type_ : type_expression) =
       let named = List.fold_left (declare_parameter state) scope input_names in
       List.iter (clause state named) clauses
   | Type_error -> ()
+
+(* The generic parameter before the [.] of [Items.Element] or [Source.Uses]. *)
+and associated_base state scope (base : name) (member : name) kind =
+  match String_map.find_opt base.text scope.types with
+  | Some parameter -> set state base parameter
+  | None ->
+      set state base
+        (Unknown
+           (reported state Not_a_generic_parameter base.span
+              (Printf.sprintf
+                 "`%s.%s` names an associated %s, so `%s` must be a generic parameter here."
+                 base.text member.text kind base.text)))
+
+and capability_reference state scope (reference : capability_reference) =
+  match reference.kind with
+  | Capability_path path -> path_type state scope path
+  | Self_capabilities _ -> ()
+  | Associated_capabilities (base, member) ->
+      associated_base state scope base member "capability set"
 
 and path_type state scope (path : path_type) =
   type_name state scope path.path;
@@ -326,7 +334,7 @@ and count_name state scope (name : name) =
 and clause state scope (clause : clause) =
   let specification = { scope with specification = in_specification } in
   match clause.kind with
-  | Uses capabilities -> List.iter (path_type state scope) capabilities
+  | Uses capabilities -> List.iter (capability_reference state scope) capabilities
   | Requires value -> expression state specification value
   | Ensures value ->
       expression state
@@ -1034,7 +1042,7 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
                   in
                   List.iter (expression state inner) requires;
                   if not (broken (Member_body index)) then block state inner body
-              | Trait_member_error -> ())
+              | Associated_capability _ | Trait_member_error -> ())
           members
       end
   | Impl { trait_; type_; uses; members } ->
@@ -1042,12 +1050,14 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
         type_name state scope type_.path;
         let scope = generics state scope ~owner:path type_.generics in
         path_type state scope trait_;
-        List.iter (path_type state scope) uses;
+        List.iter (capability_reference state scope) uses;
         List.iteri
           (fun index (line : impl_member line) ->
             if not (broken (Member_header index)) then
               match line.kind with
               | Associated_definition (_, type_) -> type_expression state scope type_
+              | Capability_definition (_, capabilities) ->
+                  List.iter (capability_reference state scope) capabilities
               | Impl_member_error -> ())
           members
       end
@@ -1060,7 +1070,7 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
       end
   | Test { uses; body; _ } ->
       if not header_broken then begin
-        List.iter (path_type state scope) uses;
+        List.iter (capability_reference state scope) uses;
         if not body_broken then block state scope body
       end
   | Theorem { generics = generics_; parameters = parameters_; clauses; body; _ } ->

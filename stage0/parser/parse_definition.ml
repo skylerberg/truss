@@ -304,7 +304,8 @@ let members cursor ~member ~error =
              id = Cursor.fresh_id cursor;
            }))
 
-(* [type Key], or [type Element: Ordered], in a trait. *)
+(* [type Key], [type Element: Ordered], [capability Uses], or a law, in a
+   trait. *)
 let trait_member cursor =
   match Cursor.peek_kind cursor with
   | Keyword Type ->
@@ -312,6 +313,9 @@ let trait_member cursor =
       let name = Atoms.upper cursor "the name of an associated type" in
       Associated_type
         (name, if Cursor.accept_punctuation cursor Colon then Parse_expression.bounds cursor else [])
+  | Keyword Capability ->
+      Cursor.advance cursor;
+      Associated_capability (Atoms.upper cursor "the name of an associated capability set")
   | Keyword Law ->
       Cursor.advance cursor;
       let name = Atoms.lower cursor "the name of a law" in
@@ -323,7 +327,7 @@ let trait_member cursor =
       in
       let requires = premises [] in
       Law { name; parameters; requires; body = Parse_expression.body cursor }
-  | _ -> Cursor.fail cursor "`fn`, `type`, or `law` to start a member of the trait"
+  | _ -> Cursor.fail cursor "`fn`, `type`, `capability`, or `law` to start a member of the trait"
 
 let impl_member cursor =
   match Cursor.peek_kind cursor with
@@ -332,7 +336,12 @@ let impl_member cursor =
       let name = Atoms.upper cursor "the name of an associated type" in
       Cursor.expect_punctuation cursor Equal;
       Associated_definition (name, Parse_expression.type_expression cursor)
-  | _ -> Cursor.fail cursor "`fn` or `type` to start a member of the `impl`"
+  | Keyword Capability ->
+      Cursor.advance cursor;
+      let name = Atoms.upper cursor "the name of an associated capability set" in
+      Cursor.expect_punctuation cursor Equal;
+      Capability_definition (name, Parse_expression.capability_list cursor)
+  | _ -> Cursor.fail cursor "`fn`, `type`, or `capability` to start a member of the `impl`"
 
 let capability_member cursor : capability_member =
   Cursor.fail cursor "`fn` to start a method of the capability"
@@ -418,7 +427,7 @@ let type_clauses cursor =
         clause (Type_invariant (Parse_expression.expression cursor))
     | Keyword Derives ->
         Cursor.advance cursor;
-        clause (Derives (Parse_expression.capability_list cursor))
+        clause (Derives (Parse_expression.path_type_list cursor))
     | Keyword Cost ->
         Cursor.advance cursor;
         ignore

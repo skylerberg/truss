@@ -10,7 +10,9 @@ public fn collections::SortedSet[Element: Ordered].new() -> collections::SortedS
 
 public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Element = Element]](
   source: own Source,
-) -> collections::SortedSet[Element] {
+) -> collections::SortedSet[Element]
+  uses Source.Uses
+{
   todo
 }
 
@@ -127,7 +129,9 @@ public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(El
 public fn collections::SortedSet[Element: Ordered].extend[Source: Cursor[Element = Element]](
   mut self,
   elements: own Source,
-) {
+)
+  uses Source.Uses
+{
   todo
 }
 

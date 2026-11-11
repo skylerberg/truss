@@ -172,7 +172,9 @@ public fn collections::Heap[Element: Ordered].reserve(mut self, additional: USiz
   mut self.items.reserve(additional)
 }
 
-public fn collections::Heap[Element: Ordered].extend[Source: Cursor[Element = Element]](mut self, items: own Source) {
+public fn collections::Heap[Element: Ordered].extend[Source: Cursor[Element = Element]](mut self, items: own Source)
+  uses Source.Uses
+{
   var cursor = own items
   while mut cursor.next() is Some(item) {
     mut self.push(own item)

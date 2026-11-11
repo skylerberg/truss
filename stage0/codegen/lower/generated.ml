@@ -24,7 +24,7 @@ let passed_on st result_ty =
    methods use, in path order, which its evidence captures. *)
 let impl_capability context impl =
   let interface = impl_interface context impl in
-  (interface, interface.implements.trait, evidence_for [] interface.impl_uses)
+  (interface, interface.implements.trait, evidence_for context [] interface.impl_uses)
 
 (* An entry: unpacks the implementation and the evidence it captured from
    the evidence it is called with, and calls the [impl]'s method. *)
@@ -365,7 +365,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   emit b (Assign (at index, Binary (Add, Copy (at index), Constant (Integer (Int32, Z.one)))));
   finish b (Goto test);
   start b after;
-  st.evidence <- real_implementations st ~user:"main" (evidence_for [] signature.uses);
+  st.evidence <- real_implementations st ~user:"main" (evidence_for st.context [] signature.uses);
   let exit_ty =
     match signature.output with
     | Returns ty -> Monomorphic.ground context.monomorphic [] ty
@@ -440,7 +440,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let method_signature = signature_of context path in
   let substitution = bind method_signature.generics type_arguments in
   let any = T.substitute_trait substitution interface.implements in
-  let _, result = any_entry_signature context ~any ~trait trait_signature in
+  let _, result, capabilities = any_entry_signature context ~any ~trait trait_signature in
   let st = generated_state context ~anchor:impl ~substitution in
   let b = st.b in
   let value = local b ~name:"value" (Raw (Pointer Opaque)) in
@@ -452,7 +452,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
         (parameter st ~owned:(info.mode = Own) (Monomorphic.mode info.mode) ty, info.mode, ty))
       method_signature.parameters
   in
-  let evidence = evidence_parameters st (evidence_for [] trait_signature.uses) in
+  let evidence = evidence_parameters st capabilities in
   start b (block b);
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let typed = local b (Pointer { target = Value self_ty; writable = true }) in
@@ -507,7 +507,8 @@ let any_table context (key : Instance.key) : Lir.table =
                 { path = Method { owner = impl; name = m.method_name; receiver }; type_arguments }
             in
             ( Instance.Any_entry method_key,
-              fst (any_entry_signature context ~any ~trait m.method_signature) ))
+              let signature, _, _ = any_entry_signature context ~any ~trait m.method_signature in
+              signature ))
           (any_methods context trait)
       in
       {

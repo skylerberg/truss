@@ -455,13 +455,13 @@ let () =
     \  Ok(0)\n\
      }\n"
     "{ for item in yielding_call standard::list::impl Iterable for List[Element].each[Int64](place \
-     items) { concurrent #48 { let own first = match app::main::fetch(place item) { Ok(value: own \
-     value) => { value } Err(error: own error) => { task_exit branch 0 of #48 { return \
+     items) { concurrent #50 { let own first = match app::main::fetch(place item) { Ok(value: own \
+     value) => { value } Err(error: own error) => { task_exit branch 0 of #50 { return \
      Result[Int64, Int64].Err(error: error) } } diverges }; if (item > 3) { task_exit branch 1 of \
-     #48 { break } } diverges }; let _ = place first }; concurrent #93 for item in yielding_call \
+     #50 { break } } diverges }; let _ = place first }; concurrent #95 for item in yielding_call \
      standard::list::impl Iterable for List[Element].each[Int64](place items) { if (item > 5) { \
-     task_exit an iteration of #93 { break } } diverges; if (item > 4) { continue } diverges; if \
-     (item > 3) { task_exit an iteration of #93 { return Result[Int64, Int64].Err(error: item) } } \
+     task_exit an iteration of #95 { break } } diverges; if (item > 4) { continue } diverges; if \
+     (item > 3) { task_exit an iteration of #95 { return Result[Int64, Int64].Err(error: item) } } \
      diverges }; Result[Int64, Int64].Ok(value: 0) }";
   expect_body "an assignment through an index calls `assign` where the type has it"
     "fn g(name: own String) {\n\

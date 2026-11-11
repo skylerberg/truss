@@ -145,17 +145,24 @@ let any_substitution context ~(any : T.trait_reference) trait : T.substitution =
       Interface.Properties.trait_substitution interface ~self:(T.Any any) reference
   | None -> bug "no interface for %s" (Path.show trait)
 
-(* The C signature of an entry in an [any] table: the value's pointer, then
-   the method's own, with the evidence for what it uses. The method is
-   [trait]'s, read for the [any] type. *)
+(* An entry in an [any] table: its C signature, which is the value's
+   pointer, then the method's own, with the evidence for what it uses; how
+   its result is passed; and the capabilities that the evidence is for. The
+   method is [trait]'s, read for the [any] type. An associated capability
+   set of an [any] type is empty, so a method that uses [Self.Uses] takes
+   no evidence for it: the caller cannot name the capabilities of the type
+   that the value hides, and the checker converts a value to [any] only
+   where each set of its type is empty. *)
 let any_entry_signature context ~any ~trait (signature : T.signature) =
+  let substitution = any_substitution context ~any trait in
   let lir, result =
-    lir_signature context
-      (any_substitution context ~any trait)
+    lir_signature context substitution
       ~parameters:(interface_parameters { signature with receiver = None })
       ~has_defaults:false ~uses:signature.uses signature.output
   in
-  ({ lir with parameters = Lir.Raw (Pointer Opaque) :: lir.parameters }, result)
+  ( { lir with parameters = Lir.Raw (Pointer Opaque) :: lir.parameters },
+    result,
+    evidence_for context substitution signature.uses )
 
 (* Evidence on the stack that a capability is implemented by the value
    [implementation] points at: its [impl]'s table, and the evidence the
@@ -167,7 +174,7 @@ let implementation_evidence st ~impl ~type_arguments ~implementation =
         match List.find_opt (fun (path, _) -> Path.equal path captured) st.evidence with
         | Some (_, operand) -> operand
         | None -> bug "no evidence for %s here" (Path.show captured))
-      (evidence_for [] (impl_interface st.context impl).impl_uses)
+      (evidence_for st.context [] (impl_interface st.context impl).impl_uses)
   in
   let slot = local st.b (Evidence (List.length outer)) in
   emit st.b
@@ -222,7 +229,7 @@ let evidence_of st capability =
    dropped. *)
 let cursor_evidence context (yielding : Ground.yielding) =
   let code = code_of context yielding.method_ yielding.type_arguments in
-  evidence_for code.substitution code.uses
+  evidence_for context code.substitution code.uses
 
 (* Writes a cursor over a yielding method to [destination]. The cursor holds
    the call's arguments, in the order of the pulled method's parameters:
@@ -359,9 +366,11 @@ let call_indirect st ~(function_type : Ground.function_type) ~(value : Lir.place
 let call_through_any st ~(any_type : T.trait_reference) ~trait ~name ~(any : Lir.place)
     ~(arguments : (T.mode * Ground.ty * Lir.place) list) destination =
   let slot, signature = dynamic_slot st.context trait name in
-  let lir_signature, result = any_entry_signature st.context ~any:any_type ~trait signature in
+  let lir_signature, result, capabilities =
+    any_entry_signature st.context ~any:any_type ~trait signature
+  in
   let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
-  let evidence = List.map (evidence_of st) (evidence_for [] signature.uses) in
+  let evidence = List.map (evidence_of st) capabilities in
   let target =
     Lir.Table_call
       {
@@ -517,15 +526,9 @@ let call_instance st key ~(signature : T.signature) ~substitution
   let passed = List.filter_map (fun (mode, ty, place) -> pass st mode ty place) arguments in
   let mask =
     (if has_defaults signature then [ constant_int UInt64 (Z.of_int mask) ] else [])
-    @ List.map (evidence_of st) (evidence_for substitution signature.uses)
+    @ List.map (evidence_of st) (evidence_for st.context substitution signature.uses)
   in
-  let callee = called key in
-  (match callee with
-  | Cursor_next yielding when cursor_evidence st.context yielding <> [] ->
-      bug "next of %s is called through `Cursor`, which passes no evidence"
-        (Ground.to_string (Cursor yielding))
-  | _ -> ());
-  let target = Lir.Direct { function_ = Instance callee; signature = lir_signature } in
+  let target = Lir.Direct { function_ = Instance (called key); signature = lir_signature } in
   emit st.b
     (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
   if not lir_signature.returns then unreachable_block st

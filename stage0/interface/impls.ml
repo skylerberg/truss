@@ -123,7 +123,8 @@ let cursor_of_impl : Path.t -> Path.t option = function
    yielding method's, its [Element] is the method's yielded type, and its
    methods are the trait's methods with [Self] substituted. Every method
    except [next] is a provided method of the trait. [next] runs the method's
-   own code up to its next [yield]. *)
+   own code up to its next [yield], so the associated capability set of the
+   [impl] is the method's [uses]. *)
 let cursor_interface database ~method_ =
   match
     ( Query.demand database Environment.signature method_,
@@ -135,6 +136,21 @@ let cursor_interface database ~method_ =
         T.Cursor { method_; arguments = Environment.generic_arguments signature.generics }
       in
       let self : T.substitution = [ ({ owner = cursor_trait; name = "Self" }, T.Type for_type) ] in
+      let of_cursor (declared : T.signature) =
+        let declared = T.substitute_signature self declared in
+        {
+          declared with
+          uses =
+            List.sort_uniq compare
+              (List.concat_map
+                 (function
+                   | T.Capability_projection { base; trait; _ }
+                     when T.equal base for_type && Path.equal trait.trait cursor_trait ->
+                       signature.uses
+                   | capability -> [ capability ])
+                 declared.uses);
+        }
+      in
       Some
         {
           T.impl_generics;
@@ -142,13 +158,15 @@ let cursor_interface database ~method_ =
             { trait = cursor_trait; trait_arguments = []; associated = [ ("Element", element) ] };
           for_type;
           impl_uses = [];
+          capability_sets =
+            List.map (fun name -> (name, signature.uses)) trait_interface.associated_capabilities;
           impl_methods =
             List.map
               (fun (method_ : T.trait_method) ->
                 ( method_.method_name,
                   method_.method_receiver,
-                  T.method_in_impl ~impl_generics ~impl_uses:[]
-                    (T.substitute_signature self method_.method_signature) ))
+                  T.method_in_impl ~impl_generics ~impl_uses:[] (of_cursor method_.method_signature)
+                ))
               trait_interface.methods;
           impl_broken = false;
         }
@@ -186,6 +204,7 @@ let derived_interface database ~type_ ~trait =
           implements = trait_reference;
           for_type;
           impl_uses = [];
+          capability_sets = [];
           impl_methods =
             List.map
               (fun (method_ : T.trait_method) ->
@@ -214,26 +233,6 @@ let trait_substitution database (impl : Path.t) =
         (fun trait ->
           Properties.trait_substitution trait ~self:interface.for_type interface.implements)
         (Query.demand database Environment.trait_interface interface.implements.trait))
-
-(* The signature of the function or method at a path, for every path at
-   which code is compiled or proven. A method that an [impl] inherits from
-   its trait, or a method of a derived [impl], is not written in the [impl]:
-   its signature is the trait method's, with [Self] and the trait's
-   parameters substituted by the [impl]'s types, inside that [impl]. *)
-let signature database (path : Path.t) =
-  match (Query.demand database Environment.signature path, path) with
-  | Some signature, _ -> Some signature
-  | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
-      match (impl_interface database owner, trait_substitution database owner) with
-      | Some impl, Some substitution ->
-          Option.map
-            (fun declared ->
-              T.method_in_impl ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
-                (T.substitute_signature substitution declared))
-            (Query.demand database Environment.signature
-               (Method { owner = impl.implements.trait; name; receiver }))
-      | _ -> None)
-  | None, _ -> None
 
 (* Matching *)
 
@@ -538,15 +537,54 @@ and associated_type database ~bounds ?defining type_ (trait : T.trait_reference)
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
 
+(* The associated capability set of a type, as the trait's [impl] for the
+   type defines it. The set of a generic parameter is known only for each
+   instantiation, so it stays a projection, and so does the set of a type
+   that is not inferred yet. An [any] type fixes every set to the empty one:
+   the code that holds the value cannot name the capabilities of the type
+   that it hides. *)
+and capability_set database ~bounds ?(depth = 0) type_ (trait : T.trait_reference) name =
+  let projection = [ T.Capability_projection { base = type_; trait; name } ] in
+  if depth > 32 then projection
+  else
+    match implements database ~bounds ~conditions:false type_ trait with
+    | Some (From_impl { impl; substitution }) -> (
+        match impl_interface database impl with
+        | Some interface ->
+            normalize_capabilities database ~bounds ~depth:(depth + 1)
+              (T.substitute_capabilities substitution
+                 (Option.value ~default:[] (List.assoc_opt name interface.capability_sets)))
+        | None -> [])
+    | Some From_bound | Some (Accepted (T.Variable _)) | None -> projection
+    | Some (From_any | Built_in | Accepted _) -> []
+
+(* Normalizes a set of capabilities: replaces every associated capability
+   set whose type is known by the capabilities that the [impl] defines for
+   it. *)
+and normalize_capabilities database ~bounds ?depth (capabilities : T.capability list) =
+  if not (List.exists (function T.Capability_projection _ -> true | _ -> false) capabilities) then
+    capabilities
+  else
+    List.sort_uniq compare
+      (List.concat_map
+         (function
+           | T.Capability_projection { base; trait; name } ->
+               capability_set database ~bounds ?depth (normalize database ~bounds base)
+                 { trait with associated = [] } name
+           | capability -> [ capability ])
+         capabilities)
+
 (* Normalizes a type: replaces every projection whose base is known by the
-   [impl]'s definition of the associated type. A projection on a generic
-   parameter stays, unless a bound fixes it. So does a projection that no
-   [impl] defines, which then equals only itself. [defining] collects the
-   [impl]s whose definitions replace associated types. *)
+   [impl]'s definition of the associated type, and normalizes every set of
+   capabilities in the type. A projection on a generic parameter stays,
+   unless a bound fixes it. So does a projection that no [impl] defines,
+   which then equals only itself. [defining] collects the [impl]s whose
+   definitions replace associated types. *)
 and normalize database ~bounds ?defining (type_ : T.ty) : T.ty =
   let normalize = normalize database ~bounds ?defining in
   let associated_type = associated_type database ~bounds ?defining in
   T.map
+    ~capabilities:(normalize_capabilities database ~bounds)
     (function
       | T.Projection { base; trait; name } -> (
           let base = normalize base in
@@ -564,6 +602,39 @@ and normalize database ~bounds ?defining (type_ : T.ty) : T.ty =
               | None -> Some (T.Projection { base; trait; name })))
       | _ -> None)
     type_
+
+(* The signature of the function or method at a path, for every path at
+   which code is compiled or proven. A method that an [impl] inherits from
+   its trait, or a method of a derived [impl], is not written in the [impl]:
+   its signature is the trait method's, with [Self] and the trait's
+   parameters substituted by the [impl]'s types, inside that [impl]. Its
+   [uses] are the trait method's for the [impl]'s type, so [Self.Uses] is
+   the set that the [impl] defines. *)
+let signature database (path : Path.t) =
+  match (Query.demand database Environment.signature path, path) with
+  | Some signature, _ -> Some signature
+  | None, Method { owner = (Impl _ | Derived _) as owner; name; receiver } -> (
+      match (impl_interface database owner, trait_substitution database owner) with
+      | Some impl, Some substitution ->
+          Option.map
+            (fun declared ->
+              let signature =
+                T.method_in_impl ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
+                  (T.substitute_signature substitution declared)
+              in
+              let bounds parameter =
+                List.concat_map
+                  (fun (generic : T.generic) ->
+                    match generic.kind with
+                    | Type_generic bounds when generic.generic = parameter -> bounds
+                    | _ -> [])
+                  signature.generics
+              in
+              { signature with uses = normalize_capabilities database ~bounds signature.uses })
+            (Query.demand database Environment.signature
+               (Method { owner = impl.implements.trait; name; receiver }))
+      | _ -> None)
+  | None, _ -> None
 
 (* Whether a type is [Copyable], [Plain], or a view, with each associated
    type that its definition's facts depend on normalized. *)

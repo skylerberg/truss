@@ -546,7 +546,9 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
   Ok(String(storage: own output))
 }
 
-public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String {
+public fn String.collect[Source: Cursor[Element = Character]](source: own Source) -> String
+  uses Source.Uses
+{
   var cursor = own source
   var text: String = ""
   while mut cursor.next() is Some(character) {

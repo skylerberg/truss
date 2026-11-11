@@ -125,11 +125,19 @@ and generic_kind =
   | Capability_parameter of name  (** [capability Granted] *)
   | Generic_error
 
+(* One member of a [uses] list. *)
+and capability_reference = capability_reference_kind node
+
+and capability_reference_kind =
+  | Capability_path of path_type  (** [FileRead], or a capability parameter *)
+  | Self_capabilities of name  (** [Self.Uses] *)
+  | Associated_capabilities of name * name  (** [Source.Uses] *)
+
 (* Clauses *)
 and clause = clause_kind node
 
 and clause_kind =
-  | Uses of path_type list
+  | Uses of capability_reference list
   | Requires of expression
   | Ensures of expression
   | Decreases of expression list
@@ -377,8 +385,17 @@ type law = { name : name; parameters : parameter list; requires : expression lis
 (* The members of a trait, an [impl], or a capability other than its
    methods. Each method declared inside one is a separate definition, which
    follows it among the file's definitions and records it as its container. *)
-type trait_member = Associated_type of name * path_type list | Law of law | Trait_member_error
-type impl_member = Associated_definition of name * type_expression | Impl_member_error
+type trait_member =
+  | Associated_type of name * path_type list
+  | Associated_capability of name  (** [capability Uses] *)
+  | Law of law
+  | Trait_member_error
+
+type impl_member =
+  | Associated_definition of name * type_expression
+  | Capability_definition of name * capability_reference list  (** [capability Uses = FileRead] *)
+  | Impl_member_error
+
 type capability_member = Capability_member_error
 
 type definition_kind =
@@ -400,12 +417,12 @@ type definition_kind =
   | Impl of {
       trait_ : path_type;
       type_ : type_head;
-      uses : path_type list;
+      uses : capability_reference list;
       members : impl_member line list;
     }
   | Capability of { name : name; members : capability_member line list }
   | Constant of { name : definition_name; type_ : type_expression; value : expression }
-  | Test of { name : string_literal; uses : path_type list; body : block }
+  | Test of { name : string_literal; uses : capability_reference list; body : block }
   | Theorem of {
       name : name;
       generics : generic_parameter list;

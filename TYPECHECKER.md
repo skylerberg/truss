@@ -427,7 +427,7 @@ and value = Known of Z.t | Value_parameter of parameter
 and function_type = {
   parameters : (mode * ty) list;
   result : result;                          (* Returns ty, or Yields / Lends with a mode and ty *)
-  uses : capability_set;                    (* capabilities and capability parameters, sorted *)
+  uses : capability_set;                    (* capabilities, parameters, and associated sets, sorted *)
   costs : cost list;
 }
 ```
@@ -452,6 +452,15 @@ and function_type = {
   candidate `impl`. A projection on a generic parameter stays a projection. It
   equals only itself, or the type that a bound fixes it to, as in
   `Iterable[Element = Int64]`.
+- **Associated capability sets are normalized** in the same way.
+  `Capability_projection { base; trait; name }` in a set of capabilities is
+  replaced by the set that the `impl` for `base` defines, which is empty when
+  the `impl` leaves it out, and by the empty set when `base` is an `any` type.
+  A projection on a generic parameter stays, and is a capability that is
+  available only where a `uses` clause declares it. Its trait reference fixes
+  no associated type, so that two projections of one set are equal. `uses`
+  clauses are normalized where a call is recorded, where a function type is
+  normalized, and where an `impl`'s method is compared with its trait's.
 - **`Variable` and `Literal` exist only during checking.** A stored checked
   form contains neither. A `Hole` stays where the type of a `todo` was never
   decided: a `todo` is not an error, so a `Hole` never becomes an `Error`.
@@ -719,10 +728,16 @@ written inside it, and neither check depends on the other:
   redeclare a method of a trait that it requires, although it can add a version
   with another receiver mode. Traits cannot require each other in a cycle.
 - **An `impl` conforms to its trait.** It defines every method without a body
-  and every associated type, and nothing else. Each method has the trait's
+  and every associated type, and nothing else. It may define each associated
+  capability set that the trait declares, once, and a set that it leaves out
+  is empty. A set is defined from capabilities, capability parameters, the
+  sets of the `impl`'s generic parameters, and the sets that the `impl`
+  defines before it; a set defined from itself is
+  `types.unknown_associated_capability`. Each method has the trait's
   parameter names, modes, and types, with `Self` and the associated types
   substituted; the same result clause; generic parameters with bounds that are
-  no stronger; and `uses` that are a subset of the trait method's. Parameter
+  no stronger; and `uses` that are a subset of the trait method's, in which
+  `Self.Uses` is the set that the `impl` defines. Parameter
   names must match because they are part of how a method is called, as Swift
   requires of protocol requirements. Defaults are written only in the trait. A
   method can add `ensures` and `cost` clauses, and can state a `requires`. The
@@ -1697,12 +1712,19 @@ the error is fixed.
 - **The `next` of a yielding method's cursor needs the capabilities in the
   method's `uses`,** at each call of `next` and at a `for` loop over the
   cursor, because `next` runs the method's code. Making the cursor needs them
-  as well. `Cursor.next` uses no capability, so such a cursor does not meet a
-  `Cursor` bound and cannot call a method that `Cursor` provides: code that
-  has only the bound has no capability to give to the cursor. This prevents a
-  function without a `uses` clause from running the method's code, and it
-  prevents a use after free: a cursor that kept the implementation it was made
-  with could run after the `provide` block of that implementation had ended.
+  as well. This prevents a function without a `uses` clause from running the
+  method's code, and it prevents a use after free: a cursor that kept the
+  implementation it was made with could run after the `provide` block of that
+  implementation had ended.
+- **A call of a trait's method needs the method's `uses` for the type that it
+  is called on.** `Cursor.next` declares `uses Self.Uses`. For a type whose
+  `impl` is known, `Self.Uses` is the set that the `impl` defines, and for the
+  cursor of a yielding method it is the method's `uses`. For a generic
+  parameter `Source`, it is `Source.Uses`, which is available only where the
+  enclosing function declares it. So a generic function that advances a cursor
+  declares `uses Source.Uses`, a call of the function needs the capabilities
+  of the cursor that it passes, and no function without a `uses` clause runs
+  code that uses a capability.
 - **A call of an intrinsic needs the capabilities that `Intrinsic.uses` lists
   for the operation.** An intrinsic has no signature with a `uses` clause. A
   method of an `impl` of a capability is exempt: it can call an intrinsic
@@ -1908,6 +1930,12 @@ type. The error is reported at the `impl`, wherever it is.
 
 - **`any Trait` fixes every associated type** of the trait, as Rust requires
   of `dyn`, since a method mentioning one could not otherwise be called.
+- **`any Trait` fixes every associated capability set to the empty set.** A
+  call through `any` therefore needs no capability for `Self.Uses`, and
+  `any value` is `types.no_impl` when the `impl` for the value's type defines
+  a set that is not empty, or when the type is a generic parameter, whose set
+  is not known. Otherwise a function without a `uses` clause could call the
+  method through `any` and run code that uses a capability.
 - **A method is object-safe,** and can be called through `any`, when it has a
   receiver (`self`, `mut self`, or `own self`), has no generic parameters, and
   names `Self` in no parameter type and not in its result type, at any depth.

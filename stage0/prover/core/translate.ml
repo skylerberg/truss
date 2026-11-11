@@ -5898,7 +5898,8 @@ and call_reaches context frame uses (values : passed list) (target : Costs.targe
         (List.exists
            (function
              | T.Capability used -> Path.equal used path
-             | T.Capability_parameter _ | T.Capability_variable _ -> true)
+             | T.Capability_parameter _ | T.Capability_projection _ | T.Capability_variable _ ->
+                 true)
            uses)
 
 (* Whether a function value is a [calls] clause's target: the target
@@ -5961,7 +5962,7 @@ and function_value_amount context frame (function_type : T.function_type) callee
         List.exists
           (function
             | T.Capability used -> Path.equal used path
-            | T.Capability_parameter _ | T.Capability_variable _ -> true)
+            | T.Capability_parameter _ | T.Capability_projection _ | T.Capability_variable _ -> true)
           function_type.uses
       then unknown_amount context frame counter
       else Costs.zero

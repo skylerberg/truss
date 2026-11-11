@@ -36,7 +36,7 @@ let spans (definition : definition) =
   | Trait { members; _ } ->
       with_members members (function
         | Law { body; _ } -> Some body.span
-        | Associated_type _ | Trait_member_error -> None)
+        | Associated_type _ | Associated_capability _ | Trait_member_error -> None)
   | Impl { members; _ } -> with_members members (fun (_ : impl_member) -> None)
   | Capability { members; _ } -> with_members members (fun (_ : capability_member) -> None)
 

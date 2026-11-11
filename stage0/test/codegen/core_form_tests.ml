@@ -1346,7 +1346,9 @@ test "floats that are not finite, as constants" {
 
 let () =
   passes "a yielding function's cursor through a bound, and the methods Cursor gives it"
-    {|fn total[Source: Cursor[Element = Int64]](items: own Source) -> Int64 {
+    {|fn total[Source: Cursor[Element = Int64]](items: own Source) -> Int64
+  uses Source.Uses
+{
   var cursor = own items
   var sum: Int64 = 0
   while mut cursor.next() is Some(item) {
@@ -1355,11 +1357,15 @@ let () =
   sum
 }
 
-fn counted[Source: Cursor](items: own Source) -> USize {
+fn counted[Source: Cursor](items: own Source) -> USize
+  uses Source.Uses
+{
   own items.count()
 }
 
-fn skipped[Source: Cursor[Element = Int64]](items: own Source) -> Int64 {
+fn skipped[Source: Cursor[Element = Int64]](items: own Source) -> Int64
+  uses Source.Uses
+{
   total(own items.skip(1))
 }
 
