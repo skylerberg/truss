@@ -13,8 +13,8 @@ let weights =
     ("standard::collections::bit_set", 2405);
     ("standard::collections::deque", 756);
     ("standard::collections::heap", 252);
-    ("standard::collections::sorted_map", 10);
-    ("standard::collections::sorted_set", 4);
+    ("standard::collections::sorted_map", 1526);
+    ("standard::collections::sorted_set", 1317);
     ("standard::console", 108);
     ("standard::core", 32);
     ("standard::core::range", 30);
@@ -29,7 +29,7 @@ let weights =
     ("standard::list", 1021);
     ("standard::list::array", 328);
     ("standard::list::array_views", 587);
-    ("standard::list::slice", 5334);
+    ("standard::list::slice", 3596);
     ("standard::list::views", 639);
     ("standard::log", 19);
     ("standard::map", 1465);
