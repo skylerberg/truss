@@ -67,6 +67,12 @@ with the facts gathered before it (see
 cut down to the facts it can use, written in a canonical form, and given to
 the solver (see [Queries](#queries)).
 
+One walk reads Truss and makes the verification conditions. Boogie and
+Why3 put a proof program between the two, which weakest preconditions turn
+into conditions; that keeps reading the language apart from the logic, at
+the cost of a second representation of every body that only the walk
+would read, so Truss has none.
+
 ### One definition at a time, one obligation at a time
 
 The prover works as the type checker does, through queries with traces (see
@@ -549,7 +555,12 @@ two calls. A `concurrent for` loop's iterations are read as a `for`'s. A
 block ends, after the other branches, which are cancelled and run to their
 own ends: each later branch is read from where the exit was as well as
 from where the branches before it ended, and the exit is then taken with
-what each branch did. A cancelled task's capability calls return the
+what each branch did. An exit from an iteration of a `concurrent for`
+ends that iteration, since the iterations after it are cancelled and run
+to their own ends, and is taken where the loop ends: a `break` is where
+the loop ends anyway, and a `return` returns there, on a path of its own,
+with a value known by its type, since which iteration's value it is is
+not known. A cancelled task's capability calls return the
 cancelled value from their implementations, which their contracts cover,
 so cancelling asks nothing more of a proof.
 
@@ -1454,16 +1465,9 @@ test the prover itself:
   other fixes, checking it with an `if`, using the
   checked version of the operation, and `uses Panic`, change what the code
   means, so the message is to name them without applying them.
-- **Proof programs as a data structure of their own,** made from a body
-  and then turned into verification conditions by weakest preconditions,
-  which would keep reading Truss apart from the logic. One walk does both.
 - **Proof states in the language server.** `Prover.states` gives each
   obligation's state at its position, proven or not with the diagnostic
   that says why; the language server, `truss lsp`, is not built yet.
-- **An early exit from an iteration of a `concurrent for` loop** is
-  reported as code the prover cannot read: the iterations after it are
-  cancelled and run to their ends, which the loop's invariant would have
-  to say of where the exit is.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.

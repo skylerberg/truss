@@ -252,6 +252,9 @@ type context = {
       (** Each type's elements and model as a buffer's, where it is one. *)
   mutable equalities : L.term list;  (** Each derived [==] whose definition is a fact. *)
   mutable known_calls : known_call list;  (** Each call running code can give a value. *)
+  mutable iteration_returns : (Core.origin * T.ty option) list;
+      (** Each [return] from an iteration of a [concurrent for], by its loop, with the type of its
+          value: taken where the loop ends. *)
   reveal : bool;
       (** Whether callees in other packages are read as their own package reads them, bodies
           included, to tell whether seeing a hidden body would prove an obligation. *)
@@ -1746,8 +1749,38 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       (* The exit is where the block it leaves ends, after the other
          branches, so here it is only recorded. *)
       match tasks with
+      | [ Iteration { loop } ] -> (
+          (* The iterations after it are cancelled and run to their ends, so
+             this one ends here, and the loop ends when they all have: a
+             [break] is then where the loop ends, and a [return] is taken
+             there, with a value known by its type. *)
+          match frame.loop with
+          | Some exits ->
+              let ended =
+                match exit.kind with
+                | Return (Some returned) -> (
+                    match expression context frame returned with
+                    | Some (after, _) ->
+                        context.iteration_returns <-
+                          (loop, Some (type_of context frame returned)) :: context.iteration_returns;
+                        Some after
+                    | None -> None)
+                | Return None ->
+                    context.iteration_returns <- (loop, None) :: context.iteration_returns;
+                    Some frame
+                | Break | Continue -> Some frame
+                | _ ->
+                    unsupported (at frame node)
+                      "an early exit that is not a `return`, `break`, or `continue`"
+              in
+              (match ended with
+              | Some ended -> exits.continues <- ended :: exits.continues
+              | None -> ());
+              None
+          | None -> unsupported (at frame node) "an early exit outside its loop")
       | Iteration _ :: _ ->
-          unsupported (at frame node) "an early exit from an iteration of a `concurrent for` loop"
+          unsupported (at frame node)
+            "an early exit from an iteration of a `concurrent for` loop to tasks around it"
       | _ -> (
           let record at exit_ = context.leaving <- { tasks; at; exit = exit_ } :: context.leaving in
           match exit.kind with
@@ -8181,6 +8214,25 @@ and one_step (counter : Costs.counter) =
   match counter.resource with Time -> L.int 1 | _ -> Costs.zero
 
 and for_ context frame (node : statement) (pattern : pattern) (iteration : iteration) clauses body =
+  let outer = context.iteration_returns in
+  context.iteration_returns <- [];
+  let ended = loop_over context frame node pattern iteration clauses body in
+  let returning, others =
+    List.partition (fun (loop, _) -> loop = node.origin) context.iteration_returns
+  in
+  context.iteration_returns <- outer @ others;
+  match (ended, returning) with
+  | Some ended, (_, ty) :: _ ->
+      (* Where an iteration returned, the function returns once the loop has
+         ended, on a path of its own. *)
+      let returned = fresh context ended "returned" L.Bool in
+      let value = Option.map (fun ty -> arrive context ended "result" ty) ty in
+      context.returns <- (restrict ended returned, value) :: context.returns;
+      Some (restrict ended (L.not_ returned))
+  | _ -> ended
+
+and loop_over context frame (node : statement) (pattern : pattern) (iteration : iteration) clauses
+    body =
   let span = span_of frame.source node.origin in
   match iteration with
   | Integer_range { start; stop; inclusive } ->
@@ -8698,6 +8750,7 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     buffers = Hashtbl.create 16;
     equalities = [];
     known_calls = [];
+    iteration_returns = [];
     entry = [];
     hidden_bodies = [];
     cursors = [];
