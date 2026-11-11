@@ -1668,6 +1668,15 @@ the error is fixed.
   clause to be available, after its capability parameters are substituted.
 - **An indirect call** needs the capabilities in the `uses` of the function
   value's type.
+- **The `next` of a yielding method's cursor needs the capabilities in the
+  method's `uses`,** at each call of `next` and at a `for` loop over the
+  cursor, because `next` runs the method's code. Making the cursor needs them
+  as well. `Cursor.next` uses no capability, so such a cursor does not meet a
+  `Cursor` bound and cannot call a method that `Cursor` provides: code that
+  has only the bound has no capability to give to the cursor. This prevents a
+  function without a `uses` clause from running the method's code, and it
+  prevents a use after free: a cursor that kept the implementation it was made
+  with could run after the `provide` block of that implementation had ended.
 - **A call of an intrinsic needs the capabilities that `Intrinsic.uses` lists
   for the operation.** An intrinsic has no signature with a `uses` clause. A
   method of an `impl` of a capability is exempt: it can call an intrinsic
