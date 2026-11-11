@@ -4,8 +4,8 @@
    Usage: unicode_tables.exe DIRECTORY > standard/text/unicode_data.truss
 
    DIRECTORY holds UnicodeData.txt, DerivedCoreProperties.txt,
-   SpecialCasing.txt, CaseFolding.txt, and EastAsianWidth.txt of one version
-   of Unicode. *)
+   DerivedNormalizationProps.txt, SpecialCasing.txt, CaseFolding.txt, and
+   EastAsianWidth.txt of one version of Unicode. *)
 
 let directory =
   match Sys.argv with
@@ -55,10 +55,18 @@ let property rows name =
        (function ranges :: found :: _ when found = name -> Some (range ranges) | _ -> None)
        rows)
 
-(* A code point of UnicodeData.txt: its general category and its simple
-   uppercase and lowercase mappings. A pair of lines named [First] and
-   [Last] stands for every code point between them. *)
-type character = { code : int; category : string; upper : string; lower : string }
+(* A code point of UnicodeData.txt: its general category, its canonical
+   combining class, its decomposition, and its simple uppercase and
+   lowercase mappings. A pair of lines named [First] and [Last] stands for
+   every code point between them. *)
+type character = {
+  code : int;
+  category : string;
+  combining : int;
+  decomposition : string;
+  upper : string;
+  lower : string;
+}
 
 let characters =
   let _, characters =
@@ -75,9 +83,27 @@ let characters =
                 List.rev_append
                   (List.init
                      (code - start + 1)
-                     (fun offset -> { code = start + offset; category; upper = ""; lower = "" }))
+                     (fun offset ->
+                       {
+                         code = start + offset;
+                         category;
+                         combining = 0;
+                         decomposition = "";
+                         upper = "";
+                         lower = "";
+                       }))
                   characters )
-            else (None, { code; category; upper = field 12; lower = field 13 } :: characters)
+            else
+              ( None,
+                {
+                  code;
+                  category;
+                  combining = int_of_string (field 3);
+                  decomposition = field 5;
+                  upper = field 12;
+                  lower = field 13;
+                }
+                :: characters )
         | _ -> (first, characters))
       (None, []) (lines "UnicodeData.txt")
   in
@@ -166,6 +192,93 @@ let fold_expansions =
     case_folding
   |> List.sort compare |> List.concat
 
+(* Runs of consecutive code points with one canonical combining class that
+   is not 0, as [first; last; class]. *)
+let combining_class_ranges =
+  List.fold_left
+    (fun runs character ->
+      if character.combining = 0 then runs
+      else
+        match runs with
+        | (first, last, earlier) :: rest
+          when last = character.code - 1 && earlier = character.combining ->
+            (first, character.code, earlier) :: rest
+        | _ -> (character.code, character.code, character.combining) :: runs)
+    [] characters
+  |> List.rev
+
+(* One step of each character's decomposition: the code points its
+   decomposition field lists. A field that starts with a tag is a
+   compatibility decomposition. *)
+let decomposition_steps =
+  let steps = Hashtbl.create 8192 in
+  List.iter
+    (fun character ->
+      match
+        List.filter (fun part -> part <> "") (String.split_on_char ' ' character.decomposition)
+      with
+      | [] -> ()
+      | tag :: parts when tag.[0] = '<' ->
+          Hashtbl.replace steps character.code (`Compatibility, List.map code parts)
+      | parts -> Hashtbl.replace steps character.code (`Canonical, List.map code parts))
+    characters;
+  steps
+
+(* A code point's decomposition with every part decomposed in turn. The
+   canonical decomposition takes canonical steps only. *)
+let rec full_decomposition ~compatibility code =
+  match Hashtbl.find_opt decomposition_steps code with
+  | Some (`Canonical, parts) -> List.concat_map (full_decomposition ~compatibility) parts
+  | Some (`Compatibility, parts) when compatibility ->
+      List.concat_map (full_decomposition ~compatibility) parts
+  | _ -> [ code ]
+
+let canonical_decompositions =
+  List.filter_map
+    (fun character ->
+      match Hashtbl.find_opt decomposition_steps character.code with
+      | Some (`Canonical, _) ->
+          Some (character.code, full_decomposition ~compatibility:false character.code)
+      | _ -> None)
+    characters
+
+(* Only the characters whose compatibility decomposition is not their
+   canonical one. *)
+let compatibility_decompositions =
+  List.filter_map
+    (fun character ->
+      let whole = full_decomposition ~compatibility:true character.code in
+      if whole = full_decomposition ~compatibility:false character.code then None
+      else Some (character.code, whole))
+    characters
+
+(* An index of [code; start; length] rows, and the pool of code points that
+   each row's start and length select. *)
+let index_and_pool decompositions =
+  let index, pool, _ =
+    List.fold_left
+      (fun (index, pool, start) (code, parts) ->
+        let length = List.length parts in
+        (List.rev_append [ code; start; length ] index, List.rev_append parts pool, start + length))
+      ([], [], 0) decompositions
+  in
+  (List.rev index, List.rev pool)
+
+(* [first; second; composite] for each character whose canonical
+   decomposition is a pair and that composition does not exclude. *)
+let composition_pairs excluded =
+  let is_excluded code =
+    List.exists (fun (first, last) -> first <= code && code <= last) excluded
+  in
+  List.filter_map
+    (fun character ->
+      match Hashtbl.find_opt decomposition_steps character.code with
+      | Some (`Canonical, [ first; second ]) when not (is_excluded character.code) ->
+          Some [ first; second; character.code ]
+      | _ -> None)
+    characters
+  |> List.sort compare |> List.concat
+
 let flat ranges = List.concat_map (fun (first, last) -> [ first; last ]) ranges
 
 let print_table name numbers =
@@ -183,6 +296,9 @@ let print_table name numbers =
 let () =
   let core = lines "DerivedCoreProperties.txt" in
   let width = lines "EastAsianWidth.txt" in
+  let normalization = lines "DerivedNormalizationProps.txt" in
+  let canonical_index, canonical_pool = index_and_pool canonical_decompositions in
+  let compatibility_index, compatibility_pool = index_and_pool compatibility_decompositions in
   let tables =
     [
       ("alphabetic_ranges", flat (property core "Alphabetic"));
@@ -201,6 +317,15 @@ let () =
       ("fold_expansions", fold_expansions);
       ( "category_ranges",
         List.concat_map (fun (first, last, number) -> [ first; last; number ]) category_ranges );
+      ( "combining_class_ranges",
+        List.concat_map
+          (fun (first, last, number) -> [ first; last; number ])
+          combining_class_ranges );
+      ("canonical_decomposition_index", canonical_index);
+      ("canonical_decomposition_pool", canonical_pool);
+      ("compatibility_decomposition_index", compatibility_index);
+      ("compatibility_decomposition_pool", compatibility_pool);
+      ("composition_pairs", composition_pairs (property normalization "Full_Composition_Exclusion"));
     ]
   in
   List.iteri

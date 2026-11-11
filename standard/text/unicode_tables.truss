@@ -1,3 +1,4 @@
+use standard::intrinsic
 use standard::text::unicode_data
 
 fn search(count: USize, compare: (fn(row: USize) -> Ordering requires row < count cost time O(1))) -> Option[USize]
@@ -66,85 +67,99 @@ fn expansion_of(expansions: Slice[UInt32], code: UInt32) -> Option[Expansion]
 internal fn is_alphabetic(code: UInt32) -> Bool
   cost time O(1)
 {
-  ranges_contain(unicode_data::alphabetic_ranges[..], code: code)
+  var found = ranges_contain(unicode_data::alphabetic_ranges[..], code: code)
+  found
 }
 
 internal fn is_numeric(code: UInt32) -> Bool
   cost time O(1)
 {
-  ranges_contain(unicode_data::numeric_ranges[..], code: code)
+  var found = ranges_contain(unicode_data::numeric_ranges[..], code: code)
+  found
 }
 
 internal fn is_uppercase(code: UInt32) -> Bool
   cost time O(1)
 {
-  ranges_contain(unicode_data::uppercase_ranges[..], code: code)
+  var found = ranges_contain(unicode_data::uppercase_ranges[..], code: code)
+  found
 }
 
 internal fn is_lowercase(code: UInt32) -> Bool
   cost time O(1)
 {
-  ranges_contain(unicode_data::lowercase_ranges[..], code: code)
+  var found = ranges_contain(unicode_data::lowercase_ranges[..], code: code)
+  found
 }
 
 internal fn is_cased(code: UInt32) -> Bool
   cost time O(1)
 {
-  ranges_contain(unicode_data::cased_ranges[..], code: code)
+  var found = ranges_contain(unicode_data::cased_ranges[..], code: code)
+  found
 }
 
 internal fn is_case_ignorable(code: UInt32) -> Bool
   cost time O(1)
 {
-  ranges_contain(unicode_data::case_ignorable_ranges[..], code: code)
+  var found = ranges_contain(unicode_data::case_ignorable_ranges[..], code: code)
+  found
 }
 
 internal fn is_wide(code: UInt32) -> Bool
   cost time O(1)
 {
-  ranges_contain(unicode_data::wide_ranges[..], code: code)
+  var found = ranges_contain(unicode_data::wide_ranges[..], code: code)
+  found
 }
 
 internal fn is_zero_width(code: UInt32) -> Bool
   cost time O(1)
 {
-  ranges_contain(unicode_data::zero_width_ranges[..], code: code)
+  var found = ranges_contain(unicode_data::zero_width_ranges[..], code: code)
+  found
 }
 
 internal fn uppercase_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  mapping_of(unicode_data::uppercase_mappings[..], code: code)
+  var found = mapping_of(unicode_data::uppercase_mappings[..], code: code)
+  found
 }
 
 internal fn lowercase_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  mapping_of(unicode_data::lowercase_mappings[..], code: code)
+  var found = mapping_of(unicode_data::lowercase_mappings[..], code: code)
+  found
 }
 
 internal fn folded_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  mapping_of(unicode_data::fold_mappings[..], code: code)
+  var found = mapping_of(unicode_data::fold_mappings[..], code: code)
+  found
 }
 
 internal fn uppercase_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  expansion_of(unicode_data::uppercase_expansions[..], code: code)
+  var found = expansion_of(unicode_data::uppercase_expansions[..], code: code)
+  found
 }
 
 internal fn lowercase_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  expansion_of(unicode_data::lowercase_expansions[..], code: code)
+  var found = expansion_of(unicode_data::lowercase_expansions[..], code: code)
+  found
 }
 
 internal fn fold_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  expansion_of(unicode_data::fold_expansions[..], code: code)
+  var found = expansion_of(unicode_data::fold_expansions[..], code: code)
+  found
 }
 
 fn range_value(ranges: Slice[UInt32], code: UInt32) -> Option[UInt32]
@@ -168,8 +183,97 @@ fn range_value(ranges: Slice[UInt32], code: UInt32) -> Option[UInt32]
 internal fn category_number_of(code: UInt32) -> UInt32
   cost time O(1)
 {
+  var number: UInt32 = 10
   match range_value(unicode_data::category_ranges[..], code: code) {
-    Some(number) => number
-    None => 10
+    Some(found) => {
+      number = found
+    }
+    None => {}
   }
+  number
+}
+
+internal fn combining_class_of(code: UInt32) -> UInt32
+  cost time O(1)
+{
+  var class: UInt32 = 0
+  match range_value(unicode_data::combining_class_ranges[..], code: code) {
+    Some(found) => {
+      class = found
+    }
+    None => {}
+  }
+  class
+}
+
+internal type PoolRange(start: UInt32, length: UInt32)
+
+fn pool_range_of(index: Slice[UInt32], code: UInt32) -> Option[PoolRange]
+  cost time O(1)
+{
+  match search(index.length() / 3, compare: fn(row) { code.compare(index[3 * row]) }) {
+    Some(row) => Some(PoolRange(start: index[3 * row + 1], length: index[3 * row + 2]))
+    None => None
+  }
+}
+
+fn append_pool_range(output: mut List[UInt32], pool: Slice[UInt32], range: PoolRange)
+  cost time finite
+{
+  var at: USize = intrinsic::convert(range.start)
+  var remaining = range.length
+  while remaining > 0 && at < pool.length()
+    decreases remaining
+  {
+    mut output.push(pool[at])
+    at += 1
+    remaining -= 1
+  }
+}
+
+internal fn append_canonical_decomposition(output: mut List[UInt32], code: UInt32) -> Bool
+  cost time finite
+{
+  match pool_range_of(unicode_data::canonical_decomposition_index[..], code: code) {
+    Some(range) => {
+      append_pool_range(mut output, pool: unicode_data::canonical_decomposition_pool[..], range: range)
+      true
+    }
+    None => false
+  }
+}
+
+internal fn append_compatibility_decomposition(output: mut List[UInt32], code: UInt32) -> Bool
+  cost time finite
+{
+  match pool_range_of(unicode_data::compatibility_decomposition_index[..], code: code) {
+    Some(range) => {
+      append_pool_range(mut output, pool: unicode_data::compatibility_decomposition_pool[..], range: range)
+      true
+    }
+    None => false
+  }
+}
+
+fn pair_value(pairs: Slice[UInt32], first: UInt32, second: UInt32) -> Option[UInt32]
+  cost time O(1)
+{
+  let found = search(pairs.length() / 3, compare: fn(row) {
+    if first != pairs[3 * row] {
+      first.compare(pairs[3 * row])
+    } else {
+      second.compare(pairs[3 * row + 1])
+    }
+  })
+  match found {
+    Some(row) => Some(pairs[3 * row + 2])
+    None => None
+  }
+}
+
+internal fn composition_of(first: UInt32, second: UInt32) -> Option[UInt32]
+  cost time O(1)
+{
+  var composite = pair_value(unicode_data::composition_pairs[..], first: first, second: second)
+  composite
 }

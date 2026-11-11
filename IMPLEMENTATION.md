@@ -28,15 +28,20 @@ develop as well as make it easier to bootstrap the compiler in parts.
   the path or name it in `TRUSS_Z3`. CI downloads that release and checks
   its hash.
 - **The Unicode tables are generated.** `standard/text/unicode_data.truss`
-  holds the tables of character properties and case mappings, and nothing
-  else. `stage0/unicode_tables` writes it from five files of the Unicode
-  character database: `UnicodeData.txt`, `DerivedCoreProperties.txt`,
+  holds the tables of character properties, case mappings, and
+  normalization, and nothing else. `stage0/unicode_tables` writes it from
+  six files of the Unicode character database: `UnicodeData.txt`,
+  `DerivedCoreProperties.txt`, `DerivedNormalizationProps.txt`,
   `SpecialCasing.txt`, `CaseFolding.txt`, and `EastAsianWidth.txt`. To move
   to a new version of Unicode, download those files of that version into
   one directory and run
   `dune exec stage0/unicode_tables/unicode_tables.exe -- DIRECTORY > standard/text/unicode_data.truss`.
   The functions that search the tables are written by hand, in
-  `standard/text/unicode_tables.truss`.
+  `standard/text/unicode_tables.truss`. Each function there that names a
+  table assigns its result to a `var`, so that its body is not functional
+  and callers know it by its contract. With a functional body the function
+  would be known by its definition, and the prover would copy the table
+  into every query of every caller.
 - **`dune build`** builds everything, **`dune test`** runs the tests, and
   **`dune fmt`** formats the code with the ocamlformat version that
   `.ocamlformat` pins.
