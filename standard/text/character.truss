@@ -1,5 +1,6 @@
 use standard::core
 use standard::intrinsic
+use standard::text::unicode_tables
 
 public let Character.replacement: Character = Character"\u{FFFD}"
 
@@ -92,19 +93,19 @@ public fn Character.is_ascii(self) -> Bool
 public fn Character.is_alphabetic(self) -> Bool
   cost time O(1)
 {
-  todo
+  if self.code() < 128 { self.is_ascii_alphabetic() } else { unicode_tables::is_alphabetic(self.code()) }
 }
 
 public fn Character.is_numeric(self) -> Bool
   cost time O(1)
 {
-  todo
+  if self.code() < 128 { self.is_ascii_digit() } else { unicode_tables::is_numeric(self.code()) }
 }
 
 public fn Character.is_alphanumeric(self) -> Bool
   cost time O(1)
 {
-  todo
+  self.is_alphabetic() || self.is_numeric()
 }
 
 public fn Character.is_whitespace(self) -> Bool
@@ -119,13 +120,15 @@ public fn Character.is_whitespace(self) -> Bool
 public fn Character.is_uppercase(self) -> Bool
   cost time O(1)
 {
-  todo
+  let code = self.code()
+  if code < 128 { code >= 65 && code <= 90 } else { unicode_tables::is_uppercase(code) }
 }
 
 public fn Character.is_lowercase(self) -> Bool
   cost time O(1)
 {
-  todo
+  let code = self.code()
+  if code < 128 { code >= 97 && code <= 122 } else { unicode_tables::is_lowercase(code) }
 }
 
 public fn Character.is_control(self) -> Bool
@@ -170,16 +173,22 @@ public fn Character.is_ascii_hexadecimal_digit(self) -> Bool
   (code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)
 }
 
+internal fn Character.or_scalar(self, code: UInt32) -> Character
+  cost time O(1)
+{
+  if code <= 1114111 && (code < 55296 || code > 57343) { intrinsic::convert(code) } else { self }
+}
+
 public fn Character.to_uppercase(self) -> Character
   cost time O(1)
 {
-  todo
+  if self.code() < 128 { self.to_ascii_uppercase() } else { self.or_scalar(unicode_tables::uppercase_of(self.code())) }
 }
 
 public fn Character.to_lowercase(self) -> Character
   cost time O(1)
 {
-  todo
+  if self.code() < 128 { self.to_ascii_lowercase() } else { self.or_scalar(unicode_tables::lowercase_of(self.code())) }
 }
 
 public fn Character.to_ascii_uppercase(self) -> Character

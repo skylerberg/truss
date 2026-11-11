@@ -13,9 +13,11 @@ let () =
 (* CI proves the library on several runners at once. [TRUSS_PROOF_SHARE]
    names this run's share as [index/count], and the run checks and proves
    only its own modules: what they use of the others is worked out as it is
-   needed. The modules are dealt out by the size of their source, largest
-   first, each to the share with the least so far, so that the shares take
-   about as long as each other. *)
+   needed. The modules are dealt out by weight, heaviest first, each to the
+   share with the least so far, so that the shares take about as long as
+   each other. A module's weight is the number of letters in its source,
+   which leaves out tables of numbers: they are large and have nothing to
+   prove. *)
 let share =
   match Sys.getenv_opt "TRUSS_PROOF_SHARE" with
   | None | Some "" -> None
@@ -26,22 +28,29 @@ let share =
           prerr_endline ("TRUSS_PROOF_SHARE is `index/count`, such as `0/2`, not `" ^ text ^ "`.");
           exit 2)
 
+let weight source =
+  String.fold_left
+    (fun letters character ->
+      match character with 'a' .. 'z' | 'A' .. 'Z' -> letters + 1 | _ -> letters)
+    0 source
+
 let modules =
   match share with
   | None -> Standard_library.modules
   | Some (index, count) ->
       let totals = Array.make count 0 in
+      let weighed =
+        List.map (fun ((_, source) as entry) -> (weight source, entry)) Standard_library.modules
+      in
       let mine =
         List.fold_left
-          (fun mine ((_, source) as entry) ->
+          (fun mine (weight, entry) ->
             let least = ref 0 in
             Array.iteri (fun other total -> if total < totals.(!least) then least := other) totals;
-            totals.(!least) <- totals.(!least) + String.length source;
+            totals.(!least) <- totals.(!least) + weight;
             if !least = index then entry :: mine else mine)
           []
-          (List.stable_sort
-             (fun (_, first) (_, second) -> compare (String.length second) (String.length first))
-             Standard_library.modules)
+          (List.stable_sort (fun (first, _) (second, _) -> compare second first) weighed)
       in
       List.filter (fun entry -> List.memq entry mine) Standard_library.modules
 

@@ -962,6 +962,152 @@ fn main(arguments: List[String]) -> ExitCode
 }
 |})
 
+(* The scheduler, with each number of threads *)
+
+let expect_with_each_thread_count ~expected text =
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "TRUSS_WORKERS" "")
+    (fun () ->
+      List.iter
+        (fun workers ->
+          Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
+          expect_threaded ~expected text)
+        worker_counts)
+
+let tally =
+  {|type Counter(count: Int64)
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+impl Tally for Counter {
+  fn add(mut self, amount: Int64) {
+    let before = self.count
+    self.count = before + amount
+  }
+
+  fn total(self) -> Int64 {
+    self.count
+  }
+}
+|}
+
+let () =
+  test "on threads, nested groups of tasks park, yield, block, and lock with any number of threads"
+    (fun () ->
+      expect_with_each_thread_count ~expected:"total 2000\n"
+        (tally
+       ^ {|
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console
+{
+  var counter = Counter(count: 0)
+  provide mut counter {
+    concurrent for outer in 0..40 {
+      concurrent for inner in 0..50 {
+        if (outer + inner) % 10 == 0 {
+          Clock.sleep(Duration.nanoseconds(1000000))
+        }
+        if inner % 7 == 0 {
+          Tasks.yield_now()
+        }
+        Tally.add(1)
+      }
+    }
+    Console.print_line("total ${Tally.total()}")
+  }
+  ExitCode.success
+}
+|}
+        ));
+  test "on threads, tasks run parallel blocks and loops with any number of threads" (fun () ->
+      expect_with_each_thread_count ~expected:"total 40064\n"
+        (tally
+       ^ {|
+fn fib(n: Int64) -> Int64 {
+  if n < 2 {
+    return n
+  }
+  parallel {
+    let left = fib(n - 1)
+    let right = fib(n - 2)
+  }
+  left.wrapping_add(right)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var counter = Counter(count: 0)
+  provide mut counter {
+    concurrent for _ in 0..64 {
+      Tasks.yield_now()
+      Tally.add(fib(15))
+      var numbers: List[Int64] = [1, 2, 3, 4, 5, 6, 7, 8]
+      parallel for item in mut numbers {
+        item = item * 2
+      }
+      Tally.add(numbers[7])
+    }
+    Console.print_line("total ${Tally.total()}")
+  }
+  ExitCode.success
+}
+|}
+        ));
+  (* The seeded scheduler runs its tasks as coroutines. [add] yields to the
+     program's scheduler in one, so the task goes on on another thread
+     while it is in a coroutine, and the other tasks park in theirs for
+     the mutex. The coroutine then suspends on that thread, when it yields
+     to the seeded scheduler. *)
+  test "on threads, a task that leaves its thread in a coroutine goes on with any number of threads"
+    (fun () ->
+      expect_with_each_thread_count ~expected:"total 1920\n"
+        {|use standard::tasks
+
+type Counter(count: Int64)
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+impl Tally for Counter
+  uses Tasks
+{
+  fn add(mut self, amount: Int64) {
+    let before = self.count
+    Tasks.yield_now()
+    self.count = before + amount
+  }
+
+  fn total(self) -> Int64 {
+    self.count
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console, Panic
+{
+  var counter = Counter(count: 0)
+  provide mut counter {
+    concurrent for _ in 0..32 {
+      provide tasks::SeededTasks.new(7) {
+        concurrent for _ in 0..30 {
+          Tally.add(1)
+          Tasks.yield_now()
+          Tally.add(1)
+        }
+      }
+    }
+    Console.print_line("total ${Tally.total()}")
+  }
+  ExitCode.success
+}
+|})
+
 (* Cancelling a task that is blocked in a call of the operating system *)
 
 let () =

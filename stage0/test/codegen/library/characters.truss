@@ -126,3 +126,31 @@ test "stepping through characters skips the surrogates" {
   assert Character"\u{D7FF}".steps_to(Character"\u{E000}") == Some(1)
   assert Character"\u{0}".steps_to(Character.maximum) == Some(1112063)
 }
+
+test "a character's properties follow the Unicode character database" {
+  assert Character"a".is_alphabetic() && Character"Z".is_alphabetic() && !Character"1".is_alphabetic()
+  assert Character"é".is_alphabetic() && Character"Ω".is_alphabetic() && Character"中".is_alphabetic()
+  assert Character"\u{2160}".is_alphabetic()
+  assert !Character"!".is_alphabetic() && !Character"€".is_alphabetic() && !Character"\u{301}".is_alphabetic()
+  assert Character"7".is_numeric() && Character"٣".is_numeric() && Character"½".is_numeric()
+  assert Character"\u{2160}".is_numeric() && !Character"x".is_numeric() && !Character"中".is_numeric()
+  assert Character"é".is_alphanumeric() && Character"٣".is_alphanumeric() && !Character"-".is_alphanumeric()
+  assert Character"A".is_uppercase() && Character"É".is_uppercase() && Character"Σ".is_uppercase()
+  assert !Character"a".is_uppercase() && !Character"中".is_uppercase() && !Character"1".is_uppercase()
+  assert Character"a".is_lowercase() && Character"é".is_lowercase() && Character"ß".is_lowercase()
+  assert !Character"A".is_lowercase() && !Character"中".is_lowercase()
+  assert Character"\u{10400}".is_uppercase() && Character"\u{10428}".is_lowercase()
+}
+
+test "a character maps to its simple uppercase and lowercase" {
+  assert Character"a".to_uppercase() == Character"A" && Character"A".to_lowercase() == Character"a"
+  assert Character"é".to_uppercase() == Character"É" && Character"É".to_lowercase() == Character"é"
+  assert Character"ω".to_uppercase() == Character"Ω" && Character"Σ".to_lowercase() == Character"σ"
+  assert Character"я".to_uppercase() == Character"Я" && Character"Я".to_lowercase() == Character"я"
+  assert Character"ÿ".to_uppercase() == Character"Ÿ"
+  assert Character"\u{10428}".to_uppercase() == Character"\u{10400}"
+  assert Character"\u{1F80}".to_uppercase() == Character"\u{1F88}"
+  assert Character"ß".to_uppercase() == Character"ß"
+  assert Character"1".to_uppercase() == Character"1" && Character"中".to_lowercase() == Character"中"
+  assert Character"İ".to_lowercase() == Character"i"
+}

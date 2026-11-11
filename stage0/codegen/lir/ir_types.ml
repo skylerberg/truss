@@ -144,6 +144,11 @@ type intrinsic =
   | Shared_free  (** [(value pointer)]: frees the block, after its value has been dropped *)
   | Shared_lock  (** [(value pointer)]: locks the block's mutex *)
   | Shared_unlock  (** [(value pointer)]: unlocks the block's mutex *)
+  | Blocking_begin
+      (** [()]: before a call of the operating system that can block. The runtime may start a spare
+          thread to run the tasks that are ready, and it can now interrupt the call if the calling
+          task is cancelled. *)
+  | Blocking_end  (** [()]: after such a call. It leaves [errno] as the call set it. *)
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }

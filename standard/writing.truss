@@ -44,11 +44,16 @@ internal fn code_point(output: mut intrinsic::Storage[UInt8], code: UInt32)
   }
 }
 
-internal fn character(output: mut intrinsic::Storage[UInt8], value: Character) {
+internal fn character(output: mut intrinsic::Storage[UInt8], value: Character)
+  cost time finite
+{
   code_point(mut output, code: intrinsic::convert(value))
 }
 
-internal fn unsigned(output: mut intrinsic::Storage[UInt8], value: UInt64) {
+internal fn unsigned(output: mut intrinsic::Storage[UInt8], value: UInt64)
+  decreases value
+  cost time finite
+{
   if value >= 10 {
     unsigned(mut output, value: value / 10)
   }
@@ -56,7 +61,9 @@ internal fn unsigned(output: mut intrinsic::Storage[UInt8], value: UInt64) {
   byte(mut output, value: digit + 48)
 }
 
-internal fn signed(output: mut intrinsic::Storage[UInt8], value: Int64) {
+internal fn signed(output: mut intrinsic::Storage[UInt8], value: Int64)
+  cost time finite
+{
   if value < 0 {
     byte(mut output, value: 45)
     let magnitude: UInt64 = intrinsic::convert(intrinsic::negate(value + 1))
@@ -66,7 +73,9 @@ internal fn signed(output: mut intrinsic::Storage[UInt8], value: Int64) {
   }
 }
 
-internal fn truth(output: mut intrinsic::Storage[UInt8], value: Bool) {
+internal fn truth(output: mut intrinsic::Storage[UInt8], value: Bool)
+  cost time finite
+{
   if value {
     append(mut output, bytes: "true".slice().bytes)
   } else {
@@ -80,7 +89,9 @@ internal fn float64(output: mut intrinsic::Storage[UInt8], value: Float64)
   shortest_that_reads_back(mut output, value: value, as_float32: false)
 }
 
-internal fn float32(output: mut intrinsic::Storage[UInt8], value: Float32) {
+internal fn float32(output: mut intrinsic::Storage[UInt8], value: Float32)
+  cost time finite
+{
   shortest_that_reads_back(mut output, value: intrinsic::convert(value), as_float32: true)
 }
 
@@ -154,7 +165,10 @@ fn reads_back(text: intrinsic::View[UInt8], value: Float64, as_float32: Bool) ->
   }
 }
 
-fn upper_hexadecimal(output: mut intrinsic::Storage[UInt8], value: UInt32) {
+fn upper_hexadecimal(output: mut intrinsic::Storage[UInt8], value: UInt32)
+  decreases value
+  cost time finite
+{
   if value >= 16 {
     upper_hexadecimal(mut output, value: value / 16)
   }
@@ -166,7 +180,9 @@ fn upper_hexadecimal(output: mut intrinsic::Storage[UInt8], value: UInt32) {
   }
 }
 
-fn escaped(output: mut intrinsic::Storage[UInt8], code: UInt32, quote: UInt8) {
+fn escaped(output: mut intrinsic::Storage[UInt8], code: UInt32, quote: UInt8)
+  cost time finite
+{
   let quote_code: UInt32 = intrinsic::convert(quote)
   if code == 92 {
     append(mut output, bytes: "\\\\".slice().bytes)
@@ -190,7 +206,9 @@ fn escaped(output: mut intrinsic::Storage[UInt8], code: UInt32, quote: UInt8) {
   }
 }
 
-internal fn quoted_character(output: mut intrinsic::Storage[UInt8], value: Character) {
+internal fn quoted_character(output: mut intrinsic::Storage[UInt8], value: Character)
+  cost time finite
+{
   append(mut output, bytes: "Character\"".slice().bytes)
   escaped(mut output, code: intrinsic::convert(value), quote: 34)
   byte(mut output, value: 34)

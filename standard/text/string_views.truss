@@ -268,13 +268,13 @@ public fn String.reversed(self) -> String
 }
 
 public fn String.to_uppercase(self) -> String
-  cost time O(self.length())
+  cost time finite
 {
   self.slice().to_uppercase()
 }
 
 public fn String.to_lowercase(self) -> String
-  cost time O(self.length())
+  cost time finite
 {
   self.slice().to_lowercase()
 }

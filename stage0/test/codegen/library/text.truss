@@ -509,3 +509,25 @@ test "truncate and clear shorten a string and keep its room" {
   mut literal.push("e")
   assert literal == "cone"
 }
+
+test "a string's uppercase uses the full mappings" {
+  assert "hello, wörld".to_uppercase() == "HELLO, WÖRLD"
+  assert "straße".to_uppercase() == "STRASSE"
+  assert "ﬁn ŉ".to_uppercase() == "FIN ʼN"
+  assert "\u{1F0} \u{390}".to_uppercase() == "J\u{30C} \u{399}\u{308}\u{301}"
+  assert "中文 123".to_uppercase() == "中文 123"
+  assert "".to_uppercase() == ""
+  assert "мир".slice().to_uppercase() == "МИР"
+}
+
+test "a string's lowercase uses the final sigma at the end of a word" {
+  assert "HELLO, WÖRLD".to_lowercase() == "hello, wörld"
+  assert "ΟΔΥΣΣΕΥΣ".to_lowercase() == "οδυσσευς"
+  assert "ΣΑΣ ΣΑΣ".to_lowercase() == "σας σας"
+  assert "Σ".to_lowercase() == "σ"
+  assert "ΑΣ'Α ΑΣ'".to_lowercase() == "ασ'α ας'"
+  assert "ΑΣ.Α ΑΣ1".to_lowercase() == "ασ.α ας1"
+  assert "İstanbul".to_lowercase() == "i̇stanbul"
+  assert "ǅ".to_lowercase() == "ǆ"
+  assert "".to_lowercase() == ""
+}
