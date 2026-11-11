@@ -805,9 +805,7 @@ let join context ?value_type frames =
             List.iter
               (fun ((frame : frame), term) ->
                 match term with
-                | Some term ->
-                    context.facts <-
-                      L.( ==> ) frame.condition (L.equal symbol term) :: context.facts
+                | Some term -> fact context first (L.( ==> ) frame.condition (L.equal symbol term))
                 | None -> ())
               values;
             Some symbol
@@ -1837,9 +1835,31 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
     | (Bit_and | Bit_or | Bit_xor), [ left; right ] ->
         let name = match operation with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
         let term = opaque_operation context frame ty name [ left; right ] in
-        (match (operation, bounds ty) with
-        | Bit_and, Some (low, _) when Z.equal low Z.zero ->
-            assume context frame L.(Apply ("<=", [ term; left ]) &&& Apply ("<=", [ term; right ]))
+        (* Of unsigned values, [and] is at most each operand, [or] at
+           least each, and [or] and [xor] at most their sum and below each
+           power of two both operands are below. *)
+        (match bounds ty with
+        | Some (low, _) when Z.equal low Z.zero -> (
+            let at_most bound = L.Apply ("<=", [ term; bound ]) in
+            match operation with
+            | Bit_and -> assume context frame L.(at_most left &&& at_most right)
+            | _ ->
+                let sum = L.Apply ("+", [ left; right ]) in
+                if operation = Bit_or then
+                  assume context frame
+                    L.(Apply ("<=", [ left; term ]) &&& Apply ("<=", [ right; term ]));
+                assume context frame (at_most sum);
+                declare context (L.Function (Costs.power_symbol, [ L.Int; L.Int ], L.Int));
+                let exponent = L.Symbol "exponent" in
+                let below value =
+                  L.Apply ("<", [ value; L.Apply (Costs.power_symbol, [ L.int 2; exponent ]) ])
+                in
+                assume context frame
+                  (L.Forall
+                     ( [ ("exponent", L.Int) ],
+                       L.(
+                         Apply ("<=", [ int 0; exponent ])
+                         &&& below left &&& below right ==> below term) )))
         | _ -> ());
         (frame, term)
     | _ -> unsupported span "this operator"
@@ -5286,10 +5306,9 @@ and contract_call context frame (node : expression) (call_ : call) path contract
     (match contract.definition with
     | Some (part, body) when not (List.exists (L.mentions after.bound) own_arguments) ->
         let unfolding =
-          {
-            (entry_frame part) with
-            condition = (if in_quantifier then L.Boolean true else after.condition);
-          }
+          if in_quantifier then
+            { (entry_frame part) with condition = L.Boolean true; bound = []; binders = [] }
+          else { (entry_frame part) with condition = after.condition }
         in
         let mark = List.length context.facts in
         (try
