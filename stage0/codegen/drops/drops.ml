@@ -522,10 +522,16 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
       (fun b (block : Lir.basic_block) ->
         builder.current <- b;
         builder.statements <- [];
+        (* A flag starts false, as every local starts zeroed, so only the
+           flag of a path that holds a value at entry is written there. A
+           write at entry would name the flag outside every region, and
+           outlining would then share the flag of a region's own local
+           among the runs of the region, which is a data race. *)
         if b = 0 then
           List.iter
             (fun (i, local) ->
-              push builder (Assign (flag_place local, Use (Constant (Bool (holds_at_entry a i))))))
+              if holds_at_entry a i then
+                push builder (Assign (flag_place local, Use (Constant (Bool true)))))
             flags;
         let s = copy_state states.(b) in
         List.iter
