@@ -3379,9 +3379,10 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
     | Some term -> term
     | None ->
         let term = arrive context frame "lambda" ty in
-        if in_the_logic function_type && (frame.bound = [] || capture_free) then
-          what_a_lambda_does context function_type term ~called ~arguments ~start_fresh ~end_fresh
-            ~start_declarations ~premises ~shown:(facts_since context facts_mark) ~ended:!ended;
+        if in_the_logic function_type then
+          what_a_lambda_does context frame ~capture_free function_type term ~called ~arguments
+            ~start_fresh ~end_fresh ~start_declarations ~premises
+            ~shown:(facts_since context facts_mark) ~ended:!ended;
         term
   in
   context.lambda_captures <-
@@ -3399,8 +3400,8 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
    body is a function of the arguments, since it can differ for each. A
    nested lambda's symbol, named after what it captures, is not such a
    function, so a body with one gives nothing. *)
-and what_a_lambda_does context function_type term ~called ~arguments ~start_fresh ~end_fresh
-    ~start_declarations ~premises ~shown ~ended =
+and what_a_lambda_does context frame ~capture_free function_type term ~called ~arguments
+    ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended =
   let declared_here =
     List.filteri
       (fun index _ -> index < List.length context.declarations - start_declarations)
@@ -3427,6 +3428,9 @@ and what_a_lambda_does context function_type term ~called ~arguments ~start_fres
       (fun argument variable ->
         match argument with L.Symbol name -> Hashtbl.replace renamed name variable | _ -> ())
       arguments variables;
+    (* Inside a quantifier, a value made in the body is a function of its
+       bound values, and becomes one of those and the arguments. *)
+    let functions = Hashtbl.create 8 in
     List.iter
       (function
         | L.Constant (name, sort) when not (Hashtbl.mem renamed name) -> (
@@ -3436,11 +3440,22 @@ and what_a_lambda_does context function_type term ~called ~arguments ~start_fres
                 declare context (L.Function (over, List.map snd parameters, sort));
                 Hashtbl.replace renamed name (L.Apply (over, variables))
             | _ -> ())
+        | L.Function (name, inputs, sort) when frame.binders <> [] -> (
+            match Hashtbl.find_opt context.fresh_order name with
+            | Some made when made > start_fresh && made <= end_fresh ->
+                let over = name ^ ".over" in
+                declare context (L.Function (over, inputs @ List.map snd parameters, sort));
+                Hashtbl.replace functions name over
+            | _ -> ())
         | _ -> ())
       declared_here;
     let rec over = function
       | L.Symbol name as symbol -> Option.value (Hashtbl.find_opt renamed name) ~default:symbol
       | (L.Integer _ | L.Boolean _ | L.Bits _) as term -> term
+      | L.Apply (name, _) when match called with L.Apply (made, _) -> made = name | _ -> false ->
+          L.Boolean true
+      | L.Apply (name, arguments) when Hashtbl.mem functions name ->
+          L.Apply (Hashtbl.find functions name, List.map over arguments @ variables)
       | L.Apply (name, arguments) -> L.Apply (name, List.map over arguments)
       | L.Forall (bound, body) -> L.Forall (bound, over body)
       | L.Exists (bound, body) -> L.Exists (bound, over body)
@@ -3456,9 +3471,16 @@ and what_a_lambda_does context function_type term ~called ~arguments ~start_fres
               value)
           ended
     in
+    (* A lambda that captures a quantifier's bound values says what it does
+       for each of them, closed over the quantifier. *)
     List.iter
       (fun statement ->
-        context.facts <- L.Forall (parameters, L.( ==> ) premise statement) :: context.facts)
+        let stated = L.Forall (parameters, L.( ==> ) premise statement) in
+        if frame.bound = [] || capture_free then context.facts <- stated :: context.facts
+        else
+          match closed_over_binders frame stated with
+          | Some closed -> context.facts <- closed :: context.facts
+          | None -> ())
       statements
   end
 
