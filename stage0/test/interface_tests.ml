@@ -554,6 +554,33 @@ let () =
       let signature = at database (Types.named (app "FixedClock") []) clock "now" in
       match signature.uses with [ Capability _ ] -> () | uses -> fail "%d uses" (List.length uses))
 
+(* Transparent functions *)
+
+let () =
+  test "a transparent function is one whose body is its definition" (fun () ->
+      no_diagnostics
+        [
+          ( "app::main",
+            "public transparent fn double(value: Int64) -> Int64\n\
+            \  cost time O(1)\n\
+             {\n\
+            \  value + value\n\
+             }\n" );
+        ];
+      one_diagnostic "public transparent fn double(value: Int64) -> Int64 {\n  value + value\n}\n"
+        "types.not_a_definition";
+      one_diagnostic
+        "public transparent fn bump(counter: mut Int64)\n  cost time O(1)\n{\n  counter += 1\n}\n"
+        "types.not_a_definition";
+      one_diagnostic
+        "public transparent fn now() -> Instant\n\
+        \  uses Clock\n\
+        \  cost time O(1)\n\
+         {\n\
+        \  Clock.now()\n\
+         }\n"
+        "types.not_a_definition")
+
 (* Law proofs *)
 
 let () =

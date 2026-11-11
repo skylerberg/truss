@@ -307,6 +307,7 @@ let visibility = function
   | Internal -> "internal"
   | Public -> "public"
   | Public_opaque -> "public opaque"
+  | Public_transparent -> "public transparent"
 
 let type_head (head : type_head) = path head.path ^ generics head.generics
 

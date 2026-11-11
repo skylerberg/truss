@@ -51,14 +51,16 @@ let of_path ~written database (path : Path.t) =
 let core_of_path =
   Query.query ~name:"core_of_path" ~phase:Phases.bodies ~show:Path.show (of_path ~written:core)
 
-(* Whether a caller's proof can read the body of a function. It reads the
-   body of a function in the logic, which the body defines: one that
-   terminates, uses no capability, mutates none of its arguments, and
-   returns its result. It reads the body that a trait provides for a method,
-   to compare it with the method of an [impl] that replaces it. It never
-   reads the body of a theorem: a call of a theorem asserts the [requires]
-   and assumes the [ensures]. *)
-let callers_read_body database (path : Path.t) =
+(* Whether a caller's proof can read the body of a function. In the
+   function's own package, it reads the body of a function in the logic,
+   which the body defines. In another package, it reads that body only if
+   the function is [transparent]: a body that other packages' proofs read
+   is part of the package's interface, and only a marked one is. In every
+   package, it reads the body that a trait provides for a method, which an
+   [impl] inherits or must agree with. It never reads the body of a
+   theorem: a call of a theorem asserts the [requires] and assumes the
+   [ensures]. *)
+let callers_read_body database ~same_package (path : Path.t) =
   let provided =
     match path with
     | Method { owner; _ } ->
@@ -69,13 +71,8 @@ let callers_read_body database (path : Path.t) =
   || Interface.Summary.kind_of database path <> Some Theorem
      &&
      match Interface.Impls.signature database path with
-     | Some signature -> (
-         signature.terminates && signature.uses = []
-         && (match signature.receiver with Some (Mut, _) -> false | _ -> true)
-         && List.for_all
-              (fun (parameter : Types.parameter_info) -> parameter.mode <> Types.Mut)
-              signature.parameters
-         && match signature.output with Returns _ -> true | Yields _ | Lends _ -> false)
+     | Some signature ->
+         Types.body_is_definition signature && (same_package || signature.transparent)
      | None -> true
 
 (* A form without the body of its function, with the counts of the nodes
@@ -112,7 +109,20 @@ let specification =
   Query.query ~name:"specification" ~phase:Phases.bodies ~show:Resolve.Names.show_key
     (fun database key ->
       Option.map
-        (fun form -> if callers_read_body database key.path then form else without_body form)
+        (fun form ->
+          if callers_read_body database ~same_package:true key.path then form else without_body form)
+        (Query.demand database core key))
+
+(* What a caller's proof in another package reads of a definition. Editing
+   the body of a function that is not [transparent] leaves this result
+   equal, so no proof in a package that depends on this one runs again. *)
+let exported_specification =
+  Query.query ~name:"exported_specification" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+    (fun database key ->
+      Option.map
+        (fun form ->
+          if callers_read_body database ~same_package:false key.path then form
+          else without_body form)
         (Query.demand database core key))
 
 (* As [core_of_path], for what a caller's proof reads of the function or
@@ -120,6 +130,10 @@ let specification =
 let specification_of_path =
   Query.query ~name:"specification_of_path" ~phase:Phases.bodies ~show:Path.show
     (of_path ~written:specification)
+
+let exported_specification_of_path =
+  Query.query ~name:"exported_specification_of_path" ~phase:Phases.bodies ~show:Path.show
+    (of_path ~written:exported_specification)
 
 (* The packages whose [impl]s met a bound in a definition. *)
 let evidence =

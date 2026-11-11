@@ -182,7 +182,14 @@ type signature = {
       (** Whether it mentions [Integer], so it can be called only in specifications. *)
   stores_functions : string list;
       (** The [own] function-typed parameters, which accept only functions that capture nothing. *)
+  transparent : bool;
+      (** Whether the proofs of callers in other packages can read the body
+          ([public transparent fn]). *)
 }
+
+val body_is_definition : signature -> bool
+(** Whether a function with this signature is one in the logic, whose body defines it: it
+    terminates, uses no capability, mutates no argument, and returns its result. *)
 
 val map_signature : (ty -> ty) -> signature -> signature
 (** A signature with each type of its receiver, parameters, and result rewritten. *)

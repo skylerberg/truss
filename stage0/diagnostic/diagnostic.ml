@@ -44,6 +44,7 @@ module Code = struct
     | Let_else_brace
     | Nesting_too_deep
     | Misplaced_opaque
+    | Misplaced_transparent
     | Misplaced_visibility
     | Misplaced_self
     | Lends_own
@@ -112,6 +113,7 @@ module Code = struct
     | Not_callable
     | Not_a_value
     | No_impl
+    | Not_a_definition
     | Mismatched_integers
     | String_addition
     | Literal_out_of_range
@@ -273,6 +275,7 @@ module Code = struct
     | Let_else_brace -> "let_else_brace"
     | Nesting_too_deep -> "nesting_too_deep"
     | Misplaced_opaque -> "misplaced_opaque"
+    | Misplaced_transparent -> "misplaced_transparent"
     | Misplaced_visibility -> "misplaced_visibility"
     | Misplaced_self -> "misplaced_self"
     | Lends_own -> "lends_own"
@@ -343,6 +346,7 @@ module Code = struct
     | Not_callable -> "not_callable"
     | Not_a_value -> "not_a_value"
     | No_impl -> "no_impl"
+    | Not_a_definition -> "not_a_definition"
     | Mismatched_integers -> "mismatched_integers"
     | String_addition -> "string_addition"
     | Literal_out_of_range -> "literal_out_of_range"

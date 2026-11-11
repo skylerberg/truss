@@ -46,6 +46,7 @@ type keyword =
   | Theorem
   | Todo
   | Trait
+  | Transparent
   | True
   | Type
   | Unreachable

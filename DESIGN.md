@@ -33,6 +33,16 @@ stage0's stages, which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists.
   `requires`, `ensures`, `decreases`, and `cost` clauses, which only callers'
   proofs depend on. Strengthening an `ensures` re-proves callers but
   type-checks none of them again.
+- **A function's body is part of its package's interface only when the
+  function is `transparent`.** Inside a package, the body of a pure function
+  with a `time` clause is its definition, which proofs read. In another
+  package, proofs read the contract only, unless the function is declared
+  `public transparent fn`. A body that other packages' proofs rely on would
+  otherwise be part of the interface without being in the signature, and a
+  change to it could break their proofs with no change that a reader of
+  signatures sees. Verus makes the same choice with `open` and `closed`, and
+  Dafny's exports with `reveals` and `provides`. A method that a trait
+  provides is read everywhere, because an `impl` in any package inherits it.
 - **The order of a type's fields is not part of its shape.** Reordering fields
   rebuilds nothing, except code that uses a derived `Ordered`, which compares
   fields in declaration order. The compiler chooses memory layout, and a record

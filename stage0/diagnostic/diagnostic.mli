@@ -52,6 +52,7 @@ module Code : sig
     | Let_else_brace
     | Nesting_too_deep
     | Misplaced_opaque
+    | Misplaced_transparent
     | Misplaced_visibility
     | Misplaced_self
     | Lends_own
@@ -120,6 +121,7 @@ module Code : sig
     | Not_callable
     | Not_a_value
     | No_impl
+    | Not_a_definition
     | Mismatched_integers
     | String_addition
     | Literal_out_of_range

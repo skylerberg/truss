@@ -35,6 +35,23 @@ let () =
   test "a body that changes is no change" (fun () ->
       expect "public fn sides() -> Int64 {\n  4\n}\n" "public fn sides() -> Int64 {\n  2 + 2\n}\n"
         []);
+  test "a transparent function's body that changes breaks" (fun () ->
+      let sides body =
+        Printf.sprintf "public transparent fn sides() -> Int64\n  cost time O(1)\n{\n  %s\n}\n" body
+      in
+      expect (sides "4") (sides "2 + 2")
+        [ "breaks: lib::shapes::sides has another body, which callers' proofs read" ];
+      expect (sides "4") (sides "4") []);
+  test "a function that stops being transparent breaks, and one that starts grows" (fun () ->
+      let sides modifier =
+        Printf.sprintf "public%s fn sides() -> Int64\n  cost time O(1)\n{\n  4\n}\n" modifier
+      in
+      expect (sides " transparent") (sides "")
+        [
+          "breaks: lib::shapes::sides is no longer `transparent`, so callers' proofs cannot read \
+           its body";
+        ];
+      expect (sides "") (sides " transparent") [ "grows: lib::shapes::sides is `transparent`" ]);
   test "a private or internal definition that changes is no change" (fun () ->
       expect "fn sides() -> Int64 {\n  4\n}\n\ninternal fn corners() -> Int64 {\n  4\n}\n"
         "fn sides(of: Int64) -> Int64 {\n  of\n}\n" []);

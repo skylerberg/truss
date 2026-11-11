@@ -85,7 +85,7 @@ These keywords are reserved everywhere and cannot be used as names:
 `forall` `if` `impl` `in` `indirect` `internal` `is` `invariant` `law`
 `lends` `let` `match` `mut` `opaque` `own` `parallel` `proof` `provide`
 `public` `requires` `return` `self` `Self` `test` `theorem` `todo` `trait`
-`true` `type` `unreachable` `use` `uses` `var` `while` `with` `yield`
+`transparent` `true` `type` `unreachable` `use` `uses` `var` `while` `with` `yield`
 `yields`
 
 A few words have a special meaning in one position only, and are ordinary
@@ -3442,6 +3442,27 @@ private and `internal` types are only visible within the package anyway.
 A public function's signature cannot mention a private or `internal` type, and
 neither can a public type's fields, unless the type is opaque. Other packages
 could never name such a type.
+
+A public function can show its body to the proofs of other packages with
+`transparent`:
+
+```truss
+public transparent fn is_sorted(items: Slice[Int64]) -> Bool
+  cost time O(items.length())
+{
+  forall index in 1..items.length() => items[index - 1] <= items[index]
+}
+```
+
+- Inside its package, the body of a pure function with a `time` clause is the
+  function's definition, and a proof can read it. In another package, a proof
+  reads only the `requires` and `ensures`, unless the function is
+  `transparent`.
+- A `transparent` function's body is part of the package's interface, as its
+  signature is: changing it can break a proof in a package that uses it.
+- Only a function or a method of a type can be `transparent`, and only one
+  whose body can be a definition: it has a `time` clause, no `uses` clause,
+  and no `mut` parameter, and it returns its result.
 
 ### No foreign code
 

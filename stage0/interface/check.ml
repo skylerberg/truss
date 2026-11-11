@@ -104,7 +104,7 @@ let visibility_of state (path : Path.t) =
    can a public type's visible fields: callers in other packages could never
    name it. *)
 let check_private_in_public state types (span : span) =
-  if state.definition.visibility = Public || state.definition.visibility = Public_opaque then
+  if is_public state.definition.visibility then
     List.iter
       (fun path ->
         match visibility_of state path with
@@ -820,6 +820,17 @@ let check state =
             | _ -> ())
         | Some _, _, _ -> ()
         | None, Function { signature; _ }, Function_interface lowered ->
+            (* The proofs of callers in other packages read a [transparent]
+               function's body as its definition, which only the body of a
+               function in the logic is. *)
+            (if lowered.transparent && not (T.body_is_definition lowered) then
+               let span =
+                 match signature.name with Plain_name name | Member_name (_, name) -> name.span
+               in
+               report state Not_a_definition span
+                 "A `transparent` function's body is its definition in callers' proofs, so the \
+                  function needs a `time` clause, no `uses` clause, no `mut` parameter, and a \
+                  result that it returns.");
             (match signature.name with
             | Member_name (head, _) -> check_method_location state head
             | Plain_name name ->

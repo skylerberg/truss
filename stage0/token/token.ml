@@ -47,6 +47,7 @@ type keyword =
   | Theorem
   | Todo
   | Trait
+  | Transparent
   | True
   | Type
   | Unreachable
@@ -244,6 +245,7 @@ let keywords =
     ("theorem", Theorem);
     ("todo", Todo);
     ("trait", Trait);
+    ("transparent", Transparent);
     ("true", True);
     ("type", Type);
     ("unreachable", Unreachable);

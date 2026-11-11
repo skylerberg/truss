@@ -507,4 +507,5 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
           | Own, Function _ -> Some parameter.name
           | _ -> None)
         parameters;
+    transparent = false;
   }

@@ -308,7 +308,17 @@ and pattern_field_kind =
 
 (* Definitions *)
 
-type visibility = Private | Internal | Public | Public_opaque
+type visibility =
+  | Private
+  | Internal
+  | Public
+  | Public_opaque  (** A type whose fields other packages cannot name. *)
+  | Public_transparent
+      (** A function whose body the proofs of callers in other packages can read. *)
+
+let is_public = function
+  | Public | Public_opaque | Public_transparent -> true
+  | Private | Internal -> false
 
 (* The type a method or constant belongs to: [List[Element: Ordered]] in
    [fn List[Element: Ordered].sort], or [hourly::Forecast]. *)
