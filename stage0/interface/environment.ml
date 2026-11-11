@@ -17,8 +17,12 @@ type interface =
   | Constant_interface of T.constant_interface
   | Test_interface of T.capability list
   | Theorem_interface of T.signature
-  | Law_proof_interface of { trait : T.trait_reference; law : string; for_type : T.ty }
-      (** The subject of a law's proof: a law of a trait, for a type's [impl]. *)
+  | Law_proof_interface of {
+      generics : T.generic list;
+      trait : T.trait_reference;
+      law : string;
+      for_type : T.ty;
+    }  (** The subject of a law's proof: a law of a trait, for a type's [impl]. *)
   | Error_interface of Diagnostic.reported
       (** A definition whose header did not parse: everything is accepted of it. *)
 
@@ -453,10 +457,10 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
                 (Lower.signature context ~owner:path ~head:[] ~self_type:None signature),
               context )
         | Law_proof { trait_; law; type_; _ } -> (
+            let generics, for_type = head_type context path type_ in
             match Lower.trait_reference context trait_ with
             | Ok trait ->
-                ( Law_proof_interface { trait; law = law.text; for_type = Lower.type_ context type_ },
-                  context )
+                (Law_proof_interface { generics; trait; law = law.text; for_type }, context)
             | Error report -> (Error_interface report, context))
         | Definition_error _ -> (Error_interface (Resolve.Parts.error_node definition.span), context)
         )

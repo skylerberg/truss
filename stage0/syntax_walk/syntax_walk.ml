@@ -242,7 +242,7 @@ let definition ?statement:visit f (definition : definition) =
       block body
   | Law_proof { trait_; type_; body; _ } ->
       path_type f trait_;
-      type_expression f type_;
+      type_head f type_;
       block body
   | Definition_error _ -> ()
 
@@ -579,7 +579,7 @@ let walk_names ~on_name:add (definition_ : definition) =
   | Law_proof { trait_; law; type_ = written; body } ->
       path_type_ trait_;
       add law;
-      type_ written;
+      head written;
       block_ body
   | Definition_error { name; _ } -> Option.iter definition_name name
 

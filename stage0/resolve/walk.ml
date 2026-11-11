@@ -1074,8 +1074,9 @@ let definition state ~(path : Path.t) ?(container : (Path.t * definition) option
       end
   | Law_proof { trait_; law; type_; body } ->
       if not header_broken then begin
+        type_name state scope type_.path;
+        let scope = generics state scope ~owner:path type_.generics in
         path_type state scope trait_;
-        type_expression state scope type_;
         (* The body is checked as the law's body is: with the law's
            parameters in scope. *)
         let law_parameters =

@@ -573,7 +573,26 @@ let () =
   test "a law's proof names a law of its trait and a type that implements the trait" (fun () ->
       no_diagnostics [ ("app::main", monoid ^ "proof Joined.associative for Meters {\n}\n") ];
       one_diagnostic (monoid ^ "proof Joined.commutative for Meters {\n}\n") "types.unknown_member";
-      one_diagnostic (monoid ^ "proof Joined.associative for Feet {\n}\n") "types.no_impl")
+      one_diagnostic (monoid ^ "proof Joined.associative for Feet {\n}\n") "types.no_impl");
+  let boxed =
+    monoid
+    ^ "type Box[Item](item: Item)\n\n\
+       impl Joined for Box[Item: Joined] {\n\
+      \  fn join(self, other: Box[Item]) -> Box[Item] { todo }\n\
+       }\n\n"
+  in
+  test "a law's proof for a generic impl names the impl's type with its own generic parameters"
+    (fun () ->
+      no_diagnostics
+        [ ("app::main", boxed ^ "proof Joined.associative for Box[Element: Joined] {\n}\n") ]);
+  test "a law's proof gives a generic parameter the bounds that the impl requires" (fun () ->
+      one_diagnostic (boxed ^ "proof Joined.associative for Box[Item] {\n}\n") "types.no_impl");
+  test "a law's proof cannot assume a bound that the impl does not require" (fun () ->
+      one_diagnostic
+        (boxed ^ "proof Joined.associative for Box[Item: Joined + Equal] {\n}\n")
+        "types.unsatisfied_bound");
+  test "a law's proof names every generic parameter of its type" (fun () ->
+      one_diagnostic (boxed ^ "proof Joined.associative for Box {\n}\n") "types.arity")
 
 (* Real implementations *)
 

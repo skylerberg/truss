@@ -426,8 +426,12 @@ constant_name = LOWER_NAME | type_head "." LOWER_NAME ;
 
 test      = "test" plain_string [ "uses" capability_list ] block ;
 theorem   = "theorem" LOWER_NAME [ generics ] parameters { clause } block ;
-law_proof = "proof" path_type "." LOWER_NAME "for" type block ;
+law_proof = "proof" path_type "." LOWER_NAME "for" type_head block ;
 ```
+
+- A law proof names its type as an `impl` does, by a `type_head`: `proof
+  Ordered.transitive for Box[Item: Ordered] { }`. So `for Self` and `for any
+  Shown` are syntax errors.
 
 - A constant's expression is a constant expression: literals, arithmetic,
   other constants, and records, variants, lists, maps, arrays, sets, and

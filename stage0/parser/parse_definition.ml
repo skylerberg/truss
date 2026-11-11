@@ -505,14 +505,15 @@ let theorem cursor =
   let clauses = clauses cursor in
   Theorem { name; generics; parameters; clauses; body = Parse_expression.body cursor }
 
-(* [proof Monoid.associative for Int64 { ... }]. *)
+(* [proof Monoid.associative for Int64 { ... }]. The type is written as an
+   [impl]'s is, with its generic parameters: [for Box[Item: Ordered]]. *)
 let law_proof cursor =
   Cursor.advance cursor;
   let trait_ = Parse_expression.path_type cursor in
   Cursor.expect_punctuation cursor Dot;
   let law = Atoms.lower cursor "the name of a law" in
   Cursor.expect_keyword cursor For;
-  let type_ = Parse_expression.type_expression cursor in
+  let type_ = type_head cursor in
   Law_proof { trait_; law; type_; body = Parse_expression.body cursor }
 
 (* The keyword and the name of a definition whose header did not parse.

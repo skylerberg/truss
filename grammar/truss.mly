@@ -340,7 +340,7 @@ theorem_definition:
   | THEOREM LOWER generics_opt parameters list(clause) newline_opt block { () }
 
 law_proof:
-  | PROOF path_type DOT LOWER FOR type_expression newline_opt block { () }
+  | PROOF path_type DOT LOWER FOR type_head newline_opt block { () }
 
 /* Statements and blocks */
 

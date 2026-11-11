@@ -305,6 +305,6 @@ let definition cursor (definition : definition) =
       clauses cursor theorem_clauses;
       block cursor (proof plain) body
   | Law_proof { type_; body; _ } ->
-      types cursor plain type_;
+      generic_parameters cursor type_.generics;
       block cursor (proof plain) body
   | Definition_error _ -> ()

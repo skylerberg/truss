@@ -443,7 +443,7 @@ let declarations =
                             module_;
                             name =
                               Printf.sprintf "%s.%s for %s" (spell_path_type trait_) law.text
-                                (spell_type type_);
+                                (spell_head type_);
                           })
                        Law_proof false
                  | Definition_error { name = Some (Plain_name name); keyword } -> (

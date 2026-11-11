@@ -1420,6 +1420,55 @@ let () =
         \  }\n\
          }\n"
         "ownership.lends_count");
+  (let bag =
+     "type Bag(items: List[String])\n\n\
+      fn Bag.each(self) yields String {\n\
+     \  for item in self.items {\n\
+     \    yield item\n\
+     \  }\n\
+      }\n\n"
+   in
+   test "a lending method can yield in a loop whose body then returns" (fun () ->
+       fine
+         (bag
+        ^ "fn Bag.first(self) lends Option[String] {\n\
+          \  for item in self.each() {\n\
+          \    yield Some(item)\n\
+          \    return\n\
+          \  }\n\
+          \  yield None\n\
+           }\n"));
+   test "a lending method cannot yield before a loop whose body yields and returns" (fun () ->
+       one_diagnostic
+         (bag
+        ^ "fn Bag.first(self) lends Option[String] {\n\
+          \  yield None\n\
+          \  for item in self.each() {\n\
+          \    yield Some(item)\n\
+          \    return\n\
+          \  }\n\
+           }\n")
+         "ownership.lends_count");
+   test "a lending method cannot yield after a loop that yields and breaks" (fun () ->
+       one_diagnostic
+         (bag
+        ^ "fn Bag.first(self) lends Option[String] {\n\
+          \  for item in self.each() {\n\
+          \    yield Some(item)\n\
+          \    break\n\
+          \  }\n\
+          \  yield None\n\
+           }\n")
+         "ownership.lends_count");
+   test "a lending method cannot yield on each iteration of a loop" (fun () ->
+       one_diagnostic
+         (bag
+        ^ "fn Bag.first(self) lends Option[String] {\n\
+          \  for item in self.each() {\n\
+          \    yield Some(item)\n\
+          \  }\n\
+           }\n")
+         "ownership.lends_count"));
   (let grid = "type Grid(cells: List[Int64], count: USize)\n\n" in
    test "a lending method can yield in one branch of a `parallel` block" (fun () ->
        fine
