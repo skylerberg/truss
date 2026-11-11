@@ -16,6 +16,9 @@ impl Environment for SystemEnvironment {
     var found = true
     while found {
       let entry = intrinsic::environment_entry(index, found: mut found)
+      proof {
+        assert forall k in 0..intrinsic::view_length(entry) => intrinsic::view_at(entry, index: k) != 0
+      }
       if found {
         mut all.push(variable_from(entry))
         index = index.wrapping_add(1)
