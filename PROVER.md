@@ -869,7 +869,9 @@ the goal holds it negated, and the quantifiers around an obligation in a
 quantifier's body. Skolemized, the bound names are constants, so the
 facts are about them alone and cost the solver no instantiation. A fact
 holds for every value of the bound names, so `forall i in 0..n => p` and
-`forall i in 0..n => facts ==> p` mean the same.
+`forall i in 0..n => facts ==> p` mean the same. A value made in a body
+is a function of every quantifier around it, so a fact can name an outer
+quantifier's bound name; it is added only where that name is bound.
 
 ### The canonical form
 
@@ -1499,9 +1501,13 @@ test the prover itself:
 - **Facts under an assumed quantifier.** A quantifier that is a fact,
   such as a `requires`, a callee's `ensures`, or an obligation shown before,
   has no hypotheses from its body: stated for every value of the bound
-  names, they are the facts that make the solver run out of steps. A
-  pure callee's contract and definition are stated once for every argument
-  either way.
+  names, they are the facts that make the solver run out of steps. Stated
+  inside the quantifier, as `forall i => facts && p`, they are instantiated
+  with it, and the standard library's invariants over nested maps run out
+  of steps all the same; inside an `exists` that is a fact, which the
+  solver skolemizes, they push a binary search's cost bound past its
+  steps. A pure callee's contract and definition are stated once for every
+  argument either way.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.

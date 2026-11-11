@@ -293,6 +293,9 @@ type context = {
           facts made in its body that name it. *)
   quantifier_facts : (L.term, L.term list) Hashtbl.t;
       (** Each quantifier read, with the facts its body made that name its bound symbol. *)
+  mutable quantifier_symbols : string list;
+      (** Every quantifier's bound symbol, which a fact stated outside its quantifier must not name.
+      *)
   mutable validating : T.ty list;
       (** The types whose invariants are being read, around this point. A type is valid inside the
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
@@ -383,30 +386,44 @@ let scope_facts context names =
 
 (* A goal with the facts of each quantifier it skolemizes as hypotheses:
    each [forall] where the goal holds it, and each [exists] where it holds
-   it negated. The facts hold for every value, so the goal means the same. *)
-let rec with_quantifier_facts context positive term =
-  let facts () = Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term) in
-  match term with
-  | L.Forall (bound, body) when positive ->
-      let body = with_quantifier_facts context positive body in
-      L.Forall
-        (bound, match facts () with [] -> body | facts -> L.( ==> ) (L.conjunction facts) body)
-  | L.Exists (bound, body) when not positive ->
-      let body = with_quantifier_facts context positive body in
-      L.Exists
-        (bound, match facts () with [] -> body | facts -> L.( &&& ) (L.conjunction facts) body)
-  | L.Apply ((("and" | "or") as operator), parts) ->
-      L.Apply (operator, List.map (with_quantifier_facts context positive) parts)
-  | L.Apply ("=>", [ premise; conclusion ]) ->
-      L.Apply
-        ( "=>",
-          [
-            with_quantifier_facts context (not positive) premise;
-            with_quantifier_facts context positive conclusion;
-          ] )
-  | L.Apply ("not", [ inner ]) ->
-      L.Apply ("not", [ with_quantifier_facts context (not positive) inner ])
-  | term -> term
+   it negated. The facts hold for every value, so the goal means the same.
+   A value made in a body is a function of every quantifier around it, so
+   a fact can name an outer quantifier's symbol that the quantifier's own
+   term does not; it is added only where every quantifier symbol it names
+   is bound, by a quantifier the goal is in or by [binders], which the
+   obligation is closed over. *)
+let with_quantifier_facts ?(binders = []) context term =
+  let stated bound fact =
+    List.for_all
+      (fun name -> List.mem name bound || not (L.mentions [ name ] fact))
+      context.quantifier_symbols
+  in
+  let rec walk positive bound term =
+    let facts symbols =
+      let bound = List.map fst symbols @ bound in
+      ( bound,
+        List.filter (stated bound)
+          (Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term)) )
+    in
+    match term with
+    | L.Forall (symbols, body) when positive ->
+        let bound, facts = facts symbols in
+        let body = walk positive bound body in
+        L.Forall
+          (symbols, match facts with [] -> body | facts -> L.( ==> ) (L.conjunction facts) body)
+    | L.Exists (symbols, body) when not positive ->
+        let bound, facts = facts symbols in
+        let body = walk positive bound body in
+        L.Exists
+          (symbols, match facts with [] -> body | facts -> L.( &&& ) (L.conjunction facts) body)
+    | L.Apply ((("and" | "or") as operator), parts) ->
+        L.Apply (operator, List.map (walk positive bound) parts)
+    | L.Apply ("=>", [ premise; conclusion ]) ->
+        L.Apply ("=>", [ walk (not positive) bound premise; walk positive bound conclusion ])
+    | L.Apply ("not", [ inner ]) -> L.Apply ("not", [ walk (not positive) bound inner ])
+    | term -> term
+  in
+  walk true binders term
 
 (* A fact of mathematics, true on every path. One that names a bound
    symbol is not stated for every value of it, since a body's calls give
@@ -521,7 +538,9 @@ let truss_of_goal context term =
 let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
   match
     obligation_at ?evaluation context frame code span message
-      (with_quantifier_facts context true goal)
+      (with_quantifier_facts
+         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+         context goal)
   with
   | Some obligation ->
       (* Without a fix of its own, a goal about the parameters alone is
@@ -2291,6 +2310,7 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
     in
     let facts = ref [] in
     context.scopes <- (bound_symbol, facts) :: context.scopes;
+    context.quantifier_symbols <- bound_symbol :: context.quantifier_symbols;
     let after, body_value =
       Fun.protect
         ~finally:(fun () -> context.scopes <- List.tl context.scopes)
@@ -9096,6 +9116,7 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     facts = [];
     scopes = [];
     quantifier_facts = Hashtbl.create 16;
+    quantifier_symbols = [];
     unfolded = Hashtbl.create 64;
     obligations = [];
     fresh = 0;
