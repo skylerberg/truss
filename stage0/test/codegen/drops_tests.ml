@@ -237,4 +237,68 @@ let () =
       in
       expect_status ~extra:drop_shapes 1 program)
 
+(* Drop flags and regions *)
+
+let make = call "make" ~result:(Some (value text)) ~parameters:[]
+
+(* A function that makes a text, consumes it on one path, and drops what
+   is left, with [before] and [after] around the three steps. *)
+let made_and_maybe_consumed ~locals ~before ~after =
+  function_ ~parameters:[ 0 ]
+    ([ condition; local (value text) ] @ locals)
+    [
+      block
+        (before @ [ make [] (Some (at 1)) ])
+        (Switch { value = copy 0; cases = [ (Z.one, 1) ]; default = Some 2 });
+      block [ consume [ Move (at 1) ] None ] (Goto 2);
+      block (Drop (at 1) :: after) (Return None);
+    ]
+
+let () =
+  test "the flag of a local that holds nothing at entry is first written where it is given a value"
+    (fun () ->
+      expect_lir
+        ~expected:
+          [
+            "fn(_0: raw Bool)";
+            "b0: _1 = call test::make(); _2 = true; switch _0 [1 => b1, _ => b2]";
+            "b1: call test::consume(move _1); _2 = false; goto b2";
+            "b2: switch _2 [1 => b3, _ => b4]";
+            "b3: drop _1; goto b4";
+            "b4: _2 = false; return";
+          ]
+        (made_and_maybe_consumed ~locals:[] ~before:[] ~after:[]));
+  test "the flag of a chunk's own local is a local of each run of the chunk" (fun () ->
+      let index = local (Raw (Integer UInt64)) in
+      let elaborated =
+        elaborate
+          (made_and_maybe_consumed ~locals:[ index; index ]
+             ~before:[ Region { fork = 0; region = Chunk { first = 2; last = 3 } } ]
+             ~after:[ Regions_end { fork = 0 } ])
+      in
+      let outlined =
+        Lir.to_string
+          (Lir.canonical_instance
+             (Outline.instance (shape_env ~extra:drop_shapes ()) (instance "entry" elaborated)))
+      in
+      (* The nested function's [_5] is the flag. The environment holds only
+         the condition, which the function around the chunk owns. *)
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "test::entry fn(_0: raw Bool)";
+               "b0: _1.capture0 = &mut _0; fork nested 0(&_1) over _3 to _2; goto b1";
+               "b1: return";
+               "nested 0 fn(_0: raw nullable, _1: raw UInt64, _2: raw UInt64)";
+               "b0: _3 = _0; goto b1";
+               "b1: _4 = call test::make(); _5 = true; switch **_3.capture0 [1 => b2, _ => b3]";
+               "b2: call test::consume(move _4); _5 = false; goto b3";
+               "b3: switch _5 [1 => b4, _ => b5]";
+               "b4: drop _4; goto b5";
+               "b5: _5 = false; goto b6";
+               "b6: return";
+             ])
+        outlined)
+
 let () = Harness.finish ()
