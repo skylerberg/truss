@@ -477,6 +477,73 @@ let () =
       body_error "let pair = (1, 2)" ~code:Tuple ~at:"(" ~occurrence:2;
       body_error "let first = pair.0" ~code:Tuple ~at:"0";
       body_error "let pair: (Int64, String) = make()" ~code:Tuple ~at:"(" ~occurrence:2);
+  test "a ** b" (fun () ->
+      body_error "let square = x ** 2" ~code:Power_operator ~at:"**";
+      let statements, _ = body_of "let y = a + x ** 2" in
+      if List.map Syntax_print.statement statements <> [ "(let y (+ a (* x 2)))" ] then
+        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+  test "name := value" (fun () ->
+      body_error "count := 0" ~code:Short_declaration ~at:":=" ~fixed:"let count = 0";
+      body_error "point.x := 0" ~code:Short_declaration ~at:":=";
+      let statements, _ = body_of "count := 0" in
+      if List.map Syntax_print.statement statements <> [ "(let count 0)" ] then
+        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+  test "value |> function" (fun () ->
+      body_error "let total = items |> sum" ~code:Pipe_operator ~at:"|>"
+        ~fixed:"let total = sum(items)";
+      body_error "let total = items\n  |> list::sum" ~code:Pipe_operator ~at:"|>"
+        ~fixed:"let total = list::sum(items)";
+      body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>";
+      let statements, _ = body_of "let total = items |> sum" in
+      if List.map Syntax_print.statement statements <> [ "(let total (call sum items))" ] then
+        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+  test "a lambda with annotations" (fun () ->
+      body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation ~at:": Int64"
+        ~fixed:"let double = fn(x) { x * 2 }";
+      body_error "let double = fn(x) -> Int64 { x * 2 }" ~code:Lambda_annotation ~at:" -> Int64"
+        ~fixed:"let double = fn(x) { x * 2 }");
+  test "List<String>.new() in an expression" (fun () ->
+      body_error "let names = List<String>.new()" ~code:Angle_brackets ~at:"<"
+        ~fixed:"let names = List[String].new()";
+      let statements, _ = body_of "let names = List<String>.new()" in
+      if
+        List.map Syntax_print.statement statements
+        <> [ "(let names (call (. ([] List String) new)))" ]
+      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+  test "a comparison of uppercase names is not angle brackets" (fun () ->
+      let _, diagnostics = body_of "let between = Low < value && value > High" in
+      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
+  test "impl<T>" (fun () ->
+      error "impl<Item> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<"
+        ~fixed:"impl Shown for Box[Item] {}";
+      error "impl<Item: Shown> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<");
+  test "!value is Variant" (fun () ->
+      body_error "let failed = !response is Ok(_)" ~code:Not_before_is ~at:"!"
+        ~fixed:"let failed = !(response is Ok(_))");
+  test "!value is a Bool pattern is allowed" (fun () ->
+      let _, diagnostics = body_of "let off = !flag is true" in
+      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
+  test "a ?? b" (fun () ->
+      body_error "let name = user.name ?? \"guest\"" ~code:Null_coalescing ~at:"?"
+        ~fixed:"let name = user.name.unwrap_or(\"guest\")";
+      body_error "let port = settings.port ?: 80" ~code:Null_coalescing ~at:"?"
+        ~fixed:"let port = settings.port.unwrap_or(80)";
+      body_error "let total = a + b ?? 0" ~code:Null_coalescing ~at:"?"
+        ~fixed:"let total = (a + b).unwrap_or(0)";
+      let statements, _ = body_of "let port = settings.port ?? 80" in
+      if
+        List.map Syntax_print.statement statements
+        <> [ "(let port (call (. (. settings port) unwrap_or) 80))" ]
+      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+  test "a ? after a call is still a try" (fun () ->
+      let _, diagnostics =
+        body_of
+          "let text = read(path)?\n\
+           let both = first? == second?\n\
+           let less = nested?? - 1\n\
+           let table = [key?: 1]"
+      in
+      if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "items.map { it.name }" (fun () ->
       body_error "let names = items.map { it.name }" ~code:Trailing_lambda ~at:"{ it"
         ~fixed:"let names = items.map(fn(item) { item.name })");

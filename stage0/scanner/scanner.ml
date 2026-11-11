@@ -25,6 +25,19 @@ let punctuation cursor current =
     cursor.position <- start + length;
     Some (Punctuation kind)
   in
+  (* An operator of another language that one Truss operator replaces. *)
+  let foreign_operator ~written ~replacement =
+    let stop = start + String.length written in
+    report cursor ~code:Foreign_operator
+      ~fixes:
+        [
+          Diagnostic.fix
+            ("Write `" ^ replacement ^ "`")
+            [ Diagnostic.replace (span start stop) replacement ];
+        ]
+      (span start stop)
+      (Printf.sprintf "Truss has no `%s`; write `%s`." written replacement)
+  in
   let followed_by options default =
     match List.find_opt (fun (character, _, _) -> is 1 character) options with
     | Some (_, kind, length) -> take kind length
@@ -40,7 +53,14 @@ let punctuation cursor current =
   | ',' -> take Comma 1
   | '?' -> take Question 1
   | '~' -> take Tilde 1
+  | ':' when is 1 '=' ->
+      cursor.position <- start + 2;
+      Some (Foreign Colon_equal)
   | ':' -> followed_by [ (':', Colon_colon, 2) ] Colon
+  (* Swift's half-open range, `..<`, is Truss's `..`. *)
+  | '.' when is 1 '.' && is 2 '<' ->
+      foreign_operator ~written:"..<" ~replacement:"..";
+      take Dot_dot 3
   | '.' ->
       if is 1 '.' then if is 2 '=' then take Dot_dot_equal 3 else take Dot_dot 2 else take Dot 1
   | '-' ->
@@ -55,11 +75,17 @@ let punctuation cursor current =
         Some (Foreign Plus_plus)
       end
       else followed_by [ ('=', Plus_equal, 2) ] Plus
+  | '*' when is 1 '*' ->
+      cursor.position <- start + 2;
+      Some (Foreign Star_star)
   | '*' -> followed_by [ ('=', Star_equal, 2) ] Star
   | '/' -> followed_by [ ('=', Slash_equal, 2) ] Slash
   | '%' -> followed_by [ ('=', Percent_equal, 2) ] Percent
   | '^' -> followed_by [ ('=', Caret_equal, 2) ] Caret
   | '&' -> followed_by [ ('&', And_and, 2); ('=', Ampersand_equal, 2) ] Ampersand
+  | '|' when is 1 '>' ->
+      cursor.position <- start + 2;
+      Some (Foreign Pipe_greater)
   | '|' -> followed_by [ ('|', Or_or, 2); ('=', Bar_equal, 2) ] Bar
   (* JavaScript's `===` and `!==`, as a whole: a longer run of `=` is not
      that habit, and lexes as `==`s for the parser to report. *)
@@ -81,6 +107,10 @@ let punctuation cursor current =
   | '=' when is 1 '=' && is 2 '>' -> take Implies 3
   | '=' -> followed_by [ ('=', Equal_equal, 2); ('>', Fat_arrow, 2) ] Equal
   | '!' -> followed_by [ ('=', Not_equal, 2) ] Bang
+  (* The inequality of SQL and Pascal, `<>`, is Truss's `!=`. *)
+  | '<' when is 1 '>' ->
+      foreign_operator ~written:"<>" ~replacement:"!=";
+      take Not_equal 2
   | '<' ->
       if is 1 '<' then if is 2 '=' then take Shift_left_equal 3 else take Shift_left 2
       else followed_by [ ('=', Less_equal, 2) ] Less
@@ -114,7 +144,82 @@ let number cursor =
         (span (start + problem.start) (start + problem.stop))
         problem.message
   | None -> ());
-  checked.value
+  match checked with
+  (* `1.`, with nothing after the `.` that a member access could continue
+     with: a float with no digit after its `.`. *)
+  | { value = Integer _; problem = None; _ }
+    when byte cursor stop = Char.code '.'
+         && (not (Numbers.is_radix_prefix cursor.text start))
+         &&
+         let after = byte cursor (Source_text.skip_blank cursor (stop + 1)) in
+         not (is_ascii_name_byte after || after >= 0x80 || after = Char.code '.') -> (
+      let written = String.sub cursor.text start (stop + 1 - start) in
+      match Numbers.float_with_zero (written ^ "0") with
+      | Some value ->
+          cursor.position <- stop + 1;
+          report cursor ~code:Number_missing_digits
+            ~fixes:
+              [
+                Diagnostic.fix
+                  (Printf.sprintf "Write `%s0`" written)
+                  [ Diagnostic.insert (stop + 1) "0" ];
+              ]
+            (span stop (stop + 1))
+            (Printf.sprintf "A float has a digit after its `.`: `%s0`." written);
+          value
+      | None -> checked.value)
+  | _ -> checked.value
+
+(* `.5`, where no operand comes before the `.`: a float with no digit before
+   its `.`. [None] when the text is not one valid float. *)
+let leading_dot_float cursor =
+  let start = cursor.position in
+  let stop = Numbers.scan_end cursor.text (start + 1) in
+  let written = String.sub cursor.text start (stop - start) in
+  match Numbers.float_with_zero ("0" ^ written) with
+  | Some value ->
+      cursor.position <- stop;
+      report cursor ~code:Number_missing_digits
+        ~fixes:
+          [ Diagnostic.fix (Printf.sprintf "Write `0%s`" written) [ Diagnostic.insert start "0" ] ]
+        (span start (start + 1))
+        (Printf.sprintf "A float has a digit before its `.`: `0%s`." written);
+      Some value
+  | None -> None
+
+(* `...`, which is three things in other languages. Between two operands
+   it is the inclusive range of Ruby and Swift, and lexes as `..=`. With an
+   operand on neither side it is a placeholder for code not written yet, as
+   in Python, and lexes as `todo`. Before an operand only, it is the spread
+   or rest operator, which Truss does not have, and lexes as nothing. *)
+let ellipsis cursor =
+  let start = cursor.position in
+  let stop = start + 3 in
+  let after = Trivia.after_operand cursor start and before = Trivia.before_operand cursor stop in
+  cursor.position <- stop;
+  cursor.line_is_blank <- false;
+  let replaced replacement message kind =
+    report cursor ~code:Foreign_operator
+      ~fixes:
+        [
+          Diagnostic.fix
+            ("Write `" ^ replacement ^ "`")
+            [ Diagnostic.replace (span start stop) replacement ];
+        ]
+      (span start stop) message;
+    Some kind
+  in
+  if after && before then
+    replaced "..=" "Truss has no `...`; a range that includes its end is written `..=`."
+      (Punctuation Dot_dot_equal)
+  else if (not after) && not before then
+    replaced "todo" "Truss has no `...`; code that is not written yet is `todo`." (Keyword Todo)
+  else begin
+    report cursor ~code:Foreign_operator (span start stop)
+      "Truss has no `...`: it has no spread or rest operator, and a function takes a list where it \
+       takes any number of values.";
+    None
+  end
 
 let rec scan cursor ~inline ~nesting =
   let start = cursor.position in
@@ -150,14 +255,52 @@ let rec scan cursor ~inline ~nesting =
       if Unicode.is_forbidden value then forbidden ()
       else if Unicode.is_xid_start value then name cursor ~nesting
       else
-        reject (Unicode.decoded_length packed)
-          (Printf.sprintf "%s is not used in Truss." (show_character cursor start))
+        let length = Unicode.decoded_length packed in
+        let unused () =
+          reject length (Printf.sprintf "%s is not used in Truss." (show_character cursor start))
+        in
+        (* A character that looks like ASCII punctuation is reported, and
+           lexes as the token that its fix writes. *)
+        let lookalike ~replacement ~name =
+          report cursor ~code:Lookalike_character
+            ~fixes:
+              [
+                Diagnostic.fix
+                  ("Write `" ^ replacement ^ "`")
+                  [ Diagnostic.replace (span start (start + length)) replacement ];
+              ]
+            (span start (start + length))
+            (Printf.sprintf "%s is not %s. Truss is written with ASCII punctuation."
+               (show_character cursor start) name);
+          cursor.position <- start + length;
+          cursor.line_is_blank <- false
+        in
+        match Lookalikes.find value with
+        | Some Space ->
+            lookalike ~replacement:" " ~name:"the space character";
+            again ()
+        | Some (Spelled spelling) -> (
+            match Lookalikes.token spelling with
+            | Some kind ->
+                lookalike ~replacement:spelling ~name:("`" ^ spelling ^ "`");
+                token kind
+            | None -> unused ())
+        | Some (Opening_quote closing) -> (
+            match Strings.curly_quoted_string cursor ~opening_length:length ~closing with
+            | Some kind -> token kind
+            | None -> unused ())
+        | None -> unused ()
   end
   else if current < 0x20 || current = 0x7F then forbidden ()
   else
     match Char.chr current with
     | '"' -> string cursor ~tag:None ~nesting ~start
     | '$' when Trivia.opens_raw_string cursor start -> string cursor ~tag:None ~nesting ~start
+    (* C#'s interpolated string, `$"..."`. *)
+    | '$' when next = quote ->
+        cursor.position <- start + 1;
+        let kind, ending = Strings.prefixed_string cursor ~scan ~prefix:"$" ~start ~nesting in
+        Token { kind; start; ending }
     | '$' ->
         reject (run_length cursor start dollar)
           "`$` is used only in strings: `${...}` inside a string interpolates, and `$`s before a \
@@ -166,11 +309,43 @@ let rec scan cursor ~inline ~nesting =
         match Trivia.character_literal_end cursor start with
         | Some stop ->
             token (Strings.character_literal cursor ~tag:"Character" ~literal_start:start ~stop)
-        | None -> reject 1 "`'` is not used in Truss. Strings are written with `\"`.")
+        | None -> (
+            let touches_name index =
+              let neighbor = byte cursor index in
+              is_ascii_name_byte neighbor || neighbor >= 0x80
+            in
+            match Strings.closing_delimiter cursor ~start ~delimiter:current with
+            (* A string of Python or JavaScript, `'abc'`. A quote that
+               touches a name on its outer side is not one: it is an
+               apostrophe, or it opens a lifetime of Rust. *)
+            | Some close
+              when (not (start > 0 && touches_name (start - 1))) && not (touches_name (close + 1))
+              ->
+                let kind, ending = Strings.quoted_string cursor ~scan ~nesting ~delimiter:current in
+                Token { kind; start; ending }
+            | _
+              when (is_ascii_letter next || next = Char.code '_')
+                   && not (start > 0 && touches_name (start - 1)) ->
+                let rec name_end position =
+                  if is_ascii_name_byte (byte cursor position) then name_end (position + 1)
+                  else position
+                in
+                reject ~code:Lifetime
+                  (name_end (start + 1) - start)
+                  "Truss has no lifetimes. How long a view lasts is checked without annotations."
+            | _ -> reject 1 "`'` is not used in Truss. Strings are written with `\"`."))
     | '/' when next = Char.code '/' || next = Char.code '*' ->
         if inline then reject ~code:Comment 2 Trivia.comment_message
         else begin
           if next = Char.code '/' then Trivia.line_comment cursor else Trivia.block_comment cursor;
+          again ()
+        end
+    | '#'
+      when next = Char.code '[' || (next = Char.code '!' && byte cursor (start + 2) = Char.code '[')
+      ->
+        if inline then reject ~code:Attribute 1 "Truss has no attributes."
+        else begin
+          Trivia.attribute cursor;
           again ()
         end
     | '#' ->
@@ -185,7 +360,24 @@ let rec scan cursor ~inline ~nesting =
           Trivia.semicolon cursor;
           again ()
         end
-    | '`' -> reject 1 "The backtick is not used in Truss."
+    | '.' when is_digit next && not (Trivia.after_operand cursor start) -> (
+        match leading_dot_float cursor with
+        | Some kind -> token kind
+        | None -> ( match punctuation cursor '.' with Some kind -> token kind | None -> again ()))
+    | '`' -> (
+        (* A template literal of JavaScript that closes on its line. *)
+        match Strings.closing_delimiter cursor ~start ~delimiter:current with
+        | Some _ ->
+            let kind, ending = Strings.quoted_string cursor ~scan ~nesting ~delimiter:current in
+            Token { kind; start; ending }
+        | None -> reject 1 "The backtick is not used in Truss.")
+    (* C#'s verbatim string, `@"..."`. *)
+    | '@' when next = quote ->
+        cursor.position <- start + 1;
+        let kind, ending = Strings.prefixed_string cursor ~scan ~prefix:"@" ~start ~nesting in
+        Token { kind; start; ending }
+    | '.' when next = Char.code '.' && byte cursor (start + 2) = Char.code '.' -> (
+        match ellipsis cursor with Some kind -> token kind | None -> again ())
     | character -> (
         match punctuation cursor character with
         | Some kind -> token kind
@@ -245,8 +437,12 @@ and name cursor ~nesting =
          || (byte cursor stop = dollar && Trivia.opens_raw_string cursor stop) ->
       string cursor ~tag:(Some (tag, span start stop)) ~nesting ~start
   (* A prefix from another language before an ordinary or an empty string. *)
+  | Lower "r" when byte cursor stop = Char.code '#' -> (
+      match Strings.hash_raw_string cursor ~start with
+      | Some kind -> Token { kind; start; ending = Closed }
+      | None -> Token { kind; start; ending = Closed })
   | Lower (("f" | "r" | "b") as prefix)
-    when byte cursor stop = quote && run_length cursor stop quote <= 2 ->
+    when byte cursor stop = quote && (prefix <> "b" || run_length cursor stop quote <= 2) ->
       let kind, ending = Strings.prefixed_string cursor ~scan ~prefix ~start ~nesting in
       Token { kind; start; ending }
   | Lower "b" when byte cursor stop = Char.code '\'' -> (

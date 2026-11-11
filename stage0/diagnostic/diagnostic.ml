@@ -11,6 +11,12 @@ module Code = struct
     | Strict_equality
     | Character_literal
     | String_prefix
+    | String_delimiter
+    | Attribute
+    | Foreign_operator
+    | Lookalike_character
+    | Lifetime
+    | Number_hexadecimal_float
     | Name_case
     | Name_not_ascii
     | Number_suffix
@@ -73,6 +79,13 @@ module Code = struct
     | Qualified_variant
     | Macro_call
     | Tuple
+    | Power_operator
+    | Short_declaration
+    | Pipe_operator
+    | Lambda_annotation
+    | Impl_parameters
+    | Not_before_is
+    | Null_coalescing
     | Specification_only
     | Misplaced_assert
     | Misplaced_proof
@@ -248,6 +261,12 @@ module Code = struct
     | Strict_equality -> "strict_equality"
     | Character_literal -> "character_literal"
     | String_prefix -> "string_prefix"
+    | String_delimiter -> "string_delimiter"
+    | Attribute -> "attribute"
+    | Foreign_operator -> "foreign_operator"
+    | Lookalike_character -> "lookalike_character"
+    | Lifetime -> "lifetime"
+    | Number_hexadecimal_float -> "number_hexadecimal_float"
     | Name_case -> "name_case"
     | Name_not_ascii -> "name_not_ascii"
     | Number_suffix -> "number_suffix"
@@ -311,6 +330,13 @@ module Code = struct
     | Qualified_variant -> "qualified_variant"
     | Macro_call -> "macro_call"
     | Tuple -> "tuple"
+    | Power_operator -> "power_operator"
+    | Short_declaration -> "short_declaration"
+    | Pipe_operator -> "pipe_operator"
+    | Lambda_annotation -> "lambda_annotation"
+    | Impl_parameters -> "impl_parameters"
+    | Not_before_is -> "not_before_is"
+    | Null_coalescing -> "null_coalescing"
     | Specification_only -> "specification_only"
     | Misplaced_assert -> "misplaced_assert"
     | Misplaced_proof -> "misplaced_proof"

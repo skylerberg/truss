@@ -215,6 +215,93 @@ let tuple_field cursor ~(field : Token.t) =
      `pair.first`.";
   raise Cursor.Failed
 
+(* [a ** b]. *)
+let power_operator cursor ~(operator : Token.t) =
+  Cursor.report cursor Power_operator operator.span
+    "Truss has no power operator. Multiply, as in `x * x`, or call the type's own method for a \
+     power."
+
+(* [name := value], from Go, and [target := value] with any other target. *)
+let short_declaration cursor ~(target : expression) ~(operator : Token.t) =
+  let message = "Truss has no `:=`. A new name is declared with `let name = value`." in
+  match target.kind with
+  | Name { modules = []; _ } ->
+      report cursor Short_declaration operator.span message "Declare the name with `let`"
+        [
+          Diagnostic.insert (Cursor.absolute cursor target.span).start "let ";
+          Diagnostic.replace operator.span "=";
+        ]
+  | _ -> Cursor.report cursor Short_declaration operator.span message
+
+(* [value |> function]. The fix is exact only when the right operand is a
+   name or a member, since the languages with [|>] disagree about which
+   argument of a call the value becomes. *)
+let pipe_operator cursor ~(value : expression) ~(operator : Token.t) ~(callee : expression) =
+  let message = "Truss has no `|>`. A function is called with its argument: `function(value)`." in
+  let rec is_path (candidate : expression) =
+    match candidate.kind with
+    | Name _ -> true
+    | Member (receiver, _) -> is_path receiver
+    | _ -> false
+  in
+  if is_path callee then
+    report cursor Pipe_operator operator.span message "Write the call"
+      [
+        Diagnostic.replace
+          (Source.span (Cursor.absolute cursor value.span).start
+             (Cursor.absolute cursor callee.span).stop)
+          (Printf.sprintf "%s(%s)" (node_text cursor callee.span) (node_text cursor value.span));
+      ]
+  else Cursor.report cursor Pipe_operator operator.span message
+
+(* [fn(x: Int64) -> Int64 { ... }]: the annotation from [from] to [stop]. *)
+let lambda_annotation cursor ~from ~stop =
+  report cursor Lambda_annotation (Source.span from stop)
+    "A lambda's parameters and result have no annotations. Their types are inferred from where the \
+     lambda is passed."
+    "Remove the annotation"
+    [ Diagnostic.delete (Source.span from stop) ]
+
+(* [impl<T> Trait for Box<T>], from Rust. [plain] says that the parameters
+   are names alone, with no bounds, so that removing them loses nothing. *)
+let impl_parameters cursor ~(opening : Token.t) ~(closing : Token.t) ~plain =
+  let message =
+    "An `impl` has no parameters of its own. The type after `for` declares them, with their \
+     bounds: `impl Trait for Box[Item: Ordered]`."
+  in
+  let span = Source.span opening.span.start closing.span.stop in
+  if plain then
+    report cursor Impl_parameters opening.span message "Remove the parameters"
+      [ Diagnostic.delete span ]
+  else Cursor.report cursor Impl_parameters opening.span message
+
+(* [a ?? b] and [a ?: b]. *)
+let null_coalescing cursor ~(value : expression) ~(first : Token.t) ~(second : Token.t)
+    ~(default : expression) =
+  let value_span = Cursor.absolute cursor value.span
+  and default_span = Cursor.absolute cursor default.span in
+  (* A method call binds tighter than every operator, so an operand that is
+     an operation goes in parentheses. *)
+  let needs_parentheses =
+    match value.kind with
+    | Binary _ | Is _ | Range _ | Prefix _ | Mode _ | Any _ | Quantified _ | Echo _ | Return _ ->
+        true
+    | _ -> false
+  in
+  report cursor Null_coalescing first.span
+    (Printf.sprintf
+       "Truss has no `%s`. An `Option`'s value, or a default when it has none, is \
+        `option.unwrap_or(default)`."
+       (Cursor.text cursor (Source.span first.span.start second.span.stop)))
+    "Call `unwrap_or`"
+    ((if needs_parentheses then [ Diagnostic.insert value_span.start "(" ] else [])
+    @ [
+        Diagnostic.replace
+          (Source.span value_span.stop default_span.start)
+          (if needs_parentheses then ").unwrap_or(" else ".unwrap_or(");
+        Diagnostic.insert default_span.stop ")";
+      ])
+
 (* The singular of a plural English noun whose plural is regular: [items]
    and [entries], but not [statuses] or [classes]. *)
 let singular word =

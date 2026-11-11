@@ -279,6 +279,39 @@ let () =
       error "b'a'" ~code:Character_literal ~at:"b" ~fixed:{|UInt8"a"|});
   test "a name before a string that is not a prefix is a name" (fun () ->
       equal_lists Fun.id "tokens" [ "g"; {|"a"|}; "NL" ] (tokens_of {|g"a"|}));
+  test "a Rust raw string with hashes becomes a raw string" (fun () ->
+      error {|r#"\d+"#|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|};
+      error {|r##"say "hi" now"##|} ~code:String_prefix ~at:"r" ~fixed:{|"""say "hi" now"""|};
+      error {|r#"a"""b"#|} ~code:String_prefix ~at:"r" ~fixed:{|""""a"""b""""|};
+      equal_lists Fun.id "tokens" [ {|"say \"hi\" now"|}; "NL" ] (tokens_of {|r#"say "hi" now"#|}));
+  test "a Rust raw string that ends with a quote has no fix" (fun () ->
+      error {|r#"say "hi""#|} ~code:String_prefix ~at:"r");
+  test "a Python string with three quotes loses its prefix" (fun () ->
+      error "f\"\"\"\n  Hello {name}\n  \"\"\"" ~code:String_prefix ~at:"f"
+        ~fixed:"\"\"\"\n  Hello ${name}\n  \"\"\"";
+      error {|r"""\d+"""|} ~code:String_prefix ~at:"r" ~fixed:{|"""\d+"""|});
+  test "a C# string becomes a Truss string" (fun () ->
+      error {|$"Hello {name}"|} ~code:String_prefix ~at:"$" ~fixed:{|"Hello ${name}"|};
+      error {|@"C:\logs"|} ~code:String_prefix ~at:"@" ~fixed:{|"""C:\logs"""|});
+  test "a template literal becomes an ordinary string" (fun () ->
+      error "`Hello ${name}`" ~code:String_delimiter ~at:"`" ~fixed:{|"Hello ${name}"|};
+      error "`say \"hi\"`" ~code:String_delimiter ~at:"`" ~fixed:{|"say \"hi\""|};
+      equal_lists Fun.id "tokens" [ {|"Hello ${}"|}; "NL" ] (tokens_of "`Hello ${name}`"));
+  test "a string between single quotes becomes an ordinary string" (fun () ->
+      error "'abc'" ~code:String_delimiter ~at:"'" ~fixed:{|"abc"|};
+      error "''" ~code:String_delimiter ~at:"'" ~fixed:{|""|};
+      equal_lists Fun.id "fixed"
+        [ {|print("say \"hi\"", 'x y')|}; {|print('say "hi"', "x y")|} ]
+        (fixed_texts {|print('say "hi"', 'x y')|} ~code:String_delimiter));
+  test "a lifetime has no fix" (fun () ->
+      error "x: &'a str" ~code:Lifetime ~at:"'";
+      equal_lists Fun.id "codes" [ "lexer.lifetime"; "lexer.lifetime" ] (codes "f<'a>(x: &'a str)"));
+  test "Swift's interpolation becomes ${...}" (fun () ->
+      error {|"Hello \(user.name)"|} ~code:Invalid_escape ~at:"\\" ~fixed:{|"Hello ${user.name}"|});
+  test "curly quotes become straight quotes" (fun () ->
+      error "\u{201C}text\u{201D}" ~code:Lookalike_character ~at:"\u{201C}" ~fixed:{|"text"|};
+      error "\u{2018}text\u{2019}" ~code:Lookalike_character ~at:"\u{2018}" ~fixed:{|"text"|};
+      equal_lists Fun.id "tokens" [ {|"text"|}; "NL" ] (tokens_of "\u{201C}text\u{201D}"));
   test "quotes touching a name are not a character literal" (fun () ->
       equal_lists Fun.id "codes"
         [ "lexer.unexpected_character"; "lexer.unexpected_character" ]
@@ -373,9 +406,60 @@ let () =
         Token.punctuation);
   test "the longest match" (fun () ->
       tokens "a<<=b" [ "a"; "<<="; "b"; "NL" ];
-      tokens "a...b" [ "a"; ".."; "."; "b"; "NL" ];
       tokens "a==>b" [ "a"; "==>"; "b"; "NL" ];
       tokens "a::b" [ "a"; "::"; "b"; "NL" ])
+
+let () =
+  test "a float with no digit on one side of its point" (fun () ->
+      error "x = 1." ~code:Number_missing_digits ~at:"." ~fixed:"x = 1.0";
+      error "x = .5" ~code:Number_missing_digits ~at:"." ~fixed:"x = 0.5";
+      error "f(.5e3, y)" ~code:Number_missing_digits ~at:"." ~fixed:"f(0.5e3, y)";
+      error "return .25" ~code:Number_missing_digits ~at:"." ~fixed:"return 0.25";
+      equal_lists Fun.id "tokens" [ "x"; "="; "1e0"; "NL" ] (tokens_of "x = 1."));
+  test "a point after an operand is a member access" (fun () ->
+      tokens "1.max(2)" [ "1"; "."; "max"; "("; "2"; ")"; "NL" ];
+      tokens "1 . max" [ "1"; "."; "max"; "NL" ];
+      tokens "1..2" [ "1"; ".."; "2"; "NL" ];
+      tokens "pair.5" [ "pair"; "."; "5"; "NL" ];
+      tokens "items[0].5" [ "items"; "["; "0"; "]"; "."; "5"; "NL" ]);
+  test "C++'s digit separator becomes an underscore" (fun () ->
+      error "1'000'000" ~code:Number_underscore ~at:"'" ~fixed:"1_000_000";
+      equal_lists Fun.id "tokens" [ "1000000"; "NL" ] (tokens_of "1'000'000"));
+  test "a hexadecimal float has no fix" (fun () ->
+      error "0x1p3" ~code:Number_hexadecimal_float ~at:"0";
+      error "0x1.8p-3" ~code:Number_hexadecimal_float ~at:"0";
+      equal_lists Fun.id "tokens" [ "1"; "NL" ] (tokens_of "0x1.8p3"));
+  test "a method call on a hexadecimal literal is not a hexadecimal float" (fun () ->
+      tokens "0xFF.abs()" [ "255"; "."; "abs"; "("; ")"; "NL" ];
+      tokens "0x1.bad" [ "1"; "."; "bad"; "NL" ]);
+  test "an attribute is removed" (fun () ->
+      error "#[derive(Debug)]\ntype Point(x: Int64)" ~code:Attribute ~at:"#"
+        ~fixed:"type Point(x: Int64)";
+      error "#![allow(unused)]\nx" ~code:Attribute ~at:"#" ~fixed:"x");
+  test "an operator of another language becomes Truss's" (fun () ->
+      error "a <> b" ~code:Foreign_operator ~at:"<>" ~fixed:"a != b";
+      error "0..<count" ~code:Foreign_operator ~at:"..<" ~fixed:"0..count";
+      equal_lists Fun.id "tokens" [ "a"; "!="; "b"; "NL" ] (tokens_of "a <> b"));
+  test "three dots between operands are an inclusive range" (fun () ->
+      error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..=5";
+      equal_lists Fun.id "tokens" [ "a"; "..="; "b"; "NL" ] (tokens_of "a...b"));
+  test "three dots alone are todo" (fun () ->
+      error "fn f() { ... }" ~code:Foreign_operator ~at:"..." ~fixed:"fn f() { todo }";
+      equal_lists Fun.id "tokens" [ "{"; "todo"; "}"; "NL" ] (tokens_of "{ ... }"));
+  test "three dots before an operand have no fix" (fun () ->
+      error "f(...items)" ~code:Foreign_operator ~at:"...";
+      equal_lists Fun.id "tokens" [ "f"; "("; "items"; ")"; "NL" ] (tokens_of "f(...items)"));
+  test "**, :=, and |> are tokens for the parser to report" (fun () ->
+      tokens "a ** b" [ "a"; "**"; "b"; "NL" ];
+      tokens "a := b" [ "a"; ":="; "b"; "NL" ];
+      tokens "a |> b" [ "a"; "|>"; "b"; "NL" ];
+      tokens "a\n  |> b" [ "a"; "|>"; "b"; "NL" ]);
+  test "a character that looks like punctuation becomes it" (fun () ->
+      error "f\u{FF08}x)" ~code:Lookalike_character ~at:"\u{FF08}" ~fixed:"f(x)";
+      error "a \u{2264} b" ~code:Lookalike_character ~at:"\u{2264}" ~fixed:"a <= b";
+      error "a\u{00A0}b" ~code:Lookalike_character ~at:"\u{00A0}" ~fixed:"a b";
+      error "\u{2200} x" ~code:Lookalike_character ~at:"\u{2200}" ~fixed:"forall x";
+      equal_lists Fun.id "tokens" [ "a"; "<="; "b"; "NL" ] (tokens_of "a \u{2264} b"))
 
 (* Layout *)
 

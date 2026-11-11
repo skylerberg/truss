@@ -141,7 +141,8 @@ let verdict : Diagnostic.Code.t -> verdict = function
       | Open_range | Float_pattern | Increment | Double_negation | Match_arm_comma
       | Conditional_operator | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish
       | Trailing_lambda | As_conversion | Elif | Angle_brackets | Path_separator | Qualified_variant
-      | Macro_call | Tuple ) ->
+      | Macro_call | Tuple | Power_operator | Short_declaration | Pipe_operator | Lambda_annotation
+      | Impl_parameters | Null_coalescing ) ->
       Grammar_rejects
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
@@ -149,7 +150,8 @@ let verdict : Diagnostic.Code.t -> verdict = function
       | Misplaced_transparent | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause
       | Finite_not_time | Loop_cost_bound | Function_type_names | Misplaced_requires
       | Specification_only | Misplaced_assert | Misplaced_proof | Misplaced_yield
-      | Misplaced_loop_exit | Leaves_parallel | Echo_in_specification | Reserved_name )
+      | Misplaced_loop_exit | Leaves_parallel | Echo_in_specification | Reserved_name
+      | Not_before_is )
   | Lexer _ | Resolve _ | Package _ | Prover _ | Capabilities _ | Ownership _ | Usage _ | Patterns _
   | Types _ | Too_many_diagnostics ->
       Grammar_accepts

@@ -123,7 +123,7 @@ type punctuation =
 
 (* Sequences from other languages whose fix depends on the expression around
    them. No grammar rule accepts them, and the parser reports them. *)
-type foreign = Plus_plus | Minus_minus
+type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Pipe_greater
 
 (* An exact decimal, significand × 10^exponent, with the trailing zeros of
    the significand removed, so that equal values are equal records. *)
@@ -324,7 +324,14 @@ let punctuation =
     (">>", Shift_right);
   ]
 
-let foreign_sequences = [ ("++", Plus_plus); ("--", Minus_minus) ]
+let foreign_sequences =
+  [
+    ("++", Plus_plus);
+    ("--", Minus_minus);
+    ("**", Star_star);
+    (":=", Colon_equal);
+    ("|>", Pipe_greater);
+  ]
 
 (* The keywords that start a top-level definition. *)
 let definition_keywords =

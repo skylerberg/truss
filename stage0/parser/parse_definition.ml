@@ -468,6 +468,24 @@ let trait cursor =
 
 let impl cursor =
   Cursor.advance cursor;
+  (* [impl<T> Trait for Box<T>], from Rust: the parameters are reported
+     and skipped. *)
+  (match
+     if Cursor.is_punctuation cursor Less then Parse_expression.angle_closer cursor else None
+   with
+  | Some closer ->
+      let opening = Cursor.peek cursor in
+      let plain =
+        List.for_all
+          (fun index ->
+            match (Cursor.token_at cursor index).kind with
+            | Upper _ | Punctuation Comma -> true
+            | _ -> false)
+          (List.init (closer - cursor.index - 1) (fun offset -> cursor.index + 1 + offset))
+      in
+      Habits.impl_parameters cursor ~opening ~closing:(Cursor.token_at cursor closer) ~plain;
+      Cursor.skip_to cursor (closer + 1)
+  | None -> ());
   let trait_ = Parse_expression.path_type cursor in
   Cursor.expect_keyword cursor For;
   let type_ = type_head cursor in

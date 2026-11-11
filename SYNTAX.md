@@ -198,6 +198,18 @@ rather than read as something else:
 | `(a, b)`, `pair.0` | Truss has no tuples. The message recommends a record. |
 | `f"Hello {name}"`, `r"\d+"`, `b'a'` | Strings have no prefixes. The fix writes `"Hello ${name}"`, `"""\d+"""`, and `UInt8"a"`. |
 | `"\x41"`, `"\u00E9"` | A character is written by its code point. The fix writes `"\u{41}"` and `"\u{E9}"`. |
+| `'abc'`, `` `Hello ${name}` `` | Strings are written between `"`s. The fix writes `"abc"` and `"Hello ${name}"`. |
+| `1.`, `.5`, `1'000` | The fix writes `1.0`, `0.5`, and `1_000`. |
+| `#[derive(Debug)]` | Truss has no attributes. The fix removes it, and the message points to `derives`. |
+| `<>`, `..<`, `...` | The fix writes `!=`, `..`, and `..=`, or `todo` where `...` stands for code not written yet. |
+| `a ** b` | Truss has no power operator. |
+| `count := 0` | The fix writes `let count = 0`. |
+| `items \|> sum` | The fix writes `sum(items)`. |
+| `a ?? b`, `a ?: b` | The fix writes `a.unwrap_or(b)`. |
+| `fn(x: Int64) { ... }` | A lambda has no annotations. The fix writes `fn(x) { ... }`. |
+| `impl<T> Trait for Box[T]` | An `impl` has no parameters of its own. The fix writes `impl Trait for Box[T]`. |
+| `!response is Ok(_)` | `!` binds tighter than `is`. The fix writes `!(response is Ok(_))`. |
+| `“text”`, `≤`, a no-break space | Characters that look like ASCII punctuation. The fix writes the ASCII spelling. |
 | `x as Int64` | The fix writes `Int64.from(x)`, or `Int64.try_from(x)` when the conversion can lose information. |
 | `null`, `nil` | The fix suggests `None`. |
 | `elif` | The fix writes `else if`. |
