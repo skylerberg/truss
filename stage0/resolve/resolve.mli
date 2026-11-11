@@ -14,6 +14,8 @@ type specification_function = Walk.specification_function = Log | Power | Time |
 type target = Walk.target =
   | Binding  (** This name binds a local, a parameter, or a generic parameter. *)
   | Local of Syntax.id  (** A local or parameter, by the id of the name that binds it. *)
+  | Law_parameter of int
+      (** In a law's proof, a parameter of the law, by its position among the law's parameters. *)
   | Type_parameter of Types.parameter
       (** A generic type parameter, by the definition that declares it and its name. *)
   | Capability_parameter of Types.parameter  (** A generic parameter declared [capability Name]. *)
@@ -42,6 +44,7 @@ type value =
   | Value_local of Syntax.id  (** A local or parameter, by the id of the name that binds it. *)
   | Value_generic of Types.parameter  (** A [USize] generic parameter. *)
   | Value_field of string  (** A field, in a record's invariant or potential. *)
+  | Value_law_parameter of int
 
 type resolved = {
   names : target option array;

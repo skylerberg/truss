@@ -612,6 +612,37 @@ let definition =
       | Some (module_, declaration) ->
           Some (Query.demand database items module_).(declaration.index).value)
 
+(* The names of the parameters of a trait's law, in order. The body of a
+   proof of the law names them. *)
+let law_parameters =
+  Query.query ~name:"law_parameters" ~phase:Declarations
+    ~show:(fun ((trait : Path.t), law) -> Path.show trait ^ "." ^ law)
+    (fun database ((trait : Path.t), law) ->
+      match trait with
+      | Top { module_; _ } when module_exists database module_ -> (
+          let declaration =
+            Declaration_map.find_opt (trait, 0) (Query.demand database declaration_index module_)
+          in
+          match
+            Option.bind declaration (fun found -> Query.demand database definition (key_of found))
+          with
+          | Some { kind = Trait { members; _ }; _ } ->
+              List.find_map
+                (fun (member : trait_member line) ->
+                  match member.kind with
+                  | Law found when found.name.text = law ->
+                      Some
+                        (List.filter_map
+                           (fun (parameter : parameter) ->
+                             match parameter.kind with
+                             | Named_parameter { name; _ } -> Some name.text
+                             | Self_parameter _ | Parameter_error -> None)
+                           found.parameters)
+                  | _ -> None)
+                members
+          | _ -> None)
+      | _ -> None)
+
 (* The span of each node of a definition, relative to the definition, by
    node id. The core form holds no positions, so reformatting a definition
    invalidates no result that reads its form. Code that displays a node's

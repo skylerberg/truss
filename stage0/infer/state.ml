@@ -126,6 +126,9 @@ type state = {
   mutable diagnostics : Diagnostic.t list;
   unifier : Unify.t;
   locals : (id, local) Hashtbl.t;
+  mutable law_parameters : (string * T.ty) list;
+      (** In a law's proof, the law's parameters, with [Self] and the trait's parameters replaced by
+          the proof's type and trait arguments. *)
   mutable frames : frame list;
   mutable references : id list;  (** Locals read, newest first, for lambdas' captures. *)
   mutable receiver_modes : (id * T.mode) list;  (** Method calls whose receiver a mark covers. *)
@@ -759,7 +762,7 @@ let rec is_place state (value : expression) =
   match value.kind with
   | Name path -> (
       match target state path.last with
-      | Some (Local _ | Field _ | Definition (Constant, _)) -> true
+      | Some (Local _ | Law_parameter _ | Field _ | Definition (Constant, _)) -> true
       | _ -> false)
   | Self_value -> true
   | Member (base, _) -> is_place state base || is_member_constant state value
@@ -1297,7 +1300,7 @@ let rec immutable state env (value : expression) : immutable option =
           | Some local ->
               if local.mutable_ || local.mode = Mut then None else Some (Read_only path.last.text)
           | None -> None)
-      | Some (Definition _) -> Some (Read_only path.last.text)
+      | Some (Definition _ | Law_parameter _) -> Some (Read_only path.last.text)
       | _ -> None)
   | Self_value ->
       if state.lambdas <> [] then Some (Captured "self")

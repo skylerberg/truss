@@ -638,7 +638,7 @@ let check (state : state) (lowered : Environment.lowered) (form : Core.t) =
       Option.iter (check_block checking (function_body ?implemented_capability signature.uses)) body
   | Test body, _, Test_interface uses ->
       check_block checking (function_body (union uses [ panic ])) body
-  | Function { body = Some body; _ }, Theorem _, _ | Law_proof body, _, _ ->
+  | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body; _ }, _, _ ->
       check_block checking (no_capabilities "a proof") body
   | _ -> ());
   solve state;

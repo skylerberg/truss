@@ -470,8 +470,41 @@ let check_definition state (lowered : Environment.lowered) =
               let contract = core_contract state clauses in
               Function { parameters; contract; body = Some (build_block state written) });
         if not (broken Body) then body state env written
+    | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type } ->
+        (* The body names the law's parameters, as the law's own body does. *)
+        (match Query.demand state.database Environment.trait_interface trait.trait with
+        | Some interface ->
+            let substitution =
+              Interface.Properties.trait_substitution interface ~self:for_type trait
+            in
+            state.law_parameters <-
+              List.map
+                (fun (name, type_) -> (name, T.substitute substitution type_))
+                (Option.value ~default:[] (List.assoc_opt law interface.laws))
+        | None -> ());
+        state.form.definition_builder <-
+          Some
+            (fun () ->
+              let parameters =
+                List.mapi
+                  (fun index (name, type_) : Core.parameter ->
+                    {
+                      local = Synthetic index;
+                      name;
+                      mode = Read;
+                      type_ = final state type_;
+                      default = None;
+                      callback_contract = None;
+                    })
+                  state.law_parameters
+              in
+              state.form.synthetic_local_count <- List.length parameters;
+              Law_proof { parameters; body = build_block state written });
+        if not (broken Body) then
+          body state { no_output with specification = true; output = Some (Returns T.unit) } written
     | Law_proof { body = written; _ }, _ ->
-        state.form.definition_builder <- Some (fun () -> Law_proof (build_block state written));
+        state.form.definition_builder <-
+          Some (fun () -> Law_proof { parameters = []; body = build_block state written });
         if not (broken Body) then
           body state { no_output with specification = true; output = Some (Returns T.unit) } written
     | _ -> ()
@@ -592,6 +625,7 @@ let check database (key : Names.key) =
           diagnostics = [];
           unifier = Unify.create ();
           locals = Hashtbl.create 32;
+          law_parameters = [];
           frames = [];
           references = [];
           receiver_modes = [];

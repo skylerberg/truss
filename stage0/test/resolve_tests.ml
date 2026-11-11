@@ -127,6 +127,7 @@ let describe names base (target : Resolve.target option) =
   | None -> "nothing"
   | Some Binding -> "binding"
   | Some (Local id) -> Printf.sprintf "local at %d" (offset id)
+  | Some (Law_parameter index) -> Printf.sprintf "law parameter %d" index
   | Some (Type_parameter parameter | Capability_parameter parameter | Value_parameter parameter) ->
       Printf.sprintf "generic %s of %s" parameter.name (Path.show parameter.owner)
   | Some (Definition (_, path)) -> Path.show path

@@ -7,6 +7,7 @@ type specification_function = Walk.specification_function = Log | Power | Time |
 type target = Walk.target =
   | Binding
   | Local of Syntax.id
+  | Law_parameter of int
   | Type_parameter of Types.parameter
   | Capability_parameter of Types.parameter
   | Value_parameter of Types.parameter
@@ -28,6 +29,7 @@ type value = Walk.value =
   | Value_local of Syntax.id
   | Value_generic of Types.parameter
   | Value_field of string
+  | Value_law_parameter of int
 
 type resolved = {
   names : target option array;

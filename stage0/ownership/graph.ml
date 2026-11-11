@@ -1093,7 +1093,7 @@ let of_definition ~plain ~is_view ~holds_function ~stores_function (definition :
   let body =
     match definition with
     | Function { body = Some body; _ } -> Some (body, true)
-    | Test body | Law_proof body -> Some (body, false)
+    | Test body | Law_proof { body; _ } -> Some (body, false)
     | Function { body = None; _ } | Type _ | Trait _ | Constant _ | Empty -> None
   in
   Option.map

@@ -3119,6 +3119,19 @@ proof Monoid.associative for Int64 {
 }
 ```
 
+The body is checked as the law's own body is, so it can name the law's
+parameters, with `Self` the type that the proof is for. A law that holds by
+induction is proven by a theorem that calls itself, which the proof calls
+with the law's values:
+
+```truss
+proof Ordered.transitive for Path {
+  compare_is_transitive(first, second: second, third: third, from: 0)
+}
+```
+
+The law's parameters are read-only.
+
 ### Writing specifications
 
 In specifications, `&&`, `||`, `==>`, and `if` are read from left to right,
