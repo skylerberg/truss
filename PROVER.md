@@ -1502,9 +1502,6 @@ test the prover itself:
   names, they are the facts that make the solver run out of steps. A
   pure callee's contract and definition are stated once for every argument
   either way.
-- **Proof states in the language server.** `Prover.states` gives each
-  obligation's state at its position, proven or not with the diagnostic
-  that says why; the language server, `truss lsp`, is not built yet.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.

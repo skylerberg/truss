@@ -338,6 +338,15 @@ let clean =
   command "clean" ~doc:"Stop the background process and delete the store, which costs only time."
     Term.(const (fun () -> Outcome.Exit 0) $ const ())
 
+(* The client runs the language server itself, since it reads standard
+   input for as long as the editor is open; this is its help. *)
+let lsp =
+  command "lsp"
+    ~doc:
+      "Run the language server on standard input and output, for an editor: each open file's \
+       diagnostics, with its proofs', and the state of each of its obligations."
+    Term.(const (fun () -> Outcome.Exit 2) $ const ())
+
 let version =
   Printf.sprintf "stage0 (Truss %s, code generation %d, Unicode %s)" Manifest.truss_version
     Lir.version Unicode.version
@@ -374,6 +383,7 @@ let truss =
       status;
       stop;
       clean;
+      lsp;
     ]
 
 (* Evaluating a command line *)
@@ -384,10 +394,13 @@ let evaluate arguments =
   let help = Format.formatter_of_buffer buffer_out
   and err = Format.formatter_of_buffer buffer_err in
   let outcome =
-    match Cmd.eval_value ~help ~err ~argv:(Array.of_list ("truss" :: arguments)) truss with
-    | Ok (`Ok outcome) -> outcome
-    | Ok (`Version | `Help) -> Outcome.Exit 0
-    | Error (`Parse | `Term | `Exn) -> Outcome.Exit 2
+    match arguments with
+    | "__check-buffers" :: rest -> exit_with (fun () -> Lsp_command.check_buffers rest)
+    | _ -> (
+        match Cmd.eval_value ~help ~err ~argv:(Array.of_list ("truss" :: arguments)) truss with
+        | Ok (`Ok outcome) -> outcome
+        | Ok (`Version | `Help) -> Outcome.Exit 0
+        | Error (`Parse | `Term | `Exn) -> Outcome.Exit 2)
   in
   Format.pp_print_flush help ();
   Format.pp_print_flush err ();
@@ -501,6 +514,21 @@ let directory_of arguments =
   | Some directory -> directory
   | None -> Sys.getcwd ()
 
+(* [truss lsp]: the language server, in the client's process, which checks
+   the open files where every other command runs. *)
+let language_server ~no_server =
+  let check ~root encoding buffers =
+    let request =
+      { (request (Lsp_command.check_arguments ~root encoding buffers)) with directory = root }
+    in
+    let response =
+      if no_server then Ok (handle ~progress:ignore request)
+      else Database.call ~key:(Database.server_key root) ~progress:ignore request
+    in
+    match response with Ok { output; outcome = Exit 0 } -> Some output | Ok _ | Error _ -> None
+  in
+  Lsp_command.serve ~input:stdin ~output:stdout ~check
+
 (* Runs a command line as the client: the command in its own process, or
    in the background process. *)
 let client argv =
@@ -510,6 +538,7 @@ let client argv =
   let local () = finish (Database.recovering (fun () -> evaluate arguments)) in
   match command_of arguments with
   | Some "clean" -> clean_store ()
+  | Some "lsp" -> language_server ~no_server
   | None | Some "new" -> local ()
   | _ when no_server -> local ()
   | Some ("status" | "stop") -> (
