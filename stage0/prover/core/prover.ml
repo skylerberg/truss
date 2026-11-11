@@ -263,8 +263,9 @@ let within database (key : Names.key) (span : span) =
    definition says what the operation is, so the second query means what
    the first does, and its answer is as sound. *)
 (* An obligation's answer: the solver's, or what running the code that
-   decides it gave, or that it ran past its time limit. *)
-type answer = Solved of Solver.answer | Ran_false | Ran_too_long
+   decides it gave, or that it ran past its time limit, or none yet, while
+   what it asks is untold. *)
+type answer = Solved of Solver.answer | Ran_false | Ran_too_long | Waiting_answer
 type evaluated = Holds | Fails | Too_long
 
 let bitwise_operations =
@@ -393,13 +394,14 @@ type variant = Made | Exact | Alone | Alone_exact
    outcome is worked out from what it is told. *)
 type teller = {
   solve :
-    index:int ->
-    choice:(string * (Z.t * Z.t)) list ->
-    variant:variant ->
-    with_locals:bool ->
-    Solver.answer option;
+    index:int -> choice:(string * (Z.t * Z.t)) list -> variant:variant -> with_locals:bool -> said;
   template : Translate.evaluation -> evaluated option;
 }
+
+(* What the solver said of one query: its answer; nothing yet, so a search
+   that would ask more after it waits instead; or that the query does not
+   exist. *)
+and said = Said of Solver.answer | Untold | No_query
 
 (* What running code gives of the calls a query mentions, as facts, which
    are only as true as the compiled code, which the prover trusts. *)
@@ -472,47 +474,61 @@ let answers (teller : teller) (obligations : Translate.obligation list) =
     | Some Fails -> Ran_false
     | Some Too_long -> Ran_too_long
     | None -> (
+        (* Each question is asked only once what it depends on is told:
+           an answer still untold stops the search, which goes on when it
+           is, rather than asking what the answer may make unneeded. *)
         let ask variant ~with_locals = teller.solve ~index ~choice ~variant ~with_locals in
         let asked made exact =
           match ask made ~with_locals:false with
-          | Some Solver.Proven -> Solver.Proven
-          | Some first -> (
-              match ask exact ~with_locals:false with Some answer -> answer | None -> first)
-          | None -> Solver.Out_of_steps
+          | Said Solver.Proven -> Some Solver.Proven
+          | Said first -> (
+              match ask exact ~with_locals:false with
+              | Said answer -> Some answer
+              | Untold -> None
+              | No_query -> Some first)
+          | Untold -> None
+          | No_query -> Some Solver.Out_of_steps
         in
         match (asked Made Exact, obligation.contracts_alone) with
-        | Solver.Out_of_steps, Some _ -> (
+        | None, _ -> Waiting_answer
+        | Some Solver.Out_of_steps, Some _ -> (
             (* Without its callees' definitions, a query is about their
                contracts alone, which can be enough where unfolding is too
                much for the solver. *)
             match asked Alone Alone_exact with
-            | Solver.Proven -> Solved Proven
-            | _ -> Solved Out_of_steps)
-        | Solver.Counterexample _, _ when obligation.locals <> [] -> (
+            | None -> Waiting_answer
+            | Some Solver.Proven -> Solved Proven
+            | Some _ -> Solved Out_of_steps)
+        | Some (Solver.Counterexample _), _ when obligation.locals <> [] -> (
             (* Where a counterexample is, the values of the locals there too,
                asked for only now, so that a query that proves keeps its
                key. *)
             match ask Made ~with_locals:true with
-            | Some (Solver.Counterexample _ as answer) -> Solved answer
-            | _ -> Solved (asked Made Exact))
-        | answer, _ -> Solved answer)
+            | Said (Solver.Counterexample _ as answer) -> Solved answer
+            | Untold -> Waiting_answer
+            | Said _ | No_query -> (
+                match asked Made Exact with Some answer -> Solved answer | None -> Waiting_answer))
+        | Some answer, _ -> Solved answer)
   in
   let indexed = List.mapi (fun index obligation -> (index, obligation)) obligations in
   let bounded =
     List.filter (fun (_, (obligation : Translate.obligation)) -> obligation.constants <> []) indexed
   in
   let all_choices = choices obligations in
+  (* The first choice that proves every bound, tried in order: one whose
+     answers are untold stops the search there, as a waiting answer does. *)
   let chosen =
-    match
-      List.find_opt
-        (fun choice ->
-          List.for_all
-            (fun (index, obligation) -> solve index obligation choice = Solved Proven)
-            bounded)
-        all_choices
-    with
-    | Some choice -> choice
-    | None -> List.hd all_choices
+    let rec first = function
+      | [] -> List.hd all_choices
+      | choice :: rest ->
+          let answers =
+            List.map (fun (index, obligation) -> solve index obligation choice) bounded
+          in
+          if List.for_all (fun answer -> answer = Solved Proven) answers then choice
+          else if List.mem Waiting_answer answers then choice
+          else first rest
+    in
+    first all_choices
   in
   List.map (fun (index, obligation) -> (obligation, solve index obligation chosen)) indexed
 
@@ -556,7 +572,7 @@ let definition_states teller database (key : Names.key) =
               shows = obligation.message;
               failure =
                 (match answer with
-                | Solved Proven -> None
+                | Solved Proven | Waiting_answer -> None
                 | Ran_false -> failed " Running it on this template's text gives `false`."
                 | Ran_too_long ->
                     failed
@@ -672,13 +688,15 @@ let outcome =
           {
             solve =
               (fun ~index ~choice ~variant ~with_locals ->
-                Option.map
-                  (fun request ->
-                    tell (Solve request) Solver.Out_of_steps (function
-                      | Solver_said canonical -> Solver.read request canonical
-                      | _ -> Solver.Out_of_steps))
-                  (Query.demand database question_request
-                     { definition = key; index; choice; variant; with_locals }));
+                match
+                  Query.demand database question_request
+                    { definition = key; index; choice; variant; with_locals }
+                with
+                | None -> No_query
+                | Some request ->
+                    tell (Solve request) Untold (function
+                      | Solver_said canonical -> Said (Solver.read request canonical)
+                      | _ -> Untold));
             template =
               (fun evaluation ->
                 tell (Run_template evaluation) None (function Template_ran ran -> ran | _ -> None));
