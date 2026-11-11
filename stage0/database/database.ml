@@ -128,6 +128,7 @@ let current () =
   match !state with
   | Some state -> state
   | None ->
+      Engine.seal ();
       let store = Store.open_ (Store.default_directory ()) in
       let identity = Identity.compute (Store.directory store) in
       let fresh =

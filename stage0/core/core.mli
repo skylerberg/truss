@@ -462,7 +462,11 @@ type definition =
   | Trait of law list
   | Constant of expression
   | Test of block
-  | Law_proof of block
+  | Law_proof of { parameters : parameter list; body : block }
+      (** The proof of a law for a type. [parameters] are the law's, in the law's order, with [Self]
+          and the trait's parameters replaced by the proof's type and trait arguments. The local of
+          each is [Synthetic] with the parameter's position, and the body can name them. The locals
+          that desugaring makes are numbered after them. *)
   | Empty  (** An [impl] or a capability. Its methods are separate definitions. *)
 
 type t = {

@@ -113,7 +113,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
         (error state Not_callable callee.span
            (Printf.sprintf "`%s` is not a function or a type, so it cannot be called." name.text))
   | Unknown report -> arguments_alone state env arguments (T.Error report)
-  | Local _ | Value_parameter _
+  | Local _ | Law_parameter _ | Value_parameter _
   | Definition (Constant, _)
   | Field _ | Result_value | Yielded | Finished ->
       function_value_call state env value callee arguments

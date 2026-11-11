@@ -32,3 +32,28 @@ test "a finished command's output is text when it is UTF-8" {
   let silent = processes::Output(status: processes::ExitStatus.Exited(code: 0), output: [], error_output: [33])
   assert silent.text() is Ok(text) && text.is_empty()
 }
+
+fn words_of(command: processes::Command) -> String {
+  var text = command.program().to_string()
+  let arguments = command.argument_list()
+  for index in 0..arguments.length() {
+    mut text.push("|")
+    mut text.push(arguments[index].slice())
+  }
+  text
+}
+
+test "a command written as a template splits its text into words and keeps each value whole" {
+  let message = "fix the build"
+  let command = processes::Command"git commit  -m ${message.slice()} --author=${"me"}"
+  assert words_of(command) == "git|commit|-m|fix the build|--author=me"
+  let empty = ""
+  let listing = processes::Command" ls ${empty.slice()} "
+  assert words_of(listing) == "ls|"
+  let plain = processes::Command"true"
+  assert words_of(plain) == "true"
+  let removal = processes::Command"rm -f ${Path.new("/tmp/a file")}"
+  assert words_of(removal) == "rm|-f|/tmp/a file"
+  let lines = processes::Command"sort\t-n\n-r"
+  assert words_of(lines) == "sort|-n|-r"
+}

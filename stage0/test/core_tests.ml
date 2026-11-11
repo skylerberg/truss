@@ -1011,6 +1011,36 @@ let () =
       | _ ->
           fail "expected the derived method with no substitution and the inherited method with one")
 
+(* A law's proof *)
+
+let pair_ordering =
+  "type Pair(first: UInt8, second: UInt8)\n\
+  \  derives Equal\n\n\
+   theorem only_equal(first: Pair, second: Pair)\n\
+  \  ensures (first.compare(second) == Ordering.Equal) == (first == second)\n\
+   {\n\
+   }\n\n\
+   impl Ordered for Pair {\n\
+  \  fn compare(self, other: Pair) -> Ordering {\n\
+  \    let order = self.first.compare(other.first)\n\
+  \    if order != Ordering.Equal { order } else { self.second.compare(other.second) }\n\
+  \  }\n\
+   }\n\n"
+
+let () =
+  test "a law's proof has the law's parameters, with the proof's type for Self" (fun () ->
+      let found =
+        printed_definition
+          (pair_ordering
+         ^ "proof Ordered.agrees_with_equal for Pair {\n  only_equal(first, second: second)\n}\n")
+          "proof Ordered.agrees_with_equal for Pair"
+      in
+      let expected =
+        "proof(first: Pair, second: Pair) { app::main::only_equal(place synthetic#0, place \
+         synthetic#1) }"
+      in
+      if found <> expected then fail "found:\n%s" found)
+
 (* [Infer.specification] *)
 
 let () =

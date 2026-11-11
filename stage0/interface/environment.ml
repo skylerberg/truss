@@ -105,6 +105,7 @@ type container =
       trait_generics : T.generic list;
       requires : T.trait_reference list;
       associated_types : T.associated_type list;
+      laws : (string * (string * T.ty) list) list;
     }
   | Capability_parts
   | Impl_parts of {
@@ -144,7 +145,24 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
             | Law _ | Trait_member_error -> None)
           members
       in
-      (Trait_parts { trait_generics; requires; associated_types }, context)
+      let laws =
+        List.filter_map
+          (fun (line : trait_member line) ->
+            match line.kind with
+            | Law law ->
+                Some
+                  ( law.name.text,
+                    List.filter_map
+                      (fun (parameter : parameter) ->
+                        match parameter.kind with
+                        | Named_parameter { name; type_; _ } ->
+                            Some (name.text, Lower.type_ context type_)
+                        | Self_parameter _ | Parameter_error -> None)
+                      law.parameters )
+            | Associated_type _ | Trait_member_error -> None)
+          members
+      in
+      (Trait_parts { trait_generics; requires; associated_types; laws }, context)
   | Impl { trait_; type_ = head; uses; members } -> (
       let impl_generics, for_type = head_type context path head in
       match Lower.trait_reference ~capability:true context trait_ with
@@ -370,12 +388,13 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         | Trait _ | Capability _ | Impl _ -> (
             match lower_container context path definition with
             | Broken report, context -> (Error_interface report, context)
-            | Trait_parts { trait_generics; requires; associated_types }, context ->
+            | Trait_parts { trait_generics; requires; associated_types; laws }, context ->
                 ( Trait_interface
                     {
                       trait_generics;
                       requires;
                       associated_types;
+                      laws;
                       methods = trait_methods ~is_capability:false;
                       is_capability = false;
                       broken_methods = broken_methods ();
@@ -387,6 +406,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
                       trait_generics = [];
                       requires = [];
                       associated_types = [];
+                      laws = [];
                       methods = trait_methods ~is_capability:true;
                       is_capability = true;
                       broken_methods = broken_methods ();

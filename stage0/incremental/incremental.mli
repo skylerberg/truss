@@ -60,6 +60,12 @@ val query :
     never held one, for which the store keeps what such a result read, by name. [equal] decides
     whether a result came out the same, and defaults to structural equality. *)
 
+val seal : unit -> unit
+(** After this, declaring an input or a query raises [Invalid_argument]. The database calls it when
+    it first opens its store: a state opened before a query is declared leaves out every result that
+    read one, so a query declared later, as one inside a lazy value is, would have its readers
+    computed again in every process. *)
+
 val phases : int
 (** Phases run from 1 to [phases - 1]. Inputs are in phase 0. *)
 

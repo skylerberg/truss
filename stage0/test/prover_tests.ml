@@ -2997,6 +2997,64 @@ let () =
         \  made\n\
          }\n")
 
+(* Definitions under a quantifier *)
+
+let () =
+  test "a derived ordering of a one-field record is its field's, for every value" (fun () ->
+      proven
+        "type Day(count: Int32)\n\
+        \  derives Equal, Ordered\n\n\
+         theorem days_order_as_their_counts()\n\
+        \  ensures forall first: Day => forall second: Day =>\n\
+        \    (first < second) == (first.count < second.count)\n\
+         {\n\
+         }\n");
+  test "a derived ordering compares fields in order, for every value" (fun () ->
+      proven
+        "type Pair(first: Int64, second: Int64)\n\
+        \  derives Equal, Ordered\n\n\
+         theorem pairs_order_by_first_then_second()\n\
+        \  ensures forall a: Pair => forall b: Pair =>\n\
+        \    (a < b) == (a.first < b.first || (a.first == b.first && a.second < b.second))\n\
+         {\n\
+         }\n")
+
+(* Counts of bits *)
+
+let () =
+  test "zero has no ones" (fun () ->
+      proven
+        "theorem t(word: UInt64)\n  requires word == 0\n  ensures word.count_ones() == 0\n{\n}\n");
+  test "the ones of a value fit below its bit length" (fun () ->
+      proven
+        "theorem t(word: UInt64, bits: USize)\n\
+        \  requires bits < 64\n\
+        \  requires word < power(2, bits)\n\
+        \  ensures word.count_ones() <= bits\n\
+         {\n\
+         }\n");
+  test "the lowest one is below the bit length" (fun () ->
+      proven
+        "theorem t(word: UInt64, bits: USize)\n\
+        \  requires bits <= 64\n\
+        \  requires word != 0\n\
+        \  requires bits == 64 || word < power(2, bits)\n\
+        \  ensures word.trailing_zeros() < bits\n\
+         {\n\
+         }\n");
+  test "every one below a power of two is counted" (fun () ->
+      proven
+        "theorem t(word: UInt64, bits: USize)\n\
+        \  requires bits <= 64\n\
+        \  requires bits > 0\n\
+        \  requires word + 1 == power(2, bits)\n\
+        \  ensures word.count_ones() == bits\n\
+         {\n\
+         }\n");
+  test "a value may have ones" (fun () ->
+      not_proven "theorem t(word: UInt64)\n  ensures word.count_ones() == 0\n{\n}\n"
+        "prover.ensures")
+
 (* Concurrent code *)
 
 let early_return ensures =

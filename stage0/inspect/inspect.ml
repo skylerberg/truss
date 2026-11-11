@@ -53,7 +53,8 @@ let holes (definition : definition) (resolved : Resolve.resolved) (checked : Che
                       match value with
                       | Value_local binding -> local_type checked binding
                       | Value_generic _ -> "USize"
-                      | Value_field _ -> "a field" ))
+                      | Value_field _ -> "a field"
+                      | Value_law_parameter _ -> "a parameter of the law" ))
                   scope;
             })
           (expression_span definition id))
@@ -77,6 +78,7 @@ let describe_target (target : Resolve.target) =
   match target with
   | Definition (_, path) -> (Printf.sprintf "the definition %s" (Path.show path), Some path)
   | Local _ -> ("a local variable or parameter", None)
+  | Law_parameter _ -> ("a parameter of the law that this proves", None)
   | Binding -> ("a name bound here", None)
   | Type_parameter _ | Capability_parameter _ | Value_parameter _ -> ("a generic parameter", None)
   | Variant (path, name) -> (Printf.sprintf "the variant %s of %s" name (Path.show path), None)

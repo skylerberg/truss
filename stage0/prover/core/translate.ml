@@ -1020,7 +1020,7 @@ let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
                  | Named { path; _ }, Some head -> Path.equal path head
                  | _ -> false -> (
               match source_at_key database (Names.key_of declaration) with
-              | Some ({ core = { definition = Law_proof body; _ }; _ } as source) ->
+              | Some ({ core = { definition = Law_proof { body; _ }; _ }; _ } as source) ->
                   Some (proven.law, (source, body))
               | _ -> None)
           | _ -> None)
@@ -2847,21 +2847,53 @@ and integer_intrinsic context frame ~node (operation : Intrinsic.operation) type
       assume context frame L.(in_range target value ==> equal known value);
       known
   | (Leading_zeros | Trailing_zeros | Count_ones), Some (low, _), ty :: _, [ value ] -> (
-      (* A count of bits is at most the width; and a nonzero unsigned value
-         lies between the powers of two that its leading zeros give. *)
+      (* Each count of bits is a function of the value, at most the width,
+         and for an unsigned value the three are related: a nonzero value
+         lies between the powers of two its leading zeros give, has no
+         more ones than the bits below its highest one, all of them where
+         it is one less than a power of two, and its lowest one below its
+         highest; zero has no ones and is all zeros. *)
       match width ty with
       | Some bits ->
+          let count name =
+            let symbol = Printf.sprintf "bits.%s.%d" name bits in
+            declare context (L.Function (symbol, [ L.Int ], L.Int));
+            L.Apply (symbol, [ value ])
+          in
+          let leading = count "leading_zeros"
+          and trailing = count "trailing_zeros"
+          and ones = count "count_ones" in
+          let term =
+            match operation with Leading_zeros -> leading | Trailing_zeros -> trailing | _ -> ones
+          in
           assume context frame
-            L.(Apply ("<=", [ int 0; known ]) &&& Apply ("<=", [ known; int bits ]));
-          (if operation = Leading_zeros && Z.equal low Z.zero && not (L.mentions frame.bound value)
-           then
+            L.(Apply ("<=", [ int 0; term ]) &&& Apply ("<=", [ term; int bits ]));
+          (if Z.equal low Z.zero && not (L.mentions frame.bound value) then
              let power exponent = power_of context frame (L.int 2) exponent in
-             assume context frame
-               L.(
-                 not_ (equal value (int 0))
-                 ==> (Apply ("<=", [ power (Apply ("-", [ int (bits - 1); known ])); value ])
-                     &&& Apply ("<", [ value; power (Apply ("-", [ int bits; known ])) ]))));
-          known
+             let width = L.int bits in
+             let nonzero = L.not_ (L.equal value (L.int 0)) in
+             let below_highest = L.Apply ("-", [ width; leading ]) in
+             List.iter (assume context frame)
+               L.
+                 [
+                   Apply ("<=", [ int 0; leading ])
+                   &&& Apply ("<=", [ leading; width ])
+                   &&& Apply ("<=", [ int 0; trailing ])
+                   &&& Apply ("<=", [ trailing; width ])
+                   &&& Apply ("<=", [ int 0; ones ])
+                   &&& Apply ("<=", [ ones; width ]);
+                   nonzero
+                   ==> (Apply ("<=", [ power (Apply ("-", [ int (bits - 1); leading ])); value ])
+                       &&& Apply ("<", [ value; power below_highest ]));
+                   equal (equal ones (int 0)) (equal value (int 0));
+                   nonzero ==> Apply ("<=", [ ones; below_highest ]);
+                   nonzero
+                   &&& equal (Apply ("+", [ value; int 1 ])) (power below_highest)
+                   ==> equal ones below_highest;
+                   nonzero ==> Apply ("<=", [ Apply ("+", [ trailing; leading ]); int (bits - 1) ]);
+                   equal value (int 0) ==> (equal trailing width &&& equal leading width);
+                 ]);
+          term
       | None -> known)
   | _ -> known
 
@@ -5180,6 +5212,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
   let own_bound = bindings own in
   let own_arguments = List.filter_map snd own_bound in
   let result_type = type_of context frame node in
+  let applied_as = ref None in
   let result =
     if
       contract.pure && contract.result_kind <> `Yields
@@ -5207,6 +5240,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                (T.substitute (substitution_of own) self.type_))
             ~model:result_type symbol
       | _ -> ());
+      applied_as := Some (symbol, sorts);
       let term = L.Apply (symbol, own_arguments) in
       assume context after (in_range result_type term);
       note_known_call context call_ path term own_arguments;
@@ -5264,6 +5298,29 @@ and contract_call context frame (node : expression) (call_ : call) path contract
            | None -> ()
          with Unsupported _ | Foreign_unsupported _ -> ());
         List.iter (fun fact -> Hashtbl.replace context.unfolded fact ()) (facts_since context mark)
+    | Some (part, body) when part.requires = [] -> (
+        (* Called on a quantifier's bound values, the definition is stated
+           once for every argument, so that it holds for each of them. *)
+        match !applied_as with
+        | Some (symbol, sorts) ->
+            once context ("definition of " ^ symbol) (fun () ->
+                let parameters =
+                  List.mapi (fun index sort -> (Printf.sprintf "defined.%d" index, sort)) sorts
+                in
+                let inputs = List.map (fun (name, _) -> L.Symbol name) parameters in
+                let outside = { after with bound = []; binders = []; condition = L.Boolean true } in
+                match
+                  body_over context outside parameters body (fun inside ->
+                      part_frame inside part
+                        ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
+                        ~substitution:(substitution_of part))
+                with
+                | Some defined ->
+                    context.facts <-
+                      L.Forall (parameters, L.equal (L.Apply (symbol, inputs)) defined)
+                      :: context.facts
+                | None -> ())
+        | None -> ())
     | _ -> ());
     (* The [ensures], after, where the [requires] held: [mut] parameters
        have their new values, and [old] the ones they had. *)

@@ -1,5 +1,6 @@
 use standard::core
 use standard::list
+use standard::list::slice
 
 public fn Array[Element, count: USize].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
@@ -159,7 +160,7 @@ public fn Array[Element: Ordered, count: USize].is_sorted(self) -> Bool
 }
 
 public fn Array[Element: Ordered, count: USize].binary_search(self, target: Element) -> Option[USize]
-  requires self.is_sorted()
+  requires forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
   ensures match result {
     Some(index) => index < self.length() && self[index] == target
     None => !self.contains(target)
@@ -236,9 +237,9 @@ public fn Array[Element: Copyable, count: USize].filter(self, keep: (fn(Element)
 public fn Array[Element: Ordered + Copyable, count: USize].sorted(self) -> List[Element]
   ensures result.length() == self.length()
   ensures result.is_sorted()
-  cost time O(self.length() * log(self.length()))
+  cost time O(self.length() * time(Element.copy) + self.length() * log(self.length()) * time(Element.compare))
 {
-  todo
+  self.slice().sorted()
 }
 
 public fn Array[Element: Copyable, count: USize].repeated(self, times: USize) -> List[Element]
@@ -453,9 +454,13 @@ public fn Array[Element, count: USize].update_each[capability Granted](
 public fn Array[Element: Ordered, count: USize].sort(mut self)
   ensures self.length() == old(self.length())
   ensures self.is_sorted()
-  cost time O(self.length() * log(self.length()))
+  ensures forall i in 1..self.length() => self.model()[i - 1] <= self.model()[i]
+  cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
-  todo
+  mut self[..].sort()
+  proof {
+    slice::sorted_from_model(self.slice(), bound: self.length())
+  }
 }
 
 public fn Array[Element, count: USize].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
@@ -467,7 +472,7 @@ public fn Array[Element, count: USize].sort_by(mut self, compare: (fn(Element, E
 
 public fn Array[Element, count: USize].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
   ensures self.length() == old(self.length())
-  cost time O(self.length() * log(self.length()) * time(key))
+  cost time finite
 {
-  todo
+  mut self[..].sort_by_key(key)
 }

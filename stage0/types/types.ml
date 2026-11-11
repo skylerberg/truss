@@ -492,6 +492,7 @@ type trait_interface = {
   requires : trait_reference list;
   associated_types : associated_type list;
   methods : trait_method list;
+  laws : (string * (string * ty) list) list;
   is_capability : bool;
   broken_methods : (string * Diagnostic.reported) list;
 }

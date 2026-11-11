@@ -619,4 +619,12 @@ let () =
       if not (List.mem "../../stage0/infer/dune" (dune_files root)) then
         fail "found no stage's dune file")
 
+let () =
+  test "a query cannot be declared once the database has opened its store" (fun () ->
+      fresh_store ();
+      ignore (session (package ()));
+      match Query.query ~name:"declared_late" ~phase:Syntax ~show:Fun.id (fun _ key -> key) with
+      | _ -> fail "it was declared"
+      | exception Invalid_argument _ -> ())
+
 let () = finish ()

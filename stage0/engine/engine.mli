@@ -5,6 +5,10 @@
 type t = Incremental.t
 (** One state: what differs from its bases, with the rest read from them. *)
 
+val seal : unit -> unit
+(** Rejects every input and query declared from now on. The database calls it before it opens a
+    state, since a state leaves out the results that read a query not declared yet. *)
+
 val create : ?log:bool -> ?bases:t list -> unit -> t
 (** An engine over frozen bases. *)
 

@@ -464,6 +464,11 @@ and facts_of database path =
     (Path.Map.find_opt path
        (Query.demand database (Lazy.force group_facts) (List.hd (Query.demand database group path))))
 
+(* Declared when the module is initialized, not when first read: a state
+   opened before a query is declared leaves out every result that read
+   it. *)
+let () = ignore (Lazy.force group_facts)
+
 (* The facts of a type definition. *)
 let facts = Query.query ~name:"type_facts" ~phase:Interfaces ~show:Path.show facts_of
 

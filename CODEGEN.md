@@ -168,7 +168,10 @@ since it does not wait for proofs:
   It panics with "requirement not met: requires ...". That is how an index
   past a `List`'s end is caught. A clause runs unless it uses the
   mathematical `Integer`, a quantifier, a conversion to or from one, or a
-  comparison of integers of two types.
+  comparison of integers of two types. In a clause that runs, `a ==> b`
+  holds where `a` does not, and `b` is evaluated only where `a` holds,
+  since `b` may be defined only there, as `items[top]` is in
+  `top < items.length() ==> items[top] >= 0`.
 - Integer `+`, `-`, and `*` panic with "arithmetic overflow", through
   `__builtin_*_overflow`, and so does negating the least value of a signed
   type. The `wrapping_` operations still wrap.

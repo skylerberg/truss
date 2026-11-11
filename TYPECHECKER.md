@@ -368,7 +368,7 @@ the change invalidates nothing beyond the definition:
 |---|---|---|
 | Function or method | Its *signature*: generic parameters and bounds, the receiver, parameter names, types, and modes, which parameters have defaults, the result or the `yields` or `lends` clause, `uses`, and whether it has a `time` clause | Its body, each default, and its `requires`, `ensures`, `decreases`, and `cost` clauses |
 | Type | Its *shape*: generic parameters, fields and variants with their types, which fields have defaults, `indirect` marks, `opaque`, and `derives` | Its invariants, its potential, and the defaults of its fields |
-| Trait | Its *interface*: parameters, required traits, associated types, and the signature of each method | Its laws |
+| Trait | Its *interface*: parameters, required traits, associated types, the signature of each method, and the parameters of each law | The `requires` and the body of each law |
 | `impl` | Its *interface*: generic parameters, the trait, the type, `uses`, and the signature of each method | Nothing |
 | A method written inside a trait, an `impl`, or a capability | Its signature, as for a function, interpreted with the `Self`, the associated types, and the generic parameters of the enclosing declaration | Its body, if it has one, and its clauses |
 | Constant | Its type, and its value where the checker needs the value | Its expression |
@@ -734,7 +734,10 @@ written inside it, and neither check depends on the other:
   use only the capabilities that the trait's methods declare. An `impl` of
   `Panic` is an error.
 - **A law's proof** names a law of its trait and a type that implements the
-  trait.
+  trait. Its body is checked with the law's parameters in scope, as read-only
+  locals. Their types are the law's, with `Self` and the trait's parameters
+  replaced by the proof's type and trait arguments. The core form of the proof
+  has those parameters, so that the prover binds them to the law's values.
 - **A method that overrides a provided method** must have exactly the provided
   method's signature. The provided method must be pure, have a `time` clause,
   and mutate none of its arguments, so that its body can serve as its
