@@ -37,6 +37,16 @@ let () =
         \  mut made.insert(7, value: 1)\n\
         \  made\n\
          }\n");
+  test "a password is hashed with the default cost and with a cost that meets its limits" (fun () ->
+      proven
+        "use standard::cryptography\n\n\
+         fn stored(password: Slice[UInt8], salt: Array[UInt8, 16]) -> Array[UInt8, 32] {\n\
+        \  cryptography::hash_password(password, salt: salt[..])\n\
+         }\n\n\
+         fn costly(password: Slice[UInt8], salt: Array[UInt8, 16]) -> Array[UInt8, 32] {\n\
+        \  let effort = cryptography::PasswordCost(memory_kibibytes: 65536, parallelism: 4)\n\
+        \  cryptography::hash_password(password, salt: salt[..], effort: effort)\n\
+         }\n");
   test "a map literal has its keys and its length" (fun () ->
       proven
         "fn literal() -> Bool\n\

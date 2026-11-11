@@ -1259,15 +1259,498 @@ public fn pbkdf2_hmac_sha256(
 
 public type PasswordCost(memory_kibibytes: UInt32 = 19456, iterations: UInt32 = 2, parallelism: UInt32 = 1)
 
+let blake2b_initial: Array[UInt64, 8] = [
+  0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1, 0x510e527fade682d1,
+  0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179,
+]
+
+let blake2b_schedule: Array[USize, 160] = [
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+  14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
+  11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
+  7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8,
+  9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13,
+  2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9,
+  12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11,
+  13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
+  6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
+  10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0,
+]
+
+internal fn blake2b_mix(
+  words: mut Array[UInt64, 16],
+  a: USize,
+  b: USize,
+  c: USize,
+  d: USize,
+  first: UInt64,
+  second: UInt64,
+)
+  requires a < 16 && b < 16 && c < 16 && d < 16
+  cost time O(1)
+{
+  words[a] = wrapping_add_64(wrapping_add_64(words[a], second: words[b]), second: first)
+  words[d] = rotate_right_64(words[d] ^ words[a], right: 32)
+  words[c] = wrapping_add_64(words[c], second: words[d])
+  words[b] = rotate_right_64(words[b] ^ words[c], right: 24)
+  words[a] = wrapping_add_64(wrapping_add_64(words[a], second: words[b]), second: second)
+  words[d] = rotate_right_64(words[d] ^ words[a], right: 16)
+  words[c] = wrapping_add_64(words[c], second: words[d])
+  words[b] = rotate_right_64(words[b] ^ words[c], right: 63)
+}
+
+internal fn blake2b_compress(state: mut Array[UInt64, 8], block: Array[UInt64, 16], byte_count: UInt64, last: Bool)
+  cost time O(1)
+{
+  var words: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let half: USize = 8
+  for index in 0..half {
+    words[index] = state[index]
+    words[index + 8] = blake2b_initial[index]
+  }
+  words[12] = words[12] ^ byte_count
+  if last {
+    words[14] = ~words[14]
+  }
+  let rounds: USize = 12
+  for round in 0..rounds {
+    let row = 16 * (round % 10)
+    blake2b_mix(mut words, a: 0, b: 4, c: 8, d: 12, first: block[blake2b_schedule[row] % 16], second: block[blake2b_schedule[row + 1] % 16])
+    blake2b_mix(mut words, a: 1, b: 5, c: 9, d: 13, first: block[blake2b_schedule[row + 2] % 16], second: block[blake2b_schedule[row + 3] % 16])
+    blake2b_mix(mut words, a: 2, b: 6, c: 10, d: 14, first: block[blake2b_schedule[row + 4] % 16], second: block[blake2b_schedule[row + 5] % 16])
+    blake2b_mix(mut words, a: 3, b: 7, c: 11, d: 15, first: block[blake2b_schedule[row + 6] % 16], second: block[blake2b_schedule[row + 7] % 16])
+    blake2b_mix(mut words, a: 0, b: 5, c: 10, d: 15, first: block[blake2b_schedule[row + 8] % 16], second: block[blake2b_schedule[row + 9] % 16])
+    blake2b_mix(mut words, a: 1, b: 6, c: 11, d: 12, first: block[blake2b_schedule[row + 10] % 16], second: block[blake2b_schedule[row + 11] % 16])
+    blake2b_mix(mut words, a: 2, b: 7, c: 8, d: 13, first: block[blake2b_schedule[row + 12] % 16], second: block[blake2b_schedule[row + 13] % 16])
+    blake2b_mix(mut words, a: 3, b: 4, c: 9, d: 14, first: block[blake2b_schedule[row + 14] % 16], second: block[blake2b_schedule[row + 15] % 16])
+  }
+  for index in 0..half {
+    state[index] = state[index] ^ words[index] ^ words[index + 8]
+  }
+}
+
+internal fn blake2b_block(input: Slice[UInt8], from: USize) -> Array[UInt64, 16]
+  requires from <= input.length()
+  cost time O(1)
+{
+  var block: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let available = input.length() - from
+  let bytes: USize = 128
+  for position in 0..bytes {
+    if position < available {
+      let byte: UInt64 = intrinsic::convert[UInt8, UInt64](input[from + position])
+      block[position / 8] = block[position / 8] | (byte << (8 * (position % 8)))
+    }
+  }
+  block
+}
+
+internal fn blake2b(input: Slice[UInt8], output_length: USize) -> List[UInt8]
+  requires 1 <= output_length && output_length <= 64
+  ensures result.length() == output_length
+  cost time finite
+{
+  var state = blake2b_initial
+  state[0] = state[0] ^ 0x01010000 ^ intrinsic::convert(output_length)
+  var offset: USize = 0
+  while input.length() - offset > 128
+    invariant offset <= input.length()
+    decreases input.length() - offset
+  {
+    let block = blake2b_block(input, from: offset)
+    offset += 128
+    blake2b_compress(mut state, block: block, byte_count: intrinsic::convert(offset), last: false)
+  }
+  blake2b_compress(
+    mut state,
+    block: blake2b_block(input, from: offset),
+    byte_count: intrinsic::convert(input.length()),
+    last: true,
+  )
+  var output: List[UInt8] = []
+  for index in 0..output_length
+    invariant output.length() == yielded.length()
+  {
+    mut output.push(intrinsic::convert((state[index / 8] >> (8 * (index % 8))) & 255))
+  }
+  output
+}
+
+internal fn push_little_endian_32(output: mut List[UInt8], value: UInt32)
+  cost time finite
+{
+  let bytes: USize = 4
+  for index in 0..bytes {
+    mut output.push(intrinsic::convert((value >> (8 * index)) & 255))
+  }
+}
+
+internal fn push_length_32(output: mut List[UInt8], length: USize)
+  cost time finite
+{
+  if length > 4294967295 {
+    intrinsic::crash("a password cannot hold that many bytes".slice())
+  }
+  push_little_endian_32(mut output, value: intrinsic::convert(length))
+}
+
+internal fn argon2_long_hash(input: Slice[UInt8], length: USize) -> List[UInt8]
+  requires 1 <= length && length <= 4294967295
+  cost time finite
+{
+  var prefixed: List[UInt8] = []
+  push_length_32(mut prefixed, length: length)
+  for byte in input {
+    mut prefixed.push(byte)
+  }
+  if length <= 64 {
+    return blake2b(prefixed.slice(), output_length: length)
+  }
+  var output: List[UInt8] = []
+  var chained = blake2b(prefixed.slice(), output_length: 64)
+  var left = length
+  while left > 64
+    invariant chained.length() == 64
+    invariant left > 32
+    decreases left
+  {
+    let half: USize = 32
+    for index in 0..half {
+      mut output.push(chained[index])
+    }
+    left -= 32
+    if left > 64 {
+      chained = blake2b(chained.slice(), output_length: 64)
+    }
+  }
+  let last = blake2b(chained.slice(), output_length: left)
+  for byte in last {
+    mut output.push(byte)
+  }
+  output
+}
+
+let argon2_zero_block: Array[UInt64, 128] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]
+
+internal fn argon2_block_from_bytes(bytes: Slice[UInt8]) -> Array[UInt64, 128]
+  cost time O(1)
+{
+  var block = argon2_zero_block
+  let count: USize = 1024
+  for position in 0..count {
+    if position < bytes.length() {
+      let byte: UInt64 = intrinsic::convert[UInt8, UInt64](bytes[position])
+      block[position / 8] = block[position / 8] | (byte << (8 * (position % 8)))
+    }
+  }
+  block
+}
+
+internal fn argon2_block_to_bytes(block: Array[UInt64, 128]) -> List[UInt8]
+  ensures result.length() == 1024
+  cost time finite
+{
+  var bytes: List[UInt8] = []
+  let count: USize = 1024
+  for position in 0..count
+    invariant bytes.length() == yielded.length()
+  {
+    mut bytes.push(intrinsic::convert((block[position / 8] >> (8 * (position % 8))) & 255))
+  }
+  bytes
+}
+
+internal fn argon2_multiply_add(first: UInt64, second: UInt64) -> UInt64
+  cost time O(1)
+{
+  let product = intrinsic::wrapping_multiply(first & 4294967295, right: second & 4294967295)
+  wrapping_add_64(wrapping_add_64(first, second: second), second: intrinsic::wrapping_multiply(product, right: 2))
+}
+
+internal fn argon2_mix(words: mut Array[UInt64, 16], a: USize, b: USize, c: USize, d: USize)
+  requires a < 16 && b < 16 && c < 16 && d < 16
+  cost time O(1)
+{
+  words[a] = argon2_multiply_add(words[a], second: words[b])
+  words[d] = rotate_right_64(words[d] ^ words[a], right: 32)
+  words[c] = argon2_multiply_add(words[c], second: words[d])
+  words[b] = rotate_right_64(words[b] ^ words[c], right: 24)
+  words[a] = argon2_multiply_add(words[a], second: words[b])
+  words[d] = rotate_right_64(words[d] ^ words[a], right: 16)
+  words[c] = argon2_multiply_add(words[c], second: words[d])
+  words[b] = rotate_right_64(words[b] ^ words[c], right: 63)
+}
+
+internal fn argon2_permute(words: Array[UInt64, 16]) -> Array[UInt64, 16]
+  cost time O(1)
+{
+  var permuted = words
+  argon2_mix(mut permuted, a: 0, b: 4, c: 8, d: 12)
+  argon2_mix(mut permuted, a: 1, b: 5, c: 9, d: 13)
+  argon2_mix(mut permuted, a: 2, b: 6, c: 10, d: 14)
+  argon2_mix(mut permuted, a: 3, b: 7, c: 11, d: 15)
+  argon2_mix(mut permuted, a: 0, b: 5, c: 10, d: 15)
+  argon2_mix(mut permuted, a: 1, b: 6, c: 11, d: 12)
+  argon2_mix(mut permuted, a: 2, b: 7, c: 8, d: 13)
+  argon2_mix(mut permuted, a: 3, b: 4, c: 9, d: 14)
+  permuted
+}
+
+internal fn argon2_compress(previous: Array[UInt64, 128], reference: Array[UInt64, 128]) -> Array[UInt64, 128]
+  cost time O(1)
+{
+  let combined = argon2_xor(previous, second: reference)
+  var mixed = combined
+  let groups: USize = 8
+  let width: USize = 16
+  for row in 0..groups {
+    var words: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for position in 0..width {
+      words[position] = mixed[16 * row + position]
+    }
+    let permuted = argon2_permute(words)
+    for position in 0..width {
+      mixed[16 * row + position] = permuted[position]
+    }
+  }
+  for column in 0..groups {
+    var words: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for position in 0..width {
+      words[position] = mixed[2 * column + 16 * (position / 2) + position % 2]
+    }
+    let permuted = argon2_permute(words)
+    for position in 0..width {
+      mixed[2 * column + 16 * (position / 2) + position % 2] = permuted[position]
+    }
+  }
+  argon2_xor(mixed, second: combined)
+}
+
+internal type Argon2Shape(lanes: USize, lane_length: USize, segment_length: USize, passes: USize)
+
+internal fn Argon2Shape.block_index(self, block_count: USize, lane: USize, column: USize) -> USize
+  requires block_count > 0
+  ensures result < block_count
+  cost time O(1)
+{
+  intrinsic::wrapping_add(intrinsic::wrapping_multiply(lane, right: self.lane_length), right: column) % block_count
+}
+
+internal fn argon2_reference_index(
+  shape: Argon2Shape,
+  block_count: USize,
+  pass: USize,
+  slice: USize,
+  lane: USize,
+  index: USize,
+  pseudo_random: UInt64,
+) -> USize
+  requires block_count > 0
+  requires shape.lanes > 0 && shape.lane_length > 0
+  ensures result < block_count
+  cost time O(1)
+{
+  let lanes: UInt64 = intrinsic::convert(shape.lanes)
+  let reference_lane: USize = if pass == 0 && slice == 0 {
+    lane
+  } else {
+    intrinsic::convert((pseudo_random >> 32) % lanes)
+  }
+  let earlier_segments = if pass == 0 {
+    intrinsic::wrapping_multiply(slice, right: shape.segment_length)
+  } else {
+    intrinsic::wrapping_subtract(shape.lane_length, right: shape.segment_length)
+  }
+  let area: USize = if reference_lane == lane {
+    intrinsic::wrapping_subtract(intrinsic::wrapping_add(earlier_segments, right: index), right: 1)
+  } else if index == 0 {
+    intrinsic::wrapping_subtract(earlier_segments, right: 1)
+  } else {
+    earlier_segments
+  }
+  let area_64: UInt64 = intrinsic::convert(area)
+  let low = pseudo_random & 4294967295
+  let squared = intrinsic::wrapping_multiply(low, right: low) >> 32
+  let relative = intrinsic::wrapping_subtract(
+    intrinsic::wrapping_subtract(area_64, right: 1),
+    right: intrinsic::wrapping_multiply(area_64, right: squared) >> 32,
+  )
+  let start: USize = if pass != 0 && slice != 3 {
+    intrinsic::wrapping_multiply(intrinsic::wrapping_add(slice, right: 1), right: shape.segment_length)
+  } else {
+    0
+  }
+  let lane_length_64: UInt64 = intrinsic::convert(shape.lane_length)
+  let start_64: UInt64 = intrinsic::convert(start)
+  let reference_column: USize = intrinsic::convert(wrapping_add_64(start_64, second: relative) % lane_length_64)
+  shape.block_index(block_count, lane: reference_lane, column: reference_column)
+}
+
+internal fn argon2_addresses(input: Array[UInt64, 128]) -> Array[UInt64, 128]
+  cost time O(1)
+{
+  argon2_compress(argon2_zero_block, reference: argon2_compress(argon2_zero_block, reference: input))
+}
+
+internal fn argon2_fill_segment(
+  memory: mut List[Array[UInt64, 128]],
+  shape: Argon2Shape,
+  pass: USize,
+  slice: USize,
+  lane: USize,
+)
+  requires memory.length() > 0
+  requires shape.lanes > 0 && shape.lane_length > 0
+  ensures memory.length() == old(memory.length())
+  cost time finite
+{
+  let block_count = memory.length()
+  let independent = pass == 0 && slice < 2
+  var address_input = argon2_zero_block
+  address_input[0] = intrinsic::convert(pass)
+  address_input[1] = intrinsic::convert(lane)
+  address_input[2] = intrinsic::convert(slice)
+  address_input[3] = intrinsic::convert(block_count)
+  address_input[4] = intrinsic::convert(shape.passes)
+  address_input[5] = 2
+  var addresses = argon2_zero_block
+  let first: USize = if pass == 0 && slice == 0 { 2 } else { 0 }
+  if independent && first != 0 {
+    address_input[6] = wrapping_add_64(address_input[6], second: 1)
+    addresses = argon2_addresses(address_input)
+  }
+  for index in first..shape.segment_length
+    invariant memory.length() == block_count
+  {
+    let column = intrinsic::wrapping_add(intrinsic::wrapping_multiply(slice, right: shape.segment_length), right: index)
+    let previous_column = intrinsic::wrapping_subtract(if column == 0 { shape.lane_length } else { column }, right: 1)
+    let previous = memory[shape.block_index(block_count, lane: lane, column: previous_column)]
+    if independent && index % 128 == 0 {
+      address_input[6] = wrapping_add_64(address_input[6], second: 1)
+      addresses = argon2_addresses(address_input)
+    }
+    let pseudo_random = if independent { addresses[index % 128] } else { previous[0] }
+    let reference = memory[argon2_reference_index(
+      shape,
+      block_count: block_count,
+      pass: pass,
+      slice: slice,
+      lane: lane,
+      index: index,
+      pseudo_random: pseudo_random,
+    )]
+    var block = argon2_compress(previous, reference: reference)
+    let target = shape.block_index(block_count, lane: lane, column: column)
+    if pass != 0 {
+      block = argon2_xor(block, second: memory[target])
+    }
+    memory[target] = block
+  }
+}
+
+internal fn argon2_xor(first: Array[UInt64, 128], second: Array[UInt64, 128]) -> Array[UInt64, 128]
+  cost time O(1)
+{
+  var combined = first
+  let count: USize = 128
+  for word in 0..count {
+    combined[word] = first[word] ^ second[word]
+  }
+  combined
+}
+
 public fn hash_password(
   password: Slice[UInt8],
   salt: Slice[UInt8],
   effort: PasswordCost = PasswordCost(),
 ) -> Array[UInt8, 32]
   requires salt.length() >= 8
+  requires effort.parallelism >= 1 && effort.parallelism <= 16777215
+  requires effort.iterations >= 1
+  requires effort.memory_kibibytes >= 8 * effort.parallelism
   cost time finite
 {
-  todo
+  let lanes: USize = intrinsic::convert(effort.parallelism)
+  let requested: USize = intrinsic::convert(effort.memory_kibibytes)
+  let segment_length = requested / (4 * lanes)
+  let shape = Argon2Shape(
+    lanes: lanes,
+    lane_length: 4 * segment_length,
+    segment_length: segment_length,
+    passes: intrinsic::convert(effort.iterations),
+  )
+  let block_count = lanes * shape.lane_length
+  var parameters: List[UInt8] = []
+  push_little_endian_32(mut parameters, value: effort.parallelism)
+  push_little_endian_32(mut parameters, value: 32)
+  push_little_endian_32(mut parameters, value: effort.memory_kibibytes)
+  push_little_endian_32(mut parameters, value: effort.iterations)
+  push_little_endian_32(mut parameters, value: 19)
+  push_little_endian_32(mut parameters, value: 2)
+  push_length_32(mut parameters, length: password.length())
+  for byte in password {
+    mut parameters.push(byte)
+  }
+  push_length_32(mut parameters, length: salt.length())
+  for byte in salt {
+    mut parameters.push(byte)
+  }
+  push_little_endian_32(mut parameters, value: 0)
+  push_little_endian_32(mut parameters, value: 0)
+  let seed = blake2b(parameters.slice(), output_length: 64)
+  var memory: List[Array[UInt64, 128]] = List.filled(argon2_zero_block, count: block_count)
+  for lane in 0..lanes
+    invariant memory.length() == block_count
+  {
+    let first_columns: UInt32 = 2
+    for column in 0..first_columns
+      invariant memory.length() == block_count
+    {
+      var input = seed.copy()
+      push_little_endian_32(mut input, value: column)
+      push_length_32(mut input, length: lane)
+      let block = argon2_block_from_bytes(argon2_long_hash(input.slice(), length: 1024).slice())
+      memory[shape.block_index(block_count, lane: lane, column: intrinsic::convert(column))] = block
+    }
+  }
+  let slices: USize = 4
+  for pass in 0..shape.passes
+    invariant memory.length() == block_count
+  {
+    for slice in 0..slices
+      invariant memory.length() == block_count
+    {
+      for lane in 0..lanes
+        invariant memory.length() == block_count
+      {
+        argon2_fill_segment(mut memory, shape: shape, pass: pass, slice: slice, lane: lane)
+      }
+    }
+  }
+  var last = argon2_zero_block
+  for lane in 0..lanes {
+    last = argon2_xor(last, second: memory[shape.block_index(block_count, lane: lane, column: shape.lane_length - 1)])
+  }
+  let tag = argon2_long_hash(argon2_block_to_bytes(last).slice(), length: 32)
+  var hash: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count {
+    if index < tag.length() {
+      hash[index] = tag[index]
+    }
+  }
+  hash
 }
 
 public fn constant_time_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool
