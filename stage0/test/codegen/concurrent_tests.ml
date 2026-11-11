@@ -1022,6 +1022,61 @@ fn main(arguments: List[String]) -> ExitCode
 }
 |}
         ));
+  (* A flag that the runs shared would let one run drop a value that
+     another had moved, or leave one that it still owned. *)
+  test "on threads, each run of a concurrent for and of a parallel for has its own drop flags"
+    (fun () ->
+      expect_threaded ~expected:"total 3000\nparallel total 2000\n"
+        (tally
+       ^ {|
+fn label(index: Int64) -> Result[String, String] {
+  if index % 2 == 0 {
+    Ok("even ${index}")
+  } else {
+    Err("odd ${index}")
+  }
+}
+
+fn kept(text: own String) -> Int64 {
+  if text.length() > 0 { 1 } else { 0 }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var counter = Counter(count: 0)
+  provide mut counter {
+    concurrent for index in 0..2000 {
+      match label(index) {
+        Ok(text) => Tally.add(kept(own text))
+        Err(_) => Tally.add(2)
+      }
+    }
+    Console.print_line("total ${Tally.total()}")
+  }
+  var sums: List[Int64] = []
+  for _ in 0..2000 {
+    mut sums.push(0)
+  }
+  parallel for sum in mut sums {
+    match label(sum) {
+      Ok(text) => {
+        sum = kept(own text)
+      }
+      Err(_) => {
+        sum = 2
+      }
+    }
+  }
+  var total = 0
+  for sum in sums {
+    total += sum
+  }
+  Console.print_line("parallel total ${total}")
+  ExitCode.success
+}
+|}
+        ));
   test "on threads, tasks run parallel blocks and loops with any number of threads" (fun () ->
       expect_with_each_thread_count ~expected:"total 40064\n"
         (tally

@@ -624,7 +624,11 @@ places, may own a value and which may not. Then each `drop(place)` becomes:
 - **a drop behind a flag,** where the place owns a value on some paths and
   not others, as after `if ready { consume(own item) }`. A flag is a `Bool`
   local, set where the place is given a value and cleared where it is moved
-  or dropped.
+  or dropped. It starts false, as every local starts zeroed, and is written
+  at the function's entry only for a parameter, which holds a value there.
+  So the flag of a local is named only where the local is, which matters
+  where a part of the function becomes a function of its own (see
+  [Outlining](#outlining)).
 
 A place can also be given a value in parts. A record holds a value once
 every field with something to drop does, as when a `List` literal fills
@@ -1391,11 +1395,20 @@ and the statement a fork:
   another region is reached through the function's environment, which
   holds the address of each. The type checker has shown that the branches
   change no place that another uses, so the addresses are never written
-  through at the same time.
+  through at the same time. Unreachable code around the region does not
+  count: after a loop whose body always fails, the blocks that step the
+  loop cannot run, and the loop's index is still the region's alone.
 - **The locals of a loop's part** are the function's parameters.
 - **No two regions share a local that one of them gives a whole new
   value.** No program can do that, so it would be a temporary of the
   compiler's used twice, and `Outline` stops at it.
+- **The parts of a loop share no local that the loop's body gives a whole
+  new value.** The parts run at the same time, each on its own thread, so
+  such a local would be a data race. A drop flag is the case that
+  matters: the flag of a value that the body owns is the body's own, so
+  each part has its own. A flag that the parts shared would let one part
+  drop a value that another had moved, which is a double free. `Outline`
+  stops at any such local.
 
 The fork is `fork(branches)` for a block and `fork_range(body, environment,
 first, last)` for a loop. A fork inside a region is outlined after the
