@@ -1,13 +1,17 @@
 use standard::intrinsic
 
 impl Equal for Float32 {
-  fn equal(self, other: Float32) -> Bool {
+  fn equal(self, other: Float32) -> Bool
+    cost time O(1)
+  {
     intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Float32 {
-  fn compare(self, other: Float32) -> Ordering {
+  fn compare(self, other: Float32) -> Ordering
+    cost time O(1)
+  {
     if intrinsic::less(self, right: other) {
       Ordering.Less
     } else if intrinsic::equal(self, right: other) {
@@ -149,13 +153,17 @@ public transparent fn Float32.square_root(self) -> Float32
 }
 
 impl Equal for Float64 {
-  fn equal(self, other: Float64) -> Bool {
+  fn equal(self, other: Float64) -> Bool
+    cost time O(1)
+  {
     intrinsic::equal(self, right: other)
   }
 }
 
 impl Ordered for Float64 {
-  fn compare(self, other: Float64) -> Ordering {
+  fn compare(self, other: Float64) -> Ordering
+    cost time O(1)
+  {
     if intrinsic::less(self, right: other) {
       Ordering.Less
     } else if intrinsic::equal(self, right: other) {

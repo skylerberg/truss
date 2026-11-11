@@ -1219,11 +1219,17 @@ It also decides a tagged template's checks by running them, as
   CODEGEN.md, "Code run while compiling"): each clause that can run is
   worked out and written out. A clause that cannot run, such as one that
   calls a function for specifications only, is left to the solver.
-- **The prover does not depend on code generation.** `Prover.diagnostics`
-  is given the running, and `truss check` gives it through the compiler it
+- **The prover does not depend on code generation,** and code generation
+  does not depend on the prover. `Prover.diagnostics` is given the running
+  as a value of the prover's own type `Prover.running`. The library
+  `stage0/running` depends on both and makes that value from code
+  generation's results, and `truss check` gives it through the compiler it
   builds programs with, made only when a template asks for it. So proofs
   stay queries of their own, and what ran is decided only when obligations
-  are asked, as the solver's answers are.
+  are asked, as the solver's answers are. The solver is run as a child
+  process by `stage0/process`, which the C compiler is run by too. A test
+  of code generation fails if a library of the prover reaches one of code
+  generation's, or the reverse.
 - **A clause that runs true is proven, and one that runs false is an
   error** that says so. A run past the test time limit is an error that
   says the check is not known.
@@ -1347,6 +1353,11 @@ A proof is as trustworthy as:
 - what the prover knows of the intrinsic module's integer operations, its
   storage and views, and reading and writing bytes, and the costs the
   compiler declares for each intrinsic
+- two facts about the system a program runs on: each of `system_is_linux`,
+  `system_is_macos`, `system_is_x86_64`, and `system_is_arm64` gives one
+  answer for the whole run, and at most one operating system and one
+  architecture is the one; and a handle's descriptor is a function of the
+  handle, the one `handle_from` made it from
 - the standard library's contracts whose bodies end in any other
   intrinsic, which the prover knows only by its type, so they are relied
   on and not proven
@@ -1398,10 +1409,9 @@ test the prover itself:
 
 ## Not built
 
-- **Contracts for the intrinsic module's system calls.** A handle's
-  descriptor, the environment's entries, the operating system and
-  architecture, a view's address, and what a C function returns beyond
-  what its row of the table says are known only by their types.
+- **Contracts for the intrinsic module's system calls.** The environment's
+  entries, a view's address, and what a C function returns beyond what its
+  row of the table says are known only by their types.
 - **Facts under a quantifier.** A fact that names a quantifier's bound
   name, such as what the `ensures` of a callee with a `requires` says of a
   call on it, is not kept. Closed over the quantifier it would be true, but the standard

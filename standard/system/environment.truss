@@ -116,6 +116,18 @@ fn variable_from(entry: intrinsic::View[UInt8]) -> environment::Variable {
   )
 }
 
+theorem one_system_for_the_run()
+  ensures intrinsic::system_is_linux() == intrinsic::system_is_linux()
+  ensures !(intrinsic::system_is_linux() && intrinsic::system_is_macos())
+  ensures !(intrinsic::system_is_x86_64() && intrinsic::system_is_arm64())
+{
+}
+
+theorem a_handle_keeps_its_descriptor(descriptor: Int32)
+  ensures intrinsic::handle_descriptor(intrinsic::handle_from(descriptor)) == descriptor
+{
+}
+
 fn operating_system() -> environment::OperatingSystem {
   if intrinsic::system_is_linux() {
     environment::OperatingSystem.Linux

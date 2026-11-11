@@ -25,6 +25,7 @@
   memory_layout
   libc
   toolchain
+  process
   build
   lir
   unicode

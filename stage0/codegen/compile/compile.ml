@@ -502,7 +502,7 @@ and build_and_run ?input ?time_limit ?(in_order = true) t ~roots ~startup ~argum
   (* Code run while compiling starts no threads, so it is linked with the
      in-order runtime unless the caller asks for the threaded one. *)
   build t ~in_order ~roots ~startup ~output;
-  let result = Toolchain.run ?input ?time_limit output arguments in
+  let result = Process.run ?input ?time_limit output arguments in
   (try Sys.remove output with Sys_error _ -> ());
   result
 
@@ -769,7 +769,7 @@ let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests
     let _, report, errors =
       Fun.protect
         ~finally:(fun () -> try Sys.remove output with Sys_error _ -> ())
-        (fun () -> Toolchain.run ~on_output:(feed reader) output [])
+        (fun () -> Process.run ~on_output:(feed reader) output [])
     in
     if Array.exists Option.is_none fresh then
       cannot_build "The test program ended before reporting every test:\n%s%s" report errors

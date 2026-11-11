@@ -7,7 +7,7 @@ type t = { program : string; cache : string option; mutable solved : int }
 
 let find ?cache () =
   let program = Option.value (Sys.getenv_opt "TRUSS_Z3") ~default:"z3" in
-  match Toolchain.run program [ "--version" ] with
+  match Process.run program [ "--version" ] with
   | exception Unix.Unix_error _ ->
       Error
         (Printf.sprintf
@@ -186,7 +186,7 @@ let ask solver request =
           Printf.sprintf "(get-value (%s))\n" (String.concat " " (List.map snd request.requested))
       in
       locked (fun () -> solver.solved <- solver.solved + 1);
-      let _, output, _ = Toolchain.run ~input solver.program [ "-in"; "-smt2" ] in
+      let _, output, _ = Process.run ~input solver.program [ "-in"; "-smt2" ] in
       let answer =
         match parse_sexps output with
         | Atom "unsat" :: _ -> Proven_canonical

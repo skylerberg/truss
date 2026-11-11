@@ -860,7 +860,7 @@ fn main(arguments: List[String]) -> ExitCode
          may not have. *)
       let path, in_terminal = report "terminal-report.txt" in
       let status, _, errors =
-        Toolchain.run ~input:"" "script"
+        Process.run ~input:"" "script"
           (match host.os with
           | Macos -> [ "-q"; "/dev/null"; program; path ]
           | Linux -> [ "-qec"; Filename.quote_command program [ path ]; "/dev/null" ])
@@ -886,7 +886,7 @@ fn main(arguments: List[String]) -> ExitCode
       | terminal -> Unix.close terminal
       | exception Unix.Unix_error _ ->
           let path, without = report "no-terminal-report.txt" in
-          let status, _, _ = Toolchain.run ~input:"" program [ path ] in
+          let status, _, _ = Process.run ~input:"" program [ path ] in
           expect_int ~expected:0 status;
           expect_string
             ~expected:
