@@ -88,6 +88,10 @@ val named : Path.t -> ty list -> ty
 val is_builtin : Intrinsic.builtin -> ty -> bool
 val builtin_of : ty -> Intrinsic.builtin option
 
+val is_well_known : Well_known.t -> ty -> bool
+(** Whether a type is the well-known type or an instantiation of it: [is_well_known List] holds for
+    [List[Int64]]. *)
+
 val integer_types : Intrinsic.builtin list
 (** The built-in integer types, which an integer literal can fill. *)
 

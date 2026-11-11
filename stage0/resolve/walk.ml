@@ -162,7 +162,7 @@ let module_of_names state (first : name) (rest : name list) =
   (* For a name through an import, the [use] line has the error, and the
      names after it resolve as usual. *)
   | Found_module (module_, `Package)
-    when module_ = Intrinsic.module_ && state.module_.package <> Prelude.standard ->
+    when module_ = Intrinsic.module_ && state.module_.package <> Path.standard_package ->
       failed
         (reported state Intrinsic_import first.span
            "Only the `standard` package can use `standard::intrinsic`.")

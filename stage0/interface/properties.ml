@@ -12,9 +12,9 @@
 
 module T = Types
 
-let copyable_trait = Path.core "Copyable"
-let plain_trait = Path.core "Plain"
-let storable_trait = Path.core "Storable"
+let copyable_trait = Well_known.path Copyable
+let plain_trait = Well_known.path Plain
+let storable_trait = Well_known.path Storable
 
 (* The substitution for a trait reference: the types that the trait's [Self]
    and parameters are instantiated with. A reference with the wrong number

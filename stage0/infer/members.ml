@@ -9,7 +9,7 @@ module Environment = Interface.Environment
    library, the calling package, and the packages its manifest lists. *)
 let visible_packages database (package : string) =
   List.sort_uniq compare
-    ("standard" :: package
+    (Path.standard_package :: package
     :: List.map
          (fun (dependency : Workspace.dependency) -> dependency.package)
          (Query.demand database Workspace.dependencies package))

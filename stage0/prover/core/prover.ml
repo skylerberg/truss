@@ -48,8 +48,7 @@ let impl_laws database (key : Names.key) source =
 
 (* [standard::specification]'s contracts say what the mathematical
    collections are, so they are the trusted base, not obligations. *)
-let specification (key : Names.key) =
-  key.module_ = { package = "standard"; modules = [ "specification" ] }
+let specification (key : Names.key) = key.module_ = Well_known.specification
 
 let declaration database (key : Names.key) =
   Names.Declaration_map.find_opt (key.path, key.ordinal)

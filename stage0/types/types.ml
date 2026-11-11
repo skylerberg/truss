@@ -65,6 +65,7 @@ let builtin_of = function
   | _ -> None
 
 let is_builtin wanted type_ = builtin_of type_ = Some wanted
+let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
 let integer_types : Intrinsic.builtin list =
   [ Int8; Int16; Int32; Int64; UInt8; UInt16; UInt32; UInt64; USize; ISize ]

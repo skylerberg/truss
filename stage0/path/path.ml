@@ -19,12 +19,9 @@ type t =
   | Test of { module_ : module_; name : string }
   | Law_proof of { module_ : module_; name : string }
 
-let standard modules name = Top { module_ = { package = "standard"; modules }; name }
-let core name = standard [ "core" ] name
-
-let core_name = function
-  | Top { module_ = { package = "standard"; modules = [ "core" ] }; name } -> Some name
-  | _ -> None
+let standard_package = "standard"
+let standard_module modules = { package = standard_package; modules }
+let standard modules name = Top { module_ = standard_module modules; name }
 
 let rec package = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->

@@ -160,7 +160,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       in
       register_expression state value (fun () ->
           Form.range_record state value start stop ~inclusive);
-      T.Named { path = range_path; arguments = [ T.Type element ] }
+      T.Named { path = Well_known.path Range; arguments = [ T.Type element ] }
   | Quantified { quantifier; binder; body } ->
       (match binder with
       | Binder_in (written, collection) ->
@@ -302,7 +302,8 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
       (* A slice: a view of a range of the collection. *)
       Option.iter (fun start -> check state env start (T.builtin USize)) start;
       Option.iter (fun stop -> check state env stop (T.builtin USize)) stop;
-      record state range (T.Named { path = range_path; arguments = [ T.Type (T.builtin USize) ] });
+      record state range
+        (T.Named { path = Well_known.path Range; arguments = [ T.Type (T.builtin USize) ] });
       register_expression state value (fun () ->
           let base = place_of (build_expression state base) in
           let start = Option.map (build_expression state) start in
@@ -311,10 +312,10 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
       match base_type with
       | T.Named { path; arguments = T.Type element :: _ }
-        when Path.equal path list_path || Path.equal path slice_path
+        when Well_known.is List path || Well_known.is Slice path
              || Intrinsic.builtin_of_path path = Some Array ->
-          T.Named { path = slice_path; arguments = [ T.Type element ] }
-      | T.Named { path; _ } when Path.equal path string_path || Path.equal path string_slice_path ->
+          T.Named { path = Well_known.path Slice; arguments = [ T.Type element ] }
+      | T.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
           error state Not_indexable value.span
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       | T.Error _ | T.Hole -> base_type
@@ -322,7 +323,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
           error state Not_indexable value.span
             (Printf.sprintf "`%s` cannot be sliced." (show state base_type)))
   | [ Item key ] -> (
-      if is_named string_path base_type || is_named string_slice_path base_type then begin
+      if T.is_well_known String base_type || T.is_well_known String_slice base_type then begin
         error state Not_indexable value.span
           "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       end
@@ -332,7 +333,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
             ignore (expression state env key);
             base_type
         | _ -> (
-            let index_trait = trait_reference (core "Index") in
+            let index_trait = trait_reference (Well_known.path Index) in
             match implements state base_type index_trait with
             | Some evidence ->
                 let associated name = associated state base_type index_trait name ~at:value.span in

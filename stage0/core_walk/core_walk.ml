@@ -261,9 +261,7 @@ let definition_children visit = function
 
 (* Calls [visit] on every node of a definition. *)
 let definition visit found = definition_children (deep visit) found
-
-let tasks_capability : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Tasks" }
+let tasks_capability = Well_known.path Tasks
 
 (* How code can use [Tasks]. *)
 type tasks_use =

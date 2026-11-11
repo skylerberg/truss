@@ -71,14 +71,14 @@ let core_call state ~lends ?function_value (call : C.call) : Core.call =
 
 (* The operator traits, each with its method and the built-in operation
    that the method is for a built-in number type. *)
-let arithmetic_traits : (string * string * Intrinsic.operation) list =
+let arithmetic_traits : (Well_known.t * string * Intrinsic.operation) list =
   [
-    ("Add", "add", Add);
-    ("Subtract", "subtract", Subtract);
-    ("Multiply", "multiply", Multiply);
-    ("Divide", "divide", Divide);
-    ("Remainder", "remainder", Remainder);
-    ("Negate", "negate", Negate);
+    (Add, "add", Add);
+    (Subtract, "subtract", Subtract);
+    (Multiply, "multiply", Multiply);
+    (Divide, "divide", Divide);
+    (Remainder, "remainder", Remainder);
+    (Negate, "negate", Negate);
   ]
 
 let is_number type_ = T.is_integer_type type_ || T.is_float_type type_
@@ -95,8 +95,8 @@ let built_in_operation (trait : T.trait_reference) name self_type =
     && List.for_all (fun argument -> argument = T.Type self_type) trait.trait_arguments
   then
     List.find_map
-      (fun (trait_name, method_, operation) ->
-        if method_ = name && Path.equal trait.trait (core trait_name) then Some operation else None)
+      (fun (known, method_, operation) ->
+        if method_ = name && Well_known.is known trait.trait then Some operation else None)
       arithmetic_traits
   else None
 
@@ -156,7 +156,7 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
           arguments = argument_expressions state recorded;
         }
   | Trait_method { trait; name = "equal"; self_type; _ }
-    when is_built_in_scalar self_type && Path.equal trait.trait (core "Equal") -> (
+    when is_built_in_scalar self_type && Well_known.is Equal trait.trait -> (
       match argument_expressions state recorded with
       | [ left; right ] -> Compare { comparison = Equal; left; right }
       | _ -> bug "`equal` does not have exactly two arguments")
@@ -340,7 +340,7 @@ let capability_impls (state : state) (type_ : T.ty) =
           else None)
         (List.concat_map
            (fun package -> Interface.Impls.impls_for state.database path package)
-           (List.sort_uniq compare [ Path.package path; state.package; "standard" ]))
+           (List.sort_uniq compare [ Path.package path; state.package; Path.standard_package ]))
   | _ -> []
 
 (* A [provide] block. Each implementation is a place or a value, with the
@@ -364,11 +364,9 @@ let provide state (implementations : expression list) (body : block) : Core.kind
 
 (* Strings *)
 
-let text_path name : Path.t = standard [ "text" ] name
-
 let builder_method name receiver : Core.callee =
   Function
-    { path = Method { owner = text_path "TextBuilder"; name; receiver }; type_arguments = [] }
+    { path = Method { owner = Well_known.path Text_builder; name; receiver }; type_arguments = [] }
 
 let checked_template state (literal : string_literal) =
   match state.tables.templates.(literal.id) with
@@ -464,14 +462,20 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
       statements = let_storage :: pushes;
       value =
         Some
-          (make (T.named list_path [ element ])
+          (make
+             (T.named (Well_known.path List) [ element ])
              (Call
                 {
                   callee =
                     Function
                       {
                         path =
-                          Method { owner = list_path; name = "from_storage"; receiver = Static };
+                          Method
+                            {
+                              owner = Well_known.path List;
+                              name = "from_storage";
+                              receiver = Static;
+                            };
                         type_arguments = [ T.Type element ];
                       };
                   arguments =
@@ -514,15 +518,17 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
       }
   in
   let list element elements =
-    make (T.named list_path [ element ]) (list_literal state ~origin:value.id element elements)
+    make
+      (T.named (Well_known.path List) [ element ])
+      (list_literal state ~origin:value.id element elements)
   in
-  let literal_type = T.named (text_path "Literal") [] in
+  let literal_type = T.named (Well_known.path Literal) [] in
   let texts =
     List.map
       (fun (written : Syntax.text) ->
         make literal_type
-          (record (text_path "Literal") []
-             [ make (T.named string_slice_path []) (String written.value) ]))
+          (record (Well_known.path Literal) []
+             [ make (T.named (Well_known.path String_slice) []) (String written.value) ]))
       (literal.first :: List.map snd literal.rest)
   in
   let parts =
@@ -538,8 +544,8 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
   let texts = list literal_type texts in
   let template =
     make
-      (T.named (text_path "Template") [ part ])
-      (record (text_path "Template") [ T.Type part ] [ texts; list part parts ])
+      (T.named (Well_known.path Template) [ part ])
+      (record (Well_known.path Template) [ T.Type part ] [ texts; list part parts ])
   in
   Template
     {
@@ -572,7 +578,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
   let value = synthetic_expression state ~origin type_ value in
   if is_built_in_scalar type_ then Literal value
   else
-    let equal = trait_reference (core "Equal") in
+    let equal = trait_reference (Well_known.path Equal) in
     match implements state type_ equal with
     | Some found ->
         Equal_to
@@ -1106,14 +1112,14 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
    A list or a set literal is desugared to calls. *)
 let collection_literal state (value : expression) (elements : Core.expression list) : Core.kind =
   match type_of state value with
-  | T.Named { path; arguments = [ T.Type element ] } when Path.equal path list_path ->
+  | T.Named { path; arguments = [ T.Type element ] } when Well_known.is List path ->
       list_literal state ~origin:value.id element elements
-  | T.Named { path; _ } as type_ when Path.equal path set_path ->
+  | T.Named { path; _ } as type_ when Well_known.is Set path ->
       inserted_literal state ~origin:value.id type_ ~name:"set" ~insert:"insert"
         (List.map (fun element -> [ element ]) elements)
   | T.Named { path; _ } when Intrinsic.builtin_of_path path = Some Array ->
       Collection_literal { elements; construction = Array }
-  | T.Named { path; _ } when Path.equal path sequence_path || Path.equal path finite_set_path ->
+  | T.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
       Collection_literal { elements; construction = Specification_only }
   | type_ -> bug "a collection literal of type `%s`" (T.show type_)
 
@@ -1123,8 +1129,8 @@ let collection_literal state (value : expression) (elements : Core.expression li
 let map_literal state (value : expression) (entries : (Core.expression * Core.expression) list) :
     Core.kind =
   match type_of state value with
-  | T.Named { path; _ } as type_ when Path.equal path map_path ->
+  | T.Named { path; _ } as type_ when Well_known.is Map path ->
       inserted_literal state ~origin:value.id type_ ~name:"map" ~insert:"insert_absent"
         (List.map (fun (key, entry) -> [ key; entry ]) entries)
-  | T.Named { path; _ } when Path.equal path finite_map_path -> Map_literal { entries }
+  | T.Named { path; _ } when Well_known.is Finite_map path -> Map_literal { entries }
   | type_ -> bug "a map literal of type `%s`" (T.show type_)

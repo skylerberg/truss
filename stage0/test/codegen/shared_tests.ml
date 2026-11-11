@@ -4,7 +4,7 @@
 
 open Codegen_support
 
-let probe : Path.module_ = { package = Standard_library.package; modules = [ "shared_probe" ] }
+let probe : Path.module_ = { package = Path.standard_package; modules = [ "shared_probe" ] }
 
 let source =
   {|use standard::intrinsic
@@ -172,7 +172,7 @@ fn main(arguments: List[String]) -> ExitCode
 let loaded =
   lazy
     (let engine = Engine.create () in
-     Database.load_package ~usize_bits:64 engine ~name:Standard_library.package ~dependencies:[]
+     Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
        (Standard_library.modules @ [ (probe, source) ]);
      let database = Engine.context engine in
      let text = (Query.demand database Workspace.file probe).source in
@@ -211,7 +211,7 @@ let () =
 
 (* Where the capability check allows [shared_update] and [shared_key],
    which require [Tasks], and the [Storable] bound on [Shared]'s value. *)
-let checks : Path.module_ = { package = Standard_library.package; modules = [ "shared_checks" ] }
+let checks : Path.module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }
 
 let checks_source =
   {|use standard::intrinsic
@@ -293,7 +293,7 @@ let () =
   test "Shared's operations require Tasks outside an impl, and its value must be Storable"
     (fun () ->
       let engine = Engine.create () in
-      Database.load_package ~usize_bits:64 engine ~name:Standard_library.package ~dependencies:[]
+      Database.load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
         (Standard_library.modules @ [ (checks, checks_source) ]);
       let database = Engine.context engine in
       let text = (Query.demand database Workspace.file checks).source in

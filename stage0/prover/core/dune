@@ -5,6 +5,7 @@
   solver
   query
   path
+  well_known
   types
   checked
   core

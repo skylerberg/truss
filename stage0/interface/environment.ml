@@ -492,7 +492,7 @@ let builtin_shape builtin : T.type_interface =
     | Storage | View -> [ { generic = element; kind = Type_generic [] } ]
     | Shared ->
         let storable : T.trait_reference =
-          { trait = Path.core "Storable"; trait_arguments = []; associated = [] }
+          { trait = Well_known.path Storable; trait_arguments = []; associated = [] }
         in
         [
           {

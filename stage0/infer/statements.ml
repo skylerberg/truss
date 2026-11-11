@@ -116,11 +116,11 @@ and statement state env (written : statement) ~last : unit =
           | Add | Subtract | Multiply | Divide | Remainder ->
               let trait, method_ =
                 match binary_operator with
-                | Add -> (core "Add", "add")
-                | Subtract -> (core "Subtract", "subtract")
-                | Multiply -> (core "Multiply", "multiply")
-                | Divide -> (core "Divide", "divide")
-                | _ -> (core "Remainder", "remainder")
+                | Add -> (Well_known.path Add, "add")
+                | Subtract -> (Well_known.path Subtract, "subtract")
+                | Multiply -> (Well_known.path Multiply, "multiply")
+                | Divide -> (Well_known.path Divide, "divide")
+                | _ -> (Well_known.path Remainder, "remainder")
               in
               let fake : expression =
                 { kind = Expression_error; span = written.span; id = written.id }
@@ -293,13 +293,13 @@ and assigns_through_index state env (written : statement) (target : expression) 
   | Bracket (_, [ Item { kind = Range _; _ } ]), _ -> false
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
       let base_type = normalize state (expression state env base) in
-      let trait = trait_reference (core "IndexAssign") in
+      let trait = trait_reference (Well_known.path Index_assign) in
       match
         ( implements state base_type trait,
           Members.trait_method state.database trait.trait "assign" Mut )
       with
       | Some ((Impls.From_impl _ | From_bound | From_any) as found), Some method_ ->
-          let index = trait_reference (core "Index") in
+          let index = trait_reference (Well_known.path Index) in
           let parameter name type_ : T.parameter_info =
             { name; mode = Own; type_; has_default = false }
           in
@@ -417,7 +417,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
               state.tables.loops.(written.id) <- Some (Yielding { call; mode });
               (element, mode)
           | None -> (
-              let cursor = trait_reference (core "Cursor") in
+              let cursor = trait_reference (Well_known.path Cursor) in
               match implements state type_ cursor with
               | Some _ ->
                   state.tables.loops.(written.id) <- Some (Pulled { cursor = type_ });

@@ -785,8 +785,13 @@ an associated type's definition on the cycle names that constructor.
 
 A generic type that contains itself with different arguments, as in `type
 Nested[Element] = Leaf(value: Element) | indirect Node(inner:
-Nested[List[Element]])`, is an error that the same traversal finds, as
-DESIGN.md requires.
+Nested[List[Element]])`, is `package.growing_type`, as DESIGN.md requires:
+the type has no fixed set of instances, and generic code is compiled once
+for each. A traversal of its own finds it, as in Go's check. Its graph has
+the parameters of generic types as nodes. An edge goes from a parameter to
+each argument position of a field's type that mentions the parameter, and
+the edge grows when the argument is more than the parameter. A type is
+growing when a cycle through its parameters has a growing edge.
 
 ## Checking bodies
 
@@ -2402,6 +2407,13 @@ the compiler. The prelude holds:
 `Storage`, `View`, and the descriptor type `Handle` are not in the prelude.
 The standard library names them through `standard::intrinsic`, so another
 package may have a type called `View`.
+
+The compiler names some of the standard library's definitions by path: an
+operator is a call of `Add`'s method, a `for` loop pulls a `Cursor`, and
+`main` returns an `ExitCode`. The module `Well_known` lists each such
+definition once, with its path, and every stage names a definition through
+that list. A test checks that each listed definition exists in the standard
+library, so renaming one there fails the test.
 
 When a call to a trait's yielding method resolves to a known `impl` that
 defines the method, the checker records the callee as the `impl`'s method,

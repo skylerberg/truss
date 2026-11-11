@@ -72,7 +72,7 @@ let granted =
    standard library need no grant. A capability parameter is instantiated by
    the caller with the caller's own capabilities, so it needs none either. *)
 let missing database ~package ~of_ (uses : T.capability list) =
-  if of_ = package || of_ = Resolve.Prelude.standard then []
+  if of_ = package || of_ = Path.standard_package then []
   else
     let granted =
       match Query.demand database granted (package, of_) with

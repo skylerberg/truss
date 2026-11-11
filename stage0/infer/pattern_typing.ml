@@ -335,7 +335,7 @@ and constant_pattern state id span path type_ =
 and structural ?(seen = []) state (type_ : T.ty) =
   if
     T.is_integer_type type_ || T.is_builtin Bool type_ || T.is_builtin Character type_
-    || T.is_builtin Unit type_ || is_named string_path type_
+    || T.is_builtin Unit type_ || T.is_well_known String type_
   then true
   else if T.is_float_type type_ then false
   else if List.exists (T.equal type_) seen then true
@@ -346,12 +346,7 @@ and structural ?(seen = []) state (type_ : T.ty) =
         | Some (Environment.Type_interface interface)
           when (not interface.opaque) || Path.package path = state.package ->
             let derives_equal =
-              List.exists
-                (fun (derived : Path.t) ->
-                  match derived with
-                  | Top { module_ = { package = "standard"; _ }; name = "Equal" } -> true
-                  | _ -> false)
-                interface.derives
+              List.exists (fun derived -> Well_known.is Equal derived) interface.derives
             in
             let substitution =
               Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
@@ -504,6 +499,7 @@ and literal_pattern state id (span : span) literal type_ =
 
 (* A string literal used as a pattern matches a string. *)
 and string_pattern state span type_ =
-  if not (is_named string_path type_ || is_named string_slice_path type_ || T.is_error type_) then
+  if not (T.is_well_known String type_ || T.is_well_known String_slice type_ || T.is_error type_)
+  then
     report state Mismatch span
       (Printf.sprintf "A string pattern matches a string, not `%s`." (T.show type_))
