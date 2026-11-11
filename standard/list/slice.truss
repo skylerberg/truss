@@ -1146,7 +1146,7 @@ fn settle[Element: Ordered](items: mut Slice[Element], start: USize, limit: USiz
   ensures is_heap_from(items.model(), limit: limit, floor: start)
   ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
   ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
-  cost time O(log(limit) * time(Element.compare))
+  cost time O(log(items.length()) * time(Element.compare))
 {
   if start >= limit / 2 {
     return
@@ -1160,6 +1160,7 @@ fn settle[Element: Ordered](items: mut Slice[Element], start: USize, limit: USiz
     invariant hole < limit
     invariant 1 <= width
     invariant width <= limit
+    invariant width <= items.length()
     invariant settled || width - 1 <= hole
     invariant !settled ==> is_heap_except(items.model(), limit: limit, floor: start, hole: hole)
     invariant !settled && hole > start ==> children_are_at_most(items.model(), limit: limit, hole: hole, above: (hole - 1) / 2)
@@ -1290,17 +1291,18 @@ theorem unchanged_tail_stays_sorted[Element: Ordered](before: Slice[Element], af
   }
 }
 
-fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: USize)
+fn put_largest_last[Element: Ordered](items: mut Slice[Element], unsorted: USize)
   requires 2 <= unsorted
   requires unsorted <= items.length()
   requires is_heap_from(items.model(), limit: unsorted, floor: 0)
-  requires forall i in 1..items.length() => i <= unsorted || items[i - 1] <= items[i]
   requires unsorted >= items.length() || (forall i in 0..unsorted => items[i] <= items[unsorted])
   ensures items.length() == old(items.length())
-  ensures is_heap_from(items.model(), limit: unsorted - 1, floor: 0)
-  ensures forall i in 1..items.length() => i > unsorted - 1 ==> items[i - 1] <= items[i]
+  ensures is_heap_except(items.model(), limit: unsorted - 1, floor: 0, hole: 0)
   ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
-  cost time O(log(unsorted) * time(Element.compare))
+  ensures identical(items.model()[unsorted - 1], old(items.model())[0])
+  ensures forall i in unsorted..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures unsorted >= items.length() || items[unsorted - 1] <= items[unsorted]
+  cost time O(1)
 {
   let last = unsorted - 1
   proof {
@@ -1311,14 +1313,27 @@ fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: US
   proof {
     moving_root_keeps_heap(old(items), after: items, limit: unsorted, bound: last / 2)
     moved_root_is_largest(old(items), after: items, limit: unsorted, bound: last)
-    assert identical(items.model()[last], old(items.model())[0])
   }
-  settle(mut items, start: 0, limit: last, top: last)
+}
+
+fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: USize)
+  requires 2 <= unsorted
+  requires unsorted <= items.length()
+  requires is_heap_from(items.model(), limit: unsorted, floor: 0)
+  requires forall i in 1..items.length() => i <= unsorted || items[i - 1] <= items[i]
+  requires unsorted >= items.length() || (forall i in 0..unsorted => items[i] <= items[unsorted])
+  ensures items.length() == old(items.length())
+  ensures is_heap_from(items.model(), limit: unsorted - 1, floor: 0)
+  ensures forall i in 1..items.length() => i > unsorted - 1 ==> items[i - 1] <= items[i]
+  ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
+  cost time O(log(items.length()) * time(Element.compare))
+{
+  put_largest_last(mut items, unsorted: unsorted)
+  settle(mut items, start: 0, limit: unsorted - 1, top: unsorted - 1)
   proof {
-    assert identical(items.model()[last], old(items.model())[0])
     assert forall i in unsorted..items.length() => identical(items.model()[i], old(items.model())[i])
     unchanged_tail_stays_sorted(old(items), after: items, from: unsorted, bound: items.length())
-    assert unsorted >= items.length() || items[last] <= items[unsorted]
+    assert unsorted >= items.length() || items[unsorted - 1] <= items[unsorted]
   }
 }
 
