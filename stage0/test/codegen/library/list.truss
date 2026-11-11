@@ -497,3 +497,69 @@ test "append moves another list's elements onto the end, in order" {
   assert words[1] == "b2"
   assert words[2] == "c3"
 }
+
+test "binary_search finds an element of a sorted list, or reports that it is absent" {
+  let numbers: List[Int64] = [1, 3, 5, 7, 9, 11]
+  assert numbers.binary_search(1) == Some(0)
+  assert numbers.binary_search(7) == Some(3)
+  assert numbers.binary_search(11) == Some(5)
+  assert numbers.binary_search(0) is None
+  assert numbers.binary_search(6) is None
+  assert numbers.binary_search(12) is None
+  let none: List[Int64] = []
+  assert none.binary_search(1) is None
+  assert numbers[1..4].binary_search(5) == Some(1)
+  let words: List[String] = ["apple", "banana", "cherry"]
+  assert words.binary_search("banana") == Some(1)
+  assert words.binary_search("blueberry") is None
+}
+
+test "find_slice finds the first place where a slice occurs" {
+  let numbers: List[Int64] = [1, 2, 1, 2, 3, 1, 2, 3, 4]
+  assert numbers.find_slice([1, 2, 3][..]) == Some(2)
+  assert numbers.find_slice([1, 2, 3, 4][..]) == Some(5)
+  assert numbers.find_slice([4][..]) == Some(8)
+  assert numbers.find_slice([2, 2][..]) is None
+  assert numbers.find_slice([1, 2, 1, 2, 3, 1, 2, 3, 4, 5][..]) is None
+  let none: List[Int64] = []
+  assert numbers.find_slice(none[..]) == Some(0)
+  assert none.find_slice([1][..]) is None
+  let repeated: List[Int64] = [0, 0, 0, 0, 1]
+  assert repeated.find_slice([0, 0, 1][..]) == Some(2)
+}
+
+test "join writes each element with the separator between them" {
+  let numbers: List[Int64] = [1, 2, 3]
+  assert numbers.join(", ") == "1, 2, 3"
+  assert numbers.join("") == "123"
+  assert numbers[..1].join(", ") == "1"
+  let none: List[Int64] = []
+  assert none.join(", ") == ""
+  let words: List[String] = ["a", "b"]
+  assert words.join("-") == "a-b"
+}
+
+test "sort_by orders a list by a comparison" {
+  var numbers: List[Int64] = [5, 3, 8, 1, 9, 2, 7, 3]
+  mut numbers.sort_by(fn(first, second) { first.compare(second) })
+  assert numbers == [1, 2, 3, 3, 5, 7, 8, 9]
+  mut numbers.sort_by(fn(first, second) { second.compare(first) })
+  assert numbers == [9, 8, 7, 5, 3, 3, 2, 1]
+  var one: List[Int64] = [4]
+  mut one.sort_by(fn(first, second) { first.compare(second) })
+  assert one == [4]
+  var none: List[Int64] = []
+  mut none.sort_by(fn(first, second) { first.compare(second) })
+  assert none.is_empty()
+  var many: List[Int64] = []
+  for value in 0..300 {
+    mut many.push((value * 73) % 211)
+  }
+  mut many.sort_by(fn(first, second) { first.compare(second) })
+  assert many.length() == 300 && many.is_sorted()
+  var words: List[String] = ["pear", "fig", "banana"]
+  mut words.sort_by(fn(first, second) { first.length().compare(second.length()) })
+  assert words == ["fig", "pear", "banana"]
+  mut words[1..].sort_by(fn(first, second) { first.compare(second) })
+  assert words == ["fig", "banana", "pear"]
+}
