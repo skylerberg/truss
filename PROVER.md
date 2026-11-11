@@ -576,6 +576,14 @@ derived, when the bounds on the `impl`'s parameters hold under the bounds
 of the definition proven. A capability
 call uses the capability method's contract.
 
+- **Channels.** A channel's `receive` and `send` have no `time` clause,
+  since waiting may never end, so a function that must end cannot wait on
+  one. A message that is received is known by its type's invariant, as a
+  capability call's result is. That one sender's messages are received in
+  the order it sent them is about two tasks' histories, which no contract
+  of one task's code can state, so the prover states nothing about the
+  order of messages; the library's tests check it under many schedules.
+
 - **A tagged template is a call** of its tag's `from_template` with the
   template: its literal texts, each a `Literal` whose model is its bytes,
   and its parts, each turned into the tag's `Part` by its `From`. The
@@ -1449,11 +1457,6 @@ test the prover itself:
   reported as code the prover cannot read: the iterations after it are
   cancelled and run to their ends, which the loop's invariant would have
   to say of where the exit is.
-- **Channels.** A channel's `receive` and `send` have no `time` clause, so
-  a function that must end cannot wait on one. A message that is received
-  is known by its type's invariant, as a capability call's result is. What
-  a channel's contract should say about the order of messages is not
-  decided.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.
