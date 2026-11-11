@@ -2,7 +2,7 @@
 
 open Ir
 
-let version = 23
+let version = 24
 let tagged n items = Cbor.Array (Cbor.int n :: items)
 let list f items = Cbor.Array (List.map f items)
 let option f = function None -> Cbor.Null | Some x -> f x

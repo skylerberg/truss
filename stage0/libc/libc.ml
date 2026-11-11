@@ -123,8 +123,6 @@ type number =
   | Istrip
   | Opost
   | Cs8
-  | Sigset_size
-  | Sig_block
   | Af_inet
   | Af_inet6
   | Sock_stream
@@ -227,10 +225,6 @@ type function_ =
   | Ioctl_tiocgwinsz
   | Tcgetattr
   | Tcsetattr
-  | Sigemptyset
-  | Sigaddset
-  | Sigprocmask_block
-  | Sigwait
   | Socket
   | Bind
   | Connect
@@ -246,6 +240,7 @@ type function_ =
   | Fcntl_getfl
   | Fcntl_setfl
   | Addresses_of_host
+  | Signals_wait
   | Tasks_open
   | Tasks_join
   | Tasks_cancel
@@ -312,10 +307,6 @@ let functions =
     Ioctl_tiocgwinsz;
     Tcgetattr;
     Tcsetattr;
-    Sigemptyset;
-    Sigaddset;
-    Sigprocmask_block;
-    Sigwait;
     Socket;
     Bind;
     Connect;
@@ -331,6 +322,7 @@ let functions =
     Fcntl_getfl;
     Fcntl_setfl;
     Addresses_of_host;
+    Signals_wait;
     Tasks_open;
     Tasks_join;
     Tasks_cancel;
@@ -397,10 +389,6 @@ let function_name = function
   | Ioctl_tiocgwinsz -> "ioctl_tiocgwinsz"
   | Tcgetattr -> "tcgetattr"
   | Tcsetattr -> "tcsetattr"
-  | Sigemptyset -> "sigemptyset"
-  | Sigaddset -> "sigaddset"
-  | Sigprocmask_block -> "sigprocmask_block"
-  | Sigwait -> "sigwait"
   | Socket -> "socket"
   | Bind -> "bind"
   | Connect -> "connect"
@@ -416,6 +404,7 @@ let function_name = function
   | Fcntl_getfl -> "fcntl_getfl"
   | Fcntl_setfl -> "fcntl_setfl"
   | Addresses_of_host -> "addresses_of_host"
+  | Signals_wait -> "signals_wait"
   | Tasks_open -> "tasks_open"
   | Tasks_join -> "tasks_join"
   | Tasks_cancel -> "tasks_cancel"
@@ -944,40 +933,6 @@ let describe function_ =
         ]
         ~named:[ ("settings", "const struct termios *") ]
         ~headers:[ "termios.h" ]
-  | Sigemptyset ->
-      (* A set of signals is storage of as many bytes as a [sigset_t]
-         takes, which only these functions read. *)
-      row (everywhere "int") (Returns Int32)
-        [ ("set", Elements_to_change (UInt8, Number Sigset_size), everywhere "void *") ]
-        ~named:[ ("set", "sigset_t *") ]
-        ~headers:[ "signal.h" ]
-  | Sigaddset ->
-      row (everywhere "int") (Returns Int32)
-        [
-          ("set", Elements_to_change (UInt8, Number Sigset_size), everywhere "void *");
-          ("signal", Value Int32, everywhere "int");
-        ]
-        ~named:[ ("set", "sigset_t *") ]
-        ~headers:[ "signal.h" ]
-  | Sigprocmask_block ->
-      (* Has the signals of a set held back until something waits for
-         them, in place of what each does when it arrives. *)
-      row (everywhere "int") (Returns Int32) ~symbol:(everywhere "sigprocmask")
-        [
-          ("how", Fixed Sig_block, everywhere "int");
-          ("set", Elements (UInt8, Number Sigset_size), everywhere "const void *");
-          ("before", Always 0, everywhere "void *");
-        ]
-        ~named:[ ("set", "const sigset_t *"); ("before", "sigset_t *") ]
-        ~headers:[ "signal.h" ]
-  | Sigwait ->
-      row (everywhere "int") (Returns Int32)
-        [
-          ("set", Elements (UInt8, Number Sigset_size), everywhere "const void *");
-          ("signal", Written (Int32, [ "signal" ]), everywhere "int *");
-        ]
-        ~named:[ ("set", "const sigset_t *") ]
-        ~headers:[ "signal.h" ]
   | Socket ->
       row (everywhere "int") (Returns Int32)
         [
@@ -1134,6 +1089,19 @@ let describe function_ =
           ("room", Value USize, size);
         ]
         ~headers:[]
+  | Signals_wait ->
+      (* The runtime's. It blocks until one of the signals arrives and
+         returns the signal's number, or 0 if the calling task is cancelled
+         first. The runtime handles the signals itself, so that a task on
+         any thread can wait for them. *)
+      row
+        ~symbol:(everywhere "t_runtime_signals_wait")
+        (everywhere "int32_t") (Returns Int32)
+        [
+          ("signals", Elements (Int32, counted "count"), everywhere "const int32_t *");
+          ("count", Value USize, size);
+        ]
+        ~headers:[]
   | ( Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait
     | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ) as task -> (
       (* The runtime's task functions. A group, a key, a ticket, and a
@@ -1156,8 +1124,8 @@ let describe function_ =
 let available system function_ = (describe function_).on system.os
 
 let of_the_runtime = function
-  | Addresses_of_host | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch
-  | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ->
+  | Addresses_of_host | Signals_wait | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled
+  | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ->
       true
   | _ -> false
 
@@ -1320,8 +1288,6 @@ let numbers =
     Istrip;
     Opost;
     Cs8;
-    Sigset_size;
-    Sig_block;
     Af_inet;
     Af_inet6;
     Sock_stream;
@@ -1447,8 +1413,6 @@ let number_name = function
   | Istrip -> "ISTRIP"
   | Opost -> "OPOST"
   | Cs8 -> "CS8"
-  | Sigset_size -> "SIGSET_SIZE"
-  | Sig_block -> "SIG_BLOCK"
   | Af_inet -> "AF_INET"
   | Af_inet6 -> "AF_INET6"
   | Sock_stream -> "SOCK_STREAM"
@@ -1483,7 +1447,7 @@ let number_type = function
   | Path_max | Spawn_file_actions_size | Dirent_length_offset | Dirent_kind_offset
   | Dirent_name_offset | Termios_size | Termios_iflag_offset | Termios_oflag_offset
   | Termios_cflag_offset | Termios_lflag_offset | Termios_flag_size | Termios_cc_offset | Vmin
-  | Vtime | Sigset_size | Sockaddr_family_offset | Sockaddr_family_size ->
+  | Vtime | Sockaddr_family_offset | Sockaddr_family_size ->
       USize
   | Tiocgwinsz | Icanon | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost
   | Cs8 ->
@@ -1504,7 +1468,7 @@ let number_headers = function
   | Clock_realtime | Clock_monotonic -> [ "time.h" ]
   | Sc_nprocessors_onln -> [ "unistd.h" ]
   | Pollin | Pollhup -> [ "poll.h" ]
-  | Sigkill | Sigusr1 | Sigusr2 | Sigset_size | Sig_block -> [ "signal.h" ]
+  | Sigkill | Sigusr1 | Sigusr2 -> [ "signal.h" ]
   | Spawn_file_actions_size -> [ "spawn.h" ]
   | Stat_size | Stat_mode_offset | Stat_mode_size | Stat_length_offset | Stat_accessed_offset
   | Stat_modified_offset | Stat_created_offset | S_ifmt | S_ifreg | S_ifdir | S_iflnk | Utime_omit
@@ -1540,7 +1504,6 @@ let number_expression (system : system) number =
   let offset_of field = Some (Printf.sprintf "__builtin_offsetof(struct stat, %s)" field) in
   match (number, system.os) with
   | Stat_size, _ -> Some "sizeof(struct stat)"
-  | Sigset_size, _ -> Some "sizeof(sigset_t)"
   | Sockaddr_family_offset, _ -> Some "__builtin_offsetof(struct sockaddr, sa_family)"
   | Sockaddr_family_size, _ -> Some "sizeof(((struct sockaddr *)0)->sa_family)"
   | Termios_size, _ -> Some "sizeof(struct termios)"
@@ -1755,10 +1718,6 @@ let value (system : system) number =
   | Sockaddr_family_offset, Macos -> 1
   | Sockaddr_family_size, Linux -> 2
   | Sockaddr_family_size, Macos -> 1
-  | Sigset_size, Linux -> 128
-  | Sigset_size, Macos -> 4
-  | Sig_block, Linux -> 0
-  | Sig_block, Macos -> 1
   | Vreg, Macos -> 1
   | Vdir, Macos -> 2
   | Vlnk, Macos -> 5

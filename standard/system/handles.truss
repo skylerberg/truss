@@ -25,7 +25,11 @@ internal fn file_error(number: Int32) -> SystemError {
   } else if number == intrinsic::libc_einval() {
     SystemError.InvalidInput
   } else if number == intrinsic::libc_eintr() {
-    SystemError.Interrupted
+    if calls::cancelled() {
+      SystemError.Cancelled
+    } else {
+      SystemError.Interrupted
+    }
   } else if number == intrinsic::libc_etimedout() || number == intrinsic::libc_eagain() {
     SystemError.TimedOut
   } else if number == intrinsic::libc_epipe() {

@@ -193,11 +193,10 @@ let settings : Build.settings =
   { build = Development; optimization = O1; extra = strict @ sanitizers }
 
 (* The thread counts that a program on threads is run with. More threads
-   than cores makes them interleave more. ThreadSanitizer slows a program
-   several times, so under it a program runs once, with a count above the
+   than cores makes them interleave more. A sanitizer slows a program
+   several times, so under one a program runs once, with a count above the
    number of cores. *)
-let worker_counts =
-  if Sys.getenv_opt "TRUSS_SANITIZE" = Some "thread" then [ 8 ] else [ 1; 2; 8; 32 ]
+let worker_counts = if sanitizers = [] then [ 1; 2; 8; 32 ] else [ 8 ]
 
 (* Compiles the instances into a program whose [main] calls [entry], runs
    it, and returns its status, output, and errors. *)

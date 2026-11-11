@@ -1152,6 +1152,16 @@ The runtime runs each task on an operating-system thread of its own:
 - **Cancellation** is a flag on the group. A task is cancelled when its
   group, or a group that encloses it, is. `cancel` sets the flag once and
   wakes every waiter, so that a cancelled one returns from `wait`.
+- **A cancelled task that is blocked in a system call is interrupted.**
+  `cancel` sends `SIGURG` to the thread of each task of the group, and of
+  each group that those tasks opened. The handler does nothing and is
+  installed without `SA_RESTART`, so a blocked read, accept, or sleep
+  fails with `EINTR`. The standard library's retry loops stop retrying in
+  a cancelled task, and the error becomes `SystemError.Cancelled`. A task
+  can start a blocking call just after an interrupt, so `join` sends the
+  interrupt again every few milliseconds until the cancelled tasks have
+  ended. The runtime reserves `SIGURG`, as Go's runtime does. A host
+  lookup cannot be interrupted, so it runs to its end.
 - **Waiting on a key** uses a fixed table of slots. A key hashes to a
   slot, which counts the wakes of its keys. `watch` returns the count,
   `wait` blocks while the count is unchanged, and `wake` increments it.
@@ -1646,11 +1656,14 @@ handle whose number is the process's and whose descriptor is none;
 `Handles.wait` reads the exit status, or the signal that ended the
 program, out of `waitpid`'s status, and `Handles.signal` is `kill`, which
 is refused for a handle that is not one process. `SystemSignals.wait`
-holds the signals it is asked for back with `sigprocmask`, so that one
-that arrives does not end the program, and takes the next with `sigwait`.
-They stay held back afterwards, so one that arrives between two waits is
-there for the second. `SystemTasks.yield_now`
-does nothing, since tasks run one after another. The real `NetworkServer`
+calls the runtime, which installs a handler for each signal it is asked
+for, so that a task on any thread can wait for it. The handler records
+the signal and writes a byte to a pipe, and a thread of the runtime reads
+the pipe and wakes the waiters. A signal stays recorded until a wait
+takes it, so one that arrives between two waits is there for the second.
+The wait returns `None` in a cancelled task. A test program, which has
+one thread, blocks the signals and takes the next with `sigwait`. The
+real `NetworkServer`
 and `NetworkClient` are sockets. An address is a `sockaddr_in` or a
 `sockaddr_in6` as bytes, which the standard library writes and reads: the
 family is where the system keeps it, and the port and the address are high
@@ -2065,11 +2078,11 @@ a command line can hold.
   builds,** cached, so a project's development builds run them at full
   speed.
 - **A lending method that lends through a call to itself.**
-- **Waiting for a signal that the system ignores unless it is asked for,**
-  such as a terminal's change of size. macOS throws such a signal away
-  while it is held back, so `Signals.wait` never sees it there. It needs a
-  handler installed for the signal, and so a function of the runtime's to
-  be the handler.
+- **Waiting, in a test program, for a signal that the system ignores
+  unless it is asked for,** such as a terminal's change of size. macOS
+  throws such a signal away while it is blocked, and a test program
+  blocks the signals it waits for. A program installs a handler instead,
+  and sees the signal.
 - **A cursor over a method that lends places to be changed.** `next` would
   have to hand out a value it takes back.
 - **A lambda in a yielding method that is pulled,** and in a pulled method
@@ -2099,10 +2112,6 @@ a command line can hold.
   operating system and switches to another task. A call that the
   operating system cannot wait for that way, such as reading a file or
   looking up a host, runs on a thread kept for such calls.
-- **Cancellation of a blocked system call.** A cancelled task returns from
-  `Tasks.wait`, but a task blocked in a call of the operating system, such
-  as a read or a sleep, stays blocked until the call returns. In a
-  cancelled task, each such call is to return the cancelled error at once.
 - **The seeded `Tasks`.** It is to run each task as a coroutine, one at a
   time, and pick the next by its seed at each capability call that blocks,
   spawns a task, or locks a mutex.

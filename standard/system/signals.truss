@@ -1,41 +1,29 @@
 use standard::intrinsic
 use standard::processes
-use standard::system::calls
 use standard::system::handles
 
 internal type SystemSignals()
 
 impl Signals for SystemSignals {
-  fn wait(self, signals: Slice[processes::Signal]) -> processes::Signal {
-    let size = intrinsic::libc_sigset_size()
-    var set: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
-    for _ in 0..size
-      invariant intrinsic::storage_length(set) == yielded.length()
-      invariant intrinsic::storage_capacity(set) == size
-    {
-      intrinsic::storage_push(mut set, value: 0)
-    }
-    let _ = intrinsic::libc_sigemptyset(mut set)
-    var added: USize = 0
+  fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
+    var numbers: intrinsic::Storage[Int32] = intrinsic::storage_with_capacity(signals.length())
     for signal in signals
-      invariant intrinsic::storage_length(set) == size
-      invariant added <= yielded.length()
+      invariant intrinsic::storage_length(numbers) <= yielded.length()
+      invariant intrinsic::storage_capacity(numbers) == signals.length()
     {
       let number = handles::signal_number(signal)
-      if number > 0 && intrinsic::libc_sigaddset(mut set, signal: number) == 0 {
-        added += 1
+      if number > 0 {
+        intrinsic::storage_push(mut numbers, value: number)
       }
     }
-    let _ = intrinsic::libc_sigprocmask_block(intrinsic::storage_view(set))
-    var arrived: Int32 = 0
-    var waiting = true
-    while waiting {
-      if added == 0 {
-        calls::sleep(3600, nanoseconds: 0)
-      } else if intrinsic::libc_sigwait(intrinsic::storage_view(set), signal: mut arrived) == 0 {
-        waiting = false
-      }
+    let arrived = intrinsic::runtime_signals_wait(
+      intrinsic::storage_view(numbers),
+      count: intrinsic::storage_length(numbers),
+    )
+    if arrived == 0 {
+      None
+    } else {
+      Some(handles::signal_from(arrived))
     }
-    handles::signal_from(arrived)
   }
 }
