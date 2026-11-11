@@ -3311,6 +3311,36 @@ let () =
       let found = message "fn first(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" in
       if contains found "is not visible in this package" then fail "message %S" found)
 
+(* Early exits from concurrent loops *)
+
+let () =
+  test "a concurrent for may return early, with a value known by its type" (fun () ->
+      proven
+        "fn any_negative(numbers: List[Int64]) -> Bool\n\
+        \  uses Tasks\n\
+         {\n\
+        \  concurrent for number in numbers {\n\
+        \    if number < 0 {\n\
+        \      return true\n\
+        \    }\n\
+        \  }\n\
+        \  false\n\
+         }\n");
+  test "a value returned from a concurrent for is not known to be any one iteration's" (fun () ->
+      not_proven
+        "fn claimed(numbers: List[Int64]) -> Bool\n\
+        \  uses Tasks\n\
+        \  ensures !result\n\
+         {\n\
+        \  concurrent for number in numbers {\n\
+        \    if number < 0 {\n\
+        \      return true\n\
+        \    }\n\
+        \  }\n\
+        \  false\n\
+         }\n"
+        "prover.ensures")
+
 (* Definitions under a quantifier *)
 
 let () =

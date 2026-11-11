@@ -549,7 +549,12 @@ two calls. A `concurrent for` loop's iterations are read as a `for`'s. A
 block ends, after the other branches, which are cancelled and run to their
 own ends: each later branch is read from where the exit was as well as
 from where the branches before it ended, and the exit is then taken with
-what each branch did. A cancelled task's capability calls return the
+what each branch did. An exit from an iteration of a `concurrent for`
+ends that iteration, since the iterations after it are cancelled and run
+to their own ends, and is taken where the loop ends: a `break` is where
+the loop ends anyway, and a `return` returns there, on a path of its own,
+with a value known by its type, since which iteration's value it is is
+not known. A cancelled task's capability calls return the
 cancelled value from their implementations, which their contracts cover,
 so cancelling asks nothing more of a proof.
 
@@ -1460,10 +1465,6 @@ test the prover itself:
 - **Proof states in the language server.** `Prover.states` gives each
   obligation's state at its position, proven or not with the diagnostic
   that says why; the language server, `truss lsp`, is not built yet.
-- **An early exit from an iteration of a `concurrent for` loop** is
-  reported as code the prover cannot read: the iterations after it are
-  cancelled and run to their ends, which the loop's invariant would have
-  to say of where the exit is.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.
