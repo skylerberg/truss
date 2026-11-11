@@ -60,6 +60,8 @@ type saved_node = {
   saved_kept : bool;
 }
 
+let artifact_header store = "truss artifact " ^ store.version ^ "\n"
+
 type artifact = {
   base : string option;
   saved : saved_node list;
@@ -192,7 +194,7 @@ let write ?(full = false) engine =
       difference_count = (if full then 0 else engine.depth + 1);
     }
   in
-  let name = store.put (Marshal.to_string artifact []) in
+  let name = store.put (artifact_header store ^ Marshal.to_string artifact []) in
   if full then engine.on_whole <- false;
   engine.chain <- Some name;
   engine.whole <- artifact.whole_size;
@@ -212,13 +214,23 @@ let artifact (engine : t) = engine.chain
 let unwritten (engine : t) =
   engine.chain = None || Hashtbl.length engine.unsaved > 0 || engine.gone <> []
 
-(* The artifacts from the whole state a chain starts with to its last. *)
+(* An artifact's bytes start with what wrote it. They are marshaled, so
+   they mean something only to the same version: read by another, as when
+   a compiler collects a store that an earlier build of it wrote to, they
+   would be taken for another type's. *)
+let read_artifact store bytes : artifact option =
+  let header = artifact_header store in
+  if String.starts_with ~prefix:header bytes then
+    Some (Marshal.from_string bytes (String.length header))
+  else None
+
+(* The artifacts from the whole state a chain starts with to its last;
+   [None] if the store lacks one, or another version wrote one. *)
 let chain_of store name =
   let rec back name found =
-    match store.get name with
+    match Option.bind (store.get name) (read_artifact store) with
     | None -> None
-    | Some bytes -> (
-        let artifact : artifact = unmarshal bytes in
+    | Some artifact -> (
         let found = (name, artifact) :: found in
         match artifact.base with None -> Some found | Some base -> back base found)
   in

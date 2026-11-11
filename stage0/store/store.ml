@@ -78,17 +78,28 @@ let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 (* Reading records *)
 
+let close_channel segment =
+  Option.iter close_in_noerr segment.channel;
+  segment.channel <- None
+
+(* The segments with an open channel. A process reads from many segments,
+   and may hold only so many files open, so past a limit the channels are
+   closed, and each is opened again when next read. *)
+let open_segments : segment list ref = ref []
+let open_limit = 64
+
 let channel segment =
   match segment.channel with
   | Some channel -> channel
   | None ->
+      if List.length !open_segments >= open_limit then begin
+        List.iter close_channel !open_segments;
+        open_segments := []
+      end;
       let channel = open_in_bin segment.path in
       segment.channel <- Some channel;
+      open_segments := segment :: !open_segments;
       channel
-
-let close_channel segment =
-  Option.iter close_in_noerr segment.channel;
-  segment.channel <- None
 
 (* The record at an offset, checked; [None] if it is cut short or damaged. *)
 let read_record channel ~offset =
@@ -186,12 +197,15 @@ let refresh t =
         |> List.filter (fun path -> Some path <> own)
     | exception Sys_error _ -> []
   in
-  let known = List.filter (fun s -> List.mem s.path present) t.segments in
-  List.iter (fun s -> if not (List.mem s.path present) then close_channel s) t.segments;
+  let there = Hashtbl.create (List.length present) in
+  List.iter (fun path -> Hashtbl.replace there path ()) present;
+  let known = List.filter (fun s -> Hashtbl.mem there s.path) t.segments in
+  List.iter (fun s -> if not (Hashtbl.mem there s.path) then close_channel s) t.segments;
+  let had = Hashtbl.create (List.length known) in
+  List.iter (fun s -> Hashtbl.replace had s.path ()) known;
   let fresh =
     List.filter_map
-      (fun path ->
-        if List.exists (fun s -> s.path = path) known then None else Some (load_segment path))
+      (fun path -> if Hashtbl.mem had path then None else Some (load_segment path))
       present
   in
   List.iter
@@ -533,41 +547,60 @@ let entries segment =
             } ))
   | None -> Hashtbl.fold (fun key location acc -> (key, location) :: acc) segment.table []
 
+(* Copies the records of segments that [keep] chooses into this process's
+   segment, and deletes those segments. *)
+let rewrite t candidates ~keep =
+  List.iter
+    (fun segment ->
+      List.iter
+        (fun (key, location) ->
+          match read_record (channel segment) ~offset:location.offset with
+          | Some (kind, found, value) when found = key ->
+              if
+                keep segment kind key
+                && not
+                     (match t.writer with
+                     | Some w -> Hashtbl.mem w.segment.table key
+                     | None -> false)
+              then append_record t kind key value
+          | Some _ | None | (exception Sys_error _) -> ())
+        (entries segment))
+    candidates;
+  flush t;
+  List.iter
+    (fun segment ->
+      close_channel segment;
+      List.iter
+        (fun path -> try Sys.remove path with Sys_error _ -> ())
+        [ segment.path; index_path segment.path ])
+    candidates;
+  t.segments <- List.filter (fun s -> not (List.memq s candidates)) t.segments
+
 let collect t ~budget ~live =
   if size t > budget then begin
-    let candidates = List.filter abandoned t.segments in
     let recent path =
       match Unix.stat path with
       | stat -> Unix.time () -. stat.st_mtime < week
       | exception Unix.Unix_error _ -> false
     in
-    List.iter
-      (fun segment ->
-        let young = recent segment.path in
-        List.iter
-          (fun (key, location) ->
-            match read_record (channel segment) ~offset:location.offset with
-            | Some (kind, _, value) ->
-                let keep =
-                  match kind with 'v' -> live key | _ -> young || Hashtbl.mem t.used key
-                in
-                if
-                  keep
-                  && not
-                       (match t.writer with
-                       | Some w -> Hashtbl.mem w.segment.table key
-                       | None -> false)
-                then append_record t kind key value
-            | None -> ())
-          (entries segment))
-      candidates;
-    flush t;
-    List.iter
-      (fun segment ->
-        close_channel segment;
-        List.iter
-          (fun path -> try Sys.remove path with Sys_error _ -> ())
-          [ segment.path; index_path segment.path ])
-      candidates;
-    t.segments <- List.filter (fun s -> not (List.memq s candidates)) t.segments
+    let young = Hashtbl.create 64 in
+    let candidates = List.filter abandoned t.segments in
+    List.iter (fun segment -> Hashtbl.replace young segment.path (recent segment.path)) candidates;
+    rewrite t candidates ~keep:(fun segment kind key ->
+        match kind with
+        | 'v' -> live key
+        | _ -> Hashtbl.find young segment.path || Hashtbl.mem t.used key)
   end
+
+(* Every process that writes leaves a segment, and a lookup searches each
+   segment's index, so small segments are gathered into one once there are
+   many. Every record is kept. *)
+let small = 8 * 1024 * 1024
+let many = 32
+
+let compact t =
+  refresh t;
+  let candidates =
+    List.filter (fun segment -> file_size segment.path < small && abandoned segment) t.segments
+  in
+  if List.length candidates >= many then rewrite t candidates ~keep:(fun _ _ _ -> true)

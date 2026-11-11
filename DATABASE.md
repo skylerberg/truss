@@ -612,8 +612,15 @@ them, with sorted indexes like git's pack files:
   again. A read that must see what another process just wrote, such as a
   worktree's state, looks first.
 - **A damaged or cut-off record is missing.** Every read checks the
-  checksum, so a crash or a damaged file costs a recomputation, never a wrong
-  answer.
+  checksum, and that the record is the key's own, so a crash or a damaged
+  file or index costs a recomputation, never a wrong answer.
+- **Small segments are gathered into one.** Every process that writes
+  leaves a segment, and a lookup searches each segment's index. Once many
+  small segments that no running process is writing have gathered, the
+  background process copies their records into its own segment and deletes
+  them.
+- **A process holds only so many segments open,** and closes them all past
+  that, to open each again when it is next read.
 - **The store is written with ordinary file operations:** create, append,
   read, rename, flush to disk, and delete, and a file lock on a writer's own
   segment. Truss has no foreign code, so the compiler written in Truss cannot
@@ -645,8 +652,15 @@ budget, 20 GiB unless `TRUSS_CACHE_SIZE` gives one in bytes. Every ten
 minutes it checks, and when the segments take more:
 
 - **What a live state names is kept:** the artifacts of its chain, and every
-  value they name. A worktree's state is live while its directory exists,
-  and its pointer is removed once the directory is gone. The standard
+  value they name. A worktree's state is live while its directory exists.
+  The pointer of a worktree whose directory is gone is removed every
+  minute, whatever the store's size, since a new worktree looks through
+  every pointer for the state nearest to it.
+- **Only this compiler's states are read.** An artifact's bytes mean
+  something only to the version that wrote them, and start with that
+  version, so another's is not read. The values of another compiler's
+  states are therefore not kept. That compiler finds its state gone, or an
+  input's value lost, and starts from its files. The standard
   library's artifact is kept, and so is each named state of the library.
 - **Results are kept while in use:** those this process read or added, and
   those in segments written in the last week.
@@ -763,8 +777,11 @@ it exits after three hours without a request, the default of both.
   between every session opened from it.
 - **Clients connect through a Unix socket** in `servers/`, named by the
   compiler's identity. A socket's path has a limit of about 100 bytes, so a
-  store with a long path puts the socket in `/tmp`, named by a hash of where
-  it would have been. A lock beside it in the store keeps to one process per
+  store with a long path puts the socket in `/tmp/truss-UID`, named by a
+  hash of where it would have been. Both directories are the user's alone,
+  and the one in `/tmp` is used only if it is: what travels over the socket
+  is marshaled, so another user who could put a socket there could run code
+  as this one. A lock beside it in the store keeps to one process per
   compiler.
 - **Without the background process,** as in CI, `--no-server` runs a
   command in its own process, against the same store. It takes the
@@ -1035,13 +1052,12 @@ with the same inputs.
   is paid once for each whole state. A state that reads only the parts it
   touches would open in the time its change needs, however large the
   project.
-- **Merging segments, and indexes read in part.** Every process that writes
-  leaves a segment, and a lookup searches each segment's index in turn, so a
-  lookup costs the number of segments until collection, which runs only over
-  the size budget, copies them into one. Each index is also read whole when
-  a process opens the store. Merging small segments as they gather, as a
-  log-structured store does, and reading an index a block at a time would
-  keep both within the logarithm of the store's size.
+- **Indexes read in part, and small segments gathered without the
+  background process.** Each index is read whole when a process opens the
+  store, and only the background process gathers small segments, so a store
+  used only with `--no-server` keeps one for each command. Reading an index
+  a block at a time, and merging by size as a log-structured store does,
+  would keep both within the logarithm of the store's size.
 - **Each stage's version in keys,** in place of the compiler's identity.
 - **Merging at the level of definitions.** Two worktrees are merged by git,
   line by line, and the merge is then checked. Truss has no comments, one
