@@ -68,6 +68,99 @@ let assignment_operator = function
   | Punctuation Shift_right_equal -> Some Shift_right_assign
   | _ -> None
 
+(* The index of the [>] or [>>] that closes the [<] at the cursor, or [None]
+   when the tokens after the [<] are not type arguments or generic
+   parameters closed on the same line. A [>>] closes two [<]. *)
+let angle_closer cursor =
+  let rec scan index depth =
+    match (Cursor.token_at cursor index).kind with
+    | Punctuation Less -> scan (index + 1) (depth + 1)
+    | Punctuation Greater -> if depth = 1 then Some index else scan (index + 1) (depth - 1)
+    | Punctuation Shift_right ->
+        if depth = 2 then Some index else if depth > 2 then scan (index + 1) (depth - 2) else None
+    | Punctuation (Open _) ->
+        let closer = Cursor.closer cursor index in
+        if closer < 0 then None else scan (closer + 1) depth
+    | Upper _ | Lower _ | Integer _
+    | Punctuation (Comma | Colon | Colon_colon | Dot | Equal | Plus | Arrow)
+    | Keyword (Self_type | Any | Fn | Mut | Own | Capability) ->
+        scan (index + 1) depth
+    | _ -> None
+  in
+  scan cursor.Cursor.index 0
+
+(* [List<String>] and [fn first<T>]: angle brackets where type arguments or
+   generic parameters go, from Rust, Java, and TypeScript. The cursor is at
+   the [<]. The tokens up to its closer are parsed by [parse] as the square
+   brackets that the fix writes, or the result is [None] when nothing closes
+   the [<]. Tokens inside a nested bracket are left as they are, since a
+   function type's [requires] there may compare with [<]. *)
+let angle_brackets cursor parse =
+  match angle_closer cursor with
+  | None -> None
+  | Some closer ->
+      let rewritten = Dynarray.create () and angles = ref [] in
+      let rec copy index =
+        if index <= closer then begin
+          let token = Cursor.token_at cursor index in
+          let bracket kind (span : Source.span) =
+            Dynarray.add_last rewritten { token with kind = Punctuation kind; span }
+          in
+          match token.kind with
+          | Punctuation Less ->
+              angles := token :: !angles;
+              bracket (Open Square) token.span;
+              copy (index + 1)
+          | Punctuation Greater ->
+              angles := token :: !angles;
+              bracket (Close Square) token.span;
+              copy (index + 1)
+          | Punctuation Shift_right ->
+              angles := token :: !angles;
+              let middle = token.span.start + 1 in
+              bracket (Close Square) (Source.span token.span.start middle);
+              bracket (Close Square) (Source.span middle token.span.stop);
+              copy (index + 1)
+          | Punctuation (Open _) ->
+              let nested_closer = Cursor.closer cursor index in
+              for nested = index to nested_closer do
+                Dynarray.add_last rewritten (Cursor.token_at cursor nested)
+              done;
+              copy (nested_closer + 1)
+          | _ ->
+              Dynarray.add_last rewritten token;
+              copy (index + 1)
+        end
+      in
+      copy cursor.index;
+      Habits.angle_brackets cursor ~angles:(List.rev !angles);
+      let value = parse (Cursor.over cursor (Dynarray.to_array rewritten)) in
+      Cursor.skip_to cursor (closer + 1);
+      Some value
+
+(* Whether a token of another language's macro call follows the name that
+   stops at [name_stop]: a [!] and then a [(] or a [[], with no space
+   between them, as in [println!(...)] and [vec![...]]. *)
+let macro_follows cursor ~name_stop =
+  let bang = Cursor.peek cursor and opener = Cursor.token_at cursor (cursor.Cursor.index + 1) in
+  bang.kind = Punctuation Bang && bang.span.start = name_stop
+  && opener.span.start = bang.span.stop
+  && match opener.kind with Punctuation (Open (Paren | Square)) -> true | _ -> false
+
+(* Whether a comma separates items directly inside the bracket whose opener
+   is at [opener], as in a tuple, [(a, b)]. *)
+let has_comma cursor ~opener =
+  let closer = Cursor.closer cursor opener in
+  let rec scan index =
+    index < closer
+    &&
+    match (Cursor.token_at cursor index).kind with
+    | Punctuation Comma -> true
+    | Punctuation (Open _) -> scan (Cursor.closer cursor index + 1)
+    | _ -> scan (index + 1)
+  in
+  scan (opener + 1)
+
 (* Types *)
 
 let rec type_expression cursor : type_expression = Cursor.nested cursor type_expression_in
@@ -100,7 +193,10 @@ and path_type cursor : path_type =
   let start = cursor.Cursor.index in
   let path = Atoms.upper_path cursor "a type name" in
   let arguments =
-    if Cursor.is_punctuation cursor (Open Square) then type_arguments cursor else []
+    if Cursor.is_punctuation cursor (Open Square) then type_arguments cursor
+    else if Cursor.is_punctuation cursor Less then
+      Option.value (angle_brackets cursor type_arguments) ~default:[]
+    else []
   in
   { path; arguments; span = Cursor.span_from cursor start; id = Cursor.fresh_id cursor }
 
@@ -198,6 +294,8 @@ and parenthesized_function_type cursor =
   let closer = Cursor.closer cursor start in
   Cursor.advance cursor;
   match
+    if (not (Cursor.is_keyword cursor Fn)) && has_comma cursor ~opener:start then
+      Habits.tuple cursor ~opening:(Cursor.token_at cursor start);
     if not (Cursor.is_keyword cursor Fn) then
       Cursor.fail cursor
         "a function type; parentheses in a type only hold a function type with clauses";
@@ -226,7 +324,9 @@ and bounds cursor =
   loop []
 
 and generics cursor : generic_parameter list =
-  if not (Cursor.is_punctuation cursor (Open Square)) then []
+  if Cursor.is_punctuation cursor Less then
+    Option.value (angle_brackets cursor generics) ~default:[]
+  else if not (Cursor.is_punctuation cursor (Open Square)) then []
   else
     let start = cursor.Cursor.index in
     let parameters =
@@ -590,6 +690,7 @@ and postfix cursor : expression =
         | Lower text | Upper text ->
             let name = Atoms.name cursor (Cursor.next cursor) text in
             loop (expression_node cursor start (Member (value, name)))
+        | Integer _ | Float _ -> Habits.tuple_field cursor ~field:(Cursor.peek cursor)
         | _ -> Cursor.fail cursor "a name after `.`")
     | Punctuation (Open Square) ->
         let items =
@@ -720,8 +821,8 @@ and primary cursor : expression =
       expression_node cursor start (String (string_literal cursor ~start ~modules:[] literal))
   | Keyword True -> simple True
   | Keyword False -> simple False
-  | Keyword Todo -> simple Todo
-  | Keyword Unreachable -> simple Unreachable
+  | Keyword Todo -> keyword_macro cursor (simple Todo)
+  | Keyword Unreachable -> keyword_macro cursor (simple Unreachable)
   | Keyword Break -> simple Break
   | Keyword Continue -> simple Continue
   | Keyword Self_value -> simple Self_value
@@ -732,6 +833,8 @@ and primary cursor : expression =
       Cursor.advance cursor;
       match
         let inner = expression cursor in
+        if Cursor.is_punctuation cursor Comma then
+          Habits.tuple cursor ~opening:(Cursor.token_at cursor start);
         if cursor.index < closer then Cursor.fail cursor "`)`";
         inner
       with
@@ -758,11 +861,16 @@ and named cursor start =
   let modules = Atoms.module_prefix cursor in
   match Cursor.peek_kind cursor with
   | Lower text ->
-      expression_node cursor start
-        (Name { modules; last = Atoms.name cursor (Cursor.next cursor) text })
+      let token = Cursor.next cursor in
+      let name = Atoms.name cursor token text in
+      if modules = [] && macro_follows cursor ~name_stop:token.span.stop then
+        macro cursor start name
+      else expression_node cursor start (Name { modules; last = name })
   | Upper text ->
       let name = Atoms.name cursor (Cursor.next cursor) text in
-      let value = expression_node cursor start (Name { modules; last = name }) in
+      let value =
+        path_separators cursor start (expression_node cursor start (Name { modules; last = name }))
+      in
       if brace_record_follows cursor then brace_record cursor start value else value
   | String ({ tag = Some _; _ } as literal) ->
       expression_node cursor start (String (string_literal cursor ~start ~modules literal))
@@ -772,6 +880,42 @@ and named cursor start =
       | last :: reversed -> turbofish cursor start { modules = List.rev reversed; last }
       | [] -> Cursor.fail cursor "a name")
   | _ -> Cursor.fail cursor "a name after `::`"
+
+(* [Shape::Circle] and [Vec::new], from Rust and C++: each [::] after an
+   uppercase name is reported, and parsed as the [.] that the fix writes. *)
+and path_separators cursor start (value : expression) =
+  match (Cursor.peek cursor, Cursor.peek_ahead cursor 1) with
+  | ({ kind = Punctuation Colon_colon; _ } as separator), (Upper text | Lower text) ->
+      Habits.path_separator cursor ~separator;
+      Cursor.advance cursor;
+      let name = Atoms.name cursor (Cursor.next cursor) text in
+      path_separators cursor start (expression_node cursor start (Member (value, name)))
+  | _ -> value
+
+(* [println!(...)] and [vec![...]], from Rust: reported, and parsed as a
+   call of the name, or as the list that [vec!] builds. *)
+and macro cursor start (name : name) =
+  let bang = Cursor.next cursor in
+  let opening = Cursor.peek cursor in
+  Habits.macro_call cursor ~name ~bang ~opening;
+  match opening.kind with
+  | Punctuation (Open Square) -> collection cursor
+  | _ ->
+      let callee = expression_node cursor start (Name { modules = []; last = name }) in
+      let arguments = arguments cursor in
+      expression_node cursor start (Call (callee, arguments))
+
+(* [todo!()] and [unreachable!()], from Rust, after the keyword [value]:
+   the [!] and its parentheses are reported and skipped. *)
+and keyword_macro cursor (value : expression) =
+  if macro_follows cursor ~name_stop:(Cursor.previous_stop cursor) then begin
+    let bang = Cursor.next cursor in
+    let closer = Cursor.closer cursor cursor.index in
+    Habits.keyword_macro cursor ~bang ~closing:(Cursor.token_at cursor closer)
+      ~empty:(closer = cursor.index + 1);
+    Cursor.skip_to cursor (closer + 1)
+  end;
+  value
 
 (* [Point { x: 1.0 }] on one line: a [{] that starts with a label can never
    open a block. *)

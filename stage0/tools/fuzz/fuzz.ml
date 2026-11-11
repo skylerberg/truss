@@ -140,7 +140,8 @@ let verdict : Diagnostic.Code.t -> verdict = function
       ( Unexpected_token | Needs_parentheses | Reserved_word | Statement_at_top_level | Missing_body
       | Open_range | Float_pattern | Increment | Double_negation | Match_arm_comma
       | Conditional_operator | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish
-      | Trailing_lambda | As_conversion | Elif ) ->
+      | Trailing_lambda | As_conversion | Elif | Angle_brackets | Path_separator | Qualified_variant
+      | Macro_call | Tuple ) ->
       Grammar_rejects
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
