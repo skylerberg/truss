@@ -2399,10 +2399,35 @@ test "two deposits both arrive" {
 
 - The seeded implementation switches tasks only at capability calls, which
   are the only points where one task can see what another did.
-- `simulation::World` adds a clock that moves when every task is waiting,
-  so a test of a timeout takes no real time.
 - A test in which no task can go on fails, and reports what each task was
-  waiting for.
+  waiting for. The report is a panic, so a function that provides a
+  `SeededTasks` or a `World` outside a test declares `uses Panic`.
+
+`simulation::World` provides every standard capability, with tasks
+scheduled by a seed and a clock of its own. The clock advances only when
+every task is blocked, and then it jumps to the earliest deadline of a
+sleeping task. So a test of a time limit takes no real time:
+
+```truss
+test "a reply that never arrives ends at the time limit" {
+  let world = simulation::World.new(seed: 3)
+  provide world {
+    let reply = tasks::within(Duration.seconds(5), work: fn() { wait_for_reply() })
+    assert reply is None
+    assert Clock.monotonic() == Duration.seconds(5)
+    assert world.output() == ""
+  }
+}
+```
+
+- `simulation::Setup` holds what a world starts with, such as the lines of
+  its console's input and its environment's variables.
+  `World.from(setup, seed: seed)` makes the world.
+- A `World` is a reference to its state, so it is provided without `mut`.
+  A test reads what happened, such as `world.output()` and
+  `world.records()`, inside the `provide`.
+- Each capability call into a `World` is a point where the seed may switch
+  to another task.
 
 ## Strings and templates
 
