@@ -140,6 +140,7 @@ type builder = {
   mutable fork_join_loops : fork_join_loop list;
   plain : T.ty -> bool;
   is_view : T.ty -> bool;
+  holds_function : T.ty -> bool;
   stores_function : Core.callee -> int -> bool;
       (** Whether the callee declares the parameter at a position as an [own] parameter of a
           function type. *)
@@ -649,7 +650,15 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
   in
   (* The callee may store its view arguments in a [mut] argument whose type
      can hold views. It cannot store a view of a borrowed argument that is
-     not a view: the callee's own check rejects that. *)
+     not a view: the callee's own check rejects that. From a function whose
+     result is not a view, the callee gets no view but the function itself,
+     so it can store that argument only in a type that holds a function. *)
+  let can_store_in target (other : Core.operand) =
+    match operand_type other with
+    | T.Function { output = Returns output; _ } when not (builder.is_view output) ->
+        builder.holds_function target
+    | _ -> true
+  in
   let frontier =
     List.fold_left
       (fun frontier (argument : Core.argument) ->
@@ -660,7 +669,10 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
             | Some place ->
                 let others =
                   List.filter
-                    (fun other -> other != target && builder.is_view (operand_type other))
+                    (fun other ->
+                      other != target
+                      && builder.is_view (operand_type other)
+                      && can_store_in (Core_walk.place_type found) other)
                     (viewable_arguments builder call)
                 in
                 store_views builder frontier place node.origin
@@ -1076,7 +1088,8 @@ and loop builder frontier ~bound ~views ~loan ~condition ~fork_join (body : Core
 
 (* The graph of a definition, or [None] if the definition has no body to
    check: only a function, a test, and a law's proof have one. *)
-let of_definition ~plain ~is_view ~stores_function (definition : Core.definition) : t option =
+let of_definition ~plain ~is_view ~holds_function ~stores_function (definition : Core.definition) :
+    t option =
   let body =
     match definition with
     | Function { body = Some body; _ } -> Some (body, true)
@@ -1097,6 +1110,7 @@ let of_definition ~plain ~is_view ~stores_function (definition : Core.definition
           fork_join_loops = [];
           plain;
           is_view;
+          holds_function;
           stores_function;
         }
       in

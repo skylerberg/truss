@@ -94,6 +94,7 @@ let analysis =
               match
                 Graph.of_definition ~plain:(Context.plain context)
                   ~is_view:(Context.is_view context)
+                  ~holds_function:(Context.holds_function context)
                   ~stores_function:(Context.stores_function context) form.definition
               with
               | Some graph ->

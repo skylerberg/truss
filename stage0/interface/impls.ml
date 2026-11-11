@@ -573,6 +573,7 @@ let has property database ~bounds type_ =
 let copyable = has Copyable
 let plain = has Plain
 let is_view = has View
+let holds_function = has Holds_function
 
 let contents database ~bounds type_ =
   Properties.contents database
