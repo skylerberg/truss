@@ -60,7 +60,9 @@ public fn String.last_character(self) -> Option[Character]
 public fn String.graphemes(self) yields StringSlice
   cost time O(self.length())
 {
-  todo
+  for grapheme in self.slice().graphemes() {
+    yield grapheme
+  }
 }
 
 public fn String.lines(self) yields StringSlice

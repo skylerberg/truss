@@ -1,7 +1,7 @@
 (* Writes standard/text/unicode_data.truss, the tables of character
-   properties, case mappings, and normalization that the standard library
-   reads, from the Unicode data files in the directory given as the only
-   argument. See regenerate.sh, which downloads those files and checks their
+   properties, case mappings, normalization, and grapheme cluster boundaries
+   that the standard library reads, from the Unicode data files in the
+   directory given as the only argument. See regenerate.sh, which downloads those files and checks their
    hashes first. *)
 
 let directory =
@@ -250,6 +250,60 @@ let composition_pairs excluded =
     characters
   |> List.sort compare |> List.concat
 
+(* [first; last; properties] for each run of code points with the same
+   properties that decide grapheme cluster boundaries: the grapheme cluster
+   break class, 16 times the Indic conjunct break class, and 64 for
+   Extended_Pictographic. The Hangul syllables are left out, because the
+   library tells LV from LVT by arithmetic. *)
+let grapheme_ranges ~breaks ~core ~emoji =
+  let properties = Hashtbl.create 16384 in
+  let add number ranges =
+    List.iter
+      (fun (first, last) ->
+        for code = first to last do
+          Hashtbl.replace properties code
+            (number lor Option.value ~default:0 (Hashtbl.find_opt properties code))
+        done)
+      ranges
+  in
+  List.iteri
+    (fun index name -> add (index + 1) (property breaks name))
+    [
+      "CR";
+      "LF";
+      "Control";
+      "Extend";
+      "ZWJ";
+      "Regional_Indicator";
+      "Prepend";
+      "SpacingMark";
+      "L";
+      "V";
+      "T";
+    ];
+  let conjunct name =
+    List.filter_map
+      (function
+        | range :: "InCB" :: found :: _ when found = name -> Some (Ucd.code_point_range range)
+        | _ -> None)
+      core
+  in
+  List.iteri
+    (fun index name -> add (16 * (index + 1)) (conjunct name))
+    [ "Consonant"; "Extend"; "Linker" ];
+  add 64 (property emoji "Extended_Pictographic");
+  Hashtbl.fold (fun code found all -> (code, found) :: all) properties []
+  |> List.sort compare
+  |> List.fold_left
+       (fun runs (code, found) ->
+         match runs with
+         | (first, last, earlier) :: rest when last = code - 1 && earlier = found ->
+             (first, code, earlier) :: rest
+         | _ -> (code, code, found) :: runs)
+       []
+  |> List.rev
+  |> List.concat_map (fun (first, last, found) -> [ first; last; found ])
+
 let flat ranges = List.concat_map (fun (first, last) -> [ first; last ]) ranges
 
 let print_table name numbers =
@@ -268,6 +322,8 @@ let () =
   let core = records "DerivedCoreProperties.txt" in
   let width = records "EastAsianWidth.txt" in
   let normalization = records "DerivedNormalizationProps.txt" in
+  let breaks = records "GraphemeBreakProperty.txt" in
+  let emoji = records "emoji-data.txt" in
   let canonical_index, canonical_pool = index_and_pool canonical_decompositions in
   let compatibility_index, compatibility_pool = index_and_pool compatibility_decompositions in
   let tables =
@@ -297,6 +353,7 @@ let () =
       ("compatibility_decomposition_index", compatibility_index);
       ("compatibility_decomposition_pool", compatibility_pool);
       ("composition_pairs", composition_pairs (property normalization "Full_Composition_Exclusion"));
+      ("grapheme_ranges", grapheme_ranges ~breaks ~core ~emoji);
     ]
   in
   List.iteri

@@ -1,0 +1,130 @@
+use standard::text::unicode_tables
+
+let carriage_return: UInt32 = 1
+let line_feed: UInt32 = 2
+let control: UInt32 = 3
+let extend: UInt32 = 4
+let zero_width_joiner: UInt32 = 5
+let regional_indicator: UInt32 = 6
+let prepend: UInt32 = 7
+let spacing_mark: UInt32 = 8
+let leading_jamo: UInt32 = 9
+let vowel_jamo: UInt32 = 10
+let trailing_jamo: UInt32 = 11
+let syllable_without_trailing: UInt32 = 12
+let syllable_with_trailing: UInt32 = 13
+
+let conjunct_consonant: UInt32 = 1
+let conjunct_extend: UInt32 = 2
+let conjunct_linker: UInt32 = 3
+
+internal type State(
+  break_class: UInt32,
+  regional_run_is_odd: Bool,
+  emoji_sequence: UInt32,
+  follows_linker: Bool,
+)
+
+internal fn State.start() -> State
+  cost time O(1)
+{
+  State(break_class: 0, regional_run_is_odd: false, emoji_sequence: 0, follows_linker: false)
+}
+
+fn break_class_of(properties: UInt32) -> UInt32
+  ensures result < 16
+  cost time O(1)
+{
+  properties % 16
+}
+
+fn conjunct_class_of(properties: UInt32) -> UInt32
+  ensures result < 4
+  cost time O(1)
+{
+  properties / 16 % 4
+}
+
+fn is_pictographic(properties: UInt32) -> Bool
+  cost time O(1)
+{
+  properties / 64 % 2 == 1
+}
+
+fn ends_a_line(break_class: UInt32) -> Bool
+  cost time O(1)
+{
+  break_class == carriage_return || break_class == line_feed || break_class == control
+}
+
+fn hangul_joins(before: UInt32, after: UInt32) -> Bool
+  cost time O(1)
+{
+  if before == leading_jamo {
+    after == leading_jamo || after == vowel_jamo || after == syllable_without_trailing
+      || after == syllable_with_trailing
+  } else if before == syllable_without_trailing || before == vowel_jamo {
+    after == vowel_jamo || after == trailing_jamo
+  } else if before == syllable_with_trailing || before == trailing_jamo {
+    after == trailing_jamo
+  } else {
+    false
+  }
+}
+
+internal fn State.joins(self, code: UInt32) -> Bool
+  cost time O(1)
+{
+  let properties = unicode_tables::grapheme_properties_of(code)
+  let after = break_class_of(properties)
+  if self.break_class == carriage_return && after == line_feed {
+    true
+  } else if ends_a_line(self.break_class) || ends_a_line(after) {
+    false
+  } else if hangul_joins(self.break_class, after: after) {
+    true
+  } else if after == extend || after == zero_width_joiner || after == spacing_mark || self.break_class == prepend {
+    true
+  } else if self.follows_linker && conjunct_class_of(properties) == conjunct_consonant {
+    true
+  } else if self.emoji_sequence == 2 && is_pictographic(properties) {
+    true
+  } else {
+    after == regional_indicator && self.regional_run_is_odd
+  }
+}
+
+fn emoji_sequence_after(sequence: UInt32, properties: UInt32) -> UInt32
+  cost time O(1)
+{
+  let after = break_class_of(properties)
+  if is_pictographic(properties) {
+    1
+  } else if sequence == 1 && after == extend {
+    1
+  } else if sequence == 1 && after == zero_width_joiner {
+    2
+  } else {
+    0
+  }
+}
+
+fn follows_linker_after(follows_linker: Bool, properties: UInt32) -> Bool
+  cost time O(1)
+{
+  let class = conjunct_class_of(properties)
+  class == conjunct_linker || (follows_linker && class == conjunct_extend)
+}
+
+internal fn State.after(self, code: UInt32) -> State
+  cost time O(1)
+{
+  let properties = unicode_tables::grapheme_properties_of(code)
+  let break_class = break_class_of(properties)
+  State(
+    break_class: break_class,
+    regional_run_is_odd: break_class == regional_indicator && !self.regional_run_is_odd,
+    emoji_sequence: emoji_sequence_after(self.emoji_sequence, properties: properties),
+    follows_linker: follows_linker_after(self.follows_linker, properties: properties),
+  )
+}

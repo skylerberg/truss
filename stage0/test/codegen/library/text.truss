@@ -531,3 +531,71 @@ test "a string's lowercase uses the final sigma at the end of a word" {
   assert "ǅ".to_lowercase() == "ǆ"
   assert "".to_lowercase() == ""
 }
+
+fn joined_graphemes(text: StringSlice) -> String {
+  var output = ""
+  for grapheme in text.graphemes() {
+    if output.length() > 0 {
+      mut output.push("|")
+    }
+    mut output.push(grapheme)
+  }
+  output
+}
+
+test "graphemes keep a base character with its marks" {
+  assert joined_graphemes("abc") == "a|b|c"
+  assert joined_graphemes("e\u{301}a") == "e\u{301}|a"
+  assert joined_graphemes("a\u{301}\u{323}b") == "a\u{301}\u{323}|b"
+  assert joined_graphemes("\u{301}a") == "\u{301}|a"
+  assert joined_graphemes("\u{BA8}\u{BBF}a") == "\u{BA8}\u{BBF}|a"
+  assert joined_graphemes("\u{600}12") == "\u{600}1|2"
+  assert joined_graphemes("") == ""
+}
+
+test "graphemes keep a carriage return with its line feed and split at other controls" {
+  assert joined_graphemes("a\r\nb") == "a|\r\n|b"
+  assert joined_graphemes("\n\r") == "\n|\r"
+  assert joined_graphemes("a\tb") == "a|\t|b"
+  assert joined_graphemes("\r\u{301}") == "\r|\u{301}"
+  assert joined_graphemes("a\u{200D}b") == "a\u{200D}|b"
+}
+
+test "graphemes keep the jamo of a Hangul syllable together" {
+  assert joined_graphemes("\u{1100}\u{1161}\u{11A8}") == "\u{1100}\u{1161}\u{11A8}"
+  assert joined_graphemes("\u{AC00}\u{11A8}") == "\u{AC00}\u{11A8}"
+  assert joined_graphemes("\u{AC01}\u{1100}") == "\u{AC01}|\u{1100}"
+  assert joined_graphemes("\u{D55C}\u{AE00}") == "\u{D55C}|\u{AE00}"
+  assert joined_graphemes("\u{1100}\u{1100}\u{1161}\u{1161}") == "\u{1100}\u{1100}\u{1161}\u{1161}"
+  assert joined_graphemes("\u{AC01}\u{1161}") == "\u{AC01}|\u{1161}"
+}
+
+test "graphemes pair regional indicators and join emoji sequences" {
+  assert joined_graphemes("\u{1F1FA}\u{1F1F8}\u{1F1EB}\u{1F1F7}") == "\u{1F1FA}\u{1F1F8}|\u{1F1EB}\u{1F1F7}"
+  assert joined_graphemes("\u{1F1FA}\u{1F1F8}\u{1F1EB}") == "\u{1F1FA}\u{1F1F8}|\u{1F1EB}"
+  assert joined_graphemes("a\u{1F1FA}\u{1F1F8}b") == "a|\u{1F1FA}\u{1F1F8}|b"
+  assert joined_graphemes("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}") == "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
+  assert joined_graphemes("\u{1F44D}\u{1F3FD}a") == "\u{1F44D}\u{1F3FD}|a"
+  assert joined_graphemes("\u{1F468}\u{200D}a") == "\u{1F468}\u{200D}|a"
+  assert joined_graphemes("\u{2764}\u{FE0F}\u{200D}\u{1F525}") == "\u{2764}\u{FE0F}\u{200D}\u{1F525}"
+}
+
+test "graphemes join an Indic linker to the consonant after it" {
+  assert joined_graphemes("\u{915}\u{94D}\u{937}") == "\u{915}\u{94D}\u{937}"
+  assert joined_graphemes("\u{915}\u{94D}a") == "\u{915}\u{94D}|a"
+  assert joined_graphemes("\u{915}\u{94D}\u{200D}\u{937}") == "\u{915}\u{94D}\u{200D}\u{937}"
+  assert joined_graphemes("\u{915}\u{937}") == "\u{915}|\u{937}"
+  assert joined_graphemes("\u{915}\u{93C}\u{94D}\u{924}\u{93F}") == "\u{915}\u{93C}\u{94D}\u{924}\u{93F}"
+  assert joined_graphemes("a\u{94D}\u{924}") == "a\u{94D}\u{924}"
+  assert joined_graphemes("\u{94D}\u{915}") == "\u{94D}\u{915}"
+  assert joined_graphemes("\u{1CF5}\u{915}") == "\u{1CF5}\u{915}"
+}
+
+test "a String yields the graphemes of its slice" {
+  var count: USize = 0
+  let text = "e\u{301}\u{1F1FA}\u{1F1F8}!"
+  for _ in text.graphemes() {
+    count += 1
+  }
+  assert count == 3
+}
