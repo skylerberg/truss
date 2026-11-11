@@ -1408,7 +1408,8 @@ test the prover itself:
   its model, as it does for a collection modeled by a sequence. The
   specification module has no sum over a finite set or map, so a
   potential that needs one is reported as one the prover cannot read.
-- **More in a diagnostic.** A note at a clause in another file, the
+- **More in a diagnostic.** A note at a clause in another file, which a
+  message names by its file and line instead, the
   branches a counterexample's path takes, listed by position, and a
   fix that adds an obligation about parameters alone to the function as a
   `requires`. DESIGN.md's other fixes, checking it with an `if`, using the

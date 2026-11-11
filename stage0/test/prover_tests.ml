@@ -3219,6 +3219,14 @@ let () =
         \  }\n\
          }\n")
 
+(* Clauses in other files *)
+
+let () =
+  test "a callee's clause in another file is named by its file and line" (fun () ->
+      let found = message "fn first(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" in
+      if not (contains found "The clause that must hold is at `standard/list.truss:") then
+        fail "message %S" found)
+
 (* Definitions under a quantifier *)
 
 let () =
