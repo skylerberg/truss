@@ -216,7 +216,7 @@ let bounds_of (generics : T.generic list) parameter =
 (* The named types that a type definition's fields contain, each with its
    field and how it occurs in a value of the type. *)
 let contained =
-  Query.query ~name:"contained_types" ~phase:Interfaces ~show:Path.show (fun database path ->
+  Query.query ~name:"contained_types" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       let bounds =
         match Query.demand database Environment.type_interface path with
         | Some interface -> bounds_of interface.type_generics
@@ -553,7 +553,7 @@ let check_tests database (package : string) =
 (* The package *)
 
 let check =
-  Query.query ~name:"package_checks" ~phase:Checks ~show:Fun.id ~saved:true
+  Query.query ~name:"package_checks" ~phase:Phases.checks ~show:Fun.id ~saved:true
     (fun database package_name ->
       let package = package_name in
       let declarations = declarations database package in
@@ -671,7 +671,7 @@ let check =
    trait whose method it calls with a dot, and those with an [impl] that
    answers a call or meets a bound in it. *)
 let used_packages =
-  Query.query ~name:"used_packages" ~phase:Bodies ~saved:true ~show:Names.show_key
+  Query.query ~name:"used_packages" ~phase:Phases.bodies ~saved:true ~show:Names.show_key
     (fun database (key : Names.key) ->
       let named =
         match Query.demand database Resolve.resolved key with
@@ -704,7 +704,7 @@ let used_packages =
    not among them is one only its tests use, which a project that uses the
    package once it is published does not take on. *)
 let code_packages =
-  Query.query ~name:"code_packages" ~phase:Checks ~saved:true ~show:Fun.id
+  Query.query ~name:"code_packages" ~phase:Phases.checks ~saved:true ~show:Fun.id
     (fun database package_name ->
       let package = package_name in
       List.sort_uniq compare
@@ -735,7 +735,7 @@ let manifest_sentence ~package = function
    package with an error elsewhere is not told that a dependency is unused,
    which a fix would then delete. *)
 let manifest_problems =
-  Query.query ~name:"manifest_problems" ~phase:Checks ~saved:true ~show:Fun.id
+  Query.query ~name:"manifest_problems" ~phase:Phases.checks ~saved:true ~show:Fun.id
     (fun database package_name ->
       let package = package_name in
       let keys = List.map Names.key_of (declarations database package) in

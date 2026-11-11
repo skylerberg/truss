@@ -646,3 +646,22 @@ test "append_slice adds a copy of each element of a slice" {
   assert words == ["a", "b", "a", "b"]
   assert names == ["a", "b"]
 }
+test "lists and slices are ordered by their first different element, then by length" {
+  let low: List[Int64] = [1, 2, 3]
+  let high: List[Int64] = [1, 3]
+  let longer: List[Int64] = [1, 2, 3, 0]
+  let none: List[Int64] = []
+  assert low.compare(high) == Ordering.Less && high.compare(low) == Ordering.Greater
+  assert low.compare(longer) == Ordering.Less && longer.compare(low) == Ordering.Greater
+  assert low.compare(low.copy()) == Ordering.Equal
+  assert none.compare(low) == Ordering.Less && none.compare(none.copy()) == Ordering.Equal
+  assert low < high && low <= low.copy() && high > longer && longer >= low
+  assert low[1..].compare(high[1..]) == Ordering.Less
+  assert low[..2].compare(longer[..2]) == Ordering.Equal
+  var rows: List[List[Int64]] = [[2, 1], [1, 5, 0], [], [1, 5]]
+  mut rows.sort()
+  assert rows == [[], [1, 5], [1, 5, 0], [2, 1]]
+  let words: List[String] = ["b", "a"]
+  let other: List[String] = ["b", "b"]
+  assert words < other
+}

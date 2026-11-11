@@ -48,15 +48,21 @@ It does not:
 
 ## Structure
 
-The database is three layers, each behind one narrow interface:
+The database is four layers, each behind one narrow interface:
 
 ```text
  command line   language server   agent tools
         \              |              /
          ▼             ▼             ▼
    ┌──────────────────────────────────────┐
-   │ Database: sessions, graph questions,  │  data, by definition and part
-   │ overlap, the background process       │
+   │ Database: a project's files as        │  data, by definition and part
+   │ inputs, manifests, registry, git      │
+   └──────────────────────────────────────┘
+                     │ Session
+   ┌──────────────────────────────────────┐
+   │ Session: states by name, saving,      │
+   │ trials, graph questions, the          │
+   │ background process                    │
    └──────────────────────────────────────┘
                      │ Engine
    ┌──────────────────────────────────────┐
@@ -74,30 +80,47 @@ The database is three layers, each behind one narrow interface:
 
 | Interface | Library | Used by | What it offers |
 |---|---|---|---|
-| `Query` | `query` | Compiler stages | Declaring inputs and queries, and reading them while a query runs |
-| `Engine` | `engine` | `Database` and tests | Setting inputs, keeping results current, bases, writing and opening states, and walking the graph |
-| `Store` | `store` | `Engine`, and the exact-key caches in `Database` | Bytes by content hash, results by key, and pointers |
-| `Database` | `database` | The command line, and the tools on it | Sessions of worktrees, and answers about them as data |
+| `Query` | `query` | Compiler stages | Declaring phases, inputs, and queries, and reading them while a query runs |
+| `Engine` | `engine` | `Session`, `Database`, and tests | Setting inputs, keeping results current, bases, writing and opening states, and walking the graph |
+| `Store` | `store` | `Engine` and `Session` | Bytes by content hash, results by key, and pointers |
+| `Session` | `session` | `Database` | States by name in the store, trials, what a state's graph answers, and the background process |
+| `Database` | `database` | The command line, and the tools on it | A session for each project's files, and answers about it as data |
 
 `Query` and `Engine` are two views of one implementation, `Incremental`,
 which nothing else names. These rules keep each interface narrow, so that
-each layer can be replaced without touching the others:
+each layer can be replaced without touching the others, and a test holds
+each of them by reading every layer's build file:
 
 - **Stages see only `Query`.** A stage never sees the engine, the store, the
   file system, worktrees, git, or another session.
-- **Only `Database` changes inputs,** and inputs are the only way anything
-  outside the stages reaches them. A driver that compiles, such as a test
-  run, reads results through a context the database gives it, as a query
-  would, and asks the database to set what it needs set.
+- **`Session` knows no stage and no project.** It keeps states, and what a
+  client attaches to each. What a manifest, a package, or a commit is, is
+  the client's.
+- **`Database` knows the project, and no stage beyond it.** It reads
+  manifests and module files, and sets the packages and their modules' text.
+  It does not depend on code generation or the prover.
+- **A driver sets a stage's input through its session,** with
+  `Database.set`, and that is the one way: the roots code generation
+  searches from and what the solver said are set so. A stage declares the
+  input; the database needs no function for it. Inputs are the only way
+  anything outside the stages reaches them.
+- **A driver holds no engine.** The command line reads through a session's
+  context, as a query would, and does not list the engine, the store, or
+  the session layer. A trial, a commit, a published package, and the
+  standard library's own state are each a session like any other.
+- **A session's files are one abstraction.** A worktree's directory, a
+  commit, and texts in memory each give the files' paths, a stamp for each
+  that says whether it changed, and each one's text. A session is opened
+  and kept current the same way whichever it has.
 - **Answers name definitions, never engine nodes.** A graph question returns
   paths and parts, so a different engine can answer the same questions.
 - **Each query's key and value types belong to the stage that declares
   them.** The database knows them only as values it can compare and save.
 - **Code generation does not see the store.** A test run is handed functions
   that find and keep results by key, and the directory object files go in.
-- **Clients see only sessions and answers.** Whether the session runs in the
-  background process or in the client's own process makes no difference to
-  them, since the background process runs the client's own code.
+- **Whether a session runs in the background process or in the client's own
+  process makes no difference to the client,** since the background process
+  runs the client's own code.
 
 ## The engine
 
@@ -126,7 +149,9 @@ keeps every edge in both directions:
 
 Every query has a *phase*, and reads only queries of its own phase and of
 earlier ones. Reading a later phase is an error, raised at the read. The
-phases are the compiler's own order:
+database holds no list of phases: a phase is declared with the phases it
+may read, as a query is declared with its phase, and the compiler declares
+its own, in `Phases`, each after the one before:
 
 | Phase | What its queries compute |
 |---|---|
@@ -329,7 +354,7 @@ A session's inputs are:
 | A package | Its name | Its manifest: dependencies, grants, and `usize_bits`, and its modules |
 | A module's text | Its module path | The file's text |
 | The layout | The session | Each package's directory and name, every manifest, lock file, and module file, each module's file, the project's test time limit, and each registry package of the build with its version and hash |
-| A file's stamp | Its path in the worktree | Its size, modification time, and inode |
+| A file's stamp | Its path from the project's root | What says the file has not changed: for a file on disk, its size, modification time, and inode; for a commit's or a trial's, the hash of its text |
 | A manifest's text | Its package's directory | The file's text |
 | The lock file's text | The session | The text of `truss.lock` at the project's root |
 | The wanted keys | How instances are lowered | The tests and programs whose keys have been asked for |
@@ -623,9 +648,9 @@ them, with sorted indexes like git's pack files:
   file or index costs a recomputation, never a wrong answer.
 - **Small segments are gathered into one.** Every process that writes
   leaves a segment, and a lookup searches each segment's index. Once many
-  small segments that no running process is writing have gathered, the
-  background process copies their records into its own segment and deletes
-  them.
+  small segments that no running process is writing have gathered, a
+  process that opens the store, and the background process each minute,
+  copies their records into its own segment and deletes them.
 - **A process holds only so many segments open,** and closes them all past
   that, to open each again when it is next read.
 - **The store is written with ordinary file operations:** create, append,
@@ -647,6 +672,10 @@ a name, such as the name of a worktree's current artifact.
 - **It is written beside itself and renamed into place,** after every value
   it may name is flushed, and is framed with its length and a checksum, so a
   pointer cut short reads as nothing.
+- **What a session's pointer holds is text:** the version that wrote the
+  state, its artifact's name, and each file's fingerprint. Any compiler can
+  read any pointer, so collection reads them all, and keeps the states of
+  the versions it can read.
 - **A pointer has one writer,** which holds its lock. A session's pointer is
   named by the compiler's identity and its worktree, so a new compiler
   starts from the files, and still finds every result whose key it computes
@@ -665,7 +694,8 @@ minutes it checks, and when the segments take more:
   every pointer for the state nearest to it.
 - **Only this compiler's states are read.** An artifact's bytes mean
   something only to the version that wrote them, and start with that
-  version, so another's is not read. The values of another compiler's
+  version, so another's is not read. A pointer names its state's version,
+  which says which states those are. The values of another compiler's
   states are therefore not kept. That compiler finds its state gone, or an
   input's value lost, and starts from its files. The standard
   library's artifact is kept, and so is each named state of the library.
@@ -867,11 +897,13 @@ that has no worktree, and checks a merge.
 
 ### Trials
 
-`Database.trial` gives an engine that starts from a session's state and
-changes on its own: the session's state is written, and opened again. The
-trial holds what it changes and shares the rest with the session. A rename
-checks its plan in a trial before it writes a file, a merge is checked in
-one, and an upgrade is tried in one, as a session with another lock file.
+`Database.trial` gives a session that starts from another's state, with
+some of its files replaced, added, or removed: the session's state is
+written, and opened again. The trial holds what its files change and shares
+the rest with the session, and is never saved. A rename checks its plan in
+a trial before it writes a file, a merge is checked in one, whose files are
+the merged tree's, and an upgrade is tried in one, whose lock file is the
+new one.
 
 ## Questions
 
@@ -1066,12 +1098,13 @@ with the same inputs.
   is paid once for each whole state. A state that reads only the parts it
   touches would open in the time its change needs, however large the
   project.
-- **Indexes read in part, and small segments gathered without the
-  background process.** Each index is read whole when a process opens the
-  store, and only the background process gathers small segments, so a store
-  used only with `--no-server` keeps one for each command. Reading an index
-  a block at a time, and merging by size as a log-structured store does,
-  would keep both within the logarithm of the store's size.
+- **Indexes read in part.** Each index is read whole when a process opens
+  the store. Reading an index a block at a time, and merging segments by
+  size as a log-structured store does, would keep a lookup within the
+  logarithm of the store's size.
+- **Collection without the background process.** Only the background
+  process keeps the store within its budget, so a store used only with
+  `--no-server`, as in CI, grows until it is deleted.
 - **Each stage's version in keys,** in place of the compiler's identity.
 - **Merging at the level of definitions.** Two worktrees are merged by git,
   line by line, and the merge is then checked. Truss has no comments, one

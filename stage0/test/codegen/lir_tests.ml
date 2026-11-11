@@ -763,6 +763,91 @@ let () =
       match (Intrinsic_signatures.signature Storage_shorten).generics with
       | [ { kind = Type_generic [ { trait = Top { name = "Plain"; _ }; _ } ]; _ } ] -> ()
       | _ -> fail "storage_shorten takes elements that are not known to be Plain");
+  test "a checked build stops a storage or view operation whose precondition does not hold"
+    (fun () ->
+      let open Lir_builder in
+      let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in
+      let view_ty =
+        Ground.Named { path = Intrinsic.builtin_path View; arguments = [ Type uint8 ] }
+      in
+      let extra = [ (Ground.to_string view_ty, Storage.view_shape ~usize:(named "USize") uint8) ] in
+      let anchors =
+        [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
+      in
+      let checked b ?destination operation arguments =
+        ignore
+          (Intrinsics.lower ~checks:true (shape_env ~extra ()) b intrinsic_types operation
+             ~type_arguments:[ uint8 ] arguments ~destination
+             ~site:{ definition = definition "entry"; line = 0; column = 1 })
+      in
+      let byte : Lir.operand = Constant (Integer (UInt8, Z.of_int 1)) in
+      (* [operation] is given a storage of three elements with room for no
+         more, and a view of them. *)
+      let stops saying operation =
+        let status, _, errors =
+          run_program ~extra ~anchors
+            [
+              built_entry (fun b ->
+                  let storage = local b (value storage_ty) in
+                  emit b
+                    (Assign
+                       ( at storage,
+                         Build
+                           {
+                             ty = storage_ty;
+                             variant = None;
+                             fields =
+                               [
+                                 ("buffer", Constant (Bytes "abc"));
+                                 ("length", usize 3);
+                                 ("capacity", usize 0);
+                               ];
+                           } ));
+                  checked b Storage_set_capacity [ Place (at storage); Value (usize 3) ];
+                  let view = local b ~name:"view" (value view_ty) in
+                  checked b ~destination:(at view) Storage_view [ Place (at storage) ];
+                  operation b ~storage ~view;
+                  let status = local b (value int32) in
+                  emit b (Assign (at status, Use (constant_int32 0)));
+                  status);
+            ]
+        in
+        if status <> 101 || not (contains errors saying) then
+          fail "expected a panic saying %S, got status %d (%s)" saying status errors
+      in
+      let index = "index out of bounds" and slice = "slice out of bounds" in
+      stops "an element pushed to a storage that has no room" (fun b ~storage ~view:_ ->
+          checked b Storage_push [ Place (at storage); Value byte ]);
+      stops "an element inserted into a storage that has no room" (fun b ~storage ~view:_ ->
+          checked b Storage_insert [ Place (at storage); Value (usize 1); Value byte ]);
+      stops index (fun b ~storage ~view:_ ->
+          checked b Storage_insert [ Place (at storage); Value (usize 9); Value byte ]);
+      stops "a storage lengthened to more than its capacity" (fun b ~storage ~view:_ ->
+          checked b Storage_lengthen [ Place (at storage); Value (usize 1) ]);
+      stops "a storage's capacity set to less than its length" (fun b ~storage ~view:_ ->
+          checked b Storage_set_capacity [ Place (at storage); Value (usize 2) ]);
+      stops index (fun b ~storage ~view:_ ->
+          let removed = local b (value uint8) in
+          checked b ~destination:(at removed) Storage_remove [ Place (at storage); Value (usize 3) ]);
+      stops index (fun b ~storage ~view:_ ->
+          checked b Storage_swap [ Place (at storage); Value (usize 0); Value (usize 3) ]);
+      stops index (fun b ~storage ~view:_ ->
+          checked b Storage_at [ Place (at storage); Value (usize 3) ]);
+      stops index (fun b ~storage:_ ~view -> checked b View_at [ Place (at view); Value (usize 3) ]);
+      stops index (fun b ~storage:_ ~view ->
+          checked b View_swap [ Place (at view); Value (usize 3); Value (usize 0) ]);
+      stops slice (fun b ~storage:_ ~view ->
+          let part = local b (value view_ty) in
+          checked b ~destination:(at part) View_slice
+            [ Place (at view); Value (usize 1); Value (usize 4) ]);
+      stops slice (fun b ~storage:_ ~view ->
+          let part = local b (value view_ty) in
+          checked b ~destination:(at part) View_slice
+            [ Place (at view); Value (usize 2); Value (usize 1) ]);
+      stops "an element popped from an empty storage" (fun b ~storage ~view:_ ->
+          checked b Storage_shorten [ Place (at storage); Value (usize 0) ];
+          let popped = local b (value uint8) in
+          checked b ~destination:(at popped) Storage_pop [ Place (at storage) ]));
   test "static storage given room is copied to the heap, where it can be pushed onto" (fun () ->
       let open Lir_builder in
       let storage_ty = named "Storage" ~arguments:[ Type uint8 ] in

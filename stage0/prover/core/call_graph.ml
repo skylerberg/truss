@@ -65,7 +65,7 @@ let impls database (modules : Path.module_ list) =
     modules
 
 let package_impls =
-  Query.query ~phase:Proofs ~name:"package_impls" ~show:Fun.id (fun database package ->
+  Query.query ~phase:Phases.proofs ~name:"package_impls" ~show:Fun.id (fun database package ->
       impls database (Query.demand database Workspace.modules package))
 
 (* The [impl]s of a package that a value of a type, given where one of
@@ -182,7 +182,7 @@ let build database package =
         (Query.demand database Names.declarations module_))
     modules
 
-let graph = Query.query ~phase:Proofs ~name:"call_graph" ~show:Fun.id build
+let graph = Query.query ~phase:Phases.proofs ~name:"call_graph" ~show:Fun.id build
 
 (* The methods an [impl] writes. *)
 let impl_methods database impl =

@@ -27,7 +27,7 @@ let tell database said =
   List.iter (fun (key, told) -> Engine.set engine Prover.told key told) said
 
 let example : Path.module_ = { package = "example"; modules = [ "main" ] }
-let standard = lazy (Database.standard_base ())
+let standard = lazy (Database.Testing.standard_base ())
 
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
@@ -53,8 +53,11 @@ let load text =
     Some
       ( database,
         lazy
-          (Compile.create ~want:(Database.want_in engine) database target (Lazy.force compiler)
-             (Lazy.force cache) settings) )
+          (Compile.create
+             ~want:(fun lowering wanted ->
+               Engine.set engine Compile.roots lowering
+                 (Compile.add_roots (Engine.context engine) lowering wanted))
+             database target (Lazy.force compiler) (Lazy.force cache) settings) )
 
 (* The bits and signedness of a built-in integer type, or of [Bool] as one
    bit. *)

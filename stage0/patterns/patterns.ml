@@ -611,8 +611,8 @@ let check_definition context (definition : Core.definition) =
     definition
 
 let definition_diagnostics =
-  Query.query ~name:"pattern_diagnostics" ~phase:Bodies ~saved:true ~show:Resolve.Names.show_key
-    (fun database key ->
+  Query.query ~name:"pattern_diagnostics" ~phase:Phases.bodies ~saved:true
+    ~show:Resolve.Names.show_key (fun database key ->
       match
         ( Infer.is_clean database key,
           Query.demand database Infer.core key,

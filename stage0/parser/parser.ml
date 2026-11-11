@@ -18,18 +18,15 @@ let placed parsed = List.map (Diagnostic.move parsed.value.base) parsed.diagnost
 let with_cursor source (tokens : Token.t array) piece parse =
   let diagnostics = Diagnostic.Collector.create () in
   let base = tokens.(piece.first).span.start in
-  let cursor =
-    Cursor.create ~text:(Source.text source) ~diagnostics ~base tokens ~first:piece.first
-      ~stop:piece.stop
-  in
+  let text = String.sub (Source.text source) base (tokens.(piece.stop - 1).span.stop - base) in
+  let cursor = Cursor.create ~text ~diagnostics ~base tokens ~first:piece.first ~stop:piece.stop in
   let value = parse cursor in
   (value, cursor, Diagnostic.Collector.to_list diagnostics)
 
 let item (cursor : Cursor.t) value : _ Syntax.item =
-  let last = cursor.tokens.(cursor.stop - 1) in
   {
     base = cursor.base;
-    text = Cursor.text cursor (Source.span cursor.base last.span.stop);
+    text = cursor.text;
     blank_line_before = cursor.tokens.(cursor.first).blank_line_before;
     value;
     container = None;

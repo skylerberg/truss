@@ -366,7 +366,7 @@ test "defaults" {
   assert keep("mine") == "mine"
 }
 |};
-  test "a requires clause lowered from the core form panics when it does not hold" (fun () ->
+  test "a requires clause is not evaluated when a test runs" (fun () ->
       expect_output
         {|fn step(start: Int64, by: Int64 = 1) -> Int64
   requires by > 0
@@ -374,42 +374,32 @@ test "defaults" {
   start + by
 }
 
-test "breaks" {
-  let _ = step(1, by: 0)
-}
-|}
-        "test 0 panicked\n\
-         message 65\n\
-         requirement not met: requires by > 0\n\
-        \  at example/main.truss:2:12\n");
-  test "a requires clause with ==> runs, and its right side only where its left side holds"
-    (fun () ->
-      expect_output
-        {|fn settle(items: List[Int64], limit: USize, top: USize) -> USize
+fn settle(items: List[Int64], limit: USize, top: USize) -> USize
   requires top < items.length() ==> items[top] >= 0
-  requires (limit > 3 ==> top > 3) == (top > 3 || limit <= 3)
 {
   limit
 }
 
-test "the left side does not hold" {
-  assert settle([1, 2], limit: 5, top: 9) == 5
-}
-
-test "both sides hold" {
-  assert settle([1, 2], limit: 0, top: 1) == 0
-}
-
-test "the right side does not hold" {
-  let _ = settle([1, -2], limit: 5, top: 1)
+test "clauses that do not hold" {
+  assert step(1, by: 0) == 1
+  assert settle([1, -2], limit: 5, top: 1) == 5
 }
 |}
-        "test 0 passed\n\
-         test 1 passed\n\
-         test 2 panicked\n\
-         message 99\n\
-         requirement not met: requires top < items.length() ==> items[top] >= 0\n\
-        \  at example/main.truss:2:12\n")
+        "test 0 passed\n");
+  test "a check in the standard library's inlined code reports the program's position" (fun () ->
+      expect_output
+        {|type Grid(cells: List[Int64], width: USize)
+
+fn Grid.cell(self, row: USize, column: USize) lends Int64 {
+  yield self.cells[row * self.width + column]
+}
+
+test "an index formed in a lending method" {
+  let grid = Grid(cells: [1, 2, 3, 4], width: 2)
+  let _ = grid.cell(2, column: 1)
+}
+|}
+        "test 0 panicked\nmessage 47\nindex out of bounds\n  at example/main.truss:4:9\n")
 
 let () =
   passes "an index, a lending method with a default, and a yielding method that returns early"

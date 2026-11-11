@@ -59,7 +59,7 @@ let next kind start stop ~ending =
       span = span start stop;
       first_line_break = None;
       blank_line = false;
-      unterminated = ending = Unterminated;
+      unterminated_string = ending = Unterminated;
     }
 
 (* An interpolation, at its delimiter: `${`, or the `$`s and `{` of a raw
@@ -96,7 +96,7 @@ let rec scan_interpolation cursor ~scan ~nesting ~delimiter_length =
           position;
           first_line_break = None;
           blank_line = false;
-          unterminated = !ending = Unterminated;
+          ends_unterminated = !ending = Unterminated;
         }
     in
     let next_input () =

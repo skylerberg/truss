@@ -463,4 +463,96 @@ let () =
       let status, _, errors = run_program ~env [ entry; Glue.drop glue handle_ty ] in
       if status <> 1 then fail "the descriptor was not free again (status %d, %s)" status errors)
 
+(* The checks of a build that does not wait for proofs *)
+
+let checked b ?destination ?(type_arguments = []) operation arguments =
+  ignore
+    (Intrinsics.lower ~checks:true (shape_env ~extra ()) b intrinsic_types operation ~type_arguments
+       arguments ~destination
+       ~site:{ definition = definition "entry"; line = 0; column = 1 })
+
+(* The position that a panic in [entry] reports. *)
+let anchors = [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
+
+let expect_panic ~saying instances =
+  let status, _, errors = run_program ~extra ~anchors instances in
+  if status <> 101 then fail "expected a panic, got status %d (%s)" status errors;
+  if not (contains errors saying) then fail "expected %S in %S" saying errors
+
+let () =
+  test "a checked build stops a C library call that is given less room than it writes" (fun () ->
+      let open Lir_builder in
+      expect_panic ~saying:"a call of the C library with less room than it writes"
+        [
+          built_entry (fun b ->
+              let storage = local b (value bytes_ty) in
+              checked b ~destination:(at storage) ~type_arguments:[ uint8 ] Storage_with_capacity
+                [ Value (usize 4) ];
+              let got = local b (value isize) in
+              checked b ~destination:(at got) (Libc Read)
+                [ Value (constant_int32 0); Place (at storage); Value (usize 100) ];
+              let status = local b (value int32) in
+              emit b (Assign (at status, Use (constant_int32 0)));
+              status);
+        ]);
+  test "a checked build stops a C library call that is given fewer elements than it reads"
+    (fun () ->
+      let open Lir_builder in
+      expect_panic ~saying:"a call of the C library with fewer elements than it reads"
+        [
+          built_entry (fun b ->
+              let view = view_of b "short" in
+              let wrote = local b (value isize) in
+              checked b ~destination:(at wrote) (Libc Write)
+                [ Value (constant_int32 1); Place (at view); Value (usize 100) ];
+              let status = local b (value int32) in
+              emit b (Assign (at status, Use (constant_int32 0)));
+              status);
+        ]);
+  test "a checked build stops a C library call whose text does not end with a zero" (fun () ->
+      let open Lir_builder in
+      expect_panic ~saying:"a call of the C library with text that does not end with a zero"
+        [
+          built_entry (fun b ->
+              let name = view_of b "/nonexistent/truss" in
+              let wanted = flags b [ O_rdonly ] in
+              let descriptor = local b (value int32) in
+              checked b ~destination:(at descriptor) (Libc Open)
+                [ Place (at name); Value (Copy (at wanted)); Value (constant_int32 0) ];
+              descriptor);
+        ]);
+  test "a checked build passes a C library call whose arguments are large enough" (fun () ->
+      let open Lir_builder in
+      expect_status ~extra ~anchors (Libc.value host Enoent)
+        [
+          built_entry (fun b ->
+              let name = view_of b "/nonexistent/truss\000" in
+              let wanted = flags b [ O_rdonly ] in
+              checked b (Libc Open)
+                [ Place (at name); Value (Copy (at wanted)); Value (constant_int32 0) ];
+              let error = local b (value int32) in
+              checked b ~destination:(at error) (Libc Errno) [];
+              error);
+        ]);
+  test "a checked build stops a float converted to an integer type that cannot hold it" (fun () ->
+      let open Lir_builder in
+      let float64 = named "Float64" in
+      let extra = extra @ [ (Ground.to_string float64, Memory_layout.Scalar Float64) ] in
+      let convert b number =
+        let result = local b (value int32) in
+        ignore
+          (Intrinsics.lower ~checks:true (shape_env ~extra ()) b intrinsic_types Convert
+             ~type_arguments:[ float64; int32 ]
+             [ Value (Constant (Float64 (Int64.bits_of_float number))) ]
+             ~destination:(Some (at result))
+             ~site:{ definition = definition "entry"; line = 0; column = 1 });
+        result
+      in
+      expect_status ~extra ~anchors 7 [ built_entry (fun b -> convert b 7.9) ];
+      let status, _, errors =
+        run_program ~extra ~anchors [ built_entry (fun b -> convert b 1.0e30) ]
+      in
+      if status <> 101 || not (contains errors "conversion out of range") then
+        fail "expected a panic about the conversion, got status %d (%s)" status errors)
+
 let () = Harness.finish ()

@@ -50,7 +50,7 @@ type grant = {
 (* The capabilities that a package's manifest grants to a dependency, or
    [None] for a package that the manifest does not list. *)
 let granted =
-  Query.query ~name:"granted" ~phase:Interfaces ~saved:true
+  Query.query ~name:"granted" ~phase:Phases.interfaces ~saved:true
     ~show:(fun (package, dependency) -> Printf.sprintf "%s to %s" package dependency)
     (fun database (package, dependency) ->
       Option.map

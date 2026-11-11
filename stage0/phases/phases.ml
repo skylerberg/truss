@@ -1,0 +1,15 @@
+(* The compiler's phases, each declared after the one before it. *)
+
+let syntax = Query.phase ~name:"syntax" ~after:[]
+let declarations = Query.phase ~name:"declarations" ~after:[ syntax ]
+let resolution = Query.phase ~name:"resolution" ~after:[ declarations ]
+let interfaces = Query.phase ~name:"interfaces" ~after:[ resolution ]
+let bodies = Query.phase ~name:"bodies" ~after:[ interfaces ]
+let checks = Query.phase ~name:"checks" ~after:[ bodies ]
+let proofs = Query.phase ~name:"proofs" ~after:[ checks ]
+let verdicts = Query.phase ~name:"verdicts" ~after:[ proofs ]
+let diagnostics = Query.phase ~name:"diagnostics" ~after:[ verdicts ]
+let lowering = Query.phase ~name:"lowering" ~after:[ diagnostics ]
+let linking = Query.phase ~name:"linking" ~after:[ lowering ]
+let recursion = Query.phase ~name:"recursion" ~after:[ linking ]
+let keys = Query.phase ~name:"keys" ~after:[ recursion ]
