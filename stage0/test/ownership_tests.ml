@@ -273,6 +273,35 @@ let () =
     \  handlers.first = fn(value) { value + amount }\n\
      }\n"
     "ownership.view_escapes";
+  rejected "a capturing lambda cannot be passed with a `mut` parameter that holds a function"
+    "fn set(handlers: mut Handlers, first: fn(Int64) -> Int64) {\n\
+    \  handlers.first = first\n\
+     }\n\n\
+     fn keep(handlers: mut Handlers, amount: Int64) {\n\
+    \  set(mut handlers, first: fn(value) { value + amount })\n\
+     }\n"
+    "ownership.view_escapes";
+  (* A slice is a view, but no part of it holds a function, so the callee
+     cannot store the lambda in it. *)
+  accepted "a capturing lambda can be passed with a `mut` slice parameter"
+    "fn arrange[Element](items: mut Slice[Element], before: fn(Element, Element) -> Bool) {}\n\n\
+     fn by_key[Element](items: mut Slice[Element], key: fn(Element) -> Int64) {\n\
+    \  arrange(mut items, before: fn(first, second) { key(first) < key(second) })\n\
+     }\n";
+  rejected "a capturing lambda cannot be passed with a `mut` slice of functions"
+    "fn fill(items: mut Slice[fn(Int64) -> Int64], from: fn(Int64) -> Int64) {}\n\n\
+     fn keep(items: mut Slice[fn(Int64) -> Int64], amount: Int64) {\n\
+    \  fill(mut items, from: fn(value) { value + amount })\n\
+     }\n"
+    "ownership.view_escapes";
+  rejected
+    "a lambda that returns a view of its capture cannot be passed with a `mut` slice of views"
+    "fn fill(items: mut Slice[Slice[Int64]], from: fn() -> Slice[Int64]) {}\n\n\
+     fn keep(items: mut Slice[Slice[Int64]]) {\n\
+    \  let numbers = [1, 2, 3]\n\
+    \  fill(mut items, from: fn() { numbers[..] })\n\
+     }\n"
+    "ownership.view_escapes";
   rejected "a capturing lambda cannot be passed to an `own` function-typed parameter"
     "fn give(amount: Int64) {\n  take(fn(value) { value + amount })\n}\n" "ownership.view_escapes";
   rejected

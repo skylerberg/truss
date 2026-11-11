@@ -2275,26 +2275,66 @@ int32_t t_runtime_tasks_cancel(uint64_t handle) {
   return 1;
 }
 
+/* Makes one waiter of [key] ready: a thread if one waits, and otherwise
+   the task that has waited longest. A caller that has taken a ticket and
+   has not parked yet returns from its wait at once, since the count has
+   changed. */
+static void t_wake_one(uint64_t key) {
+  struct t_wait_slot *slot = t_wait_slot(key);
+  struct t_task **task = NULL;
+  struct t_thread_waiter **thread = NULL;
+  pthread_mutex_lock(&slot->lock);
+  atomic_fetch_add(&slot->wakes, 1);
+  /* A waiter is put at the front of its list, so the last one with the
+     key has waited longest. A program has few threads that are not tasks,
+     so taking a thread first keeps no task waiting for long, and taking a
+     task first could keep a thread waiting for ever. */
+  for (struct t_thread_waiter **link = &slot->threads; *link != NULL; link = &(*link)->next)
+    if ((*link)->key == key) thread = link;
+  if (thread == NULL)
+    for (struct t_task **link = &slot->parked; *link != NULL; link = &(*link)->next)
+      if ((*link)->wait_key == key) task = link;
+  struct t_thread_waiter *woken_thread = NULL;
+  struct t_task *woken_task = NULL;
+  if (thread != NULL) {
+    woken_thread = *thread;
+    *thread = woken_thread->next;
+  } else if (task != NULL) {
+    woken_task = *task;
+    *task = woken_task->next;
+  }
+  pthread_mutex_unlock(&slot->lock);
+  if (woken_thread != NULL) t_unblock(&woken_thread->woken);
+  if (woken_task != NULL) t_task_ready(woken_task);
+}
+
 /* A mutex is a [uint64_t] that its owner initialized to zero: 0 is
-   unlocked and 1 is locked. A caller that finds it locked waits on the
-   mutex's address as a key. The wait is not cancellable: a cancelled task
-   still waits for the mutex, since the call it made has no other result
-   to return. */
+   unlocked, 1 is locked, and 2 is locked while a caller may wait for it.
+   These are the states of Drepper's "Futexes Are Tricky". A caller that
+   finds the mutex locked sets it to 2 and waits on its address as a key,
+   and an unlock that finds 2 wakes one waiter. A caller that takes the
+   mutex after it has waited takes it as 2, since it cannot tell whether
+   another caller still waits. So a lock and an unlock that no other
+   caller contends are one atomic operation each.
+
+   The wait is not cancellable: a cancelled task still waits for the
+   mutex, since the call it made has no other result to return. */
 int32_t t_runtime_tasks_lock(uint64_t mutex) {
   uint64_t *word = (uint64_t *)(uintptr_t)mutex;
+  uint64_t unlocked = 0;
+  if (__atomic_compare_exchange_n(word, &unlocked, 1, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+    return 0;
   for (;;) {
     uint64_t ticket = t_runtime_tasks_watch(mutex);
-    uint64_t unlocked = 0;
-    if (__atomic_compare_exchange_n(word, &unlocked, 1, 0, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
-      return 0;
+    if (__atomic_exchange_n(word, 2, __ATOMIC_SEQ_CST) == 0) return 0;
     t_wait(mutex, ticket, 0);
   }
 }
 
 int32_t t_runtime_tasks_unlock(uint64_t mutex) {
   uint64_t *word = (uint64_t *)(uintptr_t)mutex;
-  __atomic_store_n(word, 0, __ATOMIC_RELEASE);
-  return t_runtime_tasks_wake(mutex);
+  if (__atomic_exchange_n(word, 0, __ATOMIC_SEQ_CST) == 2) t_wake_one(mutex);
+  return 0;
 }
 
 /* A task goes to the end of the ready queue. */

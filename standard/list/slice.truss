@@ -225,14 +225,116 @@ public fn Slice[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
   true
 }
 
+fn failure_table[Element: Equal](needle: Slice[Element]) -> List[USize]
+  ensures result.length() == needle.length()
+  ensures forall i in 0..result.length() => result.model()[i] <= i
+  cost time O(needle.length() * time(Element.equal))
+{
+  var table: intrinsic::Storage[USize] = intrinsic::storage_with_capacity(needle.length())
+  if needle.length() == 0 {
+    return List(storage: own table)
+  }
+  intrinsic::storage_push(mut table, value: 0)
+  var matched: USize = 0
+  var index: USize = 1
+  while index < needle.length()
+    invariant 1 <= index
+    invariant index <= needle.length()
+    invariant matched < index
+    invariant intrinsic::storage_length(table) == index
+    invariant intrinsic::storage_capacity(table) == needle.length()
+    invariant forall i in 0..index => intrinsic::storage_model(table)[i] <= i
+    decreases needle.length() - index
+    cost time O((4 * index - matched) * time(Element.equal))
+  {
+    let before = matched
+    while matched > 0 && needle[index] != needle[matched]
+      invariant matched <= before
+      decreases matched
+      cost time O((before - matched + 1) * time(Element.equal))
+    {
+      matched = intrinsic::view_at(intrinsic::storage_view(table), index: matched - 1)
+    }
+    if needle[index] == needle[matched] {
+      matched += 1
+    }
+    intrinsic::storage_push(mut table, value: matched)
+    index += 1
+  }
+  List(storage: own table)
+}
+
+fn matched_after[Element: Equal](
+  haystack: Slice[Element],
+  needle: Slice[Element],
+  table: Slice[USize],
+  matched: USize,
+  index: USize,
+) -> USize
+  requires index < haystack.length()
+  requires matched < needle.length()
+  requires table.length() == needle.length()
+  requires forall i in 0..table.length() => table.model()[i] <= i
+  ensures result <= matched + 1
+  ensures result <= needle.length()
+  cost time O((matched + 3 - result) * time(Element.equal))
+{
+  var current = matched
+  while current > 0 && haystack[index] != needle[current]
+    invariant current <= matched
+    decreases current
+    cost time O((matched - current + 1) * time(Element.equal))
+  {
+    current = table[current - 1]
+  }
+  if haystack[index] == needle[current] { current + 1 } else { current }
+}
+
+fn find_with_table[Element: Equal](haystack: Slice[Element], needle: Slice[Element], table: Slice[USize]) -> Option[USize]
+  requires needle.length() > 0
+  requires table.length() == needle.length()
+  requires forall i in 0..table.length() => table.model()[i] <= i
+  ensures match result {
+    Some(index) => index + needle.length() <= haystack.length()
+    None => true
+  }
+  cost time O(haystack.length() * time(Element.equal))
+{
+  var found = false
+  var first: USize = 0
+  var matched: USize = 0
+  var index: USize = 0
+  while index < haystack.length() && !found
+    invariant index <= haystack.length()
+    invariant matched < needle.length()
+    invariant matched <= index
+    invariant found ==> first + needle.length() <= haystack.length()
+    decreases haystack.length() - index
+    cost time O((4 * index - matched) * time(Element.equal))
+  {
+    matched = matched_after(haystack, needle: needle, table: table, matched: matched, index: index)
+    index += 1
+    if matched == needle.length() {
+      found = true
+      first = index - matched
+      matched = table[matched - 1]
+    }
+  }
+  if found { Some(first) } else { None }
+}
+
 public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Option[USize]
   ensures match result {
     Some(index) => index + needle.length() <= self.length()
     None => true
   }
-  cost time O(self.length() + needle.length())
+  cost time O(self.length() * time(Element.equal) + needle.length() * time(Element.equal))
 {
-  todo
+  if needle.length() == 0 {
+    return Some(0)
+  }
+  let table = failure_table(needle)
+  find_with_table(self, needle: needle, table: table.slice())
 }
 
 public fn Slice[Element: Ordered].is_sorted(self) -> Bool
@@ -241,15 +343,138 @@ public fn Slice[Element: Ordered].is_sorted(self) -> Bool
   forall i in 1..self.length() => self[i - 1] <= self[i]
 }
 
+theorem at_most_then_less[Element: Ordered](first: Element, second: Element, third: Element)
+  requires first <= second
+  requires second < third
+  ensures first < third
+  cost time finite
+{
+}
+
+theorem less_then_at_most[Element: Ordered](first: Element, second: Element, third: Element)
+  requires first < second
+  requires second <= third
+  ensures first < third
+  cost time finite
+{
+}
+
+theorem less_is_not_equal[Element: Ordered](first: Element, second: Element)
+  requires first < second
+  ensures !(first == second)
+  ensures !(second == first)
+  cost time finite
+{
+}
+
+theorem greater_is_less_reversed[Element: Ordered](first: Element, second: Element)
+  requires first.compare(second) == Ordering.Greater
+  ensures second < first
+  cost time finite
+{
+}
+
+theorem equal_by_compare[Element: Ordered](first: Element, second: Element)
+  requires first.compare(second) == Ordering.Equal
+  ensures first == second
+  cost time finite
+{
+}
+
+theorem sorted_between[Element: Ordered](items: Slice[Element], first: USize, second: USize)
+  requires items.is_sorted()
+  requires first <= second
+  requires second < items.length()
+  ensures items[first] <= items[second]
+  decreases second - first
+  cost time finite
+{
+  if first < second {
+    sorted_between(items, first: first, second: second - 1)
+    assert items[second - 1] <= items[second]
+  }
+}
+
+theorem sorted_below[Element: Ordered](items: Slice[Element], target: Element, last: USize, bound: USize)
+  requires items.is_sorted()
+  requires last < items.length()
+  requires bound <= last + 1
+  requires bound <= items.length()
+  requires items[last] < target
+  ensures forall i in 0..bound => items[i] < target
+  ensures forall i in 0..items.length() => i < bound ==> !(items.model()[i] == target)
+  decreases bound
+  cost time finite
+{
+  if bound > 0 {
+    sorted_below(items, target: target, last: last, bound: bound - 1)
+    sorted_between(items, first: bound - 1, second: last)
+    at_most_then_less(items[bound - 1], second: items[last], third: target)
+    less_is_not_equal(items[bound - 1], second: target)
+  }
+}
+
+theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, first: USize, bound: USize)
+  requires items.is_sorted()
+  requires first <= bound
+  requires bound <= items.length()
+  requires first < items.length()
+  requires target < items[first]
+  ensures forall i in bound..items.length() => target < items[i]
+  ensures forall i in bound..items.length() => !(items.model()[i] == target)
+  decreases items.length() - bound
+  cost time finite
+{
+  if bound < items.length() {
+    sorted_above(items, target: target, first: first, bound: bound + 1)
+    sorted_between(items, first: first, second: bound)
+    less_then_at_most(target, second: items[first], third: items[bound])
+    less_is_not_equal(target, second: items[bound])
+  }
+}
+
 public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option[USize]
   requires self.is_sorted()
   ensures match result {
     Some(index) => index < self.length() && self[index] == target
     None => !self.contains(target)
   }
-  cost time O(log(self.length()))
+  cost time O(log(self.length()) * time(Element.compare))
 {
-  todo
+  var low: USize = 0
+  var high = self.length()
+  while low < high
+    invariant low <= high
+    invariant high <= self.length()
+    invariant forall i in 0..low => !(self.model()[i] == target)
+    invariant forall i in high..self.length() => !(self.model()[i] == target)
+    decreases high - low
+    cost time O((log(self.length()) - log(high - low)) * time(Element.compare))
+  {
+    let middle = low + (high - low) / 2
+    match self[middle].compare(target) {
+      Less => {
+        proof {
+          sorted_below(self, target: target, last: middle, bound: middle + 1)
+        }
+        low = middle + 1
+      }
+      Greater => {
+        proof {
+          greater_is_less_reversed(self[middle], second: target)
+          sorted_above(self, target: target, first: middle, bound: middle)
+        }
+        high = middle
+      }
+      Equal => {
+        proof {
+          equal_by_compare(self[middle], second: target)
+        }
+        return Some(middle)
+      }
+    }
+  }
+  None
 }
 
 public fn Slice[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
@@ -385,7 +610,19 @@ public fn Slice[Element: Copyable].repeated(self, times: USize) -> List[Element]
 public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
   cost time finite
 {
-  todo
+  var output = TextBuilder.new()
+  var index: USize = 0
+  while index < self.length()
+    invariant index <= self.length()
+    decreases self.length() - index
+  {
+    if index > 0 {
+      mut output.write(separator)
+    }
+    self[index].display(mut output)
+    index += 1
+  }
+  own output.finish()
 }
 
 public fn Slice[Element].enumerate(self) yields core::Indexed[Element]
@@ -672,11 +909,72 @@ public fn Slice[Element: Ordered].sort(mut self)
   todo
 }
 
+fn sift_down_by[Element](
+  items: mut Slice[Element],
+  position: USize,
+  limit: USize,
+  room: USize,
+  compare: (fn(Element, Element) -> Ordering cost time finite),
+)
+  requires 1 <= position
+  requires limit <= items.length()
+  ensures items.length() == old(items.length())
+  decreases room
+  cost time O(log(room) * time(compare))
+{
+  if room >= 2 && position <= limit / 2 {
+    var largest = 2 * position
+    if largest < limit && compare(items[largest - 1], items[largest]) == Ordering.Less {
+      largest = largest + 1
+    }
+    if compare(items[position - 1], items[largest - 1]) == Ordering.Less {
+      mut items.swap(position - 1, second: largest - 1)
+      sift_down_by(mut items, position: largest, limit: limit, room: room / 2, compare: compare)
+    }
+  }
+}
+
+fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering cost time finite))
+  ensures items.length() == old(items.length())
+  cost time O(items.length() * log(items.length()) * time(compare))
+{
+  let count = items.length()
+  var position = count / 2
+  while position >= 1
+    invariant items.length() == count
+    invariant position <= count / 2
+    decreases position
+    cost time O((count / 2 - position) * log(count) * time(compare))
+  {
+    sift_down_by(mut items, position: position, limit: count, room: count, compare: compare)
+    position -= 1
+  }
+}
+
+fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering cost time finite))
+  ensures items.length() == old(items.length())
+  cost time O(items.length() * log(items.length()) * time(compare))
+{
+  let count = items.length()
+  var unsorted = count
+  while unsorted >= 2
+    invariant items.length() == count
+    invariant unsorted <= count
+    decreases unsorted
+    cost time O((count - unsorted) * log(count) * time(compare))
+  {
+    unsorted -= 1
+    mut items.swap(0, second: unsorted)
+    sift_down_by(mut items, position: 1, limit: unsorted, room: count, compare: compare)
+  }
+}
+
 public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
-  todo
+  build_heap_by(mut self, compare: compare)
+  drain_heap_by(mut self, compare: compare)
 }
 
 public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))

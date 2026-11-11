@@ -74,7 +74,13 @@ let has_bound database ~bounds type_ trait =
     (fun (bound : T.trait_reference) -> Path.equal bound.trait trait)
     (known_bounds database ~bounds type_)
 
-type property = Copyable | Plain | View
+type property =
+  | Copyable
+  | Plain
+  | View
+  | Holds_function
+      (** A value of the type can hold a function value: the type is a function type, or a type
+          whose value is of an unknown type, or it has a part that is one. *)
 
 (* How a type occurs in a value of another type. *)
 type occurrence =
@@ -105,16 +111,19 @@ type facts = {
   plain : T.ty list option;  (** The same for [Plain]. *)
   view : T.ty list option;
       (** The types of which any one makes the type a view. [None] if the type always is one. *)
+  holds_function : T.ty list option;  (** The same for [Holds_function]. *)
   contains : (T.ty * occurrence) list;  (** The types that a value contains. *)
 }
 
 (* The facts of a type with no fields. *)
-let empty = { copyable = Some []; plain = Some []; view = Some []; contains = [] }
+let empty =
+  { copyable = Some []; plain = Some []; view = Some []; holds_function = Some []; contains = [] }
 
 let conditions_of facts = function
   | Copyable -> facts.copyable
   | Plain -> facts.plain
   | View -> facts.view
+  | Holds_function -> facts.holds_function
 
 let type_arguments arguments =
   List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
@@ -161,7 +170,8 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
   (* A function value may be a capturing lambda, which views its captures.
      The type does not state whether the function captures, so every
      function type is a view type. *)
-  | T.Function _ -> if property = View then None else Some []
+  | T.Function _ -> (
+      match property with View | Holds_function -> None | Copyable | Plain -> Some [])
   | T.Parameter _ | T.Projection _ -> leaf type_
   | T.Any trait -> (
       let requires traits =
@@ -174,7 +184,8 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
       | Plain -> None
       (* The type does not name the type of the value that it holds, so an
          [any] is a view type unless its trait requires [Storable]. *)
-      | View -> if requires [ storable_trait ] then Some [] else None)
+      | View -> if requires [ storable_trait ] then Some [] else None
+      | Holds_function -> None)
   (* A cursor from an [own self] method owns the collection that it iterates
      over. A cursor from a [self] method views it. *)
   | T.Cursor { method_ = Method { receiver = Own; _ }; arguments } when property = View ->
@@ -187,12 +198,13 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
          no value. It holds a view only if its value does. *)
       | Some Shared, Copyable -> Some []
       | Some Shared, Plain -> None
-      | Some Shared, View -> each (type_arguments arguments)
+      | Some Shared, View | Some (Shared | View), Holds_function -> each (type_arguments arguments)
       | Some (Storage | Array), _ -> each (type_arguments arguments)
       | Some _, _ -> Some []
       | None, _ -> (
           match Query.demand database Environment.type_interface path with
-          | None -> if property = View then Some [] else None
+          | None -> (
+              match property with View | Holds_function -> Some [] | Copyable | Plain -> None)
           | Some _ when List.exists (T.equal type_) within -> Some []
           | Some _ when List.length within > limit -> None
           | Some interface ->
@@ -339,12 +351,13 @@ let facts_from database ~facts_of (interface : T.type_interface) =
   in
   match interface.shape with
   | Error_shape _ | Builtin_type _ -> empty
-  | Todo_type -> { empty with copyable = None; plain = None }
+  | Todo_type -> { empty with copyable = None; plain = None; holds_function = None }
   | Record _ | Sum _ ->
       {
         copyable = owned Copyable;
         plain = owned Plain;
         view = conditions View field_types;
+        holds_function = conditions Holds_function field_types;
         contains =
           List.sort_uniq compare
             (List.concat_map
@@ -474,6 +487,9 @@ let has database ~bounds ~normalize property type_ =
       | Copyable -> bounded copyable_trait || bounded plain_trait
       | Plain -> bounded plain_trait
       | View -> is_open type_
+      (* A parameter is a type that the code cannot name, so no function
+         value can be stored where it is expected. *)
+      | Holds_function -> true
     in
     if adds_nothing then Some [] else None
   in
@@ -481,7 +497,9 @@ let has database ~bounds ~normalize property type_ =
     conditions database ~facts_of:(Query.demand database facts) ~resolve:normalize ~leaf property
       (normalize type_)
   in
-  match property with Copyable | Plain -> Option.is_some found | View -> Option.is_none found
+  match property with
+  | Copyable | Plain -> Option.is_some found
+  | View | Holds_function -> Option.is_none found
 
 (* Whether a type is [Storable]: it is not a view type for every
    instantiation of its generic parameters. A generic parameter, or an

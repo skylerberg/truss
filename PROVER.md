@@ -1243,15 +1243,19 @@ Each obligation the prover could not prove is an error, with the shared
 ## Incremental work
 
 A definition's obligations are made again when something they read
-changed, as DATABASE.md describes for every query. The solver is asked
-again only about a query whose text changed. A definition's outcome is a saved result worked out
-from its obligations and from what the solver and running code were told,
-which are the database's inputs, so a definition whose reads have not
+changed, as DATABASE.md describes for every query. A caller reads its
+callee's specification, whose body is there only where the callee is a
+function in the logic, and the callee's text only to report something about
+it, so editing or reformatting the body of any other function makes no
+caller's obligations again. A definition's outcome is a saved result worked
+out from its obligations and from what the solver and running code were
+told, which are the database's inputs, so a definition whose reads have not
 changed is neither translated nor asked anything again, in this process or
 the next. The driver asks for every outcome, asks the solver and running
 code what they wait for, together, tells the database the answers, and
 asks again, which takes a round or two, since an obligation asks again only
-after an answer such as running out of steps:
+after an answer such as running out of steps. The solver is asked again
+only about a query whose text changed:
 
 | Edit | Solved again |
 |---|---|

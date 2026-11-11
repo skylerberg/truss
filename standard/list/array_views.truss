@@ -147,9 +147,9 @@ public fn Array[Element: Equal, count: USize].find_slice(self, needle: Slice[Ele
     Some(index) => index + needle.length() <= self.length()
     None => true
   }
-  cost time O(self.length() + needle.length())
+  cost time O(self.length() * time(Element.equal) + needle.length() * time(Element.equal))
 {
-  todo
+  self.slice().find_slice(needle)
 }
 
 public fn Array[Element: Ordered, count: USize].is_sorted(self) -> Bool
@@ -164,9 +164,9 @@ public fn Array[Element: Ordered, count: USize].binary_search(self, target: Elem
     Some(index) => index < self.length() && self[index] == target
     None => !self.contains(target)
   }
-  cost time O(log(self.length()))
+  cost time O(log(self.length()) * time(Element.compare))
 {
-  todo
+  self.slice().binary_search(target)
 }
 
 public fn Array[Element, count: USize].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> USize
@@ -251,7 +251,7 @@ public fn Array[Element: Copyable, count: USize].repeated(self, times: USize) ->
 public fn Array[Element: Display, count: USize].join(self, separator: StringSlice) -> String
   cost time finite
 {
-  todo
+  self.slice().join(separator)
 }
 
 public fn Array[Element, count: USize].enumerate(self) yields core::Indexed[Element]
@@ -462,7 +462,7 @@ public fn Array[Element, count: USize].sort_by(mut self, compare: (fn(Element, E
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
-  todo
+  mut self[..].sort_by(compare)
 }
 
 public fn Array[Element, count: USize].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))

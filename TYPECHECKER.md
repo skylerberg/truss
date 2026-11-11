@@ -566,9 +566,9 @@ derived from the type's shape, as a condition on its type parameters:
   changes how every use of the type is checked. Like any other change of shape,
   it invalidates every result that read the shape.
 
-`Copyable`, `Plain`, the view property, and the types that a type contains
-(see [Recursive types](#recursive-types)) are *facts of the type's
-definition*. They are computed once per definition and stored as a result of
+`Copyable`, `Plain`, the view property, whether a value can hold a function,
+and the types that a type contains (see [Recursive types](#recursive-types))
+are *facts of the type's definition*. They are computed once per definition and stored as a result of
 their own:
 
 - **A fact is a list of conditions.** For `Copyable` and `Plain`, the
@@ -1334,7 +1334,13 @@ uses one definition of the places that a value views, `Graph.views_of`.
   live. A borrowed argument that is not a view, such as the buffer in `mut
   reader.read(mut buffer, limit: 2)`, is not stored: the callee's own check
   rejects that, by the rule on stored views below. So `reader` does not view
-  `buffer` afterwards, and the next read into the same buffer is accepted.
+  `buffer` afterwards, and the next read into the same buffer is accepted. A
+  function argument whose result is not a view is the exception: the callee
+  can get no view from it but the function itself, so only a `mut` argument
+  whose type can hold a function may store it. A slice is a view, but it holds
+  a function only if its elements do, so `mut items.sort_by(fn(first, second)
+  { key(first) < key(second) })` is accepted where `items` is a `mut` slice
+  parameter.
 - **The value of an `if`, a `match`, or a block views what any of its tail
   expressions views.** After `let part = if first { items[..1] } else {
   items[1..] }`, `part` views `items`. A copy of a view has the same views, and
@@ -2445,11 +2451,3 @@ defines the method, the checker records the callee as the `impl`'s method,
 not the trait's. `List` gets `each(self)` from `impl Iterable`. The type of
 the cursor and the contract of a loop over a list must then come from the
 list's `each`, which only the `impl`'s method has.
-
-## Not built
-
-- **Callers' proofs that read the specification.** The prover still loads a
-  callee's whole core form and its source text, so a change to a callee's
-  body runs its callers' proofs again, and they find the answer to each
-  solver query in the cache, keyed by the query's text. It will load the
-  callee's specification, and the callee's text only to report an error.

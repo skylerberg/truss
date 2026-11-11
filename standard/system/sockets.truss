@@ -33,6 +33,10 @@ internal fn connect(
 ) -> Result[network::Connection, SystemError] {
   let handle = handles::with_file_error(opened(family_of(address), kind: intrinsic::libc_sock_stream()))?
   let descriptor = intrinsic::handle_descriptor(handle)
+  let sending = network::Direction.Sending
+  if timeout is Some(_) {
+    handles::with_file_error(set_timeout(descriptor, direction: sending, timeout: timeout))?
+  }
   let bytes = address_bytes(address)
   let started = intrinsic::libc_connect(
     descriptor,
@@ -44,10 +48,10 @@ internal fn connect(
     if error != intrinsic::libc_einprogress() && error != intrinsic::libc_eintr() {
       return Err(handles::file_error(error))
     }
-    let sending = network::Direction.Sending
-    handles::with_file_error(set_timeout(descriptor, direction: sending, timeout: timeout))?
     handles::with_file_error(connected(descriptor))?
-    handles::with_file_error(set_timeout(descriptor, direction: sending, timeout: None))?
+  }
+  if timeout is Some(_) {
+    let _ = set_timeout(descriptor, direction: sending, timeout: None)
   }
   let local = handles::with_file_error(local_address(descriptor))?
   Ok(network::Connection(
