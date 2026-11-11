@@ -1843,6 +1843,7 @@ different types:
 ```truss
 impl Add[Duration] for Instant {
   type Output = Instant
+  fn add_is_defined(self, right: Duration) -> Bool { true }
   fn add(self, right: Duration) -> Instant { todo }
 }
 
@@ -1853,6 +1854,45 @@ let scaled = velocity * 2.0
 The built-in number types implement these only with themselves on both
 sides. The bitwise operators and shifts work only on the built-in integer
 types.
+
+An operation need not be defined for every pair of values: `Int8`'s `+` is
+not where the sum overflows, and its `/` is not for a divisor of 0. Each
+trait therefore has a second method, which says where the operation is
+defined, and the operation requires it:
+
+```truss
+public trait Add[Right] {
+  type Output
+
+  fn add_is_defined(self, right: Right) -> Bool
+    cost time finite
+
+  fn add(self, right: Right) -> Self.Output
+    requires self.add_is_defined(right)
+}
+```
+
+| Trait | Says where it is defined | Fixed-width integers | Floats |
+|---|---|---|---|
+| `Add[Right]` | `add_is_defined(right)` | the sum fits the type | always |
+| `Subtract[Right]` | `subtract_is_defined(right)` | the difference fits the type | always |
+| `Multiply[Right]` | `multiply_is_defined(right)` | the product fits the type | always |
+| `Divide[Right]` | `divide_is_defined(right)` | `right != 0`, and not `minimum / -1` | always |
+| `Remainder[Right]` | `remainder_is_defined(right)` | `right != 0`, and not `minimum % -1` | always |
+| `Negate` | `negate_is_defined()` | `self != minimum` | always |
+
+Generic code states the same obligation that an operator on a built-in
+type has, and can also test it:
+
+```truss
+fn doubled[Number: Add[Number]](value: Number) -> Number.Output
+  requires value.add_is_defined(value)
+{
+  value + value
+}
+```
+
+A type whose operation is defined everywhere returns `true`.
 
 For floats, `==` follows IEEE 754 except that every NaN equals every other NaN,
 so `-0.0 == 0.0` is still true. In ordering, NaN comes after every number.

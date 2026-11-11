@@ -40,7 +40,14 @@ impl Display for Int8 {
 impl Add[Int8] for Int8 {
   type Output = Int8
 
+  fn add_is_defined(self, right: Int8) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: Int8) -> Int8
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -50,7 +57,14 @@ impl Add[Int8] for Int8 {
 impl Subtract[Int8] for Int8 {
   type Output = Int8
 
+  fn subtract_is_defined(self, right: Int8) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: Int8) -> Int8
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -60,7 +74,14 @@ impl Subtract[Int8] for Int8 {
 impl Multiply[Int8] for Int8 {
   type Output = Int8
 
+  fn multiply_is_defined(self, right: Int8) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: Int8) -> Int8
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -70,7 +91,14 @@ impl Multiply[Int8] for Int8 {
 impl Divide[Int8] for Int8 {
   type Output = Int8
 
+  fn divide_is_defined(self, right: Int8) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == Int8.minimum && right == -1)
+  }
+
   fn divide(self, right: Int8) -> Int8
+    requires right != 0 && !(self == Int8.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -80,7 +108,14 @@ impl Divide[Int8] for Int8 {
 impl Remainder[Int8] for Int8 {
   type Output = Int8
 
+  fn remainder_is_defined(self, right: Int8) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == Int8.minimum && right == -1)
+  }
+
   fn remainder(self, right: Int8) -> Int8
+    requires right != 0 && !(self == Int8.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -90,7 +125,14 @@ impl Remainder[Int8] for Int8 {
 impl Negate for Int8 {
   type Output = Int8
 
+  fn negate_is_defined(self) -> Bool
+    cost time O(1)
+  {
+    self != Int8.minimum
+  }
+
   fn negate(self) -> Int8
+    requires self != Int8.minimum
     cost time O(1)
   {
     intrinsic::negate(self)
@@ -282,7 +324,14 @@ impl Display for Int16 {
 impl Add[Int16] for Int16 {
   type Output = Int16
 
+  fn add_is_defined(self, right: Int16) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: Int16) -> Int16
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -292,7 +341,14 @@ impl Add[Int16] for Int16 {
 impl Subtract[Int16] for Int16 {
   type Output = Int16
 
+  fn subtract_is_defined(self, right: Int16) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: Int16) -> Int16
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -302,7 +358,14 @@ impl Subtract[Int16] for Int16 {
 impl Multiply[Int16] for Int16 {
   type Output = Int16
 
+  fn multiply_is_defined(self, right: Int16) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: Int16) -> Int16
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -312,7 +375,14 @@ impl Multiply[Int16] for Int16 {
 impl Divide[Int16] for Int16 {
   type Output = Int16
 
+  fn divide_is_defined(self, right: Int16) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == Int16.minimum && right == -1)
+  }
+
   fn divide(self, right: Int16) -> Int16
+    requires right != 0 && !(self == Int16.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -322,7 +392,14 @@ impl Divide[Int16] for Int16 {
 impl Remainder[Int16] for Int16 {
   type Output = Int16
 
+  fn remainder_is_defined(self, right: Int16) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == Int16.minimum && right == -1)
+  }
+
   fn remainder(self, right: Int16) -> Int16
+    requires right != 0 && !(self == Int16.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -332,7 +409,14 @@ impl Remainder[Int16] for Int16 {
 impl Negate for Int16 {
   type Output = Int16
 
+  fn negate_is_defined(self) -> Bool
+    cost time O(1)
+  {
+    self != Int16.minimum
+  }
+
   fn negate(self) -> Int16
+    requires self != Int16.minimum
     cost time O(1)
   {
     intrinsic::negate(self)
@@ -516,7 +600,14 @@ impl Display for Int32 {
 impl Add[Int32] for Int32 {
   type Output = Int32
 
+  fn add_is_defined(self, right: Int32) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: Int32) -> Int32
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -526,7 +617,14 @@ impl Add[Int32] for Int32 {
 impl Subtract[Int32] for Int32 {
   type Output = Int32
 
+  fn subtract_is_defined(self, right: Int32) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: Int32) -> Int32
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -536,7 +634,14 @@ impl Subtract[Int32] for Int32 {
 impl Multiply[Int32] for Int32 {
   type Output = Int32
 
+  fn multiply_is_defined(self, right: Int32) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: Int32) -> Int32
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -546,7 +651,14 @@ impl Multiply[Int32] for Int32 {
 impl Divide[Int32] for Int32 {
   type Output = Int32
 
+  fn divide_is_defined(self, right: Int32) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == Int32.minimum && right == -1)
+  }
+
   fn divide(self, right: Int32) -> Int32
+    requires right != 0 && !(self == Int32.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -556,7 +668,14 @@ impl Divide[Int32] for Int32 {
 impl Remainder[Int32] for Int32 {
   type Output = Int32
 
+  fn remainder_is_defined(self, right: Int32) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == Int32.minimum && right == -1)
+  }
+
   fn remainder(self, right: Int32) -> Int32
+    requires right != 0 && !(self == Int32.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -566,7 +685,14 @@ impl Remainder[Int32] for Int32 {
 impl Negate for Int32 {
   type Output = Int32
 
+  fn negate_is_defined(self) -> Bool
+    cost time O(1)
+  {
+    self != Int32.minimum
+  }
+
   fn negate(self) -> Int32
+    requires self != Int32.minimum
     cost time O(1)
   {
     intrinsic::negate(self)
@@ -742,7 +868,14 @@ impl Display for Int64 {
 impl Add[Int64] for Int64 {
   type Output = Int64
 
+  fn add_is_defined(self, right: Int64) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: Int64) -> Int64
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -752,7 +885,14 @@ impl Add[Int64] for Int64 {
 impl Subtract[Int64] for Int64 {
   type Output = Int64
 
+  fn subtract_is_defined(self, right: Int64) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: Int64) -> Int64
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -762,7 +902,14 @@ impl Subtract[Int64] for Int64 {
 impl Multiply[Int64] for Int64 {
   type Output = Int64
 
+  fn multiply_is_defined(self, right: Int64) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: Int64) -> Int64
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -772,7 +919,14 @@ impl Multiply[Int64] for Int64 {
 impl Divide[Int64] for Int64 {
   type Output = Int64
 
+  fn divide_is_defined(self, right: Int64) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == Int64.minimum && right == -1)
+  }
+
   fn divide(self, right: Int64) -> Int64
+    requires right != 0 && !(self == Int64.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -782,7 +936,14 @@ impl Divide[Int64] for Int64 {
 impl Remainder[Int64] for Int64 {
   type Output = Int64
 
+  fn remainder_is_defined(self, right: Int64) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == Int64.minimum && right == -1)
+  }
+
   fn remainder(self, right: Int64) -> Int64
+    requires right != 0 && !(self == Int64.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -792,7 +953,14 @@ impl Remainder[Int64] for Int64 {
 impl Negate for Int64 {
   type Output = Int64
 
+  fn negate_is_defined(self) -> Bool
+    cost time O(1)
+  {
+    self != Int64.minimum
+  }
+
   fn negate(self) -> Int64
+    requires self != Int64.minimum
     cost time O(1)
   {
     intrinsic::negate(self)
@@ -956,7 +1124,14 @@ impl Display for ISize {
 impl Add[ISize] for ISize {
   type Output = ISize
 
+  fn add_is_defined(self, right: ISize) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::add_overflows(self, right: right)
+  }
+
   fn add(self, right: ISize) -> ISize
+    requires !intrinsic::add_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::add(self, right)
@@ -966,7 +1141,14 @@ impl Add[ISize] for ISize {
 impl Subtract[ISize] for ISize {
   type Output = ISize
 
+  fn subtract_is_defined(self, right: ISize) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::subtract_overflows(self, right: right)
+  }
+
   fn subtract(self, right: ISize) -> ISize
+    requires !intrinsic::subtract_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::subtract(self, right)
@@ -976,7 +1158,14 @@ impl Subtract[ISize] for ISize {
 impl Multiply[ISize] for ISize {
   type Output = ISize
 
+  fn multiply_is_defined(self, right: ISize) -> Bool
+    cost time O(1)
+  {
+    !intrinsic::multiply_overflows(self, right: right)
+  }
+
   fn multiply(self, right: ISize) -> ISize
+    requires !intrinsic::multiply_overflows(self, right: right)
     cost time O(1)
   {
     intrinsic::multiply(self, right)
@@ -986,7 +1175,14 @@ impl Multiply[ISize] for ISize {
 impl Divide[ISize] for ISize {
   type Output = ISize
 
+  fn divide_is_defined(self, right: ISize) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == ISize.minimum && right == -1)
+  }
+
   fn divide(self, right: ISize) -> ISize
+    requires right != 0 && !(self == ISize.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::divide(self, right)
@@ -996,7 +1192,14 @@ impl Divide[ISize] for ISize {
 impl Remainder[ISize] for ISize {
   type Output = ISize
 
+  fn remainder_is_defined(self, right: ISize) -> Bool
+    cost time O(1)
+  {
+    right != 0 && !(self == ISize.minimum && right == -1)
+  }
+
   fn remainder(self, right: ISize) -> ISize
+    requires right != 0 && !(self == ISize.minimum && right == -1)
     cost time O(1)
   {
     intrinsic::remainder(self, right)
@@ -1006,7 +1209,14 @@ impl Remainder[ISize] for ISize {
 impl Negate for ISize {
   type Output = ISize
 
+  fn negate_is_defined(self) -> Bool
+    cost time O(1)
+  {
+    self != ISize.minimum
+  }
+
   fn negate(self) -> ISize
+    requires self != ISize.minimum
     cost time O(1)
   {
     intrinsic::negate(self)

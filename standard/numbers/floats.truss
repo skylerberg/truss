@@ -33,6 +33,12 @@ impl Display for Float32 {
 impl Add[Float32] for Float32 {
   type Output = Float32
 
+  fn add_is_defined(self, right: Float32) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn add(self, right: Float32) -> Float32 {
     intrinsic::add(self, right)
   }
@@ -40,6 +46,12 @@ impl Add[Float32] for Float32 {
 
 impl Subtract[Float32] for Float32 {
   type Output = Float32
+
+  fn subtract_is_defined(self, right: Float32) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn subtract(self, right: Float32) -> Float32 {
     intrinsic::subtract(self, right)
@@ -49,6 +61,12 @@ impl Subtract[Float32] for Float32 {
 impl Multiply[Float32] for Float32 {
   type Output = Float32
 
+  fn multiply_is_defined(self, right: Float32) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn multiply(self, right: Float32) -> Float32 {
     intrinsic::multiply(self, right)
   }
@@ -56,6 +74,12 @@ impl Multiply[Float32] for Float32 {
 
 impl Divide[Float32] for Float32 {
   type Output = Float32
+
+  fn divide_is_defined(self, right: Float32) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn divide(self, right: Float32) -> Float32 {
     intrinsic::divide(self, right)
@@ -65,6 +89,12 @@ impl Divide[Float32] for Float32 {
 impl Remainder[Float32] for Float32 {
   type Output = Float32
 
+  fn remainder_is_defined(self, right: Float32) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn remainder(self, right: Float32) -> Float32 {
     intrinsic::remainder(self, right)
   }
@@ -72,6 +102,12 @@ impl Remainder[Float32] for Float32 {
 
 impl Negate for Float32 {
   type Output = Float32
+
+  fn negate_is_defined(self) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn negate(self) -> Float32 {
     intrinsic::negate(self)
@@ -145,6 +181,12 @@ impl Display for Float64 {
 impl Add[Float64] for Float64 {
   type Output = Float64
 
+  fn add_is_defined(self, right: Float64) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn add(self, right: Float64) -> Float64 {
     intrinsic::add(self, right)
   }
@@ -152,6 +194,12 @@ impl Add[Float64] for Float64 {
 
 impl Subtract[Float64] for Float64 {
   type Output = Float64
+
+  fn subtract_is_defined(self, right: Float64) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn subtract(self, right: Float64) -> Float64 {
     intrinsic::subtract(self, right)
@@ -161,6 +209,12 @@ impl Subtract[Float64] for Float64 {
 impl Multiply[Float64] for Float64 {
   type Output = Float64
 
+  fn multiply_is_defined(self, right: Float64) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn multiply(self, right: Float64) -> Float64 {
     intrinsic::multiply(self, right)
   }
@@ -168,6 +222,12 @@ impl Multiply[Float64] for Float64 {
 
 impl Divide[Float64] for Float64 {
   type Output = Float64
+
+  fn divide_is_defined(self, right: Float64) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn divide(self, right: Float64) -> Float64 {
     intrinsic::divide(self, right)
@@ -177,6 +237,12 @@ impl Divide[Float64] for Float64 {
 impl Remainder[Float64] for Float64 {
   type Output = Float64
 
+  fn remainder_is_defined(self, right: Float64) -> Bool
+    cost time O(1)
+  {
+    true
+  }
+
   fn remainder(self, right: Float64) -> Float64 {
     intrinsic::remainder(self, right)
   }
@@ -184,6 +250,12 @@ impl Remainder[Float64] for Float64 {
 
 impl Negate for Float64 {
   type Output = Float64
+
+  fn negate_is_defined(self) -> Bool
+    cost time O(1)
+  {
+    true
+  }
 
   fn negate(self) -> Float64 {
     intrinsic::negate(self)
