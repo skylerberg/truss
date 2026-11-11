@@ -3448,6 +3448,42 @@ let () =
         \  mut values.insert(key, value: value)\n\
          }\n")
 
+(* Lambdas inside lambdas *)
+
+let applying =
+  "fn apply(change: (fn(Bool) -> Bool cost time finite), value: Bool) -> Bool\n\
+  \  ensures result == change(value)\n\
+  \  cost time finite\n\
+   {\n\
+  \  change(value)\n\
+   }\n\n"
+
+let () =
+  test "a lambda with a functional lambda inside that captures nothing it made is known" (fun () ->
+      proven
+        (applying
+       ^ "theorem passes_through(value: Bool)\n\
+         \  ensures apply(fn(x) {\n\
+         \      var kept = apply(fn(y) { y }, value: x)\n\
+         \      kept\n\
+         \    }, value: value) == value\n\
+          {\n\
+          }\n"));
+  test "a functional lambda inside that captures the argument is not one function" (fun () ->
+      not_proven
+        (applying
+       ^ "theorem wrongly_constant()\n\
+         \  ensures apply(fn(x) {\n\
+         \      var kept = apply(fn(_) { x }, value: true)\n\
+         \      kept\n\
+         \    }, value: true) == apply(fn(x) {\n\
+         \      var kept = apply(fn(_) { x }, value: true)\n\
+         \      kept\n\
+         \    }, value: false)\n\
+          {\n\
+          }\n")
+        "prover.ensures")
+
 (* Definitions under a quantifier *)
 
 let () =
