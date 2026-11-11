@@ -191,6 +191,13 @@ rather than read as something else:
 | `copy(original, backup)` | Arguments after the first need a label. The fix writes `copy(original, destination: backup)`. |
 | `parse::<Int64>(text)` | The fix writes `parse[Int64](text)`. |
 | `items.map { it.name }`, `{ $0.name }` | The fix writes `items.map(fn(item) { item.name })`. |
+| `List<String>`, `fn first<T>(...)` | Type arguments and generic parameters go in square brackets. The fix writes `List[String]` and `fn first[T](...)`. |
+| `Shape::Circle`, `List::new()` | `::` follows only a module's name. The fix writes `Shape.Circle` and `List.new()`. |
+| `Shape.Circle(radius)` in a pattern | A pattern names a variant without its type. The fix writes `Circle(radius)`. |
+| `vec![1, 2]`, `println!(...)`, `todo!()` | Truss has no macros. The fix writes `[1, 2]` and `todo`; for the others, the message says what to write. |
+| `(a, b)`, `pair.0` | Truss has no tuples. The message recommends a record. |
+| `f"Hello {name}"`, `r"\d+"`, `b'a'` | Strings have no prefixes. The fix writes `"Hello ${name}"`, `"""\d+"""`, and `UInt8"a"`. |
+| `"\x41"`, `"\u00E9"` | A character is written by its code point. The fix writes `"\u{41}"` and `"\u{E9}"`. |
 | `x as Int64` | The fix writes `Int64.from(x)`, or `Int64.try_from(x)` when the conversion can lose information. |
 | `null`, `nil` | The fix suggests `None`. |
 | `elif` | The fix writes `else if`. |

@@ -131,11 +131,32 @@ and named cursor start =
         let constant = Module_constant { modules; last = name } in
         range_or cursor start (End_constant constant) (Qualified_constant constant)
   | Upper text ->
-      after_upper cursor start { modules; last = Atoms.name cursor (Cursor.next cursor) text }
+      let path = { modules; last = Atoms.name cursor (Cursor.next cursor) text } in
+      after_upper cursor start (unqualified_variant cursor start path)
   | String ({ tag = Some _; _ } as literal) ->
       let literal = Literal_string (string_literal cursor ~start ~modules literal) in
       range_or cursor start (End_literal literal) (Literal literal)
   | _ -> Cursor.fail cursor "a name after `::`"
+
+(* [Shape.Circle(radius)] and [Shape::Circle(radius)]: a variant written
+   with its type, as an expression names it and as Rust and Swift write a
+   pattern. The qualifier is reported, and the result is the variant alone,
+   which is what the fix leaves. *)
+and unqualified_variant cursor start (path : path) =
+  let rec last_name (qualified : Token.t option) =
+    match (Cursor.peek_kind cursor, Cursor.token_at cursor (cursor.index + 1)) with
+    | Punctuation (Dot | Colon_colon), ({ kind = Upper _; _ } as variant) ->
+        Cursor.advance cursor;
+        Cursor.advance cursor;
+        last_name (Some variant)
+    | _ -> qualified
+  in
+  match last_name None with
+  | Some ({ kind = Upper text; _ } as variant) ->
+      Habits.qualified_variant cursor ~qualifier_start:(Cursor.token_at cursor start).span.start
+        ~variant;
+      { modules = []; last = Atoms.name cursor variant text }
+  | _ -> path
 
 (* [(index, element: score, ..)]. [..] may only be the last field. *)
 and pattern_fields cursor =
