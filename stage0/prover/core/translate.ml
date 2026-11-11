@@ -293,6 +293,9 @@ type context = {
           facts made in its body that name it. *)
   quantifier_facts : (L.term, L.term list) Hashtbl.t;
       (** Each quantifier read, with the facts its body made that name its bound symbol. *)
+  mutable quantifier_symbols : string list;
+      (** Every quantifier's bound symbol, which a fact stated outside its quantifier must not name.
+      *)
   mutable validating : T.ty list;
       (** The types whose invariants are being read, around this point. A type is valid inside the
           reading of its own invariant, as it is inside its own fields, so a type that holds itself
@@ -381,37 +384,50 @@ let scope_facts context names =
     (fun (name, facts) -> if List.mem name names then List.rev !facts else [])
     context.scopes
 
-(* A term with the facts of each quantifier in it. A fact holds for every
-   value of the bound names, so [forall x => p], [forall x => facts && p],
-   and [forall x => facts ==> p] mean the same, and so do the [exists]
-   forms. The form chosen gives the solver the facts wherever it has a
-   value of [x]: where the query holds the quantifier, as a fact does, the
-   solver instantiates a [forall] and skolemizes an [exists], and either
-   way [facts && p] states them; where the query holds it negated, as it
-   does a goal, [facts ==> p] does. Each is stated inside its quantifier,
-   so it is instantiated only when the quantifier is. *)
-let rec with_quantifier_facts context ~holds term =
-  let inside body =
-    match Hashtbl.find_opt context.quantifier_facts term with
-    | None | Some [] -> body
-    | Some facts ->
-        if holds then L.( &&& ) (L.conjunction facts) body else L.( ==> ) (L.conjunction facts) body
+(* A term with the facts of each quantifier in it that the solver
+   skolemizes: a [forall] the query holds negated, as a goal's, and an
+   [exists] the query holds, as a fact's. A fact holds for every value of
+   the bound names, so [forall x => p] and [forall x => facts ==> p] mean
+   the same, as [exists x => p] and [exists x => facts && p] do.
+   Skolemized, the bound names are constants, so the facts cost the solver
+   no instantiation. A quantifier the solver instantiates gets none: there
+   the facts are instantiated with it, and the standard library's nested
+   quantifiers then make the solver run out of steps. A value made in a
+   body is a function of every quantifier around it, so a fact can name an
+   outer quantifier's symbol that the quantifier's own term does not; it
+   is stated only where that symbol is bound, by a quantifier the term is
+   in or by [binders], which an obligation is closed over. *)
+let with_quantifier_facts ?(binders = []) context ~holds term =
+  let stated bound fact =
+    List.for_all
+      (fun name -> List.mem name bound || not (L.mentions [ name ] fact))
+      context.quantifier_symbols
   in
-  match term with
-  | L.Forall (bound, body) -> L.Forall (bound, inside (with_quantifier_facts context ~holds body))
-  | L.Exists (bound, body) -> L.Exists (bound, inside (with_quantifier_facts context ~holds body))
-  | L.Apply ((("and" | "or") as operator), parts) ->
-      L.Apply (operator, List.map (with_quantifier_facts context ~holds) parts)
-  | L.Apply ("=>", [ premise; conclusion ]) ->
-      L.Apply
-        ( "=>",
-          [
-            with_quantifier_facts context ~holds:(not holds) premise;
-            with_quantifier_facts context ~holds conclusion;
-          ] )
-  | L.Apply ("not", [ inner ]) ->
-      L.Apply ("not", [ with_quantifier_facts context ~holds:(not holds) inner ])
-  | term -> term
+  let rec walk ~holds ~bound term =
+    let inside symbols body =
+      let bound = List.map fst symbols @ bound in
+      let body = walk ~holds ~bound body in
+      let skolemized = match term with L.Forall _ -> not holds | _ -> holds in
+      match
+        List.filter (stated bound)
+          (Option.value ~default:[] (Hashtbl.find_opt context.quantifier_facts term))
+      with
+      | facts when skolemized && facts <> [] ->
+          if holds then L.( &&& ) (L.conjunction facts) body
+          else L.( ==> ) (L.conjunction facts) body
+      | _ -> body
+    in
+    match term with
+    | L.Forall (symbols, body) -> L.Forall (symbols, inside symbols body)
+    | L.Exists (symbols, body) -> L.Exists (symbols, inside symbols body)
+    | L.Apply ((("and" | "or") as operator), parts) ->
+        L.Apply (operator, List.map (walk ~holds ~bound) parts)
+    | L.Apply ("=>", [ premise; conclusion ]) ->
+        L.Apply ("=>", [ walk ~holds:(not holds) ~bound premise; walk ~holds ~bound conclusion ])
+    | L.Apply ("not", [ inner ]) -> L.Apply ("not", [ walk ~holds:(not holds) ~bound inner ])
+    | term -> term
+  in
+  walk ~holds ~bound:binders term
 
 (* A fact of mathematics, true on every path. One that names a bound
    symbol is not stated for every value of it, since a body's calls give
@@ -527,7 +543,9 @@ let truss_of_goal context term =
 let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
   match
     obligation_at ?evaluation context frame code span message
-      (with_quantifier_facts context ~holds:false goal)
+      (with_quantifier_facts
+         ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
+         context ~holds:false goal)
   with
   | Some obligation ->
       (* Without a fix of its own, a goal about the parameters alone is
@@ -2297,6 +2315,7 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
     in
     let facts = ref [] in
     context.scopes <- (bound_symbol, facts) :: context.scopes;
+    context.quantifier_symbols <- bound_symbol :: context.quantifier_symbols;
     let after, body_value =
       Fun.protect
         ~finally:(fun () -> context.scopes <- List.tl context.scopes)
@@ -9102,6 +9121,7 @@ let new_context ?(reveal = false) database ~home ~current ~terminates ~measures 
     facts = [];
     scopes = [];
     quantifier_facts = Hashtbl.create 16;
+    quantifier_symbols = [];
     unfolded = Hashtbl.create 64;
     obligations = [];
     fresh = 0;

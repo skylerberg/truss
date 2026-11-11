@@ -863,20 +863,20 @@ What is known of such a value, as the range of `items[i].count_ones()`, is
 a fact about the bound names, which is not stated for every value of them:
 as quantified facts of their own, each with its own triggers, the
 standard library's nested quantifiers made the solver run out of steps.
-Each is stated inside its quantifier instead, so the solver has it exactly
-where it has a value of the bound names and nowhere else. A fact holds for
-every value of the bound names, so `forall i in 0..n => p`,
-`forall i in 0..n => facts && p`, and `forall i in 0..n => facts ==> p`
-mean the same, and so do the `exists` forms; the form is chosen by the
-quantifier's place in the query:
+It is a hypothesis instead, inside each quantifier the solver skolemizes,
+where the bound names are constants and the facts cost no instantiation.
+A fact holds for every value of the bound names, so each form means what
+the quantifier alone means:
 
-| The query holds the quantifier | Solver | Form |
+| Quantifier | Where | Form |
 |---|---|---|
-| as it is, as a fact or a `requires` | instantiates a `forall`, skolemizes an `exists` | `facts && p` |
-| negated, as an obligation's goal | skolemizes a `forall`, instantiates an `exists` | `facts ==> p` |
+| `forall i => p` | an obligation's goal | `forall i => facts ==> p` |
+| `exists i => p` | a fact, such as a `requires` | `exists i => facts && p` |
 
 An obligation in a quantifier's body is closed over the quantifiers around
-it with their facts as hypotheses, in the second form.
+it with their facts as hypotheses. A fact can name an outer quantifier's
+bound name, since a value made in a body is a function of every
+quantifier around it, so it is added only where that name is bound.
 
 ### The canonical form
 
@@ -1503,6 +1503,11 @@ test the prover itself:
   on `USize` are 64-bit code, so a 32-bit translation would read facts
   that contradict its own ranges. Code generation builds only for 64-bit
   targets, so no program runs with a width its proofs did not assume.
+- **Facts under an instantiated quantifier.** A `forall` that is a fact,
+  such as a `requires` or a callee's `ensures`, and an `exists` that is a
+  goal, carry none of their body's facts. Inside the quantifier, they would
+  be instantiated with it, and the standard library's invariants over
+  nested maps then make the solver run out of steps.
 - **`span`** is not a resource yet. Its rules are `time`'s, with the
   largest of the branches' costs at a `parallel` block where `time` has
   their sum.
