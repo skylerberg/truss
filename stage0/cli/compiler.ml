@@ -20,9 +20,9 @@ let target () =
 
 (* A development build compiles the package at -O1, one C file an
    instance. A release build compiles at -O2 and optimizes across every
-   file as they are linked. A build checks at run time what the prover
-   proves unless [checks] is false, which only a build made once every
-   proof it reaches is done may be. *)
+   file as they are linked. A build checks each primitive operation that
+   could fail as it runs, unless [checks] is false, which only a build
+   made once every proof it reaches is done may be. *)
 let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
   let toolchain = toolchain () in
   let extra = if sanitize then sanitizers else [] in

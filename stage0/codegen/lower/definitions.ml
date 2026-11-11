@@ -18,8 +18,9 @@ type context = {
   cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
       (** The fields of a pulled method's cursor, which the driver gives from its pulled lowering *)
   checks : bool;
-      (** Whether the program checks at run time what the prover would prove: [requires] clauses,
-          integer overflow, and division *)
+      (** Whether the program checks, as it runs, each operation that is undefined or wrong where
+          its precondition does not hold: an index, a slice, arithmetic, a shift, a call of the C
+          library, and [unreachable]. No [requires] clause is evaluated. *)
   constant : (Path.t -> Lir.static_value option) ref;
       (** Another constant's value, where it folds, which the driver reads through whatever keeps
           each constant's lowering, so that one is folded once and what reads it is known *)

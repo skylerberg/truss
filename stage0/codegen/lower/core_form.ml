@@ -9,13 +9,12 @@ open Lowering
 open Targets
 open Lir_builder
 
-(* The parameters, the [requires] clauses, and the body of a function or a
-   test, from its core form. *)
-let body_of context path : Core.parameter list * Core.condition list * Core.block =
+(* The parameters and the body of a function or a test, from its core
+   form. *)
+let body_of context path : Core.parameter list * Core.block =
   match demand context Infer.core_of_path path with
-  | Some ({ definition = Function { parameters; contract; body = Some body }; _ }, _) ->
-      (parameters, contract.requires, body)
-  | Some ({ definition = Test body; _ }, _) -> ([], [], body)
+  | Some ({ definition = Function { parameters; body = Some body; _ }; _ }, _) -> (parameters, body)
+  | Some ({ definition = Test body; _ }, _) -> ([], body)
   | _ -> bug "%s has no body in its core form" (Path.show path)
 
 let spans st =
@@ -25,6 +24,14 @@ let spans st =
 
 (* The source position of a node, for a failure message. *)
 let site_of st (origin : Core.origin) = site st (spans st).(origin)
+
+(* Where a check that fails in the code being lowered is reported: at the
+   code's own position, or, for the standard library's code that is
+   inlined into a program's, at the program's call. An index past the end
+   of a list fails in the library's method, and the index is the
+   program's. *)
+let check_site st (origin : Core.origin) =
+  match st.frame.reported with Some site -> site | None -> site_of st origin
 
 let local_place st (local : Core.local) : Lir.place =
   let bound = function Some place -> place | None -> bug "a local with no place" in
@@ -137,7 +144,7 @@ let rec place st (source : Core.place) : Lir.place =
   | Constant { path; _ } -> static_constant st path
   | Field { base; field; _ } -> place st base / Field field
   | Temporary value -> value_place st value
-  | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(site_of st origin)
+  | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(check_site st origin)
   | Lent _ -> bug "a lent place that is not a call"
 
 and operand_place st (operand : Core.operand) : Lir.place =
@@ -243,7 +250,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
         (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
            ~type_arguments:(List.map (fun (a : Core.expression) -> ground st a.type_) arguments)
            (List.map (fun argument -> Intrinsics.Value (operand st argument)) arguments)
-           ~destination:(Some destination) ~site:(site_of st value.origin))
+           ~destination:(Some destination) ~site:(check_site st value.origin))
   | Compare { comparison; left; right } ->
       assign (Binary (binary comparison, operand st left, operand st right))
   | Not inner -> assign (Unary (Not, operand st inner))
@@ -857,7 +864,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
         ~body:owned_each
 
 and yields_by_position st path =
-  let _, _, (body : Core.block) = body_of st.context path in
+  let _, (body : Core.block) = body_of st.context path in
   Core_walk.yields_by_position body
 
 (* A loop over the cursor of a yielding method's call: the pulled method's
@@ -1480,9 +1487,10 @@ and branch st (condition : Core.expression) ~yes ~no =
       start st.b middle;
       branch st right ~yes ~no
   | Implies (left, right) ->
-      (* A [requires] clause or an [assert] that can run may hold [==>]. It
-         holds where [left] does not, and [right] is evaluated only where
-         [left] holds, since [right] may be defined only there. *)
+      (* A [requires] clause of a tag's [from_template], which a template's
+         check evaluates while compiling, may hold [==>]. It holds where
+         [left] does not, and [right] is evaluated only where [left] holds,
+         since [right] may be defined only there. *)
       let middle = block st.b in
       branch st left ~yes:middle ~no:yes;
       start st.b middle;
@@ -1830,7 +1838,7 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
     Compiler_bug.unsupported ~at:(at_site call_site) "%s, which lends through a call to itself"
       (Path.show path);
-  let parameters, requires, body = body_of st.context path in
+  let parameters, body = body_of st.context path in
   let exit = block st.b in
   let caller = st.frame in
   st.frame <-
@@ -1842,6 +1850,10 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
       on_yield = Some on_yield;
       yield_into;
       inlined = path :: caller.inlined;
+      reported =
+        (if Path.package path = Path.standard_package then
+           Some (Option.value caller.reported ~default:call_site)
+         else None);
       exit = Some (exit, List.length st.scopes);
     };
   in_scope st (fun () ->
@@ -1860,7 +1872,6 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
           in
           bind_local st parameter.local place)
         parameters;
-      check_requires st ~call_site requires;
       block_into st body None);
   finish st.b (Goto exit);
   start st.b exit;
@@ -1872,7 +1883,7 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
    out of it, so the innermost scope owns the lend. Where nothing is left,
    as for an index into a [List], the method ends at its [yield]. *)
 and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
-  let _, _, body = body_of st.context path in
+  let _, body = body_of st.context path in
   let several = Method_yields.count body > 1 in
   let depth = List.length st.scopes in
   let goes_on = block st.b in
@@ -1949,36 +1960,6 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
          the call never runs. The place is never read. *)
       temporary st ty
   | None -> bug "a lending method that lends nothing"
-
-(* In a checked build, tests each [requires] clause that can run, on entry to
-   the code with its parameters bound, and panics with the clause's text
-   when one does not hold: at [call_site] for inlined code and at the clause
-   otherwise. Stage0's builds keep these checks whether or not the proofs
-   are done, so a test catches a call that breaks a contract as it runs. *)
-and check_requires ?call_site st (requires : Core.condition list) =
-  if st.context.checks then
-    List.iter
-      (fun (clause : Core.condition) ->
-        if clause.executable then begin
-          let holds = block st.b and broken = block st.b in
-          let scope = open_scope st Bindings in
-          branch st clause.value ~yes:holds ~no:broken;
-          start st.b broken;
-          let message =
-            "requirement not met: requires " ^ source st (spans st).(clause.value.origin)
-          in
-          finish st.b
-            (Fail
-               {
-                 failure = Panic;
-                 message = Constant (Bytes message);
-                 length = usize (String.length message);
-                 site = Option.value call_site ~default:(site_of st clause.value.origin);
-               });
-          start st.b holds;
-          close_scope st scope
-        end)
-      requires
 
 (* Fills in each parameter whose argument the caller omitted, as the bits
    of [mask] say, by evaluating the default inside the function, so that

@@ -71,11 +71,17 @@ let () =
 (* Checks a build makes in place of proofs *)
 
 let () =
-  test "a build checks requires clauses, overflow, and division, which stage0 cannot prove"
+  test "a build checks each primitive operation that could fail, and evaluates no requires clause"
     (fun () ->
       let output =
         run_source
-          {|test "overflow" {
+          {|fn pick(items: List[Int64], top: USize) -> USize
+  requires items[top] >= 0
+{
+  top
+}
+
+test "overflow" {
   let big: Int64 = 9223372036854775807
   let _ = big + 1
 }
@@ -88,6 +94,26 @@ test "division" {
 test "index" {
   let items: List[Int64] = [1, 2]
   let _ = items[2]
+}
+
+test "shift" {
+  let one: UInt64 = 1
+  let amount: UInt64 = 70
+  let _ = one << amount
+}
+
+test "slice" {
+  let items: List[Int64] = [1, 2]
+  let _ = items[1..9]
+}
+
+test "swap" {
+  var items: List[Int64] = [1, 2]
+  mut items.swap(0, second: 7)
+}
+
+test "a clause that would fail if it ran" {
+  assert pick([1, 2], top: 9) == 9
 }
 
 test "fine" {
@@ -108,8 +134,14 @@ test "fine" {
           "test 1 panicked\n";
           "division by zero\n";
           "test 2 panicked\n";
-          "requirement not met: requires key < self.length()\n";
-          "test 3 passed\n";
+          "index out of bounds\n  at example/main.truss:19:11\n";
+          "test 3 panicked\n";
+          "shift amount out of range\n";
+          "test 4 panicked\n";
+          "slice out of bounds\n";
+          "test 5 panicked\n";
+          "test 6 passed\n";
+          "test 7 passed\n";
         ])
 
 (* Programs *)
