@@ -4613,3 +4613,26 @@ let () =
         ~proven:[ "halve"; "halve_and_add" ] ~solved:2)
 
 let () = finish ()
+
+(* Addresses of views *)
+
+let () =
+  let proven_in_standard text =
+    let database = Engine.context (Engine.create ~log:true ()) in
+    Database.load_package (Engine.of_context database) ~name:"standard" ~dependencies:[]
+      [ (Support.module_of "standard::probe", text) ];
+    match check database (Support.module_of "standard::probe") with
+    | [] -> ()
+    | found -> fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found))
+  in
+  test "a view of a scalar ends within the address space and is not at zero" (fun () ->
+      proven_in_standard
+        "use standard::intrinsic\n\n\
+         fn placed(starts: intrinsic::View[USize]) -> USize {\n\
+        \  let first = intrinsic::view_address(starts)\n\
+        \  proof {\n\
+        \    assert intrinsic::view_length(starts) == 0 || first >= 1\n\
+        \    assert first + 8 * intrinsic::view_length(starts) <= 18446744073709551616\n\
+        \  }\n\
+        \  first\n\
+         }\n")
