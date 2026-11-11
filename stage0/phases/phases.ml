@@ -1,6 +1,7 @@
 (* The compiler's phases, each declared after the one before it. *)
 
-let syntax = Query.phase ~name:"syntax" ~after:[]
+let project = Query.phase ~name:"project" ~after:[]
+let syntax = Query.phase ~name:"syntax" ~after:[ project ]
 let declarations = Query.phase ~name:"declarations" ~after:[ syntax ]
 let resolution = Query.phase ~name:"resolution" ~after:[ declarations ]
 let interfaces = Query.phase ~name:"interfaces" ~after:[ resolution ]

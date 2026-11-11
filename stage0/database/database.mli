@@ -231,13 +231,21 @@ val load_package :
   dependencies:Workspace.dependency list ->
   (Path.module_ * string) list ->
   unit
-(** Sets a package's modules, with their text, and its manifest as an engine's inputs. [usize_bits]
-    is 32 unless given. *)
+(** Gives an engine a package by itself, as a root of its own: a manifest that says the name, the
+    dependencies, and [usize_bits], which is 32 unless given, and a file for each module. *)
 
 val load_standard : Engine.t -> unit
-(** Sets the [standard] package, built into the compiler. *)
+(** Gives an engine the [standard] package, built into the compiler. *)
 
 module Testing : sig
+  val set_text : Engine.t -> Path.module_ -> string -> unit
+  (** Gives one module of a package set with {!load_package} another text. *)
+
+  val set_manifest :
+    ?usize_bits:int -> Engine.t -> name:string -> dependencies:Workspace.dependency list -> unit
+  (** Gives a package set with {!load_package} another manifest, and leaves its modules as they are.
+  *)
+
   val engine : session -> Engine.t
 
   val session_engine : string -> Engine.t option

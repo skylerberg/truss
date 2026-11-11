@@ -288,6 +288,23 @@ let () =
       if modules session <> [ named "main"; named "other" ] then
         fail "the session's modules changed";
       if Database.diagnostics session (named "main") <> [] then fail "the session saw the change");
+  test "a manifest added below a package gives the files under it to a new package" (fun () ->
+      fresh_store ();
+      let directory = fresh "project" in
+      write directory "truss.toml" (project ^ manifest "app");
+      write directory "main.truss" program;
+      write directory "tools/helper.truss" "internal fn one() -> Int64 {\n  1\n}\n";
+      expect_errors directory 0;
+      let before, _ = session directory in
+      if List.length (Database.package_modules before "app") <> 2 then
+        fail "the package does not have both modules";
+      write directory "tools/truss.toml" (manifest "tools");
+      expect_errors directory 0;
+      let after, _ = session directory in
+      if Database.package_modules after "app" <> [ { package = "app"; modules = [ "main" ] } ] then
+        fail "the first package still has the file";
+      if Database.package_modules after "tools" <> [ { package = "tools"; modules = [ "helper" ] } ]
+      then fail "the new package does not have the file");
   test "a malformed manifest is a problem, at its line" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -608,7 +625,7 @@ let () =
       Database.reset ();
       let library = open_library [ first ] in
       let context = Engine.context (Database.Testing.engine library) in
-      if Query.find context Workspace.file_text (fst second) <> None then
+      if Query.demand context Project.module_text (fst second) <> None then
         fail "the module's text is still set";
       if List.mem (fst second) (Query.demand context Workspace.modules Path.standard_package) then
         fail "the package still has the module")

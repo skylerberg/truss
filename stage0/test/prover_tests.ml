@@ -4189,7 +4189,7 @@ let again before after =
   (match prove () with
   | [] -> ()
   | found -> fail "before the edit: %s" (String.concat "; " (Support.codes found)));
-  Engine.set engine Workspace.file_text module_ after;
+  Database.Testing.set_text engine module_ after;
   Engine.clear_log engine;
   let solved = Solver.solved solver in
   (match prove () with

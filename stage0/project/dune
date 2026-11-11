@@ -1,0 +1,7 @@
+; A project's files as inputs, and what follows from them as queries: its
+; packages, their modules and text, what is wrong between its manifests,
+; and the registry packages of its build. See DATABASE.md, "Inputs".
+
+(library
+ (name project)
+ (libraries query phases path manifest registry))

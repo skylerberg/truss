@@ -1,16 +1,52 @@
-(* Loading packages *)
+(* Setting a root's files as inputs *)
 
-let load_package ?(usize_bits = 32) engine ~name ~dependencies
+(* Replaces a root's files: each one's path and text. *)
+let set_root engine root (files : (string * string) list) =
+  let old = Option.value (Query.find (Engine.observer engine) Project.tree root) ~default:[] in
+  List.iter
+    (fun path ->
+      if not (List.mem_assoc path files) then Engine.remove engine Project.text (root, path))
+    old;
+  List.iter (fun (path, text) -> Engine.set engine Project.text (root, path) text) files;
+  Engine.set engine Project.tree root (List.sort compare (List.map fst files))
+
+let add_root engine root =
+  let given = Option.value (Query.find (Engine.observer engine) Project.roots ()) ~default:[] in
+  if not (List.mem root given) then Engine.set engine Project.roots () (given @ [ root ])
+
+(* A manifest of one package, as [Manifest.parse] reads it. *)
+let manifest_text ~usize_bits ~name ~(dependencies : Workspace.dependency list) =
+  String.concat ""
+    ([
+       Printf.sprintf "[package]\nname = %S\ntruss = %S\n" name Manifest.truss_version;
+       (if usize_bits = 64 then "usize_bits = 64\n" else "");
+       (if dependencies = [] then "" else "\n[dependencies]\n");
+     ]
+    @ List.map
+        (fun (dependency : Workspace.dependency) ->
+          Printf.sprintf "%S = [%s]\n" dependency.package
+            (String.concat ", " (List.map (Printf.sprintf "%S") dependency.capabilities)))
+        dependencies)
+
+(* A package given by itself, as a root of its own: its manifest and its
+   modules' files. *)
+let set_package engine ~root ~usize_bits ~name ~dependencies
     (modules : (Path.module_ * string) list) =
-  List.iter (fun (module_, text) -> Engine.set engine Workspace.file_text module_ text) modules;
-  Engine.set engine Workspace.packages name
-    { Workspace.name; dependencies; modules = List.map fst modules; usize_bits }
+  set_root engine root
+    (("truss.toml", manifest_text ~usize_bits ~name ~dependencies)
+    :: List.map (fun (module_, text) -> (Project.module_path ~directory:"" module_, text)) modules);
+  add_root engine root
+
+let load_package ?(usize_bits = 32) engine ~name ~dependencies modules =
+  set_package engine ~root:(Project.package_root name) ~usize_bits ~name ~dependencies modules
 
 (* The standard library holds the code for each platform, and its bounds of
    [USize] are its target's, so it is checked with the target's width. *)
-let load_standard engine =
-  load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
-    Standard_library.modules
+let set_standard engine modules =
+  set_package engine ~root:Project.standard_root ~usize_bits:64 ~name:Path.standard_package
+    ~dependencies:[] modules
+
+let load_standard engine = set_standard engine Standard_library.modules
 
 (* The standard library, checked whole in an engine of its own. Its sources
    never change, so the engine is frozen as a fixed base, which every state
@@ -27,44 +63,10 @@ let standard_base () =
   Engine.freeze ~fixed:true engine;
   engine
 
-(* The database's own inputs: how a project's files map to packages, and
-   each file's stamp, so that a restart reads only the files that changed. *)
-
-type layout = {
-  packages : (string * string) list;
-      (** Each package's directory, relative to the root, and name *)
-  files : string list;
-      (** Each manifest, lock file, and module file under the root, relative to it *)
-  modules : (string * Path.module_) list;  (** Each module's file *)
-  time_limit : int;  (** Each test's, in seconds *)
-  registry : (string * Registry.Version.t * string) list;
-      (** Each registry package of the build: its name, its version, and the hash of its files *)
-}
-
-let no_layout =
-  {
-    packages = [];
-    files = [];
-    modules = [];
-    time_limit = Manifest.default_time_limit;
-    registry = [];
-  }
-
-let layout : (unit, layout) Query.input =
-  Query.input ~name:"worktree_layout" ~show:(fun () -> "") ()
-
 (* Each file's stamp, by its path: what says, without reading the file,
-   that it has not changed. *)
+   that it has not changed. A restart reads only the files whose stamps
+   changed. *)
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
-
-(* Each manifest's text, by its package's directory, so that an unchanged
-   manifest need not be read again. *)
-let manifest_texts : (string, string) Query.input =
-  Query.input ~name:"worktree_manifest" ~show:Fun.id ()
-
-(* The project's lock file's text, for the same reason. *)
-let lock_text : (unit, string) Query.input =
-  Query.input ~name:"worktree_lock" ~show:(fun () -> "") ()
 
 (* Sessions *)
 
@@ -80,10 +82,8 @@ type project = {
   kind : kind;
   update : Session.t -> unit;  (** Brings the inputs in line with the session's files *)
   files : Files.t;
-  mutable problems : string list;  (** Manifests that could not be read, and duplicate names *)
-  mutable lock_fix : string option;
-      (** The lock file the manifests give, when the one written is another *)
-  mutable applied : bool;  (** Whether this process has brought the inputs in line with the files *)
+  mutable retried : bool;
+      (** Whether this process has tried again to fetch the packages that could not be had *)
 }
 
 type Session.attachment += Project of project
@@ -127,502 +127,133 @@ let session_name root =
     (Session.Identity.short (Session.identity ()))
     (String.sub (Blake3.to_hex (Blake3.hash root)) 0 16)
 
-let read context input key = Query.find context input key
-let current_layout engine = Option.value (read (Engine.context engine) layout ()) ~default:no_layout
-let layout_of session = current_layout (Session.engine session)
+let demand session query key = Query.demand (Session.context session) query key
+let own_layout session = demand session Project.layout Project.project_root
 
-(* Setting a worktree's files as inputs *)
-
-type file_contents = Text of string | Unchanged
-
-let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
+(* The project's files that are inputs now. *)
+let held_files session =
+  Option.value (Query.find (Session.observer session) Project.tree Project.project_root) ~default:[]
 
 (* Registry packages *)
 
-type published = {
-  manifest : Manifest.package;
-  record : Registry.Lock.t;
-  sources : (string list * string) list;  (** Each module's names under its package, and its text *)
-}
+(* A published package's directory in the store, fetched into it from the
+   registry if it is not there yet. *)
+let fetch name version ~hash =
+  let packages = Session.directory "packages" in
+  let directory = Filename.concat packages hash in
+  if Sys.file_exists directory then Ok directory
+  else
+    match Registry.Index.current () with
+    | Some registry -> Registry.Index.fetch registry ~into:packages name version ~hash
+    | None ->
+        Error
+          (Printf.sprintf "no registry is set: `%s` names its directory" Registry.Index.variable)
 
-(* A published package never changes, so what was read of one is kept by its
-   hash for as long as the process lives. *)
-let published : (string, published) Hashtbl.t = Hashtbl.create 16
+(* A published package's manifest and record, for planning a lock file. *)
+let load_published name version ~hash =
+  match fetch name version ~hash with
+  | Error reason -> Error reason
+  | Ok directory -> (
+      let files = Registry.Content.files ~all:true directory in
+      let text file = List.assoc_opt file files in
+      match
+        ( Option.map Manifest.parse (text "truss.toml"),
+          Registry.Lock.parse (Option.value ~default:"" (text "truss.lock")) )
+      with
+      | exception Manifest.Malformed (line, message) ->
+          Error (Printf.sprintf "its manifest cannot be read: line %d: %s" line message)
+      | exception Registry.Lock.Malformed (line, message) ->
+          Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
+      | Some { package = Some manifest; _ }, record when manifest.name = name ->
+          Ok (manifest, record)
+      | _ -> Error (Printf.sprintf "its manifest does not name the package `%s`" name))
 
-(* A published package's files, from the store, fetched into it from the
-   registry when they are not there yet. *)
-let load_published ~packages name version ~hash =
-  match Hashtbl.find_opt published hash with
-  | Some found -> Ok found
-  | None -> (
-      let fetched =
-        let directory = Filename.concat packages hash in
-        if Sys.file_exists directory then Ok directory
-        else
-          match Registry.Index.current () with
-          | Some registry -> Registry.Index.fetch registry ~into:packages name version ~hash
-          | None ->
-              Error
-                (Printf.sprintf "no registry is set: `%s` names its directory"
-                   Registry.Index.variable)
-      in
-      match fetched with
-      | Error reason -> Error reason
-      | Ok directory -> (
-          let files = Registry.Content.files ~all:true directory in
-          let text file = List.assoc_opt file files in
-          match
-            ( Option.map Manifest.parse (text "truss.toml"),
-              Registry.Lock.parse (Option.value ~default:"" (text "truss.lock")) )
-          with
-          | exception Manifest.Malformed (line, message) ->
-              Error (Printf.sprintf "its manifest cannot be read: line %d: %s" line message)
-          | exception Registry.Lock.Malformed (line, message) ->
-              Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
-          | Some { package = Some manifest; _ }, record when manifest.name = name ->
-              let found =
-                {
-                  manifest;
-                  record;
-                  sources =
-                    List.filter_map
-                      (fun (path, text) ->
-                        if Filename.check_suffix path ".truss" then
-                          Some (Worktree.segments (Filename.chop_suffix path ".truss"), text)
-                        else None)
-                      files;
-                }
-              in
-              Hashtbl.replace published hash found;
-              Ok found
-          | _ -> Error (Printf.sprintf "its manifest does not name the package `%s`" name)))
-
-(* A package that is in a cycle of the project's packages that depend on
-   each other, with the cycle. *)
-let dependency_cycle (packages : (string * Manifest.package) list) =
-  let dependencies name =
-    match List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages with
-    | Some (_, package) ->
-        List.map
-          (fun (dependency : Workspace.dependency) -> dependency.package)
-          package.dependencies
-    | None -> []
-  in
-  let rec reaches target seen name =
-    if List.mem name seen then None
-    else
-      List.find_map
-        (fun next ->
-          if next = target then Some [ name; target ]
-          else Option.map (fun way -> name :: way) (reaches target (name :: seen) next))
-        (dependencies name)
-  in
-  List.find_map
-    (fun (directory, (package : Manifest.package)) ->
-      Option.map (fun way -> (directory, way)) (reaches package.name [] package.name))
-    packages
-
-(* Sets a published package's manifest and modules as an engine's inputs. *)
-let set_published engine (found : published) =
-  let name = found.manifest.name in
-  let sources =
-    List.map
-      (fun (modules, text) -> (({ package = name; modules } : Path.module_), text))
-      found.sources
-  in
-  List.iter (fun (module_, text) -> Engine.set engine Workspace.file_text module_ text) sources;
-  Engine.set engine Workspace.packages name
-    {
-      Workspace.name;
-      dependencies = found.manifest.dependencies;
-      modules = List.map fst sources;
-      usize_bits = found.manifest.usize_bits;
-    }
-
-(* Brings the inputs in line with a set of files, each with its contents, or
-   [Unchanged] when its stamp shows it is the same as before. The files are
-   every manifest and module file under the project's root. Those of another
-   project are left out: under a root with a [[project]] table, a directory
-   whose manifest has one of its own and everything below it, and under a
-   root without one, which is a project of one package, every other
-   directory with a manifest. *)
-let apply ?(text = fun _ -> None) session (files : (string * file_contents) list) =
-  let module Manifest = Manifest in
+(* Gives the build the files of the registry packages it selects. Which
+   those are is a query, which names each package whose files are not
+   inputs yet; this fetches them and sets them, which reaches the query, and
+   asks again, since a package's record can name more. A package's files
+   never change, so they are set once, and removed when the build no longer
+   selects the package. *)
+let resolve_registry session ~before =
   let engine = Session.engine session in
   let project = project session in
-  let old = current_layout engine in
-  let problems = ref [] in
-  let problem directory format =
-    Printf.ksprintf
-      (fun message ->
-        problems := Printf.sprintf "%s: %s" (manifest_file directory) message :: !problems)
-      format
+  let selection () = demand session Project.selection () in
+  if not project.retried then begin
+    List.iter (fun hash -> Engine.remove engine Project.unavailable hash) (selection ()).failed;
+    project.retried <- true
+  end;
+  let rec fetch_missing rounds =
+    match (selection ()).missing with
+    | [] -> ()
+    | missing when rounds > 0 ->
+        List.iter
+          (fun (name, version, hash) ->
+            match fetch name version ~hash with
+            | Ok directory ->
+                set_root engine (Project.registry_root hash)
+                  (Registry.Content.files ~all:true directory)
+            | Error reason -> Engine.set engine Project.unavailable hash reason)
+          missing;
+        fetch_missing (rounds - 1)
+    | _ -> ()
   in
-  let manifests =
-    List.filter_map
-      (fun (path, contents) ->
-        if Filename.basename path <> "truss.toml" then None
-        else
-          let directory = Worktree.parent path in
-          let text =
-            match contents with
-            | Text text -> Some text
-            | Unchanged -> read (Engine.context engine) manifest_texts directory
-          in
-          Option.map (fun text -> (directory, text)) text)
-      files
-  in
-  List.iter (fun (directory, text) -> Engine.set engine manifest_texts directory text) manifests;
-  let directories = List.map fst manifests in
-  let is_project directory =
-    match List.assoc_opt directory manifests with
-    | Some text -> Manifest.has_project_table text
-    | None -> false
-  in
-  let root_is_project = is_project "" in
-  let rec in_another_project directory =
-    directory <> ""
-    && ((List.mem directory directories && ((not root_is_project) || is_project directory))
-       || in_another_project (Worktree.parent directory))
-  in
-  let parsed =
-    List.filter_map
-      (fun (directory, text) ->
-        if in_another_project directory then None
-        else
-          match Manifest.parse text with
-          | manifest -> Some (directory, manifest)
-          | exception Manifest.Malformed (line, message) ->
-              problems :=
-                Printf.sprintf "%s:%d: %s" (manifest_file directory) line message :: !problems;
-              None)
-      manifests
-  in
-  let time_limit =
-    List.fold_left
-      (fun limit (directory, (manifest : Manifest.t)) ->
-        match manifest.time_limit with
-        | Some seconds when directory = "" -> seconds
-        | Some _ ->
-            problem directory
-              "A test's time limit is its project's. Write `[test]` in the project's manifest, \
-               `truss.toml` at its root.";
-            limit
-        | None -> limit)
-      Manifest.default_time_limit parsed
-  in
-  let seen = Hashtbl.create 8 in
-  let packages =
-    List.filter_map
-      (fun (directory, (manifest : Manifest.t)) ->
-        match manifest.package with
-        | None -> None
-        | Some package when package.name = Path.standard_package ->
-            problem directory "The package name `standard` is the standard library's.";
-            None
-        | Some package -> (
-            match Hashtbl.find_opt seen package.name with
-            | Some other ->
-                problem directory "The package name `%s` is already used by %s." package.name
-                  (manifest_file other);
-                None
-            | None ->
-                Hashtbl.replace seen package.name directory;
-                Some (directory, package)))
-      parsed
-  in
-  let named name = List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages in
-  let lock_problem format =
-    Printf.ksprintf (fun message -> problems := ("truss.lock: " ^ message) :: !problems) format
-  in
-  let written_text =
-    match List.assoc_opt "truss.lock" files with
-    | Some (Text text) ->
-        Engine.set engine lock_text () text;
-        Some text
-    | Some Unchanged -> read (Engine.context engine) lock_text ()
-    | None ->
-        Engine.remove engine lock_text ();
-        None
-  in
-  let written =
-    match Registry.Lock.parse (Option.value ~default:"" written_text) with
-    | entries -> Some entries
-    | exception Registry.Lock.Malformed (line, message) ->
-        problems := Printf.sprintf "truss.lock:%d: %s" line message :: !problems;
-        None
-  in
-  (* The registry packages of the build: what the project's packages depend
-     on that is no package of the project, at the versions the lock file and
-     their own records give. *)
-  let store_packages = Session.directory "packages" in
-  let selected, selection_problems =
-    Registry.Selection.choose
-      ~lock:(Option.value ~default:[] written)
-      ~roots:
-        (List.concat_map
-           (fun (_, (package : Manifest.package)) ->
-             List.filter_map
-               (fun (dependency : Workspace.dependency) ->
-                 match Path.package_parts dependency.package with
-                 | [ _; _ ] -> Some (package.name, dependency.package)
-                 | _ -> None)
-               package.dependencies)
-           packages)
-      ~local:(fun name -> named name <> None)
-      ~load:(fun name version ~hash ->
-        Result.map
-          (fun found -> (found.manifest, found.record))
-          (load_published ~packages:store_packages name version ~hash))
-  in
-  List.iter (fun found -> lock_problem "%s" (Registry.Selection.sentence found)) selection_problems;
-  let selected_named name =
-    List.find_opt (fun (found : Registry.Selection.package) -> found.name = name) selected
-  in
+  fetch_missing 64;
+  let selected = demand session Project.registry () in
   List.iter
-    (fun (found : Registry.Selection.package) ->
-      match found.manifest.truss with
-      | Some version when not (Manifest.toolchain_builds version) ->
-          lock_problem "`%s` %s is written for Truss %s, and this toolchain is Truss %s." found.name
-            (Registry.Version.show found.version)
-            version Manifest.truss_version
-      | _ -> ())
-    selected;
-  (* The lock file is written one way: what the manifests and the versions
-     in it give. Another is a problem whose fix is to write that one. *)
-  project.lock_fix <- None;
-  (match written with
-  | Some written when selection_problems = [] ->
-      let current =
-        Registry.Selection.lock
-          ~project:
-            (List.concat_map
-               (fun (_, (package : Manifest.package)) -> package.dependencies)
-               packages)
-          selected
-      in
-      let text = Registry.Lock.print current in
-      if current = [] && written_text = None then ()
-      else if written_text <> Some text then begin
-        project.lock_fix <- Some text;
-        lock_problem "This is not the lock file the manifests give. %sRun `truss check --fix`."
-          (String.concat ""
-             (List.map
-                (fun difference -> difference ^ " ")
-                (Registry.Selection.differences ~written ~current)))
-      end
-  | _ -> ());
-  List.iter
-    (fun (directory, (package : Manifest.package)) ->
-      (match package.truss with
-      | None ->
-          problem directory
-            "`[package]` needs `truss = \"%s\"`, the version of Truss the package is written for."
-            Manifest.truss_version
-      | Some version when not (Manifest.toolchain_builds version) ->
-          problem directory "`%s` is written for Truss %s, and this toolchain is Truss %s."
-            package.name version Manifest.truss_version
-      | Some _ -> ());
-      (* Every path must read one way: [acme::geometry::vector] cannot be
-         both a module of [acme::geometry] and one of a package [acme]. *)
-      (match Path.package_parts package.name with
-      | [ name ] ->
-          List.iter
-            (fun other ->
-              match Path.package_parts other with
-              | [ owner; _ ] when owner = name ->
-                  problem directory
-                    "The package name `%s` is the owner in `%s`, so a path that starts with it \
-                     could be read two ways. Give one of them another name."
-                    name other
-              | _ -> ())
-            (List.sort_uniq compare
-               (List.map (fun (_, (p : Manifest.package)) -> p.name) packages
-               @ List.concat_map
-                   (fun (_, (p : Manifest.package)) ->
-                     List.map (fun (d : Workspace.dependency) -> d.package) p.dependencies)
-                   packages))
-      | _ -> ());
-      List.iter
-        (fun (dependency : Workspace.dependency) ->
-          if dependency.package = package.name then
-            problem directory "`%s` cannot depend on itself." package.name
-          else
-            let found =
-              match (named dependency.package, selected_named dependency.package) with
-              | Some (_, other), _ -> Some other
-              | None, Some other -> Some other.manifest
-              | None, None ->
-                  (* A dependency the registry would have, with no version
-                     known, is reported with the lock file. *)
-                  if List.length (Path.package_parts dependency.package) = 1 then
-                    problem directory "`%s` is not a package of this project." dependency.package;
-                  None
-            in
-            match found with
-            | Some other when package.usize_bits = 32 && other.usize_bits = 64 ->
-                (* A package that claims to run on every target cannot rely
-                   on one that runs only on 64-bit targets. *)
-                problem directory
-                  "`%s` runs only on 64-bit targets, so `%s` must say `usize_bits = 64` to depend \
-                   on it."
-                  other.name package.name
-            | _ -> ())
-        package.dependencies)
-    packages;
-  (match dependency_cycle packages with
-  | Some (directory, way) ->
-      problem directory "Packages cannot depend on each other in a cycle: %s."
-        (String.concat " -> " (List.map (Printf.sprintf "`%s`") way))
-  | None -> ());
-  let package_at directory = List.assoc_opt directory packages in
-  let modules =
-    List.filter_map
-      (fun (path, contents) ->
-        if not (Filename.check_suffix path ".truss") then None
-        else
-          match
-            Option.bind (Worktree.owner directories path) (fun directory ->
-                Option.map (fun package -> (directory, package)) (package_at directory))
-          with
-          | Some (directory, (package : Manifest.package)) ->
-              Some
-                ( path,
-                  ({
-                     package = package.name;
-                     modules = Worktree.module_names ~package_directory:directory path;
-                   }
-                    : Path.module_),
-                  contents )
-          | None -> None)
-      files
-  in
-  (* A file that is unchanged is a module whose text is not set when a
-     manifest gave it another package, and so another path. *)
-  List.iter
-    (fun (path, module_, contents) ->
-      match contents with
-      | Text text -> Engine.set engine Workspace.file_text module_ text
-      | Unchanged ->
-          if read (Engine.context engine) Workspace.file_text module_ = None then
-            Option.iter (Engine.set engine Workspace.file_text module_) (text path))
-    modules;
-  List.iter
-    (fun (path, contents) ->
-      match contents with
-      | Text text -> Session.note_file session path (Some (Session.fingerprint text))
-      | Unchanged -> ())
-    files;
-  let listed = Hashtbl.create (List.length files) in
-  List.iter (fun (path, _) -> Hashtbl.replace listed path ()) files;
-  List.iter
-    (fun path -> if not (Hashtbl.mem listed path) then Session.note_file session path None)
-    old.files;
-  let present = Hashtbl.create (List.length modules) in
-  List.iter (fun (_, module_, _) -> Hashtbl.replace present module_ ()) modules;
-  (* A module that is gone has no diagnostics to maintain, so they are no
-     longer a root. *)
-  List.iter
-    (fun (_, module_) ->
-      if not (Hashtbl.mem present module_) then begin
-        Engine.remove engine Workspace.file_text module_;
-        Engine.unroot engine Type_checker.file_diagnostics module_
+    (fun ((_, _, hash) as was) ->
+      if not (List.mem was selected) then begin
+        let root = Project.registry_root hash in
+        let files =
+          Option.value (Query.find (Session.observer session) Project.tree root) ~default:[]
+        in
+        List.iter (fun path -> Engine.remove engine Project.text (root, path)) files;
+        Engine.remove engine Project.tree root
       end)
-    old.modules;
-  List.iter
-    (fun (_, name) -> if named name = None then Engine.remove engine Workspace.packages name)
-    old.packages;
-  List.iter
-    (fun (directory, (package : Manifest.package)) ->
-      let own =
-        List.filter_map
-          (fun (path, module_, _) ->
-            if Worktree.owner directories path = Some directory then Some module_ else None)
-          modules
-      in
-      Engine.set engine Workspace.packages package.name
-        {
-          Workspace.name = package.name;
-          dependencies = package.dependencies;
-          modules = own;
-          usize_bits = package.usize_bits;
-        })
-    packages;
-  (* A registry package's files never change, so its inputs are set when it
-     enters the build, or its version changes, and taken away when it
-     leaves. *)
-  let registry =
-    List.map
-      (fun (found : Registry.Selection.package) -> (found.name, found.version, found.hash))
-      selected
-  in
-  List.iter
-    (fun ((name, _, _) as was) ->
-      if not (List.mem was registry) then begin
-        (match read (Engine.context engine) Workspace.packages name with
-        | Some package when named name = None ->
-            List.iter
-              (fun module_ -> Engine.remove engine Workspace.file_text module_)
-              package.modules
-        | _ -> ());
-        if named name = None && selected_named name = None then
-          Engine.remove engine Workspace.packages name
-      end)
-    old.registry;
-  List.iter
-    (fun (found : Registry.Selection.package) ->
-      if not (List.mem (found.name, found.version, found.hash) old.registry) then
-        Option.iter (set_published engine) (Hashtbl.find_opt published found.hash))
-    selected;
-  Engine.set engine layout ()
-    {
-      packages = List.map (fun (d, (p : Manifest.package)) -> (d, p.name)) packages;
-      files = List.map fst files;
-      modules = List.map (fun (path, module_, _) -> (path, module_)) modules;
-      time_limit;
-      registry;
-    };
-  project.problems <- List.rev !problems
+    before
 
-(* Reads the files whose stamps changed, and sets them. A file that cannot
-   be read, such as one deleted since its directory was listed, is not
-   there. A stamp is set only once its file's text is, so that a scan that
-   fails leaves the file to be read by the next. *)
+(* Brings a session's inputs in line with its files: reads the files whose
+   stamps changed, and sets each one's text, by its path. Everything else
+   about the project follows from those as queries. A file that cannot be
+   read, such as one deleted since its directory was listed, is not there.
+   A stamp is set with its file's text, so a scan that fails leaves the
+   file to be read by the next. *)
 let scan (files : Files.t) session =
   let engine = Session.engine session in
-  let project = project session in
-  let context = Engine.context engine in
-  let found =
-    List.filter_map
-      (fun (path, stamp) ->
-        match read context stamps path with
-        | Some old when old = stamp -> Some (path, stamp, Unchanged)
-        | _ -> Option.map (fun text -> (path, stamp, Text text)) (files.read path))
-      (files.list ())
-  in
-  let old = current_layout engine in
-  (* A scan that finds every file as it was has nothing to bring in line.
-     With a problem outstanding it looks again, since a problem can be one
-     that the files do not show, such as a package that could not be
-     fetched. *)
-  let unchanged =
-    project.applied && project.problems = []
-    && List.for_all (fun (_, _, contents) -> contents = Unchanged) found
-    && List.length found = List.length old.files
-  in
-  if not unchanged then begin
-    apply ~text:files.read session (List.map (fun (path, _, contents) -> (path, contents)) found);
-    project.applied <- true
-  end;
-  let present = Hashtbl.create (List.length found) in
+  let observer = Session.observer session in
+  let before = demand session Project.registry () in
+  let was = held_files session in
+  let was_modules = (own_layout session).modules in
+  let present = Hashtbl.create 64 in
   List.iter
-    (fun (path, stamp, contents) ->
-      Hashtbl.replace present path ();
-      match contents with Text _ -> Engine.set engine stamps path stamp | Unchanged -> ())
-    found;
+    (fun (path, stamp) ->
+      match Query.find observer stamps path with
+      | Some old when old = stamp -> Hashtbl.replace present path ()
+      | _ -> (
+          match files.read path with
+          | Some text ->
+              Hashtbl.replace present path ();
+              Engine.set engine Project.text (Project.project_root, path) text;
+              Engine.set engine stamps path stamp;
+              Session.note_file session path (Some (Session.fingerprint text))
+          | None -> ()))
+    (files.list ());
   List.iter
-    (fun path -> if not (Hashtbl.mem present path) then Engine.remove engine stamps path)
-    old.files
+    (fun path ->
+      if not (Hashtbl.mem present path) then begin
+        Engine.remove engine Project.text (Project.project_root, path);
+        Engine.remove engine stamps path;
+        Session.note_file session path None;
+        (* A module that is gone has no diagnostics to maintain, so they
+           are no longer a root. *)
+        match List.find_opt (fun (file, _, _) -> file = path) was_modules with
+        | Some (_, _, module_) -> Engine.unroot engine Type_checker.file_diagnostics module_
+        | None -> ()
+      end)
+    was;
+  Engine.set engine Project.tree Project.project_root
+    (List.sort compare (Hashtbl.fold (fun path () found -> path :: found) present []));
+  Engine.set engine Project.roots () [ Project.standard_root; Project.project_root ];
+  resolve_registry session ~before
 
 (* Each file's fingerprint, by which the saved state nearest to a set of
    files is found. *)
@@ -632,8 +263,7 @@ let fingerprints (files : Files.t) () =
     (files.list ())
 
 let attach_project session ~kind (files : Files.t) =
-  Session.attach session
-    (Project { kind; update = scan files; files; problems = []; lock_fix = None; applied = false })
+  Session.attach session (Project { kind; update = scan files; files; retried = false })
 
 (* The session for a set of files: its own state if it has one, else the
    nearest saved state, else a new one over the standard library. This is
@@ -652,7 +282,7 @@ let open_files ~key ?pointer ?home ~kind (files : Files.t) =
           attach_project session ~kind files;
           if start = Session.Near then
             (* The stamps it carries are another set of files'. *)
-            List.iter (fun path -> Session.remove session stamps path) (layout_of session).files;
+            List.iter (fun path -> Session.remove session stamps path) (held_files session);
           Ok session)
 
 let update session = (project session).update session
@@ -714,24 +344,30 @@ let relative_to root directory =
     then String.sub directory (String.length prefix) (String.length directory - String.length prefix)
     else ""
 
+(* Every package of the project: its directory and its name. *)
+let packages session =
+  List.map
+    (fun (directory, (package : Manifest.package)) -> (directory, package.name))
+    (own_layout session).packages
+
 (* The packages a request in a directory is about: those at or under it, or
    the one it is in. *)
 let target_packages session within =
-  let lay = layout_of session in
+  let packages = packages session in
   let under (directory, _) =
     within = "" || directory = within
     || String.length directory > String.length within
        && String.sub directory 0 (String.length within + 1) = within ^ "/"
   in
-  match List.filter under lay.packages with
+  match List.filter under packages with
   | [] -> (
-      match Worktree.owner (List.map fst lay.packages) (within ^ "/x.truss") with
-      | Some directory -> List.filter (fun (d, _) -> d = directory) lay.packages
+      match Worktree.owner (List.map fst packages) (within ^ "/x.truss") with
+      | Some directory -> List.filter (fun (d, _) -> d = directory) packages
       | None -> [])
   | found -> found
 
 let package_modules session name =
-  match read (Engine.context (Session.engine session)) Workspace.packages name with
+  match Workspace.package (Session.context session) name with
   | Some package -> package.modules
   | None -> []
 
@@ -745,7 +381,7 @@ let root session =
 
 let context session = Session.context session
 let set = Session.set
-let problems session = (project session).problems
+let problems session = demand session Project.problems ()
 
 (* What only a package's code shows to be wrong with its manifest, which
    checks the package. *)
@@ -755,22 +391,22 @@ let manifest_problems session names =
       if not (List.mem name names) then []
       else
         List.map
-          (fun problem -> (manifest_file directory, name, problem))
+          (fun problem -> (Project.manifest_file directory, name, problem))
           (try Engine.get (Session.engine session) Type_checker.manifest_problems name
            with Not_found -> []))
-    (layout_of session).packages
+    (packages session)
 
-let packages session = (layout_of session).packages
-
+(* A module's file, from the project's root: where it is, or for a module
+   the project does not have, where it would be. *)
 let module_file session (module_ : Path.module_) =
-  let lay = layout_of session in
-  match List.find_opt (fun (_, name) -> name = module_.package) lay.packages with
-  | Some (directory, _) -> Worktree.module_file ~package_directory:directory module_
-  | None -> Workspace.file_path module_
+  match demand session Project.place module_.package with
+  | Some { root; directory; _ } when root = Project.project_root ->
+      Project.module_path ~directory module_
+  | _ -> Workspace.file_path module_
 
-let time_limit session = (layout_of session).time_limit
-let registry_packages session = (layout_of session).registry
-let lock_fix session = (project session).lock_fix
+let time_limit session = (own_layout session).time_limit
+let registry_packages session = demand session Project.registry ()
+let lock_fix session = (demand session Project.selection ()).lock_fix
 
 let diagnostics session module_ =
   try Engine.get (Session.engine session) Type_checker.file_diagnostics module_
@@ -824,7 +460,7 @@ let sessions = Session.sessions
    definition's results are there to read and to compare. Each file's
    diagnostics are a root, so this is cheap after the first time. *)
 
-let check_all session = ignore (diagnostics_of session (layout_of session).packages)
+let check_all session = ignore (diagnostics_of session (packages session))
 
 type dependencies = Session.Graph.dependencies
 
@@ -836,7 +472,6 @@ let reads = Session.Graph.reads
 let readers = Session.Graph.readers
 
 let all_declarations session =
-  let lay = layout_of session in
   List.concat_map
     (fun (_, name) ->
       List.concat_map
@@ -844,7 +479,7 @@ let all_declarations session =
           try Query.demand (Session.observer session) Resolve.Names.declarations module_
           with _ -> [])
         (package_modules session name))
-    lay.packages
+    (packages session)
 
 let matches name path =
   let shown = Path.show path in
@@ -947,20 +582,10 @@ let trial session changes = trial_over session (Files.with_changes (project sess
 let library_prefix = Printf.sprintf "library-%s-" (String.sub Compiler_version.digest 0 16)
 let () = Session.trust Compiler_version.digest
 
-(* The inputs of the [standard] package, set from sources: each module's
-   text, and the package with its modules. The text of a module that the
-   state holds and the sources do not is removed. *)
+(* The inputs of the [standard] package, set from sources: its modules'
+   files. The file of a module that the sources no longer have is removed. *)
 let set_library (modules : (Path.module_ * string) list) session =
-  let engine = Session.engine session in
-  (match read (Engine.context engine) Workspace.packages Path.standard_package with
-  | Some (package : Workspace.package) ->
-      List.iter
-        (fun module_ ->
-          if not (List.mem_assoc module_ modules) then
-            Engine.remove engine Workspace.file_text module_)
-        package.modules
-  | None -> ());
-  load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[] modules
+  set_standard (Session.engine session) modules
 
 let open_library ?(modules = Standard_library.modules) name =
   match
@@ -978,9 +603,7 @@ let open_library ?(modules = Standard_library.modules) name =
              kind = Library;
              update = set_library modules;
              files = Files.of_texts [];
-             problems = [];
-             lock_fix = None;
-             applied = true;
+             retried = true;
            });
       (* A process that opens the state pays its size already, so this is
          when its differences are folded into one whole state. *)
@@ -994,8 +617,8 @@ type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Loc
 
 let project_manifests session =
   List.filter_map
-    (fun (_, name) -> read (Engine.context (Session.engine session)) Workspace.packages name)
-    (layout_of session).packages
+    (fun (_, name) -> Workspace.package (Session.context session) name)
+    (packages session)
 
 (* The lock file a project would have with some packages at other versions:
    each of [set] at the version given, or at its newest, and with [all],
@@ -1009,7 +632,9 @@ let plan_lock session ~set ~all =
       let before =
         try
           Registry.Lock.parse
-            (Option.value ~default:"" (read (Engine.context (Session.engine session)) lock_text ()))
+            (Option.value ~default:""
+               (Query.find (Session.observer session) Project.text
+                  (Project.project_root, Project.lock_file)))
         with Registry.Lock.Malformed _ -> []
       in
       let set =
@@ -1018,7 +643,7 @@ let plan_lock session ~set ~all =
         if all then
           List.filter_map
             (fun (name, _, _) -> if List.mem_assoc name set then None else Some (name, None))
-            (layout_of session).registry
+            (registry_packages session)
         else []
       in
       let wanted =
@@ -1055,7 +680,6 @@ let plan_lock session ~set ~all =
           let local name =
             List.exists (fun (package : Workspace.package) -> package.name = name) manifests
           in
-          let packages = Session.directory "packages" in
           let selected, problems =
             Registry.Selection.choose ~lock
               ~roots:
@@ -1068,11 +692,7 @@ let plan_lock session ~set ~all =
                          | _ -> None)
                        package.dependencies)
                    manifests)
-              ~local
-              ~load:(fun name version ~hash ->
-                Result.map
-                  (fun found -> (found.manifest, found.record))
-                  (load_published ~packages name version ~hash))
+              ~local ~load:load_published
           in
           if problems <> [] then
             Error (String.concat " " (List.map Registry.Selection.sentence problems))
@@ -1103,7 +723,7 @@ let published name version =
         Error
           (Printf.sprintf "`%s` %s cannot be read: %s." name (Registry.Version.show version) reason)
       in
-      match load_published ~packages:(Session.directory "packages") name version ~hash with
+      match load_published name version ~hash with
       | Error reason -> cannot reason
       | Ok _ -> (
           let directory = Filename.concat (Session.directory "packages") hash in
@@ -1138,7 +758,7 @@ let merge_preview session other =
             List.concat_map
               (fun (m, ds) ->
                 List.map (fun (d : Diagnostic.t) -> (m, Diagnostic.Code.name d.code, d.message)) ds)
-              (diagnostics_of s (layout_of s).packages)
+              (diagnostics_of s (packages s))
           in
           let sides =
             List.concat_map
@@ -1191,6 +811,26 @@ let store_directory = Session.Server.store_directory
 (* For tests *)
 
 module Testing = struct
+  (* Gives one module of a package given by itself another text. *)
+  let set_text engine (module_ : Path.module_) text =
+    let root = Project.package_root module_.package in
+    let path = Project.module_path ~directory:"" module_ in
+    Engine.set engine Project.text (root, path) text;
+    let files = Option.value (Query.find (Engine.observer engine) Project.tree root) ~default:[] in
+    if not (List.mem path files) then
+      Engine.set engine Project.tree root (List.sort compare (path :: files))
+
+  (* Gives a package given by itself another manifest, and leaves its
+     modules as they are. *)
+  let set_manifest ?(usize_bits = 32) engine ~name ~dependencies =
+    let root = Project.package_root name in
+    Engine.set engine Project.text (root, "truss.toml")
+      (manifest_text ~usize_bits ~name ~dependencies);
+    let files = Option.value (Query.find (Engine.observer engine) Project.tree root) ~default:[] in
+    if not (List.mem "truss.toml" files) then
+      Engine.set engine Project.tree root (List.sort compare ("truss.toml" :: files));
+    add_root engine root
+
   let engine = Session.engine
   let logging = Session.logging
   let standard_base = standard_base

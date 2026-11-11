@@ -56,6 +56,7 @@
   path
   well_known
   workspace
+  project
   resolve
   standard_library
   support
