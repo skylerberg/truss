@@ -185,6 +185,7 @@ module Code : sig
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Task_outlives_yield
 
   type capabilities =
     | Not_available
@@ -192,7 +193,8 @@ module Code : sig
     | Not_granted
     | Provide_mark
     | Not_an_implementation
-    | Function_in_turn
+    | Callback_may_deadlock
+    | Monitor_needs_tasks
 
   type prover =
     | Overflow

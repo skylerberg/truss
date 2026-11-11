@@ -31,12 +31,12 @@ let bounds state parameter =
 let implements state type_ trait =
   Impls.implements state.database ~bounds:(bounds state) type_ trait
 
-(* Bounds a type's arguments must meet *)
+(* Bounds on the arguments of a written type *)
 
-(* The bounds each written type's arguments must meet, each as a diagnostic
-   where it does not hold, or where the [impl] it is met by uses what its
-   package is not granted. Bodies check the types their annotations write
-   the same way. *)
+(* The bounds that the arguments of each written type must satisfy. Each
+   failure is a diagnostic: the bound does not hold, or the [impl] that
+   satisfies it uses a capability that its package is not granted. The types
+   that the annotations in a body write are checked in the same way. *)
 let bound_diagnostics database ~package ~bounds named =
   let diagnostic code (span : span) message =
     Diagnostic.make ~code (Source.span span.start span.stop) message
@@ -456,13 +456,13 @@ and agrees_result (left : T.result) (right : T.result) =
       left_mode = right_mode && agrees left right
   | _ -> false
 
-(* An [impl] as it sees its trait: the trait, what stands for the trait's
-   [Self] and parameters there, and the trait's types as this [impl] sees
-   them, with [Self] its type and each associated type of [Self] what this
-   [impl], or the [impl] of a trait it requires, chooses. An associated
-   type the trait declares and the [impl] does not give is an error
-   wherever a method's signature mentions it, which the [impl] itself
-   reports, once. *)
+(* An [impl]'s view of its trait: the trait, the substitution for the
+   trait's [Self] and parameters, and the trait's types under that
+   substitution, in which [Self] is the [impl]'s type and each associated
+   type of [Self] is the definition given by this [impl] or by the [impl] of
+   a required trait. An associated type that the trait declares and the
+   [impl] does not define is an error wherever a method's signature mentions
+   it. The [impl] itself reports it, once. *)
 type view = {
   trait : T.trait_interface;
   shown_trait : string;
@@ -475,6 +475,7 @@ type view = {
 let compiler_implements (impl : T.impl_interface) =
   Path.equal impl.implements.trait Properties.copyable_trait
   || Path.equal impl.implements.trait Properties.plain_trait
+  || Path.equal impl.implements.trait Properties.storable_trait
 
 let impl_view database ~bounds (impl : T.impl_interface) (trait_path : path_type) =
   let shown_trait = Names.spell_path trait_path.path in
@@ -525,9 +526,10 @@ let impl_view database ~bounds (impl : T.impl_interface) (trait_path : path_type
         { trait; shown_trait; substitution; impl_bounds; normalize; missing_associated })
       (Query.demand database Environment.trait_interface impl.implements.trait)
 
-(* An [impl]'s own part: that it gives every member its trait asks for, and
-   that its type implements what the trait requires. Each method written
-   inside it is checked against the trait's as a definition of its own. *)
+(* The checks of an [impl]'s own header: it defines every member that its
+   trait requires, and its type implements the traits that the trait
+   requires. Each method written inside it is checked against the trait's
+   method as a definition of its own. *)
 let check_impl state (written_members : impl_member line list) (impl : T.impl_interface)
     (trait_path : path_type) =
   let database = state.database in
@@ -560,8 +562,9 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
               | _ -> None)
             (Query.demand database Names.contained state.key)
         in
-        (* Every method without a body is given, and for a capability every
-           method, since a capability's methods have none. *)
+        (* The [impl] must define every method without a body. For a
+           capability that is every method, because a capability's methods
+           have no bodies. *)
         List.iter
           (fun (method_ : T.trait_method) ->
             let given =
@@ -583,7 +586,8 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
             match List.assoc_opt associated.associated_name impl.implements.associated with
             | None -> ()
             | Some chosen ->
-                (* What an [impl] chooses meets the bounds the trait declares. *)
+                (* Each associated type that the [impl] defines must satisfy
+                   the bounds that the trait declares for it. *)
                 List.iter
                   (fun bound ->
                     let bound = T.substitute_trait substitution bound in
@@ -680,8 +684,8 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
                     given.uses;
               }
             in
-            (* The trait method's own generic parameters stand for the
-               [impl] method's, by position. *)
+            (* The trait method's own generic parameters are substituted by
+               the [impl] method's, by position. *)
             let expected =
               T.map_signature normalize
                 (T.substitute_signature
@@ -730,9 +734,9 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
                 (Printf.sprintf "`%s` must have the signature `%s%s` that `%s` declares." name.text
                    name.text (show_signature expected) shown_trait)
             else
-              (* Whoever calls a capability holds the capability alone, so
-                 its implementation uses what its [impl] declares and no
-                 more. *)
+              (* A caller of a capability holds only that capability, so the
+                 implementation can use the capabilities that its [impl]
+                 declares and no others. *)
               let allowed = if trait.is_capability then [] else expected.uses in
               if not (List.for_all (fun capability -> List.mem capability allowed) given.uses) then
                 report state Impl_uses name.span
@@ -761,7 +765,7 @@ let check state =
           (Query.demand database Names.container state.key, definition.kind, state.lowered.interface)
         with
         (* A method written inside a trait or an [impl] is checked against
-           what that one inherits or implements. *)
+           the method that the enclosing declaration inherits or implements. *)
         | ( Some container,
             (Function { signature; _ } | Method_declaration signature),
             Function_interface given ) -> (

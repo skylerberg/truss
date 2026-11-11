@@ -125,6 +125,16 @@ let intrinsic_name = function
   | Evidence_implementation -> "evidence_implementation"
   | Evidence_outer -> "evidence_outer"
   | Program_argument -> "program_argument"
+  | Coroutine_start -> "coroutine_start"
+  | Coroutine_resume -> "coroutine_resume"
+  | Coroutine_suspend -> "coroutine_suspend"
+  | Tasks_spawn -> "tasks_spawn"
+  | Shared_allocate -> "shared_allocate"
+  | Shared_retain -> "shared_retain"
+  | Shared_release -> "shared_release"
+  | Shared_free -> "shared_free"
+  | Shared_lock -> "shared_lock"
+  | Shared_unlock -> "shared_unlock"
 
 let rvalue_to_string = function
   | Use operand -> operand_to_string operand
@@ -171,6 +181,10 @@ let statement_to_string = function
       Printf.sprintf "region of fork %d for %s to %s" fork
         (place_to_string { root = Local first; projections = [] })
         (place_to_string { root = Local last; projections = [] })
+  | Region { fork; region = Task { function_value; item } } ->
+      Printf.sprintf "region of fork %d as a task %s given %s" fork
+        (place_to_string { root = Local function_value; projections = [] })
+        (place_to_string { root = Local item; projections = [] })
   | Regions_end { fork } -> Printf.sprintf "end of fork %d" fork
   | Fork { branches } ->
       "fork "

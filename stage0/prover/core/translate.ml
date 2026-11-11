@@ -8055,10 +8055,7 @@ let new_context database ~home ~current ~terminates ~measures =
       && Call_graph.recursive database ~package:(Path.package current) current;
     disjoint =
       (match Query.demand database Ownership.ownership home with
-      | Some ownership ->
-          List.filter_map
-            (function Checked.Disjoint { first; second } -> Some (first, second) | _ -> None)
-            ownership.obligations
+      | Some ownership -> ownership.disjoint
       | None -> []);
     indexes = [];
   }

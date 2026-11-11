@@ -22,6 +22,14 @@ type key =
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
       (** The table of an [any] value of a type and trait: the type's drop, then an entry for each
           of the trait's methods *)
+  | Locked_entry of { capability : Path.t; name : string }
+      (** The entry of a capability's locking table for one of its methods. It locks the mutex of
+          the evidence it is called with, calls the implementation's entry, and unlocks the mutex.
+      *)
+  | Locked_table of Path.t
+      (** A capability's locking table: a [Locked_entry] for each of its methods. A [provide mut]
+          whose body can use [Tasks] builds its evidence with this table, so that calls of one
+          implementation by several tasks are mutually exclusive. *)
 
 let rank = function
   | Code _ -> 0
@@ -41,6 +49,8 @@ let rank = function
   | Any_drop _ -> 15
   | Template_check _ -> 16
   | Call_evaluation _ -> 17
+  | Locked_entry _ -> 18
+  | Locked_table _ -> 19
 
 let ( >>= ) c next = if c <> 0 then c else next ()
 
@@ -60,6 +70,9 @@ let rec compare a b =
   | Any_table a, Any_table b ->
       Path.compare a.impl b.impl >>= fun () ->
       Ground.compare_arguments a.type_arguments b.type_arguments
+  | Locked_entry a, Locked_entry b ->
+      Path.compare a.capability b.capability >>= fun () -> String.compare a.name b.name
+  | Locked_table a, Locked_table b -> Path.compare a b
   | Table a, Table b ->
       Path.compare a.impl b.impl >>= fun () ->
       Ground.compare_arguments a.type_arguments b.type_arguments
@@ -97,6 +110,8 @@ let rec encode ?(path = Ground.encode_path) key =
       tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
   | Any_entry key -> tagged 11 [ encode ~path key ]
   | Any_table { impl; type_arguments } -> tagged 12 [ path impl; arguments type_arguments ]
+  | Locked_entry { capability; name } -> tagged 18 [ path capability; Cbor.Text name ]
+  | Locked_table capability -> tagged 19 [ path capability ]
   | Entry key -> tagged 7 [ encode ~path key ]
   | Table { impl; type_arguments } -> tagged 8 [ path impl; arguments type_arguments ]
   | Program_main main -> tagged 10 [ path main ]
@@ -203,6 +218,9 @@ let rec mangle = function
   | Any_entry key -> marker "Dynamic" ^ mangle key
   | Any_table { impl; type_arguments } ->
       marker "Vtable" ^ path impl ^ mangle_arguments type_arguments
+  | Locked_entry { capability; name } ->
+      marker "LockedEntry" ^ path capability ^ marker "Method" ^ text name
+  | Locked_table capability -> marker "LockedTable" ^ path capability
   | Entry key -> marker "Entry" ^ mangle key
   | Table { impl; type_arguments } -> marker "Table" ^ path impl ^ mangle_arguments type_arguments
   | Program_main main -> marker "Program" ^ path main
@@ -241,6 +259,8 @@ let rec to_string = function
   | Any_entry key -> "any entry " ^ to_string key
   | Any_table { impl; type_arguments } ->
       "any table " ^ Path.show impl ^ arguments_to_string type_arguments
+  | Locked_entry { capability; name } -> "locked entry " ^ Path.show capability ^ "." ^ name
+  | Locked_table capability -> "locked table " ^ Path.show capability
   | Entry key -> "entry " ^ to_string key
   | Table { impl; type_arguments } -> "table " ^ Path.show impl ^ arguments_to_string type_arguments
   | Program_main main -> "program " ^ Path.show main

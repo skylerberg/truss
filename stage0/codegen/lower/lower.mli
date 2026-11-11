@@ -60,6 +60,10 @@ val table : context -> Instance.key -> Lir.table
 (* The table of an [any] value of a type and trait. *)
 val any_table : context -> Instance.key -> Lir.table
 
+(* A capability's locking table, whose entries lock a mutex around the
+   implementation's entries. *)
+val locked_table : context -> Instance.key -> capability:Path.t -> Lir.table
+
 (* The key of a test's instance. *)
 val test_key : Path.t -> Instance.key
 

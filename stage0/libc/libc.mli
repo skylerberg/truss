@@ -18,7 +18,7 @@ val host : system option
     [None] where that is a system it knows no C library of. *)
 
 (** A number that Truss and C both have. *)
-type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | USize | ISize | Float64
+type scalar = UInt8 | Int32 | UInt32 | Int64 | UInt64 | USize | ISize | Float32 | Float64
 
 type number =
   | O_rdonly
@@ -122,8 +122,6 @@ type number =
   | Istrip
   | Opost
   | Cs8
-  | Sigset_size  (** How many bytes a [sigset_t] takes *)
-  | Sig_block
   | Af_inet
   | Af_inet6
   | Sock_stream
@@ -223,6 +221,7 @@ type function_ =
   | Waitpid
   | Snprintf
   | Strtod
+  | Strtof
   | Fork
   | Pipe
   | Poll
@@ -263,10 +262,6 @@ type function_ =
   | Ioctl_tiocgwinsz  (** [ioctl] with the request [TIOCGWINSZ] *)
   | Tcgetattr
   | Tcsetattr  (** With [TCSAFLUSH] *)
-  | Sigemptyset
-  | Sigaddset
-  | Sigprocmask_block  (** [sigprocmask] with [SIG_BLOCK] *)
-  | Sigwait
   | Socket
   | Bind
   | Connect
@@ -282,6 +277,23 @@ type function_ =
   | Fcntl_getfl  (** [fcntl] with [F_GETFL], and then with [F_SETFL] *)
   | Fcntl_setfl
   | Addresses_of_host  (** The runtime's: a host's addresses, which it gets from [getaddrinfo] *)
+  | Signals_wait
+      (** The runtime's: blocks until one of the signals arrives and returns its number, or 0 if the
+          calling task is cancelled first *)
+  | Tasks_open
+      (** The runtime's task functions, which the real [Tasks] implementation calls. This one
+          creates a task group and returns its handle. *)
+  | Tasks_join  (** Blocks until every task of the group has ended, then frees the group *)
+  | Tasks_cancel
+      (** Cancels the group's tasks. Returns 1 to the first caller for a group and 0 to later
+          callers. *)
+  | Tasks_cancelled  (** Whether the calling task has been cancelled *)
+  | Tasks_watch  (** Returns a ticket for a key, for a later [Tasks_wait] *)
+  | Tasks_wait  (** Blocks until the key has been woken after the ticket was issued *)
+  | Tasks_wake  (** Wakes every task that is waiting on the key *)
+  | Tasks_lock  (** Acquires a mutex, blocking while another task holds it *)
+  | Tasks_unlock  (** Releases a mutex *)
+  | Tasks_yield  (** Yields the thread to another task *)
 
 val functions : function_ list
 

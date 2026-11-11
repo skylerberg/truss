@@ -4,7 +4,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Impls = Interface.Impls
 module Properties = Interface.Properties
 open State
@@ -140,9 +140,9 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
       match recorded.arguments with
       | [ receiver ] -> Copy (operand Read (build_expression_by_id state receiver.expression))
       | _ -> bug "`copy` does not have exactly one argument")
-  (* The [next] of a yielding method's cursor is the method's own code. The
-     trait's other methods on such a cursor are calls like any other, of
-     the bodies that the trait gives them. *)
+  (* The [next] of a yielding method's cursor runs the method's own code.
+     The trait's other methods on such a cursor are ordinary calls of the
+     trait's provided methods. *)
   | Trait_method { name = "next"; evidence = Impl { impl; _ }; _ }
     when Option.is_some (Impls.cursor_of_impl impl) -> (
       match recorded.arguments with
@@ -799,7 +799,7 @@ let cursor_type (call : C.call) : T.ty =
         { method_ = Method { owner = trait.trait; name; receiver }; arguments = type_arguments }
   | _ -> bug "a loop iterates over a call that cannot yield"
 
-(* What a [for] loop iterates over. *)
+(* The iteration of a [for] loop. *)
 (* The call of a value's [each] that a loop over the value makes. *)
 let each_of state (call : C.call) (mode : T.mode) (iterable : expression) : Core.expression =
   let receiver = build_expression state iterable in
@@ -888,16 +888,16 @@ let loop_clause state (clause : loop_clause) : Core.loop_clause =
   | Loop_decreases measures -> Decreases (List.map (build_expression state) measures)
   | Loop_cost written -> Cost (cost state ~origin:clause.id written)
 
-(* [inner?], desugared to a match. The first variant of the operand's type
-   is the success variant: its arm evaluates to the variant's field. The
-   second is the failure variant: its arm returns the failure variant of
-   the function's result type, with the same fields. *)
-(* An exit, inside a [Leaving] if it ends tasks early. *)
-let leaving (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.kind =
+(* An early exit. It is wrapped in a [Leaving] node if it terminates tasks. *)
+let early_exit (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.kind =
   match tasks with
   | [] -> exit
   | _ -> Leaving { tasks; exit = synthetic_expression state ~origin T.Never exit }
 
+(* [inner?], desugared to a match. The first variant of the operand's type
+   is the success variant: its arm evaluates to the variant's field. The
+   second is the failure variant: its arm returns the failure variant of
+   the function's result type, with the same fields. *)
 let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leaves : Core.task list)
     : Core.kind =
   let scrutinee = build_expression state inner in
@@ -968,7 +968,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leav
               value =
                 Some
                   (make T.Never
-                     (leaving leaves state ~origin:value.id
+                     (early_exit leaves state ~origin:value.id
                         (Return
                            (Some
                               (make output

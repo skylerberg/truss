@@ -12,7 +12,7 @@ let output_with ~workers text =
   output
 
 let same_with_any_workers text ~expected =
-  List.iter (fun workers -> expect_string ~expected (output_with ~workers text)) [ 1; 2; 8; 32 ]
+  List.iter (fun workers -> expect_string ~expected (output_with ~workers text)) worker_counts
 
 let () =
   test "branches give results through lets, change their own parts, and call a lambda" (fun () ->
@@ -164,6 +164,23 @@ fn main(arguments: List[String]) -> ExitCode
 }
 |}
         ));
+  test "a region reads a parameter that the function is passed by pointer" (fun () ->
+      same_with_any_workers ~expected:"2 4 6 8\n"
+        {|fn doubled(items: mut List[Int64]) {
+  parallel for item in mut items {
+    item = item * 2
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var numbers: List[Int64] = [1, 2, 3, 4]
+  doubled(mut numbers)
+  Console.print_line("${numbers[0]} ${numbers[1]} ${numbers[2]} ${numbers[3]}")
+  ExitCode.success
+}
+|});
   test "a parallel for over a list, whose each keeps a count between yields, runs in order"
     (fun () ->
       same_with_any_workers ~expected:"5050\n"
@@ -324,5 +341,97 @@ let () =
                "b2: return";
              ])
         actual)
+
+(* Coroutines *)
+
+let () =
+  test "a coroutine runs when resumed, switches back when it suspends, and ends when it returns"
+    (fun () ->
+      (* The coroutine adds its item to a count, suspends, and adds 10. The
+         entry reads the count after each resume, and the result of each
+         resume. *)
+      let work : Ground.function_type =
+        { parameters = [ (Read, named "UInt64") ]; result = Returns (named "Unit"); uses = [] }
+      in
+      let environment = [ ("count", Lir.Pointer { target = value int32; writable = true }) ] in
+      let count = at ~projections:[ Deref; Field "count"; Deref ] 2 in
+      let add amount = Lir.Assign (count, Binary (Add, Copy count, amount)) in
+      let coroutine =
+        function_ ~parameters:[ 0; 1 ] ~environment
+          [
+            local ~name:"environment" (Raw (Nullable_pointer Opaque));
+            local ~name:"item" (value (named "UInt64"));
+            local (Pointer { target = Environment 0; writable = false });
+            local (value int32);
+          ]
+          [
+            block
+              [
+                Assign (at 2, Use (copy 0));
+                Assign (at 3, Convert (copy 1, Integer Int32));
+                add (copy 3);
+                Call { target = Intrinsic Coroutine_suspend; arguments = []; result = Discarded };
+                add (constant_int32 10);
+              ]
+              (Return None);
+          ]
+      in
+      let resume into : Lir.statement =
+        Call
+          {
+            target = Intrinsic Coroutine_resume;
+            arguments = [ copy 3 ];
+            result = Returned (at into);
+          }
+      in
+      let plus amount = Lir.Assign (at 6, Binary (Add, copy 6, amount)) in
+      expect_status 112
+        [
+          entry ~nested:[ coroutine ]
+            [
+              local ~name:"count" (value int32);
+              local (Environment 0);
+              local (value (Function work));
+              local (value usize);
+              local (Raw Bool);
+              local (Raw Bool);
+              local (value int32);
+              local (value int32);
+              local (value int32);
+            ]
+            [
+              block
+                [
+                  Assign (at 0, Use (constant_int32 0));
+                  Assign
+                    ( at ~projections:[ Field "count" ] 1,
+                      Use (Address { place = at 0; writable = true }) );
+                  Assign
+                    ( at 2,
+                      Function_value
+                        {
+                          code = Nested 0;
+                          environment = Some (Address { place = at 1; writable = false });
+                        } );
+                  Call
+                    {
+                      target = Intrinsic Coroutine_start;
+                      arguments = [ copy 2; Constant (Integer (UInt64, Z.one)) ];
+                      result = Returned (at 3);
+                    };
+                  resume 4;
+                  Assign (at 6, Use (copy 0));
+                  resume 5;
+                  Assign (at 7, Convert (copy 4, Integer Int32));
+                  Assign (at 8, Convert (copy 5, Integer Int32));
+                  Assign (at 7, Binary (Multiply, copy 7, constant_int32 100));
+                  Assign (at 8, Binary (Multiply, copy 8, constant_int32 50));
+                  plus (copy 0);
+                  plus (copy 7);
+                  plus (copy 8);
+                ]
+                (Return (Some (copy 6)));
+            ];
+        ])
 
 let () = Harness.finish ()

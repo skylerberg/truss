@@ -3,7 +3,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -224,7 +224,7 @@ and lambda state env ?expected (value : expression) parameters body =
           (fun written (mode, input) -> pattern state env written input ~mode)
           parameters function_type.inputs;
         let output = output_type function_type.output in
-        let lambda_env = { env with output = Some (Returns output); around = [] } in
+        let lambda_env = { env with output = Some (Returns output); enclosing = [] } in
         let body_type = block_value state lambda_env ~expected:output body in
         ignore
           (convert state lambda_env ?expression:(block_end body) body.span ~found:body_type
@@ -263,7 +263,6 @@ and lambda state env ?expected (value : expression) parameters body =
       (fun acc id -> if outer id && not (List.mem id acc) then acc @ [ id ] else acc)
       [] read
   in
-  state.tables.captures.(value.id) <- Some captures;
   register_expression state value (fun () ->
       let parameters = List.map (build_pattern state) parameters in
       Lambda
@@ -364,8 +363,6 @@ and match_ state env ?expected (value : expression) scrutinees arms =
         && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier
     | _ -> false
   in
-  if guards_exhaustive then
-    state.obligations <- Guards_cover { match_ = value.id } :: state.obligations;
   (* The types of the scrutinees are inferred before the arms are checked. *)
   let types =
     List.map
@@ -431,10 +428,9 @@ and arm_value state env ?expected (body : statement) =
       ignore (statement state env body ~last:false);
       T.unit
 
-(* The type of the elements that a quantifier goes over. In code that runs,
-   a quantifier over a collection is a loop, so the call of the
-   collection's [each] is recorded for the quantifier, as for a [for]
-   loop. *)
+(* The element type of a quantifier's range or collection. In executable
+   code, a quantifier over a collection is a loop, so the call of the
+   collection's [each] is recorded for the quantifier, as for a [for] loop. *)
 and element_of_collection state env ~(quantifier : expression) (collection : expression) =
   let collection_type = normalize state (expression state env collection) in
   match collection_type with

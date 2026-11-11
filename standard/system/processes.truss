@@ -264,7 +264,7 @@ fn collect(
     intrinsic::storage_push(mut waited_for, value: if error_open { error_output } else { -1 })
     intrinsic::storage_push(mut waited_for, value: intrinsic::libc_pollin())
     if intrinsic::libc_poll(mut waited_for, count: 2, timeout: -1) < 0 {
-      if !calls::interrupted_by_signal() {
+      if !calls::retry_after_signal() {
         return Err(intrinsic::libc_errno())
       }
     } else {

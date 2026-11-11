@@ -1,5 +1,49 @@
+use standard::intrinsic
+
 internal type SystemTasks()
 
 impl Tasks for SystemTasks {
-  fn yield_now(self) {}
+  fn open(self) -> UInt64 {
+    intrinsic::runtime_tasks_open()
+  }
+
+  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    intrinsic::tasks_spawn(task_group, work: work, item: item)
+  }
+
+  fn join(self, task_group: UInt64) {
+    let _ = intrinsic::runtime_tasks_join(task_group)
+  }
+
+  fn cancel(self, task_group: UInt64) -> Bool {
+    intrinsic::runtime_tasks_cancel(task_group) != 0
+  }
+
+  fn cancelled(self) -> Bool {
+    intrinsic::runtime_tasks_cancelled() != 0
+  }
+
+  fn watch(self, key: UInt64) -> UInt64 {
+    intrinsic::runtime_tasks_watch(key)
+  }
+
+  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {
+    let _ = intrinsic::runtime_tasks_wait(key, ticket: ticket)
+  }
+
+  fn wake(self, key: UInt64) {
+    let _ = intrinsic::runtime_tasks_wake(key)
+  }
+
+  fn lock(self, mutex: UInt64) {
+    let _ = intrinsic::runtime_tasks_lock(mutex)
+  }
+
+  fn unlock(self, mutex: UInt64) {
+    let _ = intrinsic::runtime_tasks_unlock(mutex)
+  }
+
+  fn yield_now(self) {
+    let _ = intrinsic::runtime_tasks_yield()
+  }
 }

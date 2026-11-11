@@ -40,6 +40,8 @@ Code generation:
   pulled cursors into state machines
 - makes each branch of a `parallel` statement a function of its own, which
   the runtime's threads run
+- makes each branch of a `concurrent` statement a function too, and spawns
+  it as a task through the `Tasks` capability
 - emits C from the LIR, compiles it, and links the program, with the table
   that turns positions into file names and lines
 
@@ -279,7 +281,7 @@ parameter. The emitter only prints.
 | `drop(place)` | Run the type's drop code. Before drop elaboration: drop whatever the place still owns |
 | `free_block(place, variant)` | Free the block of an `indirect` variant whose fields have all been moved out or dropped |
 | `echo(text, length, site)` | Record a value's debug output, with its position |
-| `region(fork, kind)`, `regions_end(fork)` | Before outlining only. The start of a region of a `parallel` statement, and the end of the fork's last region (see [Parallelism](#parallelism)) |
+| `region(fork, kind)`, `regions_end(fork)` | Before outlining only. The start of a region of a `parallel` or `concurrent` statement, and the end of the fork's last region (see [Parallelism](#parallelism) and [Concurrency](#concurrency)) |
 | `fork(branches)` | Run each nested function, given the address of its environment, and go on when all have returned. They may run at the same time. |
 | `fork_range(body, environment, first, last)` | Run the nested function for parts that together hold each index from `first` to `last` once, and go on when all have returned |
 
@@ -430,6 +432,32 @@ code that fills a table for an `impl` and the code that calls through the
 
 `any value` allocates the block and moves the value in, which is the one
 allocation DESIGN.md says it costs.
+
+### Shared values
+
+`intrinsic::Shared[Value]` is one pointer, to a value in a heap block. The
+block starts with a header that the runtime owns: the block's address, an
+atomic reference count, and a mutex. The value follows the header, and the
+pointer is the value's address, so the header ends where the value starts.
+
+| Operation | Lowering |
+|---|---|
+| `shared_new(value)` | Allocates the block with a count of one and moves the value in |
+| `copy()` | Increments the count and copies the pointer |
+| drop | Decrements the count. The reference that brings it to zero calls the value's drop function and frees the block |
+| `shared_update(shared, input, change)` | Locks the mutex, calls `change` with the value's address as its `mut` argument and with `input`, and unlocks |
+| `shared_key(shared)` | The pointer as a `UInt64` |
+
+- **The count is atomic** because a reference can be copied and dropped
+  on any thread, in a `parallel` branch for one.
+- **`change` cannot block or deadlock.** Its type has no `uses`, so it
+  cannot wait, and it cannot call `shared_update`, which requires `Tasks`.
+- **Drop elaboration does not track the block's contents.** The code that
+  writes the value into the block or lends it to `change` reaches it
+  through a pointer local marked `borrowed`. The value is dropped by a
+  direct call of its type's drop function.
+- **The runtime's functions are declared only in the C files that call
+  them,** so adding them changed the C of no other instance.
 
 ### Function values
 
@@ -1102,8 +1130,81 @@ values of its own.
 
 ### Tasks
 
-Stage0 runs tasks one after another. The standard library's `Tasks` has
-only `yield_now`, which does nothing, and nothing runs on a second thread.
+`Tasks` is a capability like any other. `concurrent` code calls its methods
+through evidence, so a test can provide a scheduler of its own. The real
+implementation, `SystemTasks`, calls the runtime's task functions.
+
+| Method | Meaning |
+|---|---|
+| `open() -> UInt64` | Creates a task group and returns its handle |
+| `spawn(task_group, work, item) -> Bool` | Spawns a task that calls `work(item)` and returns true. If the group is cancelled, spawns nothing and returns false |
+| `join(task_group)` | Blocks until every task of the group has ended, then frees the group |
+| `cancel(task_group) -> Bool` | Cancels the group's tasks. Returns true to the first caller and false to every later caller |
+| `cancelled() -> Bool` | Whether the calling task is cancelled |
+| `watch(key) -> UInt64`, `wait(key, ticket, reason)`, `wake(key)` | Blocking on a key. `watch` returns a ticket, and `wait` blocks until `wake` has been called for the key after that ticket was issued |
+| `lock(mutex)`, `unlock(mutex)` | Mutual exclusion between the calls of a `mut` implementation |
+| `yield_now()` | Yields the thread to another task |
+
+The runtime runs each task on an operating-system thread of its own:
+
+- **A group** counts its tasks that have not ended. `join` blocks until
+  the count is zero and then frees the group.
+- **Cancellation** is a flag on the group. A task is cancelled when its
+  group, or a group that encloses it, is. `cancel` sets the flag once and
+  wakes every waiter, so that a cancelled one returns from `wait`.
+- **A cancelled task that is blocked in a system call is interrupted.**
+  `cancel` sends `SIGURG` to the thread of each task of the group, and of
+  each group that those tasks opened. The handler does nothing and is
+  installed without `SA_RESTART`, so a blocked read, accept, or sleep
+  fails with `EINTR`. The standard library's retry loops stop retrying in
+  a cancelled task, and the error becomes `SystemError.Cancelled`. A task
+  can start a blocking call just after an interrupt, so `join` sends the
+  interrupt again every few milliseconds until the cancelled tasks have
+  ended. The runtime reserves `SIGURG`, as Go's runtime does. A host
+  lookup cannot be interrupted, so it runs to its end.
+- **Waiting on a key** uses a fixed table of slots. A key hashes to a
+  slot, which counts the wakes of its keys. `watch` returns the count,
+  `wait` blocks while the count is unchanged, and `wake` increments it.
+  Two keys can share a slot, so `wait` can return without a wake of its
+  own key, and its caller tests its condition again.
+- **A mutex** is a `UInt64` that its owner initialized to zero. `lock`
+  changes it from 0 to 1 with a compare-and-swap, and a thread that finds
+  it locked waits on its address as a key. That wait is not cancellable.
+- **A test program, and code run while compiling, start no thread.**
+  `spawn` calls the task's function and returns when it returns, so tasks
+  run sequentially, in the order they are spawned. A task that calls
+  `wait` would deadlock, because the task that would wake it cannot run,
+  so `wait` panics there.
+
+### Mutual exclusion for a `mut` implementation
+
+Several tasks can call one implementation at the same time. If the
+implementation is provided `mut`, that would be a data race on its state.
+So at a `provide mut` whose body can use `Tasks`, lowering replaces the
+evidence of each capability of the implementation:
+
+- The replacement's table is the capability's *locking table*, an
+  instance generated once for the capability. Its entry for a method
+  calls `Tasks.lock`, calls the same method through the implementation's
+  own evidence, and calls `Tasks.unlock`.
+- The replacement holds the address of the mutex, the implementation's
+  own evidence, and the evidence for `Tasks`. The mutex is a word in the
+  frame of the `provide`, shared by all capabilities of the
+  implementation.
+- The locks go through `Tasks`, not straight to the runtime, so that a
+  scheduler provided as `Tasks` sees every lock. They use the `Tasks`
+  implementation that the same `provide` lists, or else the enclosing
+  one.
+- An implementation of `Tasks` is never locked. It guards its own state.
+- A `provide` whose body cannot use `Tasks`, and one without `mut`, are
+  lowered as before, so their calls cost nothing more.
+
+The intrinsic module also has coroutines, for a scheduler written in Truss
+that runs one task at a time. `coroutine_start(work, item)` creates a
+suspended coroutine, `coroutine_resume` runs it until it suspends or its
+function returns, and `coroutine_suspend` switches back to the resumer.
+Each coroutine is a thread of the operating system, and the coroutine and
+its resumer never run at the same time.
 
 ## Parallelism
 
@@ -1192,6 +1293,86 @@ waits, running other threads' branches meanwhile.
 - **The text of a failure or an `echo` is built by one thread at a time,**
   and a thread that is ending the run never gives the buffer up, so one
   failure is reported.
+
+## Concurrency
+
+A branch of a `concurrent` block, and each iteration of a `concurrent for`,
+runs as a task. Lowering marks the task's code as a region, as it does for
+`parallel`, and outlining turns the region into a nested function. Two
+things differ from `parallel`: the function is spawned through `Tasks`, and
+a task can exit its statement early.
+
+### Task regions
+
+A task region has the kind `task(function_value, item)`. Outlining assigns
+the nested function to the local `function_value`, and the code after the
+region passes it to `Tasks.spawn`. `item` is a `UInt64` local that becomes
+the nested function's parameter.
+
+- **A block** opens a group, marks one region for each branch in a single
+  fork, spawns each branch, and joins the group.
+- **A `concurrent for` over a range** runs the loop sequentially in the
+  enclosing function. Each iteration converts the index to `UInt64`,
+  assigns it to `item`, and spawns the body, which is a fork with one
+  region. If `spawn` returns false, the loop stops.
+- **A `concurrent for` over a method that yields by position** inlines the
+  method, and the method's range loop spawns the tasks. The `yield` and
+  the loop body both run in the task, so the task borrows its own element.
+  This is the only case where a task uses a place that the method lends.
+- **A `concurrent for` over any other yielding method, or over a cursor,**
+  runs the method sequentially in the enclosing function and spawns a task
+  at each `yield`. The value's bytes go to the task in a heap block whose
+  address is `item`, and the task takes them out and frees the block. What
+  the task then holds depends on the `yield`:
+
+  | Yielded | The task |
+  |---|---|
+  | An `own` value, a value the method computed for the `yield`, or a value from a cursor | Owns the value and drops it |
+  | A read-only place, or a constructor of read-only places | Holds a bitwise copy that it never drops. The place still owns what the bytes point at |
+
+  The task outlives the `yield`. The ownership check has verified that a
+  borrowed place is inside a parameter the method takes read-only, or is
+  `Plain`, so the place stays valid and unchanged until the group is
+  joined. If `spawn` returns false, the enclosing code takes the value
+  back out of the block, drops it if it is owned, and stops the method as
+  a `break` does.
+- **The join is a scope cleanup.** The group has a scope of its own, and
+  every exit from that scope joins the group, so no path skips the join.
+  The scope's temporaries, such as the arguments of the yielding method,
+  are dropped after the join, because a task may read them until then.
+- **A pulled method has no task regions.** Its instance holds no nested
+  function, so `concurrent` code in it is reported as not built, as a
+  lambda is.
+
+### Early exits
+
+An early exit is a `return`, a `break`, a `continue`, or a `?` that leaves
+a task before the task's end. The core form wraps it in `Leaving`, with the
+tasks that it ends, innermost first. Lowering handles one task at a time:
+
+1. The task evaluates the return value, if there is one, into a temporary
+   of its own.
+2. The task calls `Tasks.cancel` on its group. If the call returns true, the task
+   assigns the exit's number to the local `winner` and moves the return
+   value into the local `return_value`. If it returns false, another exit
+   won, and the temporary is dropped.
+3. The task ends: it drops what its scopes own and jumps to the end of its
+   region.
+4. After `Tasks.join`, the enclosing code switches on `winner`. If no
+   enclosing task remains, it performs the winning exit. Otherwise it
+   repeats these steps in the next enclosing task, with `return_value` as
+   the value.
+
+- **Each branch of a block has its own `winner` and `return_value`.** The
+  branches are regions of one fork, and outlining rejects a local that one
+  region assigns and another uses. The iterations of a loop are one
+  region, so they share one pair.
+- **`return_value` belongs to the scope that encloses the statement.** Drop
+  elaboration gives it a drop flag, as for any local that is assigned on
+  some paths only.
+- **A `break` of the `concurrent for` itself** needs no code after the
+  join. A `continue` of the `concurrent for` itself is not an early exit
+  of the group: it jumps to the end of the task.
 
 ## The system interface
 
@@ -1475,11 +1656,14 @@ handle whose number is the process's and whose descriptor is none;
 `Handles.wait` reads the exit status, or the signal that ended the
 program, out of `waitpid`'s status, and `Handles.signal` is `kill`, which
 is refused for a handle that is not one process. `SystemSignals.wait`
-holds the signals it is asked for back with `sigprocmask`, so that one
-that arrives does not end the program, and takes the next with `sigwait`.
-They stay held back afterwards, so one that arrives between two waits is
-there for the second. `SystemTasks.yield_now`
-does nothing, since tasks run one after another. The real `NetworkServer`
+calls the runtime, which installs a handler for each signal it is asked
+for, so that a task on any thread can wait for it. The handler records
+the signal and writes a byte to a pipe, and a thread of the runtime reads
+the pipe and wakes the waiters. A signal stays recorded until a wait
+takes it, so one that arrives between two waits is there for the second.
+The wait returns `None` in a cancelled task. A test program, which has
+one thread, blocks the signals and takes the next with `sigwait`. The
+real `NetworkServer`
 and `NetworkClient` are sockets. An address is a `sockaddr_in` or a
 `sockaddr_in6` as bytes, which the standard library writes and reads: the
 family is where the system keeps it, and the port and the address are high
@@ -1894,11 +2078,11 @@ a command line can hold.
   builds,** cached, so a project's development builds run them at full
   speed.
 - **A lending method that lends through a call to itself.**
-- **Waiting for a signal that the system ignores unless it is asked for,**
-  such as a terminal's change of size. macOS throws such a signal away
-  while it is held back, so `Signals.wait` never sees it there. It needs a
-  handler installed for the signal, and so a function of the runtime's to
-  be the handler.
+- **Waiting, in a test program, for a signal that the system ignores
+  unless it is asked for,** such as a terminal's change of size. macOS
+  throws such a signal away while it is blocked, and a test program
+  blocks the signals it waits for. A program installs a handler instead,
+  and sees the signal.
 - **A cursor over a method that lends places to be changed.** `next` would
   have to hand out a value it takes back.
 - **A lambda in a yielding method that is pulled,** and in a pulled method
@@ -1912,34 +2096,25 @@ a command line can hold.
   allocated by `from_template` too, and the copy writes no byte that
   `from_template` did not write.
 - **A template's list of literals as static data.** It is allocated.
-- **A `parallel for` over a `List`, a `Slice`, or an `Array` at once.**
-  Their `each` methods are `while` loops that keep an index between
-  `yield`s, so such a loop runs in order. Written as one `for` over a
-  range that only yields, they would run in parts with no change here.
+- **A `parallel for` over the read-only `each` of a `List`, a `Slice`, or
+  an `Array` in chunks.** These methods are `while` loops that keep an
+  index between `yield`s, so the loop runs sequentially. They cannot be
+  written as one `for` over a range yet: inside a `for`, `yielded` names
+  the loop's own cursor, so the method's `ensures` about `yielded` cannot
+  be proven.
 - **A `parallel for` over any other method at once.** A collection that
   cannot give its parts by position needs a way to split itself in two,
   as Rust's rayon and Java's `Spliterator` have.
-- **`concurrent`.** A branch is to become a function as a `parallel`
-  branch does, started as a task through the evidence for `Tasks`, which
-  also ends the block: it waits for every branch, and cancels the rest
-  when one leaves early. A branch that leaves early records where control
-  goes, and the code after the block goes there.
-- **Tasks.** The real `Tasks` is first to give each task a thread of the
-  operating system, so that the real capability implementations wait as
-  they do now. Later a task is to have a stack of its own and run on the
-  pool's threads: a call that would wait registers what it waits for with
-  the operating system and switches to another task. A call the operating
-  system cannot wait for that way, such as reading a file or looking up a
-  host, runs on a thread kept for such calls. Each call that waits returns
-  the cancelled error at once in a cancelled task.
-- **Turns for a `mut` implementation.** At a `provide mut` whose body can
-  use `Tasks`, the evidence is to point at entries that take the
-  implementation's turn through the evidence for `Tasks`, call the method,
-  and give the turn back. Any other `provide` is lowered as it is now.
-- **The seeded `Tasks`.** It is to run one task at a time and pick the
-  next by its seed at each capability call that waits, starts a task, or
-  takes a turn. It needs the operations that start a task and switch to
-  one, which the real `Tasks` is built on too.
+- **Tasks without a thread each.** A task has an operating-system thread
+  of its own, so a program with very many blocked tasks runs out of
+  threads. Later a task is to have its own stack and run on the pool's
+  threads: a call that would block registers what it waits for with the
+  operating system and switches to another task. A call that the
+  operating system cannot wait for that way, such as reading a file or
+  looking up a host, runs on a thread kept for such calls.
+- **The seeded `Tasks`.** It is to run each task as a coroutine, one at a
+  time, and pick the next by its seed at each capability call that blocks,
+  spawns a task, or locks a mutex.
 - **Keeping an instance's C and a linked program.** The C is emitted again
   for each build, and found as an object by its text. It could be kept by
   the LIR's hash and the emitter's version, and a program by its objects,

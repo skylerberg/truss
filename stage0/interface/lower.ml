@@ -1,7 +1,7 @@
-(* Lowering written types to [Types.ty], from a definition's resolved
-   form. Lowering reports what a type position alone shows to be wrong: a name
-   that is not a type, a wrong number of arguments, an associated type no
-   bound declares. Bounds are checked apart, by [Check]. *)
+(* Lowering written types to [Types.ty], from a definition's resolved form.
+   Lowering reports the errors that a type position alone determines: a name
+   that is not a type, a wrong number of arguments, an associated type that
+   no bound declares. [Check] checks bounds separately. *)
 
 open Syntax
 module T = Types
@@ -37,8 +37,8 @@ let reported context code (span : span) message =
 let report context code span message = ignore (reported context code span message)
 let error context code span message = T.Error (reported context code span message)
 
-(* What resolution and lowering agree on cannot fail; if it does, that is a
-   bug in the compiler, and stopping is better than accepting the code. *)
+(* Resolution and lowering must agree. A disagreement is a compiler bug, and
+   stopping is better than accepting the code. *)
 let bug format = Compiler_bug.bug ~stage:"Interface" format
 let target context (name : name) = context.resolved.names.(name.id)
 
@@ -438,7 +438,7 @@ let rec mentions_integer = function
 
 (* A signature, given the generics of the head before it and the type of
    [self]. *)
-(* Whether a signature's clauses say it ends: it has a [time] clause. *)
+(* Whether a signature promises termination: it has a [time] clause. *)
 let terminates (clauses : clause list) =
   List.exists
     (fun (clause : clause) ->
@@ -497,7 +497,7 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
     uses;
     terminates;
     specification_only =
-      (* [Model]'s method gives a value in mathematical terms. *)
+      (* [Model]'s method returns a mathematical value. *)
       (match owner with
         | Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" } -> true
         | _ -> false)

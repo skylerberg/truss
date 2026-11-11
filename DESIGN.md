@@ -598,7 +598,11 @@ views are *second-class*, as in Hylo:
   argument, but it cannot be returned except as below, and cannot go where
   an owned value that may be stored is required. Putting a view into a
   record or a list makes the record or list a view, so a view can never be
-  stored past its function.
+  stored past its function. Every type that is not a view type is
+  `Storable`, a trait the compiler implements, so generic code asks for a
+  value that may be stored with a bound, as in `Channel[Message: Storable]`.
+  An `any Trait` does not name the type of the value it holds, so it is a
+  view type unless `Trait` requires `Storable`.
 - **A call's result views what its arguments view.** A function may return a
   view only of what reached it through its parameters, never of its own
   locals. The caller then treats the result as viewing everything its
@@ -2002,6 +2006,23 @@ effect: code that does it declares `uses Tasks`.
   implementations are the enclosing code's variables. A task started with
   Go's `go` can outlive everything it was given, so in Truss it could be
   given neither.
+- **A task borrows only what outlives the loop.** An iteration of a
+  `concurrent for` outlives the `yield` that started it. A place inside a
+  parameter that the method takes read-only cannot change or be freed
+  while the method runs, so a task may borrow it: `concurrent for item in
+  items` lends each element for the whole loop. A value that the method
+  yields `own`, or computes for the `yield`, goes to the task, and a
+  `Plain` value is copied. A place in a local of the method or in a `mut`
+  parameter could change or be freed when the method resumes, so yielding
+  it to a task is rejected: it would be a use after free. A method that
+  yields `mut` access can drive a `concurrent for` only if its body is one
+  loop over a range that yields at each index. Each task then runs one
+  iteration of that loop and changes its own element. Rust draws the same
+  line between an iterator, whose items outlive the step that produced
+  them, and a lending iterator, whose items do not.
+- **`yield` is not allowed in concurrent code.** It would run the caller's
+  loop body as a task, at the same time as the method's other tasks, and
+  the caller's loop body is checked as sequential code.
 - **It is a construct, not a function that is passed a function.** A
   `spawn(work)` would have to keep `work` until the task runs, and only a
   function that captures nothing can be kept (see [Closures](#closures)).
@@ -2039,8 +2060,9 @@ effect: code that does it declares `uses Tasks`.
   an implementation, which is proven against its method's `ensures` like
   any other result, so a caller's proof holds whether or not the task was
   cancelled. An implementation written on calls that wait passes their
-  error on. A task that waits for its turn in a `mut` implementation keeps
-  waiting, since nothing else could answer for the method.
+  error on. A cancelled task that is blocked on the mutex of a `mut`
+  implementation stays blocked until it acquires the mutex, since the call
+  has no other result to return.
   This is Go's `Context` without the parameter, since whatever provides
   `Tasks` knows which task is calling. Trio and Kotlin raise an exception
   at the call instead, and Rust drops a future at whichever `await` it had
@@ -2054,16 +2076,23 @@ effect: code that does it declares `uses Tasks`.
 - **A channel is how one task waits for another.** A `Channel[Message]` is
   a queue with a fixed capacity: `send` waits while it is full, `receive`
   waits while it is empty, and `close` ends the loops of the tasks that
-  receive from it. A message is owned, so sending one moves it and copies
-  nothing. Its type is never a view type, since what a view views could be
-  gone before the message is received. A function's type and an `any` type
-  do not say what the value holds, so they are view types too (see
-  [Views](#views)), and a message is a record or a sum type of owned data.
-  A channel is a token, as a file handle is: the queue is held by whatever
-  provides `Tasks`, so a channel's methods take `self` read-only and every
-  branch can use the one channel. A task that waits for several kinds of
-  message receives one sum type from one channel, as an Erlang process
-  reads one mailbox.
+  receive from it. A channel of capacity 0 holds no message, and its
+  `send` returns when a task has received the message, as on Go's
+  unbuffered channels and Kotlin's rendezvous channels. A message is
+  owned, so sending one moves it and copies nothing. Its type is `Storable`, so never a view type, since what a view
+  views could be gone before the message is received. A function's type
+  does not say what the value holds, and neither does an `any` type whose
+  trait does not require `Storable`, so they are view types too (see
+  [Views](#views)). A message is a record or a sum type of owned data, or
+  an `any` of a trait that requires `Storable`.
+  A channel is a reference to its queue. `channel.copy()` makes another
+  reference to the same queue, and the queue is freed when the last
+  reference is dropped, so a channel can be stored in a record or held by
+  a capability implementation that outlives the function that made it. A
+  channel's methods take `self` read-only, so every branch can also use
+  one channel that is declared before the block. A task that waits for
+  several kinds of message receives one sum type from one channel, as an
+  Erlang process reads one mailbox.
 - **How many tasks run at once is bounded by a value, not by syntax.** A
   `tasks::Limiter` holds a number of permits, and `limiter.hold(work)`
   runs `work` once it has one. This is Kotlin's `Semaphore.withPermit` and
@@ -2077,33 +2106,34 @@ effect: code that does it declares `uses Tasks`.
   implements a `Sessions` capability, provided `mut` around the code that
   serves requests. `uses Sessions` then marks every function that can touch
   the table.
-- **Calls into a `mut` implementation take turns.** Where the code inside a
-  `provide mut` can use `Tasks`, each call of the implementation's methods
-  runs from start to end before the next begins, and a task that calls
-  meanwhile waits. This is a monitor: Ada's protected objects, Java's
-  `synchronized` methods, and an Erlang `gen_server` work the same way. A
-  check and the change that depends on it therefore go in one method.
-  Within a call nothing else changes the state, and between two calls
-  anything may. No task is left holding a view of the state, since a method
-  returns none. An implementation provided without `mut` is only read, so
-  calls into it need no turns.
+- **Calls into a `mut` implementation are mutually exclusive.** Where the
+  code inside a `provide mut` can use `Tasks`, the implementation has a
+  mutex. Each call of its methods holds the mutex from start to end, and a
+  task that calls meanwhile blocks. This is a monitor: Ada's protected
+  objects, Java's `synchronized` methods, and an Erlang `gen_server` work
+  the same way. A check and the change that depends on it therefore go in
+  one method. Within a call nothing else changes the state, and between
+  two calls anything may. No task is left holding a view of the state,
+  since a method returns none. An implementation provided without `mut` is
+  only read, so it has no mutex.
 - **Proofs already allow for it.** The prover never models an
   implementation's state: a capability call gives a value of which only
   the method's `ensures` is known. No proof ever assumed that the state
   stays the same from one call to the next, so every proof still holds when
   other tasks' calls come between.
-- **Turns cannot deadlock on each other.** An implementation's methods can
-  call only capabilities provided outside it, so tasks always take turns
-  from the innermost implementation outward, and no two wait for each
-  other's. One rule keeps this true: an implementation whose calls take
-  turns has no method with a parameter that can hold a function, or an
-  `any` value, that uses a capability, since calling it could reach an
-  implementation further in.
-- **Turns cost nothing where there are no tasks.** Whether the code inside
-  a `provide mut` can use `Tasks` is known where the `provide` is written,
-  from the signatures of what it calls. Code that uses a capability
-  parameter of the function around it counts, since the parameter may stand
-  for `Tasks`. Only such a `provide` makes calls take turns.
+- **These mutexes cannot deadlock.** An implementation's methods can call
+  only capabilities provided outside it, so every task acquires the
+  mutexes in one order, from the innermost implementation outward. One
+  rule keeps this true: an implementation with a mutex has no method with
+  a parameter that can hold a function, or an `any` value, that uses a
+  capability, since calling it could acquire the mutex of a nested
+  implementation out of order.
+- **Mutual exclusion costs nothing where there are no tasks.** Whether the
+  code inside a `provide mut` can use `Tasks` is known where the `provide`
+  is written, from the signatures of what it calls. Code that uses a
+  capability parameter of the enclosing function counts, since the
+  parameter may be instantiated with `Tasks`. Only such a `provide` gets a
+  mutex.
 - **A mutex is not a value.** Rust's `Mutex` and Go's `sync.Mutex` change
   what a read-only place holds, which mutable value semantics rules out,
   and two tasks that take two of them in different orders deadlock. A task
@@ -2111,13 +2141,17 @@ effect: code that does it declares `uses Tasks`.
   and stays possible, but every use of the state then switches tasks twice
   and waits behind every other use. Erlang added shared tables and atomic
   counters for that reason.
-- **A cell with a pure update may be added.** One implementation makes all
-  of its calls wait for each other, which is too coarse for a cache in
-  many parts that tasks should use at once. A cell that holds a value, and
-  whose one method runs a pure function on it while no other task can,
-  allows that, as Clojure's atoms do. A pure function cannot wait, use
-  another cell, or do I/O, so such updates cannot deadlock. It is added
-  when a program needs it.
+- **A cell with a pure update is what a channel is built on.** The cell,
+  `intrinsic::Shared`, holds a value behind a reference count and a mutex.
+  Its one operation runs a pure function on the value while it holds the
+  mutex, as an update of a Clojure atom does. A pure function cannot wait,
+  use another cell, or do I/O, so two updates cannot deadlock, and no task
+  holds the mutex across a call that can wait. Updating a cell requires
+  `Tasks`, because which task updates first differs from run to run. Only
+  the standard library can name the cell, and a channel's queue is one. A
+  public cell, for state that one implementation's mutual exclusion is too
+  coarse for, such as a cache in many parts, is added when a program needs
+  it.
 - **Data races cannot happen, and waiting forever can.** A task can wait
   for a message that no task will send. Go, Rust, and Erlang do not rule
   that out either.

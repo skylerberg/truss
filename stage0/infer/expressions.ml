@@ -18,7 +18,7 @@
 
 open Syntax
 module T = Types
-module C = Checked
+module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -92,7 +92,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
         match value.kind with Break -> (Break_exit, Break) | _ -> (Continue_exit, Continue)
       in
       register_expression state value (fun () ->
-          Form.leaving (left_by exit env.around) state ~origin:value.id kind);
+          Form.early_exit (tasks_exited_by exit env.enclosing) state ~origin:value.id kind);
       T.Never
   | Self_value -> (
       (* A lambda that reads [self] captures it. In the list of references,
@@ -204,7 +204,9 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       type_
   | Return inner ->
       register_expression state value (fun () ->
-          Form.leaving (left_by Return_exit env.around) state ~origin:value.id
+          Form.early_exit
+            (tasks_exited_by Return_exit env.enclosing)
+            state ~origin:value.id
             (Return (Option.map (build_expression state) inner)));
       (match (inner, env.output) with
       | Some inner, Some (Returns output) -> check state env inner output
