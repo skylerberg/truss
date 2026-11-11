@@ -99,7 +99,12 @@ let rec show_sexp = function
 (* A query as the solver is asked it: its canonical text, its key, and for
    each symbol whose value a counterexample should give, the canonical
    name the text calls it by. *)
-type request = { text : string; key : string; requested : (string * string) list }
+type request = {
+  text : string;
+  key : string;
+  requested : (string * string) list;
+  asked : string list;  (** What [get-value] is given for each of [requested], in order. *)
+}
 
 (* An answer in the canonical names, the same for every query with the
    same text, so it can be kept by key alone. *)
@@ -127,15 +132,25 @@ let render query =
       locked (fun () -> Asked.replace rendered_queries query rendered);
       rendered
 
-let request ?(values = []) query =
+let request ?(values = []) ?(terms = []) query =
   let { text; named; text_key } = render query in
-  let requested =
+  let symbols =
     List.filter_map
       (fun symbol ->
-        List.assoc_opt symbol named |> Option.map (fun canonical -> (symbol, canonical)))
+        List.assoc_opt symbol named
+        |> Option.map (fun canonical -> ((symbol, canonical), canonical)))
       values
   in
-  { text; key = text_key ^ String.concat "," (List.map snd requested); requested }
+  (* A term is asked by its text and kept by its place, since its text has
+     spaces and the solver may print it back otherwise. *)
+  let terms =
+    List.filter_map
+      (fun (name, term) -> Logic.term_text query term |> Option.map (fun text -> (name, text)))
+      terms
+    |> List.mapi (fun index (name, text) -> ((name, Printf.sprintf "#%d" index), text))
+  in
+  let requested = List.map fst (symbols @ terms) and asked = List.map snd (symbols @ terms) in
+  { text; key = text_key ^ String.concat "," asked; requested; asked }
 
 let request_key request = request.key
 
@@ -182,8 +197,7 @@ let ask solver request =
         header ^ request.text
         ^
         if request.requested = [] then ""
-        else
-          Printf.sprintf "(get-value (%s))\n" (String.concat " " (List.map snd request.requested))
+        else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.asked)
       in
       locked (fun () -> solver.solved <- solver.solved + 1);
       let _, output, _ = Process.run ~input solver.program [ "-in"; "-smt2" ] in
@@ -194,11 +208,17 @@ let ask solver request =
             Values
               (match rest with
               | List pairs :: _ ->
-                  List.filter_map
-                    (function
-                      | List [ Atom canonical; value ] -> Some (canonical, show_sexp value)
-                      | _ -> None)
-                    pairs
+                  (* In the order asked. *)
+                  List.filteri
+                    (fun index _ -> index < List.length request.requested)
+                    (List.mapi
+                       (fun index pair ->
+                         match (pair, List.nth_opt request.requested index) with
+                         | List [ _; value ], Some (_, canonical) ->
+                             Some (canonical, show_sexp value)
+                         | _ -> None)
+                       pairs)
+                  |> List.filter_map Fun.id
               | _ -> [])
         | _ -> Out_of_steps_canonical
       in

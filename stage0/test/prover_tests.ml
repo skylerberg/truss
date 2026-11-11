@@ -3341,6 +3341,27 @@ let () =
          }\n"
         "prover.ensures")
 
+(* Counterexample paths *)
+
+let () =
+  test "a counterexample says which way each if on its path goes" (fun () ->
+      let found =
+        message
+          "fn step(count: UInt8, up: Bool) -> UInt8 {\n\
+          \  if up {\n\
+          \    if count > 100 {\n\
+          \      count + 200\n\
+          \    } else {\n\
+          \      count + 1\n\
+          \    }\n\
+          \  } else {\n\
+          \    0\n\
+          \  }\n\
+           }\n"
+      in
+      if not (contains found "On that path, `up` is true, `count > 100` is true.") then
+        fail "message %S" found)
+
 (* Definitions under a quantifier *)
 
 let () =

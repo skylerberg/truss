@@ -250,7 +250,22 @@ let counterexample members (obligation : Translate.obligation) answer_values =
           (List.assoc_opt symbol answer_values))
       (List.rev obligation.values @ List.rev obligation.locals)
   in
-  match shown with [] -> "" | shown -> " For example, when " ^ String.concat ", " shown ^ "."
+  (* Each [if] the path reaches, by whether its condition holds there. *)
+  let path =
+    List.filter_map Fun.id
+      (List.mapi
+         (fun index (text, _, _) ->
+           match
+             ( List.assoc_opt (Printf.sprintf "reached.%d" index) answer_values,
+               List.assoc_opt (Printf.sprintf "condition.%d" index) answer_values )
+           with
+           | Some "true", Some holds when holds = "true" || holds = "false" ->
+               Some (Printf.sprintf "`%s` is %s" text holds)
+           | _ -> None)
+         obligation.decisions)
+  in
+  (match shown with [] -> "" | shown -> " For example, when " ^ String.concat ", " shown ^ ".")
+  ^ match path with [] -> "" | path -> " On that path, " ^ String.concat ", " path ^ "."
 
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
 let source_span (span : span) : Diagnostic.span = Source.span span.start span.stop
@@ -517,7 +532,8 @@ let answers (teller : teller) (obligations : Translate.obligation list) =
             | None -> Waiting_answer
             | Some Solver.Proven -> Solved Proven
             | Some _ -> Solved Out_of_steps)
-        | Some (Solver.Counterexample _), _ when obligation.locals <> [] -> (
+        | Some (Solver.Counterexample _), _
+          when obligation.locals <> [] || obligation.decisions <> [] -> (
             (* Where a counterexample is, the values of the locals there too,
                asked for only now, so that a query that proves keeps its
                key. *)
@@ -719,8 +735,22 @@ let question_request =
                 List.map fst obligation.values
                 @ if question.with_locals then List.map fst obligation.locals else []
               in
+              (* With the locals, each [if]'s reach and condition, for the path
+                 a counterexample takes. *)
+              let terms =
+                if question.with_locals then
+                  List.concat
+                    (List.mapi
+                       (fun index (_, reached, condition) ->
+                         [
+                           (Printf.sprintf "reached.%d" index, reached);
+                           (Printf.sprintf "condition.%d" index, condition);
+                         ])
+                       obligation.decisions)
+                else []
+              in
               Option.map
-                (fun query -> Solver.request ~values query)
+                (fun query -> Solver.request ~values ~terms query)
                 (variant_query ~call:(call_told database) obligation question.choice
                    question.variant)
           | None -> None)

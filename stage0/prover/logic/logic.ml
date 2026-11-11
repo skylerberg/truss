@@ -549,6 +549,27 @@ let render query =
 
 let text query = fst (render query)
 
+let term_text query term =
+  let _, numbering = render query in
+  (* A symbol the query declares but its text does not mention has no
+     canonical name, and the solver would not know it. *)
+  let rec named = function
+    | Symbol name -> Hashtbl.mem numbering.symbol_names name
+    | Integer _ | Boolean _ | Bits _ -> true
+    | Apply (name, arguments) ->
+        (Hashtbl.mem numbering.member_of name
+        || Hashtbl.mem numbering.symbol_names name
+        || not (Hashtbl.mem numbering.declared name))
+        && List.for_all named arguments
+    | Forall _ | Exists _ -> false
+  in
+  if named term then begin
+    let buffer = Buffer.create 64 in
+    print numbering [] buffer term;
+    Some (Buffer.contents buffer)
+  end
+  else None
+
 let symbols query =
   let _, numbering = render query in
   List.rev_map (fun name -> (name, Hashtbl.find numbering.symbol_names name)) numbering.symbol_order
