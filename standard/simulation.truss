@@ -14,7 +14,12 @@ public type Operation = Open | Read | Write | Connect | Accept | Resolve | Spawn
 
 type Fault(operation: Operation, error: SystemError)
 
-public opaque type Setup(input: List[String], environment: environment::FixedEnvironment, start: Instant)
+public opaque type Setup(
+  input: List[String],
+  environment: environment::FixedEnvironment,
+  files: files::MemoryFiles,
+  start: Instant,
+)
 
 public fn Setup.new() -> Setup {
   Setup(
@@ -29,12 +34,15 @@ public fn Setup.new() -> Setup {
       ),
       current_directory: Path.new("/"),
     ),
+    files: files::MemoryFiles.new(),
     start: Instant.epoch,
   )
 }
 
 public fn Setup.with_file(own self, path: Path, contents: StringSlice) -> Setup {
-  todo
+  var changed = own self
+  changed.files = own changed.files.with_text(path, contents: contents)
+  changed
 }
 
 public fn Setup.with_variable(own self, name: StringSlice, value: StringSlice) -> Setup {
@@ -71,10 +79,26 @@ type State(
   console: console::CapturedConsole,
   log: log::CapturedLog,
   environment: environment::FixedEnvironment,
+  files: files::MemoryFiles,
   generator: random::Generator,
   faults: List[Fault],
   pending_signals: List[processes::Signal],
 )
+
+internal fn State.take_fault(mut self, operations: Slice[Operation]) -> Option[SystemError] {
+  match self.faults.slice().find_index(fn(fault) { operations.contains(fault.operation) }) {
+    Some(index) => {
+      let fault = mut self.faults.remove_at(index)
+      Some(fault.error)
+    }
+    None => None
+  }
+}
+
+internal fn State.begin_file_operation(mut self, now: Instant, operations: Slice[Operation]) -> Option[SystemError] {
+  mut self.files.set_time(now)
+  mut self.take_fault(operations)
+}
 
 public opaque type World(tasks: tasks::SeededTasks, state: intrinsic::Shared[State], start: Instant)
 
@@ -92,6 +116,7 @@ public fn World.from(setup: own Setup, seed: UInt64 = 0) -> World {
         console: console::CapturedConsole.new(input: own setup.input),
         log: log::CapturedLog(),
         environment: own setup.environment,
+        files: own setup.files,
         generator: generator,
         faults: [],
         pending_signals: [],
@@ -106,6 +131,14 @@ fn World.preemption_point(self)
 {
   provide self.tasks {
     Tasks.yield_now()
+  }
+}
+
+fn World.clock_time(self) -> Instant
+  uses Panic
+{
+  provide self.tasks {
+    self.start + self.tasks.elapsed()
   }
 }
 
@@ -136,13 +169,17 @@ public fn World.records(self) -> List[log::Record]
 public fn World.file_text(self, path: Path) -> Option[String]
   uses Tasks
 {
-  todo
+  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    state.files.text(path)
+  })
 }
 
 public fn World.file_bytes(self, path: Path) -> Option[List[UInt8]]
   uses Tasks
 {
-  todo
+  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    state.files.contents(path)
+  })
 }
 
 public fn World.now(self) -> Instant
@@ -250,17 +287,45 @@ impl Console for World
   }
 }
 
-impl FileRead for World {
+impl FileRead for World
+  uses Panic
+{
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Open, Operation.Read]) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileRead.read(file)
+        }
+      }
+    })
   }
 
   fn read_text(self, file: Path) -> Result[String, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Open, Operation.Read]) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileRead.read_text(file)
+        }
+      }
+    })
   }
 
   fn open(self, file: Path) -> Result[files::FileReader, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    let handle = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Open]) {
+        Some(error) => Err(error)
+        None => mut state.files.open_to_read(file)
+      }
+    })?
+    Ok(files::FileReader.opened(handle))
   }
 
   fn metadata(self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
@@ -268,53 +333,162 @@ impl FileRead for World {
   }
 
   fn list(self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileRead.list(directory)
+        }
+      }
+    })
   }
 
   fn read_link(self, link: Path) -> Result[Path, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileRead.read_link(link)
+        }
+      }
+    })
   }
 
   fn resolve(self, path: Path) -> Result[Path, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileRead.resolve(path)
+        }
+      }
+    })
   }
 }
 
-impl FileWrite for World {
+impl FileWrite for World
+  uses Panic
+{
   fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Open, Operation.Write]) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileWrite.write(file, contents: contents)
+        }
+      }
+    })
   }
 
   fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Open, Operation.Write]) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileWrite.write_text(file, contents: contents)
+        }
+      }
+    })
   }
 
   fn open(self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    let handle = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Open]) {
+        Some(error) => Err(error)
+        None => mut state.files.open_to_write(file, mode: mode)
+      }
+    })?
+    Ok(files::File.opened(handle))
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileWrite.create_directory(directory)
+        }
+      }
+    })
   }
 
   fn remove(self, path: Path) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileWrite.remove(path)
+        }
+      }
+    })
   }
 
   fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileWrite.rename(from, to: to)
+        }
+      }
+    })
   }
 
   fn link(self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileWrite.link(target, link: link, kind: kind)
+        }
+      }
+    })
   }
 
   fn set_permissions(self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileWrite.set_permissions(path, permissions: permissions)
+        }
+      }
+    })
   }
 
   fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          FileWrite.set_modified(path, time: time)
+        }
+      }
+    })
   }
 }
 
@@ -342,13 +516,43 @@ impl NetworkServer for World {
   }
 }
 
-impl Handles for World {
+impl Handles for World
+  uses Panic
+{
   fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    let read = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Read]) {
+        Some(error) => Err(error)
+        None => {
+          var bytes: List[UInt8] = []
+          provide mut state.files {
+            match Handles.read(handle, buffer: mut bytes, limit: limit) {
+              Ok(_) => Ok(own bytes)
+              Err(error) => Err(error)
+            }
+          }
+        }
+      }
+    })?
+    let count = if read.length() < limit { read.length() } else { limit }
+    streams::append_bytes(mut buffer, bytes: read.slice_range(0, stop: count))
+    Ok(count)
   }
 
   fn write(self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    let written = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Write]) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          Handles.write(handle, bytes: bytes)
+        }
+      }
+    })?
+    Ok(if written < bytes.length() { written } else { bytes.length() })
   }
 
   fn read_at(
@@ -358,23 +562,78 @@ impl Handles for World {
     buffer: mut List[UInt8],
     limit: USize,
   ) -> Result[USize, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    let read = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Read]) {
+        Some(error) => Err(error)
+        None => {
+          var bytes: List[UInt8] = []
+          provide mut state.files {
+            match Handles.read_at(handle, offset: offset, buffer: mut bytes, limit: limit) {
+              Ok(_) => Ok(own bytes)
+              Err(error) => Err(error)
+            }
+          }
+        }
+      }
+    })?
+    let count = if read.length() < limit { read.length() } else { limit }
+    streams::append_bytes(mut buffer, bytes: read.slice_range(0, stop: count))
+    Ok(count)
   }
 
   fn write_at(self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    let written = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Write]) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          Handles.write_at(handle, offset: offset, bytes: bytes)
+        }
+      }
+    })?
+    Ok(if written < bytes.length() { written } else { bytes.length() })
   }
 
   fn seek(self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          Handles.seek(handle, to: to)
+        }
+      }
+    })
   }
 
   fn set_length(self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: [Operation.Write]) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          Handles.set_length(handle, length: length)
+        }
+      }
+    })
   }
 
   fn synchronize(self, handle: streams::Handle) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    let now = self.clock_time()
+    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match mut state.begin_file_operation(now, operations: []) {
+        Some(error) => Err(error)
+        None => provide mut state.files {
+          Handles.synchronize(handle)
+        }
+      }
+    })
   }
 
   fn metadata(self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
@@ -382,7 +641,12 @@ impl Handles for World {
   }
 
   fn close(self, handle: own streams::Handle) -> Result[Unit, SystemError] {
-    todo
+    self.preemption_point()
+    intrinsic::shared_update(self.state, input: own handle, change: fn(state, closing) {
+      provide mut state.files {
+        Handles.close(own closing)
+      }
+    })
   }
 
   fn shut_down(self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {

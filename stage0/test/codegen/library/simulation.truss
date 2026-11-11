@@ -1,3 +1,4 @@
+use standard::files
 use standard::log
 use standard::simulation
 use standard::tasks
@@ -182,4 +183,60 @@ test "tasks in a world print in an order that depends only on the seed" {
     }
   }
   assert outputs.length() == 2
+}
+
+test "a world holds the files of its setup and the files that are written in it" {
+  let world = simulation::World.from(simulation::Setup.new().with_file(Path.new("/etc/motd"), contents: "welcome"))
+  provide world {
+    assert FileRead.read_text(Path.new("/etc/motd")) == Ok("welcome")
+    assert FileWrite.write_text(Path.new("/etc/issue"), contents: "issue") is Ok(_)
+    assert world.file_text(Path.new("/etc/issue")) == Some("issue")
+    assert world.file_bytes(Path.new("/etc/motd")) == Some("welcome".to_bytes())
+    assert world.file_text(Path.new("/none")) is None
+    assert FileRead.list(Path.new("/etc")) is Ok(entries) && entries.length() == 2
+  }
+}
+
+test "fail_next makes the next operation of its kind fail, once" {
+  let world = simulation::World.new()
+  provide world {
+    assert FileWrite.write_text(Path.new("/a"), contents: "a") is Ok(_)
+    world.fail_next(simulation::Operation.Read, error: SystemError.Interrupted)
+    assert FileRead.read_text(Path.new("/a")) == Err(SystemError.Interrupted)
+    assert FileRead.read_text(Path.new("/a")) == Ok("a")
+    world.fail_next(simulation::Operation.Open, error: SystemError.TooManyOpen)
+    assert FileRead.open(Path.new("/a")) is Err(TooManyOpen)
+    world.fail_next(simulation::Operation.Write, error: SystemError.OutOfStorage)
+    var file = FileWrite.open(Path.new("/a"), mode: files::WriteMode.Append).expect("the file opens")
+    assert mut file.write("more".bytes()) == Err(SystemError.OutOfStorage)
+    assert mut file.write("more".bytes()) == Ok(4)
+    assert own file.close() is Ok(_)
+    assert world.file_text(Path.new("/a")) == Some("amore")
+  }
+}
+
+fn append_line(file: Path, line: StringSlice) -> Result[Unit, SystemError]
+  uses FileWrite, Handles
+{
+  var opened = FileWrite.open(file, mode: files::WriteMode.Append)?
+  mut opened.write_all(line.bytes())?
+  own opened.close()
+}
+
+test "tasks in a world append to one file, and each write arrives whole" {
+  let seeds: UInt64 = 16
+  for seed in 0..seeds {
+    let world = simulation::World.new(seed: seed)
+    provide world {
+      concurrent for writer in 0..4 {
+        let _ = append_line(Path.new("/log"), line: "writer ${writer}\n")
+      }
+      assert world.file_text(Path.new("/log")) is Some(text)
+        && text.length() == 36
+        && text.contains("writer 0\n")
+        && text.contains("writer 1\n")
+        && text.contains("writer 2\n")
+        && text.contains("writer 3\n")
+    }
+  }
 }

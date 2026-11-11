@@ -2469,8 +2469,13 @@ test "a reply that never arrives ends at the time limit" {
 ```
 
 - `simulation::Setup` holds what a world starts with, such as the lines of
-  its console's input and its environment's variables.
+  its console's input, its environment's variables, and its files.
   `World.from(setup, seed: seed)` makes the world.
+- A world's file system is in memory. `Setup.with_file(path, contents)`
+  puts a file in it, with the directories above the file, and
+  `world.file_text(path)` reads one back.
+- `world.fail_next(operation, error)` makes the next `Open`, `Read`, or
+  `Write` of a file fail with `error`, once.
 - A `World` is a reference to its state, so it is provided without `mut`.
   A test reads what happened, such as `world.output()` and
   `world.records()`, inside the `provide`.

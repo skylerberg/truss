@@ -3,7 +3,6 @@ use standard::intrinsic
 use standard::system::calls
 use standard::system::directories
 use standard::system::handles
-use standard::system::lines
 
 internal type SystemFileRead()
 
@@ -21,8 +20,7 @@ impl FileRead for SystemFileRead {
   }
 
   fn open(self, file: Path) -> Result[files::FileReader, SystemError] {
-    let handle = handles::open_to_read(file)?
-    Ok(files::FileReader(handle: own handle, input: lines::LineInput.new()))
+    Ok(files::FileReader.new(files::File(handle: handles::open_with(file, flags: intrinsic::libc_o_rdonly())?)))
   }
 
   fn metadata(self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {

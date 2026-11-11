@@ -2439,6 +2439,16 @@ package may want those names for its own types. They are `core::Pair`,
   `files::MemoryFiles`, `console::CapturedConsole`, `log::CapturedLog`.
   The narrowing implementations are there too, such as
   `files::FilesWithin` and `network::HostsAllowed`.
+- **`files::MemoryFiles` is a file system, not a table of contents.** It
+  has directories, symbolic and hard links, permissions, modification
+  times, and open files with positions, and it returns the error that the
+  operating system returns for each misuse: `NotFound`, `IsADirectory`,
+  `NotADirectory`, `DirectoryNotEmpty`, `AlreadyExists`,
+  `PermissionDenied`. A test of error handling is only as good as the
+  errors the fake can produce. A file that is removed while it is open
+  stays readable through its handle, as on POSIX systems. It implements
+  `Handles` for its own files, so `FileReader` and `File` work on it as
+  they do on the real file system.
 - **`simulation::World` fakes every capability at once.** It is an
   in-memory machine: a file system, a network between its own hosts, a
   clock that advances when every task is blocked or when the test says,
