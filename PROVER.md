@@ -101,7 +101,7 @@ Every fact the prover must show, and where it comes from:
 | Obligation | Where |
 |---|---|
 | An index or slice is in bounds | Each `items[i]` and `items[a..b]`, through the `requires` of the `impl` of `Index` the call reaches |
-| An operation does not overflow | Each `+`, `-`, `*`, negation, and conversion on a built-in integer, and each of the intrinsic module's integer operations, as an `impl` of `Add` calls |
+| An operation does not overflow | Each `+`, `-`, `*`, negation, and conversion on a built-in integer, and each of the intrinsic module's integer operations, as an `impl` of `Add` calls; on an unsigned type, only the bound that the operation can pass: the greatest value for `+` and `*`, zero for `-` |
 | A division has a nonzero divisor, and is not the least value over `-1` | Each `/` and `%` on a built-in integer, and each intrinsic `divide` and `remainder` |
 | A shift amount is less than the width | Each `<<` and `>>` |
 | `unreachable` is never reached | Each `unreachable`, including the ones after guards that the type checker added |
@@ -1345,12 +1345,12 @@ Each obligation the prover could not prove is an error, with the shared
   shift amount that may be the width or more, of such an operand, has the
   fix `requires parts != 0` or `requires by < 64`. Any other obligation
   that fails, where the goal and the conditions of the `if`s around it
-  are comparisons and logic of the parameters as they arrive and
-  literals, has the fix that adds it as a `requires`: `assert low < high`
-  gives `requires low < high`, and the same `assert` inside `if flag`
-  gives `requires (flag) ==> (low < high)`. A goal with arithmetic has no
-  such fix, since arithmetic in a `requires` must fit its types and the
-  goal's arithmetic is exact.
+  are comparisons, logic, and arithmetic of the parameters as they arrive
+  and literals, has the fix that adds it as a `requires`: `assert low < high`
+  gives `requires low < high`, the same `assert` inside `if flag` gives
+  `requires (flag) ==> (low < high)`, and `count + other` on a `UInt8`
+  gives `requires count + other <= 255`. A specification's arithmetic is
+  exact, so the clause states the goal as the solver has it.
 - **Fixes that change what the code means.** An overflow, a divisor that
   may be zero, or a shift amount that may be too large is named, not
   fixed, as one to check first with an `if`, do with the checked
@@ -1479,10 +1479,6 @@ test the prover itself:
   nested quantifiers, each fact is about values made for every
   combination of bound names, and with them the solver runs out of steps
   even with triggers chosen.
-- **Fixes for goals with arithmetic.** A `requires` from a goal such as
-  `count + 1 <= limit` must be written so that its own arithmetic cannot
-  overflow, which needs the goal rewritten into bounds on the parameters
-  that fit their types.
 - **Proof states in the language server.** `Prover.states` gives each
   obligation's state at its position, proven or not with the diagnostic
   that says why; the language server, `truss lsp`, is not built yet.

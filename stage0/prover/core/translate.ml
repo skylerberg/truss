@@ -403,9 +403,9 @@ let add_requires frame required =
   | None -> []
 
 (* A goal about the definition's parameters as they arrive, written as
-   Truss: only comparisons and logic of parameters and literals, since
-   arithmetic in a [requires] must fit its types too, which the goal's
-   exact arithmetic need not. *)
+   Truss: comparisons, logic, and arithmetic of parameters and literals,
+   which a [requires] states exactly, since a specification's integers do
+   not overflow. *)
 let truss_of_goal context term =
   let name symbol =
     if List.mem symbol context.entry then
@@ -413,6 +413,7 @@ let truss_of_goal context term =
     else None
   in
   let named = ref false in
+  let all printed = if List.mem None printed then None else Some (List.filter_map Fun.id printed) in
   let rec atom = function
     | L.Symbol symbol ->
         let printed = name symbol in
@@ -421,9 +422,25 @@ let truss_of_goal context term =
     | L.Integer value -> Some (Z.to_string value)
     | L.Boolean value -> Some (if value then "true" else "false")
     | _ -> None
+  and value term = arithmetic 0 term
+  and arithmetic level = function
+    | L.Apply ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
+        let inner = if operator = "+" then 1 else 2 in
+        Option.map
+          (fun printed -> parenthesized level inner (String.concat (" " ^ operator ^ " ") printed))
+          (all (List.map (arithmetic inner) parts))
+    | L.Apply ("-", [ left; right ]) ->
+        Option.map
+          (fun printed -> parenthesized level 1 (String.concat " - " printed))
+          (all [ arithmetic 1 left; arithmetic 2 right ])
+    | L.Apply ("-", [ inner ]) ->
+        Option.map (fun printed -> parenthesized level 3 ("-" ^ printed)) (arithmetic 3 inner)
+    | L.Integer value when Z.sign value < 0 && level > 0 -> Some ("(" ^ Z.to_string value ^ ")")
+    | term -> atom term
+  and parenthesized level inner text = if inner < level then "(" ^ text ^ ")" else text
   and print = function
     | L.Apply ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
-        match (atom left, atom right) with
+        match (value left, value right) with
         | Some left, Some right ->
             Some (Printf.sprintf "%s %s %s" left (if operator = "=" then "==" else operator) right)
         | _ -> None)
@@ -436,11 +453,17 @@ let truss_of_goal context term =
         | _ -> None)
     | term -> atom term
   and joined separator parts =
-    let printed = List.map print parts in
-    if List.mem None printed then None
-    else Some ("(" ^ String.concat separator (List.filter_map Fun.id printed) ^ ")")
+    Option.map
+      (fun printed -> "(" ^ String.concat separator printed ^ ")")
+      (all (List.map print parts))
   in
-  match print term with Some printed when !named -> Some printed | _ -> None
+  let printed =
+    match term with
+    | L.Apply ("and", parts) -> Option.map (String.concat " && ") (all (List.map print parts))
+    | L.Apply ("or", parts) -> Option.map (String.concat " || ") (all (List.map print parts))
+    | term -> print term
+  in
+  if !named then printed else None
 
 let rec oblige ?evaluation ?cited ?(fixes = []) context frame code span message goal =
   match obligation_at ?evaluation context frame code span message goal with
@@ -2139,14 +2162,18 @@ and arithmetic ?operand ?divisor context frame (node : expression) ty
           (Printf.sprintf "`%s` may overflow `%s`: the least value over -1."
              (quote source node.origin) (T.show ty))
           (L.not_ L.(equal left (Integer low) &&& equal right (int (-1))))
-  | Some _ ->
+  | Some (low, high) ->
+      let unsigned = Z.sign low = 0 && not (T.is_builtin Character ty) in
       oblige context frame Overflow span
         ~fixes:
           (match operand with
           | Some operand -> overflow_fix context frame ty operation operand left right
           | None -> [])
         (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (T.show ty))
-        (in_range ty exact)
+        (match operation with
+        | (Add | Multiply) when unsigned -> L.Apply ("<=", [ exact; Integer high ])
+        | Subtract when unsigned -> L.Apply ("<=", [ Integer low; exact ])
+        | _ -> in_range ty exact)
   | None -> ());
   exact
 
