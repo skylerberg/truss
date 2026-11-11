@@ -3421,6 +3421,17 @@ let () =
          {\n\
          }\n")
 
+(* Maps from another package *)
+
+let () =
+  test "an insertion into a map, of a new key or one it has, is amortized" (fun () ->
+      proven
+        "fn put(values: mut Map[Int64, Int64], key: Int64, value: Int64)\n\
+        \  cost amortized time O(1 + values.length())\n\
+         {\n\
+        \  mut values.insert(key, value: value)\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =
