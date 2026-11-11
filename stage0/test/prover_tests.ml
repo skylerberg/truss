@@ -3344,6 +3344,22 @@ let () =
 (* Overflow fixes *)
 
 let () =
+  let fix_titles text =
+    let database = Support.setup [ ("app::main", text) ] in
+    List.concat_map
+      (fun (d : Diagnostic.t) -> List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes)
+      (check database (Support.module_of "app::main"))
+  in
+  test "a divisor that may be zero offers a requires that it is not" (fun () ->
+      match
+        fix_titles "fn halves(total: UInt32, parts: UInt32) -> UInt32 {\n  total / parts\n}\n"
+      with
+      | [ "Add `requires parts != 0`" ] -> ()
+      | found -> fail "%s" (String.concat "; " found));
+  test "a shift amount that may be too large offers a requires below the width" (fun () ->
+      match fix_titles "fn shifted(value: UInt64, by: UInt64) -> UInt64 {\n  value << by\n}\n" with
+      | [ "Add `requires by < 64`" ] -> ()
+      | found -> fail "%s" (String.concat "; " found));
   test "an overflow with a literal offers the bound as a requires" (fun () ->
       let database =
         Support.setup [ ("app::main", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ]

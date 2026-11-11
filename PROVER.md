@@ -1333,7 +1333,9 @@ Each obligation the prover could not prove is an error, with the shared
   gives `requires count < 100` on the caller. An overflow of `+`, `-`, or `*` with a
   literal, of an operand that names only the parameters as they arrive,
   has a fix of the bound the operand must be within: `count + 1` on a
-  `UInt8` gives `requires count <= 254`.
+  `UInt8` gives `requires count <= 254`. A divisor that may be zero, and a
+  shift amount that may be the width or more, of such an operand, has the
+  fix `requires parts != 0` or `requires by < 64`.
 - **A state for every obligation.** Each obligation, shown or not, has a
   state at its position, for a language server to show; the diagnostics
   are the states that were not shown.
@@ -1470,9 +1472,9 @@ test the prover itself:
 - **More in a diagnostic.** A note at a clause in another file, which a
   message names by its file and line instead, and a
   fix that adds an obligation about parameters alone to the function as a
-  `requires` for obligations other than a callee's `requires` and an
-  overflow with a literal, which needs the obligation written back as
-  Truss. DESIGN.md's
+  `requires` for obligations other than a callee's `requires`, an
+  overflow with a literal, a divisor, and a shift amount, which needs the
+  obligation written back as Truss. DESIGN.md's
   other fixes, checking it with an `if`, using the
   checked version of the operation, and `uses Panic`, change what the code
   means, so the message is to name them without applying them.

@@ -1955,8 +1955,10 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
   else
     match (operation, operands) with
     | (Add | Subtract | Multiply | Divide | Remainder), [ left; right ] ->
-        let operand = match arguments with first :: _ -> Some first | [] -> None in
-        (frame, arithmetic ?operand context frame node ty operation left right)
+        let operand, divisor =
+          match arguments with [ first; second ] -> (Some first, Some second) | _ -> (None, None)
+        in
+        (frame, arithmetic ?operand ?divisor context frame node ty operation left right)
     | Negate, [ inner ] ->
         let negated = L.Apply ("-", [ inner ]) in
         if bounds ty <> None then
@@ -1971,6 +1973,10 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
         (match width ty with
         | Some bits ->
             oblige context frame Shift (at frame amount)
+              ~fixes:
+                (match parameter_operand context frame amount right with
+                | Some text -> add_requires frame (Printf.sprintf "%s < %d" text bits)
+                | None -> [])
               (Printf.sprintf "The shift amount `%s` may not be less than %d."
                  (quote source amount.origin) bits)
               L.(Apply ("<", [ right; int bits ]))
@@ -2023,8 +2029,8 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
         (frame, term)
     | _ -> unsupported span "this operator"
 
-and arithmetic ?operand context frame (node : expression) ty (operation : Intrinsic.operation) left
-    right =
+and arithmetic ?operand ?divisor context frame (node : expression) ty
+    (operation : Intrinsic.operation) left right =
   let source = frame.source in
   let span = at frame node in
   let exact =
@@ -2038,6 +2044,12 @@ and arithmetic ?operand context frame (node : expression) ty (operation : Intrin
   (match operation with
   | Divide | Remainder ->
       oblige context frame Division span
+        ~fixes:
+          (match
+             Option.bind divisor (fun divisor -> parameter_operand context frame divisor right)
+           with
+          | Some text -> add_requires frame (text ^ " != 0")
+          | None -> [])
         (Printf.sprintf "The divisor in `%s` may be zero." (quote source node.origin))
         (L.not_ (L.equal right (L.int 0)))
   | _ -> ());
@@ -5482,36 +5494,42 @@ and add_requires frame required =
   | Some edit -> [ Diagnostic.fix (Printf.sprintf "Add `requires %s`" required) [ edit ] ]
   | None -> []
 
-(* A fix for an overflow of an operation on the definition's parameters
-   and a literal: the bound the other operand must be within, as a
-   [requires], which an operation [count + 1] on a [UInt8] gives as
-   [requires count <= 254]. *)
-and overflow_fix context frame ty (operation : Intrinsic.operation) (operand : expression) left
-    right =
+(* An operand's text, where its value names only the definition's
+   parameters as they arrive, so that a clause about it can be the
+   definition's [requires]. *)
+and parameter_operand context frame (operand : expression) term =
   let rec free = function
     | L.Symbol name -> [ name ]
     | L.Integer _ | L.Boolean _ | L.Bits _ -> []
     | L.Apply (_, arguments) -> List.concat_map free arguments
     | L.Forall _ | L.Exists _ -> [ "" ]
   in
-  match (bounds ty, right) with
-  | Some (low, high), L.Integer k
-    when frame.source.key = Some context.home
-         && free left <> []
-         && List.for_all (fun name -> List.mem name context.entry) (free left) -> (
-      let text = quote frame.source operand.origin in
-      let text =
-        if
-          String.for_all
-            (fun c ->
-              c = '_' || c = '.'
-              || (c >= 'a' && c <= 'z')
-              || (c >= 'A' && c <= 'Z')
-              || (c >= '0' && c <= '9'))
-            text
-        then text
-        else "(" ^ text ^ ")"
-      in
+  if
+    frame.source.key = Some context.home
+    && free term <> []
+    && List.for_all (fun name -> List.mem name context.entry) (free term)
+  then
+    let text = quote frame.source operand.origin in
+    let plain =
+      String.for_all
+        (fun c ->
+          c = '_' || c = '.'
+          || (c >= 'a' && c <= 'z')
+          || (c >= 'A' && c <= 'Z')
+          || (c >= '0' && c <= '9'))
+        text
+    in
+    Some (if plain then text else "(" ^ text ^ ")")
+  else None
+
+(* A fix for an overflow of an operation on the definition's parameters
+   and a literal: the bound the other operand must be within, as a
+   [requires], which an operation [count + 1] on a [UInt8] gives as
+   [requires count <= 254]. *)
+and overflow_fix context frame ty (operation : Intrinsic.operation) (operand : expression) left
+    right =
+  match (bounds ty, right, parameter_operand context frame operand left) with
+  | Some (low, high), L.Integer k, Some text -> (
       let clause relation limit =
         if Z.leq low limit && Z.leq limit high then
           add_requires frame (Printf.sprintf "%s %s %s" text relation (Z.to_string limit))
