@@ -1,4 +1,5 @@
 use standard::log
+use standard::simulation
 
 test "a level is displayed in lower case" {
   assert "${log::Level.Debug}" == "debug"
@@ -25,4 +26,38 @@ test "a logger that adds fields puts them before the record's own" {
   assert captured.records[1].fields.length() == 1
   assert captured.records[1].fields[0].name == "request"
   assert captured.records[2].fields.length() == 0
+}
+
+test "a console log writes each record as a line with its time, level, message, and fields" {
+  let start = Instant.from_unix_nanoseconds(1700000000000000000)
+  let world = simulation::World.from(simulation::Setup.new().with_time(start))
+  provide world {
+    provide log::ConsoleLog() {
+      log::information("started", fields: [
+        log::Field.integer("count", value: 2),
+        log::Field.string("user", value: "ada"),
+        log::Field.string("note", value: "two words"),
+        log::Field.bool("ready", value: true),
+      ])
+      log::debug("hidden")
+      log::error("failed")
+    }
+    assert world.errors() == "2023-11-14T22:13:20Z information started count=2 user=ada note=\"two words\" ready=true\n2023-11-14T22:13:20Z error failed\n"
+  }
+}
+
+test "a console log writes each record as a JSON object when asked to" {
+  let start = Instant.from_unix_nanoseconds(1700000000000000000)
+  let world = simulation::World.from(simulation::Setup.new().with_time(start))
+  provide world {
+    provide log::ConsoleLog(minimum: log::Level.Debug, format: log::Format.Json) {
+      log::debug("a \"quoted\" message", fields: [
+        log::Field.integer("count", value: -3),
+        log::Field.float("ratio", value: 0.5),
+        log::Field.string("user", value: "ada"),
+        log::Field.duration("took", value: Duration.milliseconds(1500)),
+      ])
+    }
+    assert world.errors() == "{\"time\":\"2023-11-14T22:13:20Z\",\"level\":\"debug\",\"message\":\"a \\\"quoted\\\" message\",\"count\":-3,\"ratio\":0.5,\"user\":\"ada\",\"took\":\"1.5s\"}\n"
+  }
 }

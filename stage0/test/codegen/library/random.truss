@@ -179,3 +179,45 @@ test "a UUID made from a name is the same every time, and says it is version 5" 
     && "${uuid::from_name(namespace, name: "https://example.com/a".bytes())}" == "6639460f-3425-5329-8097-a58f06127860"
   assert "${uuid::from_name(uuid::Uuid.nil, name: "".bytes())}" == "e129f27c-5103-5c5c-844b-cdf0a15e160d"
 }
+
+test "sample chooses distinct numbers below the population" {
+  var generator = random::Generator.seeded(7)
+  let four = mut generator.sample(10, count: 4)
+  assert four.length() == 4
+  for first in 0..four.length() {
+    assert four[first] < 10
+    for second in 0..first {
+      assert four[first] != four[second]
+    }
+  }
+  var all = mut generator.sample(6, count: 6)
+  mut all.sort()
+  assert all == [0, 1, 2, 3, 4, 5]
+  assert mut generator.sample(5, count: 0).is_empty()
+  assert mut generator.sample(0, count: 0).is_empty()
+  var again = random::Generator.seeded(7)
+  assert mut again.sample(10, count: 4) == four
+}
+
+test "normal gives numbers around the mean, spread by the deviation" {
+  var generator = random::Generator.seeded(11)
+  var total: Float64 = 0.0
+  var squares: Float64 = 0.0
+  var near: Int64 = 0
+  for _ in 0..4000 {
+    let value = mut generator.normal(10.0, deviation: 2.0)
+    total += value
+    squares += (value - 10.0) * (value - 10.0)
+    if value > 8.0 && value < 12.0 {
+      near += 1
+    }
+  }
+  let mean = total / 4000.0
+  let variance = squares / 4000.0
+  assert mean > 9.8 && mean < 10.2
+  assert variance > 3.5 && variance < 4.5
+  assert near > 2500 && near < 2950
+  assert mut generator.normal(3.0, deviation: 0.0) == 3.0
+  let standard = mut generator.normal()
+  assert standard > -10.0 && standard < 10.0
+}

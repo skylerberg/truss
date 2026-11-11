@@ -211,3 +211,17 @@ test "URLs are equal when their parts are" {
   assert url::parse("http://example.com") != url::parse("http://example.com/")
   assert url::Url.parse("http://example.com/a") == url::parse("http://example.com/a")
 }
+
+test "a template builds a URL around values that are percent-encoded" {
+  let user = "ada lovelace/1"
+  let page: Int64 = 2
+  let built = url::Url"https://example.com/users/${user.slice()}/posts?page=${page}&q=${"a&b=c"}#${"top"}"
+  assert "${built}" == "https://example.com/users/ada%20lovelace%2F1/posts?page=2&q=a%26b%3Dc#top"
+  assert built.path_segments() == ["users", "ada lovelace/1", "posts"]
+  assert built.query_parameter("q") == Some("a&b=c")
+  let empty = ""
+  let rooted = url::Url"file:///${empty.slice()}/notes"
+  assert same(rooted.path(), expected: "//notes")
+  let plain = url::Url"mailto:${"a b"}@example.com"
+  assert same(plain.path(), expected: "a%20b@example.com")
+}

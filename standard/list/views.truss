@@ -436,6 +436,36 @@ public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Orde
   mut self[..].sort_by(compare)
 }
 
+public fn List[Element].min_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering cost time finite),
+) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(compare))
+{
+  if self.length() > 0 {
+    let position = self[..].extreme_position(compare, greatest: false)
+    yield Some(self[position])
+  } else {
+    yield None
+  }
+}
+
+public fn List[Element].max_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering cost time finite),
+) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(compare))
+{
+  if self.length() > 0 {
+    let position = self[..].extreme_position(compare, greatest: true)
+    yield Some(self[position])
+  } else {
+    yield None
+  }
+}
+
 public fn List[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
   ensures self.length() == old(self.length())
   cost time finite

@@ -322,24 +322,6 @@ public trait Iterable {
     }
     yield None
   }
-
-  fn min_by(
-    self,
-    compare: (fn(Self.Element, Self.Element) -> Ordering cost time finite),
-  ) lends Option[Self.Element]
-    cost time finite
-  {
-    todo
-  }
-
-  fn max_by(
-    self,
-    compare: (fn(Self.Element, Self.Element) -> Ordering cost time finite),
-  ) lends Option[Self.Element]
-    cost time finite
-  {
-    todo
-  }
 }
 
 public trait Cursor {

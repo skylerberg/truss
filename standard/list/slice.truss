@@ -1483,6 +1483,63 @@ public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -
   mut self.sort_by(fn(first, second) { key(first).compare(key(second)) })
 }
 
+internal fn Slice[Element].extreme_position(
+  self,
+  compare: (fn(Element, Element) -> Ordering cost time finite),
+  greatest: Bool,
+) -> USize
+  requires self.length() > 0
+  ensures result < self.length()
+  cost time O(self.length() * time(compare))
+{
+  var best: USize = 0
+  var index: USize = 1
+  while index < self.length()
+    invariant best < index
+    invariant 1 <= index
+    invariant index <= self.length()
+    decreases self.length() - index
+    cost time O(index * time(compare))
+  {
+    let order = compare(self[index], self[best])
+    if (greatest && order != Ordering.Less) || (!greatest && order == Ordering.Less) {
+      best = index
+    }
+    index += 1
+  }
+  best
+}
+
+public fn Slice[Element].min_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering cost time finite),
+) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(compare))
+{
+  if self.length() > 0 {
+    let position = self.extreme_position(compare, greatest: false)
+    yield Some(self[position])
+  } else {
+    yield None
+  }
+}
+
+public fn Slice[Element].max_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering cost time finite),
+) lends Option[Element]
+  ensures (result is Some(_)) == (self.length() > 0)
+  cost time O(self.length() * time(compare))
+{
+  if self.length() > 0 {
+    let position = self.extreme_position(compare, greatest: true)
+    yield Some(self[position])
+  } else {
+    yield None
+  }
+}
+
 impl Equal for Slice[Element: Equal] {
   fn equal(self, other: Slice[Element]) -> Bool
     ensures result == (self.length() == other.length()

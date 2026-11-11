@@ -1,0 +1,117 @@
+use standard::collections
+
+fn positions(bits: collections::BitSet) -> List[USize] {
+  var found: List[USize] = []
+  for position in bits.ones() {
+    mut found.push(position)
+  }
+  found
+}
+
+fn with_ones(length: USize, ones: Slice[USize]) -> collections::BitSet {
+  var bits = collections::BitSet.new(length)
+  for position in ones {
+    mut bits.flip(position)
+  }
+  bits
+}
+
+test "a new bit set holds only zeros" {
+  let bits = collections::BitSet.new(130)
+  assert bits.length() == 130 && !bits.is_empty()
+  assert bits.count_ones() == 0 && bits.count_zeros() == 130
+  assert bits.first_one() is None && bits.first_zero() == Some(0)
+  assert bits.get(129) == Some(false) && bits.get(130) is None
+  let none = collections::BitSet.new(0)
+  assert none.is_empty() && none.count_ones() == 0 && none.count_zeros() == 0
+  assert none.first_one() is None && none.first_zero() is None && none.get(0) is None
+}
+
+test "a bit is read, flipped, and assigned by its position" {
+  var bits = collections::BitSet.new(130)
+  mut bits.flip(0)
+  mut bits.flip(63)
+  mut bits.flip(64)
+  mut bits.flip(129)
+  assert bits[0] && bits[63] && bits[64] && bits[129] && !bits[1] && !bits[128]
+  assert bits.count_ones() == 4 && bits.count_zeros() == 126
+  assert positions(bits) == [0, 63, 64, 129]
+  mut bits.flip(63)
+  assert !bits[63] && bits.count_ones() == 3
+  bits[5] = true
+  bits[0] = false
+  bits[64] = true
+  assert positions(bits) == [5, 64, 129]
+  assert bits.first_one() == Some(5) && bits.first_zero() == Some(0)
+}
+
+test "the first one and the first zero are found in any word" {
+  var bits = collections::BitSet.new(200)
+  mut bits.flip(199)
+  assert bits.first_one() == Some(199)
+  mut bits.fill(true)
+  assert bits.count_ones() == 200 && bits.count_zeros() == 0
+  assert bits.first_zero() is None && bits.first_one() == Some(0)
+  mut bits.flip(70)
+  assert bits.first_zero() == Some(70)
+  mut bits.flip(70)
+  mut bits.flip(199)
+  assert bits.first_zero() == Some(199)
+  var whole = collections::BitSet.new(128)
+  mut whole.fill(true)
+  assert whole.first_zero() is None && whole.count_ones() == 128
+  mut whole.fill(false)
+  assert whole.first_one() is None && whole.count_ones() == 0
+}
+
+test "a bit set is resized with zeros in the new positions" {
+  var bits = collections::BitSet.new(70)
+  mut bits.fill(true)
+  mut bits.resize(200)
+  assert bits.length() == 200 && bits.count_ones() == 70 && bits.first_zero() == Some(70)
+  mut bits.resize(10)
+  assert bits.length() == 10 && bits.count_ones() == 10
+  mut bits.resize(64)
+  assert bits.count_ones() == 10 && bits.first_zero() == Some(10)
+  mut bits.resize(0)
+  assert bits.is_empty() && bits.count_ones() == 0
+}
+
+test "two bit sets are united, intersected, subtracted, and inverted" {
+  let left = with_ones(100, ones: [1, 2, 3, 70, 99].slice())
+  let right = with_ones(100, ones: [2, 3, 4, 71, 99].slice())
+  var union = left.copy()
+  mut union.unite(right)
+  assert positions(union) == [1, 2, 3, 4, 70, 71, 99]
+  var intersection = left.copy()
+  mut intersection.intersect(right)
+  assert positions(intersection) == [2, 3, 99]
+  var difference = left.copy()
+  mut difference.subtract(right)
+  assert positions(difference) == [1, 70]
+  var inverse = left.copy()
+  mut inverse.invert()
+  assert inverse.count_ones() == 95 && !inverse[1] && inverse[0] && inverse[98] && !inverse[99]
+  mut inverse.invert()
+  assert inverse == left
+}
+
+test "a bit set gives each bit in order and is equal to a set with the same bits" {
+  let bits = with_ones(5, ones: [1, 4].slice())
+  var values: List[Bool] = []
+  for value in bits {
+    mut values.push(value)
+  }
+  assert values == [false, true, false, false, true]
+  assert bits == with_ones(5, ones: [4, 1].slice())
+  assert bits != with_ones(6, ones: [1, 4].slice())
+  assert bits != with_ones(5, ones: [1].slice())
+  var shrunk = with_ones(70, ones: [1, 4, 69].slice())
+  mut shrunk.resize(5)
+  assert shrunk == bits
+  var first = Hasher.new()
+  var second = Hasher.new()
+  bits.hash(mut first)
+  shrunk.hash(mut second)
+  assert first.finish() == second.finish()
+}
