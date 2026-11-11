@@ -2509,7 +2509,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
             (in_range target value);
           value
       | _ -> known)
-  | _ -> integer_intrinsic context frame operation types operands known
+  | _ -> integer_intrinsic context frame ~node operation types operands known
 
 (* A function of the C library, by its row of the C library's table. It
    is given only an address into a storage, so each storage it is lent
@@ -2632,7 +2632,7 @@ and float_fits target value =
         &&& Apply ("<=", [ cut; Integer high ]))
   | None -> L.Boolean false
 
-and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
+and integer_intrinsic context frame ~node (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
   let exact operation left right =
     match (operation : Intrinsic.operation) with
@@ -2643,15 +2643,18 @@ and integer_intrinsic context frame (operation : Intrinsic.operation) types oper
     | _ -> L.Apply ("*", [ left; right ])
   in
   match (operation, integer, types, operands) with
+  (* An integer operation is defined where its operator is, so it has the
+     operator's obligations: a call of it, as an [impl] of [Add] makes, shows
+     what [+] would. *)
   | (Add | Subtract | Multiply | Divide | Remainder), Some _, ty :: _, [ left; right ] ->
-      let result = exact operation left right in
-      if operation = Divide || operation = Remainder then
-        assume context frame (L.not_ (L.equal right (L.int 0)));
+      let result = arithmetic context frame node ty operation left right in
       assume context frame (in_range ty result);
       result
   | Negate, Some _, ty :: _, [ value ] ->
       let result = L.Apply ("-", [ value ]) in
-      assume context frame (in_range ty result);
+      oblige context frame Overflow (at frame node)
+        (Printf.sprintf "`%s` may overflow `%s`." (quote frame.source node.origin) (T.show ty))
+        (in_range ty result);
       result
   | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), Some (low, high), _, [ left; right ] ->
       let modulus = Z.succ (Z.sub high low) in

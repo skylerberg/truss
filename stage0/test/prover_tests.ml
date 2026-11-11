@@ -2654,6 +2654,20 @@ let () =
          }\n"
         "prover.invariant")
 
+(* Integer operations of the intrinsic module *)
+
+let () =
+  test "generic negation needs what the trait requires" (fun () ->
+      not_proven "fn negate[Number: Negate](value: Number) -> Number.Output {\n  -value\n}\n"
+        "prover.requires");
+  test "generic negation proves where what the trait requires holds" (fun () ->
+      proven
+        "fn negate[Number: Negate](value: Number) -> Number.Output\n\
+        \  requires value.negate_is_defined()\n\
+         {\n\
+        \  -value\n\
+         }\n")
+
 (* Concurrent code *)
 
 let early_return ensures =
