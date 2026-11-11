@@ -317,7 +317,7 @@ let () =
                     Derived
                       {
                         type_ = Top { module_ = example; name = "Both" };
-                        trait = Path.core "Equal";
+                        trait = Well_known.path Equal;
                       };
                   name = "equal";
                   receiver = Read;

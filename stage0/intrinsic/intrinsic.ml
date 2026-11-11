@@ -1,4 +1,4 @@
-let module_ : Path.module_ = { package = "standard"; modules = [ "intrinsic" ] }
+let module_ = Path.standard_module [ "intrinsic" ]
 
 type builtin =
   | Int8
@@ -386,8 +386,7 @@ let operation_name = function
 let operation_path operation = Path.Top { module_; name = operation_name operation }
 
 let uses : operation -> Path.t list = function
-  | Shared_update | Shared_key ->
-      [ Top { module_ = { package = "standard"; modules = [ "capabilities" ] }; name = "Tasks" } ]
+  | Shared_update | Shared_key -> [ Well_known.path Tasks ]
   | _ -> []
 
 let operation_of_path = function

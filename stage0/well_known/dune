@@ -1,0 +1,3 @@
+(library
+ (name well_known)
+ (libraries path))

@@ -581,7 +581,7 @@ let () =
   test "a capability's real implementation is the one standard::system holds" (fun () ->
       let database = setup [] in
       match Interface.Impls.real_implementation database (standard [ "capabilities" ] "Clock") with
-      | Some (Impl { module_ = { package = "standard"; modules = "system" :: _ }; _ }) -> ()
+      | Some (Impl { module_; _ }) when Well_known.in_system module_ -> ()
       | Some impl -> fail "found %s" (Path.show impl)
       | None -> fail "none found");
   test "a trait that is no capability has no real implementation" (fun () ->
@@ -813,5 +813,28 @@ let () =
   test "a method of an unknown type keeps its head's generic parameters" (fun () ->
       one_diagnostic "fn Missing[Element].first(self) -> Element {\n  todo\n}\n"
         "resolve.unknown_name")
+
+(* Well-known definitions *)
+
+let () =
+  test "every definition the compiler names is in the standard library" (fun () ->
+      let database = setup [] in
+      let declared =
+        List.map
+          (fun (declaration : Resolve.Names.declaration) -> declaration.path)
+          (Query.demand database Resolve.Names.package_declarations Path.standard_package)
+      in
+      List.iter
+        (fun known ->
+          let path = Well_known.path known in
+          if not (List.exists (Path.equal path) declared) then
+            fail "the standard library has no `%s`" (Path.show path))
+        Well_known.all);
+  test "a well-known definition is found by its path" (fun () ->
+      List.iter
+        (fun known ->
+          if Well_known.of_path (Well_known.path known) <> Some known then
+            fail "`%s` is not found by its path" (Path.show (Well_known.path known)))
+        Well_known.all)
 
 let () = finish ()

@@ -4,6 +4,7 @@
   storage
   compiler_bug
   path
+  well_known
   intrinsic
   types
   core

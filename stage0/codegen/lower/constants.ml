@@ -327,8 +327,7 @@ let begin_output st =
   emit st.b (Assign (output, Storage.empty Glue.output_ty));
   output
 
-let write_fully : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "system"; "calls" ] }; name = "write_fully" }
+let write_fully = Well_known.path Write_fully
 
 let write_output st output =
   let b = st.b in

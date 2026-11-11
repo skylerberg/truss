@@ -535,12 +535,8 @@ let constructor_name ty variant =
 let selector_name ty variant field =
   "field." ^ type_key ty ^ "." ^ Option.value variant ~default:"record" ^ "." ^ field
 
-let is_standard_equal (path : Path.t) =
-  match path with
-  | Top { module_ = { package = "standard"; _ }; name = "Equal" } -> true
-  | _ -> false
-
-let equal_trait = Path.core "Equal"
+let is_standard_equal = Well_known.is Equal
+let equal_trait = Well_known.path Equal
 
 (* A type's interface, when it is a type whose fields this package sees. *)
 let visible_type context (ty : T.ty) =
@@ -866,16 +862,7 @@ let join context ?value_type frames =
             match
               define "parts"
                 (sort_of context
-                   (T.Named
-                      {
-                        path =
-                          Top
-                            {
-                              module_ = { package = "standard"; modules = [ "specification" ] };
-                              name = "Sequence";
-                            };
-                        arguments = [ T.Type part ];
-                      }))
+                   (T.Named { path = Well_known.path Sequence; arguments = [ T.Type part ] }))
                 (fun frame _ -> frame.handed_out)
             with
             | Some joined -> Some joined
@@ -1962,9 +1949,7 @@ and quantified context frame (node : expression) (quantifier : Syntax.quantifier
      which names its parts and leaves out what it does not match. *)
   let over_collection (pattern : pattern) (collection_type : T.ty) collected span =
     let element = substituted context frame pattern.type_ in
-    let set_path : Path.t =
-      Top { module_ = { package = "standard"; modules = [ "set" ] }; name = "Set" }
-    in
+    let set_path = Well_known.path Set in
     match collection_type with
     | Named { path; _ } when Path.equal path set_path || Path.equal path finite_set_path ->
         let finite = T.Named { path = finite_set_path; arguments = [ T.Type element ] } in
@@ -3551,9 +3536,7 @@ and law_fact context frame source ~substitution (law : law) =
 
 (* Sequences of handed-out parts, through the same functions in the
    logic that the contracts of [standard::specification] are about. *)
-and sequence_path : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "Sequence" }
-
+and sequence_path : Path.t = Well_known.path Sequence
 and sequence_type element = T.Named { path = sequence_path; arguments = [ T.Type element ] }
 
 and sequence_length context element term =
@@ -3588,10 +3571,10 @@ and measure_type element : T.function_type =
 
 and sequence_at context element term index =
   let sequence = sequence_type element in
-  let index_trait = Path.core "Index" in
+  let index_trait = Well_known.path Index in
   match
     Call_graph.impls_for
-      (Query.demand context.database Call_graph.package_impls "standard")
+      (Query.demand context.database Call_graph.package_impls Path.standard_package)
       [ index_trait ] sequence
   with
   | impl :: _ ->
@@ -3694,11 +3677,8 @@ and finite_function context (ty : T.ty) name output inputs =
       fun term -> L.Apply (symbol, term :: List.map fst inputs)
   | _ -> fun term -> term
 
-and finite_set_path : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "FiniteSet" }
-
-and finite_map_path : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "FiniteMap" }
+and finite_set_path : Path.t = Well_known.path Finite_set
+and finite_map_path : Path.t = Well_known.path Finite_map
 
 (* An array, a [Sequence], or a [FiniteSet] written out: a value whose
    model has the elements in order, or whose set has them. None of them
@@ -3813,8 +3793,7 @@ and reads_only_literals (parameter : Core.local) (clause : expression) =
   visit.expression clause;
   !fine
 
-and template_trait : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "text" ] }; name = "FromTemplate" }
+and template_trait : Path.t = Well_known.path From_template
 
 (* A tagged template is a call of its tag's [from_template], with the
    template: its literal texts, each a [Literal] whose model is its bytes,
@@ -4024,10 +4003,10 @@ and model_function context (ty : T.ty) ~(model : T.ty) =
       found
 
 and find_model_function context (ty : T.ty) ~(model : T.ty) =
-  let model_trait = Path.core "Model" in
+  let model_trait = Well_known.path Model in
   match
     Call_graph.impls_for
-      (Query.demand context.database Call_graph.package_impls "standard")
+      (Query.demand context.database Call_graph.package_impls Path.standard_package)
       [ model_trait ] ty
   with
   | impl :: _ ->
@@ -4073,7 +4052,7 @@ and model_ranked context (ty : T.ty) ~(model : T.ty) symbol =
 
 (* Cursors. A cursor carries what it has handed out and whether it has
    ended as ghost parts of its value. *)
-and cursor_trait : Path.t = Path.core "Cursor"
+and cursor_trait : Path.t = Well_known.path Cursor
 
 and cursor_yielded context cursor_type element cursor =
   let sort = sort_of context cursor_type in
@@ -4136,8 +4115,7 @@ and pull context frame (made : cursor) cursor ~cursor_type =
   clauses none ~each:false ~result:None ~yielded:before ~finished:(Some (L.Boolean true));
   (pulled, later)
 
-and option_path : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "option" ] }; name = "Option" }
+and option_path : Path.t = Well_known.path Option
 
 (* A sequence of parts with nothing in it. *)
 and empty_parts context frame element =

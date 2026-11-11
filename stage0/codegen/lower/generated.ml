@@ -254,7 +254,7 @@ let real_implementation (capability : Path.t) : Path.t =
   in
   Impl
     {
-      module_ = { package = "standard"; modules = [ "system"; module_name ] };
+      module_ = Well_known.system_module module_name;
       name = Printf.sprintf "%s for System%s" name name;
     }
 
@@ -295,12 +295,7 @@ let real_implementations st ~user capabilities =
 
 (* The standard library's function that copies bytes into a [String],
    replacing what is not UTF-8. *)
-let text_copied_from : Path.t =
-  Top
-    {
-      module_ = { package = "standard"; modules = [ "system"; "calls" ] };
-      name = "text_copied_from";
-    }
+let text_copied_from = Well_known.path Text_copied_from
 
 (* The C [main]'s Truss side: the program's arguments as a [List] of
    [String]s, each made of an argument's bytes by the standard library; the

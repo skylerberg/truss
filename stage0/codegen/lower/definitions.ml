@@ -25,13 +25,6 @@ type context = {
           each constant's lowering, so that one is folded once and what reads it is known *)
 }
 
-let standard_text name : Ground.ty =
-  Named
-    {
-      path = Top { module_ = { package = "standard"; modules = [ "text" ] }; name };
-      arguments = [];
-    }
-
 let context ?(checks = false) database target =
   let cursor_fields = ref (fun _ -> bug "no driver gives cursors their fields") in
   let monomorphic : Monomorphic.context =
@@ -51,7 +44,7 @@ let context ?(checks = false) database target =
       Glue.create env ~kind_of:(Monomorphic.kind monomorphic) ~usize
         ~debug_form:Monomorphic.debug_form ();
     monomorphic;
-    types = { usize; string_slice = standard_text "StringSlice" };
+    types = { usize; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
     bool = Monomorphic.builtin Bool;
     cursor_fields;
     checks;

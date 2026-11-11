@@ -5,21 +5,13 @@
 module T = Types
 
 let parameter operation name : T.parameter = { owner = Intrinsic.operation_path operation; name }
-let text name : Path.t = Top { module_ = { package = "standard"; modules = [ "text" ] }; name }
 
 let storage element =
   T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
 
 let view element = T.Named { path = Intrinsic.builtin_path View; arguments = [ T.Type element ] }
 let libc_scalar scalar = T.builtin (Intrinsic.libc_builtin scalar)
-
-let sequence element =
-  T.Named
-    {
-      path =
-        Top { module_ = { package = "standard"; modules = [ "specification" ] }; name = "Sequence" };
-      arguments = [ T.Type element ];
-    }
+let sequence element = T.Named { path = Well_known.path Sequence; arguments = [ T.Type element ] }
 
 let signature (operation : Intrinsic.operation) : T.signature =
   let generic name = { T.generic = parameter operation name; kind = Type_generic [] } in
@@ -104,7 +96,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_shorten ->
       (* Only elements with nothing to drop can be forgotten. *)
       let plain : T.trait_reference =
-        { trait = Path.core "Plain"; trait_arguments = []; associated = [] }
+        { trait = Well_known.path Plain; trait_arguments = []; associated = [] }
       in
       {
         (with_storage ~mode:Mut [ input "length" usize ]) with
@@ -186,7 +178,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~generics:[ "Element" ] ~output:(Returns usize) [ input "view" (view element) ]
   | Crash ->
       make ~output:(Returns T.Never)
-        [ input "message" (T.Named { path = text "StringSlice"; arguments = [] }) ]
+        [ input "message" (T.Named { path = Well_known.path String_slice; arguments = [] }) ]
   | Handle_from ->
       make ~output:(Returns (T.builtin Handle)) [ input "descriptor" (T.builtin Int32) ]
   | Handle_descriptor ->
@@ -218,7 +210,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
       }
   | Shared_new | Shared_update | Shared_key -> (
       let storable : T.trait_reference =
-        { trait = Path.core "Storable"; trait_arguments = []; associated = [] }
+        { trait = Well_known.path Storable; trait_arguments = []; associated = [] }
       in
       let bounded name =
         { T.generic = parameter operation name; kind = Type_generic [ storable ] }

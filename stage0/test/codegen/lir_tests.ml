@@ -451,14 +451,7 @@ let () =
       let key =
         Instance.Code
           {
-            path =
-              Method
-                {
-                  owner =
-                    Top { module_ = { package = "standard"; modules = [ "list" ] }; name = "List" };
-                  name = "each";
-                  receiver = Read;
-                };
+            path = Method { owner = Well_known.path List; name = "each"; receiver = Read };
             type_arguments = [ Type int64 ];
           }
       in

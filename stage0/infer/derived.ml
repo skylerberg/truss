@@ -14,11 +14,10 @@ module Environment = Interface.Environment
 let bug format = Compiler_bug.bug ~stage:"Infer" format
 
 let gives (trait : Path.t) name =
-  match Path.core_name trait with
-  | Some trait ->
-      List.mem (trait, name)
-        [ ("Equal", "equal"); ("Hash", "hash"); ("Ordered", "compare"); ("Default", "default") ]
-  | None -> false
+  match (Well_known.of_path trait, name) with
+  | Some Equal, "equal" | Some Hash, "hash" | Some Ordered, "compare" | Some Default, "default" ->
+      true
+  | _ -> false
 
 let form database (path : Path.t) : Core.t option =
   match path with

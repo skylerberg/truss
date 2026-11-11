@@ -9,7 +9,7 @@ let load_package ?(usize_bits = 32) engine ~name ~dependencies
 (* The standard library holds the code for each platform, and its bounds of
    [USize] are its target's, so it is checked with the target's width. *)
 let load_standard engine =
-  load_package ~usize_bits:64 engine ~name:Standard_library.package ~dependencies:[]
+  load_package ~usize_bits:64 engine ~name:Path.standard_package ~dependencies:[]
     Standard_library.modules
 
 (* The standard library, checked whole in an engine of its own. Its sources
@@ -349,7 +349,7 @@ let apply session (files : (string * file_contents) list) =
       (fun (directory, (manifest : Manifest.t)) ->
         match manifest.package with
         | None -> None
-        | Some package when package.name = Standard_library.package ->
+        | Some package when package.name = Path.standard_package ->
             problem directory "The package name `standard` is the standard library's.";
             None
         | Some package -> (

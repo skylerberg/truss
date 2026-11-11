@@ -1259,15 +1259,498 @@ public fn pbkdf2_hmac_sha256(
 
 public type PasswordCost(memory_kibibytes: UInt32 = 19456, iterations: UInt32 = 2, parallelism: UInt32 = 1)
 
+let blake2b_initial: Array[UInt64, 8] = [
+  0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1, 0x510e527fade682d1,
+  0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179,
+]
+
+let blake2b_schedule: Array[USize, 160] = [
+  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+  14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3,
+  11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4,
+  7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8,
+  9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13,
+  2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9,
+  12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11,
+  13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10,
+  6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5,
+  10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0,
+]
+
+internal fn blake2b_mix(
+  words: mut Array[UInt64, 16],
+  a: USize,
+  b: USize,
+  c: USize,
+  d: USize,
+  first: UInt64,
+  second: UInt64,
+)
+  requires a < 16 && b < 16 && c < 16 && d < 16
+  cost time O(1)
+{
+  words[a] = wrapping_add_64(wrapping_add_64(words[a], second: words[b]), second: first)
+  words[d] = rotate_right_64(words[d] ^ words[a], right: 32)
+  words[c] = wrapping_add_64(words[c], second: words[d])
+  words[b] = rotate_right_64(words[b] ^ words[c], right: 24)
+  words[a] = wrapping_add_64(wrapping_add_64(words[a], second: words[b]), second: second)
+  words[d] = rotate_right_64(words[d] ^ words[a], right: 16)
+  words[c] = wrapping_add_64(words[c], second: words[d])
+  words[b] = rotate_right_64(words[b] ^ words[c], right: 63)
+}
+
+internal fn blake2b_compress(state: mut Array[UInt64, 8], block: Array[UInt64, 16], byte_count: UInt64, last: Bool)
+  cost time O(1)
+{
+  var words: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let half: USize = 8
+  for index in 0..half {
+    words[index] = state[index]
+    words[index + 8] = blake2b_initial[index]
+  }
+  words[12] = words[12] ^ byte_count
+  if last {
+    words[14] = ~words[14]
+  }
+  let rounds: USize = 12
+  for round in 0..rounds {
+    let row = 16 * (round % 10)
+    blake2b_mix(mut words, a: 0, b: 4, c: 8, d: 12, first: block[blake2b_schedule[row] % 16], second: block[blake2b_schedule[row + 1] % 16])
+    blake2b_mix(mut words, a: 1, b: 5, c: 9, d: 13, first: block[blake2b_schedule[row + 2] % 16], second: block[blake2b_schedule[row + 3] % 16])
+    blake2b_mix(mut words, a: 2, b: 6, c: 10, d: 14, first: block[blake2b_schedule[row + 4] % 16], second: block[blake2b_schedule[row + 5] % 16])
+    blake2b_mix(mut words, a: 3, b: 7, c: 11, d: 15, first: block[blake2b_schedule[row + 6] % 16], second: block[blake2b_schedule[row + 7] % 16])
+    blake2b_mix(mut words, a: 0, b: 5, c: 10, d: 15, first: block[blake2b_schedule[row + 8] % 16], second: block[blake2b_schedule[row + 9] % 16])
+    blake2b_mix(mut words, a: 1, b: 6, c: 11, d: 12, first: block[blake2b_schedule[row + 10] % 16], second: block[blake2b_schedule[row + 11] % 16])
+    blake2b_mix(mut words, a: 2, b: 7, c: 8, d: 13, first: block[blake2b_schedule[row + 12] % 16], second: block[blake2b_schedule[row + 13] % 16])
+    blake2b_mix(mut words, a: 3, b: 4, c: 9, d: 14, first: block[blake2b_schedule[row + 14] % 16], second: block[blake2b_schedule[row + 15] % 16])
+  }
+  for index in 0..half {
+    state[index] = state[index] ^ words[index] ^ words[index + 8]
+  }
+}
+
+internal fn blake2b_block(input: Slice[UInt8], from: USize) -> Array[UInt64, 16]
+  requires from <= input.length()
+  cost time O(1)
+{
+  var block: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let available = input.length() - from
+  let bytes: USize = 128
+  for position in 0..bytes {
+    if position < available {
+      let byte: UInt64 = intrinsic::convert[UInt8, UInt64](input[from + position])
+      block[position / 8] = block[position / 8] | (byte << (8 * (position % 8)))
+    }
+  }
+  block
+}
+
+internal fn blake2b(input: Slice[UInt8], output_length: USize) -> List[UInt8]
+  requires 1 <= output_length && output_length <= 64
+  ensures result.length() == output_length
+  cost time finite
+{
+  var state = blake2b_initial
+  state[0] = state[0] ^ 0x01010000 ^ intrinsic::convert(output_length)
+  var offset: USize = 0
+  while input.length() - offset > 128
+    invariant offset <= input.length()
+    decreases input.length() - offset
+  {
+    let block = blake2b_block(input, from: offset)
+    offset += 128
+    blake2b_compress(mut state, block: block, byte_count: intrinsic::convert(offset), last: false)
+  }
+  blake2b_compress(
+    mut state,
+    block: blake2b_block(input, from: offset),
+    byte_count: intrinsic::convert(input.length()),
+    last: true,
+  )
+  var output: List[UInt8] = []
+  for index in 0..output_length
+    invariant output.length() == yielded.length()
+  {
+    mut output.push(intrinsic::convert((state[index / 8] >> (8 * (index % 8))) & 255))
+  }
+  output
+}
+
+internal fn push_little_endian_32(output: mut List[UInt8], value: UInt32)
+  cost time finite
+{
+  let bytes: USize = 4
+  for index in 0..bytes {
+    mut output.push(intrinsic::convert((value >> (8 * index)) & 255))
+  }
+}
+
+internal fn push_length_32(output: mut List[UInt8], length: USize)
+  cost time finite
+{
+  if length > 4294967295 {
+    intrinsic::crash("a password cannot hold that many bytes".slice())
+  }
+  push_little_endian_32(mut output, value: intrinsic::convert(length))
+}
+
+internal fn argon2_long_hash(input: Slice[UInt8], length: USize) -> List[UInt8]
+  requires 1 <= length && length <= 4294967295
+  cost time finite
+{
+  var prefixed: List[UInt8] = []
+  push_length_32(mut prefixed, length: length)
+  for byte in input {
+    mut prefixed.push(byte)
+  }
+  if length <= 64 {
+    return blake2b(prefixed.slice(), output_length: length)
+  }
+  var output: List[UInt8] = []
+  var chained = blake2b(prefixed.slice(), output_length: 64)
+  var left = length
+  while left > 64
+    invariant chained.length() == 64
+    invariant left > 32
+    decreases left
+  {
+    let half: USize = 32
+    for index in 0..half {
+      mut output.push(chained[index])
+    }
+    left -= 32
+    if left > 64 {
+      chained = blake2b(chained.slice(), output_length: 64)
+    }
+  }
+  let last = blake2b(chained.slice(), output_length: left)
+  for byte in last {
+    mut output.push(byte)
+  }
+  output
+}
+
+let argon2_zero_block: Array[UInt64, 128] = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+]
+
+internal fn argon2_block_from_bytes(bytes: Slice[UInt8]) -> Array[UInt64, 128]
+  cost time O(1)
+{
+  var block = argon2_zero_block
+  let count: USize = 1024
+  for position in 0..count {
+    if position < bytes.length() {
+      let byte: UInt64 = intrinsic::convert[UInt8, UInt64](bytes[position])
+      block[position / 8] = block[position / 8] | (byte << (8 * (position % 8)))
+    }
+  }
+  block
+}
+
+internal fn argon2_block_to_bytes(block: Array[UInt64, 128]) -> List[UInt8]
+  ensures result.length() == 1024
+  cost time finite
+{
+  var bytes: List[UInt8] = []
+  let count: USize = 1024
+  for position in 0..count
+    invariant bytes.length() == yielded.length()
+  {
+    mut bytes.push(intrinsic::convert((block[position / 8] >> (8 * (position % 8))) & 255))
+  }
+  bytes
+}
+
+internal fn argon2_multiply_add(first: UInt64, second: UInt64) -> UInt64
+  cost time O(1)
+{
+  let product = intrinsic::wrapping_multiply(first & 4294967295, right: second & 4294967295)
+  wrapping_add_64(wrapping_add_64(first, second: second), second: intrinsic::wrapping_multiply(product, right: 2))
+}
+
+internal fn argon2_mix(words: mut Array[UInt64, 16], a: USize, b: USize, c: USize, d: USize)
+  requires a < 16 && b < 16 && c < 16 && d < 16
+  cost time O(1)
+{
+  words[a] = argon2_multiply_add(words[a], second: words[b])
+  words[d] = rotate_right_64(words[d] ^ words[a], right: 32)
+  words[c] = argon2_multiply_add(words[c], second: words[d])
+  words[b] = rotate_right_64(words[b] ^ words[c], right: 24)
+  words[a] = argon2_multiply_add(words[a], second: words[b])
+  words[d] = rotate_right_64(words[d] ^ words[a], right: 16)
+  words[c] = argon2_multiply_add(words[c], second: words[d])
+  words[b] = rotate_right_64(words[b] ^ words[c], right: 63)
+}
+
+internal fn argon2_permute(words: Array[UInt64, 16]) -> Array[UInt64, 16]
+  cost time O(1)
+{
+  var permuted = words
+  argon2_mix(mut permuted, a: 0, b: 4, c: 8, d: 12)
+  argon2_mix(mut permuted, a: 1, b: 5, c: 9, d: 13)
+  argon2_mix(mut permuted, a: 2, b: 6, c: 10, d: 14)
+  argon2_mix(mut permuted, a: 3, b: 7, c: 11, d: 15)
+  argon2_mix(mut permuted, a: 0, b: 5, c: 10, d: 15)
+  argon2_mix(mut permuted, a: 1, b: 6, c: 11, d: 12)
+  argon2_mix(mut permuted, a: 2, b: 7, c: 8, d: 13)
+  argon2_mix(mut permuted, a: 3, b: 4, c: 9, d: 14)
+  permuted
+}
+
+internal fn argon2_compress(previous: Array[UInt64, 128], reference: Array[UInt64, 128]) -> Array[UInt64, 128]
+  cost time O(1)
+{
+  let combined = argon2_xor(previous, second: reference)
+  var mixed = combined
+  let groups: USize = 8
+  let width: USize = 16
+  for row in 0..groups {
+    var words: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for position in 0..width {
+      words[position] = mixed[16 * row + position]
+    }
+    let permuted = argon2_permute(words)
+    for position in 0..width {
+      mixed[16 * row + position] = permuted[position]
+    }
+  }
+  for column in 0..groups {
+    var words: Array[UInt64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for position in 0..width {
+      words[position] = mixed[2 * column + 16 * (position / 2) + position % 2]
+    }
+    let permuted = argon2_permute(words)
+    for position in 0..width {
+      mixed[2 * column + 16 * (position / 2) + position % 2] = permuted[position]
+    }
+  }
+  argon2_xor(mixed, second: combined)
+}
+
+internal type Argon2Shape(lanes: USize, lane_length: USize, segment_length: USize, passes: USize)
+
+internal fn Argon2Shape.block_index(self, block_count: USize, lane: USize, column: USize) -> USize
+  requires block_count > 0
+  ensures result < block_count
+  cost time O(1)
+{
+  intrinsic::wrapping_add(intrinsic::wrapping_multiply(lane, right: self.lane_length), right: column) % block_count
+}
+
+internal fn argon2_reference_index(
+  shape: Argon2Shape,
+  block_count: USize,
+  pass: USize,
+  slice: USize,
+  lane: USize,
+  index: USize,
+  pseudo_random: UInt64,
+) -> USize
+  requires block_count > 0
+  requires shape.lanes > 0 && shape.lane_length > 0
+  ensures result < block_count
+  cost time O(1)
+{
+  let lanes: UInt64 = intrinsic::convert(shape.lanes)
+  let reference_lane: USize = if pass == 0 && slice == 0 {
+    lane
+  } else {
+    intrinsic::convert((pseudo_random >> 32) % lanes)
+  }
+  let earlier_segments = if pass == 0 {
+    intrinsic::wrapping_multiply(slice, right: shape.segment_length)
+  } else {
+    intrinsic::wrapping_subtract(shape.lane_length, right: shape.segment_length)
+  }
+  let area: USize = if reference_lane == lane {
+    intrinsic::wrapping_subtract(intrinsic::wrapping_add(earlier_segments, right: index), right: 1)
+  } else if index == 0 {
+    intrinsic::wrapping_subtract(earlier_segments, right: 1)
+  } else {
+    earlier_segments
+  }
+  let area_64: UInt64 = intrinsic::convert(area)
+  let low = pseudo_random & 4294967295
+  let squared = intrinsic::wrapping_multiply(low, right: low) >> 32
+  let relative = intrinsic::wrapping_subtract(
+    intrinsic::wrapping_subtract(area_64, right: 1),
+    right: intrinsic::wrapping_multiply(area_64, right: squared) >> 32,
+  )
+  let start: USize = if pass != 0 && slice != 3 {
+    intrinsic::wrapping_multiply(intrinsic::wrapping_add(slice, right: 1), right: shape.segment_length)
+  } else {
+    0
+  }
+  let lane_length_64: UInt64 = intrinsic::convert(shape.lane_length)
+  let start_64: UInt64 = intrinsic::convert(start)
+  let reference_column: USize = intrinsic::convert(wrapping_add_64(start_64, second: relative) % lane_length_64)
+  shape.block_index(block_count, lane: reference_lane, column: reference_column)
+}
+
+internal fn argon2_addresses(input: Array[UInt64, 128]) -> Array[UInt64, 128]
+  cost time O(1)
+{
+  argon2_compress(argon2_zero_block, reference: argon2_compress(argon2_zero_block, reference: input))
+}
+
+internal fn argon2_fill_segment(
+  memory: mut List[Array[UInt64, 128]],
+  shape: Argon2Shape,
+  pass: USize,
+  slice: USize,
+  lane: USize,
+)
+  requires memory.length() > 0
+  requires shape.lanes > 0 && shape.lane_length > 0
+  ensures memory.length() == old(memory.length())
+  cost time finite
+{
+  let block_count = memory.length()
+  let independent = pass == 0 && slice < 2
+  var address_input = argon2_zero_block
+  address_input[0] = intrinsic::convert(pass)
+  address_input[1] = intrinsic::convert(lane)
+  address_input[2] = intrinsic::convert(slice)
+  address_input[3] = intrinsic::convert(block_count)
+  address_input[4] = intrinsic::convert(shape.passes)
+  address_input[5] = 2
+  var addresses = argon2_zero_block
+  let first: USize = if pass == 0 && slice == 0 { 2 } else { 0 }
+  if independent && first != 0 {
+    address_input[6] = wrapping_add_64(address_input[6], second: 1)
+    addresses = argon2_addresses(address_input)
+  }
+  for index in first..shape.segment_length
+    invariant memory.length() == block_count
+  {
+    let column = intrinsic::wrapping_add(intrinsic::wrapping_multiply(slice, right: shape.segment_length), right: index)
+    let previous_column = intrinsic::wrapping_subtract(if column == 0 { shape.lane_length } else { column }, right: 1)
+    let previous = memory[shape.block_index(block_count, lane: lane, column: previous_column)]
+    if independent && index % 128 == 0 {
+      address_input[6] = wrapping_add_64(address_input[6], second: 1)
+      addresses = argon2_addresses(address_input)
+    }
+    let pseudo_random = if independent { addresses[index % 128] } else { previous[0] }
+    let reference = memory[argon2_reference_index(
+      shape,
+      block_count: block_count,
+      pass: pass,
+      slice: slice,
+      lane: lane,
+      index: index,
+      pseudo_random: pseudo_random,
+    )]
+    var block = argon2_compress(previous, reference: reference)
+    let target = shape.block_index(block_count, lane: lane, column: column)
+    if pass != 0 {
+      block = argon2_xor(block, second: memory[target])
+    }
+    memory[target] = block
+  }
+}
+
+internal fn argon2_xor(first: Array[UInt64, 128], second: Array[UInt64, 128]) -> Array[UInt64, 128]
+  cost time O(1)
+{
+  var combined = first
+  let count: USize = 128
+  for word in 0..count {
+    combined[word] = first[word] ^ second[word]
+  }
+  combined
+}
+
 public fn hash_password(
   password: Slice[UInt8],
   salt: Slice[UInt8],
   effort: PasswordCost = PasswordCost(),
 ) -> Array[UInt8, 32]
   requires salt.length() >= 8
+  requires effort.parallelism >= 1 && effort.parallelism <= 16777215
+  requires effort.iterations >= 1
+  requires effort.memory_kibibytes >= 8 * effort.parallelism
   cost time finite
 {
-  todo
+  let lanes: USize = intrinsic::convert(effort.parallelism)
+  let requested: USize = intrinsic::convert(effort.memory_kibibytes)
+  let segment_length = requested / (4 * lanes)
+  let shape = Argon2Shape(
+    lanes: lanes,
+    lane_length: 4 * segment_length,
+    segment_length: segment_length,
+    passes: intrinsic::convert(effort.iterations),
+  )
+  let block_count = lanes * shape.lane_length
+  var parameters: List[UInt8] = []
+  push_little_endian_32(mut parameters, value: effort.parallelism)
+  push_little_endian_32(mut parameters, value: 32)
+  push_little_endian_32(mut parameters, value: effort.memory_kibibytes)
+  push_little_endian_32(mut parameters, value: effort.iterations)
+  push_little_endian_32(mut parameters, value: 19)
+  push_little_endian_32(mut parameters, value: 2)
+  push_length_32(mut parameters, length: password.length())
+  for byte in password {
+    mut parameters.push(byte)
+  }
+  push_length_32(mut parameters, length: salt.length())
+  for byte in salt {
+    mut parameters.push(byte)
+  }
+  push_little_endian_32(mut parameters, value: 0)
+  push_little_endian_32(mut parameters, value: 0)
+  let seed = blake2b(parameters.slice(), output_length: 64)
+  var memory: List[Array[UInt64, 128]] = List.filled(argon2_zero_block, count: block_count)
+  for lane in 0..lanes
+    invariant memory.length() == block_count
+  {
+    let first_columns: UInt32 = 2
+    for column in 0..first_columns
+      invariant memory.length() == block_count
+    {
+      var input = seed.copy()
+      push_little_endian_32(mut input, value: column)
+      push_length_32(mut input, length: lane)
+      let block = argon2_block_from_bytes(argon2_long_hash(input.slice(), length: 1024).slice())
+      memory[shape.block_index(block_count, lane: lane, column: intrinsic::convert(column))] = block
+    }
+  }
+  let slices: USize = 4
+  for pass in 0..shape.passes
+    invariant memory.length() == block_count
+  {
+    for slice in 0..slices
+      invariant memory.length() == block_count
+    {
+      for lane in 0..lanes
+        invariant memory.length() == block_count
+      {
+        argon2_fill_segment(mut memory, shape: shape, pass: pass, slice: slice, lane: lane)
+      }
+    }
+  }
+  var last = argon2_zero_block
+  for lane in 0..lanes {
+    last = argon2_xor(last, second: memory[shape.block_index(block_count, lane: lane, column: shape.lane_length - 1)])
+  }
+  let tag = argon2_long_hash(argon2_block_to_bytes(last).slice(), length: 32)
+  var hash: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count {
+    if index < tag.length() {
+      hash[index] = tag[index]
+    }
+  }
+  hash
 }
 
 public fn constant_time_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool
@@ -2206,7 +2689,541 @@ public fn open(
   }
 }
 
-public opaque type SigningKey(seed: Array[UInt8, 32])
+let field_one: Array[Int64, 16] = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+let field_121665: Array[Int64, 16] = [56129, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+let edwards_d: Array[Int64, 16] = [
+  30883, 4953, 19914, 30187, 55467, 16705, 2637, 112, 59544, 30585, 16505, 36039, 65139, 11119, 27886, 20995,
+]
+
+let edwards_2d: Array[Int64, 16] = [
+  61785, 9906, 39828, 60374, 45398, 33411, 5274, 224, 53552, 61171, 33010, 6542, 64743, 22239, 55772, 9222,
+]
+
+let edwards_base_x: Array[Int64, 16] = [
+  54554, 36645, 11616, 51542, 42930, 38181, 51040, 26924, 56412, 64982, 57905, 49316, 21502, 52590, 14035, 8553,
+]
+
+let edwards_base_y: Array[Int64, 16] = [
+  26200, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214, 26214,
+]
+
+let square_root_of_minus_one: Array[Int64, 16] = [
+  41136, 18958, 6951, 50414, 58488, 44335, 6150, 12099, 55207, 15867, 153, 11085, 57099, 20417, 9344, 11139,
+]
+
+let group_order: Array[Int64, 32] = [
+  237, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16,
+]
+
+internal fn field_carry(element: Array[Int64, 16]) -> Array[Int64, 16]
+  cost time O(1)
+{
+  var carried = element
+  let limbs: USize = 16
+  for limb in 0..limbs
+  {
+    carried[limb] = carried[limb].wrapping_add(65536)
+    let carry = carried[limb] >> 16
+    let above = carry.wrapping_subtract(1)
+    if limb == 15 {
+      carried[0] = carried[0].wrapping_add(above.wrapping_multiply(38))
+    } else {
+      carried[limb + 1] = carried[limb + 1].wrapping_add(above)
+    }
+    carried[limb] = carried[limb].wrapping_subtract(carry.wrapping_shift_left(16))
+  }
+  carried
+}
+
+internal fn field_swap(first: mut Array[Int64, 16], second: mut Array[Int64, 16], bit: Int64)
+  cost time O(1)
+{
+  let mask = ~bit.wrapping_subtract(1)
+  let limbs: USize = 16
+  for limb in 0..limbs
+  {
+    let difference = mask & (first[limb] ^ second[limb])
+    first[limb] = first[limb] ^ difference
+    second[limb] = second[limb] ^ difference
+  }
+}
+
+internal fn field_to_bytes(element: Array[Int64, 16]) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  var reduced = field_carry(field_carry(field_carry(element)))
+  var lowered: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let passes: USize = 2
+  for _ in 0..passes
+  {
+    lowered[0] = reduced[0].wrapping_subtract(65517)
+    let middle: USize = 14
+    for step in 0..middle
+    {
+      let limb = step + 1
+      lowered[limb] = reduced[limb].wrapping_subtract(65535).wrapping_subtract((lowered[limb - 1] >> 16) & 1)
+      lowered[limb - 1] = lowered[limb - 1] & 65535
+    }
+    lowered[15] = reduced[15].wrapping_subtract(32767).wrapping_subtract((lowered[14] >> 16) & 1)
+    let borrow = (lowered[15] >> 16) & 1
+    lowered[14] = lowered[14] & 65535
+    field_swap(mut reduced, second: mut lowered, bit: 1 - borrow)
+  }
+  var bytes: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let limbs: USize = 16
+  for limb in 0..limbs
+  {
+    bytes[2 * limb] = intrinsic::convert(reduced[limb] & 255)
+    bytes[2 * limb + 1] = intrinsic::convert((reduced[limb] >> 8) & 255)
+  }
+  bytes
+}
+
+internal fn field_from_bytes(bytes: Array[UInt8, 32]) -> Array[Int64, 16]
+  cost time O(1)
+{
+  var element: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  let limbs: USize = 16
+  for limb in 0..limbs
+  {
+    element[limb] = intrinsic::convert[UInt8, Int64](bytes[2 * limb]) | (intrinsic::convert[UInt8, Int64](bytes[2 * limb + 1]) << 8)
+  }
+  element[15] = element[15] & 32767
+  element
+}
+
+internal fn field_add(first: Array[Int64, 16], second: Array[Int64, 16]) -> Array[Int64, 16]
+  cost time O(1)
+{
+  var sum = first
+  let limbs: USize = 16
+  for limb in 0..limbs
+  {
+    sum[limb] = first[limb].wrapping_add(second[limb])
+  }
+  sum
+}
+
+internal fn field_subtract(first: Array[Int64, 16], second: Array[Int64, 16]) -> Array[Int64, 16]
+  cost time O(1)
+{
+  var difference = first
+  let limbs: USize = 16
+  for limb in 0..limbs
+  {
+    difference[limb] = first[limb].wrapping_subtract(second[limb])
+  }
+  difference
+}
+
+internal fn field_multiply(first: Array[Int64, 16], second: Array[Int64, 16]) -> Array[Int64, 16]
+  cost time O(1)
+{
+  var wide: Array[Int64, 31] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let limbs: USize = 16
+  for left in 0..limbs
+  {
+    for right in 0..limbs
+    {
+      wide[left + right] = wide[left + right].wrapping_add(first[left].wrapping_multiply(second[right]))
+    }
+  }
+  let high: USize = 15
+  for limb in 0..high
+  {
+    wide[limb] = wide[limb].wrapping_add(wide[limb + 16].wrapping_multiply(38))
+  }
+  var product: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  for limb in 0..limbs
+  {
+    product[limb] = wide[limb]
+  }
+  field_carry(field_carry(product))
+}
+
+internal fn field_square(element: Array[Int64, 16]) -> Array[Int64, 16]
+  cost time O(1)
+{
+  field_multiply(element, second: element)
+}
+
+internal fn field_invert(element: Array[Int64, 16]) -> Array[Int64, 16]
+  cost time O(1)
+{
+  var power = element
+  let squarings: USize = 254
+  for step in 0..squarings
+  {
+    power = field_square(power)
+    if step != 249 && step != 251 {
+      power = field_multiply(power, second: element)
+    }
+  }
+  power
+}
+
+internal fn field_power_2_252_minus_3(element: Array[Int64, 16]) -> Array[Int64, 16]
+  cost time O(1)
+{
+  var power = element
+  let squarings: USize = 251
+  for step in 0..squarings
+  {
+    power = field_square(power)
+    if step != 249 {
+      power = field_multiply(power, second: element)
+    }
+  }
+  power
+}
+
+internal fn field_is_odd(element: Array[Int64, 16]) -> Bool
+  cost time O(1)
+{
+  (field_to_bytes(element)[0] & 1) == 1
+}
+
+internal fn field_equal(first: Array[Int64, 16], second: Array[Int64, 16]) -> Bool
+  cost time O(1)
+{
+  let first_bytes = field_to_bytes(first)
+  let second_bytes = field_to_bytes(second)
+  var difference: UInt8 = 0
+  let count: USize = 32
+  for index in 0..count
+  {
+    difference = difference | (first_bytes[index] ^ second_bytes[index])
+  }
+  difference == 0
+}
+
+internal fn scalar_bit(scalar: Array[UInt8, 32], bit: USize) -> Int64
+  requires bit < 256
+  cost time O(1)
+{
+  intrinsic::convert[UInt8, Int64]((scalar[bit / 8] >> (bit % 8)) & 1)
+}
+
+internal fn clamp_scalar(bytes: Array[UInt8, 32]) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  var scalar = bytes
+  scalar[0] = scalar[0] & 248
+  scalar[31] = (scalar[31] & 127) | 64
+  scalar
+}
+
+internal fn x25519(scalar: Array[UInt8, 32], point: Array[UInt8, 32]) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  let clamped = clamp_scalar(scalar)
+  let u = field_from_bytes(point)
+  var a = field_one
+  var b = u
+  var c: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  var d = field_one
+  let bits: USize = 255
+  for step in 0..bits
+  {
+    let bit = scalar_bit(clamped, bit: 254 - step)
+    field_swap(mut a, second: mut b, bit: bit)
+    field_swap(mut c, second: mut d, bit: bit)
+    var e = field_add(a, second: c)
+    a = field_subtract(a, second: c)
+    c = field_add(b, second: d)
+    b = field_subtract(b, second: d)
+    d = field_square(e)
+    let f = field_square(a)
+    a = field_multiply(c, second: a)
+    c = field_multiply(b, second: e)
+    e = field_add(a, second: c)
+    a = field_subtract(a, second: c)
+    b = field_square(a)
+    c = field_subtract(d, second: f)
+    a = field_multiply(c, second: field_121665)
+    a = field_add(a, second: d)
+    c = field_multiply(c, second: a)
+    a = field_multiply(d, second: f)
+    d = field_multiply(b, second: u)
+    b = field_square(e)
+    field_swap(mut a, second: mut b, bit: bit)
+    field_swap(mut c, second: mut d, bit: bit)
+  }
+  field_to_bytes(field_multiply(a, second: field_invert(c)))
+}
+
+internal type EdwardsPoint(x: Array[Int64, 16], y: Array[Int64, 16], z: Array[Int64, 16], t: Array[Int64, 16])
+
+internal fn EdwardsPoint.neutral() -> EdwardsPoint
+  cost time O(1)
+{
+  let zero: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  EdwardsPoint(x: zero, y: field_one, z: field_one, t: zero)
+}
+
+internal fn EdwardsPoint.base() -> EdwardsPoint
+  cost time O(1)
+{
+  EdwardsPoint(
+    x: edwards_base_x,
+    y: edwards_base_y,
+    z: field_one,
+    t: field_multiply(edwards_base_x, second: edwards_base_y),
+  )
+}
+
+internal fn EdwardsPoint.add(self, other: EdwardsPoint) -> EdwardsPoint
+  cost time O(1)
+{
+  let a = field_multiply(field_subtract(self.y, second: self.x), second: field_subtract(other.y, second: other.x))
+  let b = field_multiply(field_add(self.x, second: self.y), second: field_add(other.x, second: other.y))
+  let c = field_multiply(field_multiply(self.t, second: other.t), second: edwards_2d)
+  let product = field_multiply(self.z, second: other.z)
+  let d = field_add(product, second: product)
+  let e = field_subtract(b, second: a)
+  let f = field_subtract(d, second: c)
+  let g = field_add(d, second: c)
+  let h = field_add(b, second: a)
+  EdwardsPoint(
+    x: field_multiply(e, second: f),
+    y: field_multiply(h, second: g),
+    z: field_multiply(g, second: f),
+    t: field_multiply(e, second: h),
+  )
+}
+
+internal fn edwards_swap(first: mut EdwardsPoint, second: mut EdwardsPoint, bit: Int64)
+  cost time O(1)
+{
+  field_swap(mut first.x, second: mut second.x, bit: bit)
+  field_swap(mut first.y, second: mut second.y, bit: bit)
+  field_swap(mut first.z, second: mut second.z, bit: bit)
+  field_swap(mut first.t, second: mut second.t, bit: bit)
+}
+
+internal fn EdwardsPoint.to_bytes(self) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  let inverse = field_invert(self.z)
+  let x = field_multiply(self.x, second: inverse)
+  var bytes = field_to_bytes(field_multiply(self.y, second: inverse))
+  if field_is_odd(x) {
+    bytes[31] = bytes[31] ^ 128
+  }
+  bytes
+}
+
+internal fn EdwardsPoint.multiply(self, scalar: Array[UInt8, 32]) -> EdwardsPoint
+  cost time O(1)
+{
+  var result = EdwardsPoint.neutral()
+  var addend = self
+  let bits: USize = 256
+  for step in 0..bits
+  {
+    let bit = scalar_bit(scalar, bit: 255 - step)
+    edwards_swap(mut result, second: mut addend, bit: bit)
+    addend = addend.add(result)
+    result = result.add(result)
+    edwards_swap(mut result, second: mut addend, bit: bit)
+  }
+  result
+}
+
+internal fn EdwardsPoint.negated_from_bytes(bytes: Array[UInt8, 32]) -> Option[EdwardsPoint]
+  cost time O(1)
+{
+  let y = field_from_bytes(bytes)
+  let y_squared = field_square(y)
+  let numerator = field_subtract(y_squared, second: field_one)
+  let denominator = field_add(field_one, second: field_multiply(y_squared, second: edwards_d))
+  let denominator_2 = field_square(denominator)
+  let denominator_4 = field_square(denominator_2)
+  let denominator_6 = field_multiply(denominator_4, second: denominator_2)
+  var root = field_multiply(field_multiply(denominator_6, second: numerator), second: denominator)
+  root = field_power_2_252_minus_3(root)
+  root = field_multiply(root, second: numerator)
+  root = field_multiply(root, second: denominator)
+  root = field_multiply(root, second: denominator)
+  var x = field_multiply(root, second: denominator)
+  if !field_equal(field_multiply(field_square(x), second: denominator), second: numerator) {
+    x = field_multiply(x, second: square_root_of_minus_one)
+  }
+  if !field_equal(field_multiply(field_square(x), second: denominator), second: numerator) {
+    return None
+  }
+  if field_is_odd(x) == ((bytes[31] >> 7) == 1) {
+    let zero: Array[Int64, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    x = field_subtract(zero, second: x)
+  }
+  Some(EdwardsPoint(x: x, y: y, z: field_one, t: field_multiply(x, second: y)))
+}
+
+internal fn scalar_reduce(wide: Array[Int64, 64]) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  var limbs = wide
+  let high: USize = 32
+  for step in 0..high
+  {
+    let limb = 63 - step
+    var carry: Int64 = 0
+    let span: USize = 20
+    for offset in 0..span
+    {
+      let index = limb - 32 + offset
+      limbs[index] = limbs[index]
+        .wrapping_add(carry)
+        .wrapping_subtract(limbs[limb].wrapping_multiply(16).wrapping_multiply(group_order[offset]))
+      carry = limbs[index].wrapping_add(128) >> 8
+      limbs[index] = limbs[index].wrapping_subtract(carry.wrapping_shift_left(8))
+    }
+    limbs[limb - 12] = limbs[limb - 12].wrapping_add(carry)
+    limbs[limb] = 0
+  }
+  var carry: Int64 = 0
+  let low: USize = 32
+  for index in 0..low
+  {
+    limbs[index] = limbs[index]
+      .wrapping_add(carry)
+      .wrapping_subtract((limbs[31] >> 4).wrapping_multiply(group_order[index]))
+    carry = limbs[index] >> 8
+    limbs[index] = limbs[index] & 255
+  }
+  for index in 0..low
+  {
+    limbs[index] = limbs[index].wrapping_subtract(carry.wrapping_multiply(group_order[index]))
+  }
+  var reduced: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  for index in 0..low
+  {
+    limbs[index + 1] = limbs[index + 1].wrapping_add(limbs[index] >> 8)
+    reduced[index] = intrinsic::convert(limbs[index] & 255)
+  }
+  reduced
+}
+
+internal fn scalar_from_hash(hash: Array[UInt8, 64]) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  var wide: Array[Int64, 64] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 64
+  for index in 0..count
+  {
+    wide[index] = intrinsic::convert[UInt8, Int64](hash[index])
+  }
+  scalar_reduce(wide)
+}
+
+internal fn scalar_multiply_add(product_of: Array[UInt8, 32], and: Array[UInt8, 32], plus: Array[UInt8, 32]) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  var wide: Array[Int64, 64] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count
+  {
+    wide[index] = intrinsic::convert[UInt8, Int64](plus[index])
+  }
+  for left in 0..count
+  {
+    for right in 0..count
+    {
+      wide[left + right] = wide[left + right].wrapping_add(
+        intrinsic::convert[UInt8, Int64](product_of[left]).wrapping_multiply(intrinsic::convert[UInt8, Int64](and[right])),
+      )
+    }
+  }
+  scalar_reduce(wide)
+}
+
+internal fn scalar_is_below_order(scalar: Array[UInt8, 32]) -> Bool
+  cost time O(1)
+{
+  var below = false
+  var decided = false
+  let count: USize = 32
+  for step in 0..count
+  {
+    let index = 31 - step
+    let digit = intrinsic::convert[UInt8, Int64](scalar[index])
+    if !decided && digit != group_order[index] {
+      below = digit < group_order[index]
+      decided = true
+    }
+  }
+  below
+}
+
+internal fn signing_scalar(seed: Array[UInt8, 32]) -> Array[UInt8, 64]
+  cost time O(1)
+{
+  var expanded = sha512(seed.slice())
+  expanded[0] = expanded[0] & 248
+  expanded[31] = (expanded[31] & 127) | 64
+  expanded
+}
+
+internal fn first_half(bytes: Array[UInt8, 64]) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  var half: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count
+  {
+    half[index] = bytes[index]
+  }
+  half
+}
+
+internal fn second_half(bytes: Array[UInt8, 64]) -> Array[UInt8, 32]
+  cost time O(1)
+{
+  var half: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count
+  {
+    half[index] = bytes[index + 32]
+  }
+  half
+}
+
+internal fn random_32_bytes() -> Array[UInt8, 32]
+  uses Random
+{
+  var bytes: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let words: USize = 4
+  for word in 0..words {
+    let value = Random.next()
+    let count: USize = 8
+    for index in 0..count {
+      bytes[8 * word + index] = intrinsic::convert((value >> (8 * index)) & 255)
+    }
+  }
+  bytes
+}
+
+public opaque type SigningKey(seed: Array[UInt8, 32], verifying_key: Array[UInt8, 32])
   derives Copyable
 
 public opaque type VerifyingKey(bytes: Array[UInt8, 32])
@@ -2218,31 +3235,57 @@ public type Signature(bytes: Array[UInt8, 64])
 public fn SigningKey.generate() -> SigningKey
   uses Random
 {
-  todo
+  SigningKey.from_seed(random_32_bytes())
 }
 
 public fn SigningKey.from_seed(seed: Array[UInt8, 32]) -> SigningKey
   cost time O(1)
 {
-  SigningKey(seed: seed)
+  let scalar = first_half(signing_scalar(seed))
+  SigningKey(seed: seed, verifying_key: EdwardsPoint.base().multiply(scalar).to_bytes())
 }
 
 public fn SigningKey.verifying_key(self) -> VerifyingKey
   cost time O(1)
 {
-  todo
+  VerifyingKey(bytes: self.verifying_key)
 }
 
 public fn SigningKey.sign(self, message: Slice[UInt8]) -> Signature
   cost time O(message.length())
 {
-  todo
+  let expanded = signing_scalar(self.seed)
+  let scalar = first_half(expanded)
+  var nonce_hash = Sha512.new()
+  mut nonce_hash.update(second_half(expanded).slice())
+  mut nonce_hash.update(message)
+  let nonce = scalar_from_hash(own nonce_hash.finish())
+  let commitment = EdwardsPoint.base().multiply(nonce).to_bytes()
+  var challenge_hash = Sha512.new()
+  mut challenge_hash.update(commitment.slice())
+  mut challenge_hash.update(self.verifying_key.slice())
+  mut challenge_hash.update(message)
+  let challenge = scalar_from_hash(own challenge_hash.finish())
+  let response = scalar_multiply_add(challenge, and: scalar, plus: nonce)
+  var bytes: Array[UInt8, 64] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count {
+    bytes[index] = commitment[index]
+    bytes[index + 32] = response[index]
+  }
+  Signature(bytes: bytes)
 }
 
 public fn VerifyingKey.from_bytes(bytes: Array[UInt8, 32]) -> Option[VerifyingKey]
   cost time O(1)
 {
-  todo
+  match EdwardsPoint.negated_from_bytes(bytes) {
+    Some(_) => Some(VerifyingKey(bytes: bytes))
+    None => None
+  }
 }
 
 public fn VerifyingKey.bytes(self) -> Array[UInt8, 32]
@@ -2254,7 +3297,22 @@ public fn VerifyingKey.bytes(self) -> Array[UInt8, 32]
 public fn VerifyingKey.verify(self, message: Slice[UInt8], signature: Signature) -> Bool
   cost time O(message.length())
 {
-  todo
+  let commitment = first_half(signature.bytes)
+  let response = second_half(signature.bytes)
+  if !scalar_is_below_order(response) {
+    return false
+  }
+  let negated_key = match EdwardsPoint.negated_from_bytes(self.bytes) {
+    Some(point) => point
+    None => return false
+  }
+  var challenge_hash = Sha512.new()
+  mut challenge_hash.update(commitment.slice())
+  mut challenge_hash.update(self.bytes.slice())
+  mut challenge_hash.update(message)
+  let challenge = scalar_from_hash(own challenge_hash.finish())
+  let expected = negated_key.multiply(challenge).add(EdwardsPoint.base().multiply(response)).to_bytes()
+  constant_time_equal(expected.slice(), second: commitment.slice())
 }
 
 public opaque type AgreementKey(bytes: Array[UInt8, 32])
@@ -2265,17 +3323,33 @@ public type AgreementPublicKey(bytes: Array[UInt8, 32])
 public fn AgreementKey.generate() -> AgreementKey
   uses Random
 {
-  todo
+  AgreementKey(bytes: random_32_bytes())
+}
+
+public fn AgreementKey.from_bytes(bytes: Array[UInt8, 32]) -> AgreementKey
+  cost time O(1)
+{
+  AgreementKey(bytes: bytes)
 }
 
 public fn AgreementKey.public_key(self) -> AgreementPublicKey
   cost time O(1)
 {
-  todo
+  var base_point: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  base_point[0] = 9
+  AgreementPublicKey(bytes: x25519(self.bytes, point: base_point))
 }
 
 public fn AgreementKey.agree(own self, their: AgreementPublicKey) -> Option[SecretKey]
   cost time O(1)
 {
-  todo
+  let shared = x25519(self.bytes, point: their.bytes)
+  var any_bit: UInt8 = 0
+  let count: USize = 32
+  for index in 0..count {
+    any_bit = any_bit | shared[index]
+  }
+  if any_bit == 0 { None } else { Some(SecretKey(bytes: shared)) }
 }

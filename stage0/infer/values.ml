@@ -64,7 +64,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
               let part_type = normalize state part_type in
               if T.contains_unsolved part_type then false
               else begin
-                let display = trait_reference (core "Display") in
+                let display = trait_reference (Well_known.path Display) in
                 (match implements state part_type display with
                 | Some evidence ->
                     set_part index
@@ -89,7 +89,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
           (match expected with
           | Some expected -> ignore (unify state tag_type expected)
           | None -> ());
-          let template_trait = trait_reference (standard [ "text" ] "FromTemplate") in
+          let template_trait = trait_reference (Well_known.path From_template) in
           let part_type = ref None in
           register_expression state value (fun () ->
               match !part_type with
@@ -123,7 +123,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                         let part_type = normalize state part_type in
                         if not (T.equal part_type part) then
                           let from =
-                            trait_reference ~arguments:[ T.Type part_type ] (core "From")
+                            trait_reference ~arguments:[ T.Type part_type ] (Well_known.path From)
                           in
                           match implements state part from with
                           | Some evidence ->
@@ -152,8 +152,8 @@ and list_literal state env ?expected (value : expression) items =
   let element, make =
     match expected with
     | Some (T.Named { path; arguments = T.Type element :: rest })
-      when Path.equal path set_path || Path.equal path list_path || Path.equal path sequence_path
-           || Path.equal path finite_set_path ->
+      when Well_known.is Set path || Well_known.is List path || Well_known.is Sequence path
+           || Well_known.is Finite_set path ->
         (element, fun element -> T.Named { path; arguments = T.Type element :: rest })
     | Some (T.Named { path; arguments = [ T.Type element; count ] })
       when Intrinsic.builtin_of_path path = Some Array ->
@@ -167,7 +167,8 @@ and list_literal state env ?expected (value : expression) items =
         (element, fun element -> T.Named { path; arguments = [ T.Type element; count ] })
     | _ ->
         let element = fresh state in
-        (element, fun element -> T.Named { path = list_path; arguments = [ T.Type element ] })
+        ( element,
+          fun element -> T.Named { path = Well_known.path List; arguments = [ T.Type element ] } )
   in
   List.iter (fun item -> check state env item element) items;
   List.iter (fun item -> check_owned state env item element) items;
@@ -179,14 +180,14 @@ and map_literal state env ?expected (value : expression) entries =
   let key, value_type =
     match Option.map (normalize state) expected with
     | Some (T.Named { path; arguments = [ T.Type key; T.Type value_type ] })
-      when Path.equal path map_path || Path.equal path finite_map_path ->
+      when Well_known.is Map path || Well_known.is Finite_map path ->
         (key, value_type)
     | _ -> (fresh state, fresh state)
   in
   let map_type =
     match Option.map (normalize state) expected with
-    | Some (T.Named { path; _ }) when Path.equal path finite_map_path -> finite_map_path
-    | _ -> map_path
+    | Some (T.Named { path; _ }) when Well_known.is Finite_map path -> Well_known.path Finite_map
+    | _ -> Well_known.path Map
   in
   List.iter
     (fun (entry_key, entry_value) ->
@@ -434,7 +435,7 @@ and arm_value state env ?expected (body : statement) =
 and element_of_collection state env ~(quantifier : expression) (collection : expression) =
   let collection_type = normalize state (expression state env collection) in
   match collection_type with
-  | T.Named { path; arguments = [ T.Type element ] } when Path.equal path range_path -> element
+  | T.Named { path; arguments = [ T.Type element ] } when Well_known.is Range path -> element
   | T.Error _ | T.Hole -> collection_type
   | _ -> (
       match each_call state collection.span collection_type T.Read with

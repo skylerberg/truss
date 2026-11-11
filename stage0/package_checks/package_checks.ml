@@ -601,7 +601,7 @@ let check =
         in
         let direct = dependencies database package in
         let standard =
-          if package_name = Resolve.Prelude.standard then [] else [ Resolve.Prelude.standard ]
+          if package_name = Path.standard_package then [] else [ Path.standard_package ]
         in
         List.concat_map
           (fun name ->
