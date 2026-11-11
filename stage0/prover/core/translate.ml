@@ -3447,7 +3447,7 @@ and updating_helper context (call_ : call) =
    its own proofs, where they are what is assumed: elsewhere this cannot
    tell whether they hold. The [impl] is of the trait with these arguments,
    so a type with an [impl] of [Scale[Int64]] and one of [Scale[Bool]]
-   reaches each by its own. *)
+   reaches each by its own. A derived [impl] is found as a written one is. *)
 and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
   match ty with
   | Named { path; _ } ->
@@ -3456,8 +3456,8 @@ and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
         (fun package ->
           List.find_map
             (fun impl ->
-              match Query.demand context.database Interface.Environment.interface impl with
-              | Some (Interface.Environment.Impl_interface interface)
+              match Interface.Impls.impl_interface context.database impl with
+              | Some interface
                 when Path.equal impl context.current
                      || (match context.current with
                        | Method { owner; _ } -> Path.equal owner impl
@@ -3477,9 +3477,7 @@ and concrete_impl context (trait : T.trait_reference) (ty : T.ty) =
                   | Some arguments -> Some (impl, arguments)
                   | None -> None)
               | _ -> None)
-            (Call_graph.impls_for
-               (Query.demand context.database Call_graph.package_impls package)
-               [ trait.trait ] ty))
+            (Query.demand context.database Interface.Impls.impls_in (trait.trait, path, package)))
         packages
   | _ -> None
 

@@ -3026,6 +3026,48 @@ let () =
          }\n"
         "prover.ensures")
 
+(* Derived implementations *)
+
+let () =
+  test "a derived ordering is the one a law of another trait reads" (fun () ->
+      proven
+        "use standard::core\n\n\
+         type Day(count: Int32)\n\
+        \  derives Equal, Ordered\n\n\
+         impl core::Countable for Day {\n\
+        \  fn successor(self) -> Option[Day]\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    self.advanced(1)\n\
+        \  }\n\n\
+        \  fn predecessor(self) -> Option[Day]\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    self.retreated(1)\n\
+        \  }\n\n\
+        \  fn advanced(self, by: USize) -> Option[Day]\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    match self.count.advanced(by: by) {\n\
+        \      Some(count) => Some(Day(count: count))\n\
+        \      None => None\n\
+        \    }\n\
+        \  }\n\n\
+        \  fn retreated(self, by: USize) -> Option[Day]\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    match self.count.retreated(by: by) {\n\
+        \      Some(count) => Some(Day(count: count))\n\
+        \      None => None\n\
+        \    }\n\
+        \  }\n\n\
+        \  fn steps_to(self, other: Day) -> Option[USize]\n\
+        \    cost time O(1)\n\
+        \  {\n\
+        \    self.count.steps_to(other.count)\n\
+        \  }\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =
