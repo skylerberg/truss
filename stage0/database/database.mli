@@ -32,6 +32,9 @@ val root : session -> string
 val engine : session -> Engine.t
 val context : session -> Query.context
 
+val set_answers : session -> (string * Prover.told) list -> unit
+(** Sets what the solver and run code said, which is how the prover is given its answers. *)
+
 val problems : session -> string list
 (** What reading the project's manifests shows to be wrong, each as its file and sentences: one that
     could not be read, a package name used twice, a dependency that is no package of the project. *)

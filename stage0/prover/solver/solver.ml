@@ -96,7 +96,16 @@ let rec show_sexp = function
   | Atom atom -> atom
   | List items -> "(" ^ String.concat " " (List.map show_sexp items) ^ ")"
 
-let cache : (string, answer) Hashtbl.t = Hashtbl.create 256
+(* A query as the solver is asked it: its canonical text, its key, and for
+   each symbol whose value a counterexample should give, the canonical
+   name the text calls it by. *)
+type request = { text : string; key : string; requested : (string * string) list }
+
+(* An answer in the canonical names, the same for every query with the
+   same text, so it can be kept by key alone. *)
+type canonical = Proven_canonical | Values of (string * string) list | Out_of_steps_canonical
+
+let cache : (string, canonical) Hashtbl.t = Hashtbl.create 256
 
 (* Queries are solved on several domains at once, which share the cache
    and the count of what was solved. *)
@@ -118,7 +127,7 @@ let render query =
       locked (fun () -> Asked.replace rendered_queries query rendered);
       rendered
 
-let solve solver ?(values = []) query =
+let request ?(values = []) query =
   let { text; named; text_key } = render query in
   let requested =
     List.filter_map
@@ -126,8 +135,22 @@ let solve solver ?(values = []) query =
         List.assoc_opt symbol named |> Option.map (fun canonical -> (symbol, canonical)))
       values
   in
-  let key = text_key ^ String.concat "," (List.map snd requested) in
-  let file = Option.map (fun directory -> Filename.concat directory key) solver.cache in
+  { text; key = text_key ^ String.concat "," (List.map snd requested); requested }
+
+let request_key request = request.key
+
+let read request = function
+  | Proven_canonical -> Proven
+  | Out_of_steps_canonical -> Out_of_steps
+  | Values pairs ->
+      Counterexample
+        (List.filter_map
+           (fun (symbol, canonical) ->
+             Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
+           request.requested)
+
+let ask solver request =
+  let file = Option.map (fun directory -> Filename.concat directory request.key) solver.cache in
   let stored =
     match file with
     | Some file when Sys.file_exists file -> (
@@ -135,73 +158,63 @@ let solve solver ?(values = []) query =
            ago a run last asked it, which is what pruning old answers reads. *)
         (try Unix.utimes file 0. 0. with Unix.Unix_error _ -> ());
         match String.split_on_char '\n' (In_channel.with_open_bin file In_channel.input_all) with
-        | "proven" :: _ -> Some Proven
-        | "out_of_steps" :: _ -> Some Out_of_steps
+        | "proven" :: _ -> Some Proven_canonical
+        | "out_of_steps" :: _ -> Some Out_of_steps_canonical
         | "counterexample" :: lines ->
             Some
-              (Counterexample
+              (Values
                  (List.filter_map
                     (fun line ->
                       match String.index_opt line ' ' with
-                      | Some space -> (
-                          let canonical = String.sub line 0 space in
-                          let value =
-                            String.sub line (space + 1) (String.length line - space - 1)
-                          in
-                          match List.find_opt (fun (_, c) -> c = canonical) requested with
-                          | Some (symbol, _) -> Some (symbol, value)
-                          | None -> None)
+                      | Some space ->
+                          Some
+                            ( String.sub line 0 space,
+                              String.sub line (space + 1) (String.length line - space - 1) )
                       | None -> None)
                     lines))
         | _ -> None)
     | _ -> None
   in
-  match (locked (fun () -> Hashtbl.find_opt cache key), stored) with
+  match (locked (fun () -> Hashtbl.find_opt cache request.key), stored) with
   | Some answer, _ | None, Some answer -> answer
   | None, None ->
       let input =
-        header ^ text
+        header ^ request.text
         ^
-        if requested = [] then ""
-        else Printf.sprintf "(get-value (%s))\n" (String.concat " " (List.map snd requested))
+        if request.requested = [] then ""
+        else
+          Printf.sprintf "(get-value (%s))\n" (String.concat " " (List.map snd request.requested))
       in
       locked (fun () -> solver.solved <- solver.solved + 1);
       let _, output, _ = Toolchain.run ~input solver.program [ "-in"; "-smt2" ] in
       let answer =
         match parse_sexps output with
-        | Atom "unsat" :: _ -> Proven
+        | Atom "unsat" :: _ -> Proven_canonical
         | Atom "sat" :: rest ->
-            let pairs =
-              match rest with
+            Values
+              (match rest with
               | List pairs :: _ ->
                   List.filter_map
                     (function
                       | List [ Atom canonical; value ] -> Some (canonical, show_sexp value)
                       | _ -> None)
                     pairs
-              | _ -> []
-            in
-            Counterexample
-              (List.filter_map
-                 (fun (symbol, canonical) ->
-                   Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
-                 requested)
-        | _ -> Out_of_steps
+              | _ -> [])
+        | _ -> Out_of_steps_canonical
       in
-      locked (fun () -> Hashtbl.replace cache key answer);
+      locked (fun () -> Hashtbl.replace cache request.key answer);
       (match file with
       | Some file -> (
           let text =
             match answer with
-            | Proven -> "proven\n"
-            | Out_of_steps -> "out_of_steps\n"
-            | Counterexample values ->
+            | Proven_canonical -> "proven\n"
+            | Out_of_steps_canonical -> "out_of_steps\n"
+            | Values pairs ->
                 "counterexample\n"
                 ^ String.concat ""
                     (List.map
-                       (fun (symbol, value) ->
-                         Printf.sprintf "%s %s\n" (List.assoc symbol requested) value)
-                       values)
+                       (fun (canonical, value) -> Printf.sprintf "%s %s\n" canonical value)
+                       pairs)
           in
           try
             make_directories (Filename.dirname file);
@@ -213,22 +226,29 @@ let solve solver ?(values = []) query =
       | None -> ());
       answer
 
-let solve_all solver queries =
-  let queries = Array.of_list queries in
-  let answers = Array.make (Array.length queries) Out_of_steps in
+let solve solver ?(values = []) query =
+  let request = request ~values query in
+  read request (ask solver request)
+
+let ask_all solver requests =
+  let requests = Array.of_list requests in
+  let answers = Array.make (Array.length requests) Out_of_steps_canonical in
   let next = Atomic.make 0 in
   let rec work () =
     let index = Atomic.fetch_and_add next 1 in
-    if index < Array.length queries then begin
-      let values, query = queries.(index) in
-      answers.(index) <- solve solver ~values query;
+    if index < Array.length requests then begin
+      answers.(index) <- ask solver requests.(index);
       work ()
     end
   in
-  let others = min (Array.length queries) (Domain.recommended_domain_count ()) - 1 in
+  let others = min (Array.length requests) (Domain.recommended_domain_count ()) - 1 in
   let domains = List.init (max 0 others) (fun _ -> Domain.spawn work) in
   work ();
   List.iter Domain.join domains;
   Array.to_list answers
+
+let solve_all solver queries =
+  let requests = List.map (fun (values, query) -> request ~values query) queries in
+  List.map2 read requests (ask_all solver requests)
 
 let solved solver = locked (fun () -> solver.solved)

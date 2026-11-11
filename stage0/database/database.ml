@@ -1877,3 +1877,6 @@ let call ?program ?(start_server = true) ~progress request =
           Error
             "the background process ended while answering; see its log in the store's \
              servers              directory.")
+
+let set_answers session answers =
+  List.iter (fun (key, told) -> Engine.set session.engine Prover.told key told) answers

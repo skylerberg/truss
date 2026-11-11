@@ -28,6 +28,26 @@ val key : Logic.query -> string
 (** The cache key of a query: the hash of its canonical text together with the solver's version, its
     options, and its limit. *)
 
+type request
+(** A query as it is asked: its canonical text and key, and the canonical names of the symbols whose
+    values a counterexample should give. *)
+
+type canonical
+(** An answer in a query's canonical names, which every query with the same text shares, so it can
+    be kept by its request's key alone. *)
+
+val request : ?values:string list -> Logic.query -> request
+val request_key : request -> string
+
+val ask : t -> request -> canonical
+(** Runs one request, or reads its answer from a cache. *)
+
+val ask_all : t -> request list -> canonical list
+(** Runs each request, as {!ask} does, several at once, one for each core. *)
+
+val read : request -> canonical -> answer
+(** A canonical answer in the request's own symbols. *)
+
 val solve : t -> ?values:string list -> Logic.query -> answer
 (** Runs one query. [values] are the prover's symbols whose values a counterexample should give;
     those the query does not mention are left out. Results are cached by {!key} for the life of the

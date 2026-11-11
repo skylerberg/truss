@@ -81,7 +81,7 @@ let () =
   in
   test "the code database kept every result of checking the standard library current" (fun () ->
       List.iter (fun problem -> fail "%s" problem) (Engine.audit engine));
-  Prover.solve_ahead database solver
+  Prover.solve_ahead ~tell:(Support.tell database) database solver
     (List.filter_map (fun (module_, errors) -> if errors = [] then Some module_ else None) checked);
   List.iter
     (fun ((module_ : Path.module_), errors) ->
@@ -93,7 +93,7 @@ let () =
             List.iter (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
           in
           match errors with
-          | [] -> report (Prover.diagnostics database solver module_)
+          | [] -> report (Prover.diagnostics ~tell:(Support.tell database) database solver module_)
           | errors -> report errors))
     checked
 

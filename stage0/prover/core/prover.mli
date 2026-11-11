@@ -27,11 +27,27 @@ type running = {
 (** Running compiled code, which the caller gives through code generation: a template's check, and a
     call whose arguments are known, whose result is a [Bool] as 0 or 1. *)
 
-val solve_ahead : ?running:running -> Query.context -> Solver.t -> Path.module_ list -> unit
-(** Solves the queries of every definition of the modules, several at once, one for each core, so
-    that {!diagnostics} of each finds them solved. A caller that will ask for many modules' proofs
-    calls it once with all of them, which keeps every core busy where one module's queries are few.
-*)
+type told
+(** What the world outside the prover said of something it asked: the solver of a query, or running
+    code of a template's check or a call's value. *)
+
+val told : (string, told) Query.input
+(** What each thing asked was told, by what was asked. A definition's outcome is a saved result
+    worked out from these, so one whose reads have not changed is neither translated nor asked
+    anything again. *)
+
+val solve_ahead :
+  ?running:running ->
+  tell:((string * told) list -> unit) ->
+  Query.context ->
+  Solver.t ->
+  Path.module_ list ->
+  unit
+(** Decides every definition of the modules: what their outcomes wait for is asked together, the
+    solver's queries several at once, one for each core, and [tell] sets {!told} to the answers,
+    which the driver does, since only the database sets a session's inputs. A caller that will ask
+    for many modules' proofs calls it once with all of them, which keeps every core busy where one
+    module's queries are few. *)
 
 type state = {
   code : Diagnostic.Code.prover;
@@ -41,11 +57,23 @@ type state = {
 }
 (** An obligation's state, as a language server shows it at its position. *)
 
-val states : ?running:running -> Query.context -> Solver.t -> Path.module_ -> state list
+val states :
+  ?running:running ->
+  tell:((string * told) list -> unit) ->
+  Query.context ->
+  Solver.t ->
+  Path.module_ ->
+  state list
 (** Every obligation of a file's definitions, shown or not, and every definition the prover could
     not read, in the file's offsets and in order. *)
 
-val diagnostics : ?running:running -> Query.context -> Solver.t -> Path.module_ -> Diagnostic.t list
+val diagnostics :
+  ?running:running ->
+  tell:((string * told) list -> unit) ->
+  Query.context ->
+  Solver.t ->
+  Path.module_ ->
+  Diagnostic.t list
 (** Every obligation of a file's definitions that the solver could not prove, and every definition
     the prover could not read, in the file's offsets and in order. [running] runs compiled code, as
     code generation's [Compile.check_template] and [Compile.evaluate_call] do, where it can; the

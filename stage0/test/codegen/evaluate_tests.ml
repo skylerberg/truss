@@ -4,6 +4,12 @@
 open Harness
 open Codegen_support
 
+(* What the solver said, set in the engine, as the database does for a
+   session. *)
+let tell database said =
+  let engine = Engine.of_context database in
+  List.iter (fun (key, told) -> Engine.set engine Prover.told key told) said
+
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
@@ -11,7 +17,9 @@ let solver =
    running them. *)
 let proven_with_running text =
   let database, compile = load text in
-  Prover.diagnostics ~running:(Running.through (lazy compile)) database (Lazy.force solver) example
+  Prover.diagnostics
+    ~running:(Running.through (lazy compile))
+    ~tell:(tell database) database (Lazy.force solver) example
 
 let shout =
   {|use standard::text
@@ -118,7 +126,7 @@ let () =
       let database, _ =
         load (counting ^ "\nfn f() -> UInt8\n  ensures result == 7\n{\n  count_up(7)\n}\n")
       in
-      match Prover.diagnostics database (Lazy.force solver) example with
+      match Prover.diagnostics ~tell:(tell database) database (Lazy.force solver) example with
       | [ _ ] -> ()
       | found -> fail "%d diagnostics" (List.length found));
   test "what running a call gives is what it gives, not what was hoped" (fun () ->

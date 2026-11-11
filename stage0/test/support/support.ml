@@ -449,3 +449,7 @@ let one_diagnostic ~check ?(others = []) ?fixed ?says text code =
            (List.map
               (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code ^ " " ^ d.message)
               found))
+
+let tell database said =
+  let engine = Engine.of_context database in
+  List.iter (fun (key, told) -> Engine.set engine Prover.told key told) said

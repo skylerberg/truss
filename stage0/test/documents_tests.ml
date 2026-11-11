@@ -52,7 +52,9 @@ let () =
                 then
                   match diagnostics with
                   | [] -> (
-                      match Prover.diagnostics database solver module_ with
+                      match
+                        Prover.diagnostics ~tell:(Support.tell database) database solver module_
+                      with
                       | [] -> ()
                       | unproven ->
                           fail "%s"

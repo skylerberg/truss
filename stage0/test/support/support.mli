@@ -53,3 +53,7 @@ val one_diagnostic :
 (** [one_diagnostic ~check text code]: [app::main], with [text], has exactly one diagnostic, with
     [code]. With [~fixed], its first fix gives that text, which then has no diagnostic. With
     [~says], its message contains that text. *)
+
+val tell : Query.context -> (string * Prover.told) list -> unit
+(** Sets what the solver and run code said in the context's engine, as the database does for a
+    session. *)
