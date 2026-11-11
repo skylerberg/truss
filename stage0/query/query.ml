@@ -17,6 +17,7 @@ let phase ~name ~after =
   { name; rank }
 
 let phase_name (phase : phase) = phase.name
+let phase_rank (phase : phase) = phase.rank
 let input = Incremental.input
 
 let query ~name ~show ~phase ?saved ?portable ?equal ?about compute =

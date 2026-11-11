@@ -144,8 +144,10 @@ val forget_bases : unit -> unit
 
 (** {1 Checking the engine} *)
 
-val audit : ?flat:bool -> t -> string list
-(** A line for each result that differs from what a new engine with the same inputs computes. *)
+val audit : ?flat:bool -> ?before:Query.phase -> t -> string list
+(** A line for each result that differs from what a new engine with the same inputs computes. With
+    [before], only the results of the phases before that one are computed again, which leaves out
+    what is costly to compute and audited elsewhere, such as proofs. *)
 
 val audit_all : unit -> string list
 (** Audits every engine made since {!auditing} was set that did work since its last audit. *)

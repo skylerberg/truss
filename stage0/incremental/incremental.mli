@@ -255,11 +255,12 @@ val forget_bases : unit -> unit
 
 (** {1 Checking the engine} *)
 
-val audit : ?flat:bool -> t -> string list
+val audit : ?flat:bool -> ?before:int -> t -> string list
 (** Brings the engine up to date, then computes every result it holds in a new engine with the same
     inputs, and returns a line for each that differs. With [~flat:true] the new engine has no bases
-    and is given their inputs too, which checks the bases' results as well as its own. An empty list
-    means every result is what a fresh computation gives. *)
+    and is given their inputs too, which checks the bases' results as well as its own. With
+    [before], only the results of the phases before that one are computed again. An empty list means
+    every result is what a fresh computation gives. *)
 
 val auditing : bool ref
 (** When set, every engine made is remembered, weakly, for {!audit_all}. *)

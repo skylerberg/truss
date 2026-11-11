@@ -78,7 +78,10 @@ exception Lost = Incremental.Lost
 let inputs_stored = Incremental.inputs_stored
 let values_in store ~version name = Incremental.values_in (store_of store ~version) name
 let forget_bases = Incremental.forget_bases
-let audit = Incremental.audit
+
+let audit ?flat ?before engine =
+  Incremental.audit ?flat ?before:(Option.map Query.phase_rank before) engine
+
 let audit_all = Incremental.audit_all
 let auditing = Incremental.auditing
 let skip_audit = Incremental.skip_audit

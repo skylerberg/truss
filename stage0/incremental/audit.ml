@@ -11,7 +11,7 @@ let describe_outcome (outcome : 'value outcome option) =
   | Some (Value _) -> "a value"
   | Some (Raised exception_) -> "raising " ^ Printexc.to_string exception_
 
-let audit ?(flat = false) engine =
+let audit ?(flat = false) ?before engine =
   if engine.frozen then []
   else begin
     check_can_change engine;
@@ -56,7 +56,9 @@ let audit ?(flat = false) engine =
       List.filter_map
         (fun (node : node) ->
           match node.cell with
-          | Result (query, cell) when node.alive -> (
+          | Result (query, cell)
+            when node.alive && match before with Some phase -> node.phase < phase | None -> true
+            -> (
               match load engine cell with
               | None -> None
               | Some mine ->
