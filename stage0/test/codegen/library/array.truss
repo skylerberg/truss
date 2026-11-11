@@ -121,3 +121,13 @@ test "an array is searched, joined, and sorted by a comparison" {
   assert numbers.binary_search(4) == Some(3)
   assert numbers.binary_search(7) is None
 }
+
+test "an array is sorted in place, by key, and into a list" {
+  var numbers: Array[Int64, 6] = [4, 1, 5, 2, 6, 3]
+  assert numbers.sorted() == [1, 2, 3, 4, 5, 6]
+  assert numbers == [4, 1, 5, 2, 6, 3]
+  mut numbers.sort_by_key(fn(number) { -number })
+  assert numbers == [6, 5, 4, 3, 2, 1]
+  mut numbers.sort()
+  assert numbers == [1, 2, 3, 4, 5, 6] && numbers.is_sorted()
+}

@@ -1,5 +1,6 @@
 use standard::core
 use standard::list
+use standard::list::slice
 
 public fn List[Element].get(self, index: USize) lends Option[Element]
 
@@ -218,9 +219,9 @@ public fn List[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost t
 public fn List[Element: Ordered + Copyable].sorted(self) -> List[Element]
   ensures result.length() == self.length()
   ensures result.is_sorted()
-  cost time O(self.length() * log(self.length()))
+  cost time O(self.length() * time(Element.copy) + self.length() * log(self.length()) * time(Element.compare))
 {
-  todo
+  self.slice().sorted()
 }
 
 public fn List[Element: Copyable].repeated(self, times: USize) -> List[Element]
@@ -419,9 +420,12 @@ public fn List[Element].update_each[capability Granted](
 public fn List[Element: Ordered].sort(mut self)
   ensures self.length() == old(self.length())
   ensures self.is_sorted()
-  cost time O(self.length() * log(self.length()))
+  cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
-  todo
+  mut self[..].sort()
+  proof {
+    slice::sorted_from_model(self.slice(), bound: self.length())
+  }
 }
 
 public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
@@ -433,7 +437,7 @@ public fn List[Element].sort_by(mut self, compare: (fn(Element, Element) -> Orde
 
 public fn List[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
   ensures self.length() == old(self.length())
-  cost time O(self.length() * log(self.length()) * time(key))
+  cost time finite
 {
-  todo
+  mut self[..].sort_by_key(key)
 }
