@@ -1254,9 +1254,14 @@ and the pool's threads run the tasks that are ready:
   ready. Two keys can share a slot, so a wake of one key can make a
   `wait` on the other return at once, and its caller tests its condition
   again.
-- **A mutex** is a `UInt64` that its owner initialized to zero. `lock`
-  changes it from 0 to 1 with a compare-and-swap, and a caller that finds
-  it locked waits on its address as a key. That wait is not cancellable.
+- **A mutex** is a `UInt64` that its owner initialized to zero: 0 is
+  unlocked, 1 is locked, and 2 is locked while a caller may wait, as in
+  Drepper's "Futexes Are Tricky". `lock` changes it from 0 to 1 with a
+  compare-and-swap. A caller that finds it locked sets it to 2 and waits
+  on its address as a key, and `unlock` wakes one waiter if it finds 2:
+  a thread that is not a task if one waits, and otherwise the task that
+  has waited longest. A lock and an unlock that no other caller contends
+  are one atomic operation each. The wait is not cancellable.
 - **A test program, and code run while compiling, start no thread.**
   `spawn` calls the task's function and returns when it returns, so tasks
   run sequentially, in the order they are spawned. A task that calls
@@ -1762,6 +1767,12 @@ for, so that a task on any thread can wait for it. The handler records
 the signal and writes a byte to a pipe, and a thread of the runtime reads
 the pipe and wakes the waiters. A signal stays recorded until a wait
 takes it, so one that arrives between two waits is there for the second.
+A signal that the program was started with blocked, and that arrived
+before the first wait for it, has run no handler and is pending. The
+thread that waits takes it if it can. On Linux any thread can. On macOS
+only the thread that the signal is pending for can, which is the
+program's first thread, so a task on another thread does not get such a
+signal there.
 The wait returns `None` in a cancelled task. A test program, which has
 one thread, blocks the signals and takes the next with `sigwait`. The
 real `NetworkServer`
@@ -1770,10 +1781,13 @@ and `NetworkClient` are sockets. An address is a `sockaddr_in` or a
 family is where the system keeps it, and the port and the address are high
 byte first. Listening is `socket`, `bind`, and `listen`, and the address
 the listener reports is the one `getsockname` gives, so a port asked for
-as 0 comes back as the port the system chose. Connecting with a limit puts
-the socket in the mode where `connect` does not wait, waits for it with
-`poll`, and reads how it went with `getsockopt`. A read or a write that
-runs past a timeout set with `setsockopt` is `TimedOut`. A datagram socket
+as 0 comes back as the port the system chose. Every socket is in the mode
+where a call does not wait, so that a task parks for it. `connect`
+returns at once, and the standard library waits until the socket can be
+written, with the connect's time limit set as the socket's limit for
+sending, and reads how the connection went with `getsockopt`. A read or a
+write that waits past a time limit set with `setsockopt` is `TimedOut`:
+the runtime's wait applies the limit. A datagram socket
 that is not bound to an address is an IPv6 socket that also carries IPv4,
 where the system has IPv6: an IPv4 address is sent to as the IPv6 address
 that stands for it, and a sender's is given back as IPv4. Every socket is
@@ -2210,8 +2224,6 @@ a command line can hold.
   the standard library's sockets do not block. A read of a pipe or of
   standard input, and a wait for a child process, hold a thread. A read
   of a file cannot be waited for with `epoll` or `kqueue` at all.
-- **A mutex that wakes one waiter.** `unlock` wakes every task that waits
-  for the mutex, and all but one park again.
 - **More tasks at once than the operating system allows mappings.** Each
   task's stack is a mapping with a guard page. Linux allows a process
   about sixty-five thousand mappings by default, which is about thirty
