@@ -2695,6 +2695,11 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
    result brought into range by a remainder; the overflow tests, the
    comparisons, and [fits] are exact; and [convert] keeps a value that
    fits. Anything else is known by its type alone. *)
+and handle_descriptor context handle =
+  let handle_sort = sort_of context (T.builtin Handle) in
+  declare context (L.Function ("handle.descriptor", [ handle_sort ], L.Int));
+  L.Apply ("handle.descriptor", [ handle ])
+
 and intrinsic context frame ~node (operation : Intrinsic.operation) types operands ~changed
     result_type =
   let known = arrive context frame "result" result_type in
@@ -2714,6 +2719,48 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
       buffer_operation context frame ~node operation (T.builtin UInt8) operands ~changed known
   | Libc function_, _ -> libc_call context frame ~node function_ operands ~changed known
   | Libc_number number, _ -> libc_number context frame number
+  | (System_is_os _ | System_is_architecture _), _ ->
+      (* The system a program runs on is one for the whole run, and it is at
+         most one operating system and one architecture. *)
+      let symbol operation = "system." ^ Intrinsic.operation_name operation in
+      let kind =
+        List.filter
+          (fun (other : Intrinsic.operation) ->
+            match (operation, other) with
+            | System_is_os _, System_is_os _ | System_is_architecture _, System_is_architecture _ ->
+                true
+            | _ -> false)
+          Intrinsic.operations
+      in
+      List.iter (fun other -> declare context (L.Constant (symbol other, L.Bool))) kind;
+      once context
+        ("one of " ^ symbol operation)
+        (fun () ->
+          List.iteri
+            (fun index first ->
+              List.iteri
+                (fun later second ->
+                  if later > index then
+                    context.facts <-
+                      L.(not_ (Symbol (symbol first) &&& Symbol (symbol second))) :: context.facts)
+                kind)
+            kind);
+      L.Symbol (symbol operation)
+  | Handle_from, _ -> (
+      (* A handle's descriptor is a function of it, and the one it was made
+         from. *)
+      match operands with
+      | [ descriptor ] ->
+          assume context frame (L.equal (handle_descriptor context known) descriptor);
+          known
+      | _ -> known)
+  | Handle_descriptor, _ -> (
+      match operands with
+      | [ handle ] ->
+          let descriptor = handle_descriptor context handle in
+          assume context frame (in_range (T.builtin Int32) descriptor);
+          descriptor
+      | _ -> known)
   | (Ieee_equal | Ieee_less), ty :: _ when float_format ty <> None -> (
       match operands with
       | [ left; right ] ->
