@@ -122,7 +122,12 @@ An obligation names its kind, its definition, and its position within the
 definition, as every result does. A test's obligations are proven like any
 function's; that its run checks them too changes nothing here. A
 constant's value has the obligations of any expression, so `1 << 8` as a
-`UInt8` is reported where the constant is defined.
+`UInt8` is reported where the constant is defined. Where it is used, a constant is
+one symbol, whose value is stated once in each query as a fact, so a
+large table is not repeated at each use. A function whose body reads a
+table is its definition, which carries the table into its callers'
+queries; one known by its contract alone, with a body that is not
+functional, keeps it in its own.
 
 - **An index is a call.** `items[i]` reaches the `impl` of `Index` for its
   collection, whose `requires` is the bound, so every index into a `List`
