@@ -2979,6 +2979,15 @@ let () =
         \  -value\n\
          }\n")
 
+(* Text literals *)
+
+let () =
+  test "two literals with the same text are the same value" (fun () ->
+      proven "fn f() -> String\n  ensures identical(result, \"a\")\n{\n  \"a\"\n}\n");
+  test "two literals with different text are different values" (fun () ->
+      not_proven "fn f() -> String\n  ensures identical(result, \"b\")\n{\n  \"a\"\n}\n"
+        "prover.ensures")
+
 (* Concurrent code *)
 
 let early_return ensures =
