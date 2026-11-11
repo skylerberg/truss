@@ -1,3 +1,4 @@
+use standard::core
 use standard::math
 
 test "factorials and binomial coefficients stop where a UInt64 does" {
@@ -28,4 +29,417 @@ test "the mean, the variance, and the standard deviation of a sample" {
   assert math::standard_deviation(one) is None
   let none: List[Float64] = []
   assert math::mean(none) is None
+}
+
+fn big(text: StringSlice) -> math::BigInteger {
+  match math::BigInteger.parse_radix(text, radix: 10) {
+    Ok(value) => value
+    Err(_) => math::BigInteger.zero()
+  }
+}
+
+fn shows(value: math::BigInteger, expected: StringSlice) -> Bool {
+  value.format() == expected.to_string()
+}
+
+test "a big integer is read and written in any radix" {
+  assert shows(big("0"), expected: "0")
+  assert shows(big("1"), expected: "1")
+  assert shows(big("-1"), expected: "-1")
+  assert shows(big("18446744073709551615"), expected: "18446744073709551615")
+  assert shows(big("18446744073709551616"), expected: "18446744073709551616")
+  assert shows(big("-18446744073709551616"), expected: "-18446744073709551616")
+  assert shows(big("10000000000000000000000000000000000000007"), expected: "10000000000000000000000000000000000000007")
+  assert shows(big("-10000000000000000000"), expected: "-10000000000000000000")
+  assert shows(big("1606938044258990275541962092341162602522202993782792835301375"), expected: "1606938044258990275541962092341162602522202993782792835301375")
+  assert big("1361129467683753853853498429727072858169").format(radix: 16) == "400000000000000000000000000003039"
+  assert big("1180591620717411303429").format(radix: 2) == "10000000000000000000000000000000000000000000000000000000000000000000101"
+  assert big("37778931862957161709577").format(radix: 8) == "10000000000000000000000011"
+  assert big("13367494538843734067838845976611").format(radix: 36) == "10000000000000000000z"
+  assert math::BigInteger.parse_radix("400000000000000000000000000003039", radix: 16) == Ok(big("1361129467683753853853498429727072858169"))
+  assert math::BigInteger.parse_radix("-10000000000000000000Z", radix: 36) == Ok(big("-13367494538843734067838845976611"))
+  assert math::BigInteger.parse_radix("+17", radix: 10) == Ok(big("17"))
+  assert math::BigInteger.parse_radix("-0", radix: 10) == Ok(math::BigInteger.zero())
+  assert math::BigInteger.parse_radix("000", radix: 10) == Ok(math::BigInteger.zero())
+  assert math::BigInteger.parse_radix("", radix: 10) == Err(core::ParseIntegerError.Empty)
+  assert math::BigInteger.parse_radix("-", radix: 10) == Err(core::ParseIntegerError.Empty)
+  assert math::BigInteger.parse_radix("12a", radix: 10) == Err(core::ParseIntegerError.InvalidDigit(offset: 2))
+  assert math::BigInteger.parse_radix("102", radix: 2) == Err(core::ParseIntegerError.InvalidDigit(offset: 2))
+  assert "${big("-1000000000000000000000000000000")}" == "-1000000000000000000000000000000"
+}
+
+test "big integers are added, subtracted, and multiplied across their limbs" {
+  assert big("18446744073709551615") + big("1") == big("18446744073709551616")
+  assert big("18446744073709551615") - big("1") == big("18446744073709551614")
+  assert big("18446744073709551615") * big("1") == big("18446744073709551615")
+  assert big("340282366920938463463374607431768211455") + big("18446744073709551617") == big("340282366920938463481821351505477763072")
+  assert big("340282366920938463463374607431768211455") - big("18446744073709551617") == big("340282366920938463444927863358058659838")
+  assert big("340282366920938463463374607431768211455") * big("18446744073709551617") == big("6277101735386680764176071790128604879547283307822093172735")
+  assert big("-18446744073709551616") + big("18446744073709551616") == big("0")
+  assert big("-18446744073709551616") - big("18446744073709551616") == big("-36893488147419103232")
+  assert big("-18446744073709551616") * big("18446744073709551616") == big("-340282366920938463463374607431768211456")
+  assert big("1000000000000000000000000000000") + big("-1000000000000000000000000000005") == big("-5")
+  assert big("1000000000000000000000000000000") - big("-1000000000000000000000000000005") == big("2000000000000000000000000000005")
+  assert big("1000000000000000000000000000000") * big("-1000000000000000000000000000005") == big("-1000000000000000000000000000005000000000000000000000000000000")
+  assert big("-7") + big("-1180591620717411303424") == big("-1180591620717411303431")
+  assert big("-7") - big("-1180591620717411303424") == big("1180591620717411303417")
+  assert big("-7") * big("-1180591620717411303424") == big("8264141345021879123968")
+  assert big("0") + big("-5") == big("-5")
+  assert big("0") - big("-5") == big("5")
+  assert big("0") * big("-5") == big("0")
+  assert big("6277101735386680763835789423207666416102355444464034512895") + big("6277101735386680763835789423207666416102355444464034512895") == big("12554203470773361527671578846415332832204710888928069025790")
+  assert big("6277101735386680763835789423207666416102355444464034512895") - big("6277101735386680763835789423207666416102355444464034512895") == big("0")
+  assert big("6277101735386680763835789423207666416102355444464034512895") * big("6277101735386680763835789423207666416102355444464034512895") == big("39402006196394479212279040100143613805079739270465446667935739200774948409969539032567850922052710929917699921281025")
+  assert -big("5") == big("-5")
+  assert (-big("0")).is_zero()
+  assert !(-math::BigInteger.zero()).is_negative()
+}
+
+fn divides(dividend: math::BigInteger, by: math::BigInteger, quotient: math::BigInteger, remainder: math::BigInteger) -> Bool {
+  if by.is_zero() {
+    return false
+  }
+  let division = dividend.quotient_and_remainder(by)
+  division.quotient == quotient && division.remainder == remainder
+    && dividend.quotient(by) == quotient && dividend.remainder(by) == remainder
+}
+
+test "a big integer is divided with the quotient rounded toward zero" {
+  assert divides(big("7"), by: big("2"), quotient: big("3"), remainder: big("1"))
+  assert divides(big("-7"), by: big("2"), quotient: big("-3"), remainder: big("-1"))
+  assert divides(big("7"), by: big("-2"), quotient: big("-3"), remainder: big("1"))
+  assert divides(big("-7"), by: big("-2"), quotient: big("3"), remainder: big("-1"))
+  assert divides(big("6"), by: big("3"), quotient: big("2"), remainder: big("0"))
+  assert divides(big("-6"), by: big("3"), quotient: big("-2"), remainder: big("0"))
+  assert divides(big("0"), by: big("5"), quotient: big("0"), remainder: big("0"))
+  assert divides(big("5"), by: big("7"), quotient: big("0"), remainder: big("5"))
+  assert divides(big("18446744073709551616"), by: big("3"), quotient: big("6148914691236517205"), remainder: big("1"))
+  assert divides(big("10000000000000000000000000000000000000000"), by: big("1000000000"), quotient: big("10000000000000000000000000000000"), remainder: big("0"))
+  assert divides(big("10000000000000000000000000000000000012345"), by: big("4294967296"), quotient: big("2328306436538696289062500000000"), remainder: big("12345"))
+  assert divides(big("10000000000000000000000000000000000000000"), by: big("4294967295"), quotient: big("2328306437080797375431469961868"), remainder: big("2042892940"))
+  assert divides(big("340282366920938463463374607431768211455"), by: big("18446744073709551617"), quotient: big("18446744073709551615"), remainder: big("0"))
+  assert divides(big("1606938044258990275541962092341162602522202993782792835313721"), by: big("1267650600228229401496703205373"), quotient: big("1267650600228229401496703205379"), remainder: big("12354"))
+  assert divides(big("-100000000000000000000000000000000000000000000000000"), by: big("100000000000000000007"), quotient: big("-999999999999999999930000000000"), remainder: big("-490000000000"))
+  assert divides(big("170141183420855150474555134919112130560"), by: big("39614081257132168796771975169"), quotient: big("4294967294"), remainder: big("39614081257132168792477007874"))
+  assert divides(big("170141183460469231750134047781003722752"), by: big("9223372041149743103"), quotient: big("18446744065119617031"), remainder: big("9223371989610135559"))
+  assert divides(big("237684487542793012780631851008"), by: big("9903520314283042199192993793"), quotient: big("23"), remainder: big("9903520314283042199192993769"))
+  assert divides(big("115792089237316195423570985008687907853269984665640564039457584007913129639935"), by: big("340282366920938463463374607431768211455"), quotient: big("340282366920938463463374607431768211457"), remainder: big("0"))
+  assert divides(big("1569275433846670190958947355801916604025588861116008628224"), by: big("18446744073709551616"), quotient: big("85070591730234615865843651857942052864"), remainder: big("0"))
+  assert divides(big("757798048496184117382475376339728089468788763239349200786190"), by: big("21767470612045084534"), quotient: big("34813325902774145195072363270149153371668"), remainder: big("11469128277020203478"))
+  assert divides(big("649964747297587188706154649275990835657409544466128363276109"), by: big("460036384465970131201649557923186539973"), quotient: big("1412855089825327635675"), remainder: big("131960289789485259602061571228394939334"))
+  assert divides(big("889813247437000667514062104121626197363194432150182488578315119980322750228284"), by: big("55234999394059125298322288301717495013"), quotient: big("16109590969466105017445496870075655207434"), remainder: big("1357289592778851131022006647374701642"))
+  assert divides(big("1502151373313398774704394779332365078419306528318852349409547"), by: big("886175487473007537295081930545"), quotient: big("1695094701385715721698805105729"), remainder: big("455472646966291227636189817242"))
+  assert divides(big("951416033388928840821703846901713727260847630613737244581351573917372659956557"), by: big("999672182483262914427470186572"), quotient: big("951728026507187514186061256023739808640799585316"), remainder: big("352463318683626627081908379805"))
+  assert divides(big("368190603000554361795571391311678012493"), by: big("16265936943315886203"), quotient: big("22635683654967926530"), remainder: big("9057613123333346903"))
+  assert divides(big("1075167239019617160174547649539913005402023209887623514296814446046175075851013"), by: big("7860758230"), quotient: big("136776530655315315577966535365623756806730234455719103613343727790261"), remainder: big("1206252983"))
+  assert divides(big("1219320563981044570306161912913849692542956087644686325602369"), by: big("964263374256672508563600084847"), quotient: big("1264509880322883286470475994812"), remainder: big("917699302326581312166393788605"))
+}
+
+test "floor division rounds the quotient down, and its remainder has the divisor's sign" {
+  assert big("7").floor_divide(big("2")) == big("3") && big("7").floor_modulo(big("2")) == big("1")
+  assert big("-7").floor_divide(big("2")) == big("-4") && big("-7").floor_modulo(big("2")) == big("1")
+  assert big("7").floor_divide(big("-2")) == big("-4") && big("7").floor_modulo(big("-2")) == big("-1")
+  assert big("-7").floor_divide(big("-2")) == big("3") && big("-7").floor_modulo(big("-2")) == big("-1")
+  assert big("6").floor_divide(big("-3")) == big("-2") && big("6").floor_modulo(big("-3")) == big("0")
+  assert big("-1000000000000000000000000000000").floor_divide(big("10000000001")) == big("-99999999990000000001") && big("-1000000000000000000000000000000").floor_modulo(big("10000000001")) == big("1")
+  assert big("1000000000000000000000000000000").floor_divide(big("-10000000001")) == big("-99999999990000000001") && big("1000000000000000000000000000000").floor_modulo(big("-10000000001")) == big("-1")
+  assert big("0").floor_divide(big("-4")) == big("0") && big("0").floor_modulo(big("-4")) == big("0")
+}
+
+test "powers, powers by a modulus, and the greatest common divisor" {
+  assert big("2").power(0) == big("1")
+  assert big("0").power(0) == big("1")
+  assert big("0").power(5) == big("0")
+  assert big("2").power(200) == big("1606938044258990275541962092341162602522202993782792835301376")
+  assert big("-3").power(101) == big("-1546132562196033993109383389296863818106322566003")
+  assert big("10").power(40) == big("10000000000000000000000000000000000000000")
+  assert big("12345678901234567890").power(7) == big("43712418992687254283642082895195105885392125535989504869128588251535476185264260945494363846823211566041055188105106868819264290000000")
+  assert big("4").modular_power(big("13"), modulus: big("497")) == big("445")
+  assert big("2").modular_power(big("1000000000000000000"), modulus: big("1000000007")) == big("719476260")
+  assert big("-7").modular_power(big("5"), modulus: big("13")) == big("2")
+  assert big("3").modular_power(big("0"), modulus: big("1")) == big("0")
+  assert big("5").modular_power(big("0"), modulus: big("7")) == big("1")
+  assert big("100000000000000000001").modular_power(big("100000000000000000000"), modulus: big("170141183460469231731687303715884105727")) == big("26497952341519870631539518806709450927")
+  assert big("9").modular_power(big("3"), modulus: big("-10")) == big("9")
+  assert big("0").greatest_common_divisor(big("0")) == big("0")
+  assert big("0").greatest_common_divisor(big("9")) == big("9")
+  assert big("-12").greatest_common_divisor(big("18")) == big("6")
+  assert big("1267650600228229401496703205376").greatest_common_divisor(big("3458764513820540928")) == big("1152921504606846976")
+  assert big("10000000000000000000000000000000000000000").greatest_common_divisor(big("70000000000000000000000000")) == big("10000000000000000000000000")
+  assert big("97").greatest_common_divisor(big("89")) == big("1")
+  assert big("-18446744073709551616").greatest_common_divisor(big("-4294967296")) == big("4294967296")
+}
+
+test "a big integer says its sign and its length in bits, and big integers are ordered" {
+  assert big("0").bit_length() == 0
+  assert big("1").bit_length() == 1
+  assert big("255").bit_length() == 8
+  assert big("256").bit_length() == 9
+  assert big("9223372036854775808").bit_length() == 64
+  assert big("18446744073709551615").bit_length() == 64
+  assert big("18446744073709551616").bit_length() == 65
+  assert big("1606938044258990275541962092341162602522202993782792835301375").bit_length() == 200
+  assert big("-1180591620717411303424").bit_length() == 71
+  assert big("-5").sign() == -1 && big("0").sign() == 0 && big("5").sign() == 1
+  assert big("-5").absolute() == big("5") && big("-5").is_negative() && !big("5").is_negative()
+  assert big("-1180591620717411303424") < big("-18446744073709551616") && big("-18446744073709551616") > big("-1180591620717411303424")
+  assert big("-18446744073709551616") < big("-5") && big("-5") > big("-18446744073709551616")
+  assert big("-5") < big("0") && big("0") > big("-5")
+  assert big("0") < big("3") && big("3") > big("0")
+  assert big("3") < big("18446744073709551616") && big("18446744073709551616") > big("3")
+  assert big("18446744073709551616") < big("18446744073709551617") && big("18446744073709551617") > big("18446744073709551616")
+  assert big("18446744073709551617") < big("1180591620717411303424") && big("1180591620717411303424") > big("18446744073709551617")
+  assert big("7").compare(big("7")) == Ordering.Equal && big("-7") <= big("-7")
+}
+
+test "a big integer goes to bytes and to the built-in integers and back" {
+  let bytes_1: List[UInt8] = [1]
+  assert big("1").to_big_endian_bytes() == bytes_1
+  assert math::BigInteger.from_big_endian_bytes(bytes_1.slice()) == big("1")
+  let bytes_8: List[UInt8] = [255]
+  assert big("255").to_big_endian_bytes() == bytes_8
+  assert math::BigInteger.from_big_endian_bytes(bytes_8.slice()) == big("255")
+  let bytes_9: List[UInt8] = [1, 0]
+  assert big("256").to_big_endian_bytes() == bytes_9
+  assert math::BigInteger.from_big_endian_bytes(bytes_9.slice()) == big("256")
+  let bytes_65: List[UInt8] = [1, 0, 0, 0, 0, 0, 0, 1, 2]
+  assert big("18446744073709551874").to_big_endian_bytes() == bytes_65
+  assert math::BigInteger.from_big_endian_bytes(bytes_65.slice()) == big("18446744073709551874")
+  let bytes_136: List[UInt8] = [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]
+  assert big("87112285931760246646623899502532662132735").to_big_endian_bytes() == bytes_136
+  assert math::BigInteger.from_big_endian_bytes(bytes_136.slice()) == big("87112285931760246646623899502532662132735")
+  let padded: List[UInt8] = [0, 0, 1, 2]
+  assert math::BigInteger.from_big_endian_bytes(padded.slice(), negative: true) == big("-258")
+  let none: List[UInt8] = []
+  assert math::BigInteger.from_big_endian_bytes(none.slice(), negative: true).is_zero()
+  assert math::BigInteger.zero().to_big_endian_bytes().is_empty()
+  let least: Int64 = -9223372036854775808
+  let greatest: UInt64 = 18446744073709551615
+  assert math::BigInteger.from(least) == big("-9223372036854775808")
+  assert math::BigInteger.from(greatest) == big("18446744073709551615")
+  assert Int64.try_from(big("-9223372036854775808")) == Ok(least)
+  assert Int64.try_from(big("9223372036854775807")) == Ok(9223372036854775807)
+  assert Int64.try_from(big("9223372036854775808")) is Err(_)
+  assert Int64.try_from(big("-9223372036854775809")) is Err(_)
+  assert UInt64.try_from(big("18446744073709551615")) == Ok(greatest)
+  assert UInt64.try_from(big("18446744073709551616")) is Err(_)
+  assert UInt64.try_from(big("-1")) is Err(_)
+  assert UInt64.try_from(big("0")) == Ok(0)
+}
+
+test "a big integer becomes the nearest float, with ties to the even one" {
+  assert big("0").to_float64().to_bits() == 0
+  assert big("1").to_float64().to_bits() == 4607182418800017408
+  assert big("-1").to_float64().to_bits() == 13830554455654793216
+  assert big("9007199254740992").to_float64().to_bits() == 4845873199050653696
+  assert big("9007199254740993").to_float64().to_bits() == 4845873199050653696
+  assert big("9007199254740994").to_float64().to_bits() == 4845873199050653697
+  assert big("9007199254740995").to_float64().to_bits() == 4845873199050653698
+  assert big("18446744073709551615").to_float64().to_bits() == 4895412794951729152
+  assert big("18446744073709551616").to_float64().to_bits() == 4895412794951729152
+  assert big("1000000000000000000000000000000").to_float64().to_bits() == 5055640609639927018
+  assert big("-1000000000000000000000000000000").to_float64().to_bits() == 14279012646494702826
+  assert big("1606938044258990275541962092341162602522202993782792835301377").to_float64().to_bits() == 5507902344274116608
+  assert big("89884656743115795386465259539451236680898848947115328636715040578866337902750481566354238661203768010560056939935696678829394884407208311246423715319737062188883946712432742638151109800623047059726541476042502884419075341171231440736956555270413618581675255342293149119973622969239858152417678164812112068608").to_float64().to_bits() == 9214364837600034816
+  assert big("179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497792").to_float64().to_bits() == 9218868437227405312
+  assert big("179769313486231585783329745242102944220865915302134242104801930069088822049132857039678747649997371558725200148282140634302672658333178512561752459655489972529838397712786934476288037223531902825608779341177537812204758820982652898146886972738651264941212339564475904472144978749089612198939118253764199317504").to_float64().to_bits() == 9218868437227405312
+  assert big("179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497792").to_float64().to_bits() == 9218868437227405312
+  assert big("32145258215588019628452751471800054316842144351166008223312511651110531533748083674795951364470875743827840187526594404755614358570769421307953732724095724411803703324472692956263223815187113425633862546459139424950745823802196302677496631838231188743713589433059626502981289494957873160511617004208128").to_float64().to_bits() == 9117537445611569152
+  assert big("332306998946229005119439912489189377").to_float64().to_bits() == 5138607174829735937
+  assert big("332306998946229005119439912489189376").to_float64().to_bits() == 5138607174829735936
+}
+
+fn decimal(text: StringSlice) -> math::Decimal {
+  match math::Decimal.parse(text) {
+    Ok(value) => value
+    Err(_) => math::Decimal.zero()
+  }
+}
+
+fn reads(value: math::Decimal, expected: StringSlice) -> Bool {
+  "${value}" == expected.to_string()
+}
+
+test "a decimal is read and written with the scale it was given" {
+  assert reads(decimal("0"), expected: "0")
+  assert reads(decimal("1.50"), expected: "1.50")
+  assert reads(decimal("-0.001"), expected: "-0.001")
+  assert reads(decimal("1500"), expected: "1500")
+  assert reads(decimal("1e3"), expected: "1000")
+  assert reads(decimal("1.5E-3"), expected: "0.0015")
+  assert reads(decimal("+.5"), expected: "0.5")
+  assert reads(decimal("5."), expected: "5")
+  assert reads(decimal("-12.340"), expected: "-12.340")
+  assert reads(decimal("0.00"), expected: "0.00")
+  assert reads(decimal("123456789012345678901234567890.5"), expected: "123456789012345678901234567890.5")
+  assert reads(decimal("2.5e+2"), expected: "250")
+  assert reads(decimal("-7e-1"), expected: "-0.7")
+  assert reads(math::Decimal.new(big("5"), scale: -2), expected: "500")
+  assert reads(math::Decimal.new(big("-5"), scale: 3), expected: "-0.005")
+  assert reads(math::Decimal.new(big("0"), scale: -4), expected: "0")
+  assert math::Decimal.parse("") is Err(Empty)
+  assert math::Decimal.parse("-") is Err(Invalid(offset)) && offset == 1
+  assert math::Decimal.parse("1.2.3") is Err(Invalid(offset)) && offset == 3
+  assert math::Decimal.parse("1e") is Err(Invalid(offset)) && offset == 2
+  assert math::Decimal.parse("abc") is Err(Invalid(offset)) && offset == 0
+  assert math::Decimal.parse("1x") is Err(Invalid(offset)) && offset == 1
+  assert math::Decimal.parse(".") is Err(Invalid(offset)) && offset == 1
+  assert math::Decimal.parse("1e+") is Err(Invalid(offset)) && offset == 3
+  assert math::Decimal.parse("1 ") is Err(Invalid(offset)) && offset == 1
+  assert decimal("1.50").scale() == 2 && decimal("1.50").coefficient() == big("150")
+  assert decimal("1e3").scale() == -3 && decimal("0").is_zero() && !decimal("0.01").is_zero()
+  assert decimal("-0.5").is_negative() && reads(decimal("-0.5").absolute(), expected: "0.5")
+  let seven: Int64 = -7
+  assert reads(math::Decimal.from(seven), expected: "-7") && reads(math::Decimal.from(big("10000000000000000000000000")), expected: "10000000000000000000000000")
+}
+
+test "decimals are added, subtracted, and multiplied exactly" {
+  assert reads(decimal("1.50") + decimal("2.5"), expected: "4.00")
+  assert reads(decimal("1.50") - decimal("2.5"), expected: "-1.00")
+  assert reads(decimal("1.50") * decimal("2.5"), expected: "3.750")
+  assert reads(decimal("0.1") + decimal("0.2"), expected: "0.3")
+  assert reads(decimal("0.1") - decimal("0.2"), expected: "-0.1")
+  assert reads(decimal("0.1") * decimal("0.2"), expected: "0.02")
+  assert reads(decimal("1.5") + decimal("2.25"), expected: "3.75")
+  assert reads(decimal("1.5") - decimal("2.25"), expected: "-0.75")
+  assert reads(decimal("1.5") * decimal("2.25"), expected: "3.375")
+  assert reads(decimal("-3") + decimal("0.001"), expected: "-2.999")
+  assert reads(decimal("-3") - decimal("0.001"), expected: "-3.001")
+  assert reads(decimal("-3") * decimal("0.001"), expected: "-0.003")
+  assert reads(decimal("1e3") + decimal("0.5"), expected: "1000.5")
+  assert reads(decimal("1e3") - decimal("0.5"), expected: "999.5")
+  assert reads(decimal("1e3") * decimal("0.5"), expected: "500")
+  assert reads(decimal("99999999999999999999.99") + decimal("0.01"), expected: "100000000000000000000.00")
+  assert reads(decimal("99999999999999999999.99") - decimal("0.01"), expected: "99999999999999999999.98")
+  assert reads(decimal("99999999999999999999.99") * decimal("0.01"), expected: "999999999999999999.9999")
+  assert reads(decimal("-1.5") + decimal("-2.25"), expected: "-3.75")
+  assert reads(decimal("-1.5") - decimal("-2.25"), expected: "0.75")
+  assert reads(decimal("-1.5") * decimal("-2.25"), expected: "3.375")
+  assert reads(-decimal("1.50"), expected: "-1.50") && reads(-decimal("0.0"), expected: "0.0")
+}
+
+test "a decimal is rounded to a number of decimals in each of the seven ways" {
+  assert reads(decimal("2.5").rounded(0, rounding: math::Rounding.HalfToEven), expected: "2")
+  assert reads(decimal("2.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "3")
+  assert reads(decimal("2.5").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "2")
+  assert reads(decimal("2.5").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "3")
+  assert reads(decimal("2.5").rounded(0, rounding: math::Rounding.TowardZero), expected: "2")
+  assert reads(decimal("2.5").rounded(0, rounding: math::Rounding.Up), expected: "3")
+  assert reads(decimal("2.5").rounded(0, rounding: math::Rounding.Down), expected: "2")
+  assert reads(decimal("3.5").rounded(0, rounding: math::Rounding.HalfToEven), expected: "4")
+  assert reads(decimal("3.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "4")
+  assert reads(decimal("3.5").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "3")
+  assert reads(decimal("3.5").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "4")
+  assert reads(decimal("3.5").rounded(0, rounding: math::Rounding.TowardZero), expected: "3")
+  assert reads(decimal("3.5").rounded(0, rounding: math::Rounding.Up), expected: "4")
+  assert reads(decimal("3.5").rounded(0, rounding: math::Rounding.Down), expected: "3")
+  assert reads(decimal("-2.5").rounded(0, rounding: math::Rounding.HalfToEven), expected: "-2")
+  assert reads(decimal("-2.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "-3")
+  assert reads(decimal("-2.5").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "-2")
+  assert reads(decimal("-2.5").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "-3")
+  assert reads(decimal("-2.5").rounded(0, rounding: math::Rounding.TowardZero), expected: "-2")
+  assert reads(decimal("-2.5").rounded(0, rounding: math::Rounding.Up), expected: "-2")
+  assert reads(decimal("-2.5").rounded(0, rounding: math::Rounding.Down), expected: "-3")
+  assert reads(decimal("2.4").rounded(0, rounding: math::Rounding.HalfToEven), expected: "2")
+  assert reads(decimal("2.4").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "2")
+  assert reads(decimal("2.4").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "2")
+  assert reads(decimal("2.4").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "3")
+  assert reads(decimal("2.4").rounded(0, rounding: math::Rounding.TowardZero), expected: "2")
+  assert reads(decimal("2.4").rounded(0, rounding: math::Rounding.Up), expected: "3")
+  assert reads(decimal("2.4").rounded(0, rounding: math::Rounding.Down), expected: "2")
+  assert reads(decimal("2.6").rounded(0, rounding: math::Rounding.HalfToEven), expected: "3")
+  assert reads(decimal("2.6").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "3")
+  assert reads(decimal("2.6").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "3")
+  assert reads(decimal("2.6").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "3")
+  assert reads(decimal("2.6").rounded(0, rounding: math::Rounding.TowardZero), expected: "2")
+  assert reads(decimal("2.6").rounded(0, rounding: math::Rounding.Up), expected: "3")
+  assert reads(decimal("2.6").rounded(0, rounding: math::Rounding.Down), expected: "2")
+  assert reads(decimal("-2.6").rounded(0, rounding: math::Rounding.HalfToEven), expected: "-3")
+  assert reads(decimal("-2.6").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "-3")
+  assert reads(decimal("-2.6").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "-3")
+  assert reads(decimal("-2.6").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "-3")
+  assert reads(decimal("-2.6").rounded(0, rounding: math::Rounding.TowardZero), expected: "-2")
+  assert reads(decimal("-2.6").rounded(0, rounding: math::Rounding.Up), expected: "-2")
+  assert reads(decimal("-2.6").rounded(0, rounding: math::Rounding.Down), expected: "-3")
+  assert reads(decimal("0.5").rounded(0, rounding: math::Rounding.HalfToEven), expected: "0")
+  assert reads(decimal("0.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "1")
+  assert reads(decimal("0.5").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "0")
+  assert reads(decimal("0.5").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "1")
+  assert reads(decimal("0.5").rounded(0, rounding: math::Rounding.TowardZero), expected: "0")
+  assert reads(decimal("0.5").rounded(0, rounding: math::Rounding.Up), expected: "1")
+  assert reads(decimal("0.5").rounded(0, rounding: math::Rounding.Down), expected: "0")
+  assert reads(decimal("-0.5").rounded(0, rounding: math::Rounding.HalfToEven), expected: "0")
+  assert reads(decimal("-0.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "-1")
+  assert reads(decimal("-0.5").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "0")
+  assert reads(decimal("-0.5").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "-1")
+  assert reads(decimal("-0.5").rounded(0, rounding: math::Rounding.TowardZero), expected: "0")
+  assert reads(decimal("-0.5").rounded(0, rounding: math::Rounding.Up), expected: "0")
+  assert reads(decimal("-0.5").rounded(0, rounding: math::Rounding.Down), expected: "-1")
+  assert reads(decimal("2.0").rounded(0, rounding: math::Rounding.HalfToEven), expected: "2")
+  assert reads(decimal("2.0").rounded(0, rounding: math::Rounding.HalfAwayFromZero), expected: "2")
+  assert reads(decimal("2.0").rounded(0, rounding: math::Rounding.HalfTowardZero), expected: "2")
+  assert reads(decimal("2.0").rounded(0, rounding: math::Rounding.AwayFromZero), expected: "2")
+  assert reads(decimal("2.0").rounded(0, rounding: math::Rounding.TowardZero), expected: "2")
+  assert reads(decimal("2.0").rounded(0, rounding: math::Rounding.Up), expected: "2")
+  assert reads(decimal("2.0").rounded(0, rounding: math::Rounding.Down), expected: "2")
+  assert reads(decimal("2.345").rounded(2), expected: "2.34")
+  assert reads(decimal("2.355").rounded(2), expected: "2.36")
+  assert reads(decimal("-1.005").rounded(2), expected: "-1.00")
+  assert reads(decimal("1.5").rounded(3), expected: "1.500")
+  assert reads(decimal("1234.5678").rounded(-2), expected: "1200")
+  assert reads(decimal("150").rounded(-2), expected: "200")
+  assert reads(decimal("250").rounded(-2), expected: "200")
+  assert reads(decimal("0.004").rounded(2), expected: "0.00")
+}
+
+test "a decimal is divided to a number of decimals, and truncated to an integer" {
+  assert reads(decimal("1").quotient(decimal("3"), decimals: 5), expected: "0.33333")
+  assert reads(decimal("2").quotient(decimal("3"), decimals: 5), expected: "0.66667")
+  assert reads(decimal("-1").quotient(decimal("8"), decimals: 2), expected: "-0.12")
+  assert reads(decimal("10").quotient(decimal("4"), decimals: 0), expected: "2")
+  assert reads(decimal("1").quotient(decimal("-3"), decimals: 3), expected: "-0.333")
+  assert reads(decimal("-7.5").quotient(decimal("-2.5"), decimals: 1), expected: "3.0")
+  assert reads(decimal("1e3").quotient(decimal("7"), decimals: 4), expected: "142.8571")
+  assert reads(decimal("0.001").quotient(decimal("1000"), decimals: 8), expected: "0.00000100")
+  assert reads(decimal("5").quotient(decimal("0.002"), decimals: 0), expected: "2500")
+  assert reads(decimal("1").quotient(decimal("3"), decimals: -1), expected: "0")
+  assert reads(decimal("12345").quotient(decimal("10"), decimals: -2), expected: "1200")
+  assert reads(decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.HalfToEven), expected: "-0.12")
+  assert reads(decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.HalfAwayFromZero), expected: "-0.13")
+  assert reads(decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.HalfTowardZero), expected: "-0.12")
+  assert reads(decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.AwayFromZero), expected: "-0.13")
+  assert reads(decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.TowardZero), expected: "-0.12")
+  assert reads(decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.Up), expected: "-0.12")
+  assert reads(decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.Down), expected: "-0.13")
+  assert decimal("12.99").truncated() == big("12")
+  assert decimal("-12.99").truncated() == big("-12")
+  assert decimal("0.5").truncated() == big("0")
+  assert decimal("1e3").truncated() == big("1000")
+  assert decimal("-7").truncated() == big("-7")
+}
+
+test "a decimal is made from a float exactly and becomes the nearest float" {
+  assert math::Decimal.from_float64(0.5) is Some(exact) && reads(exact, expected: "0.5")
+  assert math::Decimal.from_float64(0.1) is Some(exact) && reads(exact, expected: "0.1000000000000000055511151231257827021181583404541015625")
+  assert math::Decimal.from_float64(3.0) is Some(exact) && reads(exact, expected: "3")
+  assert math::Decimal.from_float64(-2.75) is Some(exact) && reads(exact, expected: "-2.75")
+  assert math::Decimal.from_float64(1e+22) is Some(exact) && reads(exact, expected: "10000000000000000000000")
+  assert math::Decimal.from_float64(5e-324) is Some(exact) && reads(exact, expected: "0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004940656458412465441765687928682213723650598026143247644255856825006755072702087518652998363616359923797965646954457177309266567103559397963987747960107818781263007131903114045278458171678489821036887186360569987307230500063874091535649843873124733972731696151400317153853980741262385655911710266585566867681870395603106249319452715914924553293054565444011274801297099995419319894090804165633245247571478690147267801593552386115501348035264934720193790268107107491703332226844753335720832431936092382893458368060106011506169809753078342277318329247904982524730776375927247874656084778203734469699533647017972677717585125660551199131504891101451037862738167250955837389733598993664809941164205702637090279242767544565229087538682506419718265533447265625")
+  assert math::Decimal.from_float64(1.7976931348623157e+308) is Some(exact) && reads(exact, expected: "179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368")
+  assert math::Decimal.from_float64(123456.789) is Some(exact) && reads(exact, expected: "123456.789000000004307366907596588134765625")
+  assert math::Decimal.from_float64(-0.0) is Some(exact) && reads(exact, expected: "0")
+  assert math::Decimal.from_float64(Float64.infinity) is None
+  assert math::Decimal.from_float64(Float64.not_a_number) is None
+  assert decimal("0.1").to_float64().to_bits() == 4591870180066957722
+  assert decimal("123.456").to_float64().to_bits() == 4638387860618067575
+  assert decimal("-1e3").to_float64().to_bits() == 13875379345695965184
+  assert decimal("0.30000000000000004").to_float64().to_bits() == 4599075939470750516
+  assert decimal("1e-400").to_float64().to_bits() == 0
+  assert decimal("1e400").to_float64().to_bits() == 9218868437227405312
+  assert decimal("-1e400").to_float64().to_bits() == 18442240474082181120
+  assert decimal("9007199254740993").to_float64().to_bits() == 4845873199050653696
+  assert decimal("0.000001").to_float64().to_bits() == 4517329193108106637
+  assert decimal("4.9e-324").to_float64().to_bits() == 1
+  assert decimal("2.4703282292062328e-324").to_float64().to_bits() == 1
+  assert decimal("0").to_float64().to_bits() == 0
 }
