@@ -124,7 +124,9 @@ public fn Set[Element: Hash + Ordered].seeded() -> Set[Element]
   todo
 }
 
-public fn Set[Element: Hash + Ordered].collect[Source: Cursor[Element = Element]](source: own Source) -> Set[Element] {
+public fn Set[Element: Hash + Ordered].collect[Source: Cursor[Element = Element]](source: own Source) -> Set[Element]
+  uses Source.Uses
+{
   var set: Set[Element] = []
   mut set.extend(own source)
   set
@@ -213,7 +215,9 @@ public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bo
   mut self.elements.truncate(kept_count)
 }
 
-public fn Set[Element: Hash + Ordered].extend[Source: Cursor[Element = Element]](mut self, elements: own Source) {
+public fn Set[Element: Hash + Ordered].extend[Source: Cursor[Element = Element]](mut self, elements: own Source)
+  uses Source.Uses
+{
   var cursor = own elements
   while mut cursor.next() is Some(element)
     invariant forall i in 0..self.elements.length() => forall j in 0..self.elements.length() =>

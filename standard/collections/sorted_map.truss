@@ -11,7 +11,9 @@ public fn collections::SortedMap[Key: Ordered, Value].new() -> collections::Sort
 
 public fn collections::SortedMap[Key: Ordered, Value].collect[Source: Cursor[Element = map::Entry[Key, Value]]](
   source: own Source,
-) -> collections::SortedMap[Key, Value] {
+) -> collections::SortedMap[Key, Value]
+  uses Source.Uses
+{
   todo
 }
 
@@ -174,7 +176,9 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
 public fn collections::SortedMap[Key: Ordered, Value].extend[Source: Cursor[Element = map::Entry[Key, Value]]](
   mut self,
   entries: own Source,
-) {
+)
+  uses Source.Uses
+{
   todo
 }
 

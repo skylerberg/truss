@@ -364,8 +364,12 @@ public trait Cursor {
     last
   }
 
-  fn fold[Total](own self, initial: own Total, combine: fn(own Total, own Self.Element) -> Total) -> Total
-    uses Self.Uses
+  fn fold[Total, capability Granted](
+    own self,
+    initial: own Total,
+    combine: (fn(own Total, own Self.Element) -> Total uses Granted),
+  ) -> Total
+    uses Self.Uses, Granted
   {
     var cursor = own self
     var total = own initial
@@ -375,8 +379,11 @@ public trait Cursor {
     total
   }
 
-  fn find(mut self, matching: fn(Self.Element) -> Bool) -> Option[Self.Element]
-    uses Self.Uses
+  fn find[capability Granted](
+    mut self,
+    matching: (fn(Self.Element) -> Bool uses Granted),
+  ) -> Option[Self.Element]
+    uses Self.Uses, Granted
   {
     while mut self.next() is Some(item) {
       if matching(item) {
