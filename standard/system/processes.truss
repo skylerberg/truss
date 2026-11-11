@@ -155,7 +155,10 @@ fn arrange(
       } else {
         ends = Ends(ours: read_end, theirs: write_end)
       }
-      intrinsic::libc_posix_spawn_file_actions_adddup2(mut actions, descriptor: ends.theirs, onto: descriptor)
+      match calls::without_blocking(ends.ours) {
+        Ok(_) => intrinsic::libc_posix_spawn_file_actions_adddup2(mut actions, descriptor: ends.theirs, onto: descriptor)
+        Err(error) => error
+      }
     }
   }
 }
@@ -258,26 +261,42 @@ fn collect(
   var output_open = output >= 0
   var error_open = error_output >= 0
   while output_open || error_open {
-    var waited_for: intrinsic::Storage[Int32] = intrinsic::storage_with_capacity(4)
-    intrinsic::storage_push(mut waited_for, value: if output_open { output } else { -1 })
-    intrinsic::storage_push(mut waited_for, value: intrinsic::libc_pollin())
-    intrinsic::storage_push(mut waited_for, value: if error_open { error_output } else { -1 })
-    intrinsic::storage_push(mut waited_for, value: intrinsic::libc_pollin())
-    if intrinsic::libc_poll(mut waited_for, count: 2, timeout: -1) < 0 {
-      if !calls::retry_after_signal() {
+    let ticket = intrinsic::runtime_descriptors_watch()
+    if output_open {
+      output_open = drain(output, into: mut into)?
+    }
+    if error_open {
+      error_open = drain(error_output, into: mut error_into)?
+    }
+    if output_open || error_open {
+      var waited_for: intrinsic::Storage[Int32] = intrinsic::storage_with_capacity(2)
+      intrinsic::storage_push(mut waited_for, value: if output_open { output } else { -1 })
+      intrinsic::storage_push(mut waited_for, value: if error_open { error_output } else { -1 })
+      if intrinsic::runtime_descriptors_wait(intrinsic::storage_view(waited_for), count: 2, ticket: ticket) == 0 {
         return Err(intrinsic::libc_errno())
-      }
-    } else {
-      let found = intrinsic::storage_view(waited_for)
-      if output_open && ((intrinsic::view_at(found, index: 1) >> 16) & 65535) != 0 {
-        output_open = calls::read_onto_end(output, buffer: mut into, count: 65536)? > 0
-      }
-      if error_open && ((intrinsic::view_at(found, index: 3) >> 16) & 65535) != 0 {
-        error_open = calls::read_onto_end(error_output, buffer: mut error_into, count: 65536)? > 0
       }
     }
   }
   Ok(Unit)
+}
+
+fn drain(pipe: Int32, into: mut intrinsic::Storage[UInt8]) -> Result[Bool, Int32] {
+  var open = true
+  var empty = false
+  while open && !empty {
+    match calls::read_onto_end(pipe, buffer: mut into, count: 65536, waiting: false) {
+      Ok(got) => {
+        open = got > 0
+      }
+      Err(error) => {
+        if error != intrinsic::libc_eagain() {
+          return Err(error)
+        }
+        empty = true
+      }
+    }
+  }
+  Ok(open)
 }
 
 fn add_ended_with_zero_byte(

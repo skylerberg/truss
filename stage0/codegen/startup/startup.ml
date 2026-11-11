@@ -698,6 +698,21 @@ static int32_t t_descriptor_poll(int32_t descriptor, int32_t writing) {
   return poll(&one, 1, timeout) != 0;
 }
 
+/* Waits in [poll] until one of the descriptors can be read. [poll] skips
+   a negative descriptor. */
+static void t_descriptors_poll(const int32_t *descriptors, size_t count) {
+  if (count == 0) return;
+  struct pollfd *waited = malloc(count * sizeof *waited);
+  if (waited == NULL) t_out_of_memory();
+  for (size_t index = 0; index < count; index++) {
+    waited[index].fd = descriptors[index];
+    waited[index].events = POLLIN;
+    waited[index].revents = 0;
+  }
+  poll(waited, (nfds_t)count, -1);
+  free(waited);
+}
+
 /* Tasks, in a runtime that starts no thread. */
 
 #ifdef T_IN_ORDER
@@ -788,6 +803,14 @@ int32_t t_runtime_descriptor_wait(int32_t descriptor, int32_t writing, uint64_t 
   if (t_descriptor_poll(descriptor, writing)) return 1;
   errno = EAGAIN;
   return 0;
+}
+
+uint64_t t_runtime_descriptors_watch(void) { return 0; }
+
+int32_t t_runtime_descriptors_wait(const int32_t *descriptors, size_t count, uint64_t ticket) {
+  (void)ticket;
+  t_descriptors_poll(descriptors, count);
+  return 1;
 }
 
 int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
@@ -1983,7 +2006,8 @@ int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
   }
 }
 
-/* Waiting for a descriptor. A socket that tasks wait for does not block:
+/* Waiting for a descriptor. A socket or a pipe that tasks wait for does
+   not block:
    a call that would block fails with EAGAIN, and the task then waits
    here. The descriptor is registered with the system's poller (epoll on
    Linux, kqueue elsewhere) at its first wait, for both directions, and
@@ -1992,8 +2016,16 @@ int32_t t_runtime_sleep(int64_t seconds, int64_t nanoseconds) {
    key of the descriptor and direction.
 
    The caller takes a ticket before its system call and waits on it after
-   EAGAIN, so a report between the two is not lost. */
+   EAGAIN, so a report between the two is not lost.
+
+   A caller that waits for any of several descriptors registers each one
+   with a key of its own instead, which a report that the descriptor is
+   readable wakes. So one wait covers them all. */
 #define T_DESCRIPTORS 65536
+
+/* Whose key the reports of a registered descriptor wake. */
+#define T_OWN_KEY 1
+#define T_CALLERS_KEY 2
 
 static atomic_uchar t_descriptor_registered[T_DESCRIPTORS];
 static int t_poller = -1;
@@ -2014,20 +2046,26 @@ static void *t_poller_main(void *argument) {
     struct epoll_event events[64];
     int count = epoll_wait(t_poller, events, 64, -1);
     for (int index = 0; index < count; index++) {
-      int32_t descriptor = events[index].data.fd;
+      /* The key that the descriptor was registered with: its own for
+         reading, which has the highest bit, or a caller's. */
+      uint64_t key = events[index].data.u64;
       uint32_t found = events[index].events;
       /* An error or a hang-up ends the wait in both directions. */
-      if (found & (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR))
-        t_runtime_tasks_wake(t_descriptor_key(descriptor, 0));
-      if (found & (EPOLLOUT | EPOLLHUP | EPOLLERR))
-        t_runtime_tasks_wake(t_descriptor_key(descriptor, 1));
+      if (found & (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLERR)) t_runtime_tasks_wake(key);
+      if ((key >> 63) && (found & (EPOLLOUT | EPOLLHUP | EPOLLERR))) t_runtime_tasks_wake(key | 1);
     }
 #else
     struct kevent events[64];
     int count = kevent(t_poller, NULL, 0, events, 64, NULL);
-    for (int index = 0; index < count; index++)
-      t_runtime_tasks_wake(
-          t_descriptor_key((int32_t)events[index].ident, events[index].filter == EVFILT_WRITE));
+    for (int index = 0; index < count; index++) {
+      /* The key that the descriptor was registered with, or 0 for its own. */
+      uint64_t key = (uint64_t)(uintptr_t)events[index].udata;
+      int writing = events[index].filter == EVFILT_WRITE;
+      if (key == 0)
+        t_runtime_tasks_wake(t_descriptor_key((int32_t)events[index].ident, writing));
+      else if (!writing)
+        t_runtime_tasks_wake(key);
+    }
 #endif
   }
   return NULL;
@@ -2051,26 +2089,32 @@ static void t_poller_start(void) {
 }
 
 /* Registers the descriptor with the poller, which reports at once if the
-   descriptor is ready now. Returns 0 if the system cannot report on it,
-   as for a file. */
-static int t_descriptor_register(int32_t descriptor) {
+   descriptor is ready now. Its reports wake [key], or the key of the
+   descriptor and direction where [key] is 0. A descriptor that is
+   registered with one is registered again to change to the other, and a
+   caller's key is registered each time, since the descriptor's last
+   caller may have been another. Returns 0 if the system cannot report on
+   the descriptor, as for a file. */
+static int t_descriptor_register(int32_t descriptor, uint64_t key) {
   int known = descriptor >= 0 && descriptor < T_DESCRIPTORS;
-  if (known && atomic_load(&t_descriptor_registered[descriptor])) return 1;
+  if (key == 0 && known && atomic_load(&t_descriptor_registered[descriptor]) == T_OWN_KEY) return 1;
   pthread_once(&t_poller_once, t_poller_start);
 #ifdef __linux__
   struct epoll_event event;
   memset(&event, 0, sizeof event);
   event.events = EPOLLIN | EPOLLOUT | EPOLLRDHUP | EPOLLET;
-  event.data.fd = descriptor;
-  if (epoll_ctl(t_poller, EPOLL_CTL_ADD, descriptor, &event) != 0 && *t_runtime_errno() != EEXIST)
+  event.data.u64 = key == 0 ? t_descriptor_key(descriptor, 0) : key;
+  if (epoll_ctl(t_poller, EPOLL_CTL_ADD, descriptor, &event) != 0
+      && (*t_runtime_errno() != EEXIST || epoll_ctl(t_poller, EPOLL_CTL_MOD, descriptor, &event) != 0))
     return 0;
 #else
   struct kevent changes[2];
-  EV_SET(&changes[0], descriptor, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, NULL);
-  EV_SET(&changes[1], descriptor, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, 0, NULL);
+  void *reported = (void *)(uintptr_t)key;
+  EV_SET(&changes[0], descriptor, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, reported);
+  EV_SET(&changes[1], descriptor, EVFILT_WRITE, EV_ADD | EV_CLEAR, 0, 0, reported);
   if (kevent(t_poller, changes, 2, NULL, 0, NULL) != 0) return 0;
 #endif
-  if (known) atomic_store(&t_descriptor_registered[descriptor], 1);
+  if (known) atomic_store(&t_descriptor_registered[descriptor], key == 0 ? T_OWN_KEY : T_CALLERS_KEY);
   return 1;
 }
 
@@ -2085,7 +2129,7 @@ uint64_t t_runtime_descriptor_watch(int32_t descriptor, int32_t writing) {
    limit passed. */
 int32_t t_runtime_descriptor_wait(int32_t descriptor, int32_t writing, uint64_t ticket) {
   int32_t ready = 1;
-  if (!t_descriptor_register(descriptor)) {
+  if (!t_descriptor_register(descriptor, 0)) {
     t_runtime_blocking_begin();
     ready = t_descriptor_poll(descriptor, writing);
     t_runtime_blocking_end();
@@ -2107,6 +2151,39 @@ int32_t t_runtime_descriptor_wait(int32_t descriptor, int32_t writing, uint64_t 
   }
   if (!ready) *t_runtime_errno() = EAGAIN;
   return ready;
+}
+
+/* The key that the calling task or thread waits on for any of several
+   descriptors. It is an address, so it has no highest bit, and it is the
+   key of nothing else. */
+static uint64_t t_descriptors_key(void) {
+  struct t_task *task = t_task_self();
+  return (uint64_t)(uintptr_t)(task != NULL ? (void *)&task->wait_key : (void *)t_thread_context_self());
+}
+
+uint64_t t_runtime_descriptors_watch(void) { return t_runtime_tasks_watch(t_descriptors_key()); }
+
+/* Waits until one of the descriptors has become readable since [ticket]
+   was issued. A negative descriptor is skipped. Returns 1 when the caller
+   is to read again, and 0 with [errno] set to EINTR if the calling task
+   is cancelled. */
+int32_t t_runtime_descriptors_wait(const int32_t *descriptors, size_t count, uint64_t ticket) {
+  uint64_t key = t_descriptors_key();
+  int registered = 1;
+  for (size_t index = 0; index < count && registered; index++)
+    if (descriptors[index] >= 0) registered = t_descriptor_register(descriptors[index], key);
+  if (registered) {
+    t_wait(key, ticket, 1);
+  } else {
+    t_runtime_blocking_begin();
+    t_descriptors_poll(descriptors, count);
+    t_runtime_blocking_end();
+  }
+  if (t_runtime_tasks_cancelled()) {
+    *t_runtime_errno() = EINTR;
+    return 0;
+  }
+  return 1;
 }
 
 /* The system forgets a descriptor that is closed, and gives its number to
