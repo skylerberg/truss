@@ -2445,11 +2445,3 @@ defines the method, the checker records the callee as the `impl`'s method,
 not the trait's. `List` gets `each(self)` from `impl Iterable`. The type of
 the cursor and the contract of a loop over a list must then come from the
 list's `each`, which only the `impl`'s method has.
-
-## Not built
-
-- **Callers' proofs that read the specification.** The prover still loads a
-  callee's whole core form and its source text, so a change to a callee's
-  body runs its callers' proofs again, and they find the answer to each
-  solver query in the cache, keyed by the query's text. It will load the
-  callee's specification, and the callee's text only to report an error.

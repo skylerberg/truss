@@ -1243,8 +1243,12 @@ Each obligation the prover could not prove is an error, with the shared
 ## Incremental work
 
 A definition's obligations are made again when something they read
-changed, as DATABASE.md describes for every query. The solver is asked
-again only about a query whose text changed:
+changed, as DATABASE.md describes for every query. A caller reads its
+callee's specification, whose body is there only where the callee is a
+function in the logic, and the callee's text only to report something about
+it, so editing or reformatting the body of any other function makes no
+caller's obligations again. The solver is asked again only about a query
+whose text changed:
 
 | Edit | Solved again |
 |---|---|
