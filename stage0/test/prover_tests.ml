@@ -3068,6 +3068,80 @@ let () =
         \  }\n\
          }\n")
 
+(* Equality through written impls *)
+
+let () =
+  test "a derived equality compares a list field as the list's equal does" (fun () ->
+      proven
+        "type Limbs(limbs: List[UInt64])\n\
+        \  derives Equal\n\n\
+         theorem the_same_limbs(first: Limbs, second: Limbs)\n\
+        \  requires first.limbs == second.limbs\n\
+        \  ensures first == second\n\
+         {\n\
+         }\n");
+  test "a law reads an impl of Equal whose bounds hold in the impl it is proven for" (fun () ->
+      proven
+        "trait Named: Equal {\n\
+        \  fn name(self) -> List[UInt64]\n\
+        \    cost time finite\n\n\
+        \  law named_by_its_name(first: Self, second: Self) {\n\
+        \    (first.name() == second.name()) == (first == second)\n\
+        \  }\n\
+         }\n\n\
+         type Wrapped[Item](items: List[Item], name: List[UInt64])\n\n\
+         impl Equal for Wrapped[Item: Equal] {\n\
+        \  fn equal(self, other: Wrapped[Item]) -> Bool {\n\
+        \    self.name == other.name\n\
+        \  }\n\
+         }\n\n\
+         impl Named for Wrapped[Item: Equal] {\n\
+        \  fn name(self) -> List[UInt64]\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.name.copy()\n\
+        \  }\n\
+         }\n")
+
+(* Amortized moves and copies *)
+
+let () =
+  test "a deque's potential pays for moving half of one list to the other" (fun () ->
+      proven
+        "type Deque[Element](front: List[Element], back: List[Element])\n\
+        \  invariant front.length() <= USize.maximum - back.length()\n\
+        \  cost potential if front.length() > back.length() { 8 * (front.length() - back.length()) \
+         } else { 8 * (back.length() - front.length()) }\n\n\
+         fn Deque[Element].pop_front(mut self) -> Option[Element]\n\
+        \  cost amortized time O(1)\n\
+         {\n\
+        \  if self.front.is_empty() && !self.back.is_empty() {\n\
+        \    let half = self.back.length() - self.back.length() / 2\n\
+        \    var later = mut self.back.split_off(half)\n\
+        \    mut self.back.reverse()\n\
+        \    let earlier = mut self.back.split_off(0)\n\
+        \    mut self.front.append(own earlier)\n\
+        \    mut self.back.append(own later)\n\
+        \  }\n\
+        \  mut self.front.pop()\n\
+         }\n");
+  test "a copy pays for the potential it makes" (fun () ->
+      proven
+        "fn push_copy[Element: Copyable](list: mut List[Element], item: Element)\n\
+        \  cost amortized time O(1 + time(Element.copy))\n\
+         {\n\
+        \  mut list.push(item.copy())\n\
+         }\n");
+  test "a loop of pushed copies is amortized over the copies' time" (fun () ->
+      proven
+        "fn append_copies[Element: Copyable](list: mut List[Element], items: Slice[Element])\n\
+        \  cost amortized time O(items.length() * (1 + time(Element.copy)))\n\
+         {\n\
+        \  for item in items {\n\
+        \    mut list.push(item.copy())\n\
+        \  }\n\
+         }\n")
+
 (* Definitions under a quantifier *)
 
 let () =

@@ -92,6 +92,11 @@ type candidate = {
   ranges : (int * bool) list;
 }
 
+let contains text part =
+  let n = String.length part in
+  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
+  at 0
+
 (* The functions the fuzzer can run. *)
 let runnable database =
   List.filter_map
@@ -112,20 +117,19 @@ let runnable database =
           let ranges =
             List.map (fun (p : Types.parameter_info) -> integer p.type_) signature.parameters
           in
+          let admits =
+            List.map
+              (fun (condition : Core.condition) ->
+                "(" ^ Prover.Translate.quote source condition.value.origin ^ ")")
+              requires
+          in
+          (* [admitting] writes each clause as code, where [==>] is not
+             allowed. *)
           match List.filter_map Fun.id ranges with
-          | found when List.length found = List.length ranges ->
-              Some
-                {
-                  path = declaration.path;
-                  key;
-                  signature;
-                  admits =
-                    List.map
-                      (fun (condition : Core.condition) ->
-                        "(" ^ Prover.Translate.quote source condition.value.origin ^ ")")
-                      requires;
-                  ranges = found;
-                }
+          | found
+            when List.length found = List.length ranges
+                 && not (List.exists (fun admit -> contains admit "==>") admits) ->
+              Some { path = declaration.path; key; signature; admits; ranges = found }
           | _ -> None)
       | _ -> None)
     (Query.demand database Resolve.Names.declarations example)
@@ -152,11 +156,6 @@ let admitting index candidate =
           (fun (p : Types.parameter_info) -> p.name ^ ": " ^ Types.show p.type_)
           candidate.signature.parameters))
     (String.concat " && " candidate.admits)
-
-let contains text part =
-  let n = String.length part in
-  let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
-  at 0
 
 let failures = ref 0
 let checked = ref 0

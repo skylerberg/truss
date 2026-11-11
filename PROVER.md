@@ -368,7 +368,9 @@ unstable proofs.
 - **A derived `Equal` that is not structural** is defined field by field
   with each field's own `==`, unfolded once for each two values compared,
   so a `Point` of floats is equal exactly when its coordinates are, by the
-  lawful float comparison.
+  lawful float comparison. A field whose type has a written `impl` of
+  `Equal` is compared by a call of that `impl`'s `equal`, the same term as
+  `==` on the field, so the `impl`'s contract applies to it.
 - **Every other derived method is its derived body.** A derived `compare`
   orders by variant and then field by field, and a derived `hash` or
   `default` is what the derivation writes, so each is pure and functional,
@@ -558,7 +560,8 @@ checker resolved to an `impl` reads the `impl`'s clauses with its trait's,
 and the `impl`'s own `requires` when it states any. A call through a bound
 or through `any` reads the trait's, and a call through a bound on `Self`,
 read where `Self` is a known type, reaches that type's `impl`, written or
-derived. A capability
+derived, when the bounds on the `impl`'s parameters hold under the bounds
+of the definition proven. A capability
 call uses the capability method's contract.
 
 - **A tagged template is a call** of its tag's `from_template` with the
@@ -997,9 +1000,14 @@ removes them in two steps:
    through a function value `visit` as `time(visit)`, which is at least 1,
    and 1 when its type has an `O(...)` bound. A call of a trait's method
    that promises only that it ends, as `Equal.equal` does, is counted as
-   `time(T.method)` for the type `T` it is called on: the longest any one
-   call of it takes in the run, a constant of the run, which a bound states
-   as `time(Element.equal)`. It is one term for each method and type, so a
+   `time(T.method)` for the type `T` it is called on: the most any one
+   call of it takes in the run, with the potential the call leaves, a
+   constant of the run, which a bound states as `time(Element.equal)`. So
+   such a call has paid for the potential it leaves, and is counted as
+   `time(T.method) + 1` less that potential. A built-in `copy()` of a value
+   that is not `Plain`, or that holds potential, is such a call of
+   `Copyable.copy`, and makes the potential of the copy, which it pays
+   for. It is one term for each method and type, so a
    callee's bound and its caller's are about the same term. Every callee's real cost is at
    most `C` times what is counted, where `C` is the largest of the callees'
    constants and 1. That `C` is a fixed number, though unknown, so a bound
@@ -1101,11 +1109,13 @@ plus what happens before and after:
   any other, holding what its storage holds, so a callee that changes
   `self.storage` changes the list's potential by what it changes the
   storage's.
-- **Potential is counted in a unit of its type's own,** one unknown constant
-  for each type with a potential, the same for every method of the type, so
-  that potential saved by one method pays for another's work. Since every
-  method of the type counts in that one unit, a query adds potential and
-  counted work as they are, with no factor between them.
+- **Potential is counted in the units work is counted in,** whatever its
+  type. A callee's real cost is at most its own constant times what it is
+  counted as, its bound less the growth in potential it leaves, which is
+  never below zero; so it is at most `C` times that as well, for the
+  largest constant `C`. A query therefore adds potentials of any types and
+  counted work as they are, with no factor between them, and potential a
+  `Deque` holds pays for work on the lists it holds.
 - **A method with `cost amortized time O(f)`** proves that its counted cost,
   plus the potential of what it returns and of each `mut` parameter
   afterward, minus the potential on entry of each parameter it changes or
@@ -1121,12 +1131,23 @@ plus what happens before and after:
   change in potential of what it changed, so a caller with a plain bound
   pays for the potential it consumed from what it was given: a function
   that pushes `count` times can promise `O(count + items.length())`.
+- **A callee with a plain and an amortized bound** on the same resource,
+  such as `List.pop`, is counted by the one of the kind the caller
+  promises. A plain bound on a call says nothing of the potential the call
+  leaves in what it changes, which an amortized caller pays for, so such a
+  caller counts the amortized one; a plain caller counts the plain one,
+  which the potential the call takes does not raise.
 - **A loop that spends or saves potential** is bounded by what it has spent
   plus the potential the values it changes hold, which is what telescopes:
   each iteration's bound is on what it spends plus the growth of that
   potential, so potential saved by one iteration pays for the next one's
   work, and where the loop is left, what was spent is within the bound
-  plus the potential on entry, less what is left.
+  plus the potential on entry, less what is left. Where no such bound is
+  found, as where a copy's potential is spent on a push, what an iteration
+  spends alone is bounded instead. Where an iteration's paths
+  join, what each spent is a choice, not a fresh symbol, when it names a
+  potential, written with the values the paths joined into, so the
+  potential each path changed cancels against what the loop holds.
 - **Potentials never go below zero,** which is proven for each type with
   one, from its invariants, and is a fact about every value that meets its
   type's invariants. A type parameter may hold potential, which is not

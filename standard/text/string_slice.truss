@@ -967,7 +967,7 @@ internal fn push_expansion(output: mut String, expansion: unicode_tables::Expans
 }
 
 public fn StringSlice.to_uppercase(self) -> String
-  cost time finite
+  cost time O(self.length())
 {
   var output = ""
   var offset: USize = 0
