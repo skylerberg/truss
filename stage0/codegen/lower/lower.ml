@@ -90,7 +90,7 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
   let mask =
     if code.has_defaults then Some (local st.b ~name:"passed" (Raw (Integer UInt64))) else None
   in
-  let evidence = evidence_parameters st (evidence_for code.substitution code.uses) in
+  let evidence = evidence_parameters st (evidence_for st.context code.substitution code.uses) in
   start st.b (block st.b);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;

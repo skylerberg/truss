@@ -325,7 +325,7 @@ let standard_context : Monomorphic.context =
       (fun path ->
         Query.demand (Lazy.force standard_database) Interface.Environment.type_interface path);
     normalize = Fun.id;
-    capabilities = (fun _ -> []);
+    normalize_capabilities = Fun.id;
     cursor_fields = (fun _ -> []);
   }
 

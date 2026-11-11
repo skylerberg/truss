@@ -427,7 +427,7 @@ and value = Known of Z.t | Value_parameter of parameter
 and function_type = {
   parameters : (mode * ty) list;
   result : result;                          (* Returns ty, or Yields / Lends with a mode and ty *)
-  uses : capability_set;                    (* capabilities, capability parameters, and associated capability sets, sorted *)
+  uses : capability_set;                    (* capabilities, parameters, and associated sets, sorted *)
   costs : cost list;
 }
 ```
