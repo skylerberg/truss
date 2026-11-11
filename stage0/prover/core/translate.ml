@@ -5420,7 +5420,15 @@ and contract_call context frame (node : expression) (call_ : call) path contract
          && (not (List.mem_assoc symbol context.hidden_bodies))
          &&
          match Interface.Impls.signature context.database path with
-         | Some signature -> T.body_is_definition signature && not signature.transparent
+         | Some signature -> (
+             T.body_is_definition signature && (not signature.transparent)
+             (* A body that is a [todo] would define nothing if it were seen. *)
+             &&
+             match
+               Option.bind (source_at context.database path) (fun (callee, _, _) -> body_of callee)
+             with
+             | Some body -> not (holds_todo body)
+             | None -> false)
          | None -> false
        then
          let markable = match path with Method { owner = Impl _; _ } -> false | _ -> true in
