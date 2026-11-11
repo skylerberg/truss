@@ -3058,6 +3058,47 @@ let () =
 (* Proofs of laws *)
 
 let () =
+  test "a proof for a generic impl names its own generic parameters" (fun () ->
+      proven
+        "fn triangle(n: Int64) -> Int64\n\
+        \  requires n >= 0 && n <= 1000\n\
+        \  ensures result <= n * 1000\n\
+        \  decreases n\n\
+        \  cost time finite\n\
+         {\n\
+        \  if n == 0 { 0 } else { n + triangle(n - 1) }\n\
+         }\n\n\
+         theorem triangle_at_least(n: Int64)\n\
+        \  requires n >= 0 && n <= 1000\n\
+        \  ensures triangle(n) >= n\n\
+        \  decreases n\n\
+        \  cost time finite\n\
+         {\n\
+        \  if n > 0 {\n\
+        \    triangle_at_least(n - 1)\n\
+        \  }\n\
+         }\n\n\
+         trait Bounded {\n\
+        \  fn amount(self) -> Int64\n\
+        \    ensures result >= 0 && result <= 1000\n\
+        \    cost time finite\n\n\
+        \  law covered(value: Self) {\n\
+        \    triangle(value.amount()) >= value.amount()\n\
+        \  }\n\
+         }\n\n\
+         type Box[Item](item: Item, amount: Int64)\n\
+        \  invariant amount >= 0 && amount <= 1000\n\n\
+         impl Bounded for Box[Element] {\n\
+        \  fn amount(self) -> Int64\n\
+        \    ensures result >= 0 && result <= 1000\n\
+        \    cost time finite\n\
+        \  {\n\
+        \    self.amount\n\
+        \  }\n\
+         }\n\n\
+         proof Bounded.covered for Box[Item] {\n\
+        \  triangle_at_least(value.amount())\n\
+         }\n");
   test "a law's proof names the law's parameters, where its requires hold" (fun () ->
       proven
         "trait Sized {\n\

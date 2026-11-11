@@ -730,7 +730,8 @@ may be none, so what the body assumes holds only for them. A pure call's
   method contracts and definitions and the body of its `proof` definition,
   if there is one. That body is a `proof` block. Its parameters are bound
   by position to the law's arguments, and the law's `requires` are
-  assumed. Its facts are known, but the law is shown from where it
+  assumed. A proof for a generic `impl` has generic parameters of its own,
+  and each stands for the `impl`'s argument in its position. Its facts are known, but the law is shown from where it
   started, so a proof that never ends shows nothing. A law's own proof
   never uses that law.
 - **A derived `Equal`** is the solver's equality, or its definition field

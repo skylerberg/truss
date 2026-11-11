@@ -998,12 +998,12 @@ let holds_todo (body : block) =
   !found
 
 (* The [proof]s written for a trait's laws on a type, in the package: each
-   law's name, with the proof's source and body. *)
+   law's name, with the proof's source, the renaming of the proof's generic
+   parameters to the type's arguments, and the proof's parameters and body. *)
 let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
   let same_argument (left : T.argument) (right : T.argument) =
     match (left, right) with Type left, Type right -> T.equal left right | _ -> left = right
   in
-  let head = match for_type with Named { path; _ } -> Some path | _ -> None in
   List.concat_map
     (fun module_ ->
       List.filter_map
@@ -1013,15 +1013,21 @@ let law_proofs database package (trait : T.trait_reference) (for_type : T.ty) =
               Query.demand database Interface.Environment.interface declaration.path )
           with
           | Law_proof, Some (Interface.Environment.Law_proof_interface proven)
-            when Path.equal proven.trait.trait trait.trait
-                 && List.equal same_argument proven.trait.trait_arguments trait.trait_arguments
-                 &&
-                 match (proven.for_type, head) with
-                 | Named { path; _ }, Some head -> Path.equal path head
-                 | _ -> false -> (
-              match source_at_key database (Names.key_of declaration) with
-              | Some ({ core = { definition = Law_proof { parameters; body }; _ }; _ } as source) ->
-                  Some (proven.law, (source, parameters, body))
+            when Path.equal proven.trait.trait trait.trait -> (
+              let variables =
+                List.map (fun (generic : T.generic) -> generic.generic) proven.generics
+              in
+              match Interface.Impls.match_type ~variables [] proven.for_type for_type with
+              | Some renaming
+                when List.equal same_argument
+                       (List.map (T.substitute_argument renaming) proven.trait.trait_arguments)
+                       trait.trait_arguments -> (
+                  match source_at_key database (Names.key_of declaration) with
+                  | Some
+                      ({ core = { definition = Law_proof { parameters; body }; _ }; _ } as source)
+                    ->
+                      Some (proven.law, (source, renaming, parameters, body))
+                  | _ -> None)
               | _ -> None)
           | _ -> None)
         (Query.demand database Names.declarations module_))
@@ -1046,7 +1052,7 @@ let law_unshown database (impl : Path.t) (trait : T.trait_reference) for_type na
   | Some key ->
       impl_unfinished database key
       || List.exists
-           (fun (law, (_, _, body)) -> law = name && holds_todo body)
+           (fun (law, (_, _, _, body)) -> law = name && holds_todo body)
            (law_proofs database (Path.package impl) trait for_type)
   | None -> false
 
@@ -8688,23 +8694,34 @@ let laws database (source : source) ~impl ~trait ~for_type ~proofs ~at =
         (* A [proof]'s statements are hints: its calls' postconditions are
            facts where their preconditions hold, which is all a proof
            needs. Its parameters are bound by position to the law's
+           arguments, its generic parameters stand for the type's
            arguments, and the law's [requires] are assumed. *)
         let start =
           List.fold_left
-            (fun start ((proof_source : source), (parameters : Core.parameter list), (body : block))
-               ->
+            (fun start
+                 ( (proof_source : source),
+                   renaming,
+                   (parameters : Core.parameter list),
+                   (body : block) ) ->
               let locals, types =
                 List.fold_left2
                   (fun (locals, types) (parameter : Core.parameter) term ->
                     ( Locals.add parameter.local term locals,
-                      Locals.add parameter.local parameter.type_ types ))
+                      Locals.add parameter.local (T.substitute renaming parameter.type_) types ))
                   (start.locals, start.types) parameters
                   (List.filteri (fun index _ -> index < List.length parameters) terms)
               in
               restrict start
                 (L.not_
                    (ghost context
-                      { start with source = proof_source; checking = false; locals; types }
+                      {
+                        start with
+                        source = proof_source;
+                        checking = false;
+                        locals;
+                        types;
+                        substitution = renaming;
+                      }
                       body)))
             start
             (List.filter_map
