@@ -379,11 +379,8 @@ public trait Cursor {
     total
   }
 
-  fn find[capability Granted](
-    mut self,
-    matching: (fn(Self.Element) -> Bool uses Granted),
-  ) -> Option[Self.Element]
-    uses Self.Uses, Granted
+  fn find(mut self, matching: fn(Self.Element) -> Bool) -> Option[Self.Element]
+    uses Self.Uses
   {
     while mut self.next() is Some(item) {
       if matching(item) {

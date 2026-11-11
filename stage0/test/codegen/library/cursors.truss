@@ -1,3 +1,5 @@
+use standard::simulation
+
 fn same_items(found: Slice[Int64], expected: Slice[Int64]) -> Bool {
   if found.length() != expected.length() {
     return false
@@ -143,4 +145,54 @@ test "the adapters and the trait's methods work on a yielding method's cursor" {
   assert start == "h\u{e9}"
   assert text.characters().count() == 5
   assert text.characters().skip(4).last() == Some(Character"o")
+}
+
+type Typed(most: USize)
+
+fn Typed.line_lengths(self) yields USize
+  uses Console
+{
+  var given: USize = 0
+  while given < self.most && Console.read_line() is Some(line) {
+    yield line.length()
+    given += 1
+  }
+}
+
+fn typing(lines: own List[String]) -> simulation::World {
+  simulation::World.from(simulation::Setup.new().with_input(own lines))
+}
+
+test "the adapters work on a cursor that uses a capability" {
+  let typed = Typed(most: 100)
+  provide typing(["a", "bb", "ccc", "dddd", "eeeee", "ffffff"]) {
+    let middle: List[USize] = [2, 3]
+    assert typed.line_lengths().skip(1).take(2).to_list() == middle
+    let stepped: List[USize] = [4, 6]
+    assert typed.line_lengths().step_by(2).to_list() == stepped
+  }
+  provide typing(["a", "bb", "ccc"]) {
+    assert typed.line_lengths().enumerate().fold(0, combine: fn(total, entry) { total + entry.index * entry.element }) == 8
+  }
+  provide typing(["a", "bb", "ccc", "dddd"]) {
+    assert Typed(most: 1).line_lengths().chain(typed.line_lengths()).count() == 4
+  }
+  provide typing(["a", "bb", "ccc", "dddd"]) {
+    assert typed.line_lengths().zip(typed.line_lengths()).fold(0, combine: fn(total, pair) { total + pair.first * pair.second }) == 14
+  }
+  provide typing(["a", "bb"]) {
+    var cursor = typed.line_lengths().peekable()
+    assert mut cursor.peek() == Some(1)
+    assert mut cursor.next() == Some(1)
+    assert mut cursor.find(fn(length) { length > 1 }) == Some(2)
+    assert mut cursor.next() is None
+  }
+  provide typing(["a", "bb", "ccc"]) {
+    let collected: List[USize] = List.collect(typed.line_lengths().skip(1))
+    let rest: List[USize] = [2, 3]
+    assert collected == rest
+    var longer: List[USize] = [9]
+    mut longer.extend(typed.line_lengths())
+    assert longer.length() == 1
+  }
 }
