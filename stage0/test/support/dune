@@ -5,6 +5,7 @@
   query
   engine
   database
+  prover
   path
   workspace
   diagnostic

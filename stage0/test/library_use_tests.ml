@@ -14,7 +14,7 @@ let solver =
 
 let check database module_ =
   match Type_checker.diagnostics database module_ with
-  | [] -> Prover.diagnostics database solver module_
+  | [] -> Prover.diagnostics ~tell:(Support.tell database) database solver module_
   | errors -> errors
 
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]

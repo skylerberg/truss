@@ -20,6 +20,12 @@
    It prints each such mutant, function, and arguments, and exits with
    status 1 if there was one. *)
 
+(* What the solver said, set in the engine, as the database does for a
+   session. *)
+let tell database said =
+  let engine = Engine.of_context database in
+  List.iter (fun (key, told) -> Engine.set engine Prover.told key told) said
+
 let example : Path.module_ = { package = "example"; modules = [ "main" ] }
 let standard = lazy (Database.standard_base ())
 
@@ -162,7 +168,7 @@ let run_mutant ~samples text =
   | None -> ()
   | Some (database, _) -> (
       incr checked;
-      let states = Prover.states database (Lazy.force solver) example in
+      let states = Prover.states ~tell:(tell database) database (Lazy.force solver) example in
       let candidates =
         List.filter (fun candidate -> proven database candidate.key states) (runnable database)
       in
@@ -273,7 +279,9 @@ let () =
             in
             match load text with
             | Some (database, _) ->
-                let unproven = Prover.diagnostics database (Lazy.force solver) example in
+                let unproven =
+                  Prover.diagnostics ~tell:(tell database) database (Lazy.force solver) example
+                in
                 shown unproven;
                 unproven = []
             | None ->

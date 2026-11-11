@@ -38,16 +38,16 @@ val told : (string, told) Query.input
 
 val solve_ahead :
   ?running:running ->
-  ?tell:((string * told) list -> unit) ->
+  tell:((string * told) list -> unit) ->
   Query.context ->
   Solver.t ->
   Path.module_ list ->
   unit
 (** Decides every definition of the modules: what their outcomes wait for is asked together, the
     solver's queries several at once, one for each core, and [tell] sets {!told} to the answers,
-    which by default sets them in the context's engine. A caller that will ask for many modules'
-    proofs calls it once with all of them, which keeps every core busy where one module's queries
-    are few. *)
+    which the driver does, since only the database sets a session's inputs. A caller that will ask
+    for many modules' proofs calls it once with all of them, which keeps every core busy where one
+    module's queries are few. *)
 
 type state = {
   code : Diagnostic.Code.prover;
@@ -59,7 +59,7 @@ type state = {
 
 val states :
   ?running:running ->
-  ?tell:((string * told) list -> unit) ->
+  tell:((string * told) list -> unit) ->
   Query.context ->
   Solver.t ->
   Path.module_ ->
@@ -69,7 +69,7 @@ val states :
 
 val diagnostics :
   ?running:running ->
-  ?tell:((string * told) list -> unit) ->
+  tell:((string * told) list -> unit) ->
   Query.context ->
   Solver.t ->
   Path.module_ ->

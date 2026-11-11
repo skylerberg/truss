@@ -625,16 +625,11 @@ let told_of ~(running : running) solver asked =
         | Run_call call -> Call_ran (running.call call) ))
     asked
 
-let engine_tell database said =
-  let engine = Engine.of_context database in
-  List.iter (fun (key, value) -> Engine.set engine told key value) said
-
 (* Each definition of the modules decided: their outcomes are asked for
    together, what they wait for is asked of the world outside together, and
    so on until none waits, which takes a round or two, since an obligation
    asks again only after an answer such as running out of steps. *)
-let solve_ahead ?(running = not_running) ?tell database solver modules =
-  let tell = Option.value tell ~default:(engine_tell database) in
+let solve_ahead ?(running = not_running) ~tell database solver modules =
   let keys =
     List.concat_map
       (fun module_ ->
@@ -668,8 +663,8 @@ let decided database key =
 
 (* Each definition's states, in the file's offsets. A failure of a clause
    that another definition of the file states has a note at that clause. *)
-let moved_states ?(running = not_running) ?tell database solver module_ =
-  solve_ahead ~running ?tell database solver [ module_ ];
+let moved_states ?(running = not_running) ~tell database solver module_ =
+  solve_ahead ~running ~tell database solver [ module_ ];
   List.filter_map
     (fun declaration ->
       let key = Names.key_of declaration in
@@ -714,14 +709,14 @@ let in_order list =
       compare (left.span, left.code) (right.span, right.code))
     list
 
-let states ?running ?tell database solver module_ =
-  List.concat (moved_states ?running ?tell database solver module_)
+let states ?running ~tell database solver module_ =
+  List.concat (moved_states ?running ~tell database solver module_)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
 (* The failures among the states. The same failure on another path of one
    definition, as a second index into the same list with the same index
    is, is reported once. *)
-let diagnostics ?running ?tell database solver module_ =
+let diagnostics ?running ~tell database solver module_ =
   List.concat_map
     (fun states ->
       List.fold_left
@@ -732,5 +727,5 @@ let diagnostics ?running ?tell database solver module_ =
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
-    (moved_states ?running ?tell database solver module_)
+    (moved_states ?running ~tell database solver module_)
   |> in_order
