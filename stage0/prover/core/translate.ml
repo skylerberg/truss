@@ -6624,7 +6624,66 @@ and trait_method_time context frame (method_ : Path.t) self_type =
   in
   declare context (L.Constant (symbol, L.Int));
   fact context frame (L.Apply ("<=", [ L.int 1; L.Symbol symbol ]));
+  (match method_time_bound context method_ self_type with
+  | Some k -> fact context frame (L.Apply ("<=", [ L.Symbol symbol; L.Integer (Z.max k Z.one) ]))
+  | None -> ());
   L.Symbol symbol
+
+(* A bound on [time(T.method)] for a known type: a copy of a [Plain] value
+   that holds no potential takes one step, and the method of an [impl] whose
+   time clause is a constant [O(k)] takes at most [k] counted as a call is,
+   where it makes no potential, since nothing it changes or returns can
+   hold any. *)
+and method_time_bound context (method_ : Path.t) self_type =
+  let holds ty = try has_potential context ty with Foreign_unsupported _ -> true in
+  match method_ with
+  | Method { owner = trait; name; receiver } -> (
+      if Path.equal trait Interface.Impls.copyable_path then
+        if
+          Interface.Impls.plain context.database ~bounds:(current_bounds context) self_type
+          && not (holds self_type)
+        then Some Z.one
+        else None
+      else
+        let reference : T.trait_reference = { trait; trait_arguments = []; associated = [] } in
+        match concrete_impl context reference self_type with
+        | Some (impl, arguments) -> (
+            let path = Path.Method { owner = impl; name; receiver } in
+            let makes_no_potential =
+              match Interface.Impls.signature context.database path with
+              | Some (signature : T.signature) -> (
+                  List.for_all
+                    (fun (parameter : T.parameter_info) ->
+                      parameter.mode <> T.Mut || not (holds parameter.type_))
+                    signature.parameters
+                  && (match signature.receiver with Some (Mut, ty) -> not (holds ty) | _ -> true)
+                  && match signature.output with Returns ty -> not (holds ty) | _ -> false)
+              | None -> false
+            in
+            match
+              method_contract ~reader:(Path.package context.current) context.database reference name
+                receiver
+                (Impl { impl; arguments })
+            with
+            | Some contract when makes_no_potential ->
+                List.find_map
+                  (fun (part : part) ->
+                    List.find_map
+                      (fun (cost : Core.cost) ->
+                        match cost with
+                        | {
+                         resource = Time;
+                         amortized = false;
+                         bound = Order_of { kind = Integer k; _ };
+                         _;
+                        } ->
+                            Some k
+                        | _ -> None)
+                      part.costs)
+                  contract.parts
+            | _ -> None)
+        | None -> None)
+  | _ -> None
 
 (* A built-in copy: of a [Plain] value that holds no potential, a copy of
    its bits; of any other, a call of [Copyable.copy], which takes

@@ -1019,7 +1019,11 @@ removes them in two steps:
    `time(T.method) + 1` less that potential. A built-in `copy()` of a value
    that is not `Plain`, or that holds potential, is such a call of
    `Copyable.copy`, and makes the potential of the copy, which it pays
-   for. It is one term for each method and type, so a
+   for. For a known type, `time(T.method)` is at most `k` where the
+   type's `impl` of the method promises `O(k)` for a number `k` and nothing
+   the method changes or returns can hold potential, and a copy of a
+   `Plain` value that holds none takes one, so `List.filled` of `UInt64`s
+   is `O(count)`. It is one term for each method and type, so a
    callee's bound and its caller's are about the same term. Every callee's real cost is at
    most `C` times what is counted, where `C` is the largest of the callees'
    constants and 1. That `C` is a fixed number, though unknown, so a bound
@@ -1403,11 +1407,13 @@ test the prover itself:
   nothing more about: inside a quantifier its arguments are not alone in
   what it can differ by, and a functional lambda's symbol is named after
   what it captures, which would be one function for every argument.
-- **The potential of a set's or a map's elements.** A value's potential is
-  to include that of the elements of a `Set` or a `Map` it holds, through
-  its model, as it does for a collection modeled by a sequence. The
-  specification module has no sum over a finite set or map, so a
-  potential that needs one is reported as one the prover cannot read.
+- **An amortized replacement of a map's value.** A `Set` or a `Map` from
+  another package holds a potential the prover knows through its methods'
+  clauses, and inserting a new element or key is amortized. Replacing the
+  value under a key that is there is not: the potential of the entries
+  after it follows from the sum law of `Sequence.update` taken at the
+  potential's own measure, which the solver runs out of steps finding and
+  no `assert` in the library can name.
 - **More in a diagnostic.** A note at a clause in another file, which a
   message names by its file and line instead, the
   branches a counterexample's path takes, listed by position, and a

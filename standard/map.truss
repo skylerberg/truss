@@ -173,6 +173,7 @@ internal fn Map[Key: Hash + Ordered, Value].insert_absent(mut self, key: own Key
       identical(self.model().get(other), old(self.model()).get(other))
   ensures self.length() == old(self.length()) + 1
   cost time O(1 + old(self.length()))
+  cost amortized time O(1)
 {
   mut self.push_entry(own key, value: own value)
 }
@@ -196,6 +197,7 @@ internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, v
     old(self.entries.model()).append(self.entries.model()[old(self.entries.length())]),
   )
   cost time O(1 + old(self.entries.length()))
+  cost amortized time O(1)
 {
   let position = self.entries.length()
   proof {
@@ -242,6 +244,7 @@ internal fn Map[Key: Hash + Ordered, Value].find_or_insert(mut self, key: own Ke
         old(self.entries.model()).append(self.entries.model()[old(self.entries.length())]),
       ))
   cost time O(1 + old(self.length()) * (1 + time(Key.equal)))
+  cost amortized time O(1 + old(self.length()) * (1 + time(Key.equal)))
 {
   let position = self.index_of(key)
   if position == self.entries.length() {

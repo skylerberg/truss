@@ -3226,6 +3226,30 @@ let () =
       let found = message "fn first(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" in
       if not (contains found "The clause that must hold is at `standard/list.truss:") then
         fail "message %S" found)
+(* Collections from another package *)
+
+let () =
+  test "an insertion into a set of integers is amortized in its length" (fun () ->
+      proven
+        "fn add(names: mut Set[Int64], name: Int64)\n\
+        \  cost amortized time O(1 + names.length())\n\
+         {\n\
+        \  mut names.insert(name)\n\
+         }\n");
+  test "an insertion into a set of any elements is amortized in their comparisons" (fun () ->
+      proven
+        "fn add[Element: Hash + Ordered](names: mut Set[Element], name: own Element)\n\
+        \  cost amortized time O(1 + names.length() * (1 + time(Element.equal)))\n\
+         {\n\
+        \  mut names.insert(own name)\n\
+         }\n");
+  test "a list filled with integers is linear in its count" (fun () ->
+      proven
+        "fn zeros(count: USize) -> List[UInt64]\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  List.filled(value: 0, count: count)\n\
+         }\n")
 
 (* Definitions under a quantifier *)
 

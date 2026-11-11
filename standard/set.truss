@@ -79,6 +79,7 @@ internal fn Set[Element: Hash + Ordered].insert_absent(mut self, element: own El
     old(self.elements.model()).append(self.elements.model()[old(self.elements.length())]),
   )
   cost time O(1 + old(self.elements.length()))
+  cost amortized time O(1)
 {
   let position = self.elements.length()
   proof {
@@ -103,6 +104,7 @@ public fn Set[Element: Hash + Ordered].insert(mut self, element: own Element)
   ensures self.length()
     == old(self.length()) + (if contains_equal(old(self.model()), value: element) { 0 } else { 1 })
   cost time O(1 + old(self.length()) * (1 + time(Element.equal)))
+  cost amortized time O(1 + old(self.length()) * (1 + time(Element.equal)))
 {
   if self.index_of(element) == self.elements.length() {
     mut self.insert_absent(own element)
@@ -143,6 +145,7 @@ public fn Set[Element: Hash + Ordered].insert_new(mut self, element: own Element
   ensures self.contains(element)
   ensures result == !old(self.contains(element))
   cost time O(1 + old(self.length()) * (1 + time(Element.equal)))
+  cost amortized time O(1 + old(self.length()) * (1 + time(Element.equal)))
 {
   let is_new = self.index_of(element) == self.elements.length()
   if is_new {
