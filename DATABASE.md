@@ -769,7 +769,9 @@ names, and never chooses a version itself.
 One background process per user and compiler serves every session on the
 machine, as Gradle's daemon and Bazel's server do. The first command starts
 it, detached from the terminal, with its output in `servers/server.log`, and
-it exits after three hours without a request, the default of both.
+it exits after three hours without a request, the default of both, or
+within a minute of its compiler being built again, since the new compiler's
+clients start a process of their own.
 
 - **It holds nothing that is not in the store.** What a session computed is
   written when its command is done. The process keeps each session's engine
@@ -814,6 +816,11 @@ it exits after three hours without a request, the default of both.
 - **While no request is waiting, the process scans every open worktree each
   second,** and brings each state up to date, so diagnostics are current
   before anyone asks for them, and overlaps are found as work happens.
+- **A scan that finds every file as it was does nothing more.** The
+  packages, the modules, and what is wrong between manifests are worked out
+  again only when a file changed, was added, or was removed, or while a
+  problem is outstanding, since a problem can be one the files do not show,
+  such as a package that could not be fetched.
 - **Scanning is O(files) in stamps.** FSEvents on macOS and inotify on Linux
   would make it O(change), but OCaml reaches them only through C bindings,
   which stage0 has none of yet. Since a command scans anyway, adding them

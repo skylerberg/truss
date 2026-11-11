@@ -80,6 +80,7 @@ type session = {
   texts : (string, string) Hashtbl.t;
       (** Each manifest and module file's fingerprint, by its path from the root *)
   mutable pointed : bool;  (** Whether the pointer names the state as it is *)
+  mutable applied : bool;  (** Whether this process has brought the inputs in line with the files *)
 }
 
 (* The standard library as a state of its own, for working on the library. *)
@@ -652,7 +653,19 @@ let scan session root =
       (Worktree.files root)
   in
   let old = current_layout engine in
-  apply ~text session (List.map (fun (path, _, contents) -> (path, contents)) found);
+  (* A scan that finds every file as it was has nothing to bring in line.
+     With a problem outstanding it looks again, since a problem can be one
+     that the files do not show, such as a package that could not be
+     fetched. *)
+  let unchanged =
+    session.applied && session.problems = []
+    && List.for_all (fun (_, _, contents) -> contents = Unchanged) found
+    && List.length found = List.length old.files
+  in
+  if not unchanged then begin
+    apply ~text session (List.map (fun (path, _, contents) -> (path, contents)) found);
+    session.applied <- true
+  end;
   let present = Hashtbl.create (List.length found) in
   List.iter
     (fun (path, stamp, contents) ->
@@ -818,6 +831,7 @@ let open_directory state root =
             used = Unix.time ();
             texts;
             pointed = own <> None;
+            applied = false;
           }
         in
         if near then
@@ -848,6 +862,7 @@ let open_commit state ~repository commit =
               used = Unix.time ();
               texts = Hashtbl.create 16;
               pointed = true;
+              applied = false;
             }
           in
           apply session (List.map (fun (path, text) -> (path, Text text)) texts);
@@ -1499,6 +1514,7 @@ let trial_with_lock session text =
       used = Unix.time ();
       texts = Hashtbl.create 16;
       pointed = true;
+      applied = false;
     }
   in
   let files = (current_layout session.engine).files in
@@ -1535,6 +1551,7 @@ let merge_preview session other =
               used = Unix.time ();
               texts = Hashtbl.create 16;
               pointed = true;
+              applied = false;
             }
           in
           apply merged (List.map (fun (path, text) -> (path, Text text)) texts);
@@ -1763,6 +1780,11 @@ let serve ~handle =
              Hashtbl.iter (fun _ session -> fold state session) state.sessions);
             if now -. !last_collection > 60. then begin
               last_collection := now;
+              (* A compiler that was built again has another identity, and
+                 its clients start a process of their own, so this one would
+                 only scan worktrees for no one. *)
+              if Identity.compute (Store.default_directory ()) <> (current ()).identity then
+                stopping := true;
               collect (current ())
             end
         | _ -> (
