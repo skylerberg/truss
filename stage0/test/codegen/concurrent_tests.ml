@@ -1058,11 +1058,11 @@ fn main(arguments: List[String]) -> ExitCode
 |}
         ));
   (* The seeded scheduler runs its tasks as coroutines. [add] yields to the
-     program's scheduler in one, so the task goes on on another thread
+     program's scheduler in one, so the task resumes on another thread
      while it is in a coroutine, and the other tasks park in theirs for
      the mutex. The coroutine then suspends on that thread, when it yields
      to the seeded scheduler. *)
-  test "on threads, a task that leaves its thread in a coroutine goes on with any number of threads"
+  test "on threads, a task that leaves its thread in a coroutine resumes with any number of threads"
     (fun () ->
       expect_with_each_thread_count ~expected:"total 1920\n"
         {|use standard::tasks
@@ -1108,9 +1108,154 @@ fn main(arguments: List[String]) -> ExitCode
 }
 |})
 
-(* Cancelling a task that is blocked in a call of the operating system *)
+(* Waiting for time and for a socket *)
 
 let () =
+  (* A sleeping task that held a thread would keep the last task from
+     running until a sleep ended: the runtime has fewer threads than this
+     program has sleeping tasks. *)
+  test "on threads, more tasks sleep at once than the runtime has threads" (fun () ->
+      expect_threaded ~expected:"600 woke first, before a sleep ended true\n"
+        {|fn first_to_wake(sleepers: Int64) -> Int64
+  uses Tasks, Clock
+{
+  concurrent for sleeper in 0..=sleepers {
+    if sleeper == sleepers {
+      return sleeper
+    }
+    Clock.sleep(Duration.nanoseconds(60000000000))
+  }
+  -1
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console
+{
+  let before = Clock.monotonic()
+  let first = first_to_wake(600)
+  let after = Clock.monotonic()
+  Console.print_line("${first} woke first, before a sleep ended ${after.total_seconds() - before.total_seconds() < 30}")
+  ExitCode.success
+}
+|});
+  test "on threads, tasks connect, accept, read, and write on sockets with any number of threads"
+    (fun () ->
+      expect_with_each_thread_count ~expected:"echoed 16\n"
+        ({|use standard::network
+
+|} ^ tally
+       ^ {|
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console, NetworkServer, NetworkClient, Handles
+{
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  var counter = Counter(count: 0)
+  if NetworkServer.listen(loopback) is Ok(opened) {
+    var listener = own opened
+    let at = listener.local_address()
+    provide mut counter {
+      concurrent {
+        {
+          for _ in 0..16 {
+            if mut listener.accept() is Ok(taken) {
+              var server = own taken
+              var heard: List[UInt8] = []
+              if mut server.read(mut heard, limit: 100) is Ok(_) {
+                let _ = mut server.write(heard.slice())
+              }
+            }
+          }
+        }
+        concurrent for _ in 0..16 {
+          if NetworkClient.connect(at, timeout: None) is Ok(made) {
+            var client = own made
+            let request: List[UInt8] = [7, 8, 9]
+            let _ = mut client.write(request.slice())
+            var answer: List[UInt8] = []
+            if mut client.read(mut answer, limit: 100) is Ok(count) {
+              if count == 3 && answer[2] == 9 {
+                Tally.add(1)
+              }
+            }
+          }
+        }
+      }
+      Console.print_line("echoed ${Tally.total()}")
+    }
+  }
+  ExitCode.success
+}
+|}
+        ));
+  test "on threads, a read in a task ends at the socket's time limit" (fun () ->
+      expect_threaded ~expected:"timed out true\nthe peer closed true\n"
+        {|use standard::network
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console, NetworkServer, NetworkClient, Handles
+{
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  if NetworkServer.listen(loopback) is Ok(opened) {
+    var listener = own opened
+    let at = listener.local_address()
+    concurrent {
+      {
+        if NetworkClient.connect(at, timeout: Some(Duration.nanoseconds(2000000000))) is Ok(made) {
+          var client = own made
+          let _ = mut client.set_read_timeout(Some(Duration.nanoseconds(50000000)))
+          var heard: List[UInt8] = []
+          if mut client.read(mut heard, limit: 10) is Err(error) {
+            Console.print_line("timed out ${error == SystemError.TimedOut}")
+          }
+        }
+      }
+      {
+        if mut listener.accept() is Ok(taken) {
+          var server = own taken
+          var heard: List[UInt8] = []
+          if mut server.read(mut heard, limit: 10) is Ok(count) {
+            Console.print_line("the peer closed ${count == 0}")
+          }
+        }
+      }
+    }
+  }
+  ExitCode.success
+}
+|})
+
+(* Cancelling a task that waits *)
+
+let () =
+  test "on threads, a cancelled task returns from a call that blocks in the operating system"
+    (fun () ->
+      expect_threaded ~expected:"run: cancelled\ntimed out\n"
+        {|use standard::processes
+
+fn run_or_time_out() -> String
+  uses Tasks, Clock, Console, Processes
+{
+  concurrent {
+    {
+      match Processes.run(processes::Command.new("sleep").argument("5")) {
+        Ok(_) => Console.print_line("run: ended")
+        Err(error) => Console.print_line("run: ${error}")
+      }
+    }
+    {
+      Clock.sleep(Duration.nanoseconds(100000000))
+      return "timed out"
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console, Processes
+{
+  Console.print_line(run_or_time_out())
+  ExitCode.success
+}
+|});
   test "on threads, a cancelled task returns early from a sleep" (fun () ->
       expect_threaded ~expected:"1 early true\n"
         {|fn nap(seconds: Int64) -> Int64
