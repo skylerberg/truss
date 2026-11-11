@@ -66,7 +66,7 @@ internal fn accept(listener: Int32) -> Result[network::Accepted, Int32] {
   var from = room_for_an_address()
   var length: UInt32 = 28
   var descriptor = intrinsic::libc_accept(listener, address: mut from, length: mut length)
-  while descriptor < 0 && calls::interrupted_by_signal()
+  while descriptor < 0 && calls::retry_after_signal()
     invariant intrinsic::storage_length(from) == 28
   {
     length = 28
@@ -130,7 +130,7 @@ internal fn send_to(
     address: intrinsic::storage_view(to),
     length: intrinsic::storage_length(to),
   )
-  while sent < 0 && calls::interrupted_by_signal() {
+  while sent < 0 && calls::retry_after_signal() {
     sent = intrinsic::libc_sendto(
       descriptor,
       bytes: bytes,
@@ -166,7 +166,7 @@ internal fn receive_from(
     address: mut from,
     length: mut length,
   )
-  while got < 0 && calls::interrupted_by_signal()
+  while got < 0 && calls::retry_after_signal()
     invariant intrinsic::storage_length(buffer) == before
     invariant intrinsic::storage_capacity(buffer) >= before + limit
     invariant intrinsic::storage_length(from) == 28
@@ -324,7 +324,7 @@ fn connected(descriptor: Int32, limit: Int32) -> Result[Unit, Int32] {
     }
     if ready > 0 {
       waiting = false
-    } else if !calls::interrupted_by_signal() {
+    } else if !calls::retry_after_signal() {
       return Err(intrinsic::libc_errno())
     }
   }

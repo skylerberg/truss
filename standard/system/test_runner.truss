@@ -503,7 +503,7 @@ internal fn run(count: UInt32, time_limit: UInt32) -> Int32 {
       count: workers.length(),
       timeout: milliseconds_until_a_limit(workers, longest: longest),
     )
-    if ready < 0 && !calls::interrupted_by_signal() {
+    if ready < 0 && !calls::retry_after_signal() {
       waiting = false
     } else {
       read_what_came(mut workers, waited_for: intrinsic::storage_view(waited_for), longest: longest, failed: mut failed)

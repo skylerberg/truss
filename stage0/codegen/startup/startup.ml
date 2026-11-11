@@ -524,6 +524,25 @@ int32_t t_runtime_tasks_unlock(uint64_t mutex) {
 
 int32_t t_runtime_tasks_yield(void) { return 0; }
 
+/* Blocks until one of the signals arrives, and returns its number. The
+   signals stay blocked afterwards, so one that arrives between two calls
+   is pending for the second. */
+int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
+  sigset_t set;
+  sigemptyset(&set);
+  size_t added = 0;
+  for (size_t index = 0; index < count; index++)
+    if (signals[index] > 0 && sigaddset(&set, signals[index]) == 0) added += 1;
+  sigprocmask(SIG_BLOCK, &set, NULL);
+  for (;;) {
+    int arrived = 0;
+    if (added == 0)
+      sleep(3600);
+    else if (sigwait(&set, &arrived) == 0)
+      return arrived;
+  }
+}
+
 #else
 
 /* Each task runs on a thread of its own.
@@ -539,6 +558,9 @@ struct t_group {
   size_t running;
   atomic_int cancelled;
   struct t_group *parent;
+  struct t_task *tasks;     /* The tasks that are running, under [lock] */
+  struct t_group *children; /* The groups that those tasks opened, under [lock] */
+  struct t_group *next;     /* In the parent's [children], under the parent's [lock] */
 };
 
 /* The group of the task that the calling thread runs. NULL on a thread
@@ -550,7 +572,41 @@ struct t_task {
   void (*code)(void *environment, uint64_t item);
   void *environment;
   uint64_t item;
+  pthread_t thread;
+  struct t_task *next; /* In the group's [tasks] */
 };
+
+/* Interrupting a blocked task. A cancelled task that is blocked in a call
+   of the operating system, such as a read or a sleep, has to return from
+   it. The runtime sends the task's thread SIGURG, whose handler does
+   nothing and is installed without SA_RESTART, so the call fails with
+   EINTR, and the standard library returns its cancelled error. Nothing
+   else in a program uses SIGURG. */
+static void t_interrupt_handler(int signal) { (void)signal; }
+
+static pthread_once_t t_interrupt_once = PTHREAD_ONCE_INIT;
+
+static void t_interrupt_start(void) {
+  struct sigaction action;
+  memset(&action, 0, sizeof action);
+  action.sa_handler = t_interrupt_handler;
+  sigemptyset(&action.sa_mask);
+  sigaction(SIGURG, &action, NULL);
+}
+
+/* Interrupts the group's tasks and wakes its joiner, then does the same
+   for the groups that its tasks opened. The caller holds the group's
+   lock. A lock is always taken after the lock of the enclosing group. */
+static void t_group_interrupt(struct t_group *group) {
+  for (struct t_task *task = group->tasks; task != NULL; task = task->next)
+    pthread_kill(task->thread, SIGURG);
+  pthread_cond_broadcast(&group->ended);
+  for (struct t_group *child = group->children; child != NULL; child = child->next) {
+    pthread_mutex_lock(&child->lock);
+    t_group_interrupt(child);
+    pthread_mutex_unlock(&child->lock);
+  }
+}
 
 /* Waiting on a key. A key hashes to a slot, which counts the wakes of its
    keys. [watch] reads the count as a ticket, [wait] blocks while the count
@@ -628,30 +684,52 @@ uint64_t t_runtime_tasks_open(void) {
   group->running = 0;
   atomic_init(&group->cancelled, 0);
   group->parent = t_task_group;
+  group->tasks = NULL;
+  group->children = NULL;
+  group->next = NULL;
+  if (group->parent != NULL) {
+    pthread_mutex_lock(&group->parent->lock);
+    group->next = group->parent->children;
+    group->parent->children = group;
+    pthread_mutex_unlock(&group->parent->lock);
+  }
   return (uint64_t)(uintptr_t)group;
 }
 
 static void *t_task_main(void *argument) {
-  struct t_task task = *(struct t_task *)argument;
-  free(argument);
-  t_task_group = task.group;
+  struct t_task *task = argument;
+  struct t_group *group = task->group;
+  t_task_group = group;
   /* Signals sent to the process go to the thread that started it, as they
-     do in a program with one thread. */
+     do in a program with one thread. SIGURG is the runtime's interrupt of
+     a cancelled task. */
   sigset_t all;
   sigfillset(&all);
   sigdelset(&all, SIGSEGV);
   sigdelset(&all, SIGBUS);
   sigdelset(&all, SIGFPE);
   sigdelset(&all, SIGILL);
+  sigdelset(&all, SIGURG);
   pthread_sigmask(SIG_SETMASK, &all, NULL);
   struct t_thread_signal_stack signal_stack;
   t_thread_signal_stack_install(&signal_stack);
-  task.code(task.environment, task.item);
+  pthread_mutex_lock(&group->lock);
+  task->thread = pthread_self();
+  task->next = group->tasks;
+  group->tasks = task;
+  pthread_mutex_unlock(&group->lock);
+  task->code(task->environment, task->item);
   t_thread_signal_stack_remove(&signal_stack);
-  pthread_mutex_lock(&task.group->lock);
-  task.group->running -= 1;
-  if (task.group->running == 0) pthread_cond_broadcast(&task.group->ended);
-  pthread_mutex_unlock(&task.group->lock);
+  pthread_mutex_lock(&group->lock);
+  for (struct t_task **link = &group->tasks; *link != NULL; link = &(*link)->next)
+    if (*link == task) {
+      *link = task->next;
+      break;
+    }
+  group->running -= 1;
+  if (group->running == 0) pthread_cond_broadcast(&group->ended);
+  pthread_mutex_unlock(&group->lock);
+  free(task);
   return NULL;
 }
 
@@ -659,6 +737,7 @@ uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, u
                               void *environment, uint64_t item) {
   struct t_group *group = (struct t_group *)(uintptr_t)handle;
   if (atomic_load_explicit(&group->cancelled, memory_order_acquire)) return 0;
+  pthread_once(&t_interrupt_once, t_interrupt_start);
   struct t_task *task = malloc(sizeof *task);
   if (task == NULL) t_out_of_memory();
   task->group = group;
@@ -678,11 +757,38 @@ uint8_t t_runtime_tasks_spawn(uint64_t handle, void (*code)(void *environment, u
   return 1;
 }
 
+/* Blocks until every task of the group has ended. While the group's tasks
+   are cancelled, it interrupts them again every few milliseconds: a task
+   can start a blocking call just after an interrupt, and would miss it. */
 int32_t t_runtime_tasks_join(uint64_t handle) {
   struct t_group *group = (struct t_group *)(uintptr_t)handle;
   pthread_mutex_lock(&group->lock);
-  while (group->running > 0) pthread_cond_wait(&group->ended, &group->lock);
+  while (group->running > 0) {
+    if (atomic_load_explicit(&group->cancelled, memory_order_acquire) ||
+        t_runtime_tasks_cancelled()) {
+      t_group_interrupt(group);
+      struct timespec until;
+      clock_gettime(CLOCK_REALTIME, &until);
+      until.tv_nsec += 5000000;
+      if (until.tv_nsec >= 1000000000) {
+        until.tv_sec += 1;
+        until.tv_nsec -= 1000000000;
+      }
+      pthread_cond_timedwait(&group->ended, &group->lock, &until);
+    } else {
+      pthread_cond_wait(&group->ended, &group->lock);
+    }
+  }
   pthread_mutex_unlock(&group->lock);
+  if (group->parent != NULL) {
+    pthread_mutex_lock(&group->parent->lock);
+    for (struct t_group **link = &group->parent->children; *link != NULL; link = &(*link)->next)
+      if (*link == group) {
+        *link = group->next;
+        break;
+      }
+    pthread_mutex_unlock(&group->parent->lock);
+  }
   pthread_mutex_destroy(&group->lock);
   pthread_cond_destroy(&group->ended);
   free(group);
@@ -692,7 +798,8 @@ int32_t t_runtime_tasks_join(uint64_t handle) {
 /* Cancels the group. Returns 1 to the first caller. Every waiter is woken
    so that a cancelled one returns: the slot's lock is held for the
    broadcast, so a waiter either tests the flag after it is set or is
-   already blocked when the broadcast comes. */
+   already blocked when the broadcast comes. The group's tasks, and the
+   tasks of the groups they opened, are interrupted. */
 int32_t t_runtime_tasks_cancel(uint64_t handle) {
   struct t_group *group = (struct t_group *)(uintptr_t)handle;
   int cancelled = 0;
@@ -703,6 +810,9 @@ int32_t t_runtime_tasks_cancel(uint64_t handle) {
     pthread_cond_broadcast(&t_wait_slots[index].woken);
     pthread_mutex_unlock(&t_wait_slots[index].lock);
   }
+  pthread_mutex_lock(&group->lock);
+  t_group_interrupt(group);
+  pthread_mutex_unlock(&group->lock);
   return 1;
 }
 
@@ -731,6 +841,126 @@ int32_t t_runtime_tasks_unlock(uint64_t mutex) {
 int32_t t_runtime_tasks_yield(void) {
   sched_yield();
   return 0;
+}
+
+/* Waiting for signals. Any thread can wait, so the signals cannot be
+   blocked and taken with [sigwait], which needs them blocked in every
+   thread. A handler records each signal in [t_signals_pending] and writes
+   a byte to a pipe. A thread of the runtime reads the pipe and wakes the
+   waiters, since a handler may not use a condition variable. That thread
+   also unblocks every handled signal, so that a signal which the program
+   was started with blocked is delivered to it. A waiter takes a pending
+   signal that it waits for, or blocks until the next wake. A signal that
+   no waiter takes stays pending for a later one. */
+static atomic_uint_fast64_t t_signals_pending;
+static uint64_t t_signals_handled;
+static pthread_mutex_t t_signals_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_once_t t_signals_once = PTHREAD_ONCE_INIT;
+static int t_signals_pipe[2];
+
+static void t_signals_handler(int signal) {
+  int saved = errno;
+  atomic_fetch_or(&t_signals_pending, (uint_fast64_t)1 << signal);
+  ssize_t written = write(t_signals_pipe[1], "", 1);
+  (void)written;
+  errno = saved;
+}
+
+static void *t_signals_main(void *argument) {
+  (void)argument;
+  sigset_t all;
+  sigfillset(&all);
+  pthread_sigmask(SIG_SETMASK, &all, NULL);
+  for (;;) {
+    char byte;
+    if (read(t_signals_pipe[0], &byte, 1) != 1) continue;
+    sigset_t handled;
+    sigemptyset(&handled);
+    pthread_mutex_lock(&t_signals_lock);
+    for (int signal = 1; signal < 64; signal++)
+      if (t_signals_handled & ((uint64_t)1 << signal)) sigaddset(&handled, signal);
+    pthread_mutex_unlock(&t_signals_lock);
+    pthread_sigmask(SIG_UNBLOCK, &handled, NULL);
+    t_runtime_tasks_wake((uint64_t)(uintptr_t)&t_signals_pending);
+  }
+  return NULL;
+}
+
+static void t_signals_start(void) {
+  if (pipe(t_signals_pipe) != 0) t_out_of_memory();
+  pthread_t thread;
+  pthread_attr_t attributes;
+  pthread_attr_init(&attributes);
+  pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+  int failed = pthread_create(&thread, &attributes, t_signals_main, NULL);
+  pthread_attr_destroy(&attributes);
+  if (failed) t_out_of_memory();
+}
+
+/* Blocks until one of the signals arrives, and returns its number. Returns
+   0 if the calling task is cancelled first. */
+int32_t t_runtime_signals_wait(const int32_t *signals, size_t count) {
+  pthread_once(&t_signals_once, t_signals_start);
+  uint_fast64_t wanted = 0;
+  int added = 0;
+  pthread_mutex_lock(&t_signals_lock);
+  for (size_t index = 0; index < count; index++) {
+    int32_t signal = signals[index];
+    if (signal <= 0 || signal >= 64) continue;
+    uint64_t bit = (uint64_t)1 << signal;
+    wanted |= bit;
+    if (!(t_signals_handled & bit)) {
+      struct sigaction action;
+      memset(&action, 0, sizeof action);
+      action.sa_handler = t_signals_handler;
+      sigfillset(&action.sa_mask);
+      action.sa_flags = SA_RESTART;
+      if (sigaction(signal, &action, NULL) == 0) {
+        t_signals_handled |= bit;
+        added = 1;
+      }
+    }
+  }
+  pthread_mutex_unlock(&t_signals_lock);
+  if (added) {
+    ssize_t written = write(t_signals_pipe[1], "", 1);
+    (void)written;
+  }
+  uint64_t key = (uint64_t)(uintptr_t)&t_signals_pending;
+  for (;;) {
+    uint64_t ticket = t_runtime_tasks_watch(key);
+    /* A signal that was sent while every thread blocked it has run no
+       handler: one that the program was started with blocked, and that
+       arrived before the first wait for it. It is pending, and the
+       calling thread takes it if it can see it. On macOS only the thread
+       it is pending for can take it. On Linux any thread can, so the
+       take must not block: the runtime's thread may have taken it. */
+    sigset_t blocked;
+    if (sigpending(&blocked) == 0)
+      for (size_t index = 0; index < count; index++) {
+        int32_t signal = signals[index];
+        if (signal <= 0 || signal >= 64 || sigismember(&blocked, signal) != 1) continue;
+        sigset_t one;
+        sigemptyset(&one);
+        sigaddset(&one, signal);
+#ifdef __linux__
+        struct timespec none = {0, 0};
+        if (sigtimedwait(&one, NULL, &none) == signal) return signal;
+#else
+        int arrived = 0;
+        if (sigwait(&one, &arrived) == 0) return arrived;
+#endif
+      }
+    uint_fast64_t pending = atomic_load(&t_signals_pending);
+    while (pending & wanted) {
+      uint_fast64_t arrived = pending & wanted;
+      uint_fast64_t lowest = arrived & (~arrived + 1);
+      if (atomic_compare_exchange_weak(&t_signals_pending, &pending, pending & ~lowest))
+        return (int32_t)__builtin_ctzll(lowest);
+    }
+    if (t_runtime_tasks_cancelled()) return 0;
+    t_wait(key, ticket, 1);
+  }
 }
 
 #endif

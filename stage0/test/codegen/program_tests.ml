@@ -884,10 +884,10 @@ let () =
             run_main
               {|use standard::processes
 
-fn name_of(signal: processes::Signal) -> String {
-  if signal == processes::Signal.User1 {
+fn name_of(arrived: Option[processes::Signal]) -> String {
+  if arrived is Some(signal) && signal == processes::Signal.User1 {
     "user 1".copy()
-  } else if signal == processes::Signal.Terminate {
+  } else if arrived is Some(signal) && signal == processes::Signal.Terminate {
     "terminate".copy()
   } else {
     "another".copy()

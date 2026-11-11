@@ -962,6 +962,97 @@ fn main(arguments: List[String]) -> ExitCode
 }
 |})
 
+(* Cancelling a task that is blocked in a call of the operating system *)
+
+let () =
+  test "on threads, a cancelled task returns early from a sleep" (fun () ->
+      expect_threaded ~expected:"1 early true\n"
+        {|fn nap(seconds: Int64) -> Int64
+  uses Tasks, Clock
+{
+  concurrent {
+    Clock.sleep(Duration.nanoseconds(seconds * 1000000000))
+    {
+      Clock.sleep(Duration.nanoseconds(50000000))
+      return 1
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console
+{
+  let before = Clock.monotonic()
+  let result = nap(60)
+  let after = Clock.monotonic()
+  Console.print_line("${result} early ${after.total_seconds() - before.total_seconds() < 20}")
+  ExitCode.success
+}
+|});
+  test "on threads, an accept in a cancelled task returns the cancelled error" (fun () ->
+      expect_threaded ~expected:"accept: cancelled\ntimed out\n"
+        {|use standard::network
+
+fn accept_or_time_out() -> String
+  uses Tasks, Clock, Console, NetworkServer, Handles
+{
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  if NetworkServer.listen(loopback) is Ok(opened) {
+    var listener = own opened
+    concurrent {
+      {
+        match mut listener.accept() {
+          Ok(_) => Console.print_line("accept: a connection")
+          Err(error) => Console.print_line("accept: ${error}")
+        }
+      }
+      {
+        Clock.sleep(Duration.nanoseconds(50000000))
+        return "timed out"
+      }
+    }
+  }
+  "could not listen"
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console, NetworkServer, Handles
+{
+  Console.print_line(accept_or_time_out())
+  ExitCode.success
+}
+|});
+  test "on threads, a wait for signals in a cancelled task returns None" (fun () ->
+      expect_threaded ~expected:"no signal\ntimed out\n"
+        {|use standard::processes
+
+fn signal_or_time_out() -> String
+  uses Tasks, Clock, Console, Signals
+{
+  let wanted = [processes::Signal.User2]
+  concurrent {
+    {
+      if Signals.wait(wanted.slice()) is Some(_) {
+        Console.print_line("a signal")
+      } else {
+        Console.print_line("no signal")
+      }
+    }
+    {
+      Clock.sleep(Duration.nanoseconds(50000000))
+      return "timed out"
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console, Signals
+{
+  Console.print_line(signal_or_time_out())
+  ExitCode.success
+}
+|})
+
 (* Programs that are reported as not built *)
 
 let unsupported name ~message text =
