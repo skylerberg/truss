@@ -534,6 +534,8 @@ prefix     = ( "-" | "!" | "~" ) prefix
   anything else, put it in parentheses: `(flags & mask) != 0`.
 - `&&` and `||` cannot be mixed without parentheses, and comparisons,
   `is`, and ranges do not chain.
+- The left operand of `is` is not a `!` expression: `!value is Pattern`
+  needs parentheses, as `!(value is Pattern)` or `(!value) is Pattern`.
 - `return` and `echo` take everything after them. A `{` right after
   `return`, on the same line, starts the value being returned.
 - A quantifier over a range or a collection, `forall pattern in expression`,

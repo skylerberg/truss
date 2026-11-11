@@ -517,11 +517,17 @@ let () =
       error "impl<Item> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<"
         ~fixed:"impl Shown for Box[Item] {}";
       error "impl<Item: Shown> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<");
-  test "!value is Variant" (fun () ->
-      body_error "let failed = !response is Ok(_)" ~code:Not_before_is ~at:"!"
-        ~fixed:"let failed = !(response is Ok(_))");
-  test "!value is a Bool pattern is allowed" (fun () ->
-      let _, diagnostics = body_of "let off = !flag is true" in
+  test "!value is Pattern needs parentheses" (fun () ->
+      body_error "let failed = !response is Ok(_)" ~code:Needs_parentheses ~at:"is"
+        ~fixed:"let failed = !(response is Ok(_))"
+        ~alternatives:[ "let failed = (!response) is Ok(_)" ];
+      body_error "let off = !flags.ready is true" ~code:Needs_parentheses ~at:"is"
+        ~fixed:"let off = !(flags.ready is true)"
+        ~alternatives:[ "let off = (!flags.ready) is true" ]);
+  test "a negation that is not the whole left operand of is needs none" (fun () ->
+      let _, diagnostics =
+        body_of "let a = (!flag) is true\nlet b = !(value is Some(_))\nlet c = -count is 0"
+      in
       if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a ?? b" (fun () ->
       body_error "let name = user.name ?? \"guest\"" ~code:Null_coalescing ~at:"?"

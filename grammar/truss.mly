@@ -437,26 +437,42 @@ or_chain:
   | comparison OROR comparison { () }
   | or_chain OROR comparison { () }
 
+/* `!` and `is` have no relative precedence, so the left operand of `is` is
+   not a `!` expression: `!value is Pattern` needs parentheses. Each level
+   from `range` down to `prefix` is therefore either a `!` expression or one
+   of its other forms, and `is` takes only the other forms of a `range`. */
 comparison:
   | range { () }
   | range comparison_operator range { () }
-  | range IS pattern { () }
+  | range_other IS pattern { () }
 
 comparison_operator:
   | EQEQ { () } | NEQ { () } | LT { () } | LE { () } | GT { () } | GE { () }
 
 range:
-  | additive { () }
+  | not_expression { () }
+  | range_other { () }
+
+range_other:
+  | additive_other { () }
   | additive DOTDOT additive { () }
   | additive DOTDOTEQ additive { () }
 
 additive:
-  | multiplicative { () }
+  | not_expression { () }
+  | additive_other { () }
+
+additive_other:
+  | multiplicative_other { () }
   | additive PLUS multiplicative { () }
   | additive MINUS multiplicative { () }
 
 multiplicative:
-  | prefix { () }
+  | not_expression { () }
+  | multiplicative_other { () }
+
+multiplicative_other:
+  | prefix_other { () }
   | multiplicative STAR prefix { () }
   | multiplicative SLASH prefix { () }
   | multiplicative PERCENT prefix { () }
@@ -486,8 +502,14 @@ shift_bits:
   | shift_bits SHR prefix { () }
 
 prefix:
-  | MINUS prefix { () }
+  | not_expression { () }
+  | prefix_other { () }
+
+not_expression:
   | BANG prefix { () }
+
+prefix_other:
+  | MINUS prefix { () }
   | TILDE prefix { () }
   | MUT postfix { () }
   | OWN postfix { () }

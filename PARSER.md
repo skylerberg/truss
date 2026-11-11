@@ -327,6 +327,7 @@ expression, checks each operation against each of its operands, and reports:
 | `a < b < c` | Comparisons do not chain. When `b` is a name or a literal, the fix is `a < b && b < c`, its meaning in Python; otherwise there is no fix |
 | `a ==> b ==> c` | `==>` does not chain. Fixes: `a ==> (b ==> c)`, Dafny's grouping, then `(a ==> b) ==> c` |
 | `0..10..20` | Ranges do not chain. No fix |
+| `!response is Ok(_)` | `!` and `is` have no relative precedence. Fixes: `!(response is Ok(_))`, Python's grouping, then `(!response) is Ok(_)`, the grouping of C#, Kotlin, Swift, and JavaScript |
 
 A grouping is which of two adjacent operators is applied first. When other
 languages group a combination differently, the diagnostic offers each
@@ -444,15 +445,6 @@ against that table, never against a string literal elsewhere.
 - **Inside a bound,** `time(...)`, `calls(...)`, `log(...)`, and
   `power(...)` parse as ordinary calls; name resolution resolves them, as
   GRAMMAR.md specifies.
-
-### A negation before `is`
-
-`!response is Ok(_)` is valid syntax: `!` binds tighter than `is`, so it
-negates `response`. A negated value is a `Bool`, which no variant matches,
-so `Operators` reports a `!` whose operand is the left operand of an `is`
-with a variant pattern, with the fix `!(response is Ok(_))`. `!flag is true`
-is not reported. The tree matches the source text, so this diagnostic is not
-a recovery.
 
 ## Checks on a whole definition
 

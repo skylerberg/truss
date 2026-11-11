@@ -1133,6 +1133,11 @@ comparisons over `&&`. Every other combination needs parentheses.
   Truss has no table for these and asks for parentheses, which Rust's Clippy
   and Go's vet already recommend.
 - **`&&` and `||` cannot be mixed,** for the same reason.
+- **`!` directly before the left operand of `is` needs parentheses.**
+  `not x is y` negates the test in Python, and `!x is T` negates the value
+  in C#, Kotlin, and Swift, as `!x instanceof T` does in JavaScript, where
+  linters report it. So `!response is Ok(_)` means nothing in Truss: write
+  `!(response is Ok(_))` or `(!response) is Ok(_)`.
 - **Comparisons do not chain.** `a < b < c` means something different in
   Python than in C, so it means nothing in Truss.
 - **`echo` covers everything after it,** like `return`, so adding `echo` in
