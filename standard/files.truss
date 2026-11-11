@@ -3,8 +3,6 @@ use standard::intrinsic
 use standard::network
 use standard::processes
 use standard::streams
-use standard::system::handles
-use standard::system::lines
 use standard::text
 
 public opaque type Path(text: String)
@@ -555,34 +553,51 @@ public type WriteMode =
 public type LinkKind = Symbolic | Hard
   derives Equal
 
-public opaque type FileReader(handle: intrinsic::Handle, input: lines::LineInput)
+public opaque type FileReader(reader: streams::BufferedReader[File])
+
+internal fn FileReader.new(file: own File) -> FileReader {
+  FileReader(reader: streams::BufferedReader[File].new(own file))
+}
+
+internal fn FileReader.opened(simulated_handle: UInt64) -> FileReader {
+  FileReader.new(File.opened(simulated_handle))
+}
 
 public fn FileReader.read_line(mut self) -> Result[Option[String], SystemError]
   uses Handles
 {
-  match mut self.input.next_line(intrinsic::handle_descriptor(self.handle)) {
-    Ok(line) => Ok(own line)
-    Err(number) => Err(handles::file_error(number))
-  }
+  mut self.reader.read_line()
 }
 
 public fn FileReader.lines(mut self) yields own Result[String, SystemError]
   uses Handles
 {
-  todo
+  var more = true
+  while more {
+    match mut self.reader.read_line() {
+      Ok(Some(line)) => yield Ok(own line)
+      Ok(None) => {
+        more = false
+      }
+      Err(error) => {
+        more = false
+        yield Err(error)
+      }
+    }
+  }
 }
 
 public fn FileReader.metadata(self) -> Result[Metadata, SystemError]
   uses Handles
 {
-  todo
+  self.reader.source().metadata()
 }
 
 impl streams::Reader for FileReader {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
   {
-    todo
+    mut self.reader.read(mut buffer, limit: limit)
   }
 }
 
@@ -590,7 +605,7 @@ impl streams::Seek for FileReader {
   fn seek(mut self, to: streams::Position) -> Result[UInt64, SystemError]
     uses Handles
   {
-    todo
+    mut self.reader.seek(to)
   }
 }
 
@@ -622,6 +637,10 @@ public fn FileWriter.flush(mut self) -> Result[Unit, SystemError]
 }
 
 public opaque type File(handle: streams::Handle)
+
+internal fn File.opened(simulated_handle: UInt64) -> File {
+  File(handle: streams::Handle.simulated(simulated_handle))
+}
 
 public fn File.read_at(mut self, offset: UInt64, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
   uses Handles
@@ -919,107 +938,748 @@ impl FileWrite for ReadOnlyFiles {
   }
 }
 
-public opaque type MemoryFiles(files: Map[Path, List[UInt8]], directories: Set[Path], next_handle: UInt64)
+type InodeKind =
+  | Bytes(contents: List[UInt8])
+  | Directory
+  | Link(target: Path)
+
+type Inode(kind: InodeKind, permissions: Permissions, modified: Instant, link_count: USize)
+
+type OpenFile(handle: UInt64, inode: UInt64, position: UInt64, readable: Bool, writable: Bool, appending: Bool)
+
+type Located(path: Path, inode: Option[UInt64])
+
+type Named(path: Path, inode: UInt64)
+
+type Renamed(from: Path, to: Path, inode: UInt64)
+
+let last_console_handle: UInt64 = 2
+
+let followed_links_limit: USize = 32
+
+let largest_file: USize = 1073741824
+
+public opaque type MemoryFiles(
+  names: Map[Path, UInt64],
+  inodes: Map[UInt64, Inode],
+  open_files: List[OpenFile],
+  inodes_made: UInt64,
+  handles_made: UInt64,
+  time: Instant,
+)
 
 public fn MemoryFiles.new() -> MemoryFiles {
-  MemoryFiles(files: [:], directories: [], next_handle: 0)
+  var files = MemoryFiles(
+    names: [:],
+    inodes: [:],
+    open_files: [],
+    inodes_made: 0,
+    handles_made: last_console_handle,
+    time: Instant.epoch,
+  )
+  let root = mut files.add_inode(InodeKind.Directory, permissions: Permissions.from_mode(0o755))
+  mut files.names.insert(Path.new("/"), value: root)
+  files
 }
 
 public fn MemoryFiles.with_text(own self, file: Path, contents: StringSlice) -> MemoryFiles {
-  todo
+  own self.with_bytes(file, contents: contents.bytes())
 }
 
 public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -> MemoryFiles {
-  todo
+  var changed = own self
+  var directory = Path.new("/")
+  var components = reversed_components(file)
+  while mut components.pop() is Some(name) {
+    let path = directory.join(name.slice())
+    mut changed.remove_tree(path, keep_directory: !components.is_empty())
+    if components.is_empty() {
+      let inode = mut changed.add_inode(
+        InodeKind.Bytes(contents: contents.to_list()),
+        permissions: Permissions.from_mode(0o644),
+      )
+      mut changed.names.insert(own path, value: inode)
+    } else {
+      if !changed.names.contains(path) {
+        let inode = mut changed.add_inode(InodeKind.Directory, permissions: Permissions.from_mode(0o755))
+        mut changed.names.insert(path.copy(), value: inode)
+      }
+      directory = own path
+    }
+  }
+  changed
 }
 
-public fn MemoryFiles.contents(self, file: Path) lends Option[List[UInt8]] {
-  todo
+public fn MemoryFiles.contents(self, file: Path) -> Option[List[UInt8]] {
+  match self.read_bytes(file) {
+    Ok(bytes) => Some(own bytes)
+    Err(_) => None
+  }
 }
 
 public fn MemoryFiles.text(self, file: Path) -> Option[String] {
-  todo
+  match self.read_bytes(file) {
+    Ok(bytes) => match String.from_utf8(own bytes) {
+      Ok(text) => Some(own text)
+      Err(_) => None
+    }
+    Err(_) => None
+  }
 }
 
 public fn MemoryFiles.paths(self) -> List[Path] {
-  todo
+  var paths: List[Path] = []
+  for entry in self.names {
+    if self.kind_of(entry.value) == Some(FileKind.File) {
+      mut paths.push(entry.key.copy())
+    }
+  }
+  paths
+}
+
+internal fn MemoryFiles.set_time(mut self, now: Instant) {
+  self.time = now
+}
+
+fn reversed_components(path: Path) -> List[String] {
+  var components: List[String] = []
+  for component in path.components() {
+    mut components.push(component.to_string())
+  }
+  mut components.reverse()
+  components
+}
+
+fn offset_from(base: UInt64, by: Int64) -> Option[UInt64] {
+  if by >= 0 {
+    base.checked_add(by.to_unsigned_bits())
+  } else {
+    base.checked_subtract(by.unsigned_absolute())
+  }
+}
+
+fn overwrite(contents: mut List[UInt8], at: UInt64, bytes: Slice[UInt8]) -> Result[Unit, SystemError] {
+  let limit: UInt64 = intrinsic::convert(largest_file)
+  if at > limit || bytes.length() > largest_file {
+    return Err(SystemError.OutOfStorage)
+  }
+  let start: USize = intrinsic::convert(at)
+  while contents.length() < start {
+    mut contents.push(0)
+  }
+  for index in 0..bytes.length() {
+    let position = start + index
+    if position < contents.length() {
+      contents[position] = bytes[index]
+    } else {
+      mut contents.push(bytes[index])
+    }
+  }
+  Ok(Unit)
+}
+
+internal fn MemoryFiles.add_inode(mut self, kind: own InodeKind, permissions: Permissions) -> UInt64 {
+  self.inodes_made = self.inodes_made.saturating_add(1)
+  mut self.inodes.insert(
+    self.inodes_made,
+    value: Inode(kind: own kind, permissions: permissions, modified: self.time, link_count: 1),
+  )
+  self.inodes_made
+}
+
+internal fn MemoryFiles.kind_of(self, inode: UInt64) -> Option[FileKind] {
+  match self.inodes.get(inode) {
+    Some(found) => match found.kind {
+      Bytes(_) => Some(FileKind.File)
+      Directory => Some(FileKind.Directory)
+      Link(_) => Some(FileKind.SymbolicLink)
+    }
+    None => None
+  }
+}
+
+internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Located, SystemError] {
+  var unresolved = reversed_components(path)
+  var current = Path.new("/")
+  var followed: USize = 0
+  while mut unresolved.pop() is Some(name) {
+    if name == "." {
+      continue
+    }
+    if name == ".." {
+      current = current.parent().unwrap_or(Path.new("/"))
+      continue
+    }
+    let candidate = current.join(name.slice())
+    let inode = match self.names.get(candidate) {
+      Some(number) => number
+      None => {
+        if unresolved.is_empty() {
+          return Ok(Located(path: own candidate, inode: None))
+        }
+        return Err(SystemError.NotFound)
+      }
+    }
+    match self.inodes.get(inode) {
+      Some(found) => match found.kind {
+        Link(target) => {
+          if unresolved.is_empty() && !follow_last {
+            return Ok(Located(path: own candidate, inode: Some(inode)))
+          }
+          if followed >= followed_links_limit {
+            return Err(SystemError.InvalidInput)
+          }
+          followed += 1
+          mut unresolved.append(reversed_components(target))
+          if target.is_absolute() {
+            current = Path.new("/")
+          }
+        }
+        Directory => {
+          current = own candidate
+        }
+        Bytes(_) => {
+          if !unresolved.is_empty() {
+            return Err(SystemError.NotADirectory)
+          }
+          current = own candidate
+        }
+      }
+      None => return Err(SystemError.NotFound)
+    }
+  }
+  let inode = match self.names.get(current) {
+    Some(number) => Some(number)
+    None => None
+  }
+  Ok(Located(path: own current, inode: inode))
+}
+
+internal fn MemoryFiles.existing(self, path: Path, follow_last: Bool) -> Result[UInt64, SystemError] {
+  match self.locate(path, follow_last: follow_last)?.inode {
+    Some(inode) => Ok(inode)
+    None => Err(SystemError.NotFound)
+  }
+}
+
+internal fn MemoryFiles.has_entries(self, directory: Path) -> Bool {
+  for entry in self.names {
+    if entry.key.parent() is Some(parent) && parent == directory {
+      return true
+    }
+  }
+  false
+}
+
+internal fn MemoryFiles.is_open(self, inode: UInt64) -> Bool {
+  for open in self.open_files {
+    if open.inode == inode {
+      return true
+    }
+  }
+  false
+}
+
+internal fn MemoryFiles.forget_if_unreachable(mut self, inode: UInt64) {
+  let unnamed = match self.inodes.get(inode) {
+    Some(found) => found.link_count == 0
+    None => false
+  }
+  if unnamed && !self.is_open(inode) {
+    mut self.inodes.remove(inode)
+  }
+}
+
+internal fn MemoryFiles.remove_name(mut self, path: Path, inode: UInt64) {
+  mut self.names.remove(path)
+  match mut self.inodes.take(inode) {
+    Some(found) => {
+      var changed = own found
+      changed.link_count = changed.link_count.saturating_subtract(1)
+      mut self.inodes.insert(inode, value: own changed)
+    }
+    None => {}
+  }
+  mut self.forget_if_unreachable(inode)
+}
+
+internal fn MemoryFiles.remove_tree(mut self, path: Path, keep_directory: Bool) {
+  var removed: List[Named] = []
+  for entry in self.names {
+    let is_directory = self.kind_of(entry.value) == Some(FileKind.Directory)
+    let removes_entry = if entry.key == path {
+      !(keep_directory && is_directory)
+    } else {
+      !keep_directory && entry.key.starts_with(path)
+    }
+    if removes_entry {
+      mut removed.push(Named(path: entry.key.copy(), inode: entry.value))
+    }
+  }
+  for name in removed {
+    mut self.remove_name(name.path, inode: name.inode)
+  }
+}
+
+internal fn MemoryFiles.read_bytes(self, file: Path) -> Result[List[UInt8], SystemError] {
+  let inode = self.existing(file, follow_last: true)?
+  match self.inodes.get(inode) {
+    Some(found) => match found.kind {
+      Bytes(contents) => {
+        if (found.permissions.mode() & 0o444) == 0 {
+          return Err(SystemError.PermissionDenied)
+        }
+        Ok(contents.copy())
+      }
+      Directory => Err(SystemError.IsADirectory)
+      Link(_) => Err(SystemError.NotFound)
+    }
+    None => Err(SystemError.NotFound)
+  }
+}
+
+internal fn MemoryFiles.replace_contents(mut self, inode: UInt64, contents: own List[UInt8]) -> Result[Unit, SystemError] {
+  match mut self.inodes.take(inode) {
+    Some(found) => {
+      var changed = own found
+      let outcome: Result[Unit, SystemError] = match changed.kind {
+        Bytes(_) => if changed.permissions.is_read_only() { Err(SystemError.PermissionDenied) } else { Ok(Unit) }
+        Directory => Err(SystemError.IsADirectory)
+        Link(_) => Err(SystemError.NotFound)
+      }
+      if outcome is Ok(_) {
+        changed.kind = InodeKind.Bytes(contents: own contents)
+        changed.modified = self.time
+      }
+      mut self.inodes.insert(inode, value: own changed)
+      outcome
+    }
+    None => Err(SystemError.NotFound)
+  }
+}
+
+internal fn MemoryFiles.write_bytes(mut self, file: Path, contents: own List[UInt8]) -> Result[Unit, SystemError] {
+  let located = self.locate(file, follow_last: true)?
+  match located.inode {
+    Some(inode) => mut self.replace_contents(inode, contents: own contents)
+    None => {
+      let inode = mut self.add_inode(InodeKind.Bytes(contents: own contents), permissions: Permissions.from_mode(0o644))
+      mut self.names.insert(own located.path, value: inode)
+      Ok(Unit)
+    }
+  }
+}
+
+internal fn MemoryFiles.change_inode(
+  mut self,
+  path: Path,
+  permissions: Option[Permissions],
+  modified: Option[Instant],
+) -> Result[Unit, SystemError] {
+  let inode = self.existing(path, follow_last: true)?
+  match mut self.inodes.take(inode) {
+    Some(found) => {
+      var changed = own found
+      if permissions is Some(new_permissions) {
+        changed.permissions = new_permissions
+      }
+      if modified is Some(new_time) {
+        changed.modified = new_time
+      }
+      mut self.inodes.insert(inode, value: own changed)
+      Ok(Unit)
+    }
+    None => Err(SystemError.NotFound)
+  }
+}
+
+internal fn MemoryFiles.metadata_of(self, inode: UInt64) -> Result[Metadata, SystemError] {
+  match self.inodes.get(inode) {
+    Some(found) => {
+      let length: USize = match found.kind {
+        Bytes(contents) => contents.length()
+        Directory => 0
+        Link(target) => target.bytes().length()
+      }
+      let kind = match found.kind {
+        Bytes(_) => FileKind.File
+        Directory => FileKind.Directory
+        Link(_) => FileKind.SymbolicLink
+      }
+      Ok(Metadata(
+        kind: kind,
+        length: intrinsic::convert(length),
+        permissions: found.permissions,
+        modified: found.modified,
+        accessed: None,
+        created: None,
+      ))
+    }
+    None => Err(SystemError.NotFound)
+  }
+}
+
+internal fn MemoryFiles.add_open_file(mut self, inode: UInt64, readable: Bool, writable: Bool, appending: Bool) -> UInt64 {
+  self.handles_made = self.handles_made.saturating_add(1)
+  mut self.open_files.push(
+    OpenFile(
+      handle: self.handles_made,
+      inode: inode,
+      position: 0,
+      readable: readable,
+      writable: writable,
+      appending: appending,
+    ),
+  )
+  self.handles_made
+}
+
+internal fn MemoryFiles.open_file_index(self, handle: streams::Handle) -> Option[USize]
+  ensures !(result is Some(index) && index >= self.open_files.length())
+{
+  let number = handle.number()
+  self.open_files.slice().find_index(fn(open) { open.handle == number })
+}
+
+internal fn MemoryFiles.length_of(self, inode: UInt64) -> UInt64 {
+  match self.inodes.get(inode) {
+    Some(found) => match found.kind {
+      Bytes(contents) => intrinsic::convert(contents.length())
+      _ => 0
+    }
+    None => 0
+  }
+}
+
+internal fn MemoryFiles.copy_out(self, inode: UInt64, from: UInt64, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+  ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
+  ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
+{
+  match self.inodes.get(inode) {
+    Some(found) => match found.kind {
+      Bytes(contents) => {
+        let length: UInt64 = intrinsic::convert(contents.length())
+        if from >= length {
+          return Ok(0)
+        }
+        let start: USize = intrinsic::convert(from)
+        let available = contents.length() - start
+        let count = if limit < available { limit } else { available }
+        streams::append_bytes(mut buffer, bytes: contents.slice_range(start, stop: start + count))
+        Ok(count)
+      }
+      Directory => Err(SystemError.IsADirectory)
+      Link(_) => Err(SystemError.InvalidInput)
+    }
+    None => Err(SystemError.Closed)
+  }
+}
+
+internal fn MemoryFiles.copy_in(mut self, inode: UInt64, at: UInt64, bytes: Slice[UInt8]) -> Result[Unit, SystemError]
+  ensures self.open_files.length() == old(self.open_files.length())
+{
+  match mut self.inodes.take(inode) {
+    Some(found) => {
+      var changed = own found
+      let outcome: Result[Unit, SystemError] = match mut changed.kind {
+        Bytes(contents) => overwrite(mut contents, at: at, bytes: bytes)
+        Directory => Err(SystemError.IsADirectory)
+        Link(_) => Err(SystemError.InvalidInput)
+      }
+      changed.modified = self.time
+      mut self.inodes.insert(inode, value: own changed)
+      outcome
+    }
+    None => Err(SystemError.Closed)
+  }
+}
+
+internal fn MemoryFiles.resize(mut self, inode: UInt64, length: UInt64) -> Result[Unit, SystemError] {
+  let limit: UInt64 = intrinsic::convert(largest_file)
+  if length > limit {
+    return Err(SystemError.OutOfStorage)
+  }
+  let wanted: USize = intrinsic::convert(length)
+  match mut self.inodes.take(inode) {
+    Some(found) => {
+      var changed = own found
+      let outcome: Result[Unit, SystemError] = match mut changed.kind {
+        Bytes(contents) => {
+          if wanted < contents.length() {
+            mut contents.truncate(wanted)
+          }
+          while contents.length() < wanted {
+            mut contents.push(0)
+          }
+          Ok(Unit)
+        }
+        Directory => Err(SystemError.IsADirectory)
+        Link(_) => Err(SystemError.InvalidInput)
+      }
+      changed.modified = self.time
+      mut self.inodes.insert(inode, value: own changed)
+      outcome
+    }
+    None => Err(SystemError.Closed)
+  }
+}
+
+internal fn MemoryFiles.open_to_read(mut self, file: Path) -> Result[UInt64, SystemError] {
+  let inode = self.existing(file, follow_last: true)?
+  if self.kind_of(inode) == Some(FileKind.Directory) {
+    return Err(SystemError.IsADirectory)
+  }
+  if (self.metadata_of(inode)?.permissions.mode() & 0o444) == 0 {
+    return Err(SystemError.PermissionDenied)
+  }
+  Ok(mut self.add_open_file(inode, readable: true, writable: false, appending: false))
+}
+
+internal fn MemoryFiles.open_to_write(mut self, file: Path, mode: WriteMode) -> Result[UInt64, SystemError] {
+  let located = self.locate(file, follow_last: true)?
+  let inode = match located.inode {
+    Some(existing) => {
+      if mode == WriteMode.CreateNew {
+        return Err(SystemError.AlreadyExists)
+      }
+      if self.kind_of(existing) == Some(FileKind.Directory) {
+        return Err(SystemError.IsADirectory)
+      }
+      if self.metadata_of(existing)?.permissions.is_read_only() {
+        return Err(SystemError.PermissionDenied)
+      }
+      if mode == WriteMode.Replace {
+        mut self.replace_contents(existing, contents: [])?
+      }
+      existing
+    }
+    None => {
+      let made = mut self.add_inode(InodeKind.Bytes(contents: []), permissions: Permissions.from_mode(0o644))
+      mut self.names.insert(own located.path, value: made)
+      made
+    }
+  }
+  let handle = mut self.add_open_file(
+    inode,
+    readable: mode == WriteMode.Update,
+    writable: true,
+    appending: mode == WriteMode.Append,
+  )
+  Ok(handle)
 }
 
 impl FileRead for MemoryFiles {
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
-    todo
+    self.read_bytes(file)
   }
 
   fn read_text(self, file: Path) -> Result[String, SystemError] {
-    todo
+    match String.from_utf8(self.read_bytes(file)?) {
+      Ok(text) => Ok(own text)
+      Err(_) => Err(SystemError.InvalidData)
+    }
   }
 
-  fn open(self, file: Path) -> Result[FileReader, SystemError] {
-    todo
+  fn open(mut self, file: Path) -> Result[FileReader, SystemError] {
+    Ok(FileReader.opened(mut self.open_to_read(file)?))
   }
 
   fn metadata(self, path: Path, follow_links: Bool) -> Result[Metadata, SystemError] {
-    todo
+    self.metadata_of(self.existing(path, follow_last: follow_links)?)
   }
 
   fn list(self, directory: Path) -> Result[List[DirectoryEntry], SystemError] {
-    todo
+    let located = self.locate(directory, follow_last: true)?
+    let inode = match located.inode {
+      Some(number) => number
+      None => return Err(SystemError.NotFound)
+    }
+    if self.kind_of(inode) != Some(FileKind.Directory) {
+      return Err(SystemError.NotADirectory)
+    }
+    var entries: List[DirectoryEntry] = []
+    for entry in self.names {
+      if entry.key.parent() is Some(parent) && parent == located.path {
+        if entry.key.file_name() is Some(name) && self.kind_of(entry.value) is Some(kind) {
+          mut entries.push(DirectoryEntry(name: name.to_string(), kind: kind))
+        }
+      }
+    }
+    Ok(own entries)
   }
 
   fn read_link(self, link: Path) -> Result[Path, SystemError] {
-    todo
+    let inode = self.existing(link, follow_last: false)?
+    match self.inodes.get(inode) {
+      Some(found) => match found.kind {
+        Link(target) => Ok(target.copy())
+        _ => Err(SystemError.InvalidInput)
+      }
+      None => Err(SystemError.NotFound)
+    }
   }
 
   fn resolve(self, path: Path) -> Result[Path, SystemError] {
-    todo
+    let located = self.locate(path, follow_last: true)?
+    match located.inode {
+      Some(_) => Ok(own located.path)
+      None => Err(SystemError.NotFound)
+    }
   }
 }
 
 impl FileWrite for MemoryFiles {
   fn write(mut self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
-    todo
+    mut self.write_bytes(file, contents: contents.to_list())
   }
 
   fn write_text(mut self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
-    todo
+    mut self.write_bytes(file, contents: contents.to_bytes())
   }
 
   fn open(mut self, file: Path, mode: WriteMode) -> Result[File, SystemError] {
-    todo
+    Ok(File.opened(mut self.open_to_write(file, mode: mode)?))
   }
 
   fn create_directory(mut self, directory: Path) -> Result[Unit, SystemError] {
-    todo
+    let located = self.locate(directory, follow_last: false)?
+    if located.inode is Some(_) {
+      return Err(SystemError.AlreadyExists)
+    }
+    let inode = mut self.add_inode(InodeKind.Directory, permissions: Permissions.from_mode(0o755))
+    mut self.names.insert(own located.path, value: inode)
+    Ok(Unit)
   }
 
   fn remove(mut self, path: Path) -> Result[Unit, SystemError] {
-    todo
+    let located = self.locate(path, follow_last: false)?
+    let inode = match located.inode {
+      Some(number) => number
+      None => return Err(SystemError.NotFound)
+    }
+    if located.path == Path.new("/") {
+      return Err(SystemError.PermissionDenied)
+    }
+    if self.kind_of(inode) == Some(FileKind.Directory) && self.has_entries(located.path) {
+      return Err(SystemError.DirectoryNotEmpty)
+    }
+    mut self.remove_name(located.path, inode: inode)
+    Ok(Unit)
   }
 
   fn rename(mut self, from: Path, to: Path) -> Result[Unit, SystemError] {
-    todo
+    let source = self.locate(from, follow_last: false)?
+    let moved = match source.inode {
+      Some(number) => number
+      None => return Err(SystemError.NotFound)
+    }
+    let target = self.locate(to, follow_last: false)?
+    if source.path == target.path {
+      return Ok(Unit)
+    }
+    if source.path == Path.new("/") || target.path.starts_with(source.path) {
+      return Err(SystemError.InvalidInput)
+    }
+    let moves_directory = self.kind_of(moved) == Some(FileKind.Directory)
+    if target.inode is Some(replaced) {
+      let replaces_directory = self.kind_of(replaced) == Some(FileKind.Directory)
+      if moves_directory && !replaces_directory {
+        return Err(SystemError.NotADirectory)
+      }
+      if !moves_directory && replaces_directory {
+        return Err(SystemError.IsADirectory)
+      }
+      if replaces_directory && self.has_entries(target.path) {
+        return Err(SystemError.DirectoryNotEmpty)
+      }
+      mut self.remove_name(target.path, inode: replaced)
+    }
+    var renamed: List[Renamed] = []
+    for entry in self.names {
+      if entry.key == source.path {
+        mut renamed.push(Renamed(from: entry.key.copy(), to: target.path.copy(), inode: entry.value))
+      } else if entry.key.relative_to(source.path) is Some(below) {
+        mut renamed.push(Renamed(from: entry.key.copy(), to: target.path.join_path(below), inode: entry.value))
+      }
+    }
+    for name in renamed {
+      mut self.names.remove(name.from)
+      mut self.names.insert(name.to.copy(), value: name.inode)
+    }
+    Ok(Unit)
   }
 
   fn link(mut self, target: Path, link: Path, kind: LinkKind) -> Result[Unit, SystemError] {
-    todo
+    let located = self.locate(link, follow_last: false)?
+    if located.inode is Some(_) {
+      return Err(SystemError.AlreadyExists)
+    }
+    match kind {
+      Symbolic => {
+        let inode = mut self.add_inode(InodeKind.Link(target: target.copy()), permissions: Permissions.from_mode(0o777))
+        mut self.names.insert(own located.path, value: inode)
+        Ok(Unit)
+      }
+      Hard => {
+        let inode = self.existing(target, follow_last: false)?
+        if self.kind_of(inode) == Some(FileKind.Directory) {
+          return Err(SystemError.PermissionDenied)
+        }
+        match mut self.inodes.take(inode) {
+          Some(found) => {
+            var changed = own found
+            changed.link_count = changed.link_count.saturating_add(1)
+            mut self.inodes.insert(inode, value: own changed)
+          }
+          None => return Err(SystemError.NotFound)
+        }
+        mut self.names.insert(own located.path, value: inode)
+        Ok(Unit)
+      }
+    }
   }
 
   fn set_permissions(mut self, path: Path, permissions: Permissions) -> Result[Unit, SystemError] {
-    todo
+    mut self.change_inode(path, permissions: Some(permissions), modified: None)
   }
 
   fn set_modified(mut self, path: Path, time: Instant) -> Result[Unit, SystemError] {
-    todo
+    mut self.change_inode(path, permissions: None, modified: Some(time))
   }
 }
 
 impl Handles for MemoryFiles {
   fn read(mut self, handle: streams::Handle, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
-    todo
+    let index = match self.open_file_index(handle) {
+      Some(index) => index
+      None => return Err(SystemError.Closed)
+    }
+    if !self.open_files[index].readable {
+      return Err(SystemError.InvalidInput)
+    }
+    let count = self.copy_out(
+      self.open_files[index].inode,
+      from: self.open_files[index].position,
+      buffer: mut buffer,
+      limit: limit,
+    )?
+    self.open_files[index].position = self.open_files[index].position.saturating_add(intrinsic::convert(count))
+    Ok(count)
   }
 
   fn write(mut self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    todo
+    let index = match self.open_file_index(handle) {
+      Some(index) => index
+      None => return Err(SystemError.Closed)
+    }
+    if !self.open_files[index].writable {
+      return Err(SystemError.InvalidInput)
+    }
+    let inode = self.open_files[index].inode
+    let at = if self.open_files[index].appending { self.length_of(inode) } else { self.open_files[index].position }
+    mut self.copy_in(inode, at: at, bytes: bytes)?
+    self.open_files[index].position = at.saturating_add(intrinsic::convert(bytes.length()))
+    Ok(bytes.length())
   }
 
   fn read_at(
@@ -1029,35 +1689,86 @@ impl Handles for MemoryFiles {
     buffer: mut List[UInt8],
     limit: USize,
   ) -> Result[USize, SystemError] {
-    todo
+    let index = match self.open_file_index(handle) {
+      Some(index) => index
+      None => return Err(SystemError.Closed)
+    }
+    if !self.open_files[index].readable {
+      return Err(SystemError.InvalidInput)
+    }
+    self.copy_out(self.open_files[index].inode, from: offset, buffer: mut buffer, limit: limit)
   }
 
   fn write_at(mut self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    todo
+    let index = match self.open_file_index(handle) {
+      Some(index) => index
+      None => return Err(SystemError.Closed)
+    }
+    if !self.open_files[index].writable {
+      return Err(SystemError.InvalidInput)
+    }
+    let inode = self.open_files[index].inode
+    mut self.copy_in(inode, at: offset, bytes: bytes)?
+    Ok(bytes.length())
   }
 
   fn seek(mut self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
-    todo
+    let index = match self.open_file_index(handle) {
+      Some(index) => index
+      None => return Err(SystemError.Closed)
+    }
+    let position = match to {
+      FromStart(offset) => Some(offset)
+      FromCurrent(offset) => offset_from(self.open_files[index].position, by: offset)
+      FromEnd(offset) => offset_from(self.length_of(self.open_files[index].inode), by: offset)
+    }
+    match position {
+      Some(found) => {
+        self.open_files[index].position = found
+        Ok(found)
+      }
+      None => Err(SystemError.InvalidInput)
+    }
   }
 
   fn set_length(mut self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
-    todo
+    let index = match self.open_file_index(handle) {
+      Some(index) => index
+      None => return Err(SystemError.Closed)
+    }
+    if !self.open_files[index].writable {
+      return Err(SystemError.InvalidInput)
+    }
+    let inode = self.open_files[index].inode
+    mut self.resize(inode, length: length)
   }
 
   fn synchronize(mut self, handle: streams::Handle) -> Result[Unit, SystemError] {
-    todo
+    match self.open_file_index(handle) {
+      Some(_) => Ok(Unit)
+      None => Err(SystemError.Closed)
+    }
   }
 
   fn metadata(mut self, handle: streams::Handle) -> Result[Metadata, SystemError] {
-    todo
+    match self.open_file_index(handle) {
+      Some(index) => self.metadata_of(self.open_files[index].inode)
+      None => Err(SystemError.Closed)
+    }
   }
 
   fn close(mut self, handle: own streams::Handle) -> Result[Unit, SystemError] {
-    todo
+    let index = match self.open_file_index(handle) {
+      Some(index) => index
+      None => return Err(SystemError.Closed)
+    }
+    let closed = mut self.open_files.swap_remove(index)
+    mut self.forget_if_unreachable(closed.inode)
+    Ok(Unit)
   }
 
   fn shut_down(mut self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn set_timeout(
@@ -1066,11 +1777,11 @@ impl Handles for MemoryFiles {
     direction: network::Direction,
     timeout: Option[Duration],
   ) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn accept(mut self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn send_to(
@@ -1079,7 +1790,7 @@ impl Handles for MemoryFiles {
     bytes: Slice[UInt8],
     address: network::SocketAddress,
   ) -> Result[USize, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn receive_from(
@@ -1088,22 +1799,22 @@ impl Handles for MemoryFiles {
     buffer: mut List[UInt8],
     limit: USize,
   ) -> Result[network::Datagram, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn wait(mut self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn signal(mut self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn terminal_size(mut self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 
   fn set_raw_mode(mut self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
-    todo
+    Err(SystemError.Unsupported)
   }
 }

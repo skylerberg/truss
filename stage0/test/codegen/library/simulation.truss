@@ -1,0 +1,242 @@
+use standard::files
+use standard::log
+use standard::simulation
+use standard::tasks
+
+fn collect(numbers: tasks::Channel[Int64]) -> List[Int64]
+  uses Tasks
+{
+  var received: List[Int64] = []
+  for number in numbers.messages() {
+    mut received.push(number)
+  }
+  received
+}
+
+fn random_numbers(seed: UInt64) -> List[UInt64]
+  uses Panic
+{
+  var numbers: List[UInt64] = []
+  provide simulation::World.new(seed: seed) {
+    for _ in 0..4 {
+      mut numbers.push(Random.next())
+    }
+  }
+  numbers
+}
+
+test "a world captures the text that the console prints" {
+  let world = simulation::World.new()
+  provide world {
+    Console.print("a")
+    Console.print_line("b")
+    Console.print_error("c")
+    assert world.output() == "ab\n"
+    assert world.errors() == "c\n"
+  }
+}
+
+test "a world's console reads the lines of its setup" {
+  provide simulation::World.from(simulation::Setup.new().with_input(["first", "second"])) {
+    assert Console.read_line() == Some("first")
+    assert Console.read_line() == Some("second")
+    assert Console.read_line() is None
+  }
+}
+
+test "a world answers with the variables and the platform of its setup" {
+  provide simulation::World.from(simulation::Setup.new().with_variable("HOME", value: "/home/ada")) {
+    assert Environment.variable("HOME") == Some("/home/ada")
+    assert Environment.variable("PATH") is None
+    assert Environment.platform().host_name == "simulation"
+    assert Environment.current_directory() is Ok(directory) && "${directory}" == "/"
+  }
+}
+
+test "a world keeps the records that are logged" {
+  let world = simulation::World.new()
+  provide world {
+    log::information("started")
+    log::warning("slow")
+    let records = world.records()
+    assert records.length() == 2
+      && records[0].message == "started"
+      && records[1].level == log::Level.Warning
+  }
+}
+
+test "a world's random numbers depend only on its seed" {
+  assert random_numbers(5) == random_numbers(5)
+  assert random_numbers(5) != random_numbers(6)
+}
+
+test "a world's clock starts at the time of its setup and moves only when a task sleeps" {
+  let start = Instant.from_unix_nanoseconds(1700000000000000000)
+  let world = simulation::World.from(simulation::Setup.new().with_time(start))
+  provide world {
+    assert Clock.now() == start
+    assert Clock.monotonic() == Duration.zero
+    Console.print_line("no time passes")
+    assert Clock.now() == start
+    Clock.sleep(Duration.hours(24))
+    assert Clock.monotonic() == Duration.hours(24)
+    assert Clock.now() == start + Duration.hours(24)
+    assert world.now() == Clock.now()
+    Clock.sleep(Duration.zero)
+    Clock.sleep(Duration.seconds(-5))
+    assert Clock.monotonic() == Duration.hours(24)
+  }
+}
+
+test "advance moves a world's clock" {
+  let world = simulation::World.new()
+  provide world {
+    world.advance(Duration.minutes(5))
+    assert Clock.monotonic() == Duration.minutes(5)
+  }
+}
+
+test "tasks that sleep wake in the order of their deadlines" {
+  let seeds: UInt64 = 16
+  for seed in 0..seeds {
+    provide simulation::World.new(seed: seed) {
+      let order = tasks::Channel[Int64].new(capacity: 3)
+      concurrent {
+        {
+          Clock.sleep(Duration.seconds(3))
+          let _ = order.send(3)
+        }
+        {
+          Clock.sleep(Duration.seconds(1))
+          let _ = order.send(1)
+        }
+        {
+          Clock.sleep(Duration.seconds(2))
+          let _ = order.send(2)
+        }
+      }
+      order.close()
+      assert collect(order) == [1, 2, 3]
+      assert Clock.monotonic() == Duration.seconds(3)
+    }
+  }
+}
+
+test "the clock advances while one task sleeps and another waits for its message" {
+  let seeds: UInt64 = 16
+  for seed in 0..seeds {
+    provide simulation::World.new(seed: seed) {
+      let numbers = tasks::Channel[Int64].new()
+      concurrent {
+        {
+          Clock.sleep(Duration.seconds(1))
+          let _ = numbers.send(4)
+        }
+        let received = numbers.receive()
+      }
+      assert received == Some(4)
+      assert Clock.monotonic() == Duration.seconds(1)
+    }
+  }
+}
+
+test "within returns None when the limit passes before the work ends" {
+  let seeds: UInt64 = 16
+  for seed in 0..seeds {
+    provide simulation::World.new(seed: seed) {
+      let never = tasks::Channel[Int64].new()
+      assert tasks::within(Duration.seconds(5), work: fn() { never.receive() }) is None
+      assert Clock.monotonic() == Duration.seconds(5)
+    }
+  }
+}
+
+test "within returns the output of work that ends before the limit, and cancels the timer" {
+  let seeds: UInt64 = 16
+  for seed in 0..seeds {
+    provide simulation::World.new(seed: seed) {
+      let output = tasks::within(Duration.seconds(5), work: fn() {
+        Clock.sleep(Duration.seconds(2))
+        7
+      })
+      assert output == Some(7)
+      assert Clock.monotonic() == Duration.seconds(2)
+    }
+  }
+}
+
+test "tasks in a world print in an order that depends only on the seed" {
+  var outputs: List[String] = []
+  let seeds: UInt64 = 32
+  for seed in 0..seeds {
+    let world = simulation::World.new(seed: seed)
+    provide world {
+      concurrent {
+        Console.print("a")
+        Console.print("b")
+      }
+      let output = world.output()
+      assert output == "ab" || output == "ba"
+      if !outputs.contains(output) {
+        mut outputs.push(own output)
+      }
+    }
+  }
+  assert outputs.length() == 2
+}
+
+test "a world holds the files of its setup and the files that are written in it" {
+  let world = simulation::World.from(simulation::Setup.new().with_file(Path.new("/etc/motd"), contents: "welcome"))
+  provide world {
+    assert FileRead.read_text(Path.new("/etc/motd")) == Ok("welcome")
+    assert FileWrite.write_text(Path.new("/etc/issue"), contents: "issue") is Ok(_)
+    assert world.file_text(Path.new("/etc/issue")) == Some("issue")
+    assert world.file_bytes(Path.new("/etc/motd")) == Some("welcome".to_bytes())
+    assert world.file_text(Path.new("/none")) is None
+    assert FileRead.list(Path.new("/etc")) is Ok(entries) && entries.length() == 2
+  }
+}
+
+test "fail_next makes the next operation of its kind fail, once" {
+  let world = simulation::World.new()
+  provide world {
+    assert FileWrite.write_text(Path.new("/a"), contents: "a") is Ok(_)
+    world.fail_next(simulation::Operation.Read, error: SystemError.Interrupted)
+    assert FileRead.read_text(Path.new("/a")) == Err(SystemError.Interrupted)
+    assert FileRead.read_text(Path.new("/a")) == Ok("a")
+    world.fail_next(simulation::Operation.Open, error: SystemError.TooManyOpen)
+    assert FileRead.open(Path.new("/a")) is Err(TooManyOpen)
+    world.fail_next(simulation::Operation.Write, error: SystemError.OutOfStorage)
+    var file = FileWrite.open(Path.new("/a"), mode: files::WriteMode.Append).expect("the file opens")
+    assert mut file.write("more".bytes()) == Err(SystemError.OutOfStorage)
+    assert mut file.write("more".bytes()) == Ok(4)
+    assert own file.close() is Ok(_)
+    assert world.file_text(Path.new("/a")) == Some("amore")
+  }
+}
+
+fn append_line(file: Path, line: StringSlice) -> Result[Unit, SystemError]
+  uses FileWrite, Handles
+{
+  var opened = FileWrite.open(file, mode: files::WriteMode.Append)?
+  mut opened.write_all(line.bytes())?
+  own opened.close()
+}
+
+test "tasks in a world append to one file, and each write arrives whole" {
+  let seeds: UInt64 = 16
+  for seed in 0..seeds {
+    let world = simulation::World.new(seed: seed)
+    provide world {
+      concurrent for writer in 0..4 {
+        let _ = append_line(Path.new("/log"), line: "writer ${writer}\n")
+      }
+      assert world.file_text(Path.new("/log")) is Some(text)
+        && text.length() == 36
+        && text.contains("writer 0\n")
+        && text.contains("writer 1\n")
+        && text.contains("writer 2\n")
+        && text.contains("writer 3\n")
+    }
+  }
+}

@@ -104,11 +104,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_shorten ->
       (* Only elements with nothing to drop can be forgotten. *)
       let plain : T.trait_reference =
-        {
-          trait = Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Plain" };
-          trait_arguments = [];
-          associated = [];
-        }
+        { trait = Path.core "Plain"; trait_arguments = []; associated = [] }
       in
       {
         (with_storage ~mode:Mut [ input "length" usize ]) with
@@ -222,12 +218,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
       }
   | Shared_new | Shared_update | Shared_key -> (
       let storable : T.trait_reference =
-        {
-          trait =
-            Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Storable" };
-          trait_arguments = [];
-          associated = [];
-        }
+        { trait = Path.core "Storable"; trait_arguments = []; associated = [] }
       in
       let bounded name =
         { T.generic = parameter operation name; kind = Type_generic [ storable ] }

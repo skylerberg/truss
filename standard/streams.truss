@@ -318,6 +318,10 @@ public fn BufferedReader[Source: Reader].finish(own self) -> Source {
   self.source
 }
 
+public fn BufferedReader[Source: Reader].source(self) lends Source {
+  yield self.source
+}
+
 impl Reader for BufferedReader[Source: Reader] {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
@@ -333,6 +337,29 @@ impl Reader for BufferedReader[Source: Reader] {
     append_bytes(mut buffer, bytes: self.pending.slice_range(self.start, stop: self.start + count))
     self.start += count
     Ok(count)
+  }
+}
+
+impl Seek for BufferedReader[Source: Reader + Seek] {
+  fn seek(mut self, to: Position) -> Result[UInt64, SystemError]
+    uses Handles
+  {
+    let unread: UInt64 = intrinsic::convert(self.pending.length() - self.start)
+    mut self.pending.clear()
+    self.start = 0
+    match to {
+      FromCurrent(offset) => {
+        let position = mut self.source.seek(Position.FromCurrent(offset: 0))?
+        let target = if offset >= 0 {
+          position.saturating_subtract(unread).saturating_add(offset.to_unsigned_bits())
+        } else {
+          position.saturating_subtract(unread).saturating_subtract(offset.unsigned_absolute())
+        }
+        mut self.source.seek(Position.FromStart(offset: target))
+      }
+      FromStart(offset) => mut self.source.seek(Position.FromStart(offset: offset))
+      FromEnd(offset) => mut self.source.seek(Position.FromEnd(offset: offset))
+    }
   }
 }
 

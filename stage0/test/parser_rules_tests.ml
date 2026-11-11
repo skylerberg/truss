@@ -142,6 +142,8 @@ let () =
   test "an impl takes no visibility" (fun () ->
       error "public impl A for B {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"impl A for B {}");
+  test "an impl's trait arguments declare no generic parameter, as the recursive type check assumes"
+    (fun () -> error "impl Selected[Carried: Shown] for Marker {}" ~code:Unexpected_token ~at:":");
   test "a test takes no visibility" (fun () ->
       error "internal test \"a\" {}" ~code:Misplaced_visibility ~at:"internal"
         ~fixed:"test \"a\" {}");

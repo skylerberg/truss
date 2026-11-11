@@ -901,6 +901,16 @@ choices below keep method calls predictable:
   arithmetic operators use `Add[Right]` and similar traits, with the result
   as an associated type. Comparisons stay between values of one type,
   because the laws of `Equal` and `Ordered` relate a type to itself.
+- **An operator trait says where its operation is defined.** `Int8`'s `+`
+  is not defined where the sum overflows, and its `/` is not defined for a
+  divisor of 0. If `Add.add` promised a result for every pair of values, an
+  `impl` for a fixed-width integer would have to wrap or to crash, and
+  generic code could overflow with nothing in its signature to show it. So
+  each trait has a second method, such as `add_is_defined`, and the
+  operation requires it. Generic code then carries the obligation that an
+  operator on a built-in type has, as `Index.at` requires `contains_key`.
+  Verus gives Rust's `Add` a precondition, `add_req`, for the same reason.
+  A type whose operation is defined everywhere returns `true`.
 - **Associated types are chosen by each implementation,** as in Rust: the
   key and result of `Index`, the element of a collection, the part type of
   `FromTemplate`. A trait's type parameters are what an `impl` is chosen by,
@@ -1626,8 +1636,21 @@ Cost clauses state proven bounds on what a function consumes.
   recursion as a direct call on a part. Derived implementations are proven
   by the compiler's rule, and functions without a `time` clause need no
   termination, so neither is affected. Truss has no mutable state outside
-  variables, so a function can reach itself only through what its code
-  names, and every such cycle is visible within one package.
+  variables, and a value cannot hold a function that takes the value and
+  promises to terminate, so a function can reach itself only through what
+  its code names, and every such cycle is visible within one package.
+- **A type cannot hold a function that takes the type and promises to
+  terminate.** In its own fields, a type must not occur in the input of a
+  function type that has a `time` clause: at any depth, through type
+  arguments, and through associated types. With `type Knot(run: (fn(Knot)
+  -> Bool cost time finite))`, a function that calls `knot.run(knot)` calls
+  itself when `knot.run` is that function, and no name in its code says so.
+  Its `time` clause would be proven although the function does not
+  terminate. Coq, Lean, and Agda forbid this for every function type, as
+  strict positivity. Truss forbids it only for a function type with a
+  `time` clause, because a function with a `time` clause cannot call a
+  function value whose type has none: `type Button(on_click: fn(Button))`
+  is legal.
 - A loop that runs until a capability says to stop, such as reading until the
   end of a stream, cannot be proven to terminate, because an implementation
   could keep supplying data forever. Such functions have no `time` clause.
@@ -2416,13 +2439,32 @@ package may want those names for its own types. They are `core::Pair`,
   `files::MemoryFiles`, `console::CapturedConsole`, `log::CapturedLog`.
   The narrowing implementations are there too, such as
   `files::FilesWithin` and `network::HostsAllowed`.
+- **`files::MemoryFiles` is a file system, not a table of contents.** It
+  has directories, symbolic and hard links, permissions, modification
+  times, and open files with positions, and it returns the error that the
+  operating system returns for each misuse: `NotFound`, `IsADirectory`,
+  `NotADirectory`, `DirectoryNotEmpty`, `AlreadyExists`,
+  `PermissionDenied`. A test of error handling is only as good as the
+  errors the fake can produce. A file that is removed while it is open
+  stays readable through its handle, as on POSIX systems. It implements
+  `Handles` for its own files, so `FileReader` and `File` work on it as
+  they do on the real file system.
 - **`simulation::World` fakes every capability at once.** It is an
   in-memory machine: a file system, a network between its own hosts, a
-  clock that advances only when the test says, programs that return what
-  the test scripted, tasks scheduled by a seed, and fault injection.
-  FoundationDB tests its database this way. A test that opens both files
-  and connections provides a `World`, because one provider must implement
-  `Handles` for every handle, as the operating system does.
+  clock that advances when every task is blocked or when the test says,
+  programs that return what the test scripted, tasks scheduled by a seed,
+  and fault injection. FoundationDB tests its database this way. A test
+  that opens both files and connections provides a `World`, because one
+  provider must implement `Handles` for every handle, as the operating
+  system does.
+- **A `World` is a reference to its state.** It implements `Tasks`, so its
+  methods are not made mutually exclusive by a mutex, and several tasks
+  call them. Its state is therefore in the cell that a channel's queue is
+  in, and each capability method is one pure update of the cell. The
+  method first lets the seed switch to another task, so a test explores
+  the orders of the calls. A plain record, `simulation::Setup`, holds what
+  the world starts with, because the cell can be read only where `Tasks`
+  is available.
 
 ## Visibility
 

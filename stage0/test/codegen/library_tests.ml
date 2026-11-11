@@ -26,6 +26,10 @@ let name_of (path : Path.t) =
   | Test { module_; name } -> Printf.sprintf "%s: %s" (String.concat "::" module_.modules) name
   | _ -> Path.show path
 
+(* The tests could not be built. This is reported whatever [TRUSS_TEST]
+   names, since none of the tests it names can run. *)
+let not_built message = always "the library's tests build" (fun () -> fail "%s" message)
+
 let expected_panic (path : Path.t) =
   match path with Test { module_ = { modules = [ "panics" ]; _ }; name } -> Some name | _ -> None
 
@@ -46,9 +50,8 @@ let () =
         |> List.filter (fun path -> wanted (name_of path))
       in
       match Compile.run_tests compile ~time_limit:10000 tests with
-      | exception Compiler_bug.Bug bug ->
-          test "the library's tests build" (fun () -> fail "%s" (Compiler_bug.to_string bug))
-      | Error message -> test "the library's tests build" (fun () -> fail "%s" message)
+      | exception Compiler_bug.Bug bug -> not_built (Compiler_bug.to_string bug)
+      | Error message -> not_built message
       | Ok records ->
           List.iter2
             (fun path (record : Compile.record) ->

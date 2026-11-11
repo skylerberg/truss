@@ -888,11 +888,11 @@ let loop_clause state (clause : loop_clause) : Core.loop_clause =
   | Loop_decreases measures -> Decreases (List.map (build_expression state) measures)
   | Loop_cost written -> Cost (cost state ~origin:clause.id written)
 
-(* An early exit. It is wrapped in a [Leaving] node if it terminates tasks. *)
+(* An early exit. It is wrapped in a [Task_exit] node if it terminates tasks. *)
 let early_exit (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.kind =
   match tasks with
   | [] -> exit
-  | _ -> Leaving { tasks; exit = synthetic_expression state ~origin T.Never exit }
+  | _ -> Task_exit { tasks; exit = synthetic_expression state ~origin T.Never exit }
 
 (* [inner?], desugared to a match. The first variant of the operand's type
    is the success variant: its arm evaluates to the variant's field. The

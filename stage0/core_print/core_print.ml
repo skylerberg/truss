@@ -121,8 +121,8 @@ let rec expression names (node : expression) =
       match value with Some value -> "return " ^ expression value | None -> "return")
   | Break -> "break"
   | Continue -> "continue"
-  | Leaving { tasks; exit } ->
-      Printf.sprintf "leaving %s { %s }"
+  | Task_exit { tasks; exit } ->
+      Printf.sprintf "task_exit %s { %s }"
         (String.concat ", "
            (List.map
               (function

@@ -217,6 +217,7 @@ module Code : sig
     | Overlapping_impls
     | Method_name_clash
     | Needs_indirect
+    | Not_strictly_positive
     | Growing_type
     | Instantiation_cycle
     | Duplicate_test

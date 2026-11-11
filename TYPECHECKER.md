@@ -47,7 +47,8 @@ The type checker:
   dependency was granted
 - checks the package-wide rules: where an `impl` may be defined (the orphan
   rule), that `impl`s do not overlap, that recursive types are marked
-  `indirect`, and that generic code has no instantiation cycle
+  `indirect` and are strictly positive, and that generic code has no
+  instantiation cycle
 
 It does not:
 
@@ -551,8 +552,8 @@ derived from the type's shape, as a condition on its type parameters:
   changes how every use of the type is checked. Like any other change of shape,
   it invalidates every result that read the shape.
 
-`Copyable`, `Plain`, the view property, and the types that a type holds in
-place (see [Recursive types](#recursive-types)) are *facts of the type's
+`Copyable`, `Plain`, the view property, and the types that a type contains
+(see [Recursive types](#recursive-types)) are *facts of the type's
 definition*. They are computed once per definition and stored as a result of
 their own:
 
@@ -561,15 +562,16 @@ their own:
   or the fact is that the type never has it. For the view property, the
   conditions are the types of which any one makes the type a view, or the fact
   is that the type always is one. `Option` is `Plain` on the condition `Value`,
-  and a view on the condition `Value`.
+  and a view on the condition `Value`. The types that a type contains are
+  conditions too, each with its occurrence.
 - **A query about a type instantiates its definition's conditions with its
   arguments.** Whether `Option[Option[List[Int64]]]` is `Plain` is `Option`'s
   condition for `Option[List[Int64]]`, then for `List[Int64]`, which is never
   `Plain`. No query traverses a type's fields, so a type nested in itself
   cannot be mistaken for a recursive type.
 - **Mutually recursive types are computed together.** Such a type is `Copyable`
-  and `Plain` unless a part of it prevents that, and it is a view, or holds a
-  type in place, only if a part of it does. So the computation is a fixed
+  and `Plain` unless a part of it prevents that, and it is a view, or contains
+  a type, only if a part of it does. So the computation is a fixed
   point: it starts from the facts of the types without fields, and recomputes
   each member's facts from the others' until none changes.
 - **An associated type is a condition too.** In `type Kept[Source: Shown](part:
@@ -727,21 +729,59 @@ written inside it, and neither check depends on the other:
 
 ### Recursive types
 
-A type that holds itself in place would have infinite size. The checker finds
-every cycle of types that hold each other in place, through fields, variants,
-type arguments that are held in place, and associated types. It reports each
-cycle that does not pass through an `indirect` variant, with a fix that adds
-`indirect` to the variant where the cycle closes.
+A type must not contain itself in either of two ways:
 
-Whether a generic type holds a type argument in place is a fact of the generic
-type's definition (see [Properties of types](#properties-of-types)): `Option`
-holds its `Value` in place, and `List` holds its elements through a `Buffer`,
-which the intrinsic module declares as heap storage. A type that holds an
-associated type of a parameter in place, as `type Kept[Source: Shown](part:
-Source.Part)` does, holds the type that the `impl` defines for each argument.
-So `type Tree(kept: Kept[Marker])` is recursive when `Marker`'s `Part` is
-`Tree`. This is a package check, over the type definitions of one package:
-packages cannot depend on each other in a cycle, so their types cannot either.
+| The type contains itself | Failure that the rule prevents | Diagnostic |
+|---|---|---|
+| in place | The type would have infinite size. | `package.needs_indirect`, with a fix that adds `indirect` to the variant where the cycle starts |
+| in the input of a function type that has a `time` clause | A function stored in a value could be called on the value and call itself through it. No call in its code names it, so the prover would accept a `time` clause on a function that does not terminate. | `package.not_strictly_positive`, on the field |
+
+The second rule is strict positivity, applied only to function types that
+promise termination. `type Button(on_click: fn(Button))` is legal, because a
+function with a `time` clause cannot call a function value whose type has
+none. `type Lazy(next: (fn() -> Lazy cost time finite))` is legal, because the
+type is in the output. A trait's method may take the type that holds an `any`
+of the trait: a call through `any Trait` is a call of the trait's method,
+which is an edge of the prover's call graph.
+
+Each type that a value contains has an *occurrence*:
+
+| Occurrence | Where the type is |
+|---|---|
+| in place | In a field of a variant that is not `indirect`, or in an array |
+| indirect | Behind a pointer: in an `indirect` variant, a collection's storage, an `any`, or the output of a function type |
+| function input | At any depth in the input of a function type that has a `time` clause |
+
+A type that is contained through another type is a function input if either
+occurrence is, in place if both are, and indirect otherwise. The checker
+finds every cycle of type definitions that contain each other. A cycle
+whose occurrences are all in place is the first error. A cycle with a
+function input is the second.
+
+How a generic type contains a type argument is a fact of the generic type's
+definition (see [Properties of types](#properties-of-types)). `Option`
+contains its `Value` in place. `List` contains its elements indirectly,
+through a `Storage`. `type Callback[Input](run: (fn(Input) -> Bool cost time
+finite))` contains `Input` as a function input, so `type Wrap(next:
+Callback[Wrap])` is an error. A type that contains an associated type of a
+parameter, as `type Kept[Source: Shown](part: Source.Part)` does, contains the
+type that the `impl` defines for each argument. So `type Tree(kept:
+Kept[Marker])` is recursive when `Marker`'s `Part` is `Tree`.
+
+An `impl` can make a type contain itself though no type definition's fields
+do. With `type Part = Kept[Marker]` in `impl Shown for Marker`, `Kept[Marker]`
+contains itself in place. So the checker also reads the definition of each
+associated type, and reports a type that contains itself through that
+definition on the `impl`.
+
+These are package checks, over the type definitions and `impl`s of one
+package: packages cannot depend on each other in a cycle, so their types
+cannot either. They cover the types that only a function names, such as a
+parameter of type `Kept[Marker]`. An `impl`'s generic parameters are the
+arguments of its type, so the definition of an associated type can use only
+the arguments of the type that it is defined for. A type that contains itself
+through an `impl` selects that `impl` by a type constructor, and a field or
+an associated type's definition on the cycle names that constructor.
 
 A generic type that contains itself with different arguments, as in `type
 Nested[Element] = Leaf(value: Element) | indirect Node(inner:

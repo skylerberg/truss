@@ -540,10 +540,7 @@ let is_standard_equal (path : Path.t) =
   | Top { module_ = { package = "standard"; _ }; name = "Equal" } -> true
   | _ -> false
 
-let core_trait name : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "core" ] }; name }
-
-let equal_trait = core_trait "Equal"
+let equal_trait = Path.core "Equal"
 
 (* A type's interface, when it is a type whose fields this package sees. *)
 let visible_type context (ty : T.ty) =
@@ -1671,7 +1668,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
   | Specification_function { function_; arguments } ->
       specification_function context frame node function_ arguments
   | Method_time callee -> Some (frame, method_time context frame callee)
-  | Leaving { tasks; exit } -> (
+  | Task_exit { tasks; exit } -> (
       (* The exit is where the block it leaves ends, after the other
          branches, so here it is only recorded. *)
       match tasks with
@@ -2690,7 +2687,7 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
             (in_range target value);
           value
       | _ -> known)
-  | _ -> integer_intrinsic context frame operation types operands known
+  | _ -> integer_intrinsic context frame ~node operation types operands known
 
 (* A function of the C library, by its row of the C library's table. It
    is given only an address into a storage, so each storage it is lent
@@ -2813,7 +2810,7 @@ and float_fits target value =
         &&& Apply ("<=", [ cut; Integer high ]))
   | None -> L.Boolean false
 
-and integer_intrinsic context frame (operation : Intrinsic.operation) types operands known =
+and integer_intrinsic context frame ~node (operation : Intrinsic.operation) types operands known =
   let integer = match types with ty :: _ -> bounds ty | [] -> None in
   let exact operation left right =
     match (operation : Intrinsic.operation) with
@@ -2824,15 +2821,18 @@ and integer_intrinsic context frame (operation : Intrinsic.operation) types oper
     | _ -> L.Apply ("*", [ left; right ])
   in
   match (operation, integer, types, operands) with
+  (* An integer operation is defined where its operator is, so it has the
+     operator's obligations: a call of it, as an [impl] of [Add] makes, shows
+     what [+] would. *)
   | (Add | Subtract | Multiply | Divide | Remainder), Some _, ty :: _, [ left; right ] ->
-      let result = exact operation left right in
-      if operation = Divide || operation = Remainder then
-        assume context frame (L.not_ (L.equal right (L.int 0)));
+      let result = arithmetic context frame node ty operation left right in
       assume context frame (in_range ty result);
       result
   | Negate, Some _, ty :: _, [ value ] ->
       let result = L.Apply ("-", [ value ]) in
-      assume context frame (in_range ty result);
+      oblige context frame Overflow (at frame node)
+        (Printf.sprintf "`%s` may overflow `%s`." (quote frame.source node.origin) (T.show ty))
+        (in_range ty result);
       result
   | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), Some (low, high), _, [ left; right ] ->
       let modulus = Z.succ (Z.sub high low) in
@@ -3581,9 +3581,7 @@ and measure_type element : T.function_type =
 
 and sequence_at context element term index =
   let sequence = sequence_type element in
-  let index_trait : Path.t =
-    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Index" }
-  in
+  let index_trait = Path.core "Index" in
   match
     Call_graph.impls_for
       (Query.demand context.database Call_graph.package_impls "standard")
@@ -4018,9 +4016,7 @@ and model_function context (ty : T.ty) ~(model : T.ty) =
       found
 
 and find_model_function context (ty : T.ty) ~(model : T.ty) =
-  let model_trait : Path.t =
-    Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Model" }
-  in
+  let model_trait = Path.core "Model" in
   match
     Call_graph.impls_for
       (Query.demand context.database Call_graph.package_impls "standard")
@@ -4069,8 +4065,7 @@ and model_ranked context (ty : T.ty) ~(model : T.ty) symbol =
 
 (* Cursors. A cursor carries what it has handed out and whether it has
    ended as ghost parts of its value. *)
-and cursor_trait : Path.t =
-  Top { module_ = { package = "standard"; modules = [ "core" ] }; name = "Cursor" }
+and cursor_trait : Path.t = Path.core "Cursor"
 
 and cursor_yielded context cursor_type element cursor =
   let sort = sort_of context cursor_type in

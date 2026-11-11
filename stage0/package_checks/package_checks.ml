@@ -1,13 +1,15 @@
 (* The checks that look at more than one definition of a package: where an
    [impl] may live, overlapping [impl]s, a type's method sharing a name
-   with a trait's, recursive types without [indirect], instantiation
-   cycles, and tests with one name. Packages cannot depend on each other in
-   a cycle, so every cycle these find is within one package. *)
+   with a trait's, types that contain themselves in place or in a function
+   type's input, instantiation cycles, and tests with one name. Packages
+   cannot depend on each other in a cycle, so every cycle these find is
+   within one package. *)
 
 open Syntax
 module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
+module Properties = Interface.Properties
 
 (* A diagnostic at a place inside a definition, moved to its file. *)
 type placed = { module_ : Path.module_; diagnostic : Diagnostic.t }
@@ -175,7 +177,7 @@ let check_method_names database (declaration : Names.declaration) (definition : 
 (* Recursive types *)
 
 (* A type definition's generic parameters, and its fields, each with the
-   variant it is in and whether that variant is [indirect]. *)
+   variant that it is in. *)
 let type_fields database path =
   match Query.demand database Environment.type_interface path with
   | Some interface ->
@@ -184,14 +186,12 @@ let type_fields database path =
       in
       let fields =
         match interface.shape with
-        | Record written ->
-            List.map (fun (field : T.field) -> (None, false, field.field_type)) written
+        | Record fields -> List.map (fun field -> (None, field)) fields
         | Sum variants ->
             List.concat_map
               (fun (variant : T.variant) ->
                 List.map
-                  (fun (field : T.field) ->
-                    (Some variant.variant_name, variant.indirect, field.field_type))
+                  (fun field -> (Some variant, field))
                   (Option.value ~default:[] variant.fields))
               variants
         | _ -> []
@@ -205,43 +205,58 @@ let output_type : T.result -> T.ty = function
 let type_arguments arguments =
   List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
 
-(* The named types each field of a type definition holds in place, with the
-   variant the field is in. The fields of an [indirect] variant hold nothing
-   in place. *)
-let held database path =
-  let bounds parameter =
-    match Query.demand database Environment.type_interface path with
-    | Some interface ->
-        List.concat_map
-          (fun (generic : T.generic) ->
-            match generic.kind with
-            | Type_generic bounds when generic.generic = parameter -> bounds
-            | _ -> [])
-          interface.type_generics
-    | None -> []
-  in
-  List.filter_map
-    (fun (variant, indirect, field_type) ->
-      if indirect then None
-      else Some (variant, Interface.Impls.held_in_place database ~bounds field_type))
-    (snd (type_fields database path))
+let bounds_of (generics : T.generic list) parameter =
+  List.concat_map
+    (fun (generic : T.generic) ->
+      match generic.kind with
+      | Type_generic bounds when generic.generic = parameter -> bounds
+      | _ -> [])
+    generics
 
-(* A cycle of types that hold each other in place, from a type back to it:
-   [Some variant] with the variant of [start] where the cycle leaves it,
-   [None] for a record's field. Each type is visited once. *)
-let find_cycle database (start : Path.t) =
+(* The named types that a type definition's fields contain, each with its
+   field and how it occurs in a value of the type. *)
+let contained =
+  Query.query ~name:"contained_types" ~phase:Interfaces ~show:Path.show (fun database path ->
+      let bounds =
+        match Query.demand database Environment.type_interface path with
+        | Some interface -> bounds_of interface.type_generics
+        | None -> fun _ -> []
+      in
+      List.concat_map
+        (fun (((variant : T.variant option), (field : T.field)) as written) ->
+          let indirect = match variant with Some variant -> variant.indirect | None -> false in
+          List.filter_map
+            (function
+              | T.Named { path; _ }, occurrence ->
+                  Some
+                    ( written,
+                      path,
+                      Properties.through (if indirect then Indirect else In_place) occurrence )
+              | _ -> None)
+            (Interface.Impls.contents database ~bounds field.field_type).contained)
+        (snd (type_fields database path)))
+
+(* How a type contains itself through the fields of type definitions: the
+   occurrence of the type in itself along each cycle of definitions, with
+   the field of the type that the cycle starts at. A cycle is within one
+   package. Each type is visited once with each occurrence. *)
+let self_occurrences database (start : Path.t) =
   let visited = Hashtbl.create 16 in
-  let rec reaches path =
-    Path.equal path start
-    || (not (Hashtbl.mem visited path))
-       && begin
-         Hashtbl.replace visited path ();
-         List.exists (fun (_, held) -> List.exists reaches held) (held database path)
-       end
+  let rec from path occurrence =
+    if Path.equal path start then [ occurrence ]
+    else if Path.package path <> Path.package start || Hashtbl.mem visited (path, occurrence) then
+      []
+    else begin
+      Hashtbl.replace visited (path, occurrence) ();
+      List.concat_map
+        (fun (_, target, step) -> from target (Properties.through occurrence step))
+        (Query.demand database contained path)
+    end
   in
-  List.find_map
-    (fun (variant, held) -> if List.exists reaches held then Some variant else None)
-    (held database start)
+  List.concat_map
+    (fun (field, target, occurrence) ->
+      List.map (fun found -> (field, found)) (from target occurrence))
+    (Query.demand database contained start)
 
 (* Whether a generic type contains itself with growing type arguments,
    through any field at all, so that it has no fixed set of instances. As in
@@ -282,7 +297,7 @@ let grows database (start : Path.t) =
               @ targets (output_type output)
           | _ -> []
         in
-        List.concat_map (fun (_, _, field_type) -> targets field_type) fields
+        List.concat_map (fun (_, (field : T.field)) -> targets field.field_type) fields
   in
   let visited = Hashtbl.create 16 in
   let rec walk ((path, _) as node) grown =
@@ -298,41 +313,144 @@ let grows database (start : Path.t) =
     (fun index -> List.exists (fun (target, growing) -> walk target growing) (edges (start, index)))
     (List.init (List.length parameters) Fun.id)
 
+let not_strictly_positive =
+  "A function stored in such a value could be called on the value and call itself through it, so a \
+   function with a `time` clause might not terminate. Remove the `time` clause from the function \
+   type, or pass the function the fields that it needs instead of the whole value."
+
+(* Where a field of a type definition is written. *)
+let field_span (body : type_body) ((variant : T.variant option), (field : T.field)) =
+  let among (fields : Syntax.field list) =
+    List.find_map
+      (fun (written : Syntax.field) ->
+        match written.kind with
+        | Field_declaration { name; _ } when name.text = field.field_name -> Some written.span
+        | _ -> None)
+      fields
+  in
+  match (body, variant) with
+  | Fields fields, None -> among fields
+  | Variants variants, Some variant ->
+      Option.bind
+        (List.find_opt
+           (fun (written : Syntax.variant) -> written.name.text = variant.variant_name)
+           variants)
+        (fun written -> Option.bind written.fields among)
+  | _ -> None
+
 let check_recursion database (declaration : Names.declaration) (definition : definition) =
   match definition.kind with
   | Type_definition _ when grows database declaration.path ->
-      at database (Names.key_of declaration) Growing_type (header_span definition)
-        "This type contains itself with different type arguments, so it has no fixed set of \
-         instances, and generic code is compiled once for each set of arguments."
-  | Type_definition { body; _ } -> (
+      Option.to_list
+        (at database (Names.key_of declaration) Growing_type (header_span definition)
+           "This type contains itself with different type arguments, so it has no fixed set of \
+            instances, and generic code is compiled once for each set of arguments.")
+  | Type_definition { name; body; _ } ->
       let key = Names.key_of declaration in
-      match find_cycle database declaration.path with
-      | None -> None
-      | Some variant -> (
-          let variant_span =
-            match (body, variant) with
-            | Variants variants, Some name ->
-                Option.map
-                  (fun (written : variant) -> written.name.span)
-                  (List.find_opt (fun (written : variant) -> written.name.text = name) variants)
-            | _ -> None
-          in
-          match variant_span with
-          | Some span ->
+      let occurrences = self_occurrences database declaration.path in
+      let first (wanted : Properties.occurrence) =
+        List.find_map
+          (fun (field, occurrence) -> if occurrence = wanted then Some field else None)
+          occurrences
+      in
+      let in_place =
+        Option.bind (first In_place) (fun (variant, _) ->
+            let variant_span =
+              match (body, variant) with
+              | Variants variants, Some (variant : T.variant) ->
+                  Option.map
+                    (fun (written : variant) -> written.name.span)
+                    (List.find_opt
+                       (fun (written : variant) -> written.name.text = variant.variant_name)
+                       variants)
+              | _ -> None
+            in
+            match variant_span with
+            | Some span ->
+                at database key Needs_indirect span
+                  ~fixes:
+                    [
+                      Diagnostic.fix "Mark the variant `indirect`."
+                        [ Diagnostic.insert span.start "indirect " ];
+                    ]
+                  "This type contains itself in place, so it would be infinitely large. Mark the \
+                   variant `indirect` to keep its fields on the heap."
+            | None ->
+                at database key Needs_indirect (header_span definition)
+                  "This record contains itself in place, so it would be infinitely large. A record \
+                   has no variant to mark `indirect`; use a sum type with an `indirect` variant, \
+                   or a collection.")
+      in
+      let function_input =
+        Option.bind (first Function_input) (fun field ->
+            at database key Not_strictly_positive
+              (Option.value ~default:(header_span definition) (field_span body field))
+              (Printf.sprintf
+                 "Through this field, `%s` contains a function type that has a `time` clause and \
+                  whose input contains `%s`. %s"
+                 name.text name.text not_strictly_positive))
+      in
+      Option.to_list in_place @ Option.to_list function_input
+  | _ -> []
+
+(* An [impl]'s associated type can make a type contain itself though no type
+   definition's fields do. With [type Kept[Source: Shown](part:
+   Source.Part)], defining [Part] as [Kept[Marker]] in [impl Shown for
+   Marker] makes [Kept[Marker]] infinitely large. A type that contains
+   itself the same way through its definition's fields is reported there. *)
+let check_associated_types database (declaration : Names.declaration) (definition : definition)
+    (impl : T.impl_interface) =
+  let key = Names.key_of declaration in
+  let bounds = bounds_of impl.impl_generics in
+  let written name =
+    match definition.kind with
+    | Impl { members; _ } ->
+        List.find_map
+          (fun (member : impl_member line) ->
+            match member.kind with
+            | Associated_definition (written, _) when written.text = name -> Some member.span
+            | _ -> None)
+          members
+    | _ -> None
+  in
+  let reported_at_definition (recursion : Properties.recursion) =
+    match recursion.recursive with
+    | T.Named { path; _ } ->
+        List.exists
+          (fun (_, occurrence) -> occurrence = recursion.occurrence)
+          (self_occurrences database path)
+    | _ -> false
+  in
+  List.concat_map
+    (fun (name, type_) ->
+      let span = Option.value ~default:(header_span definition) (written name) in
+      List.filter_map
+        (fun (recursive, (occurrence : Properties.occurrence)) ->
+          match occurrence with
+          | In_place ->
               at database key Needs_indirect span
-                ~fixes:
-                  [
-                    Diagnostic.fix "Mark the variant `indirect`."
-                      [ Diagnostic.insert span.start "indirect " ];
-                  ]
-                "This type contains itself in place, so it would be infinitely large. Mark the \
-                 variant `indirect` to keep its fields on the heap."
-          | None ->
-              at database key Needs_indirect (header_span definition)
-                "This record contains itself in place, so it would be infinitely large. A record \
-                 has no variant to mark `indirect`; use a sum type with an `indirect` variant, or \
-                 a collection."))
-  | _ -> None
+                (Printf.sprintf
+                   "With this definition of `%s`, `%s` contains itself in place, so it would be \
+                    infinitely large. Define `%s` as a type that holds it in a collection or in an \
+                    `indirect` variant."
+                   name (T.show recursive) name)
+          | Function_input ->
+              at database key Not_strictly_positive span
+                (Printf.sprintf
+                   "With this definition of `%s`, `%s` contains a function type that has a `time` \
+                    clause and whose input contains `%s`. %s"
+                   name (T.show recursive) (T.show recursive) not_strictly_positive)
+          | Indirect -> None)
+        (List.sort_uniq compare
+           (List.filter_map
+              (fun (recursion : Properties.recursion) ->
+                if
+                  List.exists (Path.equal declaration.path) recursion.defining
+                  && not (reported_at_definition recursion)
+                then Some (recursion.recursive, recursion.occurrence)
+                else None)
+              (Interface.Impls.contents database ~bounds type_).recursions)))
+    impl.implements.associated
 
 (* Instantiation cycles *)
 
@@ -530,14 +648,18 @@ let check =
           placed
       in
       let recursion =
-        List.filter_map
+        List.concat_map
           (fun (declaration : Names.declaration) ->
             if declaration.kind = Type && declaration.ordinal = 0 then
               match Query.demand database Names.definition (Names.key_of declaration) with
               | Some definition -> check_recursion database declaration definition
-              | None -> None
-            else None)
+              | None -> []
+            else [])
           declarations
+        @ List.concat_map
+            (fun (declaration, definition, impl) ->
+              check_associated_types database declaration definition impl)
+            impls
       in
       location @ names @ overlaps @ recursion
       @ check_instantiation database package

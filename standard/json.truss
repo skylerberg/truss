@@ -1,5 +1,8 @@
+use standard::intrinsic
+use standard::numbers::float_math
 use standard::streams
 use standard::text
+use standard::writing
 
 public type Value =
   | Null
@@ -11,13 +14,20 @@ public type Value =
   derives Equal
 
 public opaque type Number(whole: Bool, integer: Int64, fraction: Float64)
-  derives Plain
+  derives Plain, Equal
 
 public fn Number.from_float64(value: Float64) -> Option[Number]
   ensures (result is Some(_)) == value.is_finite()
   cost time O(1)
 {
-  todo
+  if !value.is_finite() {
+    return None
+  }
+  let fits = value >= -9223372036854775808.0 && value < 9223372036854775808.0
+  if fits && value == value.truncate() && !(value == 0.0 && value.is_negative()) {
+    return Some(Number(whole: true, integer: Int64.saturating_from(value), fraction: 0.0))
+  }
+  Some(Number(whole: false, integer: 0, fraction: value))
 }
 
 public fn Number.is_whole(self) -> Bool
@@ -29,13 +39,13 @@ public fn Number.is_whole(self) -> Bool
 public fn Number.to_int64(self) -> Option[Int64]
   cost time O(1)
 {
-  todo
+  if self.whole { Some(self.integer) } else { None }
 }
 
 public fn Number.to_float64(self) -> Float64
   cost time O(1)
 {
-  todo
+  if self.whole { self.integer.to_float64() } else { self.fraction }
 }
 
 impl From[Int64] for Number {
@@ -44,15 +54,10 @@ impl From[Int64] for Number {
   }
 }
 
-impl Equal for Number {
-  fn equal(self, other: Number) -> Bool {
-    todo
-  }
-}
-
 impl Display for Number {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write(format_number(self).slice())
   }
 }
 
@@ -70,34 +75,541 @@ public type ParseError(kind: ParseErrorKind, offset: USize, line: USize, column:
   derives Equal
 
 impl Display for ParseError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self.kind {
+      UnexpectedEnd => mut output.write("the text ends before the value does")
+      UnexpectedCharacter => mut output.write("a character that cannot be here")
+      InvalidNumber => mut output.write("a number that is not written as JSON writes one")
+      InvalidEscape => mut output.write("an escape that JSON does not have")
+      InvalidUnicode => mut output.write("text that is not Unicode")
+      TooDeep => mut output.write("values nested too deeply")
+      TrailingCharacters => mut output.write("text after the value")
+    }
+    mut output.write(" at line ")
+    self.line.display(mut output)
+    mut output.write(", column ")
+    self.column.display(mut output)
   }
 }
 
-public fn parse(text: StringSlice, maximum_depth: USize = 128) -> Result[Value, ParseError]
-  cost time O(text.length())
+type Failure(kind: ParseErrorKind, offset: USize)
+
+type ParsedValue(value: Value, end: USize)
+
+type ParsedString(text: String, end: USize)
+
+fn with_position(text: StringSlice, failure: Failure) -> ParseError
+  cost time finite
 {
-  todo
+  var line: USize = 1
+  var column: USize = 1
+  var index: USize = 0
+  while index < text.length() && index < failure.offset
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    let byte = text.byte(index)
+    if byte == 10 {
+      line = line.saturating_add(1)
+      column = 1
+    } else if byte < 128 || byte >= 192 {
+      column = column.saturating_add(1)
+    }
+    index += 1
+  }
+  ParseError(kind: failure.kind, offset: failure.offset, line: line, column: column)
+}
+
+fn is_whitespace(byte: UInt8) -> Bool
+  cost time O(1)
+{
+  byte == 32 || byte == 9 || byte == 10 || byte == 13
+}
+
+fn skip_whitespace(text: StringSlice, from: USize) -> USize
+  requires from <= text.length()
+  ensures from <= result
+  ensures result <= text.length()
+  cost time finite
+{
+  var index = from
+  while index < text.length() && is_whitespace(text.byte(index))
+    invariant from <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    index += 1
+  }
+  index
+}
+
+fn skip_digits(text: StringSlice, from: USize) -> USize
+  requires from <= text.length()
+  ensures from <= result
+  ensures result <= text.length()
+  cost time finite
+{
+  var index = from
+  while index < text.length() && 48 <= text.byte(index) && text.byte(index) <= 57
+    invariant from <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    index += 1
+  }
+  index
+}
+
+fn hexadecimal_value(byte: UInt8) -> UInt32
+  ensures result <= 16
+  cost time O(1)
+{
+  if 48 <= byte && byte <= 57 {
+    intrinsic::convert(byte - 48)
+  } else if 97 <= byte && byte <= 102 {
+    intrinsic::convert(byte - 87)
+  } else if 65 <= byte && byte <= 70 {
+    intrinsic::convert(byte - 55)
+  } else {
+    16
+  }
+}
+
+fn parse_hex4(text: StringSlice, from: USize) -> Option[UInt32]
+  requires from <= text.length()
+  ensures !(result is Some(code) && code > 65535)
+  ensures (result is Some(_)) ==> text.length() - from >= 4
+  cost time O(1)
+{
+  if text.length() - from < 4 {
+    return None
+  }
+  let first = hexadecimal_value(text.byte(from))
+  let second = hexadecimal_value(text.byte(from + 1))
+  let third = hexadecimal_value(text.byte(from + 2))
+  let fourth = hexadecimal_value(text.byte(from + 3))
+  if first == 16 || second == 16 || third == 16 || fourth == 16 {
+    return None
+  }
+  Some(first * 4096 + second * 256 + third * 16 + fourth)
+}
+
+fn parse_escape(text: StringSlice, from: USize, output: mut String) -> Result[USize, Failure]
+  requires from < text.length()
+  ensures !(result is Ok(end) && (end <= from || end > text.length()))
+  cost time finite
+{
+  if text.length() - from < 2 {
+    return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+  }
+  let byte = text.byte(from + 1)
+  if byte == 117 {
+    return parse_unicode_escape(text, from: from, output: mut output)
+  }
+  if byte == 34 {
+    mut output.push("\"")
+  } else if byte == 92 {
+    mut output.push("\\")
+  } else if byte == 47 {
+    mut output.push("/")
+  } else if byte == 98 {
+    mut output.push("\u{8}")
+  } else if byte == 102 {
+    mut output.push("\u{c}")
+  } else if byte == 110 {
+    mut output.push("\n")
+  } else if byte == 114 {
+    mut output.push("\r")
+  } else if byte == 116 {
+    mut output.push("\t")
+  } else {
+    return Err(Failure(kind: ParseErrorKind.InvalidEscape, offset: from))
+  }
+  Ok(from + 2)
+}
+
+fn parse_unicode_escape(text: StringSlice, from: USize, output: mut String) -> Result[USize, Failure]
+  requires from < text.length()
+  requires text.length() - from >= 2
+  ensures !(result is Ok(end) && (end <= from || end > text.length()))
+  cost time finite
+{
+  match parse_hex4(text, from: from + 2) {
+    None => Err(Failure(kind: ParseErrorKind.InvalidEscape, offset: from))
+    Some(code) => {
+      if 56320 <= code && code <= 57343 {
+        return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
+      }
+      if code < 55296 || code > 56319 {
+        writing::code_point(mut output.storage, code: code)
+        return Ok(from + 6)
+      }
+      let pair = text.length() - from >= 8 && text.byte(from + 6) == 92 && text.byte(from + 7) == 117
+      if !pair {
+        return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
+      }
+      match parse_hex4(text, from: from + 8) {
+        None => Err(Failure(kind: ParseErrorKind.InvalidEscape, offset: from + 6))
+        Some(low) => {
+          if low < 56320 || low > 57343 {
+            return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
+          }
+          writing::code_point(mut output.storage, code: 65536 + (code - 55296) * 1024 + (low - 56320))
+          Ok(from + 12)
+        }
+      }
+    }
+  }
+}
+
+fn parse_string(text: StringSlice, from: USize) -> Result[ParsedString, Failure]
+  requires from < text.length()
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  cost time finite
+{
+  var output = ""
+  var run = from + 1
+  var index = from + 1
+  while index < text.length()
+    invariant from < run
+    invariant run <= index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    let byte = text.byte(index)
+    if byte == 34 {
+      mut output.push(text.part(run, to: index))
+      return Ok(ParsedString(text: own output, end: index + 1))
+    }
+    if byte < 32 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: index))
+    }
+    if byte == 92 {
+      mut output.push(text.part(run, to: index))
+      index = parse_escape(text, from: index, output: mut output)?
+      run = index
+    } else {
+      index += 1
+    }
+  }
+  Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+}
+
+fn parse_number(text: StringSlice, from: USize) -> Result[ParsedValue, Failure]
+  requires from < text.length()
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  cost time finite
+{
+  let negative = text.byte(from) == 45
+  let start: USize = if negative { from + 1 } else { from }
+  if start == text.length() {
+    return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: start))
+  }
+  var end = start + 1
+  if 49 <= text.byte(start) && text.byte(start) <= 57 {
+    end = skip_digits(text, from: start + 1)
+  } else if text.byte(start) != 48 {
+    return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: start))
+  } else if end < text.length() && 48 <= text.byte(end) && text.byte(end) <= 57 {
+    return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: end))
+  }
+  var whole = true
+  if end < text.length() && text.byte(end) == 46 {
+    let fraction = skip_digits(text, from: end + 1)
+    if fraction == end + 1 {
+      return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: fraction))
+    }
+    end = fraction
+    whole = false
+  }
+  if end < text.length() && (text.byte(end) == 101 || text.byte(end) == 69) {
+    var exponent = end + 1
+    if exponent < text.length() && (text.byte(exponent) == 43 || text.byte(exponent) == 45) {
+      exponent += 1
+    }
+    let last = skip_digits(text, from: exponent)
+    if last == exponent {
+      return Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: last))
+    }
+    end = last
+    whole = false
+  }
+  let written = text.part(from, to: end)
+  if whole && Int64.parse_radix(written, radix: 10) is Ok(integer) && !(negative && integer == 0) {
+    return Ok(ParsedValue(value: Value.Number(value: Number(whole: true, integer: integer, fraction: 0.0)), end: end))
+  }
+  if float_math::parse_float64(written) is Ok(read) && Number.from_float64(read) is Some(number) {
+    return Ok(ParsedValue(value: Value.Number(value: number), end: end))
+  }
+  Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: from))
+}
+
+fn parse_literal(text: StringSlice, from: USize, word: StringSlice, value: own Value) -> Result[ParsedValue, Failure]
+  requires from < text.length()
+  requires word.length() > 0
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  cost time finite
+{
+  var index: USize = 0
+  while index < word.length()
+    invariant index <= word.length()
+    invariant index <= text.length() - from
+    decreases word.length() - index
+  {
+    if index >= text.length() - from {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+    }
+    if text.byte(from + index) != word.byte(index) {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: from + index))
+    }
+    index += 1
+  }
+  Ok(ParsedValue(value: own value, end: from + word.length()))
+}
+
+fn parse_array(text: StringSlice, from: USize, depth: USize) -> Result[ParsedValue, Failure]
+  requires from < text.length()
+  requires depth > 0
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  decreases depth, 0
+  cost time finite
+{
+  var items: List[Value] = []
+  var index = skip_whitespace(text, from: from + 1)
+  if index < text.length() && text.byte(index) == 93 {
+    return Ok(ParsedValue(value: Value.Array(items: own items), end: index + 1))
+  }
+  while index < text.length()
+    invariant from < index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    let item = parse_value(text, from: index, depth: depth - 1)?
+    let next = skip_whitespace(text, from: item.end)
+    mut items.push(own item.value)
+    if next == text.length() {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: next))
+    }
+    if text.byte(next) == 93 {
+      return Ok(ParsedValue(value: Value.Array(items: own items), end: next + 1))
+    }
+    if text.byte(next) != 44 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: next))
+    }
+    index = skip_whitespace(text, from: next + 1)
+  }
+  Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+}
+
+fn parse_object(text: StringSlice, from: USize, depth: USize) -> Result[ParsedValue, Failure]
+  requires from < text.length()
+  requires depth > 0
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  decreases depth, 0
+  cost time finite
+{
+  var members: Map[String, Value] = [:]
+  var index = skip_whitespace(text, from: from + 1)
+  if index < text.length() && text.byte(index) == 125 {
+    return Ok(ParsedValue(value: Value.Object(members: own members), end: index + 1))
+  }
+  while index < text.length()
+    invariant from < index
+    invariant index <= text.length()
+    decreases text.length() - index
+  {
+    if text.byte(index) != 34 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: index))
+    }
+    let name = parse_string(text, from: index)?
+    let colon = skip_whitespace(text, from: name.end)
+    if colon == text.length() {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: colon))
+    }
+    if text.byte(colon) != 58 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: colon))
+    }
+    let member = parse_value(text, from: skip_whitespace(text, from: colon + 1), depth: depth - 1)?
+    let next = skip_whitespace(text, from: member.end)
+    mut members.insert(own name.text, value: own member.value)
+    if next == text.length() {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: next))
+    }
+    if text.byte(next) == 125 {
+      return Ok(ParsedValue(value: Value.Object(members: own members), end: next + 1))
+    }
+    if text.byte(next) != 44 {
+      return Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: next))
+    }
+    index = skip_whitespace(text, from: next + 1)
+  }
+  Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
+}
+
+fn parse_value(text: StringSlice, from: USize, depth: USize) -> Result[ParsedValue, Failure]
+  requires from <= text.length()
+  ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
+  decreases depth, 1
+  cost time finite
+{
+  if from == text.length() {
+    return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: from))
+  }
+  let byte = text.byte(from)
+  if byte == 123 || byte == 91 {
+    if depth == 0 {
+      return Err(Failure(kind: ParseErrorKind.TooDeep, offset: from))
+    }
+    return if byte == 123 {
+      parse_object(text, from: from, depth: depth)
+    } else {
+      parse_array(text, from: from, depth: depth)
+    }
+  }
+  if byte == 34 {
+    let read = parse_string(text, from: from)?
+    return Ok(ParsedValue(value: Value.String(value: own read.text), end: read.end))
+  }
+  if byte == 116 {
+    return parse_literal(text, from: from, word: "true", value: Value.Bool(value: true))
+  }
+  if byte == 102 {
+    return parse_literal(text, from: from, word: "false", value: Value.Bool(value: false))
+  }
+  if byte == 110 {
+    return parse_literal(text, from: from, word: "null", value: Value.Null)
+  }
+  if byte == 45 || (48 <= byte && byte <= 57) {
+    return parse_number(text, from: from)
+  }
+  Err(Failure(kind: ParseErrorKind.UnexpectedCharacter, offset: from))
+}
+
+public fn parse(text: StringSlice, maximum_depth: USize = 128) -> Result[Value, ParseError]
+  cost time finite
+{
+  let start = skip_whitespace(text, from: 0)
+  match parse_value(text, from: start, depth: maximum_depth) {
+    Ok(step) => {
+      let end = skip_whitespace(text, from: step.end)
+      if end < text.length() {
+        return Err(with_position(text, failure: Failure(kind: ParseErrorKind.TrailingCharacters, offset: end)))
+      }
+      Ok(own step.value)
+    }
+    Err(failure) => Err(with_position(text, failure: failure))
+  }
 }
 
 public fn parse_bytes(bytes: Slice[UInt8], maximum_depth: USize = 128) -> Result[Value, ParseError]
-  cost time O(bytes.length())
+  cost time finite
 {
-  todo
+  match String.from_utf8(bytes.to_list()) {
+    Ok(text) => parse(text.slice(), maximum_depth: maximum_depth)
+    Err(error) => Err(with_position(
+      StringSlice(bytes: bytes.elements),
+      failure: Failure(kind: ParseErrorKind.InvalidUnicode, offset: error.valid_up_to),
+    ))
+  }
+}
+
+fn escape_overhead(byte: UInt8) -> USize
+  ensures result <= 5
+  cost time O(1)
+  cost allocations == 0
+{
+  if byte == 34 || byte == 92 || byte == 8 || byte == 9 || byte == 10 || byte == 12 || byte == 13 {
+    1
+  } else if byte < 32 {
+    5
+  } else {
+    0
+  }
+}
+
+fn lower_hexadecimal(value: UInt8) -> UInt8
+  requires value < 16
+  cost time O(1)
+  cost allocations == 0
+{
+  if value < 10 { value + 48 } else { value + 87 }
+}
+
+fn format_number(number: Number) -> String
+  cost time finite
+{
+  if number.whole {
+    return number.integer.format()
+  }
+  var storage: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(0)
+  writing::float64(mut storage, value: number.fraction)
+  String(storage: own storage)
 }
 
 public fn quote(text: StringSlice) -> String
   cost time O(text.length())
 {
-  todo
+  if text.length() > USize.maximum / 8 {
+    intrinsic::crash("a string cannot hold that many bytes".slice())
+  }
+  var extra: USize = 0
+  for index in 0..text.length()
+    invariant extra <= 5 * yielded.length()
+  {
+    extra += escape_overhead(text.byte(index))
+  }
+  let capacity = text.length() + extra + 2
+  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  intrinsic::storage_push(mut output, value: 34)
+  var budget = extra
+  for index in 0..text.length()
+    invariant intrinsic::storage_length(output) + (text.length() - yielded.length()) + budget + 1 <= capacity
+    invariant intrinsic::storage_capacity(output) == capacity
+  {
+    let byte = text.byte(index)
+    let needed = escape_overhead(byte)
+    if needed == 0 || budget < needed {
+      intrinsic::storage_push(mut output, value: byte)
+    } else if needed == 1 {
+      intrinsic::storage_push(mut output, value: 92)
+      let letter: UInt8 = if byte == 8 {
+        98
+      } else if byte == 9 {
+        116
+      } else if byte == 10 {
+        110
+      } else if byte == 12 {
+        102
+      } else if byte == 13 {
+        114
+      } else {
+        byte
+      }
+      intrinsic::storage_push(mut output, value: letter)
+      budget -= 1
+    } else {
+      intrinsic::storage_push(mut output, value: 92)
+      intrinsic::storage_push(mut output, value: 117)
+      intrinsic::storage_push(mut output, value: 48)
+      intrinsic::storage_push(mut output, value: 48)
+      intrinsic::storage_push(mut output, value: lower_hexadecimal(byte / 16))
+      intrinsic::storage_push(mut output, value: lower_hexadecimal(byte % 16))
+      budget -= 5
+    }
+  }
+  intrinsic::storage_push(mut output, value: 34)
+  String(storage: own output)
 }
 
 public fn Value.number(value: Float64) -> Option[Value]
   ensures (result is Some(_)) == value.is_finite()
   cost time O(1)
 {
-  todo
+  match Number.from_float64(value) {
+    Some(number) => Some(Value.Number(value: number))
+    None => None
+  }
 }
 
 public fn Value.is_null(self) -> Bool
@@ -109,49 +621,86 @@ public fn Value.is_null(self) -> Bool
 public fn Value.to_bool(self) -> Option[Bool]
   cost time O(1)
 {
-  todo
+  match self {
+    Bool(value) => Some(value)
+    _ => None
+  }
 }
 
 public fn Value.to_int64(self) -> Option[Int64]
   cost time O(1)
 {
-  todo
+  match self {
+    Number(value) => value.to_int64()
+    _ => None
+  }
 }
 
 public fn Value.to_float64(self) -> Option[Float64]
   cost time O(1)
 {
-  todo
+  match self {
+    Number(value) => Some(value.to_float64())
+    _ => None
+  }
 }
 
 public fn Value.text(self) -> Option[StringSlice]
   cost time O(1)
 {
-  todo
+  match self {
+    String(value) => Some(value.slice())
+    _ => None
+  }
 }
 
 public fn Value.items(self) -> Option[Slice[Value]]
   cost time O(1)
 {
-  todo
+  match self {
+    Array(items) => Some(items.slice())
+    _ => None
+  }
 }
 
 public fn Value.members(self) lends Option[Map[String, Value]]
   cost time O(1)
 {
-  todo
+  match self {
+    Object(members) => yield Some(members)
+    _ => yield None
+  }
 }
 
 public fn Value.get(self, name: StringSlice) lends Option[Value]
   cost time finite
 {
-  todo
+  let key = name.to_string()
+  match self {
+    Object(members) => {
+      if members.contains(key) {
+        yield Some(members[key])
+      } else {
+        yield None
+      }
+    }
+    _ => yield None
+  }
 }
 
 public fn Value.get_index(self, index: USize) lends Option[Value]
   cost time O(1)
 {
-  todo
+  match self {
+    Array(items) => {
+      if index < items.length() {
+        yield Some(items[index])
+      } else {
+        yield None
+      }
+    }
+    _ => yield None
+  }
 }
 
 public fn Value.pointer(self, path: StringSlice) lends Option[Value]
@@ -160,28 +709,131 @@ public fn Value.pointer(self, path: StringSlice) lends Option[Value]
   todo
 }
 
+fn push_newline(output: mut String, indent: USize, level: USize)
+  cost time finite
+{
+  mut output.push("\n")
+  var left = indent.saturating_multiply(level)
+  while left > 0
+    decreases left
+  {
+    mut output.push(" ")
+    left -= 1
+  }
+}
+
+fn write_value(value: Value, output: mut String)
+  cost time finite
+{
+  match value {
+    Null => mut output.push("null")
+    Bool(flag) => {
+      if flag {
+        mut output.push("true")
+      } else {
+        mut output.push("false")
+      }
+    }
+    Number(number) => mut output.push(format_number(number).slice())
+    String(text) => mut output.push(quote(text.slice()).slice())
+    Array(items) => {
+      mut output.push("[")
+      for index in 0..items.length() {
+        if index > 0 {
+          mut output.push(",")
+        }
+        write_value(items[index], output: mut output)
+      }
+      mut output.push("]")
+    }
+    Object(members) => {
+      mut output.push("{")
+      for index in 0..members.entries.length() {
+        if index > 0 {
+          mut output.push(",")
+        }
+        mut output.push(quote(members.entries[index].key.slice()).slice())
+        mut output.push(":")
+        write_value(members.entries[index].value, output: mut output)
+      }
+      mut output.push("}")
+    }
+  }
+}
+
+fn write_pretty_value(value: Value, output: mut String, indent: USize, level: USize)
+  cost time finite
+{
+  match value {
+    Array(items) => {
+      if items.length() == 0 {
+        mut output.push("[]")
+        return
+      }
+      mut output.push("[")
+      for index in 0..items.length() {
+        if index > 0 {
+          mut output.push(",")
+        }
+        push_newline(mut output, indent: indent, level: level.saturating_add(1))
+        write_pretty_value(items[index], output: mut output, indent: indent, level: level.saturating_add(1))
+      }
+      push_newline(mut output, indent: indent, level: level)
+      mut output.push("]")
+    }
+    Object(members) => {
+      if members.entries.length() == 0 {
+        mut output.push("{}")
+        return
+      }
+      mut output.push("{")
+      for index in 0..members.entries.length() {
+        if index > 0 {
+          mut output.push(",")
+        }
+        push_newline(mut output, indent: indent, level: level.saturating_add(1))
+        mut output.push(quote(members.entries[index].key.slice()).slice())
+        mut output.push(": ")
+        write_pretty_value(
+          members.entries[index].value,
+          output: mut output,
+          indent: indent,
+          level: level.saturating_add(1),
+        )
+      }
+      push_newline(mut output, indent: indent, level: level)
+      mut output.push("}")
+    }
+    _ => write_value(value, output: mut output)
+  }
+}
+
 public fn Value.write(self, output: mut TextBuilder)
   cost time finite
 {
-  todo
+  mut output.write(self.to_text().slice())
 }
 
 public fn Value.write_pretty(self, output: mut TextBuilder, indent: USize = 2)
   cost time finite
 {
-  todo
+  mut output.write(self.to_pretty_text(indent: indent).slice())
 }
 
 public fn Value.to_text(self) -> String
   cost time finite
 {
-  todo
+  var text = ""
+  write_value(self, output: mut text)
+  text
 }
 
 public fn Value.to_pretty_text(self, indent: USize = 2) -> String
   cost time finite
 {
-  todo
+  var text = ""
+  write_pretty_value(self, output: mut text, indent: indent, level: 0)
+  text
 }
 
 impl Display for Value {
@@ -193,8 +845,9 @@ impl Display for Value {
 impl text::Parse for Value {
   type Error = ParseError
 
-  fn parse(text: StringSlice) -> Result[Value, ParseError] {
-    todo
+  fn parse(text: StringSlice) -> Result[Value, ParseError]
+  {
+    parse(text)
   }
 }
 
@@ -254,8 +907,14 @@ public type DecodeError(path: String, message: String)
   derives Equal
 
 impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    if self.path.length() > 0 {
+      mut output.write("at ")
+      mut output.write(self.path.slice())
+      mut output.write(": ")
+    }
+    mut output.write(self.message.slice())
   }
 }
 
@@ -265,8 +924,12 @@ public type Error =
   derives Equal
 
 impl Display for Error {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Parse(error) => error.display(mut output)
+      Decode(error) => error.display(mut output)
+    }
   }
 }
 
@@ -276,8 +939,12 @@ public type ReadError =
   derives Equal
 
 impl Display for ReadError {
-  fn display(self, output: mut TextBuilder) {
-    todo
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      System(error) => error.display(mut output)
+      Parse(error) => error.display(mut output)
+    }
   }
 }
 
@@ -289,250 +956,451 @@ public trait Decode {
   fn from_json(value: Value) -> Result[Self, DecodeError]
 }
 
+fn type_mismatch(expected: StringSlice) -> DecodeError {
+  var message = "expected "
+  mut message.push(expected)
+  DecodeError(path: "", message: own message)
+}
+
+fn prefix_path(name: StringSlice, error: own DecodeError) -> DecodeError {
+  var path = "/"
+  mut path.push(name)
+  mut path.push(error.path.slice())
+  DecodeError(path: own path, message: own error.message)
+}
+
+fn expect_integer(value: Value) -> Result[Int64, DecodeError] {
+  match value {
+    Number(number) => match number.to_int64() {
+      Some(integer) => Ok(integer)
+      None => Err(type_mismatch("a whole number"))
+    }
+    _ => Err(type_mismatch("a number"))
+  }
+}
+
 public fn encode[Item: Encode](item: Item) -> String {
-  todo
+  item.to_json().to_text()
 }
 
 public fn encode_pretty[Item: Encode](item: Item, indent: USize = 2) -> String {
-  todo
+  item.to_json().to_pretty_text(indent: indent)
 }
 
 public fn decode[Item: Decode](text: StringSlice) -> Result[Item, Error] {
-  todo
+  match parse(text) {
+    Ok(value) => match Item.from_json(value) {
+      Ok(item) => Ok(own item)
+      Err(error) => Err(Error.Decode(error: own error))
+    }
+    Err(error) => Err(Error.Parse(error: error))
+  }
 }
 
 public fn Value.field[Field: Decode](self, name: StringSlice) -> Result[Field, DecodeError] {
-  todo
+  let key = name.to_string()
+  match self {
+    Object(members) => {
+      if !members.contains(key) {
+        var message = "there is no member `"
+        mut message.push(name)
+        mut message.push("`")
+        return Err(DecodeError(path: "", message: own message))
+      }
+      match Field.from_json(members[key]) {
+        Ok(field) => Ok(own field)
+        Err(error) => Err(prefix_path(name, error: own error))
+      }
+    }
+    _ => Err(type_mismatch("an object"))
+  }
 }
 
 public fn Value.optional_field[Field: Decode](self, name: StringSlice) -> Result[Option[Field], DecodeError] {
-  todo
+  let key = name.to_string()
+  match self {
+    Object(members) => {
+      if !members.contains(key) || members[key].is_null() {
+        return Ok(None)
+      }
+      match Field.from_json(members[key]) {
+        Ok(field) => Ok(Some(own field))
+        Err(error) => Err(prefix_path(name, error: own error))
+      }
+    }
+    _ => Err(type_mismatch("an object"))
+  }
 }
 
 public fn read_from[Source: streams::Reader](source: mut Source, maximum_depth: USize = 128) -> Result[Value, ReadError]
   uses Handles
 {
-  todo
+  var bytes: List[UInt8] = []
+  match mut source.read_to_end(mut bytes) {
+    Ok(_) => match parse_bytes(bytes.slice(), maximum_depth: maximum_depth) {
+      Ok(value) => Ok(own value)
+      Err(error) => Err(ReadError.Parse(error: error))
+    }
+    Err(error) => Err(ReadError.System(error: error))
+  }
 }
 
 public fn write_to[Sink: streams::Writer](value: Value, sink: mut Sink) -> Result[Unit, SystemError]
   uses Handles
 {
-  todo
+  let text = value.to_text()
+  mut sink.write_all(text.bytes())
 }
 
 impl Encode for Bool {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Bool(value: self)
   }
 }
 
 impl Decode for Bool {
-  fn from_json(value: Value) -> Result[Bool, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Bool, DecodeError]
+  {
+    match value {
+      Bool(flag) => Ok(flag)
+      _ => Err(type_mismatch("true or false"))
+    }
   }
 }
 
 impl Encode for Int8 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Number(value: Number.from(Int64.from(self)))
   }
 }
 
 impl Decode for Int8 {
-  fn from_json(value: Value) -> Result[Int8, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Int8, DecodeError]
+  {
+    match Int8.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `Int8`"))
+    }
   }
 }
 
 impl Encode for Int16 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Number(value: Number.from(Int64.from(self)))
   }
 }
 
 impl Decode for Int16 {
-  fn from_json(value: Value) -> Result[Int16, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Int16, DecodeError]
+  {
+    match Int16.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `Int16`"))
+    }
   }
 }
 
 impl Encode for Int32 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Number(value: Number.from(Int64.from(self)))
   }
 }
 
 impl Decode for Int32 {
-  fn from_json(value: Value) -> Result[Int32, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Int32, DecodeError]
+  {
+    match Int32.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `Int32`"))
+    }
   }
 }
 
 impl Encode for Int64 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Number(value: Number.from(self))
   }
 }
 
 impl Decode for Int64 {
-  fn from_json(value: Value) -> Result[Int64, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Int64, DecodeError]
+  {
+    expect_integer(value)
   }
 }
 
 impl Encode for UInt8 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Number(value: Number.from(Int64.from(self)))
   }
 }
 
 impl Decode for UInt8 {
-  fn from_json(value: Value) -> Result[UInt8, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[UInt8, DecodeError]
+  {
+    match UInt8.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `UInt8`"))
+    }
   }
 }
 
 impl Encode for UInt16 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Number(value: Number.from(Int64.from(self)))
   }
 }
 
 impl Decode for UInt16 {
-  fn from_json(value: Value) -> Result[UInt16, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[UInt16, DecodeError]
+  {
+    match UInt16.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `UInt16`"))
+    }
   }
 }
 
 impl Encode for UInt32 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Number(value: Number.from(Int64.from(self)))
   }
 }
 
 impl Decode for UInt32 {
-  fn from_json(value: Value) -> Result[UInt32, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[UInt32, DecodeError]
+  {
+    match UInt32.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `UInt32`"))
+    }
   }
 }
 
 impl Encode for UInt64 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    match Int64.try_from(self) {
+      Ok(integer) => Value.Number(value: Number.from(integer))
+      Err(_) => match Number.from_float64(self.to_float64()) {
+        Some(number) => Value.Number(value: number)
+        None => Value.Null
+      }
+    }
   }
 }
 
 impl Decode for UInt64 {
-  fn from_json(value: Value) -> Result[UInt64, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[UInt64, DecodeError]
+  {
+    match UInt64.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `UInt64`"))
+    }
   }
 }
 
 impl Encode for USize {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    match Int64.try_from(self) {
+      Ok(integer) => Value.Number(value: Number.from(integer))
+      Err(_) => match Number.from_float64(self.to_float64()) {
+        Some(number) => Value.Number(value: number)
+        None => Value.Null
+      }
+    }
   }
 }
 
 impl Decode for USize {
-  fn from_json(value: Value) -> Result[USize, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[USize, DecodeError]
+  {
+    match USize.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `USize`"))
+    }
   }
 }
 
 impl Encode for ISize {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.Number(value: Number.from(Int64.from(self)))
   }
 }
 
 impl Decode for ISize {
-  fn from_json(value: Value) -> Result[ISize, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[ISize, DecodeError]
+  {
+    match ISize.try_from(expect_integer(value)?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(type_mismatch("a number that fits `ISize`"))
+    }
   }
 }
 
 impl Encode for Float32 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    match Number.from_float64(Float64.from(self)) {
+      Some(number) => Value.Number(value: number)
+      None => Value.Null
+    }
   }
 }
 
 impl Decode for Float32 {
-  fn from_json(value: Value) -> Result[Float32, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Float32, DecodeError]
+  {
+    match value {
+      Number(number) => Ok(number.to_float64().to_float32())
+      _ => Err(type_mismatch("a number"))
+    }
   }
 }
 
 impl Encode for Float64 {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    match Number.from_float64(self) {
+      Some(number) => Value.Number(value: number)
+      None => Value.Null
+    }
   }
 }
 
 impl Decode for Float64 {
-  fn from_json(value: Value) -> Result[Float64, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Float64, DecodeError]
+  {
+    match value {
+      Number(number) => Ok(number.to_float64())
+      _ => Err(type_mismatch("a number"))
+    }
   }
 }
 
 impl Encode for String {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    Value.String(value: self.copy())
   }
 }
 
 impl Decode for String {
-  fn from_json(value: Value) -> Result[String, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[String, DecodeError]
+  {
+    match value {
+      String(text) => Ok(text.copy())
+      _ => Err(type_mismatch("a string"))
+    }
   }
 }
 
 impl Encode for Value {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    self.copy()
   }
 }
 
 impl Decode for Value {
-  fn from_json(value: Value) -> Result[Value, DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Value, DecodeError]
+  {
+    Ok(value.copy())
   }
 }
 
 impl Encode for List[Element: Encode] {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    var items: List[Value] = List.with_capacity(self.length())
+    for item in self {
+      mut items.push(item.to_json())
+    }
+    Value.Array(items: own items)
   }
 }
 
 impl Decode for List[Element: Decode] {
-  fn from_json(value: Value) -> Result[List[Element], DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[List[Element], DecodeError]
+  {
+    match value {
+      Array(items) => {
+        var decoded: List[Element] = List.with_capacity(items.length())
+        for index in 0..items.length() {
+          match Element.from_json(items[index]) {
+            Ok(item) => mut decoded.push(own item)
+            Err(error) => return Err(prefix_path(index.format().slice(), error: own error))
+          }
+        }
+        Ok(own decoded)
+      }
+      _ => Err(type_mismatch("an array"))
+    }
   }
 }
 
 impl Encode for Option[Inner: Encode] {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    match self {
+      Some(inner) => inner.to_json()
+      None => Value.Null
+    }
   }
 }
 
 impl Decode for Option[Inner: Decode] {
-  fn from_json(value: Value) -> Result[Option[Inner], DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Option[Inner], DecodeError]
+  {
+    if value.is_null() {
+      return Ok(None)
+    }
+    match Inner.from_json(value) {
+      Ok(inner) => Ok(Some(own inner))
+      Err(error) => Err(own error)
+    }
   }
 }
 
 impl Encode for Map[Key: Hash + Ordered + Display, Member: Encode] {
-  fn to_json(self) -> Value {
-    todo
+  fn to_json(self) -> Value
+  {
+    var members: Map[String, Value] = Map.with_capacity(self.length())
+    for entry in self {
+      mut members.insert("${entry.key}", value: entry.value.to_json())
+    }
+    Value.Object(members: own members)
   }
 }
 
 impl Decode for Map[Key: Hash + Ordered + text::Parse, Member: Decode] {
-  fn from_json(value: Value) -> Result[Map[Key, Member], DecodeError] {
-    todo
+  fn from_json(value: Value) -> Result[Map[Key, Member], DecodeError]
+  {
+    match value {
+      Object(members) => {
+        var decoded: Map[Key, Member] = Map.with_capacity(members.length())
+        for entry in members {
+          match Key.parse(entry.key.slice()) {
+            Ok(key) => match Member.from_json(entry.value) {
+              Ok(member) => mut decoded.insert(own key, value: own member)
+              Err(error) => return Err(prefix_path(entry.key.slice(), error: own error))
+            }
+            Err(_) => return Err(prefix_path(entry.key.slice(), error: type_mismatch("a key of the map's type")))
+          }
+        }
+        Ok(own decoded)
+      }
+      _ => Err(type_mismatch("an object"))
+    }
   }
 }

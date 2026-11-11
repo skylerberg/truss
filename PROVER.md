@@ -95,8 +95,8 @@ Every fact the prover must show, and where it comes from:
 | Obligation | Where |
 |---|---|
 | An index or slice is in bounds | Each `items[i]` and `items[a..b]`, through the `requires` of the `impl` of `Index` the call reaches |
-| An operation does not overflow | Each `+`, `-`, `*`, negation, and conversion on a built-in integer |
-| A division has a nonzero divisor, and is not the least value over `-1` | Each `/` and `%` on a built-in integer |
+| An operation does not overflow | Each `+`, `-`, `*`, negation, and conversion on a built-in integer, and each of the intrinsic module's integer operations, as an `impl` of `Add` calls |
+| A division has a nonzero divisor, and is not the least value over `-1` | Each `/` and `%` on a built-in integer, and each intrinsic `divide` and `remainder` |
 | A shift amount is less than the width | Each `<<` and `>>` |
 | `unreachable` is never reached | Each `unreachable`, including the ones after guards that the type checker added |
 | A call's `requires` holds | Each call, including calls to theorems in proofs and calls in specifications |
@@ -194,8 +194,9 @@ and `reads` clauses):
   type comes with its range as a fact, and each operation on one becomes
   an exact operation and an obligation that the result is in range, as in
   Dafny and Verus. The intrinsic module's integer operations mean what the
-  compiler makes them do: arithmetic that stops the program on overflow or
-  a zero divisor gives the exact result when it returns, wrapping
+  compiler makes them do: arithmetic gives the exact result, with its
+  operator's obligation that the result is in range and the divisor is not
+  zero, since a build without run-time checks does not stop there; wrapping
   arithmetic gives the exact result brought into range by a remainder,
   and the overflow tests, the comparisons, `fits`, and `convert` of a
   value that fits are exact. A float's `fits` an integer type when it is a
