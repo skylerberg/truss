@@ -118,7 +118,7 @@ let signature_parts = [ "interface"; "signature"; "shape" ]
    with the definitions that read it, and the diagnostics the project would
    have that it does not have now. *)
 let consequences (project : Project.t) text =
-  let trial = Database.trial_with_lock project.session text in
+  let trial = Database.trial project.session [ ("truss.lock", Some text) ] in
   let own = List.map snd (Database.packages project.session) in
   let ours path = List.mem (Path.package path) own in
   let changed =

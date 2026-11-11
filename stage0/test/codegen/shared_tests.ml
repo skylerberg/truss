@@ -182,8 +182,11 @@ let loaded =
          fail "the source has diagnostics:\n%s"
            (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
      ( database,
-       Compile.create ~want:(Database.want_in engine) database target_64 (Lazy.force compiler)
-         (Lazy.force cache) settings ))
+       Compile.create
+         ~want:(fun lowering wanted ->
+           Engine.set engine Compile.roots lowering
+             (Compile.add_roots (Engine.context engine) lowering wanted))
+         database target_64 (Lazy.force compiler) (Lazy.force cache) settings ))
 
 let () =
   test "shared values are updated, copied, and dropped without a leak" (fun () ->

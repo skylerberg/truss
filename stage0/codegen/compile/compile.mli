@@ -20,10 +20,15 @@ type lowering
    database sets it. *)
 val roots : (lowering, Instance.key list) Query.input
 
-(* With [checks], the default, the program checks at run time what the
-   prover would prove: [requires] clauses that can run, integer overflow,
-   and division. Stage0's builds keep the checks whether or not the proofs
-   are done. [file_name] names the file of each position the
+val add_roots : Query.context -> lowering -> Instance.key list -> Instance.key list
+(** The roots with more wanted, which a driver sets {!roots} to before it asks for those instances'
+    keys: a query cannot set an input. *)
+
+(* With [checks], the default, the program checks at run time each
+   primitive operation that is undefined or wrong where its precondition
+   does not hold: an index, a slice, arithmetic, a shift, and a call of
+   the C library. It evaluates no [requires] clause. A build with checks
+   does not wait for proofs. [file_name] names the file of each position the
    program reports, by its module, and is [Workspace.file_path] unless a
    driver shows files another way. [want] is told which instances' keys are
    about to be asked for, and adds them to [roots]; without it, asking for

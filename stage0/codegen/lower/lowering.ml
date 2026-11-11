@@ -54,6 +54,9 @@ type frame = {
       (** In an inlined lending method with a [yield] on each of several paths, where a value the
           method makes to lend is put, so that one owner drops it whichever [yield] is reached *)
   inlined : Path.t list;  (** The methods inlined around this frame, to refuse recursion *)
+  reported : Lir.site option;
+      (** In the standard library's code that is inlined into a program's, the position of the
+          program's call, where a check that fails in this code is reported *)
   exit : (Lir.block * int) option;
       (** In an inlined method, where its [return] goes and how many scopes that keeps *)
 }
@@ -131,6 +134,7 @@ let frame_of code ~inlined =
     on_yield = None;
     yield_into = None;
     inlined;
+    reported = None;
     exit = None;
   }
 

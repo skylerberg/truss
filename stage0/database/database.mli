@@ -1,7 +1,10 @@
-(** The code database: sessions, which keep each project's packages and modules as inputs and every
-    result asked of them current as files change, with each state written to the store as a
-    difference over an earlier one; the questions the graph of those results answers; and the
-    background process that holds sessions between commands.
+(** The code database, as a project sees it: a session for each project's files, kept current as the
+    files change, with the project's packages and modules as its inputs; the questions a session's
+    graph answers; and the background process that holds sessions between commands.
+
+    This is the project's layer over {!Session}, which keeps states in the store and knows no
+    compiler stage. What is here knows manifests, packages, the registry, and git. It names no
+    stage's inputs but the project's own: a driver sets a stage's input with {!set}.
 
     The database answers with data. What a command does with it, and how it is shown, is the command
     line's, in [stage0/cli]; the background process runs the command line's own handler, so a
@@ -10,7 +13,10 @@
 
 (** {1 Sessions} *)
 
-type session
+type session = Session.t
+(** One state of a project: a worktree as its files are now, a commit, a change that is only being
+    tried, a published package, or the standard library being worked on. Whatever its files come
+    from, it is read through {!context}. *)
 
 val open_session : string -> (session * (string * string) list, string) result
 (** The session for the project a directory is in, brought up to date with its files, and the
@@ -27,13 +33,15 @@ val save_session : session -> unit
 (** Saves what the session computed to the store. *)
 
 val root : session -> string
-(** The project's root, absolute. *)
+(** The project's root, absolute; empty for a session whose files are in no directory. *)
 
-val engine : session -> Engine.t
 val context : session -> Query.context
+(** What a driver reads a session's results through. *)
 
-val set_answers : session -> (string * Prover.told) list -> unit
-(** Sets what the solver and run code said, which is how the prover is given its answers. *)
+val set : session -> ('key, 'value) Query.input -> 'key -> 'value -> unit
+(** Sets an input that a stage declares and a driver gives, such as the roots code generation
+    searches from, or what the solver said. This is the one way a driver sets an input: the
+    project's own inputs, its packages and their modules' text, follow from the session's files. *)
 
 val problems : session -> string list
 (** What reading the project's manifests shows to be wrong, each as its file and sentences: one that
@@ -67,31 +75,61 @@ val module_file : session -> Path.module_ -> string
 val diagnostics : session -> Path.module_ -> Diagnostic.t list
 (** A file's diagnostics, kept current and saved. *)
 
+val code_packages : session -> string -> string list
+(** The packages a package's code uses, its tests apart. *)
+
+val sessions : unit -> (string * int) list
+(** Each open session, by what names it, with how many results it holds. *)
+
+(** {1 Other sessions of a project} *)
+
+val trial : session -> (string * string option) list -> session
+(** A session that starts from another's state, with some of its files replaced, added, or, with
+    [None], removed: each by its path from the project's root. It shares with the session everything
+    but what the change reaches and is never saved, so a change, such as a rename or another lock
+    file, is checked before any file is written. *)
+
+val base_commit : session -> string option -> string option
+(** The commit a revision names, or without one, where the worktree's branch left its default
+    branch. *)
+
+val open_commit_of : session -> string -> (session, string) result
+(** A session of the worktree's repository at a commit. *)
+
+val published : string -> Registry.Version.t -> (session, string) result
+(** A published package at a version, as a session of its own with the packages it was published
+    with, for comparing a release with it. An error says, as a sentence, why it cannot be had. *)
+
+val open_library : ?modules:(Path.module_ * string) list -> string -> (session, string) result
+(** The standard library as a state of its own, for working on the library: the [standard] package
+    is the session's own inputs, over no base, set from [modules], which are the sources built into
+    this compiler unless given. The state is opened from the pointer of that name, so each caller
+    that gives its own name keeps its own state, and is kept under {!Compiler_version.digest}, so it
+    is found again after an edit to the library, and by a test as by the command line. An error says
+    that another process has the state open. *)
+
+(** {1 The store} *)
+
 val objects_directory : unit -> string
 (** Where object files are cached, in the store. *)
 
 val programs_directory : unit -> string
 (** Where programs built to be run are put, in the store. *)
 
-val test_results : unit -> Compile.results
-(** Kept test results, in the store. *)
+val results : kind:string -> (string -> string option) * (string -> string -> unit)
+(** Finding and keeping the results of one kind of expensive step, such as ["tests"], each under the
+    key of exactly the input that made it. *)
 
-val want : session -> Compile.lowering -> Instance.key list -> unit
-(** Adds to the instances whose keys a session has been asked for, which is how code generation is
-    given the roots it searches from, as {!Compile.create}'s [want]. *)
-
-val want_in : Engine.t -> Compile.lowering -> Instance.key list -> unit
-(** The same, for an engine that is not a session's, as tests have. *)
+val flush_store : unit -> unit
+(** Writes what the store holds in memory. *)
 
 val prepare_store : unit -> unit
 (** Checks the standard library and keeps its state in the store, unless the store has it, as the
     first session opened in a new store does. *)
 
-val flush_store : unit -> unit
-(** Writes what the store holds in memory. *)
-
-val sessions : unit -> (string * int) list
-(** Each open session, by its worktree or commit, with how many results it holds. *)
+val store_directory : unit -> string
+(** Where the store is: [$TRUSS_CACHE], or else [$XDG_CACHE_HOME/truss], or else [~/.cache/truss].
+*)
 
 (** {1 What reads what} *)
 
@@ -112,13 +150,6 @@ val find_definitions : session -> string -> Path.t list
 (** {1 Comparing} *)
 
 type difference = Changed | Added | Same
-
-val base_commit : session -> string option -> string option
-(** The commit a revision names, or without one, where the worktree's branch left its default
-    branch. *)
-
-val open_commit_of : session -> string -> (session, string) result
-(** A session of the worktree's repository at a commit. *)
 
 val changes : session -> session -> (Path.t * string option * difference) list
 (** Every part of a definition that a change between the two could reach, in the first, with how it
@@ -144,6 +175,21 @@ val merge_preview : session -> session -> ((string * string * string) list, stri
 (** The diagnostics a merge of the two would have that neither has: each one's file, code, and
     message. *)
 
+(** {1 Choosing versions} *)
+
+type lock_plan = {
+  text : string;  (** The lock file as it would be written *)
+  before : Registry.Lock.t;
+  after : Registry.Lock.t;
+}
+
+val plan_lock :
+  session -> set:(string * Registry.Version.t option) list -> all:bool -> (lock_plan, string) result
+(** The lock file a project would have with other versions: each package of [set] at the version
+    given, or at the registry's newest, and with [all], every registry package of the build at its
+    newest. The rest follow as a build's versions do. It fetches what it needs and writes no file.
+    An error says, in sentences, why there is no such lock file. *)
+
 (** {1 The background process} *)
 
 val serve : handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
@@ -162,10 +208,6 @@ val call :
     this executable unless given, with the argument [__serve], if it is not running, unless
     [start_server] is false, and handing each piece of progress to [progress] as it arrives. *)
 
-val store_directory : unit -> string
-(** Where the store is: [$TRUSS_CACHE], or else [$XDG_CACHE_HOME/truss], or else [~/.cache/truss].
-*)
-
 val recovering : (unit -> 'a) -> 'a
 (** Runs a command that is not answered by the background process. If a state it reads has lost an
     input's value, as after another process collected the store, every open state is discarded and
@@ -174,7 +216,13 @@ val recovering : (unit -> 'a) -> 'a
 val stop : unit -> unit
 (** Ends the background process once the request being answered is. *)
 
-(** {1 For tests and drivers} *)
+val reset : unit -> unit
+(** Saves and closes every session and the store, so that the next request starts as a new process
+    would. *)
+
+(** {1 For tests}
+
+    A test holds an engine of its own, which a driver never does. *)
 
 val load_package :
   ?usize_bits:int ->
@@ -183,67 +231,21 @@ val load_package :
   dependencies:Workspace.dependency list ->
   (Path.module_ * string) list ->
   unit
-(** Sets a package's modules, with their text, and its manifest as inputs. [usize_bits] is 32 unless
-    given. *)
+(** Sets a package's modules, with their text, and its manifest as an engine's inputs. [usize_bits]
+    is 32 unless given. *)
 
 val load_standard : Engine.t -> unit
 (** Sets the [standard] package, built into the compiler. *)
 
-val standard_base : unit -> Engine.t
-(** The standard library, checked whole and frozen as a fixed base for engines to be made over. *)
+module Testing : sig
+  val engine : session -> Engine.t
 
-type lock_plan = {
-  text : string;  (** The lock file as it would be written *)
-  before : Registry.Lock.t;
-  after : Registry.Lock.t;
-}
+  val session_engine : string -> Engine.t option
+  (** The engine of the open session for a directory. *)
 
-val plan_lock :
-  session -> set:(string * Registry.Version.t option) list -> all:bool -> (lock_plan, string) result
-(** The lock file a project would have with other versions: each package of [set] at the version
-    given, or at the registry's newest, and with [all], every registry package of the build at its
-    newest. The rest follow as a build's versions do. It fetches what it needs and writes no file.
-    An error says, in sentences, why there is no such lock file. *)
+  val standard_base : unit -> Engine.t
+  (** The standard library, checked whole and frozen as a fixed base for engines to be made over. *)
 
-val published_engine : string -> Registry.Version.t -> (Engine.t, string) result
-(** A published package at a version, in an engine of its own with the packages it was published
-    with, for comparing a release with it. An error says, as a sentence, why it cannot be had. *)
-
-val code_packages : session -> string -> string list
-(** The packages a package's code uses, its tests apart. *)
-
-val trial_with_lock : session -> string -> session
-(** A session that starts from another's state, with a lock file in place of its own, for seeing
-    what other versions would change before the file is written. *)
-
-val trial : session -> Engine.t
-(** An engine that starts from a session's state and changes on its own, for trying a change, such
-    as a rename, before any file is written. It shares with the session everything but what the
-    trial changes. *)
-
-(** {1 The standard library as a state of its own} *)
-
-type library
-
-val open_library : ?modules:(Path.module_ * string) list -> string -> (library, string) result
-(** The standard library as a state of its own, for working on the library: the [standard] package
-    is the engine's own inputs, over no base, set from [modules], which are the sources built into
-    this compiler unless given. The state is opened from the pointer of that name, so each caller
-    that gives its own name keeps its own state, and is kept under {!Compiler_version.digest}, so it
-    is found again after an edit to the library, and by a test as by the command line. An error says
-    that another process has the state open. *)
-
-val library_engine : library -> Engine.t
-
-val save_library : library -> unit
-(** Writes what changed in a library's state to the store, and points its name at it. *)
-
-val reset : unit -> unit
-(** Saves and closes every session and the store, so that the next request starts as a new process
-    would. *)
-
-val logging : bool ref
-(** Whether new sessions keep a log of the queries they compute, for tests. *)
-
-val session_engine : string -> Engine.t option
-(** The engine of the open session for a directory, for tests. *)
+  val logging : bool ref
+  (** Whether new sessions keep a log of the queries they compute. *)
+end

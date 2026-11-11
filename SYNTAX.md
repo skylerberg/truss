@@ -3043,9 +3043,10 @@ test "writes the report"
 - A failed `assert` ends the test as failed. After an `assert`, the rest of the
   test can rely on what it asserted.
 - Tests do not wait for proofs. A test build checks, as the code runs, every
-  operation that could fail, such as an index, a `requires` that can run, or
+  primitive operation that could fail, such as an index, a division, or
   an addition that could overflow, so a test runs safely even where a proof
   has failed or is still running. A failed check ends the test as failed and names the operation.
+  A `requires` clause is not run: only the prover checks it.
   A program is built only once everything it can reach is proven.
 - A panic fails only the test it happens in. There is no way to expect a
   panic: test error cases as `Result` values instead.

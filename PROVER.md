@@ -1341,8 +1341,9 @@ test the prover itself:
 - **The ownership check** gives the pairs of indexes and slices that must
   reach different elements, by the bracket each is written with.
 - **Code generation** runs a tagged template's checks for the prover. It
-  builds tests and `truss run` with run-time checks of what the prover
-  proves, and `truss build` without them, as CODEGEN.md describes.
+  builds tests and `truss run` with run-time checks of the primitive
+  operations, and `truss build` without them, as CODEGEN.md describes. It
+  evaluates no `requires` clause in either.
 - **The build** refuses a package with an obligation that is not proven,
   and a program whose `main` can reach a hole in a proof. A dependency's
   proofs are the program's too, since the build leaves out the run-time
