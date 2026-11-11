@@ -13,7 +13,7 @@ let type_node cursor start kind : type_expression =
 
 let error_expression cursor start : expression = expression_node cursor start Expression_error
 
-(* Whether a token can start an expression. *)
+(* Whether a token is in the first set of an expression. *)
 let begins_expression = function
   | Upper _ | Lower _ | Integer _ | Float _ | String _ -> true
   | Punctuation (Open _ | Minus | Bang | Tilde | Dot_dot | Dot_dot_equal) -> true
@@ -23,8 +23,8 @@ let begins_expression = function
       true
   | _ -> false
 
-(* Whether a token can start a statement that is not an expression, or an
-   expression. *)
+(* Whether a token is in the first set of a statement: of a statement that
+   is not an expression, or of an expression. *)
 let begins_statement = function
   | Keyword (Let | Var | For | While | Parallel | Concurrent | Proof | Assert | Yield) -> true
   | kind -> begins_expression kind
