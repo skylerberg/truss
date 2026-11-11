@@ -69,6 +69,15 @@ val trial : t -> t
 (** A session that starts from another's state and changes on its own. The two share everything but
     what the trial changes. It is never saved, and has no attachment. *)
 
+val snapshot :
+  key:string -> pointer:string -> version:string -> bases:(unit -> Engine.t list) -> t option
+(** A session of the state that a name points at, which another process saves: opened without the
+    name's lock, never saved, and changing on its own. It is opened again when the name points at
+    another state. [None] if the name points at no state of that version. *)
+
+val homes : unit -> (string * string) list
+(** Each directory that has a saved state, with the name its state is saved under. *)
+
 val save : t -> unit
 (** Writes what changed in the state since it was last written, and points its name at it. *)
 
@@ -152,20 +161,34 @@ end
 
 module Server : sig
   val serve :
+    key:string ->
+    alive:(unit -> bool) ->
     idle:(unit -> unit) ->
     keep:(unit -> (string * string) list) ->
     handle:(progress:(string -> unit) -> 'request -> 'response) ->
     unit
-  (** Runs the background process until it has gone three hours without a request, or {!stop} is
-      called. [idle] runs each second that no request waits, and [keep] names states to keep when
-      the store is collected, each as its version and artifact. *)
+  (** Runs the background process that serves a key, until it has gone three hours without a
+      request, {!stop} is called, or [alive] says no. One request is answered at a time; requests
+      for different keys go to different processes, and so are answered at once. [idle] runs each
+      second that no request waits, and [keep] names states to keep when the store is collected,
+      each as its version and artifact. *)
 
   val call :
     ?program:string ->
     ?start_server:bool ->
+    key:string ->
     progress:(string -> unit) ->
     'request ->
     ('response, string) result
+  (** Answers a request through the background process that serves a key, starting it from [program]
+      with the arguments [__serve] and the key if it is not running, unless [start_server] is false.
+  *)
+
+  val running : string -> bool
+  (** Whether a background process of this compiler serves a key now. *)
+
+  val serving : unit -> string list
+  (** The keys that background processes of this compiler serve now. *)
 
   val stop : unit -> unit
   val store_directory : unit -> string

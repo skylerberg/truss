@@ -14,6 +14,8 @@ type t = {
       (** Each file's fingerprint, by its path, by which another set of files finds this state *)
   mutable pointed : bool;  (** Whether the pointer names the state as it is *)
   mutable attachment : attachment;
+  snapshot_of : string option;
+      (** For a snapshot of a state another process saves: the artifact it was opened from *)
 }
 
 type state = { store : Store.t; identity : string; sessions : (string, t) Hashtbl.t }
@@ -278,6 +280,7 @@ let open_ ~key ?pointer:name ?home ~version ~bases ~fingerprints () =
               fingerprints = table;
               pointed = own <> None;
               attachment = Nothing;
+              snapshot_of = None;
             }
           in
           Hashtbl.replace state.sessions key session;
@@ -312,7 +315,45 @@ let trial session =
     fingerprints = Hashtbl.create 16;
     pointed = true;
     attachment = Nothing;
+    snapshot_of = None;
   }
+
+(* A session of the state that a name points at, which another process
+   saves: opened without the name's lock, never saved, and changing on its
+   own. It is opened again when the name points at another state. *)
+let snapshot ~key ~pointer:name ~version ~bases =
+  let state = current () in
+  Store.refresh state.store;
+  match read_record (Store.pointer state.store name) with
+  | Some record when record.version = version -> (
+      match Hashtbl.find_opt state.sessions key with
+      | Some session when session.snapshot_of = Some record.artifact -> Some session
+      | _ ->
+          let bases = bases () in
+          Option.map
+            (fun engine ->
+              let session =
+                {
+                  key;
+                  engine;
+                  pointer = None;
+                  version;
+                  bases;
+                  used = Unix.time ();
+                  fingerprints = Hashtbl.create 16;
+                  pointed = true;
+                  attachment = Nothing;
+                  snapshot_of = Some record.artifact;
+                }
+              in
+              Hashtbl.replace state.sessions key session;
+              session)
+            (open_state state ~version ~bases record.artifact))
+  | Some _ | None -> None
+
+(* Each directory that has a saved state, with the name its state is saved
+   under. *)
+let homes () = known_homes (current ())
 
 let sessions () =
   match !state with
@@ -422,20 +463,33 @@ let collect ~keep =
   let state = current () in
   prune state;
   Store.compact state.store;
-  if Store.size state.store > budget () then begin
-    let live = Hashtbl.create 4096 in
-    let keep_artifact ~version artifact =
-      List.iter
-        (fun name -> Hashtbl.replace live name ())
-        (Engine.values_in state.store ~version artifact)
-    in
-    List.iter
-      (fun name ->
-        match read_record (Store.pointer state.store name) with
-        | Some record when record.version = state.identity || List.mem record.version !trusted ->
-            keep_artifact ~version:record.version record.artifact
-        | Some _ | None -> ())
-      (Store.pointers state.store);
-    List.iter (fun (version, artifact) -> keep_artifact ~version artifact) (keep ());
-    Store.collect state.store ~budget:(budget ()) ~live:(Hashtbl.mem live)
-  end
+  (* One process collects at a time: every background process comes here. *)
+  let lock =
+    Unix.openfile
+      (Filename.concat (Store.directory state.store) "collect.lock")
+      [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
+  in
+  let held =
+    match Unix.lockf lock F_TLOCK 0 with () -> true | exception Unix.Unix_error _ -> false
+  in
+  Fun.protect
+    ~finally:(fun () -> Unix.close lock)
+    (fun () ->
+      if held && Store.size state.store > budget () then begin
+        let live = Hashtbl.create 4096 in
+        let keep_artifact ~version artifact =
+          List.iter
+            (fun name -> Hashtbl.replace live name ())
+            (Engine.values_in state.store ~version artifact)
+        in
+        List.iter
+          (fun name ->
+            match read_record (Store.pointer state.store name) with
+            | Some record when record.version = state.identity || List.mem record.version !trusted
+              ->
+                keep_artifact ~version:record.version record.artifact
+            | Some _ | None -> ())
+          (Store.pointers state.store);
+        List.iter (fun (version, artifact) -> keep_artifact ~version artifact) (keep ());
+        Store.collect state.store ~budget:(budget ()) ~live:(Hashtbl.mem live)
+      end)

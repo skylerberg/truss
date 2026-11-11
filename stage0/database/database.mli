@@ -166,7 +166,8 @@ type overlap =
       (** One worktree's change reads what the other changes *)
 
 val other_worktrees : session -> session list
-(** The open sessions of the same project in the other worktrees of its repository. *)
+(** The sessions of the same project in the other worktrees of its repository: those open in this
+    process, and a snapshot of each that a background process serves. *)
 
 val overlap_with : session -> session -> (overlap list, string) result
 (** Where two sessions' changes from their common commit meet. *)
@@ -192,21 +193,31 @@ val plan_lock :
 
 (** {1 The background process} *)
 
-val serve : handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
-(** Runs the background process until it has gone three hours without a request, or {!stop} is
-    called, answering each request with [handle], which may send text to show while it works with
-    [progress]. The client and the process are the same executable, so a request and a response are
-    the client's own types. *)
+val server_key : string -> string
+(** What names the background process for a directory: the root of the project it is in. *)
+
+val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
+(** Runs the background process of a key until it has gone three hours without a request, the
+    project's directory is gone, or {!stop} is called, answering each request with [handle], which
+    may send text to show while it works with [progress]. Each project has a process of its own, so
+    requests about different projects, and so different worktrees, are answered at once; those about
+    one project are answered one at a time. The client and the process are the same executable, so a
+    request and a response are the client's own types. *)
 
 val call :
   ?program:string ->
   ?start_server:bool ->
+  ?key:string ->
   progress:(string -> unit) ->
   'request ->
   ('response, string) result
-(** Answers a request through the background process for this compiler, starting it from [program],
-    this executable unless given, with the argument [__serve], if it is not running, unless
-    [start_server] is false, and handing each piece of progress to [progress] as it arrives. *)
+(** Answers a request through the background process of a key, which is that of the current
+    directory unless given, starting it from [program], this executable unless given, with the
+    arguments [__serve] and the key, if it is not running, unless [start_server] is false, and
+    handing each piece of progress to [progress] as it arrives. *)
+
+val servers : unit -> string list
+(** The keys of this compiler's background processes that are running. *)
 
 val recovering : (unit -> 'a) -> 'a
 (** Runs a command that is not answered by the background process. If a state it reads has lost an
