@@ -26,23 +26,16 @@ val input :
   ('key, 'value) input
 (** An input, which only the database sets. [show] names a key in logs and messages. *)
 
-(** The compiler's phases, in order. A query reads queries of its own phase and of earlier ones,
-    never of a later one, so that when the database brings a phase up to date, every earlier one is
-    final, and a result that comes out the same in one phase costs the later ones nothing. *)
-type phase =
-  | Syntax  (** A file's tokens and trees *)
-  | Declarations  (** What each file and package declares, and finding a definition by name *)
-  | Resolution  (** What each name in a definition means *)
-  | Interfaces  (** Signatures, shapes, constants, and the [impl]s found for a type *)
-  | Bodies  (** Checked bodies, and what is found in them *)
-  | Checks  (** The rules that span a package *)
-  | Proofs  (** Each definition's obligations, as the solver's queries, and the call graph *)
-  | Verdicts  (** Whether each definition's obligations hold, from the solver's answers *)
-  | Diagnostics  (** Every stage's diagnostics for a file *)
-  | Lowering  (** What each instance compiles to *)
-  | Linking  (** What each instance refers to, and the hash of its own code *)
-  | Recursion  (** Which instances reach themselves *)
-  | Keys  (** The key of everything an instance can reach *)
+type phase
+(** A phase: a step in the order in which a change is pushed through the queries. A query reads
+    queries of its own phase and of the phases its phase was declared after, never of a later one,
+    so that when the database brings a phase up to date, every earlier one is final, and a result
+    that comes out the same in one phase costs the later ones nothing. The database holds no list of
+    phases: whoever declares the queries declares their phases. *)
+
+val phase : name:string -> after:phase list -> phase
+(** A phase whose queries may read the phases in [after], and every phase those were declared after.
+    Raises [Invalid_argument] for a name used twice. *)
 
 val phase_name : phase -> string
 

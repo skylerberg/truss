@@ -48,6 +48,7 @@
   cbor
   blake3
   query
+  phases
   engine
   database
   store

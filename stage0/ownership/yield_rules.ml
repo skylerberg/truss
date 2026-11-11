@@ -110,7 +110,7 @@ let each_statement (body : Core.block) visit =
 (* The yielding functions that a function delegates to: those that a [for]
    loop in its body iterates over, where the loop body yields. *)
 let yields_through =
-  Query.query ~name:"yields_through" ~phase:Bodies ~saved:true ~show:Path.show
+  Query.query ~name:"yields_through" ~phase:Phases.bodies ~saved:true ~show:Path.show
     (fun database (path : Path.t) ->
       match body_of database path with
       | Some body ->
@@ -145,7 +145,7 @@ type pulling =
           be copied implicitly. *)
 
 let pullable =
-  Query.query ~name:"pullable" ~phase:Bodies ~saved:true ~show:Path.show
+  Query.query ~name:"pullable" ~phase:Phases.bodies ~saved:true ~show:Path.show
     (fun database (path : Path.t) ->
       let rec reaches visited = function
         | [] -> false

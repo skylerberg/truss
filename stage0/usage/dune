@@ -2,6 +2,7 @@
  (name usage)
  (libraries
   query
+  phases
   path
   types
   checked

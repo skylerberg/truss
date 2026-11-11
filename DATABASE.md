@@ -126,7 +126,9 @@ keeps every edge in both directions:
 
 Every query has a *phase*, and reads only queries of its own phase and of
 earlier ones. Reading a later phase is an error, raised at the read. The
-phases are the compiler's own order:
+database holds no list of phases: a phase is declared with the phases it
+may read, as a query is declared with its phase, and the compiler declares
+its own, in `Phases`, each after the one before:
 
 | Phase | What its queries compute |
 |---|---|

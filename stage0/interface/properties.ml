@@ -378,7 +378,7 @@ let facts_from database ~facts_of (interface : T.type_interface) =
    Packages cannot depend on each other in a cycle, so a group is within one
    package. *)
 let groups =
-  Query.query ~name:"type_groups" ~phase:Interfaces ~show:Fun.id (fun database package ->
+  Query.query ~name:"type_groups" ~phase:Phases.interfaces ~show:Fun.id (fun database package ->
       let types =
         List.filter_map
           (fun (declaration : Resolve.Names.declaration) ->
@@ -419,7 +419,7 @@ let groups =
         (Components.of_graph ~compare:Path.compare ~successors types))
 
 let group =
-  Query.query ~name:"type_group" ~phase:Interfaces ~show:Path.show (fun database path ->
+  Query.query ~name:"type_group" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       Option.value ~default:[ path ]
         (Path.Map.find_opt path (Query.demand database groups (Path.package path))))
 
@@ -433,7 +433,7 @@ let group =
    is finite, so the iteration terminates. *)
 let rec group_facts =
   lazy
-    (Query.query ~name:"type_group_facts" ~phase:Interfaces ~saved:true ~show:Path.show
+    (Query.query ~name:"type_group_facts" ~phase:Phases.interfaces ~saved:true ~show:Path.show
        (fun database first ->
          let interfaces =
            List.filter_map
@@ -470,7 +470,7 @@ and facts_of database path =
 let () = ignore (Lazy.force group_facts)
 
 (* The facts of a type definition. *)
-let facts = Query.query ~name:"type_facts" ~phase:Interfaces ~show:Path.show facts_of
+let facts = Query.query ~name:"type_facts" ~phase:Phases.interfaces ~show:Path.show facts_of
 
 (* Whether the base of an associated type is a generic parameter or a type
    that is not inferred yet, so that the projection cannot be normalized
