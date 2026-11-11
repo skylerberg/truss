@@ -1473,6 +1473,17 @@ test the prover itself:
   returns beyond what its row of the table says is known only by its type,
   and so is the address of a view of any type but a built-in scalar, whose
   size is the code generator's and may be zero.
+- **Proofs for a 32-bit `USize`.** DESIGN.md verifies a package that does
+  not say `usize_bits = 64` for both widths of `USize` and `ISize`, but the
+  prover reads them as 64 bits in every package. A package that claims to
+  run everywhere can therefore rely on 64 bits, as `n * n` on a `USize`
+  with `n < 2^20` does, and overflow on a 32-bit target. Proving each such
+  definition at both widths needs the standard library's 32-bit form:
+  today `USize.maximum`, `ISize.minimum`, `ISize.maximum`, and
+  `USize.bits` are 64-bit literals, and the bodies of the bit operations
+  on `USize` are 64-bit code, so a 32-bit translation would read facts
+  that contradict its own ranges. Code generation builds only for 64-bit
+  targets, so no program runs with a width its proofs did not assume.
 - **Facts under a quantifier.** A pure callee's contract and definition
   are stated once for every argument, but any other fact that names a
   quantifier's bound name, such as what is known of a value made in the
