@@ -491,9 +491,8 @@ with its number of paths. No step goes around a loop: each loop is cut at
 its head by its invariant, as below. The right side of `&&`, `||`, or
 `==>` runs on only one path, so when it changes a local, as a call with a
 `mut` argument does, that path joins the one where it did not run, as the
-two arms of an `if` do. What the right side spends is counted as if it
-ran, which is an upper bound, and is joined the same way only for a
-counter that counts exactly. A `match` arm's guard runs only where its patterns matched, so
+two arms of an `if` do, and so does one where the right side spends
+anything, since what it spends is known only where it ran. A `match` arm's guard runs only where its patterns matched, so
 the next arm is tried where they did not, joined with where they did and
 the guard, which may change locals the same way, was false. A binding
 that a pattern lends `mut` is a local of the arm. Wherever the arm ends,

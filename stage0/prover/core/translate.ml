@@ -759,6 +759,18 @@ let join context ?value_type frames =
   | [ (frame, value) ] -> Some (frame, value)
   | (first, _) :: _ ->
       let condition = L.disjunction (List.map (fun (frame, _) -> frame.condition) frames) in
+      (* The joined condition is named, so that each later fact on the path
+         names it rather than repeating every branch's condition, which
+         would grow with each join. *)
+      let condition =
+        match condition with
+        | L.Boolean _ | L.Symbol _ -> condition
+        | _ when L.mentions first.bound condition -> condition
+        | _ ->
+            let path = fresh context first "path" L.Bool in
+            fact context first (L.equal path condition);
+            path
+      in
       let merged = { first with condition } in
       let define prefix sort pick =
         let values = List.map (fun ((frame : frame), item) -> (frame, pick frame item)) frames in
@@ -1690,23 +1702,14 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
    [&&] keeps what its right side binds, as an [is] does. *)
 and short_circuit context frame right ~runs ~otherwise ~binds combine =
   let after, right_value = value context (restrict frame runs) right in
-  (* What the right side spends is an upper bound on what the expression
-     spends, which is all a counter that bounds from above needs; for one
-     that counts exactly, the paths where it ran and did not run are
-     joined. *)
-  let counts_exactly =
-    List.exists (fun (counter : Costs.counter) -> counter.counting = Exactly) context.counters
-  in
+  (* What the right side spends is known only where it ran, so where it
+     spends anything the paths where it ran and did not run are joined. *)
   let changed =
     Locals.exists (fun id term -> Locals.find_opt id after.locals <> Some term) frame.locals
-    || after.self <> frame.self
-    || (counts_exactly && after.spent <> frame.spent)
+    || after.self <> frame.self || after.spent <> frame.spent
   in
   if not changed then
-    Some
-      ( (if binds then { after with condition = frame.condition }
-         else { frame with spent = after.spent }),
-        combine right_value )
+    Some ((if binds then { after with condition = frame.condition } else frame), combine right_value)
   else
     match
       join context ~value_type:T.bool
