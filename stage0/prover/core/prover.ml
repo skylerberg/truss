@@ -558,10 +558,27 @@ let definition_states ?running database solver (key : Names.key) =
             obligation.cited ))
         (answers ?running solver outcome.obligations)
 
-(* The queries of every definition of the modules, solved together,
-   several at once, so that reading each definition's answers after finds
-   them solved. *)
+(* The solver, and what runs code, for [outcome]: a query cannot be given
+   them, so each driver below sets them before it asks. The solver is
+   pinned, and its version and step limit are in the compiler's source,
+   which keys every saved result, so an outcome is the same whichever
+   solver asked. *)
+let solving : (Solver.t * running) option ref = ref None
+
+(* Each definition's states, solved: a saved result, so a definition whose
+   reads have not changed is not translated again. *)
+let outcome =
+  Query.query ~name:"proof_outcome" ~phase:Verdicts ~saved:true ~show:Names.show_key
+    (fun database key ->
+      match !solving with
+      | Some (solver, running) -> definition_states ~running database solver key
+      | None -> invalid_arg "Prover.outcome: no solver")
+
+(* The queries of every definition of the modules whose outcome is not
+   known, solved together, several at once, so that reading each
+   definition's outcome after finds them solved. *)
 let solve_ahead ?(running = not_running) database solver modules =
+  solving := Some (solver, running);
   ignore
     (Solver.solve_all solver
        (List.concat_map
@@ -569,9 +586,14 @@ let solve_ahead ?(running = not_running) database solver modules =
             List.concat_map
               (fun declaration ->
                 let key = Names.key_of declaration in
-                match (Query.demand database Names.base key, Query.demand database proof key) with
-                | Some _, Obligations outcome -> first_queries running outcome.obligations
-                | _ -> [])
+                match Query.known database outcome key with
+                | Some _ -> []
+                | None -> (
+                    match
+                      (Query.demand database Names.base key, Query.demand database proof key)
+                    with
+                    | Some _, Obligations outcome -> first_queries running outcome.obligations
+                    | _ -> []))
               (Query.demand database Names.declarations module_))
           modules))
 
@@ -613,7 +635,7 @@ let moved_states ?(running = not_running) database solver module_ =
                          | None -> failure)
                        state.failure;
                  })
-               (definition_states ~running database solver key))
+               (Query.demand database outcome key))
       | None -> None)
     (Query.demand database Names.declarations module_)
 
