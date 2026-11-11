@@ -1,12 +1,12 @@
 use standard::core
 
-public fn Range[Value: Ordered].is_empty(self) -> Bool
+public transparent fn Range[Value: Ordered].is_empty(self) -> Bool
   cost time finite
 {
   if self.inclusive { self.start > self.stop } else { self.start >= self.stop }
 }
 
-public fn Range[Value: Ordered].contains(self, value: Value) -> Bool
+public transparent fn Range[Value: Ordered].contains(self, value: Value) -> Bool
   cost time finite
 {
   self.start <= value && (if self.inclusive { value <= self.stop } else { value < self.stop })

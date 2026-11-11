@@ -146,7 +146,7 @@ public fn List[Element: Equal].find_slice(self, needle: Slice[Element]) -> Optio
   self.slice().find_slice(needle)
 }
 
-public fn List[Element: Ordered].is_sorted(self) -> Bool
+public transparent fn List[Element: Ordered].is_sorted(self) -> Bool
   cost time finite
 {
   self.slice().is_sorted()

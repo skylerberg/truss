@@ -12,6 +12,7 @@ public let Duration.maximum: Duration = Duration(nanoseconds: 922337203685477580
 public let Duration.minimum: Duration = Duration(nanoseconds: -9223372036854775808)
 
 public fn Duration.nanoseconds(count: Int64) -> Duration
+  ensures result.total_nanoseconds() == count
   cost time O(1)
 {
   Duration(nanoseconds: count)
@@ -493,6 +494,7 @@ public opaque type Instant(nanoseconds: Int64)
 public let Instant.epoch: Instant = Instant(nanoseconds: 0)
 
 public fn Instant.from_unix_nanoseconds(nanoseconds: Int64) -> Instant
+  ensures result.unix_nanoseconds() == nanoseconds
   cost time O(1)
 {
   Instant(nanoseconds: nanoseconds)
@@ -1009,7 +1011,7 @@ public fn Weekday.number_from_monday(self) -> UInt8
   }
 }
 
-public fn Weekday.is_weekend(self) -> Bool
+public transparent fn Weekday.is_weekend(self) -> Bool
   cost time O(1)
 {
   self is Saturday | Sunday
@@ -1376,7 +1378,7 @@ public fn Date.from_day_of_year(year: Int32, day_of_year: UInt16) -> Option[Date
   }
 }
 
-public fn Date.is_leap_year(year: Int32) -> Bool
+public transparent fn Date.is_leap_year(year: Int32) -> Bool
   cost time O(1)
 {
   (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
@@ -1452,7 +1454,7 @@ public fn Date.days_until(self, other: Date) -> Int64
   to - from
 }
 
-public fn Date.at(self, time: TimeOfDay) -> DateTime
+public transparent fn Date.at(self, time: TimeOfDay) -> DateTime
   cost time O(1)
 {
   DateTime(date: self, time: time)

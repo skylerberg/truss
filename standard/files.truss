@@ -530,13 +530,13 @@ public type Metadata(
 )
   derives Equal
 
-public fn Metadata.is_file(self) -> Bool
+public transparent fn Metadata.is_file(self) -> Bool
   cost time O(1)
 {
   self.kind == FileKind.File
 }
 
-public fn Metadata.is_directory(self) -> Bool
+public transparent fn Metadata.is_directory(self) -> Bool
   cost time O(1)
 {
   self.kind == FileKind.Directory

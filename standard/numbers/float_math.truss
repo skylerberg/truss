@@ -17,43 +17,43 @@ public let Float32.smallest_positive_normal: Float32 = 1.1754944e-38
 
 public let Float32.epsilon: Float32 = 1.1920929e-7
 
-public fn Float32.is_infinite(self) -> Bool
+public transparent fn Float32.is_infinite(self) -> Bool
   cost time O(1)
 {
   (self.to_bits() & 0x7fff_ffff) == 0x7f80_0000
 }
 
-public fn Float32.is_finite(self) -> Bool
+public transparent fn Float32.is_finite(self) -> Bool
   cost time O(1)
 {
   (self.to_bits() & 0x7fff_ffff) < 0x7f80_0000
 }
 
-public fn Float32.is_negative(self) -> Bool
+public transparent fn Float32.is_negative(self) -> Bool
   cost time O(1)
 {
   self.to_bits() >= 0x8000_0000
 }
 
-public fn Float32.absolute(self) -> Float32
+public transparent fn Float32.absolute(self) -> Float32
   cost time O(1)
 {
   Float32.from_bits(self.to_bits() & 0x7fff_ffff)
 }
 
-public fn Float32.floor(self) -> Float32
+public transparent fn Float32.floor(self) -> Float32
   cost time O(1)
 {
   intrinsic::floor(self)
 }
 
-public fn Float32.ceiling(self) -> Float32
+public transparent fn Float32.ceiling(self) -> Float32
   cost time O(1)
 {
   intrinsic::ceiling(self)
 }
 
-public fn Float32.round(self) -> Float32
+public transparent fn Float32.round(self) -> Float32
   cost time O(1)
 {
   let whole = intrinsic::truncate(self)
@@ -61,25 +61,25 @@ public fn Float32.round(self) -> Float32
   if (self - whole).absolute() >= 0.5 { whole + one.copy_sign(self) } else { whole }
 }
 
-public fn Float32.round_to_even(self) -> Float32
+public transparent fn Float32.round_to_even(self) -> Float32
   cost time O(1)
 {
   intrinsic::round_to_even(self)
 }
 
-public fn Float32.truncate(self) -> Float32
+public transparent fn Float32.truncate(self) -> Float32
   cost time O(1)
 {
   intrinsic::truncate(self)
 }
 
-public fn Float32.fraction(self) -> Float32
+public transparent fn Float32.fraction(self) -> Float32
   cost time O(1)
 {
   self - intrinsic::truncate(self)
 }
 
-public fn Float32.sign(self) -> Float32
+public transparent fn Float32.sign(self) -> Float32
   cost time O(1)
 {
   if intrinsic::is_nan(self) || self == 0.0 {
@@ -205,13 +205,13 @@ public fn Float32.inverse_hyperbolic_tangent(self) -> Float32
   self.widened().inverse_hyperbolic_tangent().to_float32()
 }
 
-public fn Float32.to_degrees(self) -> Float32
+public transparent fn Float32.to_degrees(self) -> Float32
   cost time O(1)
 {
   self * 57.29577951308232
 }
 
-public fn Float32.to_radians(self) -> Float32
+public transparent fn Float32.to_radians(self) -> Float32
   cost time O(1)
 {
   self * 0.017453292519943295
@@ -235,7 +235,7 @@ public fn Float32.arctangent_2(self, x: Float32) -> Float32
   self.widened().arctangent_2(x.widened()).to_float32()
 }
 
-public fn Float32.copy_sign(self, sign: Float32) -> Float32
+public transparent fn Float32.copy_sign(self, sign: Float32) -> Float32
   cost time O(1)
 {
   Float32.from_bits((self.to_bits() & 0x7fff_ffff) | (sign.to_bits() & 0x8000_0000))
@@ -258,25 +258,25 @@ public fn Float32.hypotenuse(self, other: Float32) -> Float32
   larger * intrinsic::square_root(1.0 + ratio * ratio)
 }
 
-public fn Float32.ieee_not_equal(self, other: Float32) -> Bool
+public transparent fn Float32.ieee_not_equal(self, other: Float32) -> Bool
   cost time O(1)
 {
   !intrinsic::ieee_equal(self, right: other)
 }
 
-public fn Float32.ieee_less_or_equal(self, other: Float32) -> Bool
+public transparent fn Float32.ieee_less_or_equal(self, other: Float32) -> Bool
   cost time O(1)
 {
   intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other)
 }
 
-public fn Float32.ieee_greater(self, other: Float32) -> Bool
+public transparent fn Float32.ieee_greater(self, other: Float32) -> Bool
   cost time O(1)
 {
   intrinsic::ieee_less(other, right: self)
 }
 
-public fn Float32.ieee_greater_or_equal(self, other: Float32) -> Bool
+public transparent fn Float32.ieee_greater_or_equal(self, other: Float32) -> Bool
   cost time O(1)
 {
   intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other)
@@ -302,19 +302,19 @@ public fn Float32.power_integer(self, exponent: Int32) -> Float32
   if exponent < 0 { 1.0 / result } else { result }
 }
 
-public fn Float32.fused_multiply_add(self, multiplier: Float32, addend: Float32) -> Float32
+public transparent fn Float32.fused_multiply_add(self, multiplier: Float32, addend: Float32) -> Float32
   cost time O(1)
 {
   intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend)
 }
 
-public fn Float32.to_bits(self) -> UInt32
+public transparent fn Float32.to_bits(self) -> UInt32
   cost time O(1)
 {
   intrinsic::to_bits[Float32, UInt32](self)
 }
 
-public fn Float32.from_bits(bits: UInt32) -> Float32
+public transparent fn Float32.from_bits(bits: UInt32) -> Float32
   cost time O(1)
 {
   intrinsic::from_bits[UInt32, Float32](bits)
@@ -728,43 +728,43 @@ public let Float64.smallest_positive_normal: Float64 = 2.2250738585072014e-308
 
 public let Float64.epsilon: Float64 = 2.220446049250313e-16
 
-public fn Float64.is_infinite(self) -> Bool
+public transparent fn Float64.is_infinite(self) -> Bool
   cost time O(1)
 {
   (self.to_bits() & 0x7fff_ffff_ffff_ffff) == 0x7ff0_0000_0000_0000
 }
 
-public fn Float64.is_finite(self) -> Bool
+public transparent fn Float64.is_finite(self) -> Bool
   cost time O(1)
 {
   (self.to_bits() & 0x7fff_ffff_ffff_ffff) < 0x7ff0_0000_0000_0000
 }
 
-public fn Float64.is_negative(self) -> Bool
+public transparent fn Float64.is_negative(self) -> Bool
   cost time O(1)
 {
   self.to_bits() >= 0x8000_0000_0000_0000
 }
 
-public fn Float64.absolute(self) -> Float64
+public transparent fn Float64.absolute(self) -> Float64
   cost time O(1)
 {
   Float64.from_bits(self.to_bits() & 0x7fff_ffff_ffff_ffff)
 }
 
-public fn Float64.floor(self) -> Float64
+public transparent fn Float64.floor(self) -> Float64
   cost time O(1)
 {
   intrinsic::floor(self)
 }
 
-public fn Float64.ceiling(self) -> Float64
+public transparent fn Float64.ceiling(self) -> Float64
   cost time O(1)
 {
   intrinsic::ceiling(self)
 }
 
-public fn Float64.round(self) -> Float64
+public transparent fn Float64.round(self) -> Float64
   cost time O(1)
 {
   let whole = intrinsic::truncate(self)
@@ -772,25 +772,25 @@ public fn Float64.round(self) -> Float64
   if (self - whole).absolute() >= 0.5 { whole + one.copy_sign(self) } else { whole }
 }
 
-public fn Float64.round_to_even(self) -> Float64
+public transparent fn Float64.round_to_even(self) -> Float64
   cost time O(1)
 {
   intrinsic::round_to_even(self)
 }
 
-public fn Float64.truncate(self) -> Float64
+public transparent fn Float64.truncate(self) -> Float64
   cost time O(1)
 {
   intrinsic::truncate(self)
 }
 
-public fn Float64.fraction(self) -> Float64
+public transparent fn Float64.fraction(self) -> Float64
   cost time O(1)
 {
   self - intrinsic::truncate(self)
 }
 
-public fn Float64.sign(self) -> Float64
+public transparent fn Float64.sign(self) -> Float64
   cost time O(1)
 {
   if intrinsic::is_nan(self) || self == 0.0 {
@@ -1362,13 +1362,13 @@ public fn Float64.inverse_hyperbolic_tangent(self) -> Float64
   found.copy_sign(self)
 }
 
-public fn Float64.to_degrees(self) -> Float64
+public transparent fn Float64.to_degrees(self) -> Float64
   cost time O(1)
 {
   self * 57.29577951308232
 }
 
-public fn Float64.to_radians(self) -> Float64
+public transparent fn Float64.to_radians(self) -> Float64
   cost time O(1)
 {
   self * 0.017453292519943295
@@ -1475,7 +1475,7 @@ public fn Float64.arctangent_2(self, x: Float64) -> Float64
   }
 }
 
-public fn Float64.copy_sign(self, sign: Float64) -> Float64
+public transparent fn Float64.copy_sign(self, sign: Float64) -> Float64
   cost time O(1)
 {
   Float64.from_bits((self.to_bits() & 0x7fff_ffff_ffff_ffff) | (sign.to_bits() & 0x8000_0000_0000_0000))
@@ -1498,25 +1498,25 @@ public fn Float64.hypotenuse(self, other: Float64) -> Float64
   larger * intrinsic::square_root(1.0 + ratio * ratio)
 }
 
-public fn Float64.ieee_not_equal(self, other: Float64) -> Bool
+public transparent fn Float64.ieee_not_equal(self, other: Float64) -> Bool
   cost time O(1)
 {
   !intrinsic::ieee_equal(self, right: other)
 }
 
-public fn Float64.ieee_less_or_equal(self, other: Float64) -> Bool
+public transparent fn Float64.ieee_less_or_equal(self, other: Float64) -> Bool
   cost time O(1)
 {
   intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other)
 }
 
-public fn Float64.ieee_greater(self, other: Float64) -> Bool
+public transparent fn Float64.ieee_greater(self, other: Float64) -> Bool
   cost time O(1)
 {
   intrinsic::ieee_less(other, right: self)
 }
 
-public fn Float64.ieee_greater_or_equal(self, other: Float64) -> Bool
+public transparent fn Float64.ieee_greater_or_equal(self, other: Float64) -> Bool
   cost time O(1)
 {
   intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other)
@@ -1542,19 +1542,19 @@ public fn Float64.power_integer(self, exponent: Int32) -> Float64
   if exponent < 0 { 1.0 / result } else { result }
 }
 
-public fn Float64.fused_multiply_add(self, multiplier: Float64, addend: Float64) -> Float64
+public transparent fn Float64.fused_multiply_add(self, multiplier: Float64, addend: Float64) -> Float64
   cost time O(1)
 {
   intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend)
 }
 
-public fn Float64.to_bits(self) -> UInt64
+public transparent fn Float64.to_bits(self) -> UInt64
   cost time O(1)
 {
   intrinsic::to_bits[Float64, UInt64](self)
 }
 
-public fn Float64.from_bits(bits: UInt64) -> Float64
+public transparent fn Float64.from_bits(bits: UInt64) -> Float64
   cost time O(1)
 {
   intrinsic::from_bits[UInt64, Float64](bits)
@@ -1776,7 +1776,7 @@ impl From[Float32] for Float64 {
   }
 }
 
-public fn Float64.to_float32(self) -> Float32
+public transparent fn Float64.to_float32(self) -> Float32
   cost time O(1)
 {
   if intrinsic::is_nan(self) {

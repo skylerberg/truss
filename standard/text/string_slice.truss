@@ -167,7 +167,7 @@ public fn StringSlice.is_ascii(self) -> Bool
   true
 }
 
-public fn StringSlice.is_boundary(self, offset: USize) -> Bool
+public transparent fn StringSlice.is_boundary(self, offset: USize) -> Bool
   cost time O(1)
 {
   offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80)

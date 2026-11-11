@@ -57,7 +57,7 @@ public fn Int8.wrapping_power(self, exponent: UInt32) -> Int8
   result
 }
 
-public fn Int8.saturating_power(self, exponent: UInt32) -> Int8
+public transparent fn Int8.saturating_power(self, exponent: UInt32) -> Int8
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -130,19 +130,19 @@ public fn Int8.absolute_difference(self, other: Int8) -> UInt8
   }
 }
 
-public fn Int8.to_float64(self) -> Float64
+public transparent fn Int8.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn Int8.to_float32(self) -> Float32
+public transparent fn Int8.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn Int8.saturating_from(value: Float64) -> Int8
+public transparent fn Int8.saturating_from(value: Float64) -> Int8
   cost time O(1)
 {
   if intrinsic::fits[Float64, Int8](value) {
@@ -156,7 +156,7 @@ public fn Int8.saturating_from(value: Float64) -> Int8
   }
 }
 
-public fn Int8.total(items: Slice[Int8]) -> Integer
+public transparent fn Int8.total(items: Slice[Int8]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -257,13 +257,13 @@ public fn Int8.sign(self) -> Int8
   if self < 0 { -1 } else if self > 0 { 1 } else { 0 }
 }
 
-public fn Int8.is_negative(self) -> Bool
+public transparent fn Int8.is_negative(self) -> Bool
   cost time O(1)
 {
   self < 0
 }
 
-public fn Int8.is_positive(self) -> Bool
+public transparent fn Int8.is_positive(self) -> Bool
   cost time O(1)
 {
   self > 0
@@ -381,7 +381,7 @@ public fn Int16.wrapping_power(self, exponent: UInt32) -> Int16
   result
 }
 
-public fn Int16.saturating_power(self, exponent: UInt32) -> Int16
+public transparent fn Int16.saturating_power(self, exponent: UInt32) -> Int16
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -454,19 +454,19 @@ public fn Int16.absolute_difference(self, other: Int16) -> UInt16
   }
 }
 
-public fn Int16.to_float64(self) -> Float64
+public transparent fn Int16.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn Int16.to_float32(self) -> Float32
+public transparent fn Int16.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn Int16.saturating_from(value: Float64) -> Int16
+public transparent fn Int16.saturating_from(value: Float64) -> Int16
   cost time O(1)
 {
   if intrinsic::fits[Float64, Int16](value) {
@@ -480,7 +480,7 @@ public fn Int16.saturating_from(value: Float64) -> Int16
   }
 }
 
-public fn Int16.total(items: Slice[Int16]) -> Integer
+public transparent fn Int16.total(items: Slice[Int16]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -581,13 +581,13 @@ public fn Int16.sign(self) -> Int16
   if self < 0 { -1 } else if self > 0 { 1 } else { 0 }
 }
 
-public fn Int16.is_negative(self) -> Bool
+public transparent fn Int16.is_negative(self) -> Bool
   cost time O(1)
 {
   self < 0
 }
 
-public fn Int16.is_positive(self) -> Bool
+public transparent fn Int16.is_positive(self) -> Bool
   cost time O(1)
 {
   self > 0
@@ -705,7 +705,7 @@ public fn Int32.wrapping_power(self, exponent: UInt32) -> Int32
   result
 }
 
-public fn Int32.saturating_power(self, exponent: UInt32) -> Int32
+public transparent fn Int32.saturating_power(self, exponent: UInt32) -> Int32
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -778,19 +778,19 @@ public fn Int32.absolute_difference(self, other: Int32) -> UInt32
   }
 }
 
-public fn Int32.to_float64(self) -> Float64
+public transparent fn Int32.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn Int32.to_float32(self) -> Float32
+public transparent fn Int32.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn Int32.saturating_from(value: Float64) -> Int32
+public transparent fn Int32.saturating_from(value: Float64) -> Int32
   cost time O(1)
 {
   if intrinsic::fits[Float64, Int32](value) {
@@ -804,7 +804,7 @@ public fn Int32.saturating_from(value: Float64) -> Int32
   }
 }
 
-public fn Int32.total(items: Slice[Int32]) -> Integer
+public transparent fn Int32.total(items: Slice[Int32]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -905,13 +905,13 @@ public fn Int32.sign(self) -> Int32
   if self < 0 { -1 } else if self > 0 { 1 } else { 0 }
 }
 
-public fn Int32.is_negative(self) -> Bool
+public transparent fn Int32.is_negative(self) -> Bool
   cost time O(1)
 {
   self < 0
 }
 
-public fn Int32.is_positive(self) -> Bool
+public transparent fn Int32.is_positive(self) -> Bool
   cost time O(1)
 {
   self > 0
@@ -1029,7 +1029,7 @@ public fn Int64.wrapping_power(self, exponent: UInt32) -> Int64
   result
 }
 
-public fn Int64.saturating_power(self, exponent: UInt32) -> Int64
+public transparent fn Int64.saturating_power(self, exponent: UInt32) -> Int64
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -1102,19 +1102,19 @@ public fn Int64.absolute_difference(self, other: Int64) -> UInt64
   }
 }
 
-public fn Int64.to_float64(self) -> Float64
+public transparent fn Int64.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn Int64.to_float32(self) -> Float32
+public transparent fn Int64.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn Int64.saturating_from(value: Float64) -> Int64
+public transparent fn Int64.saturating_from(value: Float64) -> Int64
   cost time O(1)
 {
   if intrinsic::fits[Float64, Int64](value) {
@@ -1128,7 +1128,7 @@ public fn Int64.saturating_from(value: Float64) -> Int64
   }
 }
 
-public fn Int64.total(items: Slice[Int64]) -> Integer
+public transparent fn Int64.total(items: Slice[Int64]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -1229,13 +1229,13 @@ public fn Int64.sign(self) -> Int64
   if self < 0 { -1 } else if self > 0 { 1 } else { 0 }
 }
 
-public fn Int64.is_negative(self) -> Bool
+public transparent fn Int64.is_negative(self) -> Bool
   cost time O(1)
 {
   self < 0
 }
 
-public fn Int64.is_positive(self) -> Bool
+public transparent fn Int64.is_positive(self) -> Bool
   cost time O(1)
 {
   self > 0
@@ -1353,7 +1353,7 @@ public fn ISize.wrapping_power(self, exponent: UInt32) -> ISize
   result
 }
 
-public fn ISize.saturating_power(self, exponent: UInt32) -> ISize
+public transparent fn ISize.saturating_power(self, exponent: UInt32) -> ISize
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -1426,19 +1426,19 @@ public fn ISize.absolute_difference(self, other: ISize) -> USize
   }
 }
 
-public fn ISize.to_float64(self) -> Float64
+public transparent fn ISize.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn ISize.to_float32(self) -> Float32
+public transparent fn ISize.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn ISize.saturating_from(value: Float64) -> ISize
+public transparent fn ISize.saturating_from(value: Float64) -> ISize
   cost time O(1)
 {
   if intrinsic::fits[Float64, ISize](value) {
@@ -1452,7 +1452,7 @@ public fn ISize.saturating_from(value: Float64) -> ISize
   }
 }
 
-public fn ISize.total(items: Slice[ISize]) -> Integer
+public transparent fn ISize.total(items: Slice[ISize]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -1553,13 +1553,13 @@ public fn ISize.sign(self) -> ISize
   if self < 0 { -1 } else if self > 0 { 1 } else { 0 }
 }
 
-public fn ISize.is_negative(self) -> Bool
+public transparent fn ISize.is_negative(self) -> Bool
   cost time O(1)
 {
   self < 0
 }
 
-public fn ISize.is_positive(self) -> Bool
+public transparent fn ISize.is_positive(self) -> Bool
   cost time O(1)
 {
   self > 0
@@ -1677,7 +1677,7 @@ public fn UInt8.wrapping_power(self, exponent: UInt32) -> UInt8
   result
 }
 
-public fn UInt8.saturating_power(self, exponent: UInt32) -> UInt8
+public transparent fn UInt8.saturating_power(self, exponent: UInt32) -> UInt8
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -1729,19 +1729,19 @@ public fn UInt8.absolute_difference(self, other: UInt8) -> UInt8
   if self >= other { self - other } else { other - self }
 }
 
-public fn UInt8.to_float64(self) -> Float64
+public transparent fn UInt8.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn UInt8.to_float32(self) -> Float32
+public transparent fn UInt8.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn UInt8.saturating_from(value: Float64) -> UInt8
+public transparent fn UInt8.saturating_from(value: Float64) -> UInt8
   cost time O(1)
 {
   if intrinsic::fits[Float64, UInt8](value) {
@@ -1755,7 +1755,7 @@ public fn UInt8.saturating_from(value: Float64) -> UInt8
   }
 }
 
-public fn UInt8.total(items: Slice[UInt8]) -> Integer
+public transparent fn UInt8.total(items: Slice[UInt8]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -1809,7 +1809,7 @@ public fn UInt8.is_power_of_two(self) -> Bool
   self != 0 && (self & (self - 1)) == 0
 }
 
-public fn UInt8.next_power_of_two(self) -> Option[UInt8]
+public transparent fn UInt8.next_power_of_two(self) -> Option[UInt8]
   cost time O(1)
 {
   if self <= 1 {
@@ -1846,7 +1846,7 @@ public fn UInt8.greatest_common_divisor(self, other: UInt8) -> UInt8
   first
 }
 
-public fn UInt8.least_common_multiple(self, other: UInt8) -> Option[UInt8]
+public transparent fn UInt8.least_common_multiple(self, other: UInt8) -> Option[UInt8]
   cost time O(log(self) + log(other))
 {
   if self == 0 || other == 0 {
@@ -1979,7 +1979,7 @@ public fn UInt16.wrapping_power(self, exponent: UInt32) -> UInt16
   result
 }
 
-public fn UInt16.saturating_power(self, exponent: UInt32) -> UInt16
+public transparent fn UInt16.saturating_power(self, exponent: UInt32) -> UInt16
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -2031,19 +2031,19 @@ public fn UInt16.absolute_difference(self, other: UInt16) -> UInt16
   if self >= other { self - other } else { other - self }
 }
 
-public fn UInt16.to_float64(self) -> Float64
+public transparent fn UInt16.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn UInt16.to_float32(self) -> Float32
+public transparent fn UInt16.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn UInt16.saturating_from(value: Float64) -> UInt16
+public transparent fn UInt16.saturating_from(value: Float64) -> UInt16
   cost time O(1)
 {
   if intrinsic::fits[Float64, UInt16](value) {
@@ -2057,7 +2057,7 @@ public fn UInt16.saturating_from(value: Float64) -> UInt16
   }
 }
 
-public fn UInt16.total(items: Slice[UInt16]) -> Integer
+public transparent fn UInt16.total(items: Slice[UInt16]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -2111,7 +2111,7 @@ public fn UInt16.is_power_of_two(self) -> Bool
   self != 0 && (self & (self - 1)) == 0
 }
 
-public fn UInt16.next_power_of_two(self) -> Option[UInt16]
+public transparent fn UInt16.next_power_of_two(self) -> Option[UInt16]
   cost time O(1)
 {
   if self <= 1 {
@@ -2148,7 +2148,7 @@ public fn UInt16.greatest_common_divisor(self, other: UInt16) -> UInt16
   first
 }
 
-public fn UInt16.least_common_multiple(self, other: UInt16) -> Option[UInt16]
+public transparent fn UInt16.least_common_multiple(self, other: UInt16) -> Option[UInt16]
   cost time O(log(self) + log(other))
 {
   if self == 0 || other == 0 {
@@ -2281,7 +2281,7 @@ public fn UInt32.wrapping_power(self, exponent: UInt32) -> UInt32
   result
 }
 
-public fn UInt32.saturating_power(self, exponent: UInt32) -> UInt32
+public transparent fn UInt32.saturating_power(self, exponent: UInt32) -> UInt32
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -2333,19 +2333,19 @@ public fn UInt32.absolute_difference(self, other: UInt32) -> UInt32
   if self >= other { self - other } else { other - self }
 }
 
-public fn UInt32.to_float64(self) -> Float64
+public transparent fn UInt32.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn UInt32.to_float32(self) -> Float32
+public transparent fn UInt32.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn UInt32.saturating_from(value: Float64) -> UInt32
+public transparent fn UInt32.saturating_from(value: Float64) -> UInt32
   cost time O(1)
 {
   if intrinsic::fits[Float64, UInt32](value) {
@@ -2359,7 +2359,7 @@ public fn UInt32.saturating_from(value: Float64) -> UInt32
   }
 }
 
-public fn UInt32.total(items: Slice[UInt32]) -> Integer
+public transparent fn UInt32.total(items: Slice[UInt32]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -2413,7 +2413,7 @@ public fn UInt32.is_power_of_two(self) -> Bool
   self != 0 && (self & (self - 1)) == 0
 }
 
-public fn UInt32.next_power_of_two(self) -> Option[UInt32]
+public transparent fn UInt32.next_power_of_two(self) -> Option[UInt32]
   cost time O(1)
 {
   if self <= 1 {
@@ -2450,7 +2450,7 @@ public fn UInt32.greatest_common_divisor(self, other: UInt32) -> UInt32
   first
 }
 
-public fn UInt32.least_common_multiple(self, other: UInt32) -> Option[UInt32]
+public transparent fn UInt32.least_common_multiple(self, other: UInt32) -> Option[UInt32]
   cost time O(log(self) + log(other))
 {
   if self == 0 || other == 0 {
@@ -2583,7 +2583,7 @@ public fn UInt64.wrapping_power(self, exponent: UInt32) -> UInt64
   result
 }
 
-public fn UInt64.saturating_power(self, exponent: UInt32) -> UInt64
+public transparent fn UInt64.saturating_power(self, exponent: UInt32) -> UInt64
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -2635,19 +2635,19 @@ public fn UInt64.absolute_difference(self, other: UInt64) -> UInt64
   if self >= other { self - other } else { other - self }
 }
 
-public fn UInt64.to_float64(self) -> Float64
+public transparent fn UInt64.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn UInt64.to_float32(self) -> Float32
+public transparent fn UInt64.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn UInt64.saturating_from(value: Float64) -> UInt64
+public transparent fn UInt64.saturating_from(value: Float64) -> UInt64
   cost time O(1)
 {
   if intrinsic::fits[Float64, UInt64](value) {
@@ -2661,7 +2661,7 @@ public fn UInt64.saturating_from(value: Float64) -> UInt64
   }
 }
 
-public fn UInt64.total(items: Slice[UInt64]) -> Integer
+public transparent fn UInt64.total(items: Slice[UInt64]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -2715,7 +2715,7 @@ public fn UInt64.is_power_of_two(self) -> Bool
   self != 0 && (self & (self - 1)) == 0
 }
 
-public fn UInt64.next_power_of_two(self) -> Option[UInt64]
+public transparent fn UInt64.next_power_of_two(self) -> Option[UInt64]
   cost time O(1)
 {
   if self <= 1 {
@@ -2752,7 +2752,7 @@ public fn UInt64.greatest_common_divisor(self, other: UInt64) -> UInt64
   first
 }
 
-public fn UInt64.least_common_multiple(self, other: UInt64) -> Option[UInt64]
+public transparent fn UInt64.least_common_multiple(self, other: UInt64) -> Option[UInt64]
   cost time O(log(self) + log(other))
 {
   if self == 0 || other == 0 {
@@ -2885,7 +2885,7 @@ public fn USize.wrapping_power(self, exponent: UInt32) -> USize
   result
 }
 
-public fn USize.saturating_power(self, exponent: UInt32) -> USize
+public transparent fn USize.saturating_power(self, exponent: UInt32) -> USize
   cost time O(log(exponent))
 {
   match self.checked_power(exponent) {
@@ -2937,19 +2937,19 @@ public fn USize.absolute_difference(self, other: USize) -> USize
   if self >= other { self - other } else { other - self }
 }
 
-public fn USize.to_float64(self) -> Float64
+public transparent fn USize.to_float64(self) -> Float64
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn USize.to_float32(self) -> Float32
+public transparent fn USize.to_float32(self) -> Float32
   cost time O(1)
 {
   intrinsic::convert(self)
 }
 
-public fn USize.saturating_from(value: Float64) -> USize
+public transparent fn USize.saturating_from(value: Float64) -> USize
   cost time O(1)
 {
   if intrinsic::fits[Float64, USize](value) {
@@ -2963,7 +2963,7 @@ public fn USize.saturating_from(value: Float64) -> USize
   }
 }
 
-public fn USize.total(items: Slice[USize]) -> Integer
+public transparent fn USize.total(items: Slice[USize]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
@@ -3017,7 +3017,7 @@ public fn USize.is_power_of_two(self) -> Bool
   self != 0 && (self & (self - 1)) == 0
 }
 
-public fn USize.next_power_of_two(self) -> Option[USize]
+public transparent fn USize.next_power_of_two(self) -> Option[USize]
   cost time O(1)
 {
   if self <= 1 {
@@ -3054,7 +3054,7 @@ public fn USize.greatest_common_divisor(self, other: USize) -> USize
   first
 }
 
-public fn USize.least_common_multiple(self, other: USize) -> Option[USize]
+public transparent fn USize.least_common_multiple(self, other: USize) -> Option[USize]
   cost time O(log(self) + log(other))
 {
   if self == 0 || other == 0 {
