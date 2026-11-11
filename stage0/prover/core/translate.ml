@@ -83,8 +83,10 @@ type source = {
   key : Names.key option;
   name : string;  (** For messages. *)
   core : Core.t;
-  spans : span array;  (** By a node's origin. *)
-  text : string;
+  spans : span array Lazy.t;
+      (** By a node's origin, read only to report something, so a caller's proof depends on a
+          callee's text only where it says something about it. *)
+  text : string Lazy.t;
 }
 
 (* One form's clauses about a callee: its own, or, for a method of an
@@ -440,13 +442,15 @@ and occurs part term =
 
 (* Where a node came from in its form's text, by its origin. *)
 let span_of (source : source) origin =
-  if origin >= 0 && origin < Array.length source.spans then source.spans.(origin) else Span.make 0 0
+  let spans = Lazy.force source.spans in
+  if origin >= 0 && origin < Array.length spans then spans.(origin) else Span.make 0 0
 
 (* A node's source text, for messages. *)
 let quote source origin =
   let span = span_of source origin in
-  if span.stop > span.start && span.stop <= String.length source.text then
-    String.sub source.text span.start (span.stop - span.start)
+  let text = Lazy.force source.text in
+  if span.stop > span.start && span.stop <= String.length text then
+    String.sub text span.start (span.stop - span.start)
   else "this expression"
 
 (* Where a node of the form read here is. *)
@@ -893,8 +897,8 @@ let source_of database (key : Names.key) core =
     key = Some key;
     name = Names.show_key key;
     core;
-    spans = Option.value (Query.demand database Names.spans key) ~default:[||];
-    text = Option.value (Query.demand database Names.text key) ~default:"";
+    spans = lazy (Option.value (Query.demand database Names.spans key) ~default:[||]);
+    text = lazy (Option.value (Query.demand database Names.text key) ~default:"");
   }
 
 (* The form of a definition, by its key, when it has one. *)
@@ -907,14 +911,16 @@ type found = Written | Derived | Provided
 
 (* The form of a function or a method by its path, with the substitution it
    is read under: the [impl]'s, for the form of the trait's method that the
-   [impl] leaves to it. *)
+   [impl] leaves to it. A caller reads its callee's specification, whose
+   body is there only where the callee is a function in the logic, so
+   editing another body proves no caller again. *)
 let source_at database (path : Path.t) =
-  match Query.demand database Infer.core_of_path path with
+  match Query.demand database Infer.specification_of_path path with
   | None -> None
   | Some (core, substitution) -> (
       if Option.is_some (Query.demand database Infer.derived path) then
         Some
-          ( { key = None; name = Path.show path; core; spans = [||]; text = "" },
+          ( { key = None; name = Path.show path; core; spans = lazy [||]; text = lazy "" },
             substitution,
             Derived )
       else
@@ -1292,8 +1298,9 @@ and note_place context frame (node : expression) place =
                       ]
               in
               let text (span : span) =
-                if span.stop <= String.length frame.source.text then
-                  String.sub frame.source.text span.start (span.stop - span.start)
+                let source_text = Lazy.force frame.source.text in
+                if span.stop <= String.length source_text then
+                  String.sub source_text span.start (span.stop - span.start)
                 else "this expression"
               in
               oblige context frame Disjoint (at frame node)
@@ -8134,7 +8141,8 @@ let empty_frame source =
 (* The span of the whole definition, for an obligation about how it
    returns. *)
 let definition_span (source : source) =
-  match Array.length source.spans with 0 -> Span.make 0 0 | count -> source.spans.(count - 1)
+  let spans = Lazy.force source.spans in
+  match Array.length spans with 0 -> Span.make 0 0 | count -> spans.(count - 1)
 
 (* A cost clause, as a promise about one counter, shown at each way its
    definition returns. A trait's clause, which an [impl]'s method keeps, is
