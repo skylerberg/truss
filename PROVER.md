@@ -1324,7 +1324,8 @@ Each obligation the prover could not prove is an error, with the shared
   by its term, not added to the query, so a query that proves keeps its
   text.
 - **A note at the clause.** A call's `requires` that may not hold has a
-  note at that clause, where the callee is in the same file.
+  note at that clause, where the callee is in the same file; for a callee
+  in another file, the message names the clause's file and line.
 - **A fix that moves the clause up.** Where a callee's `requires` that may
   not hold names only the definition's parameters as they arrive,
   constants, and literals, the diagnostic has a fix that adds it to the
@@ -1335,7 +1336,18 @@ Each obligation the prover could not prove is an error, with the shared
   has a fix of the bound the operand must be within: `count + 1` on a
   `UInt8` gives `requires count <= 254`. A divisor that may be zero, and a
   shift amount that may be the width or more, of such an operand, has the
-  fix `requires parts != 0` or `requires by < 64`.
+  fix `requires parts != 0` or `requires by < 64`. Any other obligation
+  that fails, where the goal and the conditions of the `if`s around it
+  are comparisons and logic of the parameters as they arrive and
+  literals, has the fix that adds it as a `requires`: `assert low < high`
+  gives `requires low < high`, and the same `assert` inside `if flag`
+  gives `requires (flag) ==> (low < high)`. A goal with arithmetic has no
+  such fix, since arithmetic in a `requires` must fit its types and the
+  goal's arithmetic is exact.
+- **Fixes that change what the code means.** An overflow, a divisor that
+  may be zero, or a shift amount that may be too large is named, not
+  fixed, as one to check first with an `if`, do with the checked
+  operation, or allow to stop the program with `uses Panic`.
 - **A state for every obligation.** Each obligation, shown or not, has a
   state at its position, for a language server to show; the diagnostics
   are the states that were not shown.
@@ -1471,15 +1483,10 @@ test the prover itself:
   captures none of the quantifier's bound values is read as it is outside
   it, and one that captures some says what it does for each of them,
   closed over the quantifier.
-- **More in a diagnostic.** A note at a clause in another file, which a
-  message names by its file and line instead, and a
-  fix that adds an obligation about parameters alone to the function as a
-  `requires` for obligations other than a callee's `requires`, an
-  overflow with a literal, a divisor, and a shift amount, which needs the
-  obligation written back as Truss. DESIGN.md's
-  other fixes, checking it with an `if`, using the
-  checked version of the operation, and `uses Panic`, change what the code
-  means, so the message is to name them without applying them.
+- **Fixes for goals with arithmetic.** A `requires` from a goal such as
+  `count + 1 <= limit` must be written so that its own arithmetic cannot
+  overflow, which needs the goal rewritten into bounds on the parameters
+  that fit their types.
 - **Proof states in the language server.** `Prover.states` gives each
   obligation's state at its position, proven or not with the diagnostic
   that says why; the language server, `truss lsp`, is not built yet.
