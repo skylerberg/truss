@@ -558,4 +558,69 @@ let () =
           let value = Engine.get opened doubled () in
           if value <> 10 then fail "read %d, the base's result" value)
 
+let raising_input = Query.input ~name:"raising_input" ~show:(fun () -> "") ()
+
+let raising =
+  unit_query "raising" (fun database () ->
+      match Query.get database raising_input () with
+      | value when value < 0 -> failwith (string_of_int (value mod 2))
+      | value -> value)
+
+let handles =
+  unit_query "handles" ~saved:true ~phase:Phases.bodies (fun database () ->
+      try Query.demand database raising () with Failure _ -> 0)
+
+let closure_input = Query.input ~name:"closure_input" ~show:(fun () -> "") ()
+
+let closure =
+  Query.query ~name:"closure" ~phase:Phases.syntax
+    ~show:(fun () -> "")
+    ~equal:(fun _ _ -> false)
+    (fun database () ->
+      let value = Query.get database closure_input () in
+      fun more -> value + more)
+
+let applies =
+  unit_query "applies" ~saved:true ~phase:Phases.bodies (fun database () ->
+      (Query.demand database closure ()) 1)
+
+let () =
+  test "a result that raises as it did before stops a change" (fun () ->
+      let engine = attached (Store.open_ (fresh_directory ())) in
+      Engine.set engine raising_input () (-2);
+      if Engine.get engine handles () <> 0 then fail "the handler's result";
+      Engine.clear_log engine;
+      (* Another input that raises the same exception. *)
+      Engine.set engine raising_input () (-4);
+      ignore (Engine.stabilize engine);
+      if Engine.executed engine <> [ "raising()" ] then
+        fail "ran [%s]" (String.concat "; " (Engine.executed engine)));
+  test "a state opened again holds a result that read one that raised" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let engine = attached store in
+      Engine.set engine raising_input () (-2);
+      ignore (Engine.get engine handles ());
+      let artifact = Engine.write engine in
+      match Engine.open_ ~log:true store ~version ~bases:[] artifact with
+      | None -> fail "the state did not open"
+      | Some opened ->
+          if Engine.get opened handles () <> 0 then fail "the handler's result";
+          if Engine.executed opened <> [] then
+            fail "ran [%s]" (String.concat "; " (Engine.executed opened));
+          Engine.set opened raising_input () 5;
+          if Engine.get opened handles () <> 5 then fail "the result after the input changed");
+  test "a result that read an opaque one is computed again in a state opened later" (fun () ->
+      let store = Store.open_ (fresh_directory ()) in
+      let engine = attached store in
+      Engine.skip_audit engine;
+      Engine.set engine closure_input () 4;
+      if Engine.get engine applies () <> 5 then fail "the result";
+      let artifact = Engine.write engine in
+      match Engine.open_ ~log:true store ~version ~bases:[] artifact with
+      | None -> fail "the state did not open"
+      | Some opened ->
+          Engine.skip_audit opened;
+          Engine.set opened closure_input () 6;
+          if Engine.get opened applies () <> 7 then fail "the result after the input changed")
+
 let () = finish ()

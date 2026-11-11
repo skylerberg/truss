@@ -70,7 +70,7 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
 let change engine (cell : ('key, 'value) input_cell) slot =
   let node = cell.input_node in
   cell.slot <- slot;
-  node.fingerprint <- None;
+  forget_fingerprint node;
   node.changed_at <- tick engine;
   engine.activity <- engine.activity + 1;
   Hashtbl.replace engine.unsaved node.id node;
