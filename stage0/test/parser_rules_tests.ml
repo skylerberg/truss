@@ -60,10 +60,7 @@ let () =
       error "fn f() uses Clock uses Random {}" ~code:Repeated_clause ~at:"uses Random");
   test "a missing body gets { todo }" (fun () ->
       error "fn f() -> Int64\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
-        ~fixed:"fn f() -> Int64 {\n  todo\n}\nfn g() {}");
-  test "a missing body after a visibility is not indented" (fun () ->
-      error "public fn f()\nfn g() {}" ~code:Missing_body ~at:"\nfn g"
-        ~fixed:"public fn f() {\n  todo\n}\nfn g() {}");
+        ~fixed:"fn f() -> Int64 { todo }\nfn g() {}");
   test "self only in a method" (fun () -> error "fn f(self) {}" ~code:Misplaced_self ~at:"self");
   test "self only first" (fun () ->
       error "fn T.f(x: Int64, self) {}" ~code:Misplaced_self ~at:"self");
@@ -126,7 +123,7 @@ let () =
       error "capability Clock {\n  fn now(self) -> Instant\n}" ~code:Misplaced_self ~at:"self");
   test "an impl's methods need bodies" (fun () ->
       error "impl Clock for Fixed {\n  fn now(self) -> Instant\n}" ~code:Missing_body ~at:"\n}"
-        ~fixed:"impl Clock for Fixed {\n  fn now(self) -> Instant {\n    todo\n  }\n}");
+        ~fixed:"impl Clock for Fixed {\n  fn now(self) -> Instant { todo }\n}");
   test "constants" (fun () ->
       definition "public let UInt8.maximum: UInt8 = 255" "(public (let UInt8.maximum : UInt8 255))";
       definition "let pi: Float64 = 3.14" "(let pi : Float64 314e-2)");

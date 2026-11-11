@@ -5,7 +5,7 @@
     its spans are relative to its first token, and so are its diagnostics, so that a piece that only
     moved parses to exactly the same result, which can be cached and reused. *)
 
-type piece = Split.item = { first : int; stop : int }
+type piece = Split.piece = { first : int; stop : int }
 (** A piece of a file: the indexes of its first token and one past its last. *)
 
 val split : Token.t array -> piece list

@@ -25,7 +25,7 @@ let punctuation cursor current =
     cursor.position <- start + length;
     Some (Punctuation kind)
   in
-  let first_of options default =
+  let followed_by options default =
     match List.find_opt (fun (character, _, _) -> is 1 character) options with
     | Some (_, kind, length) -> take kind length
     | None -> take default 1
@@ -40,7 +40,7 @@ let punctuation cursor current =
   | ',' -> take Comma 1
   | '?' -> take Question 1
   | '~' -> take Tilde 1
-  | ':' -> first_of [ (':', Colon_colon, 2) ] Colon
+  | ':' -> followed_by [ (':', Colon_colon, 2) ] Colon
   | '.' ->
       if is 1 '.' then if is 2 '=' then take Dot_dot_equal 3 else take Dot_dot 2 else take Dot 1
   | '-' ->
@@ -48,19 +48,19 @@ let punctuation cursor current =
         cursor.position <- start + 2;
         Some (Foreign Minus_minus)
       end
-      else first_of [ ('>', Arrow, 2); ('=', Minus_equal, 2) ] Minus
+      else followed_by [ ('>', Arrow, 2); ('=', Minus_equal, 2) ] Minus
   | '+' ->
       if is 1 '+' then begin
         cursor.position <- start + 2;
         Some (Foreign Plus_plus)
       end
-      else first_of [ ('=', Plus_equal, 2) ] Plus
-  | '*' -> first_of [ ('=', Star_equal, 2) ] Star
-  | '/' -> first_of [ ('=', Slash_equal, 2) ] Slash
-  | '%' -> first_of [ ('=', Percent_equal, 2) ] Percent
-  | '^' -> first_of [ ('=', Caret_equal, 2) ] Caret
-  | '&' -> first_of [ ('&', And_and, 2); ('=', Ampersand_equal, 2) ] Ampersand
-  | '|' -> first_of [ ('|', Or_or, 2); ('=', Bar_equal, 2) ] Bar
+      else followed_by [ ('=', Plus_equal, 2) ] Plus
+  | '*' -> followed_by [ ('=', Star_equal, 2) ] Star
+  | '/' -> followed_by [ ('=', Slash_equal, 2) ] Slash
+  | '%' -> followed_by [ ('=', Percent_equal, 2) ] Percent
+  | '^' -> followed_by [ ('=', Caret_equal, 2) ] Caret
+  | '&' -> followed_by [ ('&', And_and, 2); ('=', Ampersand_equal, 2) ] Ampersand
+  | '|' -> followed_by [ ('|', Or_or, 2); ('=', Bar_equal, 2) ] Bar
   (* JavaScript's `===` and `!==`, as a whole: a longer run of `=` is not
      that habit, and lexes as `==`s for the parser to report. *)
   | ('=' | '!') when is 1 '=' && is 2 '=' && not (is 3 '=') ->
@@ -79,14 +79,14 @@ let punctuation cursor current =
            replacement);
       take kind 3
   | '=' when is 1 '=' && is 2 '>' -> take Implies 3
-  | '=' -> first_of [ ('=', Equal_equal, 2); ('>', Fat_arrow, 2) ] Equal
-  | '!' -> first_of [ ('=', Not_equal, 2) ] Bang
+  | '=' -> followed_by [ ('=', Equal_equal, 2); ('>', Fat_arrow, 2) ] Equal
+  | '!' -> followed_by [ ('=', Not_equal, 2) ] Bang
   | '<' ->
       if is 1 '<' then if is 2 '=' then take Shift_left_equal 3 else take Shift_left 2
-      else first_of [ ('=', Less_equal, 2) ] Less
+      else followed_by [ ('=', Less_equal, 2) ] Less
   | '>' ->
       if is 1 '>' then if is 2 '=' then take Shift_right_equal 3 else take Shift_right 2
-      else first_of [ ('=', Greater_equal, 2) ] Greater
+      else followed_by [ ('=', Greater_equal, 2) ] Greater
   | _ -> None
 
 (* Checks a name, once per spelling in the file. *)
@@ -258,7 +258,7 @@ let rec next cursor =
           position = cursor.length;
           first_line_break = cursor.first_line_break;
           blank_line = cursor.blank_line;
-          cut_off = cursor.ended_inside_error;
+          unterminated = cursor.unterminated_at_end;
         }
   | Token { kind; start; ending } ->
       let first_line_break = cursor.first_line_break and blank_line = cursor.blank_line in
@@ -271,5 +271,5 @@ let rec next cursor =
           span = span start cursor.position;
           first_line_break;
           blank_line;
-          cut_off = ending = Cut_off;
+          unterminated = ending = Unterminated;
         }

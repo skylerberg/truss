@@ -373,6 +373,12 @@ let () =
 (* Brackets *)
 
 let () =
+  test "two unclosed brackets inside another each close before its closer" (fun () ->
+      equal_lists Fun.id "fixed" [ "f({[1, 2})"; "f({[1, 2])" ]
+        (fixed_texts "f({[1, 2)" ~code:Unclosed_bracket));
+  test "a closer with no opener among open brackets is dropped" (fun () ->
+      error "f(1 ] , 2)" ~code:Unmatched_closing_bracket ~at:"]";
+      equal_lists Fun.id "tokens" [ "f"; "("; "1"; ","; "2"; ")"; "NL" ] (tokens_of "f(1 ] , 2)"));
   test "an unclosed bracket inside another" (fun () ->
       error "f(1, [2)" ~code:Unclosed_bracket ~at:"[" ~fixed:"f(1, [2])";
       equal_lists Fun.id "tokens"

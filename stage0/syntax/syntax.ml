@@ -1,10 +1,11 @@
 (* The syntax tree of one file, shared by every stage after the parser.
 
-   The tree is abstract: it keeps what the program says and each node's span,
-   not every token. Each definition records where it starts in the file, its
-   base, and every span in its tree is relative to that base, so a definition
-   that only moved has exactly the same tree. Every kind of node that can fail
-   to parse has an [Error] case, covering the span that did not parse.
+   The tree is an abstract syntax tree: it has the program's constructs and
+   each node's span, not every token. Each definition records its base, the
+   offset of its first token in the file, and every span in its tree is
+   relative to that base, so a definition that only moved has exactly the
+   same tree. Every kind of node that can fail to parse has an [Error]
+   case, whose span covers the tokens that did not parse.
 
    Constructs that parse the same are one node, and later stages annotate
    them without rebuilding them: [Bracket] is an index or type arguments,
@@ -28,10 +29,10 @@ end
 
 type span = Span.t
 
-(* A node's id: a small integer, unique within its definition, given in the
-   order the parser builds the definition's nodes. Later stages record what
-   they decide about a node in tables keyed by its id, never by rebuilding
-   the tree. The same tokens give the same ids. *)
+(* A node's id: a small integer, unique within its definition, assigned in
+   the order the parser builds the definition's nodes. Later stages record
+   their results for a node in tables keyed by its id, and never rebuild
+   the tree. The same tokens produce the same ids. *)
 type id = int
 type name = { text : string; span : span; id : id }
 
@@ -81,7 +82,7 @@ type quantifier = Forall | Exists
    keeps. *)
 type 'kind line = { kind : 'kind; span : span; blank_line_before : bool; id : id }
 
-(* Most of the tree is nodes: what a part of the program is, and its span. *)
+(* Most of the tree is nodes: a construct's kind, its span, and its id. *)
 type 'kind node = { kind : 'kind; span : span; id : id }
 
 (* Types *)
@@ -191,7 +192,7 @@ and expression_kind =
   | Expression_error
 
 (* A string literal: its tag, and its texts alternating with its
-   interpolations, starting and ending with a text, as the lexer gives them.
+   interpolations, starting and ending with a text, as in the lexer's token.
    How it was written is the source text under its span. *)
 and string_literal = {
   tag : path option;
@@ -326,8 +327,8 @@ and parameter_kind =
     }
   | Parameter_error
 
-(* [yields] gives out parts of [self] any number of times, and [lends]
-   exactly once. *)
+(* A [yields] method yields parts of [self] any number of times, and a
+   [lends] method lends one part exactly once. *)
 type result =
   | Returns of type_expression
   | Yields of mode option * type_expression
@@ -363,9 +364,9 @@ and type_clause_kind =
 
 type law = { name : name; parameters : parameter list; requires : expression list; body : block }
 
-(* What a trait, an [impl], or a capability holds besides its methods. Each
-   method written inside one is a definition of its own, which comes after
-   it among the file's definitions and says which one it is inside. *)
+(* The members of a trait, an [impl], or a capability other than its
+   methods. Each method declared inside one is a separate definition, which
+   follows it among the file's definitions and records it as its container. *)
 type trait_member = Associated_type of name * path_type list | Law of law | Trait_member_error
 type impl_member = Associated_definition of name * type_expression | Impl_member_error
 type capability_member = Capability_member_error
@@ -407,11 +408,11 @@ type definition_kind =
       (** A definition whose header did not parse, with its keyword and its name when those were
           read, so that later stages can still know it is there. *)
 
-(* [recovered] lists where the parser recovered from an error in the
-   definition, in order: wherever it built a node the source does not say
-   as written, such as an [Error] node or a node for a habit as if its fix
-   had been applied. A part of the definition is as written exactly when
-   none of these lies in its span. *)
+(* [recovered] lists the spans where the parser recovered from an error in
+   the definition, in order. At each one it built a node that does not
+   match the source text: an [Error] node, or the node that a habit's fix
+   would produce. A part of the definition matches its source text exactly
+   when no recovery lies in its span. *)
 type definition = {
   visibility : visibility;
   kind : definition_kind;
@@ -424,14 +425,14 @@ type definition = {
    absolute offset of its first token, and its source text, from its first
    token to the end of its last. Spans inside [value] are relative to
    [base], and index into [text]. A method written inside a trait, an
-   [impl], or a capability is an item of its own, [within] that one, by its
-   index among the file's definitions. *)
+   [impl], or a capability is an item of its own, and [container] is the
+   index of that trait, [impl], or capability among the file's definitions. *)
 type 'value item = {
   base : int;
   text : string;
   blank_line_before : bool;
   value : 'value;
-  within : int option;
+  container : int option;
 }
 
 type file = { uses : path item list; definitions : definition item list }

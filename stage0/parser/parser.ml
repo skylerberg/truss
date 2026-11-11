@@ -2,9 +2,9 @@
 
 open Token
 
-type piece = Split.item = { first : int; stop : int }
+type piece = Split.piece = { first : int; stop : int }
 
-let split = Split.items
+let split = Split.pieces
 let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword Use
 let spelled_words = List.map fst Cost_word.spellings
 
@@ -13,13 +13,14 @@ type 'value parsed = { value : 'value Syntax.item; diagnostics : relative_diagno
 
 let placed parsed = List.map (Diagnostic.move parsed.value.base) parsed.diagnostics
 
-(* Parses a piece with a cursor of its own, which collects the piece's
-   diagnostics apart from the rest of the file's. *)
+(* Parses a piece with a cursor of its own, whose collector holds only the
+   piece's diagnostics. *)
 let with_cursor source (tokens : Token.t array) piece parse =
   let diagnostics = Diagnostic.Collector.create () in
   let base = tokens.(piece.first).span.start in
   let cursor =
-    Cursor.create ~source ~diagnostics ~base tokens ~first:piece.first ~stop:piece.stop
+    Cursor.create ~text:(Source.text source) ~diagnostics ~base tokens ~first:piece.first
+      ~stop:piece.stop
   in
   let value = parse cursor in
   (value, cursor, Diagnostic.Collector.to_list diagnostics)
@@ -31,7 +32,7 @@ let item (cursor : Cursor.t) value : _ Syntax.item =
     text = Cursor.text cursor (Source.span cursor.base last.span.stop);
     blank_line_before = cursor.tokens.(cursor.first).blank_line_before;
     value;
-    within = None;
+    container = None;
   }
 
 let parsed cursor value diagnostics =
@@ -42,8 +43,8 @@ let check cursor definition =
   Operators.definition cursor definition;
   Check.definition cursor definition
 
-(* One definition from a piece of its own, by [parse], or the error that
-   stands for it when its header does not parse. *)
+(* The definition that [parse] builds from a piece, or a
+   [Definition_error] when its header does not parse. *)
 let one_definition source tokens piece parse =
   let value, cursor, diagnostics =
     with_cursor source tokens piece (fun cursor ->
@@ -53,13 +54,13 @@ let one_definition source tokens piece parse =
               check cursor definition;
               definition
           | exception Cursor.Failed ->
-              let keyword, name = Parse_definition.header (Cursor.reread cursor) in
+              let keyword, name = Parse_definition.header (Cursor.restarted cursor) in
               {
                 visibility = Private;
                 kind = Definition_error { keyword; name };
                 span = Cursor.span_from cursor cursor.first;
                 recovered = [];
-                id = Cursor.fresh cursor;
+                id = Cursor.fresh_id cursor;
               }
         in
         let recovered =
@@ -69,13 +70,13 @@ let one_definition source tokens piece parse =
   in
   (parsed cursor value diagnostics, List.rev !(cursor.methods))
 
-(* A definition, and the methods written inside it when it is a trait, an
-   [impl], or a capability: each a definition of its own, with its own
-   tokens, positions, and node ids, so that a change to one method is a
-   change to nothing else. *)
+(* A definition, and the methods declared inside it when it is a trait, an
+   [impl], or a capability. Each method is a separate definition, with its
+   own tokens, base, and node ids, so that an edit to one method changes no
+   other definition's tree. *)
 let definition source tokens piece =
   let parsed, methods = one_definition source tokens piece Parse_definition.definition in
-  let within : Parse_definition.container option =
+  let container : Parse_definition.container option =
     match parsed.value.value.kind with
     | Trait _ -> Some In_trait
     | Impl _ -> Some In_impl
@@ -83,13 +84,13 @@ let definition source tokens piece =
     | _ -> None
   in
   ( parsed,
-    match within with
-    | Some within ->
+    match container with
+    | Some container ->
         List.map
           (fun (first, stop) ->
             fst
               (one_definition source tokens { first; stop }
-                 (Parse_definition.method_ ~within ~visibility:parsed.value.value.visibility)))
+                 (Parse_definition.method_ ~container ~visibility:parsed.value.value.visibility)))
           methods
     | None -> [] )
 
@@ -170,10 +171,10 @@ let parse source tokens =
           | [], None -> Some (Source.line_start source parsed.value.base)
           | _ -> destination
         in
-        let within = Some (List.length definitions) in
+        let container = Some (List.length definitions) in
         gather rest ~uses
           ~definitions:
-            (List.rev_map (fun (method_ : _ parsed) -> { method_.value with within }) methods
+            (List.rev_map (fun (method_ : _ parsed) -> { method_.value with container }) methods
             @ (parsed.value :: definitions))
           ~diagnostics:(List.rev_map placed methods @ (placed parsed :: diagnostics))
           ~destination
@@ -209,7 +210,7 @@ let example_statement source tokens piece =
   let (), _, diagnostics =
     with_cursor source tokens piece (fun cursor ->
         match
-          let statement = Parse_statement.statement_line cursor ~previous:None in
+          let statement = Parse_expression.statement_line cursor ~previous:None in
           if not (Cursor.at_end cursor) then Cursor.fail cursor "a line break after the statement";
           statement
         with

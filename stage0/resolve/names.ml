@@ -207,7 +207,7 @@ let plain_items (definitions : definition Syntax.item list) =
       match definition.kind with
       (* A method written inside a trait, an [impl], or a capability is
          reached through that one, not by its name. *)
-      | _ when Option.is_some item.within -> []
+      | _ when Option.is_some item.container -> []
       | Function { signature = { name = Plain_name name; generics; _ }; _ } ->
           plain name.text Function (generics <> [])
       | Type_definition { name; generics; _ } -> plain name.text Type (generics <> [])
@@ -369,7 +369,7 @@ let declarations =
             path;
             ordinal;
             index;
-            container = item.within;
+            container = item.container;
             kind;
             visibility = item.value.visibility;
             generic;
@@ -380,7 +380,7 @@ let declarations =
            (fun index (item : definition Syntax.item) ->
              let definition = item.value in
              let declare = declare index item in
-             match (definition.kind, Option.bind item.within (Hashtbl.find_opt containers)) with
+             match (definition.kind, Option.bind item.container (Hashtbl.find_opt containers)) with
              (* A method written inside a trait, an [impl], or a capability
                 is that one's. *)
              | (Function { signature; _ } | Method_declaration signature), Some (owner, static) ->
