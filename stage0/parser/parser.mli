@@ -35,6 +35,12 @@ val use_line : Source.t -> Token.t array -> piece -> Syntax.path option parsed
 val parse : Source.t -> Token.t array -> Syntax.file * Diagnostic.t list
 (** A whole file, with its diagnostics in the file's offsets, in order of position. *)
 
+val begins_statement : Token.kind -> bool
+(** Whether a token is in the first set of a statement. [Layout] must let every such token begin a
+    statement, or a line break before one emits no [Newline] and two statements parse as one. The
+    exceptions are [..] and [..=], which begin an expression only inside brackets, where line breaks
+    are ignored. *)
+
 val spelled_words : string list
 (** The names the parser recognizes by their spelling, in [cost] clauses. *)
 
