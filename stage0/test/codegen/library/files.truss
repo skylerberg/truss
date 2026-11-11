@@ -1,4 +1,5 @@
 use standard::files
+use standard::random
 use standard::streams
 
 fn shows(path: Path, expected: StringSlice) -> Bool {
@@ -334,5 +335,145 @@ test "a removed file stays readable through a handle that was open" {
     assert FileWrite.remove(path_of("/gone")) is Ok(_)
     assert FileRead.read(path_of("/gone")) == Err(SystemError.NotFound)
     assert mut reader.read_line() == Ok(Some("still here"))
+  }
+}
+
+fn project() -> files::MemoryFiles {
+  files::MemoryFiles.new()
+    .with_text(path_of("/project/README"), contents: "read me")
+    .with_text(path_of("/project/source/main.truss"), contents: "main")
+    .with_text(path_of("/project/source/library/list.truss"), contents: "list")
+}
+
+test "append adds to the end of a file and makes a missing one" {
+  var memory = files::MemoryFiles.new()
+  provide mut memory {
+    assert files::append_text(path_of("/log"), contents: "one\n") is Ok(_)
+    assert files::append_text(path_of("/log"), contents: "two\n") is Ok(_)
+    assert files::append(path_of("/log"), contents: [51]) is Ok(_)
+    assert FileRead.read_text(path_of("/log")) == Ok("one\ntwo\n3")
+    assert files::append_text(path_of("/none/log"), contents: "x") == Err(SystemError.NotFound)
+  }
+}
+
+test "copy writes the bytes and the permissions of a file to another path" {
+  var memory = project()
+  provide mut memory {
+    assert FileWrite.set_permissions(path_of("/project/README"), permissions: files::Permissions.from_mode(0o600)) is Ok(_)
+    assert files::copy(path_of("/project/README"), to: path_of("/copy")) == Ok(7)
+    assert FileRead.read_text(path_of("/copy")) == Ok("read me")
+    assert FileRead.metadata(path_of("/copy")) is Ok(copied) && copied.permissions.mode() == 0o600
+    assert files::copy(path_of("/project/source/main.truss"), to: path_of("/copy")) == Ok(4)
+    assert FileRead.read_text(path_of("/copy")) == Ok("main")
+    assert files::copy(path_of("/none"), to: path_of("/copy")) == Err(SystemError.NotFound)
+    assert files::copy(path_of("/project"), to: path_of("/copy")) == Err(SystemError.IsADirectory)
+    assert files::copy(path_of("/copy"), to: path_of("/none/copy")) == Err(SystemError.NotFound)
+  }
+}
+
+test "create_directories makes each missing directory of a path" {
+  var memory = files::MemoryFiles.new().with_text(path_of("/file"), contents: "x")
+  provide mut memory {
+    assert files::create_directories(path_of("/a/b/c")) is Ok(_)
+    assert FileRead.metadata(path_of("/a/b/c")) is Ok(made) && made.is_directory()
+    assert files::create_directories(path_of("/a/b/c")) is Ok(_)
+    assert files::create_directories(path_of("/a/b/d/e")) is Ok(_)
+    assert FileRead.list(path_of("/a/b")) is Ok(entries) && entries.length() == 2
+    assert files::create_directories(path_of("/file/below")) == Err(SystemError.NotADirectory)
+  }
+}
+
+test "remove_all removes a directory with everything below it" {
+  var memory = project()
+  provide mut memory {
+    assert FileWrite.link(path_of("/project/README"), link: path_of("/project/source/link"), kind: files::LinkKind.Symbolic)
+      is Ok(_)
+    assert files::remove_all(path_of("/project/source")) is Ok(_)
+    assert FileRead.read(path_of("/project/source")) == Err(SystemError.NotFound)
+    assert FileRead.read_text(path_of("/project/README")) == Ok("read me")
+    assert files::remove_all(path_of("/project/README")) is Ok(_)
+    assert files::remove_all(path_of("/project/README")) == Err(SystemError.NotFound)
+    assert FileRead.list(path_of("/project")) is Ok(left) && left.length() == 0
+  }
+}
+
+test "walk lists a directory before the entries below it" {
+  var memory = project()
+  provide mut memory {
+    assert FileWrite.link(path_of("/project/source"), link: path_of("/project/alias"), kind: files::LinkKind.Symbolic)
+      is Ok(_)
+    assert files::walk(path_of("/project")) is Ok(entries)
+      && entries.length() == 7
+      && "${entries[0].path}" == "/project"
+      && entries[0].depth == 0
+      && "${entries[1].path}" == "/project/README"
+      && entries[1].kind == files::FileKind.File
+      && "${entries[2].path}" == "/project/source"
+      && entries[2].kind == files::FileKind.Directory
+      && "${entries[3].path}" == "/project/source/main.truss"
+      && entries[3].depth == 2
+      && "${entries[4].path}" == "/project/source/library"
+      && "${entries[5].path}" == "/project/source/library/list.truss"
+      && entries[5].depth == 3
+      && "${entries[6].path}" == "/project/alias"
+      && entries[6].kind == files::FileKind.SymbolicLink
+    assert files::walk(path_of("/project"), follow_links: true) is Ok(followed)
+      && followed.length() == 10
+      && "${followed[7].path}" == "/project/alias/main.truss"
+    assert files::walk(path_of("/project/README")) is Ok(single) && single.length() == 1
+    assert files::walk(path_of("/none")) is Err(NotFound)
+  }
+}
+
+test "walk stops at a loop of symbolic links when it follows links" {
+  var memory = files::MemoryFiles.new().with_text(path_of("/loop/file"), contents: "x")
+  provide mut memory {
+    assert FileWrite.link(path_of("/loop"), link: path_of("/loop/again"), kind: files::LinkKind.Symbolic) is Ok(_)
+    assert files::walk(path_of("/loop")) is Ok(entries) && entries.length() == 3
+    assert files::walk(path_of("/loop"), follow_links: true) == Err(SystemError.InvalidInput)
+  }
+}
+
+test "write_atomically replaces a file and leaves no temporary file" {
+  var memory = files::MemoryFiles.new().with_text(path_of("/data/config"), contents: "old")
+  provide mut memory, random::SeededRandom.new(4) {
+    assert files::write_atomically(path_of("/data/config"), contents: "new".bytes()) is Ok(_)
+    assert FileRead.read_text(path_of("/data/config")) == Ok("new")
+    assert FileRead.list(path_of("/data")) is Ok(entries) && entries.length() == 1
+    assert files::write_atomically(path_of("/data/fresh"), contents: "made".bytes()) is Ok(_)
+    assert FileRead.read_text(path_of("/data/fresh")) == Ok("made")
+    assert files::write_atomically(path_of("/none/config"), contents: "x".bytes()) == Err(SystemError.NotFound)
+    assert files::write_atomically(path_of("/"), contents: "x".bytes()) == Err(SystemError.InvalidInput)
+    assert FileWrite.create_directory(path_of("/data/directory")) is Ok(_)
+    assert files::write_atomically(path_of("/data/directory"), contents: "x".bytes()) == Err(SystemError.IsADirectory)
+    assert FileRead.list(path_of("/data")) is Ok(after) && after.length() == 3
+  }
+}
+
+test "create_temporary_directory makes a new directory with the prefix" {
+  var memory = files::MemoryFiles.new()
+  provide mut memory, random::SeededRandom.new(9) {
+    assert FileWrite.create_directory(path_of("/tmp")) is Ok(_)
+    assert files::create_temporary_directory(path_of("/tmp"), prefix: "build-") is Ok(first)
+      && files::create_temporary_directory(path_of("/tmp"), prefix: "build-") is Ok(second)
+      && first != second
+      && "${first}".starts_with("/tmp/build-")
+      && FileRead.metadata(first) is Ok(made)
+      && made.is_directory()
+    assert files::create_temporary_directory(path_of("/none"), prefix: "x") is Err(NotFound)
+  }
+}
+
+test "files within a directory resolve a path to one below the directory, or refuse" {
+  var memory = project()
+  provide mut memory {
+    assert FileWrite.link(path_of("/project/source"), link: path_of("/project/inside"), kind: files::LinkKind.Symbolic)
+      is Ok(_)
+    assert FileWrite.link(path_of("/"), link: path_of("/project/outside"), kind: files::LinkKind.Symbolic) is Ok(_)
+    provide files::FilesWithin(root: path_of("/project")) {
+      assert FileRead.resolve(path_of("inside/main.truss")) is Ok(inside) && "${inside}" == "source/main.truss"
+      assert FileRead.resolve(path_of("outside")) == Err(SystemError.PermissionDenied)
+      assert FileRead.resolve(path_of("missing")) == Err(SystemError.NotFound)
+    }
   }
 }
