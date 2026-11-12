@@ -80,18 +80,21 @@ let hold st mode ty place =
    parameter types, writing the result to [destination]. *)
 (* A capability's method: its slot in every table of the capability, and
    its signature. *)
+(* A method's slot in a table whose first method is at [first], and its
+   signature. *)
+let method_slot ~first ~missing (methods : T.trait_method list) name =
+  match List.find_index (fun (m : T.trait_method) -> m.method_name = name) methods with
+  | Some index -> (first + index, (List.nth methods index).method_signature)
+  | None -> missing ()
+
 let capability_method context capability name =
   let interface =
     match demand context Environment.trait_interface capability with
     | Some i -> i
     | None -> bug "no interface for %s" (Path.show capability)
   in
-  let rec find i = function
-    | [] -> bug "%s has no method %s" (Path.show capability) name
-    | (m : T.trait_method) :: rest ->
-        if m.method_name = name then (i, m.method_signature) else find (i + 1) rest
-  in
-  find 0 interface.methods
+  method_slot ~first:0 interface.methods name ~missing:(fun () ->
+      bug "%s has no method %s" (Path.show capability) name)
 
 (* The C signature of an entry in a capability's table, which every caller
    and every entry agree on: the evidence, then the method's own. *)
@@ -118,12 +121,8 @@ let any_methods context trait =
 
 (* A method's slot in an [any] table, after the drop in slot 0. *)
 let dynamic_slot context trait name =
-  let rec find i = function
-    | [] -> bug "%s cannot be called through any" name
-    | (m : T.trait_method) :: rest ->
-        if m.method_name = name then (i, m.method_signature) else find (i + 1) rest
-  in
-  find 1 (any_methods context trait)
+  method_slot ~first:1 (any_methods context trait) name ~missing:(fun () ->
+      bug "%s cannot be called through any" name)
 
 (* What a trait's [Self] and parameters stand for in a method called
    through an [any] type: [Self] is the [any] type, which fixes each
@@ -207,7 +206,7 @@ let evidence_of st capability =
           in
           let implementation =
             match st.frame.self_place with
-            | _ when (Memory_layout.of_type st.context.env self_ty).size = 0 -> Lir.Constant Null
+            | _ when Memory_layout.has_zero_size st.context.env self_ty -> Lir.Constant Null
             | Some self -> Lir.Address { place = self; writable = true }
             | None -> missing ()
           in
@@ -571,28 +570,32 @@ let static_constant st path : Lir.place =
   | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
   | None -> bug "no type for the constant %s" (Path.show path)
 
+(* A [List]'s storage field, the storage's type, and the element type. *)
+let list_parts monomorphic ty =
+  match Monomorphic.shape monomorphic ty with
+  | Record [ (field, Typed storage) ] -> (
+      match Monomorphic.representation monomorphic storage with
+      | Storage element -> (field, storage, element)
+      | _ -> bug "%s is not a list" (Ground.to_string ty))
+  | _ -> bug "%s is not a list" (Ground.to_string ty)
+
 (* Writes a [List] to [destination], with storage of exactly its length. Each
    fill writes one element to the place it is given. *)
 let list_of st ty destination ~site fills =
-  match Monomorphic.shape st.context.monomorphic ty with
-  | Record [ (field, Typed storage) ] -> (
-      match Monomorphic.representation st.context.monomorphic storage with
-      | Storage element ->
-          let storage_place = destination / Field field in
-          let lower operation arguments destination =
-            ignore
-              (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types
-                 operation ~type_arguments:[ element ] arguments ~destination ~site)
-          in
-          lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
-          List.iter
-            (fun fill ->
-              let value = temporary st element in
-              fill value;
-              lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
-            fills
-      | _ -> bug "a list of %s" (Ground.to_string ty))
-  | _ -> bug "%s is not a list" (Ground.to_string ty)
+  let field, _, element = list_parts st.context.monomorphic ty in
+  let storage_place = destination / Field field in
+  let lower operation arguments destination =
+    ignore
+      (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
+         ~type_arguments:[ element ] arguments ~destination ~site)
+  in
+  lower Storage_with_capacity [ Value (usize (List.length fills)) ] (Some storage_place);
+  List.iter
+    (fun fill ->
+      let value = temporary st element in
+      fill value;
+      lower Storage_push [ Place storage_place; Value (owned st value element) ] None)
+    fills
 
 (* A [Template] of these literal texts, each a [Literal] of static bytes,
    with one part for each fill in [parts]. *)
@@ -606,12 +609,8 @@ let template_value st template_ty texts ~site ~parts =
     | _ -> bug "%s is not a record" (Ground.to_string ty)
   in
   let element list_ty =
-    match Monomorphic.shape st.context.monomorphic list_ty with
-    | Record [ (_, Typed storage) ] -> (
-        match Monomorphic.representation st.context.monomorphic storage with
-        | Storage element -> element
-        | _ -> bug "%s is not a list" (Ground.to_string list_ty))
-    | _ -> bug "%s is not a list" (Ground.to_string list_ty)
+    let _, _, element = list_parts st.context.monomorphic list_ty in
+    element
   in
   let literals_ty = field_type template_ty "literals" in
   let parts_ty = field_type template_ty "parts" in
@@ -689,8 +688,7 @@ let pull_loop st ~(option : Ground.ty) ~(call_next : Lir.place -> unit) ~(body :
       call_next next;
       let more = local st.b (Raw Bool) in
       emit st.b (Assign (at more, Is_variant (next, "Some")));
-      finish st.b
-        (Switch { value = Copy (at more); cases = [ (Z.one, inside) ]; default = Some after });
+      branch st.b (Copy (at more)) ~yes:inside ~no:after;
       start st.b inside;
       in_scope st (fun () ->
           looping st ~continue_:test ~break_:after ~depth (fun () ->

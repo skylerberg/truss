@@ -19,13 +19,6 @@ let scalar env (ty : Ground.ty) =
   | Scalar scalar -> scalar
   | _ -> bug "%s is not a number" (Ground.to_string ty)
 
-let integer_range (integer : Memory_layout.integer) bytes =
-  let bits = 8 * bytes in
-  match integer with
-  | Int8 | Int16 | Int32 | Int64 | ISize ->
-      (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
-  | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
-
 let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_arguments arguments
     ~destination ~site =
   let set rvalue = Option.iter (fun d -> emit b (Assign (d, rvalue))) destination in
@@ -52,7 +45,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
   (* Ends the run with a panic where [failed] holds. *)
   let panic_when failed message =
     let fail = block b and go_on = block b in
-    finish b (Switch { value = failed; cases = [ (Z.one, fail) ]; default = Some go_on });
+    branch b failed ~yes:fail ~no:go_on;
     start b fail;
     finish b
       (Fail
@@ -369,12 +362,8 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           let fits () : Lir.rvalue =
             match (scalar env (type_argument 0), scalar env (type_argument 1)) with
             | Integer source, Integer target_integer -> (
-                let source_low, source_high =
-                  integer_range source (Memory_layout.integer_size target source)
-                in
-                let low, high =
-                  integer_range target_integer (Memory_layout.integer_size target target_integer)
-                in
+                let source_low, source_high = Memory_layout.integer_range target source in
+                let low, high = Memory_layout.integer_range target target_integer in
                 let constant value = Lir.Constant (Integer (source, value)) in
                 let tests =
                   (if Z.lt source_low low then [ (Lir.Greater_equal, low) ] else [])
@@ -401,9 +390,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                  type holds exactly. Where the first is not held exactly,
                  no float lies between it and the least value. A float
                  that is not a number passes neither test. *)
-                let low, high =
-                  integer_range target_integer (Memory_layout.integer_size target target_integer)
-                in
+                let low, high = Memory_layout.integer_range target target_integer in
                 let held bound =
                   match source with
                   | Float32 ->
@@ -632,7 +619,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
               }
           in
           let elements : Lir.operand =
-            if (Memory_layout.of_type env array_ty).size = 0 then Constant (Bytes "")
+            if Memory_layout.has_zero_size env array_ty then Constant (Bytes "")
             else Address { place = read (argument 0) / Index (usize 0); writable = false }
           in
           set
@@ -678,9 +665,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
               let go_on = block b and compare = block b in
               let empty = local b (Raw Bool) in
               emit b (Assign (at empty, Binary (Equal, view_length part, usize 0)));
-              finish b
-                (Switch
-                   { value = Copy (at empty); cases = [ (Z.one, go_on) ]; default = Some compare });
+              branch b (Copy (at empty)) ~yes:go_on ~no:compare;
               start b compare;
               let expected = local b (Pointer { target = Value (element ()); writable = false }) in
               emit b (Assign (at expected, Use (Address { place = first; writable = false })));
@@ -807,8 +792,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           emit b (Assign (at last, Binary (Equal, Copy (at entry), Constant Null)));
           emit b (Assign (at reached, Binary (Equal, Copy (at position), value 0)));
           emit b (Assign (at stop, Binary (Bit_or, Copy (at last), Copy (at reached))));
-          finish b
-            (Switch { value = Copy (at stop); cases = [ (Z.one, after) ]; default = Some next });
+          branch b (Copy (at stop)) ~yes:after ~no:next;
           start b next;
           emit b (Assign (at position, Binary (Add, Copy (at position), usize 1)));
           finish b (Goto test);

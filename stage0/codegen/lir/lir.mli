@@ -13,6 +13,9 @@ end
 
 val signature : function_ -> signature
 
+(* A local as a place, with no projections. *)
+val local_place : local -> place
+
 (* The type of a projection of a place of the given type, or [None] where it
    has zero size and so is erased. [environment] gives the fields of a
    nested function's environment. *)
