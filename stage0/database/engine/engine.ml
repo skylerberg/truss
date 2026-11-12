@@ -16,6 +16,8 @@ type change = Incremental.change = { computed : node list; changed : node list }
 
 let stabilize = Incremental.stabilize
 let executed = Incremental.executed
+let computed = Incremental.computed
+let result_label = Incremental.result_label
 let clear_log = Incremental.clear_log
 
 type counters = Incremental.counters = {

@@ -44,18 +44,19 @@ let always name body =
 
 let test name body = if wanted name then always name body
 
-let expect_not_recomputed engine ~first ~again labels =
+let expect_not_recomputed engine ~first ~again query keys =
   let computed step =
     Engine.clear_log engine;
     step ();
-    Engine.executed engine
+    Engine.computed engine query
   in
   let before = computed first in
-  List.iter
-    (fun label -> if not (List.mem label before) then fail "%s was never computed" label)
-    labels;
   let after = computed again in
-  List.iter (fun label -> if List.mem label after then fail "%s was computed again" label) labels
+  List.iter
+    (fun key ->
+      if not (List.mem key before) then fail "%s was never computed" (Engine.result_label query key)
+      else if List.mem key after then fail "%s was computed again" (Engine.result_label query key))
+    keys
 
 (* The workspace root: the nearest directory above the executable that
    holds [dune-project]. The executable is built under [_build/default],

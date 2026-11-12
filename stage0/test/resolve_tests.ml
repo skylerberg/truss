@@ -498,13 +498,9 @@ let () =
       Database.Testing.set_text (Engine.of_context database) module_ (text "3");
       Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      let resolved =
-        List.filter
-          (String.starts_with ~prefix:"resolved(")
-          (Engine.executed (Engine.of_context database))
-      in
-      if resolved <> [ "resolved(app::main::second)" ] then
-        fail "resolved again: %s" (String.concat "; " resolved));
+      let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
+      if resolved <> [ Support.top_key "app::main" "second" ] then
+        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "moving a definition down resolves nothing again" (fun () ->
       let database = setup [ ("app::main", "fn first() -> Int64 { 1 }\n") ] in
       let engine = Engine.of_context database in
@@ -514,7 +510,8 @@ let () =
         ~again:(fun () ->
           Database.Testing.set_text engine module_ "\n\nfn first() -> Int64 { 1 }\n";
           ignore (Resolve.diagnostics database module_))
-        [ "resolved(app::main::first)" ])
+        Resolve.resolved
+        [ Support.top_key "app::main" "first" ])
 
 (* What the review of resolution found *)
 
@@ -541,13 +538,9 @@ let () =
         "fn z() {}\n\nfn a() -> Int64 { 1 }\n\nfn f() -> Int64 { a() }\n";
       Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      let resolved =
-        List.filter
-          (String.starts_with ~prefix:"resolved(")
-          (Engine.executed (Engine.of_context database))
-      in
-      if resolved <> [ "resolved(app::main::z)" ] then
-        fail "resolved again: %s" (String.concat "; " resolved));
+      let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
+      if resolved <> [ Support.top_key "app::main" "z" ] then
+        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "an import used only in a part the parser could not read is not unused" (fun () ->
       let database =
         setup

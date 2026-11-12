@@ -4705,15 +4705,13 @@ let again before after =
   (match prove () with
   | [] -> ()
   | found -> fail "after the edit: %s" (String.concat "; " (Support.codes found)));
-  let prefix = "proof(app::main::" in
   let proven =
     List.filter_map
-      (fun name ->
-        let length = String.length prefix in
-        if String.length name > length && String.sub name 0 length = prefix then
-          Some (String.sub name length (String.length name - length - 1))
+      (fun (key : Resolve.Names.key) ->
+        if key.module_ = module_ then
+          match key.path with Top { name; _ } -> Some name | path -> Some (Path.show path)
         else None)
-      (Engine.executed engine)
+      (Engine.computed engine Prover.proof)
   in
   (List.sort_uniq compare proven, Solver.solved solver - solved)
 
