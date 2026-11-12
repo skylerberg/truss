@@ -4,10 +4,7 @@
 
 open Harness
 
-let module_of text : Path.module_ =
-  match String.split_on_char ':' text |> List.filter (( <> ) "") with
-  | name :: modules -> { package = { owner = None; name }; modules }
-  | [] -> invalid_arg text
+let module_of = Support.module_of
 
 (* A small standard library, enough for the prelude names these tests use. *)
 let standard =
@@ -39,19 +36,14 @@ let setup files =
     by_package;
   database
 
-let parse_errors database module_ =
-  List.map
-    (fun (d : Diagnostic.t) -> d.message)
-    (Query.demand database Workspace.file module_).diagnostics
-
 let diagnostics database name =
   let module_ = module_of name in
-  (match parse_errors database module_ with
+  (match Support.parse_errors database module_ with
   | [] -> ()
   | errors -> fail "the test input does not parse: %s" (String.concat " " errors));
   Resolve.diagnostics database module_
 
-let codes diagnostics = List.map (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code) diagnostics
+let codes = Support.codes
 
 let no_diagnostics files =
   let database = setup files in
@@ -67,26 +59,7 @@ let no_diagnostics files =
 (* The one diagnostic of the file [app::main], with its code, and, if
    [fixed] is given, the text after applying its first fix, which must
    resolve with no diagnostic left. *)
-let one_diagnostic ?(others = []) ?fixed text code =
-  let files = ("app::main", text) :: others in
-  let database = setup files in
-  match diagnostics database "app::main" with
-  | [ diagnostic ] -> (
-      let actual = Diagnostic.Code.name diagnostic.code in
-      if actual <> code then fail "expected %s, got %s: %s" code actual diagnostic.message;
-      match (fixed, diagnostic.fixes) with
-      | None, _ -> ()
-      | Some _, [] -> fail "no fix"
-      | Some expected, fix :: _ ->
-          let after = Diagnostic.apply_fix text fix in
-          if after <> expected then fail "fixed to %S" after
-          else begin
-            let database = setup (("app::main", after) :: others) in
-            match diagnostics database "app::main" with
-            | [] -> ()
-            | left -> fail "after the fix: %s" (String.concat "; " (codes left))
-          end)
-  | found -> fail "expected one %s, got [%s]" code (String.concat "; " (codes found))
+let one_diagnostic = Support.one_diagnostic ~setup ~check:Resolve.diagnostics
 
 (* Finding names *)
 

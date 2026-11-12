@@ -6,14 +6,7 @@ module Usage = Type_checker.For_testing.Usage
 open Harness
 open Support
 
-let check database module_ =
-  Resolve.diagnostics database module_
-  @ Interface.diagnostics database module_
-  @ Infer.diagnostics database module_
-  @ Patterns.diagnostics database module_
-  @ Usage.diagnostics database module_
-  @ Ownership.diagnostics database module_
-
+let check = Type_checker.through Ownership
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let keep = "fn keep(items: own List[Int64]) {}\n\nfn look(items: List[Int64]) {}\n\n"

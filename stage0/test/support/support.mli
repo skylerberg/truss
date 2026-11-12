@@ -47,6 +47,7 @@ val no_diagnostics :
 
 val one_diagnostic :
   check:(Query.context -> Path.module_ -> Diagnostic.t list) ->
+  ?setup:((string * string) list -> Query.context) ->
   ?others:(string * string) list ->
   ?fixed:string ->
   ?says:string ->
@@ -55,7 +56,10 @@ val one_diagnostic :
   unit
 (** [one_diagnostic ~check text code]: [app::main], with [text], has exactly one diagnostic, with
     [code]. With [~fixed], its first fix gives that text, which then has no diagnostic. With
-    [~says], its message contains that text. *)
+    [~says], its message contains that text. [setup] makes the database, {!setup} by default. *)
+
+val solver : Solver.t Lazy.t
+(** The solver, without a cache. Without a solver the tests cannot run, so the executable exits. *)
 
 val record : Query.context -> (string * Prover.oracle_response) list -> unit
 (** Records the oracles' responses in the context's engine, as the database does for a session. *)

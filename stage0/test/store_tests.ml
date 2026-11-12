@@ -3,16 +3,7 @@
 
 open Harness
 
-let counter = ref 0
-
-let fresh_directory () =
-  incr counter;
-  let directory =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "truss-store-test-%d-%d" (Unix.getpid ()) !counter)
-  in
-  if Sys.file_exists directory then ignore (Sys.command ("rm -rf " ^ Filename.quote directory));
-  directory
+let fresh_directory () = scratch "store"
 
 let segment_files directory =
   let segments = Filename.concat directory "segments" in

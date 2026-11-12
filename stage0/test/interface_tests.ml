@@ -6,9 +6,7 @@ open Harness
 open Support
 
 (* Everything the checker reports so far: resolution and interfaces. *)
-let check database module_ =
-  Resolve.diagnostics database module_ @ Interface.diagnostics database module_
-
+let check = Type_checker.through Interface
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }

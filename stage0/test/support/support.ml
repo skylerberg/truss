@@ -434,7 +434,7 @@ let no_diagnostics ~check files =
       ignore (check_module_core_invariants database (module_of name)))
     files
 
-let one_diagnostic ~check ?(others = []) ?fixed ?says text code =
+let one_diagnostic ~check ?(setup = setup) ?(others = []) ?fixed ?says text code =
   let database = setup (("app::main", text) :: others) in
   match checked ~check database "app::main" with
   | [ (diagnostic : Diagnostic.t) ] -> (
@@ -466,3 +466,11 @@ let one_diagnostic ~check ?(others = []) ?fixed ?says text code =
 let record database responses =
   let engine = Engine.of_context database in
   List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
+
+let solver =
+  lazy
+    (match Solver.find () with
+    | Ok solver -> solver
+    | Error message ->
+        prerr_endline message;
+        exit 1)

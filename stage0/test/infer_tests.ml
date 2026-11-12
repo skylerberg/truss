@@ -5,11 +5,7 @@
 open Harness
 open Support
 
-let check database module_ =
-  Resolve.diagnostics database module_
-  @ Interface.diagnostics database module_
-  @ Infer.diagnostics database module_
-
+let check = Type_checker.through Infer
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let fine text = no_diagnostics [ ("app::main", text) ]

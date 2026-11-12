@@ -7,10 +7,7 @@
 
 let test = Harness.test
 let fail = Harness.fail
-
-let expect_string ~expected actual =
-  if not (String.equal expected actual) then fail "expected %S, got %S" expected actual
-
+let expect_string = Harness.expect_string
 let contains = Substring.contains
 
 let expect_int ~expected actual =
@@ -150,7 +147,7 @@ let call name ?(result = Some (value int32)) ?(parameters = []) arguments place 
 (* Compiling and running generated C *)
 
 let shape_env ?(extra = []) () = create target_64 ~shape_of:(shapes extra)
-let scratch = lazy (Filename.temp_dir "truss-codegen-tests" "")
+let scratch = lazy (Harness.scratch "codegen")
 
 let compiler =
   lazy

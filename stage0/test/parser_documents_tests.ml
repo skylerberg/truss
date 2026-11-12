@@ -19,11 +19,7 @@ let () =
 
 (* The documents *)
 
-let markdown_files =
-  Sys.readdir (Harness.workspace_path ".")
-  |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".md")
-  |> List.sort compare
+let markdown_files = Harness.markdown_documents ()
 
 let snippet text =
   let source = source text in

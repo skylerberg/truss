@@ -2,6 +2,27 @@
    definitions of a build. The stages are linked together; each reads the
    earlier ones' results through their queries. *)
 
+type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
+
+let stages =
+  [
+    (Resolve, Resolve.diagnostics);
+    (Interface, Interface.diagnostics);
+    (Infer, Infer.diagnostics);
+    (Patterns, Patterns.diagnostics);
+    (Usage, Usage.diagnostics);
+    (Ownership, Ownership.diagnostics);
+    (Package_checks, Package_checks.diagnostics);
+  ]
+
+let through last database module_ =
+  let rec go = function
+    | [] -> []
+    | (stage, diagnostics) :: rest ->
+        diagnostics database module_ @ if stage = last then [] else go rest
+  in
+  go stages
+
 (* Every diagnostic of a file, from the lexer to the package checks, in the
    file's offsets and in order. *)
 let diagnostics database module_ =
@@ -9,14 +30,7 @@ let diagnostics database module_ =
   List.sort_uniq
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-    (file.diagnostics
-    @ Resolve.diagnostics database module_
-    @ Interface.diagnostics database module_
-    @ Infer.diagnostics database module_
-    @ Patterns.diagnostics database module_
-    @ Usage.diagnostics database module_
-    @ Ownership.diagnostics database module_
-    @ Package_checks.diagnostics database module_)
+    (file.diagnostics @ through Package_checks database module_)
 
 (* The same, as a query, which the database keeps current for each file of
    a worktree and saves, so that a check after a restart finds it done. *)

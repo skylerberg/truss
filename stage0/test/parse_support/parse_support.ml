@@ -21,8 +21,7 @@ let definitions text expected =
   let file, diagnostics = parse text in
   no_diagnostics text diagnostics;
   let actual = Syntax_print.definitions file.definitions in
-  if actual <> expected then
-    fail "expected [%s], got [%s]" (String.concat "; " expected) (String.concat "; " actual)
+  expect_strings ~expected actual
 
 let definition text expected = definitions text [ expected ]
 
@@ -36,8 +35,7 @@ let statements text expected =
   let statements, diagnostics = body_of text in
   no_diagnostics text diagnostics;
   let actual = List.map Syntax_print.statement statements in
-  if actual <> expected then
-    fail "expected [%s], got [%s]" (String.concat "; " expected) (String.concat "; " actual)
+  expect_strings ~expected actual
 
 let statement text expected = statements text [ expected ]
 

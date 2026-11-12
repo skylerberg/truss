@@ -1,6 +1,13 @@
 (** The type checker's entry point: loading a build's packages and gathering every stage's
     diagnostics. *)
 
+(** The stages, in the order they run. *)
+type stage = Resolve | Interface | Infer | Patterns | Usage | Ownership | Package_checks
+
+val through : stage -> Query.context -> Path.module_ -> Diagnostic.t list
+(** The diagnostics of a file's definitions from the stages up to and including one, in the order
+    the stages run, for tests of a stage that leave the later ones out. *)
+
 val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** Every diagnostic of a file, from the lexer to the package checks, in its offsets and in order.
 *)

@@ -3,12 +3,7 @@
 
 open Harness
 
-let solver =
-  match Solver.find () with
-  | Ok solver -> solver
-  | Error message ->
-      prerr_endline message;
-      exit 1
+let solver = Lazy.force Support.solver
 
 let check database module_ =
   match Type_checker.diagnostics database module_ with
@@ -4687,9 +4682,7 @@ let () =
    definitions are its own, so no other test has solved its queries. *)
 
 let again before after =
-  let solver =
-    match Solver.find () with Ok solver -> solver | Error message -> failwith message
-  in
+  let solver = Lazy.force Support.solver in
   let database = Support.setup [ ("app::main", before) ] in
   let module_ = Support.module_of "app::main" in
   let engine = Engine.of_context database in
