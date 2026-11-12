@@ -691,7 +691,7 @@ let pattern_fields state (fields : Types.field list) (matched : (string * patter
 (* Converts a built-in integer to [Integer]. An expression of any other
    type is returned unchanged. *)
 let to_integer state (node : Core.expression) : Core.expression =
-  if node.type_ = Types.Integer || not (Types.is_integer_type node.type_) then node
+  if node.type_ = Types.Integer || not (integer_type state node.type_) then node
   else
     synthetic_expression state ~origin:node.origin Types.Integer
       (Convert { conversion = To_integer; value = node })

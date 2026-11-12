@@ -27,7 +27,7 @@ let rec coerce state env ?argument (value : expression) ~actual ~expected =
 
 and literal_type state ~expected kind =
   match Option.map (resolve state) expected with
-  | Some expected when Unify.literal_fits kind expected -> expected
+  | Some expected when Unify.literal_fits state.unifier kind expected -> expected
   | _ -> Unify.fresh_literal state.unifier kind
 
 (* The type of a name that is used as a value, according to its referent. *)

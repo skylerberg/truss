@@ -361,6 +361,25 @@ let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
 let fresh state = Unify.fresh state.unifier
 
+(* Whether a type is a built-in integer type, or a type parameter that an
+   integer trait bounds, which only those types implement. *)
+let integer_type state (type_ : Types.ty) =
+  Types.is_integer_type type_
+  ||
+  match type_ with
+  | Parameter _ | Projection _ -> state.unifier.integer_range type_ <> None
+  | _ -> false
+
+(* Whether a type is a signed integer type, a built-in one or a parameter
+   that [SignedInteger] bounds. *)
+let signed_type state (type_ : Types.ty) =
+  Types.is_signed type_
+  ||
+  match type_ with
+  | Parameter _ | Projection _ -> (
+      match state.unifier.integer_range type_ with Some (low, _) -> Z.sign low < 0 | None -> false)
+  | _ -> false
+
 let bounds state parameter =
   Option.value ~default:[] (Hashtbl.find_opt state.context.bounds parameter)
 
@@ -891,11 +910,10 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
       if not (Unify.unify_arguments state.unifier wanted_named.arguments actual_named.arguments)
       then mismatch state span ~expected ~actual;
       Some Owned_to_view
-  | Types.Integer, _, Some _ when argument && env.specification && Types.is_integer_type wanted ->
+  | Types.Integer, _, Some _ when argument && env.specification && integer_type state wanted ->
       Some From_integer
   (* In a specification, a built-in integer converts to [Integer]. *)
-  | _, Types.Integer, _ when env.specification && Types.is_integer_type actual_type ->
-      Some To_integer
+  | _, Types.Integer, _ when env.specification && integer_type state actual_type -> Some To_integer
   | Types.Function actual_function, Types.Function wanted_function, _
     when not (Types.same_clauses actual_function wanted_function) ->
       let unlisted =

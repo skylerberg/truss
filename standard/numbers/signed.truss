@@ -150,55 +150,6 @@ public let Int8.minimum: Int8 = -128
 
 public let Int8.maximum: Int8 = 127
 
-public transparent fn Int8.checked_add(self, other: Int8) -> Option[Int8]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn Int8.checked_subtract(self, other: Int8) -> Option[Int8]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn Int8.checked_multiply(self, other: Int8) -> Option[Int8]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn Int8.wrapping_add(self, other: Int8) -> Int8
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn Int8.wrapping_subtract(self, other: Int8) -> Int8
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn Int8.wrapping_multiply(self, other: Int8) -> Int8
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn Int8.saturating_add(self, other: Int8) -> Int8
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    if other < 0 { Int8.minimum } else { Int8.maximum }
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl TryFrom[Int16] for Int8 {
   type Error = core::ConversionError
 
@@ -456,55 +407,6 @@ public let Int16.minimum: Int16 = -32768
 
 public let Int16.maximum: Int16 = 32767
 
-public transparent fn Int16.checked_add(self, other: Int16) -> Option[Int16]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn Int16.checked_subtract(self, other: Int16) -> Option[Int16]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn Int16.checked_multiply(self, other: Int16) -> Option[Int16]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn Int16.wrapping_add(self, other: Int16) -> Int16
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn Int16.wrapping_subtract(self, other: Int16) -> Int16
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn Int16.wrapping_multiply(self, other: Int16) -> Int16
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn Int16.saturating_add(self, other: Int16) -> Int16
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    if other < 0 { Int16.minimum } else { Int16.maximum }
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl From[Int8] for Int16 {
   fn from(value: own Int8) -> Int16 {
     intrinsic::convert(value)
@@ -750,55 +652,6 @@ public let Int32.minimum: Int32 = -2147483648
 
 public let Int32.maximum: Int32 = 2147483647
 
-public transparent fn Int32.checked_add(self, other: Int32) -> Option[Int32]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn Int32.checked_subtract(self, other: Int32) -> Option[Int32]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn Int32.checked_multiply(self, other: Int32) -> Option[Int32]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn Int32.wrapping_add(self, other: Int32) -> Int32
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn Int32.wrapping_subtract(self, other: Int32) -> Int32
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn Int32.wrapping_multiply(self, other: Int32) -> Int32
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn Int32.saturating_add(self, other: Int32) -> Int32
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    if other < 0 { Int32.minimum } else { Int32.maximum }
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl From[Int8] for Int32 {
   fn from(value: own Int8) -> Int32 {
     intrinsic::convert(value)
@@ -1032,55 +885,6 @@ public let Int64.minimum: Int64 = -9223372036854775808
 
 public let Int64.maximum: Int64 = 9223372036854775807
 
-public transparent fn Int64.checked_add(self, other: Int64) -> Option[Int64]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn Int64.checked_subtract(self, other: Int64) -> Option[Int64]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn Int64.checked_multiply(self, other: Int64) -> Option[Int64]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn Int64.wrapping_add(self, other: Int64) -> Int64
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn Int64.wrapping_subtract(self, other: Int64) -> Int64
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn Int64.wrapping_multiply(self, other: Int64) -> Int64
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn Int64.saturating_add(self, other: Int64) -> Int64
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    if other < 0 { Int64.minimum } else { Int64.maximum }
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl From[Int8] for Int64 {
   fn from(value: own Int8) -> Int64 {
     intrinsic::convert(value)
@@ -1296,55 +1100,6 @@ public let ISize.minimum: ISize = -9223372036854775808
 
 public let ISize.maximum: ISize = 9223372036854775807
 
-public transparent fn ISize.checked_add(self, other: ISize) -> Option[ISize]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn ISize.checked_subtract(self, other: ISize) -> Option[ISize]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn ISize.checked_multiply(self, other: ISize) -> Option[ISize]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn ISize.wrapping_add(self, other: ISize) -> ISize
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn ISize.wrapping_subtract(self, other: ISize) -> ISize
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn ISize.wrapping_multiply(self, other: ISize) -> ISize
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn ISize.saturating_add(self, other: ISize) -> ISize
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    if other < 0 { ISize.minimum } else { ISize.maximum }
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl From[Int8] for ISize {
   fn from(value: own Int8) -> ISize {
     intrinsic::convert(value)
@@ -1419,4 +1174,139 @@ impl TryFrom[USize] for ISize {
   {
     if intrinsic::fits[USize, ISize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
   }
+}
+
+impl FixedWidthInteger for Int8 {
+  fn minimum_value() -> Int8
+    ensures result == Int8.minimum
+    cost time O(1)
+  {
+    Int8.minimum
+  }
+
+  fn maximum_value() -> Int8
+    ensures result == Int8.maximum
+    cost time O(1)
+  {
+    Int8.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == Int8.bits
+    cost time O(1)
+  {
+    Int8.bits
+  }
+}
+
+impl SignedInteger for Int8 {
+  type Unsigned = UInt8
+}
+
+impl FixedWidthInteger for Int16 {
+  fn minimum_value() -> Int16
+    ensures result == Int16.minimum
+    cost time O(1)
+  {
+    Int16.minimum
+  }
+
+  fn maximum_value() -> Int16
+    ensures result == Int16.maximum
+    cost time O(1)
+  {
+    Int16.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == Int16.bits
+    cost time O(1)
+  {
+    Int16.bits
+  }
+}
+
+impl SignedInteger for Int16 {
+  type Unsigned = UInt16
+}
+
+impl FixedWidthInteger for Int32 {
+  fn minimum_value() -> Int32
+    ensures result == Int32.minimum
+    cost time O(1)
+  {
+    Int32.minimum
+  }
+
+  fn maximum_value() -> Int32
+    ensures result == Int32.maximum
+    cost time O(1)
+  {
+    Int32.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == Int32.bits
+    cost time O(1)
+  {
+    Int32.bits
+  }
+}
+
+impl SignedInteger for Int32 {
+  type Unsigned = UInt32
+}
+
+impl FixedWidthInteger for Int64 {
+  fn minimum_value() -> Int64
+    ensures result == Int64.minimum
+    cost time O(1)
+  {
+    Int64.minimum
+  }
+
+  fn maximum_value() -> Int64
+    ensures result == Int64.maximum
+    cost time O(1)
+  {
+    Int64.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == Int64.bits
+    cost time O(1)
+  {
+    Int64.bits
+  }
+}
+
+impl SignedInteger for Int64 {
+  type Unsigned = UInt64
+}
+
+impl FixedWidthInteger for ISize {
+  fn minimum_value() -> ISize
+    ensures result == ISize.minimum
+    cost time O(1)
+  {
+    ISize.minimum
+  }
+
+  fn maximum_value() -> ISize
+    ensures result == ISize.maximum
+    cost time O(1)
+  {
+    ISize.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == ISize.bits
+    cost time O(1)
+  {
+    ISize.bits
+  }
+}
+
+impl SignedInteger for ISize {
+  type Unsigned = USize
 }

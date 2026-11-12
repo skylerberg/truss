@@ -23,7 +23,16 @@ let resolve_impl st ~(trait : Types.trait_reference) ~self_type ~(evidence : Cor
           Interface.Impls.implements st.context.database
             ~bounds:(fun _ -> [])
             self
-            (Types.substitute_trait st.frame.code.substitution trait)
+            (let trait = Types.substitute_trait st.frame.code.substitution trait in
+             {
+               trait with
+               trait_arguments =
+                 List.map
+                   (function
+                     | Types.Type ty -> Types.Type (st.context.monomorphic.normalize ty)
+                     | argument -> argument)
+                   trait.trait_arguments;
+             })
         with
         | Some (From_impl { impl; substitution }) -> (impl, substitution)
         | _ -> bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))

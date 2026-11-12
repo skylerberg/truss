@@ -44,6 +44,22 @@ let () =
   test "an overflow's counterexample names the value" (fun () ->
       let actual = message "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
       if not (contains actual "`count` is 255") then fail "message %S" actual);
+  test "code generic over an integer trait is proven for each type that implements it" (fun () ->
+      proven
+        "fn twice[Number: SignedInteger](value: Number) -> Number\n\
+        \  requires -50 <= value && value <= 50\n\
+         {\n\
+        \  value + value\n\
+         }\n";
+      let actual =
+        message
+          "fn twice[Number: UnsignedInteger](value: Number) -> Number\n\
+          \  requires value <= 200\n\
+           {\n\
+          \  value + value\n\
+           }\n"
+      in
+      if not (contains actual "`Number` is `UInt8`") then fail "message %S" actual);
   test "a requires rules out the overflow" (fun () ->
       proven "fn f(count: UInt8) -> UInt8\n  requires count < 255\n{\n  count + 1\n}\n");
   test "a check in an if rules out the overflow" (fun () ->

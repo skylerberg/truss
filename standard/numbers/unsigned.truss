@@ -133,55 +133,6 @@ public let UInt8.minimum: UInt8 = 0
 
 public let UInt8.maximum: UInt8 = 255
 
-public transparent fn UInt8.checked_add(self, other: UInt8) -> Option[UInt8]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn UInt8.checked_subtract(self, other: UInt8) -> Option[UInt8]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn UInt8.checked_multiply(self, other: UInt8) -> Option[UInt8]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn UInt8.wrapping_add(self, other: UInt8) -> UInt8
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn UInt8.wrapping_subtract(self, other: UInt8) -> UInt8
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn UInt8.wrapping_multiply(self, other: UInt8) -> UInt8
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn UInt8.saturating_add(self, other: UInt8) -> UInt8
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    UInt8.maximum
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl TryFrom[Int8] for UInt8 {
   type Error = core::ConversionError
 
@@ -422,55 +373,6 @@ public let UInt16.minimum: UInt16 = 0
 
 public let UInt16.maximum: UInt16 = 65535
 
-public transparent fn UInt16.checked_add(self, other: UInt16) -> Option[UInt16]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn UInt16.checked_subtract(self, other: UInt16) -> Option[UInt16]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn UInt16.checked_multiply(self, other: UInt16) -> Option[UInt16]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn UInt16.wrapping_add(self, other: UInt16) -> UInt16
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn UInt16.wrapping_subtract(self, other: UInt16) -> UInt16
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn UInt16.wrapping_multiply(self, other: UInt16) -> UInt16
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn UInt16.saturating_add(self, other: UInt16) -> UInt16
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    UInt16.maximum
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl TryFrom[Int8] for UInt16 {
   type Error = core::ConversionError
 
@@ -705,55 +607,6 @@ public let UInt32.minimum: UInt32 = 0
 
 public let UInt32.maximum: UInt32 = 4294967295
 
-public transparent fn UInt32.checked_add(self, other: UInt32) -> Option[UInt32]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn UInt32.checked_subtract(self, other: UInt32) -> Option[UInt32]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn UInt32.checked_multiply(self, other: UInt32) -> Option[UInt32]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn UInt32.wrapping_add(self, other: UInt32) -> UInt32
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn UInt32.wrapping_subtract(self, other: UInt32) -> UInt32
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn UInt32.wrapping_multiply(self, other: UInt32) -> UInt32
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn UInt32.saturating_add(self, other: UInt32) -> UInt32
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    UInt32.maximum
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl TryFrom[Int8] for UInt32 {
   type Error = core::ConversionError
 
@@ -982,55 +835,6 @@ public let UInt64.minimum: UInt64 = 0
 
 public let UInt64.maximum: UInt64 = 18446744073709551615
 
-public transparent fn UInt64.checked_add(self, other: UInt64) -> Option[UInt64]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn UInt64.checked_subtract(self, other: UInt64) -> Option[UInt64]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn UInt64.checked_multiply(self, other: UInt64) -> Option[UInt64]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn UInt64.wrapping_add(self, other: UInt64) -> UInt64
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn UInt64.wrapping_subtract(self, other: UInt64) -> UInt64
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn UInt64.wrapping_multiply(self, other: UInt64) -> UInt64
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn UInt64.saturating_add(self, other: UInt64) -> UInt64
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    UInt64.maximum
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl TryFrom[Int8] for UInt64 {
   type Error = core::ConversionError
 
@@ -1247,55 +1051,6 @@ public let USize.minimum: USize = 0
 
 public let USize.maximum: USize = 18446744073709551615
 
-public transparent fn USize.checked_add(self, other: USize) -> Option[USize]
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
-}
-
-public transparent fn USize.checked_subtract(self, other: USize) -> Option[USize]
-  cost time O(1)
-{
-  if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
-}
-
-public transparent fn USize.checked_multiply(self, other: USize) -> Option[USize]
-  cost time O(1)
-{
-  if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
-}
-
-public transparent fn USize.wrapping_add(self, other: USize) -> USize
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(self, right: other)
-}
-
-public transparent fn USize.wrapping_subtract(self, other: USize) -> USize
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_subtract(self, right: other)
-}
-
-public transparent fn USize.wrapping_multiply(self, other: USize) -> USize
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_multiply(self, right: other)
-}
-
-public transparent fn USize.saturating_add(self, other: USize) -> USize
-  cost time O(1)
-{
-  if intrinsic::add_overflows(self, right: other) {
-    USize.maximum
-  } else {
-    intrinsic::add(self, right: other)
-  }
-}
-
 impl TryFrom[Int8] for USize {
   type Error = core::ConversionError
 
@@ -1383,4 +1138,139 @@ impl TryFrom[UInt64] for USize {
   {
     if intrinsic::fits[UInt64, USize](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
   }
+}
+
+impl FixedWidthInteger for UInt8 {
+  fn minimum_value() -> UInt8
+    ensures result == UInt8.minimum
+    cost time O(1)
+  {
+    UInt8.minimum
+  }
+
+  fn maximum_value() -> UInt8
+    ensures result == UInt8.maximum
+    cost time O(1)
+  {
+    UInt8.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == UInt8.bits
+    cost time O(1)
+  {
+    UInt8.bits
+  }
+}
+
+impl UnsignedInteger for UInt8 {
+  type Signed = Int8
+}
+
+impl FixedWidthInteger for UInt16 {
+  fn minimum_value() -> UInt16
+    ensures result == UInt16.minimum
+    cost time O(1)
+  {
+    UInt16.minimum
+  }
+
+  fn maximum_value() -> UInt16
+    ensures result == UInt16.maximum
+    cost time O(1)
+  {
+    UInt16.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == UInt16.bits
+    cost time O(1)
+  {
+    UInt16.bits
+  }
+}
+
+impl UnsignedInteger for UInt16 {
+  type Signed = Int16
+}
+
+impl FixedWidthInteger for UInt32 {
+  fn minimum_value() -> UInt32
+    ensures result == UInt32.minimum
+    cost time O(1)
+  {
+    UInt32.minimum
+  }
+
+  fn maximum_value() -> UInt32
+    ensures result == UInt32.maximum
+    cost time O(1)
+  {
+    UInt32.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == UInt32.bits
+    cost time O(1)
+  {
+    UInt32.bits
+  }
+}
+
+impl UnsignedInteger for UInt32 {
+  type Signed = Int32
+}
+
+impl FixedWidthInteger for UInt64 {
+  fn minimum_value() -> UInt64
+    ensures result == UInt64.minimum
+    cost time O(1)
+  {
+    UInt64.minimum
+  }
+
+  fn maximum_value() -> UInt64
+    ensures result == UInt64.maximum
+    cost time O(1)
+  {
+    UInt64.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == UInt64.bits
+    cost time O(1)
+  {
+    UInt64.bits
+  }
+}
+
+impl UnsignedInteger for UInt64 {
+  type Signed = Int64
+}
+
+impl FixedWidthInteger for USize {
+  fn minimum_value() -> USize
+    ensures result == USize.minimum
+    cost time O(1)
+  {
+    USize.minimum
+  }
+
+  fn maximum_value() -> USize
+    ensures result == USize.maximum
+    cost time O(1)
+  {
+    USize.maximum
+  }
+
+  fn bit_width() -> USize
+    ensures result == USize.bits
+    cost time O(1)
+  {
+    USize.bits
+  }
+}
+
+impl UnsignedInteger for USize {
+  type Signed = ISize
 }

@@ -4,6 +4,7 @@ type t = {
   values : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability list * Types.capability list) list;
+  mutable integer_range : Types.ty -> (Z.t * Z.t) option;
 }
 
 val create : unit -> t
@@ -15,7 +16,7 @@ val resolve : t -> Types.ty -> Types.ty
 val resolve_value : t -> Types.value -> Types.value
 val zonk : t -> Types.ty -> Types.ty
 val zonk_trait : t -> Types.trait_reference -> Types.trait_reference
-val literal_fits : Types.literal_kind -> Types.ty -> bool
+val literal_fits : t -> Types.literal_kind -> Types.ty -> bool
 
 type unknown =
   | Unknown_type of int

@@ -1519,8 +1519,13 @@ let method_contract ?reading_package database (trait : Types.trait_reference) na
             (part_of callee)
       | Some (_, _, Provided) | None ->
           (* A method the [impl] leaves to its trait: the trait's clauses,
-             with the [impl]'s signature for the method. *)
-          Option.map (fun own -> make_contract database path ~own ~others:[] ~body:None) trait_side)
+             with the [impl]'s signature for the method, and the trait's
+             body, which is what the method does for this [impl]. *)
+          Option.map
+            (fun own ->
+              make_contract database path ~own ~others:[]
+                ~body:(provided_body database trait.trait name receiver))
+            trait_side)
   | Bound | Dynamic ->
       Option.map
         (fun own ->
@@ -2747,7 +2752,12 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       frame values
   in
   let arguments_of (type_arguments : Types.argument list) =
-    List.map (Types.substitute_argument frame.substitution) type_arguments
+    List.map
+      (fun argument ->
+        match Types.substitute_argument frame.substitution argument with
+        | Types.Type ty -> Types.Type (substituted context frame ty)
+        | other -> other)
+      type_arguments
   in
   let generics_of path =
     match Interface.Impls.signature context.database path with
@@ -2777,6 +2787,27 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       | Function { path; _ } -> signature_terminates context path
       | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ } ->
           signature_terminates context (Path.Method { owner = impl; name; receiver })
+      | Trait_method { trait; name; receiver; evidence = Bound; self_type; _ } -> (
+          (* A bound on a type the frame's substitution makes known, as in
+             code proven once for each integer type, reaches its [impl]. *)
+          let trait =
+            {
+              trait with
+              trait_arguments =
+                List.map
+                  (function
+                    | Types.Type ty -> Types.Type (substituted context frame ty)
+                    | argument -> argument)
+                  trait.trait_arguments;
+            }
+          in
+          match concrete_impl context trait (substituted context frame self_type) with
+          | Some (impl, _)
+            when Interface.Impls.signature context.database
+                   (Path.Method { owner = impl; name; receiver })
+                 <> None ->
+              signature_terminates context (Path.Method { owner = impl; name; receiver })
+          | _ -> signature_terminates context (Path.Method { owner = trait.trait; name; receiver }))
       | Trait_method { trait; name; receiver; _ } ->
           signature_terminates context (Path.Method { owner = trait.trait; name; receiver })
       | Capability_method { capability; name } ->
@@ -2849,6 +2880,16 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       assume_laws context frame ~at:span trait self_type;
       let operands () = List.map (fun (passed : passed) -> passed.term) values in
       match (name, evidence, operands ()) with
+      | ("minimum_value" | "maximum_value" | "bit_width"), _, []
+        when Well_known.is Fixed_width_integer trait.trait && Types.integer_bits self_type <> None
+        -> (
+          (* A built-in integer type's bounds and bits are numbers, so that
+             an obligation that names them stays linear. *)
+          match (name, Types.integer_range self_type, Types.integer_bits self_type) with
+          | "minimum_value", Some (low, _), _ -> Some (frame, Logic.Integer low)
+          | "maximum_value", Some (_, high), _ -> Some (frame, Logic.Integer high)
+          | _, _, Some (bits, _) -> Some (frame, Logic.int bits)
+          | _ -> None)
       | "equal", _, [ a; b ] when Path.equal trait.trait equal_trait && structural context self_type
         ->
           (* [==] on a type with identity semantics is the solver's
@@ -9419,14 +9460,18 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
    cost clauses are shown at each way it returns. [inherited] is, for an
    [impl]'s method, its trait's clauses, with the substitution they are
    read under and the body the trait provides, if any. *)
-let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited database
-    (source : source) ~path =
+let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(substitution = [])
+    database (source : source) ~path =
   let parameters, contract, body =
     match source.core.definition with
     | Function { parameters; contract; body = Some body } -> (parameters, contract, body)
     | _ -> unsupported (definition_span source) "a function without a body"
   in
-  let signature = Interface.Impls.signature database path in
+  let signature =
+    Option.map
+      (Types.map_signature (Types.substitute substitution))
+      (Interface.Impls.signature database path)
+  in
   let terminates =
     proof
     ||
@@ -9461,7 +9506,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
             if not updating_helper then assume_valid context frame self_type self;
             { frame with self = Some self; self_type = Some self_type }
         | local ->
-            let ty = parameter.type_ in
+            let ty = substituted context frame parameter.type_ in
             let term = arrive context frame ("parameter." ^ parameter.name) ty in
             (match term with
             | Logic.Symbol symbol ->
@@ -9470,7 +9515,8 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
             | _ -> ());
             assume_valid context frame ty term;
             bind frame local ty term)
-      (empty_frame source) parameters
+      { (empty_frame source) with substitution }
+      parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
   (* A lending or yielding method yields parts: its postconditions that

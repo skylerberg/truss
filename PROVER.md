@@ -394,6 +394,15 @@ lets a generic function's proof be cached like any other, and it is why a
 trait's contracts and laws, not its implementations, are what generic code
 may use.
 
+Code generic over an integer trait is the exception: it is proven once for
+each built-in type that implements the trait, as SPARK proves each instance
+of a generic unit. The traits are sealed, so those types are every instance
+there can be, and each proof is a proof about a concrete type, with its
+range, its overflow bounds, and its bits. One proof over an unknown sort
+would need a symbolic width, which the solver's bit-vector theory does not
+have. An obligation that fails names its instance, as in "Where `Self` is
+`Int8`: ...".
+
 ## What functions mean
 
 DESIGN.md's [What a function means to the prover](DESIGN.md#what-a-function-means-to-the-prover)

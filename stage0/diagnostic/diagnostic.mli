@@ -239,6 +239,7 @@ module Code : sig
 
   type package =
     | Impl_location
+    | Sealed_trait_impl
     | Overlapping_impls
     | Method_name_clash
     | Needs_indirect
