@@ -11,17 +11,17 @@ type hole = {
   scope : (string * string) list;  (** Each name in scope, with its type, by name *)
 }
 
-(* A type as tools show it. The checked form holds no unsolved type, so the
-   type of a [todo] nothing fixes, such as one that is interpolated, is the
-   error type there, and is not decided yet. *)
-let show_type (checked : Checked.t) id =
-  match if id < Array.length checked.types then checked.types.(id) else None with
+(* A type as tools show it. The tables hold no unsolved type, so the type
+   of a [todo] nothing fixes, such as one that is interpolated, is the error
+   type there, and is not decided yet. *)
+let show_type (tables : Infer.tables) id =
+  match if id < Array.length tables.types then tables.types.(id) else None with
   | Some (Types.Error _ | Types.Hole) -> "not decided yet"
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
-let local_type (checked : Checked.t) id =
-  match if id < Array.length checked.local_types then checked.local_types.(id) else None with
+let local_type (tables : Infer.tables) id =
+  match if id < Array.length tables.local_types then tables.local_types.(id) else None with
   | Some type_ -> Types.show type_
   | None -> "an unknown type"
 
@@ -36,8 +36,8 @@ let expression_span (definition : definition) id =
 
 (* Each [todo] of a definition, in order: the names in scope come from name
    resolution, which records them at each [todo] as it walks, and their
-   types from the checked form. *)
-let holes (definition : definition) (resolved : Resolve.resolved) (checked : Checked.t) =
+   types from the tables. *)
+let holes (definition : definition) (resolved : Resolve.resolved) (tables : Infer.tables) =
   let values =
     List.filter_map
       (fun (id, scope) ->
@@ -45,13 +45,13 @@ let holes (definition : definition) (resolved : Resolve.resolved) (checked : Che
           (fun (span : span) ->
             {
               offset = span.start;
-              expected = Some (show_type checked id);
+              expected = Some (show_type tables id);
               scope =
                 List.map
                   (fun (name, (value : Resolve.value)) ->
                     ( name,
                       match value with
-                      | Value_local binding -> local_type checked binding
+                      | Value_local binding -> local_type tables binding
                       | Value_generic _ -> "USize"
                       | Value_field _ -> "a field"
                       | Value_law_parameter _ -> "a parameter of the law" ))
@@ -96,19 +96,19 @@ let contains (span : span) offset = span.start <= offset && offset <= span.stop
 
 (* The innermost expression at an offset, relative to the definition, and
    what it means. *)
-let at (definition : definition) (resolved : Resolve.resolved) (checked : Checked.t option) ~text
-    offset =
-  let best = ref None in
+let explain_at (definition : definition) (resolved : Resolve.resolved)
+    (tables : Infer.tables option) ~text offset =
+  let innermost = ref None in
   let rec visit (value : expression) =
     if contains value.span offset then begin
       (match value.kind with
-      | Name _ | Member _ | Call _ | Bracket _ -> best := Some value
-      | _ -> if !best = None then best := Some value);
+      | Name _ | Member _ | Call _ | Bracket _ -> innermost := Some value
+      | _ -> if !innermost = None then innermost := Some value);
       Syntax_walk.children visit value
     end
   in
   Syntax_walk.definition visit definition;
-  match !best with
+  match !innermost with
   | None -> None
   | Some value ->
       let written =
@@ -127,14 +127,14 @@ let at (definition : definition) (resolved : Resolve.resolved) (checked : Checke
                 (Some meaning, refers_to)
             | None -> (None, None))
         | _ -> (
-            match checked with
-            | Some checked when value.id < Array.length checked.meanings -> (
-                match checked.meanings.(value.id) with
+            match tables with
+            | Some tables when value.id < Array.length tables.resolutions -> (
+                match tables.resolutions.(value.id) with
                 | Some (Global { path; _ }) ->
                     (Some (Printf.sprintf "the definition %s" (Path.show path)), Some path)
-                | Some meaning -> (Some (Checked.show_meaning meaning), None)
+                | Some resolution -> (Some (Infer.show_resolution resolution), None)
                 | None -> (None, None))
             | _ -> (None, None))
       in
-      let type_ = Option.map (fun checked -> show_type checked value.id) checked in
+      let type_ = Option.map (fun tables -> show_type tables value.id) tables in
       Some { text = written; meaning; refers_to; type_ }

@@ -21,7 +21,7 @@ let marked_receiver (receiver : expression) : Path.receiver =
   match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
 
 (* Checks a value of type [found] against an expected type, and records the
-   conversion. *)
+   conversion in the core form. *)
 let rec coerce state env ?argument (value : expression) ~found ~expected =
   convert state env ?argument ~expression:value.id value.span ~found ~expected
 
@@ -36,7 +36,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   match target with
   | Local id -> (
       state.references <- id :: state.references;
-      state.tables.meanings.(value.id) <- Some (Local_value id);
+      state.tables.resolutions.(value.id) <- Some (Local_value id);
       register_expression state value (fun () -> Form.local_use state ~origin:value.id id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
@@ -49,7 +49,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
           type_
       | None -> bug "the law has no parameter `%s`" text)
   | Value_parameter parameter ->
-      state.tables.meanings.(value.id) <- Some (Generic_value parameter);
+      state.tables.resolutions.(value.id) <- Some (Value_parameter parameter);
       register_expression state value (fun () -> Value_parameter parameter);
       T.builtin USize
   | Type_parameter _ | Capability_parameter _ ->
@@ -59,14 +59,14 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | Some (Ok signature) ->
           let instance = instantiate state value.span signature in
           Option.iter (explicit_type_arguments state value instance) type_arguments;
-          state.tables.meanings.(value.id) <-
+          state.tables.resolutions.(value.id) <-
             Some (Global { path; type_arguments = instance.type_arguments });
           register_expression state value (fun () -> Form.function_value state value);
           T.Function (T.function_type_of instance.signature)
       | Some (Error report) -> T.Error report
       | None -> bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) -> (
-      state.tables.meanings.(value.id) <- Some (Global { path; type_arguments = [] });
+      state.tables.resolutions.(value.id) <- Some (Global { path; type_arguments = [] });
       register_expression state value (fun () ->
           Use (Form.constant_place state ~origin:value.id path));
       match Query.demand state.database Environment.constant_type path with
@@ -74,7 +74,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | None -> bug "the constant `%s` has no type" (Path.show path))
   | Definition (Type, path) ->
       if Intrinsic.builtin_of_path path = Some Unit then begin
-        state.tables.meanings.(value.id) <-
+        state.tables.resolutions.(value.id) <-
           Some (Variant_value { type_ = T.unit; variant = "Unit" });
         register_expression state value (fun () -> Construct { variant = None; fields = [] });
         T.unit
@@ -110,18 +110,18 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
           | None -> bug "the field `%s` is not in a record" field)
       | _ -> bug "the field `%s` is named outside its type" field)
   | Result_value -> (
-      state.tables.meanings.(value.id) <- Some Specification_value;
+      state.tables.resolutions.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Result);
       match env.output with
       | Some output -> output_type output
       | None -> bug "`result` is named where nothing is returned")
   | Old | Identical | Specification_function _ ->
-      state.tables.meanings.(value.id) <- Some Specification_value;
+      state.tables.resolutions.(value.id) <- Some Specification_value;
       error state Not_a_value value.span
         (Printf.sprintf "`%s` is applied to what it is about, as in `%s(...)`." text text)
   | Yielded -> (
       (* The sequence of the parts yielded so far. *)
-      state.tables.meanings.(value.id) <- Some Specification_value;
+      state.tables.resolutions.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Yielded);
       let part =
         match (env.loop_element, env.output) with
@@ -133,7 +133,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       | Some part -> T.Named { path = Well_known.path Sequence; arguments = [ T.Type part ] }
       | None -> bug "`yielded` is named where nothing is handed out")
   | Finished ->
-      state.tables.meanings.(value.id) <- Some Specification_value;
+      state.tables.resolutions.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Finished);
       T.bool
   | Unknown report -> T.Error report
@@ -144,7 +144,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
    fields is not a function, because its fields have no order. *)
 and variant_value state (value : expression) type_path variant ~arguments =
   let type_ = T.Named { path = type_path; arguments } in
-  state.tables.meanings.(value.id) <- Some (Variant_value { type_; variant });
+  state.tables.resolutions.(value.id) <- Some (Variant_value { type_; variant });
   register_expression state value (fun () -> Form.variant_value state value type_path variant);
   match Members.variants state.database type_path arguments with
   | Some variants -> (
@@ -203,8 +203,8 @@ and field state (value : expression) base_type (member : name) =
                      (show state base_type))
               end
               else begin
-                state.tables.meanings.(value.id) <-
-                  Some (Field_read { type_ = base_type; field = member.text });
+                state.tables.resolutions.(value.id) <-
+                  Some (Field_access { type_ = base_type; field = member.text });
                 written.field_type
               end
           | None ->
@@ -234,7 +234,7 @@ and static_member state (value : expression) type_ (member : name) =
       else
         begin match Members.own_constant state.database path member.text with
         | Some constant -> (
-            state.tables.meanings.(value.id) <-
+            state.tables.resolutions.(value.id) <-
               Some (Global { path = constant; type_arguments = [] });
             register_expression state value (fun () ->
                 Use (Form.constant_place state ~origin:value.id constant));
@@ -250,7 +250,7 @@ and static_member state (value : expression) type_ (member : name) =
                     (match instance.signature.receiver with
                     | Some (_, receiver) -> ignore (unify state receiver type_)
                     | None -> ());
-                    state.tables.meanings.(value.id) <-
+                    state.tables.resolutions.(value.id) <-
                       Some (Global { path = method_path; type_arguments = instance.type_arguments });
                     register_expression state value (fun () -> Form.function_value state value);
                     T.Function (T.function_type_of instance.signature)
@@ -302,7 +302,14 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
 and finish_call state (value : expression) callee (instance : instance) arguments left_out =
   let result = output_type instance.signature.output in
   state.tables.calls.(value.id) <-
-    Some { callee; arguments; defaults_left_out = left_out; uses = instance.signature.uses; result };
+    Some
+      {
+        callee;
+        arguments;
+        omitted_defaults = left_out;
+        uses = instance.signature.uses;
+        callee_result = result;
+      };
   note_lending state value instance.signature.output;
   Form.register_call state value;
   (* A call of a yielding method outside a [for] loop creates a cursor. *)
@@ -534,9 +541,9 @@ and each_call state (span : span) type_ mode =
                     C.callee =
                       Function { path = method_path; type_arguments = instance.type_arguments };
                     arguments = [];
-                    defaults_left_out = [];
+                    omitted_defaults = [];
                     uses = instance.signature.uses;
-                    result = element;
+                    callee_result = element;
                   },
                   element )
           | _ -> None)
@@ -570,9 +577,9 @@ and each_call state (span : span) type_ mode =
                             | None -> Built_in));
                     };
                 arguments = [];
-                defaults_left_out = [];
+                omitted_defaults = [];
                 uses = instance.signature.uses;
-                result = element;
+                callee_result = element;
               },
               element )
       | _ -> None)

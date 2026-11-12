@@ -14,8 +14,8 @@ open State
 open Statements
 open Expressions
 
-type result = {
-  checked : Checked.t;
+type type_check_result = {
+  tables : Tables.published;
   core : Core.t option;
       (** The definition's core form, when it parsed whole and nothing in it is an error. *)
   diagnostics : Diagnostic.t list;
@@ -162,7 +162,7 @@ let check_defaults state env (written : parameter list) (signature : T.signature
                  collection becomes its view. *)
               in_statement state env value.span (fun () ->
                   let found = expression state env ~expected:info.type_ value in
-                  ignore (Lookups.coerce state env ~argument:true value ~found ~expected:info.type_));
+                  Lookups.coerce state env ~argument:true value ~found ~expected:info.type_);
               Constant.check state ~default:true value
           | None -> ())
       | _ -> ())
@@ -509,10 +509,10 @@ let check_definition state (lowered : Environment.lowered) =
           body state { no_output with specification = true; output = Some (Returns T.unit) } written
     | _ -> ()
 
-(* Replaces every type in the checked tables by its final form, so that the
-   tables hold no inference variable. A variable that is still unsolved was
-   reported, and becomes the error type. An entry recorded while a statement
-   was checked, such as a call's type arguments, is final only after the
+(* Replaces every type in the tables by its final form, so that they hold
+   no inference variable. A variable that is still unsolved was reported,
+   and becomes the error type. An entry recorded while a statement was
+   checked, such as a call's type arguments, is final only after the
    statement's inference finished. *)
 let finalize (state : state) =
   let final = final state and argument = final_argument state in
@@ -555,19 +555,19 @@ let finalize (state : state) =
             Intrinsic { intrinsic with type_arguments = List.map argument intrinsic.type_arguments }
         | other -> other);
       uses = final_capabilities state written.uses;
-      result = final written.result;
+      callee_result = final written.callee_result;
     }
   in
   let tables = state.tables in
   let update table f = Array.iteri (fun index entry -> table.(index) <- Option.map f entry) table in
   update tables.types final;
   update tables.local_types final;
-  update tables.pattern_types final;
+  update tables.scrutinee_types final;
   update tables.calls call;
-  update tables.meanings (function
+  update tables.resolutions (function
     | C.Global { path; type_arguments } ->
         C.Global { path; type_arguments = List.map argument type_arguments }
-    | Field_read { type_; field } -> Field_read { type_ = final type_; field }
+    | Field_access { type_; field } -> Field_access { type_ = final type_; field }
     | Variant_value { type_; variant } -> Variant_value { type_ = final type_; variant }
     | Type_name type_ -> Type_name (final type_)
     | other -> other);
@@ -670,7 +670,7 @@ let check database (key : Names.key) =
             table
         in
         contains state.tables.types || contains state.tables.local_types
-        || contains state.tables.pattern_types
+        || contains state.tables.scrutinee_types
       in
       (* Whether a type is an error, or names a type whose declaration has
          an error. The error is reported at the declaration, and a use of
@@ -747,7 +747,7 @@ let check database (key : Names.key) =
       in
       Some
         {
-          checked = Tables.published state.tables;
+          tables = Tables.publish state.tables;
           core;
           diagnostics =
             List.sort_uniq
@@ -758,8 +758,8 @@ let check database (key : Names.key) =
         }
   | _ -> None
 
-let checked =
-  Query.query ~name:"checked" ~phase:Phases.bodies ~show:Names.show_key ~saved:true
+let type_check_result =
+  Query.query ~name:"type_check_result" ~phase:Phases.bodies ~show:Names.show_key ~saved:true
     ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
     (fun database key ->
       Compiler_bug.within ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
@@ -767,4 +767,6 @@ let checked =
 (* The diagnostics of every body in a file, in file offsets and in order. *)
 let diagnostics database module_ =
   Names.per_definition database module_ (fun key ->
-      match Query.demand database checked key with Some result -> result.diagnostics | None -> [])
+      match Query.demand database type_check_result key with
+      | Some result -> result.diagnostics
+      | None -> [])

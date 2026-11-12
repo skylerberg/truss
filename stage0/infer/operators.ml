@@ -186,8 +186,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           else begin
             Form.register_call state value;
             operator_call
-              ~operands:
-                [ { C.expression = inner.id; parameter = 0; mode = T.Read; conversion = None } ]
+              ~operands:[ { C.expression = inner.id; parameter_index = 0; mode = T.Read } ]
               state value ~trait:(Well_known.path Negate) ~method_:"negate" ~left:type_ ~right:None
           end)
 
@@ -212,9 +211,9 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
               evidence = Built_in;
             };
         arguments = operands;
-        defaults_left_out = [];
+        omitted_defaults = [];
         uses = [];
-        result;
+        callee_result = result;
       };
   defer state (fun () ->
       let left = normalize state left in
@@ -251,9 +250,9 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
                         evidence = evidence_of evidence;
                       };
                   arguments = operands;
-                  defaults_left_out = [];
+                  omitted_defaults = [];
                   uses = [];
-                  result = output;
+                  callee_result = output;
                 }
         | None ->
             let unknown =
@@ -288,11 +287,11 @@ and built_in_operator state (value : expression) (operands : expression list) re
         arguments =
           List.mapi
             (fun index (operand : expression) ->
-              { C.expression = operand.id; parameter = index; mode = Read; conversion = None })
+              { C.expression = operand.id; parameter_index = index; mode = Read })
             operands;
-        defaults_left_out = [];
+        omitted_defaults = [];
         uses = [];
-        result;
+        callee_result = result;
       }
 
 and is_hole state type_ = resolve state type_ = T.Hole
@@ -417,12 +416,12 @@ and binary state env ?expected (value : expression) operator (left : expression)
                   };
               arguments =
                 [
-                  { expression = left.id; parameter = 0; mode = Read; conversion = None };
-                  { expression = right.id; parameter = 1; mode = Read; conversion = None };
+                  { expression = left.id; parameter_index = 0; mode = Read };
+                  { expression = right.id; parameter_index = 1; mode = Read };
                 ];
-              defaults_left_out = [];
+              omitted_defaults = [];
               uses = [];
-              result;
+              callee_result = result;
             };
         resolve_evidence state value left_type (trait_reference trait);
         T.bool
@@ -507,8 +506,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
               operator_call
                 ~operands:
                   [
-                    { C.expression = left.id; parameter = 0; mode = T.Read; conversion = None };
-                    { C.expression = right.id; parameter = 1; mode = T.Read; conversion = None };
+                    { C.expression = left.id; parameter_index = 0; mode = T.Read };
+                    { C.expression = right.id; parameter_index = 1; mode = T.Read };
                   ]
                 state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
             in

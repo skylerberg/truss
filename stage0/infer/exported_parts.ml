@@ -71,9 +71,9 @@ let check_names (state : state) (parts : span list) ~message =
         match call with Some { callee = Function { path; _ }; _ } -> named id path | _ -> ())
       state.tables.calls;
     Array.iteri
-      (fun id (meaning : Tables.meaning option) ->
-        match meaning with Some (Global { path; _ }) -> named id path | _ -> ())
-      state.tables.meanings
+      (fun id (resolution : Tables.resolution option) ->
+        match resolution with Some (Global { path; _ }) -> named id path | _ -> ())
+      state.tables.resolutions
   end
 
 let check (state : state) (lowered : Environment.lowered) =

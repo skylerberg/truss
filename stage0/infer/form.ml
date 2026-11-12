@@ -1,5 +1,5 @@
-(* Builds core form nodes from the tables the type checker records
-   ([Checked]). The checker's other modules call these functions when they
+(* Builds core form nodes from the tables the type checker records. The
+   checker's other modules call these functions when they
    register how the core node of a syntax node is built. *)
 
 open Syntax
@@ -38,16 +38,18 @@ let callee (callee : C.callee) : Core.callee =
       Trait_method { trait; name; receiver; self_type; type_arguments; evidence = evidence found }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
-  | Constructor _ | Function_value | Built_in_operator -> bug "this callee has no core callee"
+  | Constructor _ | Indirect | Built_in_operator -> bug "this callee has no core callee"
 
 (* One argument per parameter, in parameter order. A parameter with no
    argument is [Default]. *)
 let arguments state (call : C.call) : Core.argument list =
   List.init
-    (List.length call.arguments + List.length call.defaults_left_out)
+    (List.length call.arguments + List.length call.omitted_defaults)
     (fun index ->
       match
-        List.find_opt (fun (argument : C.argument) -> argument.parameter = index) call.arguments
+        List.find_opt
+          (fun (argument : C.argument) -> argument.parameter_index = index)
+          call.arguments
       with
       | Some argument ->
           Core.Passed
@@ -62,7 +64,7 @@ let core_call state ~lends ?function_value (call : C.call) : Core.call =
   {
     callee =
       (match (call.callee, function_value) with
-      | Function_value, Some function_value -> Indirect (operand Read function_value)
+      | Indirect, Some function_value -> Indirect (operand Read function_value)
       | direct, _ -> callee direct);
     arguments = arguments state call;
     lends;
@@ -105,7 +107,8 @@ let argument_expressions state (call : C.call) =
   List.map
     (fun (argument : C.argument) -> build_expression_by_id state argument.expression)
     (List.sort
-       (fun (left : C.argument) (right : C.argument) -> compare left.parameter right.parameter)
+       (fun (left : C.argument) (right : C.argument) ->
+         compare left.parameter_index right.parameter_index)
        call.arguments)
 
 (* The fields of a record type, or of one variant of a sum type, in
@@ -133,7 +136,9 @@ let constructor_fields state type_ variant type_arguments =
    [function_value] is the callee expression of an indirect call. *)
 let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
   let recorded = checked_call state value.id in
-  let lends = match lends with Some lends -> Some lends | None -> state.tables.lends.(value.id) in
+  let lends =
+    match lends with Some lends -> Some lends | None -> state.tables.lend_modes.(value.id)
+  in
   match recorded.callee with
   | Trait_method { trait; evidence = Built_in; _ }
     when Path.equal trait.trait Properties.copyable_trait -> (
@@ -165,7 +170,7 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
       let written =
         List.map
           (fun (argument : C.argument) ->
-            ( (List.nth declared argument.parameter).field_name,
+            ( (List.nth declared argument.parameter_index).field_name,
               Some (operand argument.mode (build_expression_by_id state argument.expression)) ))
           recorded.arguments
       in
@@ -177,11 +182,12 @@ let kind_of_call ?lends ?function_value state (value : expression) : Core.kind =
       in
       Construct { variant; fields = written @ defaulted }
   | Built_in_operator -> bug "an operator is recorded as a call"
-  | Function_value | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> (
+  | Indirect | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> (
       let function_value = Option.map (build_expression state) function_value in
       let call = Core.Call (core_call state ~lends ?function_value recorded) in
       match lends with
-      | Some _ -> Use (Lent (synthetic_expression state ~origin:value.id recorded.result call))
+      | Some _ ->
+          Use (Lent (synthetic_expression state ~origin:value.id recorded.callee_result call))
       | None -> call)
 
 let register_call ?function_value state (value : expression) =
@@ -211,7 +217,7 @@ let type_of state (value : expression) =
 (* A named function or method used as a value, with its inferred type
    arguments. *)
 let function_value state (value : expression) : Core.kind =
-  match state.tables.meanings.(value.id) with
+  match state.tables.resolutions.(value.id) with
   | Some (Global { path; type_arguments }) -> Function_value { path; type_arguments }
   | _ -> bug "`%s` is not recorded as a function" (source state value.span)
 
@@ -583,7 +589,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
       (fun ((written : expression), _) (conversion : C.call option) ->
         match conversion with
         | Some call ->
-            synthetic_expression state ~origin:written.id call.result
+            synthetic_expression state ~origin:written.id call.callee_result
               (Call (core_call state ~lends:None call))
         | None -> build_expression state written)
       literal.rest recorded.part_conversions
@@ -601,7 +607,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
           (fun (written : Syntax.text) -> written.value)
           (literal.first :: List.map snd literal.rest);
       call =
-        make from_template.result
+        make from_template.callee_result
           (Call
              {
                callee = callee from_template.callee;
@@ -614,7 +620,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
 (* Patterns *)
 
 let pattern_type state (id : id) =
-  match state.tables.pattern_types.(id) with
+  match state.tables.scrutinee_types.(id) with
   | Some type_ -> type_
   | None -> bug "a pattern has no recorded type"
 
@@ -739,7 +745,7 @@ let comparison state (value : expression) operator (left : expression) (right : 
       built_in_comparison state operator left right
   | _ -> (
       let call =
-        synthetic_expression state ~origin:value.id recorded.result
+        synthetic_expression state ~origin:value.id recorded.callee_result
           (Call (core_call state ~lends:None recorded))
       in
       let is variant : Core.kind =
@@ -750,7 +756,7 @@ let comparison state (value : expression) operator (left : expression) (right : 
               {
                 id = fresh_node_id state;
                 origin = value.id;
-                type_ = recorded.result;
+                type_ = recorded.callee_result;
                 kind = Variant { variant; fields = [] };
               };
           }
@@ -820,7 +826,7 @@ let compound_assign state (written : statement) (target : expression) (value : e
             let mode index =
               match
                 List.find_opt
-                  (fun (argument : C.argument) -> argument.parameter = index)
+                  (fun (argument : C.argument) -> argument.parameter_index = index)
                   recorded.arguments
               with
               | Some argument -> argument.mode

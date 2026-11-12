@@ -1,5 +1,6 @@
 (* The tests of checking bodies. Each gives a small definition and states
-   one fact: a diagnostic with its fix, or one fact about the checked form. *)
+   one fact: a diagnostic with its fix, or one fact about the tables or the
+   core form. *)
 
 open Harness
 open Support
@@ -13,7 +14,7 @@ let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let fine text = no_diagnostics [ ("app::main", text) ]
 
-(* The checked form of the definition that holds the [occurrence]th
+(* The type check result of the definition that holds the [occurrence]th
    appearance of [written], and the innermost expression that starts there. *)
 let expression_at text written occurrence =
   let database = setup [ ("app::main", text) ] in
@@ -26,7 +27,7 @@ let expression_at text written occurrence =
         match
           ( Query.demand database Resolve.Names.definition key,
             Query.demand database Resolve.Names.base key,
-            Query.demand database Infer.checked key )
+            Query.demand database Infer.type_check_result key )
         with
         | Some definition, Some (_, base), Some result ->
             (* The expression whose span is exactly the text, or else the
@@ -48,7 +49,7 @@ let expression_at text written occurrence =
               Syntax_walk.children visit value
             in
             Syntax_walk.definition visit definition;
-            Option.map (fun value -> (value, result.checked)) !best
+            Option.map (fun value -> (value, result)) !best
         | _ -> None)
       (Query.demand database Resolve.Names.declarations module_)
   in
@@ -64,9 +65,50 @@ let has_integer text value =
       match node.kind with Integer found -> Z.equal found (Z.of_int value) | _ -> false)
     (first_core_nodes text).expressions
 
+(* The core nodes built from the [occurrence]th appearance of [written]. *)
+let core_at text written occurrence =
+  let value, (result : Infer.type_check_result) = expression_at text written occurrence in
+  match result.core with
+  | None -> failwith (Printf.sprintf "no core form holds %S" written)
+  | Some form ->
+      let nodes = ref [] in
+      Core_walk.definition
+        {
+          Core_walk.ignore_all with
+          expression =
+            (fun (node : Core.expression) -> if node.origin = value.id then nodes := node :: !nodes);
+        }
+        form.definition;
+      List.rev !nodes
+
+(* The call built from the [occurrence]th appearance of [written], with its
+   type. *)
+let core_call_at text written occurrence =
+  match
+    List.find_map
+      (fun (node : Core.expression) ->
+        match node.kind with Call call -> Some (call, node.type_) | _ -> None)
+      (core_at text written occurrence)
+  with
+  | Some call -> call
+  | None -> failwith (Printf.sprintf "%S is not a call" written)
+
+(* Whether an argument is the view of an owned collection: a call of its
+   [slice]. *)
+let is_view : Core.argument -> bool = function
+  | Passed
+      {
+        value =
+          Value
+            { kind = Call { callee = Function { path = Method { name = "slice"; _ }; _ }; _ }; _ };
+        _;
+      } ->
+      true
+  | _ -> false
+
 let has_type text written ?(occurrence = 1) expected =
-  let value, checked = expression_at text written occurrence in
-  match checked.types.(value.id) with
+  let value, (result : Infer.type_check_result) = expression_at text written occurrence in
+  match result.tables.types.(value.id) with
   | Some type_ ->
       if Types.show type_ <> expected then
         fail "`%s` has type %s, not %s" written (Types.show type_) expected
@@ -125,10 +167,27 @@ let () =
       one_diagnostic "fn f(name: String) -> String {\n  name + \"!\"\n}\n" "types.string_addition"
         ~fixed:"fn f(name: String) -> String {\n  \"${name}!\"\n}\n");
   test "an operator chooses the impl by both operands" (fun () ->
-      let text = "fn f(left: Int64, right: Int64) -> Int64 {\n  left + right\n}\n" in
-      let value, checked = expression_at text "left + right" 1 in
-      match checked.calls.(value.id) with
-      | Some { callee = Trait_method { evidence = Impl _; name = "add"; _ }; _ } -> ()
+      let text =
+        "type Meters(value: Int64)\n\n\
+         impl Add[Meters] for Meters {\n\
+        \  type Output = Meters\n\
+        \  fn add_is_defined(self, right: Meters) -> Bool { true }\n\
+        \  fn add(self, right: Meters) -> Meters { todo }\n\
+         }\n\n\
+         impl Add[Int64] for Meters {\n\
+        \  type Output = Meters\n\
+        \  fn add_is_defined(self, right: Int64) -> Bool { true }\n\
+        \  fn add(self, right: Int64) -> Meters { todo }\n\
+         }\n\n\
+         fn f(length: Meters, extra: Int64) -> Meters {\n\
+        \  length + extra\n\
+         }\n"
+      in
+      match core_call_at text "length + extra" 1 with
+      | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ ->
+          let shown = Path.show impl in
+          if Documents.find shown "Add[Int64]" ~occurrence:1 < 0 then
+            fail "the impl chosen is %s" shown
       | _ -> fail "no impl recorded");
   test "an ordering on Self in a trait's law is its compare" (fun () ->
       let text =
@@ -143,13 +202,11 @@ let () =
       in
       List.iter
         (fun written ->
-          let value, checked = expression_at text written 1 in
-          match checked.calls.(value.id) with
-          | Some { callee = Trait_method { name = "compare"; evidence = Bound; _ }; result; _ } ->
+          match core_call_at text written 1 with
+          | { callee = Trait_method { name = "compare"; evidence = Bound; _ }; _ }, result ->
               if Types.show result <> "Ordering" then
                 fail "`%s` calls a `compare` that gives `%s`" written (Types.show result)
-          | Some _ -> fail "`%s` is another call" written
-          | None -> fail "`%s` has no call" written)
+          | _ -> fail "`%s` is another call" written)
         [ "first < second"; "second < third"; "first < third" ]);
   test "an operand can be the result of an operator's method" (fun () ->
       fine "fn f(left: Int64, right: Int64) -> Int64 {\n  left + right.multiply(2)\n}\n");
@@ -185,28 +242,24 @@ let () =
       one_diagnostic (functions ^ "fn f() {\n  copy_file(1)\n}\n") "types.missing_argument");
   test "an argument for a parameter with a default can be omitted" (fun () ->
       let text = "fn connect(host: Int64, port: UInt16 = 443) {}\n\nfn f() {\n  connect(1)\n}\n" in
-      let value, checked = expression_at text "connect(1)" 1 in
-      match checked.calls.(value.id) with
-      | Some { defaults_left_out = [ "port" ]; _ } -> ()
-      | _ -> fail "the default left out is not recorded");
+      match core_call_at text "connect(1)" 1 with
+      | { arguments = [ Passed _; Default ]; _ }, _ -> ()
+      | _ -> fail "the omitted default is not recorded");
   test "a String passed where a StringSlice is expected is viewed" (fun () ->
       let text = "fn greet(text: StringSlice) {}\n\nfn f(name: String) {\n  greet(name)\n}\n" in
-      let value, checked = expression_at text "greet(name)" 1 in
-      match checked.calls.(value.id) with
-      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      match core_call_at text "greet(name)" 1 with
+      | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> fail "no conversion recorded");
   test "a capability's method views a String argument too" (fun () ->
       let text = "fn f(name: String)\n  uses Console\n{\n  Console.print_line(name)\n}\n" in
-      let value, checked = expression_at text "Console.print_line(name)" 1 in
-      match checked.calls.(value.id) with
-      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      match core_call_at text "Console.print_line(name)" 1 with
+      | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> fail "no conversion recorded");
   test "a string literal is a String, viewed where a StringSlice is expected" (fun () ->
       let text = "fn f()\n  uses Console\n{\n  Console.print_line(\"hello\")\n}\n" in
       has_type text "\"hello\"" "String";
-      let value, checked = expression_at text "Console.print_line(\"hello\")" 1 in
-      match checked.calls.(value.id) with
-      | Some { arguments = [ { conversion = Some Owned_to_view; _ } ]; _ } -> ()
+      match core_call_at text "Console.print_line(\"hello\")" 1 with
+      | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> fail "no conversion recorded");
   test "a cursor's next is the Cursor trait's, by the cursor's own impl" (fun () ->
       let text =
@@ -222,27 +275,8 @@ let () =
       in
       fine text;
       has_type text "count_to(3)" "the cursor of app::main::count_to";
-      let value, checked = expression_at text "first.next()" 1 in
-      match checked.calls.(value.id) with
-      | Some
-          {
-            callee =
-              Trait_method
-                {
-                  name = "next";
-                  receiver = Mut;
-                  self_type = Cursor _;
-                  evidence = Impl { impl; _ };
-                  trait;
-                  _;
-                };
-            result;
-            _;
-          }
-        when Path.show trait.trait = "standard::core::Cursor"
-             && Types.show result = "Option[Int64]"
-             && Option.is_some (Interface.Impls.cursor_of_impl impl) ->
-          ()
+      match core_at text "first.next()" 1 with
+      | [ { kind = Cursor_next _; type_; _ } ] when Types.show type_ = "Option[Int64]" -> ()
       | _ -> fail "not the `next` of the cursor's own impl");
   test "an unknown label is an error with a fix to the closest" (fun () ->
       one_diagnostic
@@ -890,9 +924,11 @@ let () =
       Database.Testing.set_text (Engine.of_context database) module_ (text "2");
       Engine.clear_log (Engine.of_context database);
       ignore (Infer.diagnostics database module_);
-      if List.mem "checked(app::main::caller)" (Engine.executed (Engine.of_context database)) then
-        fail "the caller was checked again");
-  test "checking twice gives the same checked form" (fun () ->
+      if
+        List.mem "type_check_result(app::main::caller)"
+          (Engine.executed (Engine.of_context database))
+      then fail "the caller was checked again");
+  test "checking twice gives the same result" (fun () ->
       let text =
         "fn f(items: List[Int64]) -> Int64 {\n\
         \  var total = 0\n\
@@ -902,18 +938,18 @@ let () =
         \  total\n\
          }\n"
       in
-      let checked () =
+      let type_check_result () =
         let database = setup [ ("app::main", text) ] in
         let key =
           Resolve.Names.key_of
             (List.hd (Query.demand database Resolve.Names.declarations (module_of "app::main")))
         in
-        Query.demand database Infer.checked key
+        Query.demand database Infer.type_check_result key
       in
-      if checked () <> checked () then fail "different")
+      if type_check_result () <> type_check_result () then fail "different")
 
 let () =
-  test "no checked form of the standard library holds a type inference left unsolved" (fun () ->
+  test "no table of the standard library holds a type inference left unsolved" (fun () ->
       let database = setup [] in
       let rec unsolved = function
         | Types.Variable _ | Types.Literal _ -> true
@@ -926,38 +962,20 @@ let () =
             | Returns type_ | Yields (_, type_) | Lends (_, type_) -> unsolved type_)
         | _ -> false
       in
-      let arguments =
-        List.exists (function
-          | Types.Type type_ -> unsolved type_
-          | Types.Value (Value_variable _) -> true
-          | _ -> false)
-      in
       List.iter
         (fun ((module_ : Path.module_), _) ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
-              match Query.demand database Infer.checked (Resolve.Names.key_of declaration) with
-              | Some { checked; _ } ->
-                  Array.iter
-                    (function
+              match
+                Query.demand database Infer.type_check_result (Resolve.Names.key_of declaration)
+              with
+              | Some { tables; _ } ->
+                  List.iter
+                    (Array.iter (function
                       | Some type_ when unsolved type_ ->
                           fail "%s: an unsolved type" (Path.show declaration.path)
-                      | _ -> ())
-                    checked.types;
-                  Array.iter
-                    (function
-                      | Some
-                          ({
-                             callee =
-                               Intrinsic { type_arguments; _ } | Function { type_arguments; _ };
-                             _;
-                           } :
-                            Checked.call)
-                        when arguments type_arguments ->
-                          fail "%s: a call with unsolved type arguments"
-                            (Path.show declaration.path)
-                      | _ -> ())
-                    checked.calls
+                      | _ -> ()))
+                    [ tables.types; tables.local_types ]
               | None -> ())
             (Query.demand database Resolve.Names.declarations module_))
         Standard_library.modules)
@@ -1447,7 +1465,7 @@ let () =
         \  }\n\
          }\n"
         "types.unknown_variant");
-  test "a `todo` that nothing decides keeps the hole type in the checked form" (fun () ->
+  test "a `todo` that nothing decides keeps the hole type in the tables" (fun () ->
       has_type "fn f() {\n  let later = todo\n  let _ = later\n}\n" "todo" "an undecided type")
 
 (* Bounds wherever generic parameters are filled in *)

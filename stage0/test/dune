@@ -67,7 +67,6 @@
   types
   intrinsic
   interface
-  checked
   infer
   ownership
   syntax_walk
