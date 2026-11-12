@@ -1072,3 +1072,229 @@ public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
     && parses_with_parts_after_authority(literals, part: "~")
     && parses_with_parts_after_authority(literals, part: "")
 }
+
+fn same(actual: StringSlice, expected: StringSlice) -> Bool {
+  actual == expected
+}
+
+fn holds(actual: Option[StringSlice], expected: StringSlice) -> Bool {
+  match actual {
+    Some(text) => text == expected
+    None => false
+  }
+}
+
+fn shows(text: StringSlice, expected: StringSlice) -> Bool {
+  match parse(text) {
+    Ok(parsed) => "${parsed}" == expected.to_string()
+    Err(_) => false
+  }
+}
+
+fn fails(text: StringSlice, expected: ParseError) -> Bool {
+  match parse(text) {
+    Ok(_) => false
+    Err(error) => error == expected
+  }
+}
+
+test "a URL is taken apart into its parts" {
+  assert parse("https://user:pw@Example.COM:8443/a/b%20c?x=1&y=two#frag") is Ok(parsed)
+    && same(parsed.scheme(), expected: "https")
+    && holds(parsed.user_information(), expected: "user:pw")
+    && parsed.port() == Some(8443)
+    && same(parsed.path(), expected: "/a/b%20c")
+    && holds(parsed.query(), expected: "x=1&y=two")
+    && holds(parsed.fragment(), expected: "frag")
+  assert parse("https://Example.COM/") is Ok(parsed) && parsed.host() is Some(Domain(name)) && name == "example.com"
+  assert parse("mailto:someone@example.com") is Ok(parsed)
+    && parsed.host() is None
+    && same(parsed.path(), expected: "someone@example.com")
+    && parsed.query() is None
+    && parsed.fragment() is None
+    && parsed.user_information() is None
+}
+
+test "a URL is displayed as it was read, with its scheme and host in lower case" {
+  assert shows("https://user:pw@Example.COM:8443/a/b%20c?x=1&y=two#frag", expected: "https://user:pw@example.com:8443/a/b%20c?x=1&y=two#frag")
+  assert shows("HTTP://[2001:DB8::1]/", expected: "http://[2001:db8::1]/")
+  assert shows("http://[::1]:8080/x", expected: "http://[::1]:8080/x")
+  assert shows("http://127.0.0.1:80", expected: "http://127.0.0.1:80")
+  assert shows("mailto:someone@example.com", expected: "mailto:someone@example.com")
+  assert shows("file:///etc/hosts", expected: "file:///etc/hosts")
+  assert shows("urn:isbn:0451450523", expected: "urn:isbn:0451450523")
+  assert shows("http://example.com", expected: "http://example.com")
+  assert shows("http://example.com:/x", expected: "http://example.com/x")
+  assert shows("http://example.com?q", expected: "http://example.com?q")
+  assert shows("http://example.com#", expected: "http://example.com#")
+  assert shows("a+b.c-d://x", expected: "a+b.c-d://x")
+}
+
+test "text that is not a URL says what is wrong with it" {
+  assert fails("", expected: ParseError.MissingScheme)
+  assert fails("/path/only", expected: ParseError.MissingScheme)
+  assert fails("example.com/path", expected: ParseError.MissingScheme)
+  assert fails("1http://x", expected: ParseError.InvalidScheme)
+  assert fails("ht tp://x", expected: ParseError.InvalidScheme)
+  assert fails("http://exa mple.com", expected: ParseError.InvalidHost)
+  assert fails("http://[::1", expected: ParseError.InvalidHost)
+  assert fails("http://[1.2.3.4]/", expected: ParseError.InvalidHost)
+  assert fails("http://x:99999", expected: ParseError.InvalidPort)
+  assert fails("http://x:8a", expected: ParseError.InvalidPort)
+  assert fails("http://[::1]8080", expected: ParseError.InvalidPort)
+  assert fails("http://x/a b", expected: ParseError.InvalidCharacter(offset: 10))
+  assert fails("http://x/\u{e9}", expected: ParseError.InvalidCharacter(offset: 9))
+  assert fails("http://x/%zz", expected: ParseError.InvalidPercentEncoding(offset: 9))
+  assert fails("http://x/%4", expected: ParseError.InvalidPercentEncoding(offset: 9))
+  assert fails("http://x/?a=%", expected: ParseError.InvalidPercentEncoding(offset: 12))
+  assert "${ParseError.InvalidPort}" == "the port is not a number up to 65535"
+}
+
+test "a port is the one written, or the scheme's own" {
+  assert parse("http://x") is Ok(parsed) && parsed.port() is None && parsed.port_or_default() == Some(80)
+  assert parse("https://x") is Ok(parsed) && parsed.port_or_default() == Some(443)
+  assert parse("https://x:8443") is Ok(parsed) && parsed.port_or_default() == Some(8443)
+  assert parse("gopher://x") is Ok(parsed) && parsed.port_or_default() is None
+}
+
+test "a path's segments and a query's parameters are given decoded" {
+  assert parse("http://x/a/b%20c/%C3%A9/") is Ok(parsed)
+    && parsed.path_segments().length() == 4
+    && parsed.path_segments()[0] == "a"
+    && parsed.path_segments()[1] == "b c"
+    && parsed.path_segments()[2] == "\u{e9}"
+    && parsed.path_segments()[3] == ""
+  assert parse("http://x") is Ok(parsed) && parsed.path_segments().length() == 0
+  assert parse("http://x/") is Ok(parsed) && parsed.path_segments().length() == 1
+  assert parse("http://x/p?a+b=1%262&%C3%A9=&&flag") is Ok(parsed)
+    && parsed.query_parameters().length() == 3
+    && parsed.query_parameters()[0] == Parameter(name: "a b", value: "1&2")
+    && parsed.query_parameters()[1] == Parameter(name: "\u{e9}", value: "")
+    && parsed.query_parameters()[2] == Parameter(name: "flag", value: "")
+    && parsed.query_parameter("a b") == Some("1&2")
+    && parsed.query_parameter("missing") is None
+  assert parse("http://x/p") is Ok(parsed) && parsed.query_parameters().length() == 0
+  assert parse("http://x/a/%C3") is Ok(parsed)
+    && parsed.path_segments().length() == 2
+    && parsed.path_segments()[1] == "%C3"
+  assert parse("http://x/p?a=1&b=%C3") is Ok(parsed) && parsed.query_parameters().length() == 0
+}
+
+test "text is percent-encoded and decoded" {
+  assert encode_component("a b&c/d?e=\u{e9}") == "a%20b%26c%2Fd%3Fe%3D%C3%A9"
+  assert encode_component("AZaz09-._~") == "AZaz09-._~"
+  assert encode_component("") == ""
+  assert decode_component("a%20b%26c") == Ok("a b&c")
+  assert decode_component("a+b") == Ok("a+b")
+  assert decode_component("%C3%A9") == Ok("\u{e9}")
+  assert decode_component("%zz") == Err(ParseError.InvalidPercentEncoding(offset: 0))
+  assert decode_component("ab%4") == Err(ParseError.InvalidPercentEncoding(offset: 2))
+  assert decode_component("%C3") == Err(ParseError.InvalidCharacter(offset: 0))
+  let parameters: List[Parameter] = [Parameter(name: "a b", value: "1&2"), Parameter(name: "\u{e9}", value: "")]
+  assert encode_query(parameters) == "a+b=1%262&%C3%A9="
+  assert decode_query("a+b=1%262&%C3%A9=") == Ok(own parameters)
+  assert decode_query("") is Ok(none) && none.length() == 0
+  assert decode_query("a=%") == Err(ParseError.InvalidPercentEncoding(offset: 2))
+  assert decode_query("a=1&b=%zz") == Err(ParseError.InvalidPercentEncoding(offset: 6))
+  assert decode_query("a=1&%C3=2") == Err(ParseError.InvalidCharacter(offset: 4))
+}
+
+fn joins(reference: StringSlice, expected: StringSlice) -> Bool {
+  match parse("http://a/b/c/d;p?q") {
+    Ok(start) => match start.join(reference) {
+      Ok(parsed) => "${parsed}" == expected.to_string()
+      Err(_) => false
+    }
+    Err(_) => false
+  }
+}
+
+test "a reference is resolved against a URL as RFC 3986 gives its normal examples" {
+  assert joins("g:h", expected: "g:h")
+  assert joins("g", expected: "http://a/b/c/g")
+  assert joins("./g", expected: "http://a/b/c/g")
+  assert joins("g/", expected: "http://a/b/c/g/")
+  assert joins("/g", expected: "http://a/g")
+  assert joins("//g", expected: "http://g")
+  assert joins("?y", expected: "http://a/b/c/d;p?y")
+  assert joins("g?y", expected: "http://a/b/c/g?y")
+  assert joins("#s", expected: "http://a/b/c/d;p?q#s")
+  assert joins("g#s", expected: "http://a/b/c/g#s")
+  assert joins("g?y#s", expected: "http://a/b/c/g?y#s")
+  assert joins(";x", expected: "http://a/b/c/;x")
+  assert joins("g;x?y#s", expected: "http://a/b/c/g;x?y#s")
+  assert joins("", expected: "http://a/b/c/d;p?q")
+  assert joins(".", expected: "http://a/b/c/")
+  assert joins("./", expected: "http://a/b/c/")
+  assert joins("..", expected: "http://a/b/")
+  assert joins("../", expected: "http://a/b/")
+  assert joins("../g", expected: "http://a/b/g")
+  assert joins("../..", expected: "http://a/")
+  assert joins("../../", expected: "http://a/")
+  assert joins("../../g", expected: "http://a/g")
+}
+
+test "a reference is resolved as RFC 3986 gives its abnormal examples" {
+  assert joins("../../../g", expected: "http://a/g")
+  assert joins("../../../../g", expected: "http://a/g")
+  assert joins("/./g", expected: "http://a/g")
+  assert joins("/../g", expected: "http://a/g")
+  assert joins("g.", expected: "http://a/b/c/g.")
+  assert joins(".g", expected: "http://a/b/c/.g")
+  assert joins("g..", expected: "http://a/b/c/g..")
+  assert joins("..g", expected: "http://a/b/c/..g")
+  assert joins("./../g", expected: "http://a/b/g")
+  assert joins("./g/.", expected: "http://a/b/c/g/")
+  assert joins("g/./h", expected: "http://a/b/c/g/h")
+  assert joins("g/../h", expected: "http://a/b/c/h")
+  assert joins("g;x=1/./y", expected: "http://a/b/c/g;x=1/y")
+  assert joins("g;x=1/../y", expected: "http://a/b/c/y")
+  assert joins("g?y/./x", expected: "http://a/b/c/g?y/./x")
+  assert joins("g#s/../x", expected: "http://a/b/c/g#s/../x")
+  assert parse("http://host") is Ok(bare) && bare.join("x") is Ok(parsed) && "${parsed}" == "http://host/x"
+  assert parse("http://host") is Ok(bare) && bare.join("a b") is Err(error)
+    && error == ParseError.InvalidCharacter(offset: 1)
+}
+
+fn example() -> Url {
+  match parse("http://example.com/start?old=1#top") {
+    Ok(parsed) => parsed
+    Err(_) => example()
+  }
+}
+
+test "a URL is given with one part changed, encoded as that part needs" {
+  assert "${example().with_path("a b/c")}" == "http://example.com/a%20b/c?old=1#top"
+  assert "${example().with_path("/x").with_path_segment("d/e")}" == "http://example.com/x/d%2Fe?old=1#top"
+  assert "${example().with_path("")}" == "http://example.com?old=1#top"
+  let parameters: List[Parameter] = [Parameter(name: "k", value: "v w")]
+  assert "${example().with_query(parameters)}" == "http://example.com/start?k=v+w#top"
+  assert "${example().with_query([])}" == "http://example.com/start#top"
+  assert "${example().with_query_parameter("n", value: "1&2")}" == "http://example.com/start?old=1&n=1%262#top"
+  assert "${example().with_query([]).with_query_parameter("n", value: "1")}" == "http://example.com/start?n=1#top"
+  assert "${example().with_fragment(Some("sec 1"))}" == "http://example.com/start?old=1#sec%201"
+  assert "${example().with_fragment(None)}" == "http://example.com/start?old=1"
+  assert "${example().with_port(Some(8080))}" == "http://example.com:8080/start?old=1#top"
+  assert "${example().with_port(Some(8080)).with_port(None)}" == "http://example.com/start?old=1#top"
+}
+
+test "URLs are equal when their parts are" {
+  assert parse("HTTP://EXAMPLE.com/a") == parse("http://example.com/a")
+  assert parse("http://example.com/a") != parse("http://example.com/A")
+  assert parse("http://example.com") != parse("http://example.com/")
+  assert Url.parse("http://example.com/a") == parse("http://example.com/a")
+}
+
+test "a template builds a URL around values that are percent-encoded" {
+  let user = "ada lovelace/1"
+  let page: Int64 = 2
+  let built = Url"https://example.com/users/${user.slice()}/posts?page=${page}&q=${"a&b=c"}#${"top"}"
+  assert "${built}" == "https://example.com/users/ada%20lovelace%2F1/posts?page=2&q=a%26b%3Dc#top"
+  assert built.path_segments() == ["users", "ada lovelace/1", "posts"]
+  assert built.query_parameter("q") == Some("a&b=c")
+  let empty = ""
+  let rooted = Url"file:///${empty.slice()}/notes"
+  assert same(rooted.path(), expected: "//notes")
+  let plain = Url"mailto:${"a b"}@example.com"
+  assert same(plain.path(), expected: "a%20b@example.com")
+}

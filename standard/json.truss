@@ -1604,3 +1604,223 @@ impl Decode for Map[Key: Hash + Ordered + text::Parse, Member: Decode] {
     }
   }
 }
+
+fn kind_of(text: StringSlice) -> Option[ParseErrorKind] {
+  match parse(text) {
+    Ok(_) => None
+    Err(error) => Some(error.kind)
+  }
+}
+
+fn round_trip(text: StringSlice) -> Bool {
+  match parse(text) {
+    Ok(value) => value.to_text().slice() == text
+    Err(_) => false
+  }
+}
+
+fn written_text_parses_to_the_same_value(text: StringSlice) -> Bool {
+  match parse(text) {
+    Ok(value) => match parse(value.to_text().slice()) {
+      Ok(again) => again == value
+      Err(_) => false
+    }
+    Err(_) => false
+  }
+}
+
+test "parse reads each kind of value" {
+  assert parse("null") == Ok(Value.Null)
+  assert parse(" true ") is Ok(yes) && yes.as_bool() == Some(true)
+  assert parse("false") is Ok(no) && no.as_bool() == Some(false)
+  assert parse("42") is Ok(whole) && whole.as_int64() == Some(42)
+  assert parse("-0.5e1") is Ok(real) && real.as_float64() == Some(-5.0)
+  assert parse("\"plain\"") is Ok(text) && text.as_text() == Some("plain")
+  assert parse("[1, [2, 3], {}]") is Ok(array)
+    && array.as_items() is Some(items)
+    && items.length() == 3
+    && items[0].as_int64() == Some(1)
+  assert parse("{\"a\": 1, \"b\": {\"c\": [true]}}") is Ok(object)
+    && object.get("a") is Some(first)
+    && first.as_int64() == Some(1)
+    && object.get("missing") is None
+    && object.get_index(0) is None
+  assert parse_bytes("[null]".bytes()) is Ok(from_bytes) && from_bytes.to_text() == "[null]"
+}
+
+test "parse decodes the escapes of a string" {
+  assert parse("\"a\\nb\\tc\\\"d\\\\e\\/f\"") is Ok(escaped) && escaped.as_text() == Some("a\nb\tc\"d\\e/f")
+  assert parse("\"\\u00e9\\u4e2d\"") is Ok(unicode) && unicode.as_text() == Some("é中")
+  assert parse("\"\\ud83d\\ude00\"") is Ok(pair) && pair.as_text() == Some("😀")
+  assert parse("\"é中😀\"") is Ok(direct) && direct.as_text() == Some("é中😀")
+  assert kind_of("\"\\x\"") == Some(ParseErrorKind.InvalidEscape)
+  assert kind_of("\"\\ud83d\"") == Some(ParseErrorKind.InvalidUnicode)
+  assert kind_of("\"\\ude00\"") == Some(ParseErrorKind.InvalidUnicode)
+  assert kind_of("\"\\u12\"") == Some(ParseErrorKind.InvalidEscape)
+}
+
+test "parse rejects text that is not JSON and says where" {
+  assert kind_of("") == Some(ParseErrorKind.UnexpectedEnd)
+  assert kind_of("[1, 2") == Some(ParseErrorKind.UnexpectedEnd)
+  assert kind_of("\"open") == Some(ParseErrorKind.UnexpectedEnd)
+  assert kind_of("{\"a\" 1}") == Some(ParseErrorKind.UnexpectedCharacter)
+  assert kind_of("[1,]") == Some(ParseErrorKind.UnexpectedCharacter)
+  assert kind_of("{a: 1}") == Some(ParseErrorKind.UnexpectedCharacter)
+  assert kind_of("nul") == Some(ParseErrorKind.UnexpectedEnd)
+  assert kind_of("nulx") == Some(ParseErrorKind.UnexpectedCharacter)
+  assert kind_of("01") == Some(ParseErrorKind.InvalidNumber)
+  assert kind_of("1.") == Some(ParseErrorKind.InvalidNumber)
+  assert kind_of("-") == Some(ParseErrorKind.InvalidNumber)
+  assert kind_of("1e") == Some(ParseErrorKind.InvalidNumber)
+  assert kind_of("1 2") == Some(ParseErrorKind.TrailingCharacters)
+  assert kind_of("[[[1]]]") is None
+  assert parse("[[[1]]]", maximum_depth: 2) is Err(deep) && deep.kind == ParseErrorKind.TooDeep
+  assert parse("[\n  1,\n  x\n]") is Err(placed)
+    && placed.kind == ParseErrorKind.UnexpectedCharacter
+    && placed.offset == 9
+    && placed.line == 3
+    && placed.column == 3
+}
+
+test "a number keeps a whole value exact and any other value as a float" {
+  assert parse("9007199254740993") is Ok(large) && large.as_int64() == Some(9007199254740993)
+  assert parse("-9223372036854775808") is Ok(least) && least.as_int64() == Some(Int64.minimum)
+  assert parse("1.5") is Ok(half) && half.as_int64() is None && half.as_float64() == Some(1.5)
+  assert parse("1e3") is Ok(thousand) && thousand.as_float64() == Some(1000.0)
+  assert Number.from_float64(3.0) is Some(three) && three.is_whole() && three.to_int64() == Some(3)
+  assert Number.from_float64(0.25) is Some(quarter) && !quarter.is_whole() && quarter.to_float64() == 0.25
+  assert Number.from_float64(Float64.not_a_number) is None
+  assert Number.from_float64(Float64.infinity) is None
+  assert Value.from_float64(Float64.not_a_number) is None
+  assert round_trip("[0,-1,1.5,0.1,-0.25]")
+  assert written_text_parses_to_the_same_value("[1e300,-2.5e-7,1.7976931348623157e308,5e-324,123456789012345680000]")
+}
+
+test "a value is written as compact text and as indented text" {
+  let text = "{\"name\":\"Ada\",\"tags\":[\"a\",\"b\"],\"age\":36,\"ratio\":0.5,\"none\":null,\"empty\":[],\"object\":{}}"
+  assert round_trip(text)
+  assert parse(text) is Ok(value)
+    && value.to_pretty_text()
+    == "{\n  \"name\": \"Ada\",\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ],\n  \"age\": 36,\n  \"ratio\": 0.5,\n  \"none\": null,\n  \"empty\": [],\n  \"object\": {}\n}"
+  assert parse("[1,[2]]") is Ok(nested) && nested.to_pretty_text(indent: 1) == "[\n 1,\n [\n  2\n ]\n]"
+  assert parse("{\"a\":1}") is Ok(shown) && "${shown}" == "{\"a\":1}"
+  assert quote("a\"b\\c\n\té") == "\"a\\\"b\\\\c\\n\\té\""
+  assert round_trip("\"\\u0001\\u001f\"")
+}
+
+type Player(name: String, score: Int64, tags: List[String], rank: Option[UInt8])
+  derives Equal
+
+impl Encode for Player {
+  fn to_json(self) -> Value {
+    var members: Map[String, Value] = [:]
+    members["name"] = self.name.to_json()
+    members["score"] = self.score.to_json()
+    members["tags"] = self.tags.to_json()
+    members["rank"] = self.rank.to_json()
+    Value.Object(members: own members)
+  }
+}
+
+impl Decode for Player {
+  fn from_json(value: Value) -> Result[Player, DecodeError] {
+    Ok(Player(
+      name: value.field("name")?,
+      score: value.field("score")?,
+      tags: value.field("tags")?,
+      rank: value.optional_field("rank")?,
+    ))
+  }
+}
+
+test "a type that implements Encode and Decode goes to JSON and back" {
+  let player = Player(name: "Ada", score: 12, tags: ["a", "b"], rank: Some(3))
+  let text = encode(player)
+  assert text == "{\"name\":\"Ada\",\"score\":12,\"tags\":[\"a\",\"b\"],\"rank\":3}"
+  let decoded: Result[Player, Error] = decode(text)
+  assert decoded == Ok(own player)
+  let unranked: Result[Player, Error] = decode("{\"name\":\"Bo\",\"score\":-1,\"tags\":[]}")
+  assert unranked == Ok(Player(name: "Bo", score: -1, tags: [], rank: None))
+  assert encode_pretty([1, 2]) == "[\n  1,\n  2\n]"
+}
+
+test "decode says which member has the wrong type or is missing" {
+  let wrong: Result[Player, Error] = decode("{\"name\":\"Ada\",\"score\":\"high\",\"tags\":[]}")
+  assert wrong is Err(Decode(mismatch)) && mismatch.path == "/score"
+  let missing: Result[Player, Error] = decode("{\"name\":\"Ada\",\"score\":1}")
+  assert missing is Err(Decode(absent)) && "${absent}".contains("tags")
+  let nested: Result[Player, Error] = decode("{\"name\":\"Ada\",\"score\":1,\"tags\":[\"a\",2]}")
+  assert nested is Err(Decode(inner)) && inner.path == "/tags/1"
+  let outside: Result[Player, Error] = decode("{\"name\":\"Ada\",\"score\":1,\"tags\":[],\"rank\":256}")
+  assert outside is Err(Decode(range)) && range.path == "/rank"
+  let broken: Result[Player, Error] = decode("{\"name\":")
+  assert broken is Err(Parse(_))
+  let numbers: Result[List[UInt8], Error] = decode("[0, 255]")
+  assert numbers == Ok([0, 255])
+  let table: Result[Map[String, Bool], Error] = decode("{\"on\": true, \"off\": false}")
+  assert table is Ok(flags) && flags.length() == 2 && flags["on"] && !flags["off"]
+}
+
+test "a value is read from a reader and written to a writer" {
+  provide streams::NoHandles() {
+    var source = streams::ByteReader.new("{\"items\": [1, 2, 3]}".bytes())
+    assert read_from(mut source) is Ok(value)
+      && value.get("items") is Some(items)
+      && items.get_index(2) is Some(last)
+      && last.as_int64() == Some(3)
+    var sink = streams::ByteWriter.new()
+    assert parse("[1, \"two\"]") is Ok(written) && write_to(written, sink: mut sink) is Ok(_)
+    assert sink.written() == "[1,\"two\"]".bytes()
+    var broken = streams::ByteReader.new("[1,".bytes())
+    assert read_from(mut broken) is Err(Parse(_))
+  }
+}
+
+fn pointed(text: StringSlice, path: StringSlice) -> Option[String] {
+  match parse(text) {
+    Ok(document) => {
+      match document.pointer(path) {
+        Some(value) => Some(value.to_text())
+        None => None
+      }
+    }
+    Err(_) => None
+  }
+}
+
+test "a pointer finds the value at a path of member names and positions" {
+  let text = "{\"a\": {\"b\": [10, {\"c\": true}]}, \"\": 1, \"m/n\": 2, \"k~l\": 3, \"01\": 4}"
+  assert pointed(text, path: "/a/b") == Some("[10,{\"c\":true}]")
+  assert pointed(text, path: "/a/b/0") == Some("10")
+  assert pointed(text, path: "/a/b/1/c") == Some("true")
+  assert pointed(text, path: "/") == Some("1")
+  assert pointed(text, path: "/m~1n") == Some("2")
+  assert pointed(text, path: "/k~0l") == Some("3")
+  assert pointed(text, path: "/01") == Some("4")
+  assert pointed("[5]", path: "") == Some("[5]")
+  assert pointed(text, path: "/a/b/2") is None
+  assert pointed(text, path: "/a/b/01") is None
+  assert pointed(text, path: "/a/b/-") is None
+  assert pointed(text, path: "/a/b/+1") is None
+  assert pointed(text, path: "/a/x") is None
+  assert pointed(text, path: "/a/b/0/c") is None
+  assert pointed(text, path: "a") is None
+  assert pointed(text, path: "/k~2l") is None
+  assert pointed(text, path: "/k~") is None
+}
+
+test "a template builds a value around the values written in it" {
+  let name = "Ada \"the first\""
+  let count: Int64 = 3
+  let tags: List[Value] = [Value.from("a"), Value.from(true)]
+  let built = Value"""{"name": ${name.slice()}, "count": ${count}, "tags": ${own tags}, "nested": [ ${false} , null, 1.5]}"""
+  assert built.to_text() == "{\"name\":\"Ada \\\"the first\\\"\",\"count\":3,\"tags\":[\"a\",true],\"nested\":[false,null,1.5]}"
+  let whole = Value"${count}"
+  let inner = Value"""{"id": ${count}}"""
+  let members: Map[String, Value] = [:]
+  let outer = Value"""[${own inner}, ${own members}]"""
+  assert outer.to_text() == "[{\"id\":3},{}]"
+  assert whole.as_int64() == Some(3)
+  let plain = Value" [1, 2] "
+  assert plain.to_text() == "[1,2]"
+}

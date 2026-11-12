@@ -1,3 +1,4 @@
+use standard::console
 use standard::text::string_slice
 use standard::text::unicode_tables
 
@@ -254,4 +255,125 @@ public fn display_width(character: Character) -> USize
   } else {
     1
   }
+}
+
+test "fold_case removes the differences of case" {
+  assert fold_case("Hello WÖRLD") == "hello wörld"
+  assert fold_case("Straße") == "strasse"
+  assert fold_case("ΟΔΥΣΣΕΥΣ") == "οδυσσευσ"
+  assert fold_case("ﬃ") == "ffi"
+  assert fold_case("中文 123") == "中文 123"
+}
+
+test "equal_ignoring_case compares folded text" {
+  assert equal_ignoring_case("Straße", second: "STRASSE")
+  assert equal_ignoring_case("ΟΔΥΣΣΕΥΣ", second: "οδυσσευς")
+  assert equal_ignoring_case("", second: "")
+  assert !equal_ignoring_case("résumé", second: "resume")
+  assert !equal_ignoring_case("a", second: "ab")
+}
+
+test "a character has one general category" {
+  assert category(Character"a") == Category.Letter
+  assert category(Character"中") == Category.Letter
+  assert category(Character"\u{301}") == Category.Mark
+  assert category(Character"7") == Category.Number
+  assert category(Character"½") == Category.Number
+  assert category(Character"!") == Category.Punctuation
+  assert category(Character"€") == Category.Symbol
+  assert category(Character" ") == Category.Separator
+  assert category(Character"\n") == Category.Control
+  assert category(Character"\u{200D}") == Category.Format
+  assert category(Character"\u{E000}") == Category.PrivateUse
+  assert category(Character"\u{F0000}") == Category.PrivateUse
+  assert category(Character"\u{378}") == Category.Unassigned
+  assert category(Character"\u{10FFFF}") == Category.Unassigned
+}
+
+test "a character is as wide as zero, one, or two columns" {
+  assert display_width(Character"a") == 1
+  assert display_width(Character"é") == 1
+  assert display_width(Character"中") == 2
+  assert display_width(Character"ｱ") == 1
+  assert display_width(Character"Ａ") == 2
+  assert display_width(Character"😀") == 2
+  assert display_width(Character"\u{301}") == 0
+  assert display_width(Character"\u{200D}") == 0
+  assert display_width(Character"\n") == 0
+  assert console::display_width("abc") == 3
+  assert console::display_width("日本語") == 6
+  assert console::display_width("e\u{301}") == 1
+  assert console::display_width("") == 0
+}
+
+test "normalize composes and decomposes canonical equivalents" {
+  assert normalize("e\u{301}") == "\u{E9}"
+  assert normalize("\u{E9}", form: Form.Decomposed) == "e\u{301}"
+  assert normalize("A\u{30A}") == "\u{C5}"
+  assert normalize("\u{212B}") == "\u{C5}"
+  assert normalize("\u{212B}", form: Form.Decomposed) == "A\u{30A}"
+  assert normalize("\u{2126}", form: Form.Decomposed) == "\u{3A9}"
+  assert normalize("\u{1F600}e\u{301}") == "\u{1F600}\u{E9}"
+  assert normalize("plain text") == "plain text"
+  assert normalize("") == ""
+}
+
+test "normalize orders combining marks by their class" {
+  assert normalize("a\u{301}\u{323}", form: Form.Decomposed) == "a\u{323}\u{301}"
+  assert normalize("a\u{301}\u{323}") == "\u{1EA1}\u{301}"
+  assert normalize("a\u{315}\u{300}\u{5AE}b", form: Form.Decomposed) == "a\u{5AE}\u{300}\u{315}b"
+  assert normalize("a\u{315}\u{300}\u{5AE}b") == "\u{E0}\u{5AE}\u{315}b"
+  assert normalize("\u{3A9}\u{301}\u{345}") == "\u{38F}\u{345}"
+  assert normalize("\u{301}a") == "\u{301}a"
+}
+
+test "normalize leaves a character that composition excludes decomposed" {
+  assert normalize("\u{958}") == "\u{915}\u{93C}"
+  assert normalize("\u{958}", form: Form.Decomposed) == "\u{915}\u{93C}"
+}
+
+test "normalize composes two starters" {
+  assert normalize("\u{CC6}\u{CD5}") == "\u{CC7}"
+  assert normalize("\u{CC6}\u{CD5}", form: Form.Decomposed) == "\u{CC6}\u{CD5}"
+}
+
+test "normalize decomposes and composes Hangul syllables by arithmetic" {
+  assert normalize("\u{D55C}", form: Form.Decomposed) == "\u{1112}\u{1161}\u{11AB}"
+  assert normalize("\u{1112}\u{1161}\u{11AB}") == "\u{D55C}"
+  assert normalize("\u{AC00}", form: Form.Decomposed) == "\u{1100}\u{1161}"
+  assert normalize("\u{AC00}\u{11A8}") == "\u{AC01}"
+  assert normalize("\u{1100}\u{1161}\u{11A8}") == "\u{AC01}"
+}
+
+test "normalize replaces compatibility characters only in the compatibility forms" {
+  assert normalize("\u{FB01}") == "\u{FB01}"
+  assert normalize("\u{FB01}", form: Form.Decomposed) == "\u{FB01}"
+  assert normalize("\u{FB01}", form: Form.CompatibilityComposed) == "fi"
+  assert normalize("\u{FB01}", form: Form.CompatibilityDecomposed) == "fi"
+  assert normalize("\u{2460}", form: Form.CompatibilityComposed) == "1"
+  assert normalize("\u{BD}", form: Form.CompatibilityComposed) == "1\u{2044}2"
+  assert normalize("\u{FF76}\u{FF9E}", form: Form.CompatibilityComposed) == "\u{30AC}"
+  assert normalize("\u{FF76}\u{FF9E}", form: Form.CompatibilityDecomposed) == "\u{30AB}\u{3099}"
+  assert normalize("\u{FDFA}", form: Form.CompatibilityDecomposed).slice().characters().count() == 18
+}
+
+test "the four forms of one string differ" {
+  assert normalize("\u{1E9B}\u{323}") == "\u{1E9B}\u{323}"
+  assert normalize("\u{1E9B}\u{323}", form: Form.Decomposed) == "\u{17F}\u{323}\u{307}"
+  assert normalize("\u{1E9B}\u{323}", form: Form.CompatibilityComposed) == "\u{1E69}"
+  assert normalize("\u{1E9B}\u{323}", form: Form.CompatibilityDecomposed) == "s\u{323}\u{307}"
+}
+
+test "is_normalized tells whether normalize would change the text" {
+  assert is_normalized("plain text")
+  assert is_normalized("")
+  assert is_normalized("\u{E9}")
+  assert !is_normalized("e\u{301}")
+  assert is_normalized("e\u{301}", form: Form.Decomposed)
+  assert !is_normalized("\u{E9}", form: Form.Decomposed)
+  assert is_normalized("\u{FB01}")
+  assert !is_normalized("\u{FB01}", form: Form.CompatibilityComposed)
+  assert !is_normalized("a\u{301}\u{323}", form: Form.Decomposed)
+  assert is_normalized("\u{D55C}")
+  assert !is_normalized("\u{D55C}", form: Form.CompatibilityDecomposed)
 }

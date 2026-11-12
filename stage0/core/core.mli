@@ -191,9 +191,10 @@ and kind =
           [base]: it is some of the elements of that place.
 
           [call] creates the view. It is a call of the base type's [slice_range] with three
-          arguments: [base], the start, and the stop, which is exclusive. The bounds are already
-          computed: a missing start is [0], a missing stop is the length of [base], and an inclusive
-          stop is [stop + 1]. The two bounds are passed as values. *)
+          arguments: [base], the start, and the stop, which is exclusive; or with no stop, of its
+          [slice_from] with two: [base] and the start. Either way [base] is the call's first
+          argument, the same node, so the base is evaluated once. A missing start is [0], and an
+          inclusive stop is [stop + 1]. The bounds are passed as values. *)
   (* Calls and operators *)
   | Call of call
   | Operator of { operation : Intrinsic.operation; arguments : expression list }

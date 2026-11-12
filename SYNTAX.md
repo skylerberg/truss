@@ -3626,7 +3626,9 @@ forecast = []
 - **`name`** is a `lower_snake_case` name, or two joined by `::`, an owner
   and a name, as in `"acme::geometry"`. A package must have an owner in its
   name to be published. `standard` is the standard library's name, and a
-  name of one part cannot be the owner of another package of the build.
+  project's package of that name takes the place of the standard library
+  built into the compiler. A name of one part cannot be the owner of
+  another package of the build.
 - **`truss`** is the language version the package's files are read as, and
   the least toolchain that can build it.
 - **Each entry of `[dependencies]`** is a package's name and the list of

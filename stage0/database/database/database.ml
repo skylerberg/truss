@@ -30,23 +30,20 @@ let manifest_text ~usize_bits ~name ~(dependencies : Manifest.dependency list) =
             (String.concat ", " (List.map (Printf.sprintf "%S") dependency.capabilities)))
         dependencies)
 
-(* A package given by itself, as a root of its own: its manifest and its
-   modules' files. *)
-let set_package engine ~root ~usize_bits ~name ~dependencies
-    (modules : (Path.module_ * string) list) =
+(* A package as a root of its own: its manifest and its modules' files. *)
+let set_package engine ~root ~manifest (modules : (Path.module_ * string) list) =
   set_root engine root
-    (("truss.toml", manifest_text ~usize_bits ~name ~dependencies)
+    (("truss.toml", manifest)
     :: List.map (fun (module_, text) -> (Project.module_path ~directory:"" module_, text)) modules);
   add_root engine root
 
 let load_package ?(usize_bits = 32) engine ~name ~dependencies modules =
-  set_package engine ~root:(Project.package_root name) ~usize_bits ~name ~dependencies modules
+  set_package engine ~root:(Project.package_root name)
+    ~manifest:(manifest_text ~usize_bits ~name ~dependencies)
+    modules
 
-(* The standard library holds the code for each platform, and its bounds of
-   [USize] are its target's, so it is checked with the target's width. *)
 let set_standard engine modules =
-  set_package engine ~root:Project.standard_root ~usize_bits:64 ~name:Path.standard_package
-    ~dependencies:[] modules
+  set_package engine ~root:Project.standard_root ~manifest:Standard_library.manifest modules
 
 let load_standard engine = set_standard engine Standard_library.modules
 

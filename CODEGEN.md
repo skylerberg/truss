@@ -15,8 +15,8 @@ linker turns into a program. In the core form every call has a resolved
 callee and one argument per parameter, each argument is marked as a place
 or a value, every operator is resolved to an intrinsic operation or a call,
 and every type is fully inferred. A slice of a range, `items[1..3]`, is a
-call of the base type's `slice_range` with both bounds worked out, so
-lowering it is lowering that call. Lowering from the core form needs no
+call of the base type's `slice_range` with both bounds worked out, or with
+no stop, of its `slice_from`, so lowering it is lowering that call. Lowering from the core form needs no
 name resolution and no type inference. Every proof obligation has been
 discharged by then.
 

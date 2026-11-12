@@ -1,4 +1,5 @@
 use standard::json
+use standard::simulation
 
 public type Level = Debug | Information | Warning | Error
   derives Equal, Hash, Ordered
@@ -238,5 +239,66 @@ impl Log for WithFields
 
   fn enabled(self, level: Level) -> Bool {
     Log.enabled(level)
+  }
+}
+
+test "a level is displayed in lower case" {
+  assert "${Level.Debug}" == "debug"
+  assert "${Level.Information}" == "information"
+  assert "${Level.Warning}" == "warning"
+  assert "${Level.Error}" == "error"
+}
+
+test "a logger that adds fields puts them before the record's own" {
+  var captured = CapturedLog()
+  provide mut captured {
+    provide WithFields(fields: [Field.string("request", value: "r1")]) {
+      information("started", fields: [Field.integer("count", value: 2)])
+      debug("detail")
+    }
+    warning("outside")
+  }
+  assert captured.records.length() == 3
+  assert captured.records[0].level == Level.Information
+  assert captured.records[0].message == "started"
+  assert captured.records[0].fields.length() == 2
+  assert captured.records[0].fields[0].name == "request"
+  assert captured.records[0].fields[1].name == "count"
+  assert captured.records[1].fields.length() == 1
+  assert captured.records[1].fields[0].name == "request"
+  assert captured.records[2].fields.length() == 0
+}
+
+test "a console log writes each record as a line with its time, level, message, and fields" {
+  let start = Instant.from_unix_nanoseconds(1700000000000000000)
+  let world = simulation::World.from(simulation::Setup.new().with_time(start))
+  provide world {
+    provide ConsoleLog() {
+      information("started", fields: [
+        Field.integer("count", value: 2),
+        Field.string("user", value: "ada"),
+        Field.string("note", value: "two words"),
+        Field.bool("ready", value: true),
+      ])
+      debug("hidden")
+      error("failed")
+    }
+    assert world.errors() == "2023-11-14T22:13:20Z information started count=2 user=ada note=\"two words\" ready=true\n2023-11-14T22:13:20Z error failed\n"
+  }
+}
+
+test "a console log writes each record as a JSON object when asked to" {
+  let start = Instant.from_unix_nanoseconds(1700000000000000000)
+  let world = simulation::World.from(simulation::Setup.new().with_time(start))
+  provide world {
+    provide ConsoleLog(minimum: Level.Debug, format: Format.Json) {
+      debug("a \"quoted\" message", fields: [
+        Field.integer("count", value: -3),
+        Field.float("ratio", value: 0.5),
+        Field.string("user", value: "ada"),
+        Field.duration("took", value: Duration.milliseconds(1500)),
+      ])
+    }
+    assert world.errors() == "{\"time\":\"2023-11-14T22:13:20Z\",\"level\":\"debug\",\"message\":\"a \\\"quoted\\\" message\",\"count\":-3,\"ratio\":0.5,\"user\":\"ada\",\"took\":\"1.5s\"}\n"
   }
 }

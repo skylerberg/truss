@@ -98,26 +98,33 @@ jobs:
 
       # The objects of the C that the tests generate, each kept by the text
       # of its C, the compiler, and its flags. A run starts from main's and
-      # compiles only the C that main did not.
+      # compiles only the C that main did not. They are in the store's
+      # directory of objects, so `truss test` reads them too.
       - uses: actions/cache/restore@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/objects
           key: objects-${{ github.sha }}
           restore-keys: objects-
 
       - name: Test generated code
-        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune build @stage0/test/codegen/runtest
+        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss/objects" opam exec -- dune build @stage0/test/codegen/runtest
+
+      - name: Test the standard library
+        run: |
+          opam exec -- dune build ./stage0/bin/truss.exe
+          cd standard
+          TRUSS_CACHE="$HOME/.cache/truss" ../_build/default/stage0/bin/truss.exe test --no-server
 
       # An object compiled more than two weeks ago is dropped, and compiled
       # again by the next run that needs it, so the cache holds the objects
       # that are still built and not every one that was.
       - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+        run: mkdir -p ~/.cache/truss/objects && find ~/.cache/truss/objects -type f -mtime +14 -delete
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/objects
           key: objects-${{ github.sha }}
 
   # The standard library's proofs: the longest test, and the one that grows
@@ -227,7 +234,7 @@ jobs:
       # of its own again.
       - uses: actions/cache/restore@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/objects
           key: sanitized-objects-${{ github.sha }}
           restore-keys: sanitized-objects-
 
@@ -235,15 +242,23 @@ jobs:
         env:
           TRUSS_SANITIZE: "1"
           ASAN_OPTIONS: detect_leaks=0
-        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss-objects" opam exec -- dune test --force stage0/test/codegen
+        run: TRUSS_OBJECT_CACHE="$HOME/.cache/truss/objects" opam exec -- dune test --force stage0/test/codegen
+
+      - name: Test the standard library under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          opam exec -- dune build ./stage0/bin/truss.exe
+          cd standard
+          TRUSS_CACHE="$HOME/.cache/truss" ../_build/default/stage0/bin/truss.exe test --no-server --sanitize
 
       - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+        run: mkdir -p ~/.cache/truss/objects && find ~/.cache/truss/objects -type f -mtime +14 -delete
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/objects
           key: sanitized-objects-${{ github.sha }}
 
   # The programs that run on several threads, again under ThreadSanitizer,
@@ -276,7 +291,7 @@ jobs:
       # were one job.
       - uses: actions/cache/restore@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/objects
           key: thread-sanitized-objects-${{ github.sha }}
           restore-keys: |
             thread-sanitized-objects-
@@ -285,7 +300,7 @@ jobs:
       - name: Test programs on threads under ThreadSanitizer
         env:
           TRUSS_SANITIZE: thread
-          TRUSS_OBJECT_CACHE: /home/runner/.cache/truss-objects
+          TRUSS_OBJECT_CACHE: /home/runner/.cache/truss/objects
         run: |
           opam exec -- dune build stage0/test/codegen/parallel_tests.exe stage0/test/codegen/shared_tests.exe stage0/test/codegen/concurrent_tests.exe
           cd _build/default/stage0/test/codegen
@@ -294,10 +309,10 @@ jobs:
           TRUSS_TEST="on threads" ./concurrent_tests.exe
 
       - if: github.event_name == 'push'
-        run: mkdir -p ~/.cache/truss-objects && find ~/.cache/truss-objects -type f -mtime +14 -delete
+        run: mkdir -p ~/.cache/truss/objects && find ~/.cache/truss/objects -type f -mtime +14 -delete
 
       - if: github.event_name == 'push'
         uses: actions/cache/save@v6.1.0
         with:
-          path: ~/.cache/truss-objects
+          path: ~/.cache/truss/objects
           key: thread-sanitized-objects-${{ github.sha }}

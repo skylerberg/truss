@@ -205,7 +205,7 @@ SYNTAX.md and DESIGN.md state the rules that a programmer can observe.
 | `Task_exit`, `Return`, `Break`, `Continue` | `exit_tasks`, `return`, and jumps |
 | `Lambda` | A body of its own, and a `function` rvalue |
 | `Template` | A call of the tag's `from_template` that keeps the literal texts, on which the prover runs the tag's checks |
-| `Slice` | A call of `slice_range` with its base borrowed, whose result views the base |
+| `Slice` | A call of `slice_range` or `slice_from` with its base borrowed, whose result views the base |
 | `Record_update`, an array's `Collection_literal` | Constructions |
 | `Proof`, a condition that cannot run | Ghost statements |
 | `Old`, `Yielded`, `Finished` | Ghost locals, which the builder assigns at entry, at each part, and at the end |

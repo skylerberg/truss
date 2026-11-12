@@ -241,3 +241,68 @@ public fn decode(text: StringSlice, alphabet: Alphabet = Alphabet.Standard) -> R
   }
   Ok(List(storage: own bytes))
 }
+
+fn decodes_to(text: StringSlice, expected: StringSlice) -> Bool {
+  match decode(text) {
+    Ok(bytes) => bytes == expected.to_bytes()
+    Err(_) => false
+  }
+}
+
+test "bytes encode with padding, as RFC 4648 gives them" {
+  assert encode("".bytes()) == ""
+  assert encode("f".bytes()) == "Zg=="
+  assert encode("fo".bytes()) == "Zm8="
+  assert encode("foo".bytes()) == "Zm9v"
+  assert encode("foob".bytes()) == "Zm9vYg=="
+  assert encode("fooba".bytes()) == "Zm9vYmE="
+  assert encode("foobar".bytes()) == "Zm9vYmFy"
+}
+
+test "encoding can leave out the padding and use the alphabet for addresses" {
+  assert encode("f".bytes(), padding: false) == "Zg"
+  assert encode("fo".bytes(), padding: false) == "Zm8"
+  assert encode("foo".bytes(), padding: false) == "Zm9v"
+  let bytes: List[UInt8] = [251, 255, 254]
+  assert encode(bytes) == "+//+"
+  assert encode(bytes, alphabet: Alphabet.UrlSafe) == "-__-"
+  let two: List[UInt8] = [251, 255]
+  assert encode(two, alphabet: Alphabet.UrlSafe) == "-_8="
+}
+
+test "text decodes with or without its padding" {
+  assert decodes_to("", expected: "")
+  assert decodes_to("Zg==", expected: "f")
+  assert decodes_to("Zg", expected: "f")
+  assert decodes_to("Zm8=", expected: "fo")
+  assert decodes_to("Zm8", expected: "fo")
+  assert decodes_to("Zm9v", expected: "foo")
+  assert decodes_to("Zm9vYmFy", expected: "foobar")
+  assert decodes_to("Zm9vYmE=", expected: "fooba")
+  assert decode("-__-", alphabet: Alphabet.UrlSafe) is Ok(bytes) && bytes.length() == 3 && bytes[0] == 251
+    && bytes[2] == 254
+}
+
+test "decoding says what is wrong with text that is not base64" {
+  assert decode("Z") == Err(DecodeError.InvalidLength)
+  assert decode("Zm9vY") == Err(DecodeError.InvalidLength)
+  assert decode("Zg=") == Err(DecodeError.InvalidPadding)
+  assert decode("Zm8==") == Err(DecodeError.InvalidPadding)
+  assert decode("Zm9v=") == Err(DecodeError.InvalidPadding)
+  assert decode("Zh==") == Err(DecodeError.InvalidPadding)
+  assert decode("Zm9=") == Err(DecodeError.InvalidPadding)
+  assert decode("Zm9!") == Err(DecodeError.InvalidCharacter(offset: 3))
+  assert decode("Z=9v") == Err(DecodeError.InvalidCharacter(offset: 1))
+  assert decode("-__-") == Err(DecodeError.InvalidCharacter(offset: 0))
+  assert decode("+//+", alphabet: Alphabet.UrlSafe)
+    == Err(DecodeError.InvalidCharacter(offset: 0))
+  assert "${DecodeError.InvalidCharacter(offset: 2)}" == "the byte at offset 2 is not in the alphabet"
+}
+
+test "bytes are encoded onto text that is being built" {
+  var builder = TextBuilder.new()
+  mut builder.write("data:")
+  encode_onto("foobar".bytes(), output: mut builder)
+  encode_onto("f".bytes(), output: mut builder, padding: false)
+  assert own builder.finish() == "data:Zm9vYmFyZg"
+}

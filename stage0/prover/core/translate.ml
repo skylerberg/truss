@@ -1572,6 +1572,17 @@ let rec root_of (place : place) =
 
 let is_test context = match context.current with Path.Test _ -> true | _ -> false
 
+(* The bounds of a slice: the arguments after the base of its call, a start
+   and a stop for [slice_range], or a start alone for [slice_from]. *)
+let slice_bounds (call : expression) =
+  match call.kind with
+  | Call
+      { arguments = [ _; Passed { value = Value start; _ }; Passed { value = Value stop; _ } ]; _ }
+    ->
+      Some (start, Some stop)
+  | Call { arguments = [ _; Passed { value = Value start; _ } ]; _ } -> Some (start, None)
+  | _ -> None
+
 (* Whether a function is a private method that takes [mut self] and is
    written as [fn Type.method], which is a step of an update: its
    receiver's invariant is neither shown at a call nor assumed after. *)
@@ -1799,23 +1810,12 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
   | Collection_literal { elements; _ } -> Some (list_literal context frame node elements)
   | Map_literal { entries; _ } -> Some (map_literal context frame node entries)
   | Record_update { base; updates } -> Some (with_ context frame node base updates)
-  | Slice
-      {
-        base;
-        call =
-          {
-            kind =
-              Call
-                {
-                  arguments =
-                    [ _; Passed { value = Value start; _ }; Passed { value = Value stop; _ } ];
-                  _;
-                };
-            _;
-          };
-      } ->
-      Some (slice context frame node base ~start:(Some start) ~stop:(Some stop) ~inclusive:false)
-  | Slice _ -> unsupported (at frame node) "a slice whose call is not of `slice_range`"
+  | Slice { base; call } -> (
+      match slice_bounds call with
+      | Some (start, stop) ->
+          Some (slice context frame node base ~start:(Some start) ~stop ~inclusive:false)
+      | None ->
+          unsupported (at frame node) "a slice whose call is not of `slice_range` or `slice_from`")
   | Call call_ -> (
       match resolved_call context frame node call_ with
       | Some _ when Types.equal (type_of context frame node) Types.Never ->
@@ -2590,42 +2590,25 @@ and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
         | Passed { mode; value = operand; _ } when not (is_lambda argument) ->
             let type_ = operand_type context frame operand in
             let frame, term, run =
-              match operand with
-              | Value
-                  ({
-                     kind =
-                       Slice
-                         {
-                           base;
-                           call =
-                             {
-                               kind =
-                                 Call
-                                   {
-                                     arguments =
-                                       [
-                                         _;
-                                         Passed { value = Value start; _ };
-                                         Passed { value = Value stop; _ };
-                                       ];
-                                     _;
-                                   };
-                               _;
-                             };
-                         };
-                     _;
-                   } as slice_node) ->
+              let sliced =
+                match operand with
+                | Value ({ kind = Slice { base; call }; _ } as slice_node) ->
+                    Option.map (fun bounds -> (slice_node, base, bounds)) (slice_bounds call)
+                | _ -> None
+              in
+              match (sliced, operand) with
+              | Some (slice_node, base, (start, stop)), _ ->
                   let frame, term, low, high =
-                    slice_run context frame slice_node base ~start:(Some start) ~stop:(Some stop)
+                    slice_run context frame slice_node base ~start:(Some start) ~stop
                       ~inclusive:false
                   in
                   (frame, term, Some (low, high))
-              | Place (Local _) ->
+              | None, Place (Local _) ->
                   let frame, term =
                     reading_callback context (fun () -> operand_value context frame operand)
                   in
                   (frame, term, None)
-              | _ ->
+              | None, _ ->
                   let frame, term = operand_value context frame operand in
                   (frame, term, None)
             in
@@ -4483,7 +4466,9 @@ and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
     | Some stop ->
         let frame, high = value context frame stop in
         (frame, if inclusive then Costs.plus high (Logic.int 1) else high)
-    | None -> (frame, length)
+    | None ->
+        assume context frame Logic.(Operation (">=", [ length; int 0 ]));
+        (frame, length)
   in
   oblige context frame Requires span
     (Printf.sprintf "`%s` may not be within the collection." (quote frame.source node.origin))

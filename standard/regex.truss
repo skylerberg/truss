@@ -1597,3 +1597,199 @@ impl text::Parse for Regex {
     compile(text, placeholders: false)
   }
 }
+
+fn compiled(pattern: StringSlice) -> Regex {
+  match Regex.parse(pattern) {
+    Ok(parsed) => parsed
+    Err(_) => Regex"x^"
+  }
+}
+
+fn finds(pattern: StringSlice, text: StringSlice, start: USize, end: USize) -> Bool {
+  compiled(pattern).find(text) == Some(Match(start: start, end: end))
+}
+
+fn misses(pattern: StringSlice, text: StringSlice) -> Bool {
+  Regex.parse(pattern) is Ok(parsed) && parsed.find(text) is None && !parsed.is_match(text)
+}
+
+fn refuses(pattern: StringSlice, kind: PatternErrorKind, offset: USize) -> Bool {
+  Regex.parse(pattern) is Err(error) && error.kind == kind && error.offset == offset
+}
+
+fn has_group(captures: Captures, index: USize, start: USize, end: USize) -> Bool {
+  captures.get(index) == Some(Match(start: start, end: end))
+}
+
+test "a pattern of characters, classes, and escapes finds its first match" {
+  assert finds("abc", text: "xabcx", start: 1, end: 4)
+  assert misses("abc", text: "ab")
+  assert finds("a.c", text: "xa-cx", start: 1, end: 4)
+  assert misses("a.c", text: "a\nc")
+  assert finds("[a-c]+", text: "xxbcabx", start: 2, end: 6)
+  assert finds("[^0-9]+", text: "12ab34", start: 2, end: 4)
+  assert finds("\\d{3}-\\d{4}", text: "call 555-1234 now", start: 5, end: 13)
+  assert finds("\\w+@\\w+\\.com", text: "mail ada_1@example.com!", start: 5, end: 22)
+  assert finds("\\s+", text: "a \t\nb", start: 1, end: 4)
+  assert finds("\\S+", text: "  ab  ", start: 2, end: 4)
+  assert finds("\\D+", text: "12ab", start: 2, end: 4)
+  assert finds("\\W", text: "ab_c-d", start: 4, end: 5)
+  assert finds("é+", text: "caféé!", start: 3, end: 7)
+  assert finds("[α-ω]+", text: "xyz λογος", start: 4, end: 14)
+  assert finds("a\\.b", text: "axb a.b", start: 4, end: 7)
+  assert finds("\\x41\\u{42}", text: "xAB", start: 1, end: 3)
+  assert finds("[\\]\\-a]+", text: "x]-a]", start: 1, end: 5)
+  assert finds("[\\d.]+", text: "v1.25b", start: 1, end: 5)
+  assert finds("\\t\\n", text: "a\t\nb", start: 1, end: 3)
+  assert finds("", text: "abc", start: 0, end: 0)
+  assert misses("a", text: "")
+}
+
+test "alternation takes the first branch that matches, and repetition is greedy unless marked lazy" {
+  assert finds("a|ab", text: "ab", start: 0, end: 1)
+  assert finds("ab|a", text: "ab", start: 0, end: 2)
+  assert finds("(a|ab)(c|bcd)", text: "abcd", start: 0, end: 4)
+  assert finds("a*", text: "aaab", start: 0, end: 3)
+  assert finds("a*?", text: "aaab", start: 0, end: 0)
+  assert finds("a+?", text: "aaab", start: 0, end: 1)
+  assert finds("<.+>", text: "<a><b>", start: 0, end: 6)
+  assert finds("<.+?>", text: "<a><b>", start: 0, end: 3)
+  assert finds("x{2,3}", text: "xxxxx", start: 0, end: 3)
+  assert finds("x{2,3}?", text: "xxxxx", start: 0, end: 2)
+  assert finds("x{2,}", text: "axxxxb", start: 1, end: 5)
+  assert finds("(ab){2}", text: "ababab", start: 0, end: 4)
+  assert finds("x{0}y", text: "xy", start: 1, end: 2)
+  assert finds("a(|b)c", text: "ac abc", start: 0, end: 2)
+  assert finds("(a|b)*c", text: "ababc", start: 0, end: 5)
+  assert finds("colou?r", text: "my color", start: 3, end: 8)
+  assert finds("a??b", text: "ab", start: 0, end: 2)
+  assert finds("(a+)+b", text: "aaab", start: 0, end: 4)
+  assert misses("x{3}", text: "xx")
+  assert finds("ab|cd|ef", text: "xxefcd", start: 2, end: 4)
+  assert finds("(?:ab)+", text: "ababx", start: 0, end: 4)
+}
+
+test "anchors and word boundaries hold at a place and take no character" {
+  assert finds("^abc", text: "abcabc", start: 0, end: 3)
+  assert finds("abc\u{24}", text: "abcabc", start: 3, end: 6)
+  assert finds("^abc\u{24}", text: "abc", start: 0, end: 3)
+  assert misses("^abc\u{24}", text: "abcd")
+  assert finds("^\u{24}", text: "", start: 0, end: 0)
+  assert finds("^", text: "ab", start: 0, end: 0)
+  assert finds("\u{24}", text: "ab", start: 2, end: 2)
+  assert finds("\\bcat\\b", text: "concat cat cats", start: 7, end: 10)
+  assert finds("\\Bcat", text: "cat concat", start: 7, end: 10)
+  assert finds("\\b", text: "  ab", start: 2, end: 2)
+  assert misses("a^b", text: "ab")
+  assert finds("(^a|b\u{24})", text: "cab", start: 2, end: 3)
+}
+
+test "captures give where each group matched, by number and by name" {
+  assert compiled("(\\d+)-(\\d+)-(\\d+)").captures("from 2026-11-10 to 2027-01-02") is Some(date)
+    && date.length() == 4 && date.whole() == Match(start: 5, end: 15)
+    && has_group(date, index: 1, start: 5, end: 9)
+    && has_group(date, index: 2, start: 10, end: 12)
+    && has_group(date, index: 3, start: 13, end: 15)
+    && date.get(4) is None
+  let named = compiled("(?<year>\\d{4})-(?<month>\\d\\d)")
+  assert named.group_count() == 2
+  assert named.captures("from 2026-11-10 to 2027-01-02") is Some(parts)
+    && parts.named("year") == Some(Match(start: 5, end: 9))
+    && parts.named("month") == Some(Match(start: 10, end: 12))
+    && parts.named("day") is None && parts.named("") is None
+  assert compiled("(a)|(b)").captures("xb") is Some(either)
+    && either.get(1) is None && has_group(either, index: 2, start: 1, end: 2)
+  assert compiled("((a)(b))*").captures("abab") is Some(repeated)
+    && repeated.whole() == Match(start: 0, end: 4)
+    && has_group(repeated, index: 1, start: 2, end: 4)
+    && has_group(repeated, index: 3, start: 3, end: 4)
+  assert compiled("(x)").captures("abc") is None
+  assert compiled("(?:a)(b)").group_count() == 1
+}
+
+test "every match is found, and text is split and replaced around matches" {
+  let numbers = compiled("\\d+").find_all("a1b22c333")
+  assert numbers.length() == 3
+  assert numbers[0] == Match(start: 1, end: 2)
+  assert numbers[1] == Match(start: 3, end: 5)
+  assert numbers[2] == Match(start: 6, end: 9)
+  let empties = compiled("a*").find_all("baaa")
+  assert empties.length() == 3
+  assert empties[0] == Match(start: 0, end: 0)
+  assert empties[1] == Match(start: 1, end: 4)
+  assert empties[2] == Match(start: 4, end: 4)
+  let commas = compiled(",\\s*")
+  let pieces = commas.split("a, b,c,  d")
+  assert pieces.length() == 4
+  assert pieces[0] == "a".slice()
+  assert pieces[1] == "b".slice()
+  assert pieces[2] == "c".slice()
+  assert pieces[3] == "d".slice()
+  let comma = compiled(",")
+  let whole = comma.split("abc")
+  assert whole.length() == 1 && whole[0] == "abc".slice()
+  assert compiled("\\s+").replace_all("a  b \t c", replacement: " ") == "a b c"
+  assert compiled("b+").replace_first("abbcbb", replacement: "-") == "a-cbb"
+  assert compiled("x").replace_all("abc", replacement: "-") == "abc"
+  assert compiled("x*").replace_all("ab", replacement: "-") == "-a-b-"
+  let doubled = compiled("(\\w)(\\d)").replace_all_with("a1 b2", replace: fn(captures) {
+    if captures.get(2) is Some(digit) && digit.start == 1 { "first" } else { "later" }
+  })
+  assert doubled == "first later"
+}
+
+test "a pattern that is not well formed says what is wrong and where" {
+  assert refuses("(", kind: PatternErrorKind.UnbalancedParenthesis, offset: 0)
+  assert refuses("a)", kind: PatternErrorKind.UnbalancedParenthesis, offset: 1)
+  assert refuses("[a", kind: PatternErrorKind.UnbalancedBracket, offset: 0)
+  assert refuses("a{2,1}", kind: PatternErrorKind.InvalidRepetition, offset: 1)
+  assert refuses("*a", kind: PatternErrorKind.InvalidRepetition, offset: 0)
+  assert refuses("a{x}", kind: PatternErrorKind.InvalidRepetition, offset: 1)
+  assert refuses("a{1001}", kind: PatternErrorKind.InvalidRepetition, offset: 1)
+  assert refuses("\\q", kind: PatternErrorKind.InvalidEscape, offset: 0)
+  assert refuses("[\\b]", kind: PatternErrorKind.InvalidEscape, offset: 1)
+  assert refuses("[z-a]", kind: PatternErrorKind.InvalidRange, offset: 2)
+  assert refuses("(?=a)", kind: PatternErrorKind.UnsupportedSyntax, offset: 0)
+  assert refuses("(a)\\1", kind: PatternErrorKind.UnsupportedSyntax, offset: 3)
+  assert refuses("(?<n", kind: PatternErrorKind.UnbalancedParenthesis, offset: 0)
+  assert refuses("a\\", kind: PatternErrorKind.InvalidEscape, offset: 1)
+  assert refuses("\\x4", kind: PatternErrorKind.InvalidEscape, offset: 0)
+  assert refuses("\\u{110000}", kind: PatternErrorKind.InvalidEscape, offset: 0)
+  assert Regex.parse("(") is Err(error) && "${error}" == "a parenthesis has no partner at offset 0"
+}
+
+test "a match of the whole text, a search from an offset, and escaped text" {
+  assert compiled("a+b").is_full_match("aaab") && !compiled("a+b").is_full_match("aaabc")
+  assert compiled("a|ab").is_full_match("ab") && !compiled("b").is_full_match("ab")
+  assert compiled("").is_full_match("") && compiled("x*").is_full_match("")
+  assert compiled("a").is_match("xa") && !compiled("a").is_match("xyz")
+  assert compiled("a").find_from("abca", offset: 1) == Some(Match(start: 3, end: 4))
+  assert compiled("^a").find_from("aba", offset: 1) is None
+  assert compiled("a").find_from("abc", offset: 3) is None
+  assert escape("a.b*c(d)[e]{f}|g^h\u{24}i\\j-k") == "a\\.b\\*c\\(d\\)\\[e\\]\\{f\\}\\|g\\^h\\\u{24}i\\\\j\\-k"
+  assert compiled(escape("1+1=2?").slice()).is_full_match("1+1=2?")
+  assert compiled("a+").pattern() == "a+".slice() && compiled("a+") == compiled("a+") && compiled("a+") != compiled("a*")
+  assert "${compiled("[a-z]+")}" == "[a-z]+"
+}
+
+test "a template puts each value in as text to match, and a pattern in as a pattern" {
+  let name = "a.b"
+  let address = Regex"^${name.slice()}@example\\.com\u{24}"
+  assert address.is_match("a.b@example.com") && !address.is_match("aXb@example.com")
+  let repeated = Regex"${"ab"}+!"
+  assert repeated.is_full_match("ababab!") && !repeated.is_full_match("abbb!")
+  let digits = compiled("\\d+")
+  let version = Regex"v(${digits.copy()})\\.(${own digits})"
+  assert version.captures("v12.345") is Some(parts) && has_group(parts, index: 1, start: 1, end: 3)
+    && has_group(parts, index: 2, start: 4, end: 7)
+  let letter = Regex"[${Character"x"}]?${Character"*"}"
+  assert letter.is_full_match("*")
+}
+
+test "a pattern that would take a backtracking matcher exponential time is matched in one pass" {
+  let text = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  assert misses("(a*)*b", text: text)
+  assert misses("(a+a+)+b", text: text)
+  assert misses("(a|aa)+\u{24}b", text: text)
+  assert finds("(a*)*", text: text, start: 0, end: 60)
+}

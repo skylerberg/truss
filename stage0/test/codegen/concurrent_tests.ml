@@ -1573,3 +1573,41 @@ fn main(arguments: List[String]) -> ExitCode
   ExitCode.success
 }
 |}
+
+(* A test in which no task can go on panics, with a report of what each
+   task waits for, so a deadlock fails the test instead of hanging it. *)
+
+let deadlocks name ~report body =
+  test name (fun () ->
+      let output = run_source ("use standard::tasks\n\ntest \"deadlock\" {\n" ^ body ^ "}\n") in
+      if not (String.starts_with ~prefix:"test 0 panicked\n" output && contains output report) then
+        fail "expected a panic reporting %S, got:\n%s" report output)
+
+let () =
+  deadlocks "a task that receives from an empty channel deadlocks"
+    ~report:"Task 2 is receiving from an empty channel."
+    {|  provide tasks::SeededTasks.new(0) {
+    let numbers = tasks::Channel[Int64].new()
+    concurrent {
+      let _ = numbers.receive()
+      let _ = numbers.receive()
+    }
+  }
+|};
+  deadlocks "a task that sends to a channel with no receiver deadlocks"
+    ~report:"Task 1 is sending to a channel that no task is receiving from."
+    {|  provide tasks::SeededTasks.new(0) {
+    let numbers = tasks::Channel[Int64].new()
+    concurrent {
+      let _ = numbers.send(1)
+    }
+  }
+|};
+  deadlocks "a task that sends to a full channel deadlocks"
+    ~report:"Task 0 is sending to a full channel."
+    {|  provide tasks::SeededTasks.new(0) {
+    let numbers = tasks::Channel[Int64].new(capacity: 1)
+    let _ = numbers.send(1)
+    let _ = numbers.send(2)
+  }
+|}

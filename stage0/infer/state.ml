@@ -337,6 +337,52 @@ let alias_expression state (value : expression) (inner : expression) =
 let place_of (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
+(* A slice, [base[start..stop]]: a view of a run of a list, a slice, or an
+   array. The node holds the call of the base type's [slice_range] that
+   creates the view, or with no stop, of its [slice_from], so that the base
+   is evaluated once. A missing start is [0], and an inclusive stop is
+   [stop + 1]. *)
+let slice state ~origin ~type_ (base : Core.place) ~start ~stop ~inclusive : Core.kind =
+  let make = synthetic_expression state ~origin in
+  let usize = Types.builtin USize in
+  let path, type_arguments =
+    match Core_walk.place_type base with
+    | Types.Named { path; arguments } -> (path, arguments)
+    | other -> bug "a slice of `%s`" (Types.show other)
+  in
+  let start = match start with Some start -> start | None -> make usize (Integer Z.zero) in
+  let name, bounds =
+    match stop with
+    | Some stop when inclusive ->
+        ( "slice_range",
+          [
+            start;
+            make usize
+              (Operator { operation = Add; arguments = [ stop; make usize (Integer Z.one) ] });
+          ] )
+    | Some stop -> ("slice_range", [ start; stop ])
+    | None -> ("slice_from", [ start ])
+  in
+  Slice
+    {
+      base;
+      call =
+        make type_
+          (Call
+             {
+               callee =
+                 Function { path = Method { owner = path; name; receiver = Read }; type_arguments };
+               arguments =
+                 Passed { mode = Read; value = Place base; mark = None }
+                 :: List.map
+                      (fun bound : Core.argument ->
+                        Passed { mode = Read; value = Value bound; mark = None })
+                      bounds;
+               lends = None;
+               uses = [];
+             });
+    }
+
 let fresh_synthetic_local state : Core.local =
   let number = state.form.next_synthetic_local in
   state.form.next_synthetic_local <- number + 1;
@@ -855,10 +901,16 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
                   if Types.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
-              (* An owned collection converts to its view by a call of its
-                 [slice], which borrows the collection. *)
+              (* A list converts to a slice of all of it, as [items[..]]
+                 does, so that a [mut] argument names the list it changes.
+                 A string converts to its view by a call of its [slice].
+                 Either view borrows the collection. *)
               | Owned_to_view -> (
                   match inner.type_ with
+                  | Types.Named { path; _ } when Well_known.is List path ->
+                      synthetic_expression state ~origin:id expected
+                        (slice state ~origin:id ~type_:expected (place_of inner) ~start:None
+                           ~stop:None ~inclusive:false)
                   | Types.Named { path; arguments } ->
                       synthetic_expression state ~origin:id expected
                         (Call

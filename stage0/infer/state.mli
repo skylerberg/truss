@@ -112,6 +112,18 @@ val register_pattern : state -> Syntax.pattern -> (unit -> Core.pattern_kind) ->
 val build_pattern : state -> Syntax.pattern -> Core.pattern
 val alias_expression : state -> Syntax.expression -> Syntax.expression -> unit
 val place_of : Core.expression -> Core.place
+
+val slice :
+  state ->
+  origin:Core.origin ->
+  type_:Types.ty ->
+  Core.place ->
+  start:Core.expression option ->
+  stop:Core.expression option ->
+  inclusive:bool ->
+  Core.kind
+(** A slice, [base[start..stop]], as a {!Core.Slice} node's kind. *)
+
 val fresh_synthetic_local : state -> Core.local
 val fix : string -> Syntax.span Diagnostic.edit list -> Syntax.span Diagnostic.fix
 val replace : Syntax.span -> string -> Syntax.span Diagnostic.edit

@@ -308,7 +308,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
           let base = place_of (build_expression state base) in
           let start = Option.map (build_expression state) start in
           let stop = Option.map (build_expression state) stop in
-          Form.slice state value base ~start ~stop
+          State.slice state ~origin:value.id ~type_:(Form.type_of state value) base ~start ~stop
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
       match base_type with
       | Types.Named { path; arguments = Types.Type element :: _ }

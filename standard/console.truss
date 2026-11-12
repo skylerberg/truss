@@ -365,3 +365,47 @@ impl Console for CapturedConsole {
     Terminal(handle: streams::Handle.simulated(1))
   }
 }
+
+fn same(actual: StringSlice, expected: StringSlice) -> Bool {
+  actual == expected
+}
+
+test "styles are stripped from text" {
+  assert strip_styles("\u{1b}[1;31mred\u{1b}[0m plain") == "red plain"
+  assert strip_styles("no styles") == "no styles"
+  assert strip_styles("") == ""
+  assert strip_styles("\u{1b}[") == ""
+  assert strip_styles("a\u{1b}[2Kb") == "ab"
+  assert strip_styles("\u{1b}[38;2;1;2;3mx") == "x"
+  assert strip_styles("h\u{e9}\u{1b}[4m\u{20ac}") == "h\u{e9}\u{20ac}"
+  assert strip_styles("\u{1b}x").length() == 2
+}
+
+test "a captured console gives its lines in order and keeps what is printed" {
+  var captured = CapturedConsole.new(["first", "second"])
+  provide mut captured {
+    assert Console.read_line() == Some("first")
+    Console.print("a")
+    Console.print_line("b")
+    Console.print_error("oops")
+    assert Console.read_line() == Some("second")
+    assert Console.read_line() is None
+    assert Console.read_line() is None
+  }
+  assert same(captured.output(), expected: "ab\n")
+  assert same(captured.errors(), expected: "oops\n")
+}
+
+test "a style wraps text in the codes that set it and the code that resets it" {
+  assert Style().apply("plain") == "plain"
+  assert Style(bold: true).apply("x") == "\u{1b}[0;1mx\u{1b}[0m"
+  assert Style(dim: true, italic: true).apply("x") == "\u{1b}[0;2;3mx\u{1b}[0m"
+  assert Style(foreground: Some(Color.Red), background: Some(Color.BrightBlue), underline: true)
+    .apply("hi") == "\u{1b}[0;4;31;104mhi\u{1b}[0m"
+  assert Style(foreground: Some(Color.Palette(index: 200))).apply("p") == "\u{1b}[0;38;5;200mp\u{1b}[0m"
+  assert Style(background: Some(Color.TrueColor(red: 1, green: 20, blue: 255))).apply("t")
+    == "\u{1b}[0;48;2;1;20;255mt\u{1b}[0m"
+  assert Style(foreground: Some(Color.BrightWhite)).apply("") == "\u{1b}[0;97m\u{1b}[0m"
+  let styled = Style(bold: true, foreground: Some(Color.Green)).apply("h\u{e9}llo")
+  assert strip_styles(styled) == "h\u{e9}llo"
+}

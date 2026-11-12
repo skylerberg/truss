@@ -1448,6 +1448,16 @@ let () =
          {\n\
         \  count(items)\n\
          }\n");
+  test "a list passed `mut` as a slice may change" (fun () ->
+      not_proven
+        "fn clear(items: mut Slice[Int64]) {}\n\n\
+         fn f(items: mut List[Int64])\n\
+        \  requires items.length() > 0\n\
+        \  ensures items[0] == old(items[0])\n\
+         {\n\
+        \  clear(mut items)\n\
+         }\n"
+        "prover.ensures");
   test "a slice must be within its collection" (fun () ->
       not_proven "fn f(items: List[Int64]) -> Slice[Int64] {\n  items[0..5]\n}\n" "prover.requires");
   test "two slices lent together must not overlap" (fun () ->

@@ -122,9 +122,6 @@ let layout =
           (fun (directory, (manifest : Manifest.t)) ->
             match manifest.package with
             | None -> None
-            | Some package when root = project_root && package.name = Path.standard_package ->
-                problem directory "The package name `standard` is the standard library's.";
-                None
             | Some package -> (
                 match Hashtbl.find_opt seen package.name with
                 | Some other ->

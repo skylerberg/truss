@@ -990,6 +990,21 @@ test "ranges" {
 |}
 
 let () =
+  passes "a slice of a call's result calls it once"
+    {|fn counted(calls: mut Int64) -> List[Int64] {
+  calls += 1
+  [1, 2, 4]
+}
+
+test "one call" {
+  var calls = 0
+  assert counted(mut calls)[1..].length() == 2
+  assert counted(mut calls)[..].length() == 3
+  assert calls == 2
+}
+|}
+
+let () =
   passes "a slice of a small array, or of one in a small record, views the caller's array"
     {|fn total(part: Slice[Int64]) -> Int64 {
   var sum = 0

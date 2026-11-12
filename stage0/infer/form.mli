@@ -81,15 +81,6 @@ val try_ :
   exited_tasks:Core.task list ->
   Core.kind
 
-val slice :
-  State.state ->
-  Syntax.expression ->
-  Core.place ->
-  start:Core.expression option ->
-  stop:Core.expression option ->
-  inclusive:bool ->
-  Core.kind
-
 val collection_literal : State.state -> Syntax.expression -> Core.expression list -> Core.kind
 
 val map_literal :

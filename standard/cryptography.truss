@@ -1,4 +1,6 @@
+use standard::hex
 use standard::intrinsic
+use standard::random
 
 let sha256_constants: Array[UInt32, 64] = [
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -3324,4 +3326,597 @@ public fn AgreementKey.agree(own self, peer: AgreementPublicKey) -> Option[Secre
     any_bit = any_bit | shared[index]
   }
   if any_bit == 0 { None } else { Some(SecretKey(bytes: shared)) }
+}
+
+fn letters(count: USize) -> List[UInt8] {
+  List.filled(97, count: count)
+}
+
+fn sha256_of(bytes: Slice[UInt8]) -> String {
+  let digest = sha256(bytes)
+  hex::encode(digest[..])
+}
+
+fn sha512_of(bytes: Slice[UInt8]) -> String {
+  let digest = sha512(bytes)
+  hex::encode(digest[..])
+}
+
+fn sha1_of(bytes: Slice[UInt8]) -> String {
+  let digest = sha1(bytes)
+  hex::encode(digest[..])
+}
+
+test "SHA-256 of the standard's examples" {
+  assert sha256_of("".bytes()) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  assert sha256_of("abc".bytes()) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+  assert sha256_of("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq".bytes())
+    == "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+  assert sha256_of("The quick brown fox jumps over the lazy dog".bytes())
+    == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
+}
+
+test "SHA-256 at every length around the padding's edges" {
+  assert sha256_of(letters(55)) == "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318"
+  assert sha256_of(letters(56)) == "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
+  assert sha256_of(letters(63)) == "7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34"
+  assert sha256_of(letters(64)) == "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb"
+  assert sha256_of(letters(65)) == "635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0"
+  assert sha256_of(letters(200)) == "c2a908d98f5df987ade41b5fce213067efbcc21ef2240212a41e54b5e7c28ae5"
+}
+
+test "a hasher given bytes in pieces gives the digest of the whole" {
+  var hasher = Sha256.new()
+  mut hasher.update(letters(30))
+  mut hasher.update(letters(0))
+  mut hasher.update(letters(100))
+  mut hasher.update(letters(70))
+  let digest = own hasher.finish()
+  assert hex::encode(digest[..]) == "c2a908d98f5df987ade41b5fce213067efbcc21ef2240212a41e54b5e7c28ae5"
+  var wide = Sha512.new()
+  mut wide.update(letters(127))
+  mut wide.update(letters(73))
+  let wide_digest = own wide.finish()
+  assert hex::encode(wide_digest[..])
+    == "4b11459c33f52a22ee8236782714c150a3b2c60994e9acee17fe68947a3e6789f31e7668394592da7bef827cddca88c4e6f86e4df7ed1ae6cba71f3e98faee9f"
+}
+
+test "SHA-512 of the standard's examples and around the padding's edges" {
+  assert sha512_of("".bytes())
+    == "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"
+  assert sha512_of("abc".bytes())
+    == "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+  assert sha512_of("The quick brown fox jumps over the lazy dog".bytes())
+    == "07e547d9586f6a73f73fbac0435ed76951218fb7d0c8d788a309d785436bbb642e93a252a954f23912547d1e8a3b5ed6e1bfd7097821233fa0538f3db854fee6"
+  assert sha512_of(letters(111))
+    == "fa9121c7b32b9e01733d034cfc78cbf67f926c7ed83e82200ef86818196921760b4beff48404df811b953828274461673c68d04e297b0eb7b2b4d60fc6b566a2"
+  assert sha512_of(letters(112))
+    == "c01d080efd492776a1c43bd23dd99d0a2e626d481e16782e75d54c2503b5dc32bd05f0f1ba33e568b88fd2d970929b719ecbb152f58f130a407c8830604b70ca"
+  assert sha512_of(letters(128))
+    == "b73d1929aa615934e61a871596b3f3b33359f42b8175602e89f7e06e5f658a243667807ed300314b95cacdd579f3e33abdfbe351909519a846d465c59582f321"
+}
+
+test "SHA-1 of the standard's examples and around the padding's edges" {
+  assert sha1_of("".bytes()) == "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+  assert sha1_of("abc".bytes()) == "a9993e364706816aba3e25717850c26c9cd0d89d"
+  assert sha1_of("The quick brown fox jumps over the lazy dog".bytes()) == "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12"
+  assert sha1_of(letters(55)) == "c1c8bbdc22796e28c0e15163d20899b65621d65a"
+  assert sha1_of(letters(56)) == "c2db330f6083854c99d4b5bfb6e8f29f201be699"
+  assert sha1_of(letters(64)) == "0098ba824b5c16427bd7a1122a5a442a25ec644d"
+  assert sha1_of(letters(200)) == "e61cfffe0d9195a525fc6cf06ca2d77119c24a40"
+}
+
+fn hmac256_of(key: Slice[UInt8], message: Slice[UInt8]) -> String {
+  let code = hmac_sha256(key, message: message)
+  hex::encode(code[..])
+}
+
+fn hmac512_of(key: Slice[UInt8], message: Slice[UInt8]) -> String {
+  let code = hmac_sha512(key, message: message)
+  hex::encode(code[..])
+}
+
+test "HMAC with keys shorter than, as long as, and longer than a block" {
+  let fox = "The quick brown fox jumps over the lazy dog"
+  assert hmac256_of("key".bytes(), message: fox.bytes())
+    == "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+  assert hmac256_of("".bytes(), message: "".bytes()) == "b613679a0814d9ec772f95d778c35fc5ff1697c493715653c6c712144292c5ad"
+  let long_key: List[UInt8] = List.filled(120, count: 100)
+  assert hmac256_of(long_key, message: "abc".bytes()) == "c943ae4ba853256e0d741769bad8e0151afddacc654539f0be4776e9fe7b6e89"
+  let block_key: List[UInt8] = List.filled(107, count: 64)
+  assert hmac256_of(block_key, message: "abc".bytes()) == "ae0c0e4a2340cf50185eb46aaa8723f4769153661612e212fb0d1fa3170c6202"
+  assert hmac512_of("key".bytes(), message: fox.bytes())
+    == "b42af09057bac1e2d41708e48a902e09b5ff7f12ab428a4fe86653c73dd248fb82f948a549f7b791a5b41915ee4d1ec3935357e4e2317250d0372afa2ebeeb3a"
+  let longer_key: List[UInt8] = List.filled(120, count: 200)
+  assert hmac512_of(longer_key, message: "abc".bytes())
+    == "7b7b9d1ebab49cfdc2a5b55d6252f60130cbd3b781544dfb192c4454791fc0dba924a2c646a4a3b5cd41737a60d8209c84d72414bcccc4cb401db0751811f89a"
+}
+
+test "HKDF gives the bytes of RFC 5869, and any length up to its limit" {
+  let secret: List[UInt8] = List.filled(11, count: 22)
+  let salt: List[UInt8] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  let information: List[UInt8] = [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]
+  assert hex::encode(hkdf_sha256(secret, salt: salt, information: information, length: 42))
+    == "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+  assert hex::encode(hkdf_sha256(secret, salt: [], information: [], length: 42))
+    == "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"
+  let hundred = hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 100)
+  assert hundred.length() == 100
+  assert sha256_of(hundred) == "53c418dbf98518e4ad94b87f488f49045017c539bd046cc07509c7e02b6c8b5a"
+  let most = hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 8160)
+  assert most.length() == 8160
+  assert sha256_of(most) == "cba3a942d3923adc5281096393efb90cd7a388796af48ea75b7c469458c8e6e2"
+  assert hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 0).length() == 0
+}
+
+test "PBKDF2 gives the bytes of RFC 7914's and RFC 6070's inputs" {
+  assert hex::encode(pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 1, length: 32))
+    == "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"
+  assert hex::encode(pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 2, length: 32))
+    == "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43"
+  assert hex::encode(
+    pbkdf2_hmac_sha256(
+      "passwordPASSWORDpassword".bytes(),
+      salt: "saltSALTsaltSALTsaltSALTsaltSALTsalt".bytes(),
+      iterations: 3,
+      length: 40,
+    ),
+  ) == "325651a5ca818d11f4331cb0c300d6f8b68790c75a09ebad494e74b3f649475856c392e03e00705f"
+  assert pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 1, length: 0).length() == 0
+}
+
+test "bytes compare equal only when they are the same bytes" {
+  assert constant_time_equal("secret".bytes(), second: "secret".bytes())
+  assert !constant_time_equal("secret".bytes(), second: "secreT".bytes())
+  assert !constant_time_equal("secret".bytes(), second: "secre".bytes())
+  assert !constant_time_equal("xecret".bytes(), second: "secret".bytes())
+  assert constant_time_equal("".bytes(), second: "".bytes())
+}
+
+fn pattern(count: USize) -> List[UInt8] {
+  List.generate(count, make: fn(index) { pattern_byte(index) })
+}
+
+fn pattern_byte(index: USize) -> UInt8 {
+  let small = index % 251
+  match UInt8.try_from(small) {
+    Ok(byte) => byte
+    Err(_) => 0
+  }
+}
+
+fn blake3_of(bytes: Slice[UInt8]) -> String {
+  let digest = blake3(bytes)
+  hex::encode(digest[..])
+}
+
+test "BLAKE3 of the published test vectors" {
+  assert blake3_of(pattern(0)) == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"
+  assert blake3_of(pattern(1)) == "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213"
+  assert blake3_of(pattern(1024)) == "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7"
+  assert blake3_of(pattern(1025)) == "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444"
+  assert blake3_of("abc".bytes()) == "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+}
+
+test "BLAKE3 at block and chunk boundaries" {
+  assert blake3_of(pattern(63)) == "e9bc37a594daad83be9470df7f7b3798297c3d834ce80ba85d6e207627b7db7b"
+  assert blake3_of(pattern(64)) == "4eed7141ea4a5cd4b788606bd23f46e212af9cacebacdc7d1f4c6dc7f2511b98"
+  assert blake3_of(pattern(65)) == "de1e5fa0be70df6d2be8fffd0e99ceaa8eb6e8c93a63f2d8d1c30ecb6b263dee"
+  assert blake3_of(pattern(1023)) == "10108970eeda3eb932baac1428c7a2163b0e924c9a9e25b35bba72b28f70bd11"
+  assert blake3_of(pattern(2048)) == "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a"
+  assert blake3_of(pattern(2049)) == "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030"
+  assert blake3_of(pattern(3072)) == "b98cb0ff3623be03326b373de6b9095218513e64f1ee2edd2525c7ad1e5cffd2"
+  assert blake3_of(pattern(4097)) == "9b4052b38f1c5fc8b1f9ff7ac7b27cd242487b3d890d15c96a1c25b8aa0fb995"
+  assert blake3_of(pattern(7169)) == "a003fc7a51754a9b3c7fae0367ab3d782dccf28855a03d435f8cfe74605e7817"
+  assert blake3_of(pattern(16384)) == "f875d6646de28985646f34ee13be9a576fd515f76b5b0a26bb324735041ddde4"
+}
+
+fn keyed_blake3_of(bytes: Slice[UInt8]) -> String {
+  let key = "whats the Elvish word for friend".to_bytes()
+  var words: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  let count: USize = 32
+  for index in 0..count {
+    words[index] = key[index]
+  }
+  var hasher = Blake3.keyed(words)
+  mut hasher.update(bytes)
+  let digest = own hasher.finish()
+  hex::encode(digest[..])
+}
+
+test "keyed BLAKE3 of the published test vectors" {
+  assert keyed_blake3_of(pattern(0)) == "92b2b75604ed3c761f9d6f62392c8a9227ad0ea3f09573e783f1498a4ed60d26"
+  assert keyed_blake3_of(pattern(65)) == "c0a4edefa2d2accb9277c371ac12fcdbb52988a86edc54f0716e1591b4326e72"
+  assert keyed_blake3_of(pattern(2049)) == "9f29700902f7c86e514ddc4df1e3049f258b2472b6dd5267f61bf13983b78dd5"
+}
+
+test "BLAKE3 in pieces is BLAKE3 of the whole, and its output extends" {
+  let bytes = pattern(2049)
+  var hasher = Blake3.new()
+  mut hasher.update(bytes[..1])
+  mut hasher.update(bytes[1..1000])
+  mut hasher.update(bytes[1000..1030])
+  mut hasher.update(bytes[1030..])
+  let digest = own hasher.finish()
+  assert hex::encode(digest[..]) == "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030"
+  var long = Blake3.new()
+  mut long.update(pattern(1025))
+  let extended = own long.finish_extended(131)
+  assert hex::encode(extended) == "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444f4c4a22b4b399155358a994e52bf255de60035742ec71bd08ac275a1b51cc6bfe332b0ef84b409108cda080e6269ed4b3e2c3f7d722aa4cdc98d16deb554e5627be8f955c98e1d5f9565a9194cad0c4285f93700062d9595adb992ae68ff12800ab67a"
+  let empty = Blake3.new()
+  assert hex::encode(own empty.finish_extended(70)) == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262e00f03e7b69af26b7faaf09fcd333050338ddfe085b8cc869ca98b206c08243a26f5487789e8"
+  let none = Blake3.new()
+  assert (own none.finish_extended(0)).length() == 0
+}
+
+fn sealing_key() -> SecretKey {
+  SecretKey.from_bytes([
+    128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
+    144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
+  ])
+}
+
+fn sealing_nonce() -> Nonce {
+  Nonce(bytes: [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75])
+}
+
+fn associated_byte(index: USize) -> UInt8 {
+  match UInt8.try_from(160 + index % 7) {
+    Ok(byte) => byte
+    Err(_) => 0
+  }
+}
+
+fn associated(count: USize) -> List[UInt8] {
+  List.generate(count, make: fn(index) { associated_byte(index) })
+}
+
+fn seal_pattern(cipher: Cipher, plain: USize, data: USize) -> List[UInt8] {
+  seal(
+    sealing_key(),
+    nonce: sealing_nonce(),
+    plaintext: pattern(plain),
+    associated_data: associated(data),
+    cipher: cipher,
+  )
+}
+
+fn sealed_text(cipher: Cipher, plain: USize, data: USize) -> String {
+  hex::encode(seal_pattern(cipher, plain: plain, data: data))
+}
+
+fn sealed_digest(cipher: Cipher, plain: USize, data: USize) -> String {
+  sha256_of(seal_pattern(cipher, plain: plain, data: data))
+}
+
+test "ChaCha20-Poly1305 seals to the bytes OpenSSL produces" {
+  let cipher = Cipher.ChaCha20Poly1305
+  assert sealed_text(cipher, plain: 0, data: 0) == "4968bfa6ac4c53184fac3d9c8e0d17c4"
+  assert sealed_text(cipher, plain: 1, data: 13) == "5d8fa1d73a31170e23ca7f37885694bb8d"
+  assert sealed_text(cipher, plain: 15, data: 14) == "5d8150399a1c3df221a6117ac8d4097b9b47e6fc6ba5d4ebb46e426694e6c6"
+  assert sealed_text(cipher, plain: 16, data: 0) == "5d8150399a1c3df221a6117ac8d4096a35f7b85046059a5730faa95f6c5c368e"
+  assert sealed_text(cipher, plain: 17, data: 16) == "5d8150399a1c3df221a6117ac8d4096a076ed2e332ba875071ede94c5be8455ff2"
+  assert sealed_text(cipher, plain: 63, data: 17)
+    == "5d8150399a1c3df221a6117ac8d4096a07099c51cac1d49dc3be0fe3379196df183f9019426f3c837f12e0f0ae3f1cdf7fe51906637278c02860d336d93c65c594d473510300900a690beaa25a57db"
+  assert sealed_text(cipher, plain: 64, data: 0)
+    == "5d8150399a1c3df221a6117ac8d4096a07099c51cac1d49dc3be0fe3379196df183f9019426f3c837f12e0f0ae3f1cdf7fe51906637278c02860d336d93c658f6a5c88992cebb4a0cbe9c2fc2581e2fd"
+  assert sealed_text(cipher, plain: 65, data: 19)
+    == "5d8150399a1c3df221a6117ac8d4096a07099c51cac1d49dc3be0fe3379196df183f9019426f3c837f12e0f0ae3f1cdf7fe51906637278c02860d336d93c658f2c96ef336c5b5e91382881a44bbed515d5"
+  assert sealed_digest(cipher, plain: 114, data: 20) == "3ebfeb423e818bafe97dd5801ac01087957ddb955a442e08f807407e4d77bfd1"
+  assert sealed_digest(cipher, plain: 300, data: 0) == "1278a79c23fb23caaa25aabb9b7b5dcc2bf3bb3487525b5351f4e88808e4d620"
+}
+
+test "AES-256-GCM seals to the bytes OpenSSL produces" {
+  let cipher = Cipher.Aes256Gcm
+  assert sealed_text(cipher, plain: 0, data: 0) == "fdcf33bb6f37f3a12b3fc5eeeff1ed47"
+  assert sealed_text(cipher, plain: 1, data: 13) == "d967882cb12ee59bfae106f4377a1271da"
+  assert sealed_text(cipher, plain: 15, data: 14) == "d9cb034537e0b86d70f8db7233a3157b0357880a4ac59b988468ca602cd816"
+  assert sealed_text(cipher, plain: 16, data: 0) == "d9cb034537e0b86d70f8db7233a31532f7d2efac00d10cb88cb7933433d2a13b"
+  assert sealed_text(cipher, plain: 17, data: 16) == "d9cb034537e0b86d70f8db7233a31532608a6926fb553883561f08911fa05fc920"
+  assert sealed_text(cipher, plain: 63, data: 17)
+    == "d9cb034537e0b86d70f8db7233a315326072052dfe54dbbe2a52a04872f424940d940096bdba9b16fd8ad7e6d9c669dc6260b6214211ffff6676ce6cdb911e95bb598120fb578f2dad701f69ce4a95"
+  assert sealed_text(cipher, plain: 64, data: 0)
+    == "d9cb034537e0b86d70f8db7233a315326072052dfe54dbbe2a52a04872f424940d940096bdba9b16fd8ad7e6d9c669dc6260b6214211ffff6676ce6cdb911ee5f086dffac72b5c8828783901d9dc2895"
+  assert sealed_text(cipher, plain: 65, data: 19)
+    == "d9cb034537e0b86d70f8db7233a315326072052dfe54dbbe2a52a04872f424940d940096bdba9b16fd8ad7e6d9c669dc6260b6214211ffff6676ce6cdb911ee5cf07827a99fb5524ee3f9ac99509f1bc2b"
+  assert sealed_digest(cipher, plain: 114, data: 20) == "ada9ee032a351086783ac20eb4dc180566719dd878cadf120c7c254d900b5b3e"
+  assert sealed_digest(cipher, plain: 300, data: 0) == "f07eb869e75d33553f8185ebeedbb018f3df2b0e078a4bc128b87cd01713007c"
+}
+
+fn opens(cipher: Cipher, sealed: Slice[UInt8], data: USize) -> Option[List[UInt8]] {
+  match open(
+    sealing_key(),
+    nonce: sealing_nonce(),
+    sealed: sealed,
+    associated_data: associated(data),
+    cipher: cipher,
+  ) {
+    Ok(plaintext) => Some(own plaintext)
+    Err(_) => None
+  }
+}
+
+fn open_round_trips(cipher: Cipher) -> Bool {
+  var box = seal_pattern(cipher, plain: 100, data: 9)
+  if opens(cipher, sealed: box, data: 9) != Some(pattern(100)) {
+    return false
+  }
+  if opens(cipher, sealed: box, data: 10) is Some(_) {
+    return false
+  }
+  box[3] = box[3] ^ 1
+  if opens(cipher, sealed: box, data: 9) is Some(_) {
+    return false
+  }
+  box[3] = box[3] ^ 1
+  box[115] = box[115] ^ 128
+  if opens(cipher, sealed: box, data: 9) is Some(_) {
+    return false
+  }
+  box[115] = box[115] ^ 128
+  opens(cipher, sealed: box[..15], data: 9) is None && opens(cipher, sealed: box, data: 9) is Some(_)
+}
+
+test "open returns what was sealed and rejects anything that was changed" {
+  assert open_round_trips(Cipher.ChaCha20Poly1305)
+  assert open_round_trips(Cipher.Aes256Gcm)
+  let empty = seal_pattern(Cipher.ChaCha20Poly1305, plain: 0, data: 0)
+  assert opens(Cipher.ChaCha20Poly1305, sealed: empty, data: 0) == Some([])
+  assert opens(Cipher.Aes256Gcm, sealed: empty, data: 0) is None
+}
+
+test "keys and nonces are drawn from the random capability" {
+  provide random::SeededRandom.new(11) {
+    let first = SecretKey.generate()
+    let second = SecretKey.generate()
+    assert first.expose() != second.expose()
+    let nonce = Nonce.generate()
+    let other = Nonce.generate()
+    assert nonce != other
+  }
+  provide random::SeededRandom.new(11) {
+    let again = SecretKey.generate()
+    provide random::SeededRandom.new(11) {
+      assert again.expose() == SecretKey.generate().expose()
+    }
+  }
+}
+
+fn stepped_32(start: UInt8, step: UInt8) -> Array[UInt8, 32] {
+  var bytes: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  var value = start
+  let count: USize = 32
+  for index in 0..count {
+    bytes[index] = value
+    value = value.wrapping_add(step)
+  }
+  bytes
+}
+
+fn message_of(count: USize) -> List[UInt8] {
+  var message: List[UInt8] = []
+  for index in 0..count {
+    match UInt8.try_from(index % 253) {
+      Ok(byte) => mut message.push(byte)
+      Err(_) => mut message.push(0)
+    }
+  }
+  message
+}
+
+fn public_key_hex(private: Array[UInt8, 32]) -> String {
+  let public_key = AgreementKey.from_bytes(private).public_key()
+  hex::encode(public_key.bytes[..])
+}
+
+fn shared_hex(private: Array[UInt8, 32], their: AgreementPublicKey) -> String {
+  match AgreementKey.from_bytes(private).agree(their) {
+    Some(secret) => hex::encode(secret.expose()[..])
+    None => "none"
+  }
+}
+
+test "X25519 gives the public keys and the shared secret that OpenSSL produces" {
+  let first = stepped_32(1, step: 3)
+  let second = stepped_32(2, step: 5)
+  assert public_key_hex(first) == "c37077fb432d19c51d6a8c6fdf9dbf06f8471cf12edb1cadab76aeac29917a1e"
+  assert public_key_hex(second) == "b5a8a94cec7ee33acb0fc1501b6180f147542e2cd41ff4cdf20ebcc1521c1b0b"
+  let second_public = AgreementKey.from_bytes(second).public_key()
+  let first_public = AgreementKey.from_bytes(first).public_key()
+  assert shared_hex(first, their: second_public) == "b1726613cf762380186440efa70706292be62a41153200b0fa2946a8d8971570"
+  assert shared_hex(second, their: first_public) == "b1726613cf762380186440efa70706292be62a41153200b0fa2946a8d8971570"
+  let third = stepped_32(200, step: 3)
+  let fourth = stepped_32(77, step: 5)
+  assert public_key_hex(third) == "eebeea3c07a2a7f60ec9a6fa2b9c069a639a2a3976660561e6ae241099142843"
+  assert shared_hex(third, their: AgreementKey.from_bytes(fourth).public_key())
+    == "d799098a349c515afa2eaf6bcf8d967e44419d71c91780e83e22e89bec53551a"
+}
+
+test "X25519 refuses a public key of low order" {
+  let zero: Array[UInt8, 32] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+  assert shared_hex(stepped_32(1, step: 3), their: AgreementPublicKey(bytes: zero)) == "none"
+  var one = zero
+  one[0] = 1
+  assert shared_hex(stepped_32(1, step: 3), their: AgreementPublicKey(bytes: one)) == "none"
+}
+
+fn signature_hex(seed: Array[UInt8, 32], message: Slice[UInt8]) -> String {
+  let signature = SigningKey.from_seed(seed).sign(message)
+  hex::encode(signature.bytes[..])
+}
+
+fn verifying_key_hex(seed: Array[UInt8, 32]) -> String {
+  hex::encode(SigningKey.from_seed(seed).verifying_key().bytes()[..])
+}
+
+test "Ed25519 gives the public keys and the signatures that OpenSSL produces" {
+  let first = stepped_32(9, step: 7)
+  assert verifying_key_hex(first) == "5d130de8527df4df802812f4726d29236feb8e22e6a8ae43849fc46a3537045a"
+  assert signature_hex(first, message: message_of(0))
+    == "2b13d2d0eb088d52560da35f7b2bc22058f5df2e93c191a7c8d3bc07aca28069a655ea69a704d02d209ec412e140d0d59e5a5e742510d0afd1df3da32c390a06"
+  assert signature_hex(first, message: message_of(1))
+    == "88040c9b10927e0a0b4aec947ef8b6109057258e5b85b0f1500d5dd1b2e162a28d35d3c6f0faab0b8c1c8d9056a2de1b514beb8134934a2151b342251ae5960c"
+  let second = stepped_32(100, step: 7)
+  assert verifying_key_hex(second) == "6e97550717cdf6ec50c143d6448d5a542c25482242fa5d059f160642fbbf1622"
+  assert signature_hex(second, message: message_of(64))
+    == "6616ccdbd94d6427ab321d3bbcc4321d67e397fa1ddc41761ec39f8008f3e6f332235c5f337176dcea80849a3f41b6f33fd55d47c60f8f86d11c5b49e2a93a05"
+  let third = stepped_32(250, step: 7)
+  assert verifying_key_hex(third) == "f1d261bf7cc781578aa009a0bc61c84a7aac6c1db778880bb67b49e712848a2a"
+  assert signature_hex(third, message: message_of(300))
+    == "bff07bcab1323a7db7518ff6df783ea61a0438043d334aaca45f5bac39cf0b3d32d3bc36ea2d0502720476e1d79e4d4232802294779e6103f16ab1cf52742606"
+}
+
+test "Ed25519 verifies its own signatures and rejects anything that was changed" {
+  let key = SigningKey.from_seed(stepped_32(100, step: 7))
+  let verifying_key = key.verifying_key()
+  let message = message_of(64)
+  let signature = key.sign(message)
+  assert verifying_key.verify(message, signature: signature)
+  assert !verifying_key.verify(message_of(63), signature: signature)
+  var changed_message = message_of(64)
+  changed_message[10] = changed_message[10] ^ 1
+  assert !verifying_key.verify(changed_message, signature: signature)
+  var changed_commitment = signature.bytes
+  changed_commitment[3] = changed_commitment[3] ^ 4
+  assert !verifying_key.verify(message, signature: Signature(bytes: changed_commitment))
+  var changed_response = signature.bytes
+  changed_response[40] = changed_response[40] ^ 4
+  assert !verifying_key.verify(message, signature: Signature(bytes: changed_response))
+  let other = SigningKey.from_seed(stepped_32(9, step: 7)).verifying_key()
+  assert !other.verify(message, signature: signature)
+}
+
+test "Ed25519 rejects a response that is not below the group's order" {
+  let key = SigningKey.from_seed(stepped_32(100, step: 7))
+  let message = message_of(8)
+  let signature = key.sign(message)
+  let order: Array[UInt8, 32] = [
+    237, 211, 245, 92, 26, 99, 18, 88, 214, 156, 247, 162, 222, 249, 222, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 16,
+  ]
+  var malleated = signature.bytes
+  var carry: UInt16 = 0
+  let count: USize = 32
+  for index in 0..count {
+    let sum = UInt16.from(malleated[index + 32]) + UInt16.from(order[index]) + carry
+    match UInt8.try_from(sum & 255) {
+      Ok(byte) => {
+        malleated[index + 32] = byte
+      }
+      Err(_) => {}
+    }
+    carry = sum >> 8
+  }
+  assert key.verifying_key().verify(message, signature: signature)
+  assert !key.verifying_key().verify(message, signature: Signature(bytes: malleated))
+}
+
+test "a verifying key is made only from bytes that name a point of the curve" {
+  let valid = SigningKey.from_seed(stepped_32(9, step: 7)).verifying_key().bytes()
+  assert VerifyingKey.from_bytes(valid) is Some(_)
+  var invalid = valid
+  invalid[0] = invalid[0] ^ 1
+  var invalid_count = 0
+  if VerifyingKey.from_bytes(invalid) is None {
+    invalid_count += 1
+  }
+  invalid[0] = invalid[0] ^ 3
+  if VerifyingKey.from_bytes(invalid) is None {
+    invalid_count += 1
+  }
+  invalid[1] = invalid[1] ^ 1
+  if VerifyingKey.from_bytes(invalid) is None {
+    invalid_count += 1
+  }
+  assert invalid_count >= 1
+}
+
+test "signing keys and agreement keys are drawn from the random capability" {
+  provide random::SeededRandom.new(5) {
+    let first = SigningKey.generate()
+    let second = SigningKey.generate()
+    assert first.verifying_key() != second.verifying_key()
+    assert first.verifying_key().verify("message".bytes(), signature: first.sign("message".bytes()))
+    let ours = AgreementKey.generate()
+    let theirs = AgreementKey.generate()
+    let our_public = ours.public_key()
+    let their_public = theirs.public_key()
+    assert our_public != their_public
+    assert own ours.agree(their_public) is Some(left)
+      && own theirs.agree(our_public) is Some(right)
+      && left.expose() == right.expose()
+  }
+}
+
+fn stepped_bytes(count: USize, start: USize, modulus: USize) -> List[UInt8] {
+  var bytes: List[UInt8] = []
+  for index in 0..count {
+    match UInt8.try_from(start + index % modulus) {
+      Ok(byte) => mut bytes.push(byte)
+      Err(_) => mut bytes.push(0)
+    }
+  }
+  bytes
+}
+
+fn password_hash_hex(password: USize, salt: USize, password_cost: PasswordCost) -> String {
+  let hash = hash_password(
+    stepped_bytes(password, start: 48, modulus: 77),
+    salt: stepped_bytes(salt, start: 160, modulus: 53),
+    password_cost: password_cost,
+  )
+  hex::encode(hash[..])
+}
+
+test "hash_password gives the bytes that OpenSSL's Argon2id produces" {
+  assert password_hash_hex(
+    8,
+    salt: 8,
+    password_cost: PasswordCost(memory_kibibytes: 8, iterations: 1, parallelism: 1),
+  )
+    == "9f5cbedabc0b5a5fc68c616d931cf7d0d41808260123b081e38401a058effc7e"
+  assert password_hash_hex(
+    0,
+    salt: 8,
+    password_cost: PasswordCost(memory_kibibytes: 8, iterations: 1, parallelism: 1),
+  )
+    == "dc1a6bd586d35fb0e40abdd27db6da14335f8c04c64b990d21acd36a0b583d11"
+  assert password_hash_hex(
+    11,
+    salt: 16,
+    password_cost: PasswordCost(memory_kibibytes: 32, iterations: 3, parallelism: 1),
+  )
+    == "ec96795655b389788c0aa55be337ea66200c20686f259310fc349e23ab185400"
+}
+
+test "hash_password with several lanes and a memory size that is not a multiple of the lanes" {
+  assert password_hash_hex(
+    32,
+    salt: 16,
+    password_cost: PasswordCost(memory_kibibytes: 64, iterations: 2, parallelism: 2),
+  )
+    == "0d99ad0cab8a280629027b813e74bd323ce823924c3bea6b627d121d2ab7b04b"
+  assert password_hash_hex(
+    100,
+    salt: 33,
+    password_cost: PasswordCost(memory_kibibytes: 71, iterations: 2, parallelism: 3),
+  )
+    == "4216edbca32c089f1f00079b4516e65488c8b2752b09405ccdc8aa7c61bfdfdf"
+  assert password_hash_hex(
+    16,
+    salt: 16,
+    password_cost: PasswordCost(memory_kibibytes: 256, iterations: 2, parallelism: 4),
+  )
+    == "ff6f4f5585fe87450ec7fc361494ed733c4e0e583099d584c3d5d8333c7daa99"
+}
+
+test "hash_password with the default cost" {
+  assert password_hash_hex(16, salt: 16, password_cost: PasswordCost())
+    == "b2fe92bef9e06d5c129e728b2e78965e2180818a2a9ae126914187564ecde44d"
 }

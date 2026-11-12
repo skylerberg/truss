@@ -350,3 +350,61 @@ impl streams::Reader for ChildOutput {
     Handles.read(self.handle, buffer: mut buffer, limit: limit)
   }
 }
+
+test "a command keeps its program and the arguments added to it" {
+  let more: List[String] = ["-l${1}", "x${2}"]
+  let command = Command.new("list").argument("-a").arguments(more)
+  let arguments = command.argument_list()
+  assert command.program().length() == 4
+  assert arguments.length() == 3
+  assert arguments[0] == "-a"
+  assert arguments[1] == "-l1"
+  assert arguments[2] == "x2"
+}
+
+test "a command's builders each return the command with one thing set" {
+  let command = Command.new("tool")
+    .variable("KEY", value: "value")
+    .without_inherited_variables()
+    .directory(Path.new("/tmp"))
+    .input(Redirect.Discard)
+    .output(Redirect.Pipe)
+    .error_output(Redirect.Capture)
+    .argument("last")
+  assert command.argument_list().length() == 1
+  assert command.program().length() == 4
+}
+
+test "a finished command's output is text when it is UTF-8" {
+  let finished = Output(status: ExitStatus.Exited(code: 0), output: [104, 195, 169], error_output: [])
+  assert finished.text() is Ok(text) && text == "h\u{e9}"
+  let broken = Output(status: ExitStatus.Exited(code: 1), output: [104, 255], error_output: [])
+  assert broken.text() is Err(error) && error.valid_up_to == 1
+  let silent = Output(status: ExitStatus.Exited(code: 0), output: [], error_output: [33])
+  assert silent.text() is Ok(text) && text.is_empty()
+}
+
+fn words_of(command: Command) -> String {
+  var text = command.program().to_string()
+  let arguments = command.argument_list()
+  for index in 0..arguments.length() {
+    mut text.push("|")
+    mut text.push(arguments[index].slice())
+  }
+  text
+}
+
+test "a command written as a template splits its text into words and keeps each value whole" {
+  let message = "fix the build"
+  let command = Command"git commit  -m ${message.slice()} --author=${"me"}"
+  assert words_of(command) == "git|commit|-m|fix the build|--author=me"
+  let empty = ""
+  let listing = Command" ls ${empty.slice()} "
+  assert words_of(listing) == "ls|"
+  let plain = Command"true"
+  assert words_of(plain) == "true"
+  let removal = Command"rm -f ${Path.new("/tmp/a file")}"
+  assert words_of(removal) == "rm|-f|/tmp/a file"
+  let lines = Command"sort\t-n\n-r"
+  assert words_of(lines) == "sort|-n|-r"
+}

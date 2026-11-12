@@ -68,10 +68,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
     quick to restore.
   - **The build, formatting, the opam file, and the compiler's tests are one
     dune run,** so they overlap. Four things run beside it, each on a
-    runner of its own: the codegen tests, the codegen tests again under
-    AddressSanitizer and UndefinedBehaviorSanitizer, the programs that use
-    several threads under ThreadSanitizer, and the standard library's
-    proofs. ThreadSanitizer cannot run beside the other sanitizers, and its
+    runner of its own: the codegen tests with the standard library's tests,
+    both again under AddressSanitizer and UndefinedBehaviorSanitizer, the
+    programs that use several threads under ThreadSanitizer, and the
+    standard library's proofs. ThreadSanitizer cannot run beside the other sanitizers, and its
     tests take as long as theirs, so it has a job of its own.
   - **The standard library's proofs have their own jobs.** They are the
     longest test, and the one that grows with the library, so they do not
@@ -192,15 +192,14 @@ Every stage of stage0 is tested the same way:
   file of generated C. `TRUSS_SOLVER_CACHE` and `TRUSS_OBJECT_CACHE` name
   the directories. CI restores both from `main`'s last run, so a run
   solves and compiles only what changed.
-- **The standard library's own tests are written in Truss.** Each file of
-  `stage0/test/codegen/library/` is a module of tests for one module of the
-  library, named after it. `library_tests` builds every file's tests into
-  one program and runs it, so a new test adds its own code to that build
-  and no build of its own. A test of what a library function returns goes
-  there. A test of a panic goes in the module `panics`: each of its tests
-  must panic with a message that contains the test's name. A test written
-  in OCaml that compiles a program of its own is for the compiler: a
-  diagnostic, generated code, or a whole program's output.
+- **The standard library's tests are in its modules,** as any package's
+  are, and `truss test` in `standard/` runs them. A test of what a library
+  function returns goes in the module that defines the function. A Truss
+  test cannot expect a panic, so a test of a panic that the library reports,
+  such as a deadlock, is an OCaml test that compiles a program and reads the
+  test runner's output. A test written in OCaml that compiles a program of
+  its own is for the compiler: a diagnostic, generated code, or a whole
+  program's output.
 - **Every test checks the code database too.** When a test ends, the harness
   computes every result the test's engines hold again, in a new engine with
   the same inputs, and fails the test if one differs. So a query that is not

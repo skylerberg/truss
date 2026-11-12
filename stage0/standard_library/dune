@@ -9,7 +9,7 @@
  (action
   (with-stdout-to
    %{target}
-   (run ./embed.exe %{deps}))))
+   (run ./embed.exe %{dep:../../standard/truss.toml} %{deps}))))
 
 (library
  (name standard_library)

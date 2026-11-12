@@ -104,11 +104,17 @@ A package's dependencies are found among the project's packages, by name,
 and then among the registry's, at the versions the project's lock file
 gives (see [Registry packages](#registry-packages)).
 
+The standard library is a package like any other. `standard/truss.toml` is
+its manifest, so `truss check` and `truss test` in `standard/` check it and
+run its tests. A project's package named `standard` takes the place of the
+one built into the compiler, as any project's package takes the place of a
+registry package of its name.
+
 What is wrong with a manifest is a problem in the code, reported with the
 diagnostics, and the exit status is 1:
 
 - a manifest that cannot be read, with the line
-- a package name used twice in the project, or the name `standard`
+- a package name used twice in the project
 - a package without `truss`, or written for a newer Truss than the
   toolchain's, which `truss --version` gives
 - a dependency that is no package of the project and that the lock file

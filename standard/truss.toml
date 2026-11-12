@@ -1,0 +1,4 @@
+[package]
+name = "standard"
+truss = "0.1"
+usize_bits = 64

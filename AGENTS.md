@@ -115,7 +115,8 @@ Before you push, run only:
    `stage0/parser/parser`, the parser's suites. Run a suite as its executable,
    such as `stage0/test/parser_tests.exe`.
 3. For a change under `standard/`, the check and the proofs of the modules
-   that the change edits, and their tests.
+   that the change edits, and their tests: `truss test FILE...` in
+   `standard/`.
 
 Then push. If CI reports a failure, fix it and push again.
 

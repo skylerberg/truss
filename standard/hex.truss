@@ -74,3 +74,31 @@ public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
   }
   Ok(List(storage: own bytes))
 }
+
+test "bytes encode as two hexadecimal digits each" {
+  let bytes: List[UInt8] = [0, 1, 15, 16, 171, 255]
+  assert encode(bytes) == "00010f10abff"
+  assert encode(bytes, uppercase: true) == "00010F10ABFF"
+  let none: List[UInt8] = []
+  assert encode(none) == ""
+}
+
+test "hexadecimal text decodes to bytes, in either case" {
+  assert decode("00010f10ABff") is Ok(bytes) && bytes.length() == 6 && bytes[2] == 15 && bytes[4] == 171
+    && bytes[5] == 255
+  assert decode("") is Ok(bytes) && bytes.length() == 0
+}
+
+test "decoding says what is wrong with text that is not hexadecimal" {
+  assert decode("abc") == Err(DecodeError.OddLength)
+  assert decode("ag") == Err(DecodeError.InvalidCharacter(offset: 1))
+  assert decode("zz") == Err(DecodeError.InvalidCharacter(offset: 0))
+  assert decode("00 1") == Err(DecodeError.InvalidCharacter(offset: 2))
+  assert "${DecodeError.OddLength}" == "the text has an odd number of digits"
+  assert "${DecodeError.InvalidCharacter(offset: 4)}" == "the byte at offset 4 is not a hexadecimal digit"
+}
+
+test "encoding and decoding undo each other" {
+  let bytes: List[UInt8] = [222, 173, 190, 239]
+  assert decode(encode(bytes)) is Ok(decoded) && decoded == bytes
+}

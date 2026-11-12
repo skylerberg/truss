@@ -1072,52 +1072,6 @@ let try_ state (value : expression) (inner : expression) ~(output : Types.ty)
         ];
     }
 
-(* A slice expression, [base[start..stop]]. The node holds the call of the
-   base type's [slice_range] that creates the view, with the bounds
-   computed: a missing start is [0], a missing stop is the length of the
-   base, and an inclusive stop is [stop + 1]. *)
-let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive : Core.kind =
-  let origin = value.id in
-  let make = synthetic_expression state ~origin in
-  let usize = Types.builtin USize in
-  let path, type_arguments =
-    match Core_walk.place_type base with
-    | Types.Named { path; arguments } -> (path, arguments)
-    | type_ -> bug "a slice of `%s`" (Types.show type_)
-  in
-  let call name (arguments : Core.argument list) result =
-    make result
-      (Call
-         {
-           callee =
-             Function { path = Method { owner = path; name; receiver = Read }; type_arguments };
-           arguments;
-           lends = None;
-           uses = [];
-         })
-  in
-  let receiver : Core.argument = Passed { mode = Read; value = Place base; mark = None } in
-  let start = match start with Some start -> start | None -> make usize (Integer Z.zero) in
-  let stop =
-    match stop with
-    | Some stop when inclusive ->
-        make usize (Operator { operation = Add; arguments = [ stop; make usize (Integer Z.one) ] })
-    | Some stop -> stop
-    | None -> call "length" [ receiver ] usize
-  in
-  Slice
-    {
-      base;
-      call =
-        call "slice_range"
-          [
-            receiver;
-            Passed { mode = Read; value = Value start; mark = None };
-            Passed { mode = Read; value = Value stop; mark = None };
-          ]
-          (type_of state value);
-    }
-
 (* A set or a map literal, desugared to a block: create the collection
    with capacity for the entries, insert each entry, and evaluate to the
    collection. [entries] holds the arguments of each insertion. A literal

@@ -164,8 +164,7 @@ let () =
      intrinsic::storage_push(mut place storage, own 1); intrinsic::storage_push(mut place storage, \
      own 2); intrinsic::storage_push(mut place storage, own 3); \
      standard::list::List.from_storage[Int64](own storage) }; let _ = slice \
-     standard::list::List.slice_range[Int64](place numbers, 1, \
-     standard::list::List.length[Int64](place numbers)); lent Index.at for List[Int64] by \
+     standard::list::List.slice_from[Int64](place numbers, 1); lent Index.at for List[Int64] by \
      standard::list::impl Index for List[Element](place numbers, 0) lends }";
   expect_body "a set literal becomes `with_capacity` and one `insert` per element"
     "fn g(first: own String, second: own String) -> Set[String] {\n  [own first, own second]\n}\n"
@@ -404,8 +403,8 @@ let () =
         <> "{ if standard::list::List.is_empty[String](place self.books) { yield \
             Option[First].None() } else { yield Option[First].Some(value: First(title: place lent \
             Index.at for List[String] by standard::list::impl Index for List[Element](place \
-            self.books, 0) lends, rest: slice standard::list::List.slice_range[String](place \
-            self.books, 1, standard::list::List.length[String](place self.books)))) } }"
+            self.books, 0) lends, rest: slice standard::list::List.slice_from[String](place \
+            self.books, 1))) } }"
       then fail "found:\n%s" actual);
   test "a constructor yielded `mut` lends the places that are marked `mut`" (fun () ->
       let actual =
@@ -1188,3 +1187,44 @@ let () =
       match actual with
       | Some { definition = Function { body = Some _; _ }; _ } -> ()
       | _ -> fail "the provided body is not in the specification")
+
+(* A slice of a value that has no place evaluates the value once: the call
+   that creates the view takes the base as its only copy, even with no stop,
+   which [slice_from] needs no length for. *)
+
+let () =
+  let satisfies_invariants name text =
+    test name (fun () ->
+        let database = setup [ ("app::main", text) ] in
+        ignore (check_module_core_invariants database (module_of "app::main")))
+  in
+  satisfies_invariants "a slice of an array literal holds the literal once"
+    "fn g() -> USize {\n  [1, 2, 3][..].length()\n}\n";
+  satisfies_invariants "a slice of a call's result holds the call once"
+    "fn bytes() -> Array[UInt8, 4] {\n\
+    \  [1, 2, 3, 4]\n\
+     }\n\n\
+     fn g() -> USize {\n\
+    \  bytes()[1..].length()\n\
+     }\n";
+  satisfies_invariants "a list passed `mut` as a slice is a slice of the list"
+    "fn clear(items: mut Slice[Int64]) {\n\
+    \  for index in 0..items.length() {\n\
+    \    items[index] = 0\n\
+    \  }\n\
+     }\n\n\
+     fn g() {\n\
+    \  var items: List[Int64] = [1, 2]\n\
+    \  clear(mut items)\n\
+     }\n";
+  expect_body "a slice with no stop calls `slice_from`"
+    "fn g(items: List[Int64]) -> Slice[Int64] {\n  items[2..]\n}\n"
+    "{ slice standard::list::List.slice_from[Int64](place items, 2) }";
+  expect_body "a list passed as a slice converts to a slice of all of it"
+    "fn total(items: Slice[Int64]) -> Int64 {\n\
+    \  0\n\
+     }\n\n\
+     fn g(items: List[Int64]) -> Int64 {\n\
+    \  total(items)\n\
+     }\n"
+    "{ app::main::total(slice standard::list::List.slice_from[Int64](place items, 0)) }"
