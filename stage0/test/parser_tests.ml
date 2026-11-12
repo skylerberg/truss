@@ -72,13 +72,9 @@ let () =
           then fail "no recovery in the signature"
       | _ -> fail "wrong definitions");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->
-      let file, _ =
-        parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}"
-      in
+      let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
       let printed = Syntax_print.For_testing.definitions file.definitions in
-      if
-        printed
-        <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]
+      if printed <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]
       then fail "got [%s]" (String.concat "; " printed));
   test "a function without a body keeps its signature" (fun () ->
       let file, _ = parse "fn f(x: Int64) -> Int64\nfn g() {}" in
@@ -511,10 +507,8 @@ let () =
       let file, _ = parse "type T(x: Int64, 1)" in
       (match file.definitions with
       | [ { value; _ } ] ->
-          if
-            Syntax_print.For_testing.definition value
-            <> "(type T ((x: Int64) error))"
-          then fail "got %s" (Syntax_print.For_testing.definition value)
+          if Syntax_print.For_testing.definition value <> "(type T ((x: Int64) error))" then
+            fail "got %s" (Syntax_print.For_testing.definition value)
       | _ -> fail "wrong definitions");
       let statements, _ = body_of "let y = x with (1)" in
       if List.map Syntax_print.statement statements <> [ "(let y (with x error))" ] then

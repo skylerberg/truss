@@ -517,11 +517,7 @@ let () =
   test "a type is shown with its methods" (fun () ->
       let root = package [ ("main.truss", Fixtures.type_is_shown_with_its_methods) ] in
       expect_strings
-        ~expected:
-          [
-            "public type Point(x: Int64, y: Int64)";
-            "public fn Point.sum(self) -> Int64";
-          ]
+        ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
         (shown root "demo::main::Point"))
 
 (* Holes *)
