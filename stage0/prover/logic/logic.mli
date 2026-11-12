@@ -171,11 +171,21 @@ val text : query -> string
     then the negated goal, then [(check-sat)]. Each quantifier states the triggers chosen for it.
     Only symbols reached from the facts or the goal are declared. *)
 
-val term_text : query -> term -> string option
+type rendering
+(** A query's canonical text, with the canonical names it gives the query's symbols. *)
+
+val render : query -> rendering
+(** The query rendered once, for its text and for the names that {!term_text} and {!symbols} read.
+*)
+
+val rendered_text : rendering -> string
+(** The text {!text} gives. *)
+
+val term_text : rendering -> term -> string option
 (** A term in the query's canonical names, for asking its value of a model, or [None] if it names a
     symbol the query's text does not. *)
 
-val symbols : query -> (symbol * string) list
+val symbols : rendering -> (symbol * string) list
 (** Each declared symbol the canonical text mentions, with its canonical name, for reading a model
     back. *)
 

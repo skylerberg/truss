@@ -90,39 +90,3 @@ let rec of_core (place : Core.place) : t option =
 (* A [Slice] or a [StringSlice]: a view that an owned collection converts
    to, and through which the collection's elements can be mutated. *)
 let is_slice_type type_ = Types.is_well_known Slice type_ || Types.is_well_known String_slice type_
-
-(* The slice that a mutation of a place writes through, if there is one:
-   the innermost place of a slice type on the way to the mutated place.
-   [whole] is true if the place itself is borrowed [mut], and false if it
-   is assigned. Assigning a slice variable replaces the view and writes
-   through nothing. *)
-let rec written_slice ~whole (place : Core.place) : Core.place option =
-  if whole && is_slice_type (Core_walk.place_type place) then Some place
-  else
-    match place with
-    | Field { base; _ } -> written_slice ~whole:false base
-    | Lent index -> (
-        match storage_index index with
-        | Some collection ->
-            if is_slice_type (Core_walk.place_type collection) then Some collection
-            else written_slice ~whole:false collection
-        | None -> None)
-    | Local _ | Constant _ | Temporary _ -> None
-
-(* The place that a slice views: some elements of its base. *)
-let of_slice (slice : Core.expression) : t option =
-  match slice.kind with
-  | Slice { base; _ } ->
-      Option.map
-        (fun base ->
-          { base with steps = base.steps @ [ Element { node = slice.id; origin = slice.origin } ] })
-        (of_core base)
-  | _ -> None
-
-(* Whether a core place is a part that a lending call lent, and so is not a
-   tracked place. *)
-let rec is_lent_part (place : Core.place) =
-  match place with
-  | Lent index -> Option.is_none (storage_index index)
-  | Field { base; _ } -> is_lent_part base
-  | Local _ | Constant _ | Temporary _ -> false

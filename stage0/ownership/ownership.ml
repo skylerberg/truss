@@ -86,13 +86,16 @@ let analysis =
         (fun ((context : Context.context), (form : Core.t), _, executable) ->
           let task_hazard =
             if executable then
-              match
-                Graph.of_definition ~plain:(Context.plain context)
-                  ~is_view:(Context.is_view context)
-                  ~holds_function:(Context.holds_function context)
-                  ~stores_function:(Context.stores_function context) form.definition
-              with
-              | Some graph ->
+              match Query.demand database Mir.mir key with
+              | Some mir ->
+                  let graph =
+                    Graph.of_mir ~plain:(Context.plain context) ~is_view:(Context.is_view context)
+                      ~holds_function:(Context.holds_function context)
+                      ~stores_function:(Context.stores_function context)
+                      ~returns:(match form.definition with Function _ -> true | _ -> false)
+                      ~is_var:(fun local -> List.mem local context.mutable_locals)
+                      mir
+                  in
                   Moves.check context graph;
                   Views.check context graph
               | None -> None

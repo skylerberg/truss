@@ -1,9 +1,12 @@
 (** Running the tests of one test executable. When the executable exits, it prints the result, and
-    exits with status 1 if any test failed. *)
+    exits with status 1 if any test failed. With [TRUSS_SKIP_SUITES] naming the executable, it runs
+    no test. With [TRUSS_TEST_SHARE] set to [index/count], it runs every [count]th test, from the
+    [index]th on. *)
 
 val test : string -> (unit -> unit) -> unit
-(** Runs a test now. An exception it raises is a failure, and so is a result that an engine the test
-    made holds and a new engine with the same inputs computes differently. *)
+(** Runs a test now, unless [TRUSS_TEST_SHARE] gives it to another process. An exception it raises
+    is a failure, and so is a result that an engine the test made holds and a new engine with the
+    same inputs computes differently. *)
 
 val always : string -> (unit -> unit) -> unit
 (** Runs a test whatever [TRUSS_TEST] names, for a step that every test of the executable needs,
@@ -45,7 +48,8 @@ val expect_strings : expected:string list -> string list -> unit
 (** Fails the running test unless the lists are equal. *)
 
 val markdown_documents : unit -> string list
-(** The names of the Markdown documents at the root of the repository, in order. *)
+(** The paths of the Markdown documents at the root of the repository and under [standard/], in
+    order. *)
 
 val workspace_path : string -> string
 (** The path of a file of the repository, given from the workspace root, such as

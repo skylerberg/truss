@@ -3,13 +3,6 @@
 
 open Harness
 
-(* CI proves the library on runners of its own, beside the other tests. *)
-let () =
-  if Sys.getenv_opt "TRUSS_SKIP_LIBRARY_PROOFS" = Some "1" then begin
-    print_endline "skipped: the library's proofs run in jobs of their own";
-    exit 0
-  end
-
 (* CI proves the library in several processes at once, one for each core
    of several runners. [TRUSS_PROOF_SHARE] names this process's share as
    [index/count], and the process checks and proves only its own modules,

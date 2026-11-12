@@ -22,7 +22,7 @@ val plain : context -> Types.ty -> bool
 val copyable : context -> Types.ty -> bool
 val is_view : context -> Types.ty -> bool
 val holds_function : context -> Types.ty -> bool
-val stores_function : context -> Core.callee -> int -> bool
+val stores_function : context -> Mir.callee -> int -> bool
 val span : context -> Core.origin -> Syntax.span
 
 val report :

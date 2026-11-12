@@ -31,11 +31,14 @@ and projection =
 type constant = Unit | Integer of Z.t | Float of float | Boolean of bool | String of string
 
 type operand =
-  | Use of { place : place; node : Core.id }
-      (** The value at a place, copied if its type copies implicitly and moved otherwise. [node] is
-          the core node the value is read for. *)
-  | Borrow of { place : place; mode : Types.mode }
+  | Use of { place : place; type_ : Types.ty; node : Core.id; origin : Core.origin }
+      (** The value at a place, of [type_], copied if the type copies implicitly and moved
+          otherwise. [node] is the core node the value is read for. *)
+  | Borrow of { place : place; type_ : Types.ty; mode : Types.mode; origin : Core.origin }
       (** The place itself, lent for the operation: read-only, or [mut]. *)
+  | Take of { place : place; type_ : Types.ty; origin : Core.origin }
+      (** The old value of a compound assignment's target, which the operator takes as owned. The
+          statement assigns the target again before any other code runs. *)
   | Constant of constant
 
 type callee =
@@ -92,6 +95,15 @@ type provided = {
   origin : Core.origin;
 }
 
+(** How long a loan lasts. *)
+type loan_duration =
+  | Loop_body  (** A loop borrows what it iterates over for its body. *)
+  | Provide_body  (** A [provide] block borrows its implementations for its body. *)
+  | Rest_of_statement  (** A lending call borrows its receiver until the statement ends. *)
+  | Operand_evaluation
+      (** An evaluated operand stays borrowed until its operation runs, so that a later operand
+          cannot mutate it. *)
+
 type statement = { kind : statement_kind; origin : Core.origin }
 
 and statement_kind =
@@ -114,6 +126,9 @@ and statement_kind =
   | Fork_start of { fork : int; concurrent : bool }
       (** The start of a branch of a [parallel] or [concurrent] block. *)
   | Fork_end of { fork : int }  (** The end of the block's last branch. *)
+  | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
+      (** From here on, what [borrowed] borrows or views is lent with [mode]. *)
+  | Loan_end of int list
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
   | Proof of Core.block  (** Only the prover reads it. *)
 
@@ -159,6 +174,9 @@ type body = {
 }
 
 type t = { body : body; lambdas : body array }
+
+val successors : terminator -> block list
+(** The blocks a terminator can jump to. *)
 
 val mir : (Resolve.Names.key, t option) Query.query
 (** The MIR of a definition whose code runs. The body of a function for specifications only never

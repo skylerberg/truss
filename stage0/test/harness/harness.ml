@@ -1,3 +1,28 @@
+(* With [TRUSS_SKIP_SUITES] naming this executable, such as
+   [prover_tests,database_tests], it says it is skipped and runs no test:
+   CI runs the slowest suites in jobs of their own. *)
+let () =
+  let suite = Filename.remove_extension (Filename.basename Sys.executable_name) in
+  match Sys.getenv_opt "TRUSS_SKIP_SUITES" with
+  | Some names when List.mem suite (String.split_on_char ',' names) ->
+      print_endline ("skipped: CI runs " ^ suite ^ " in a job of its own");
+      exit 0
+  | _ -> ()
+
+(* With [TRUSS_TEST_SHARE] set to [index/count], the process runs every
+   [count]th test, from the [index]th on, so that several processes run
+   one executable's tests at once. A step that [always] runs runs in each
+   of them. *)
+let share =
+  match Sys.getenv_opt "TRUSS_TEST_SHARE" with
+  | None | Some "" -> None
+  | Some text -> (
+      match List.map int_of_string_opt (String.split_on_char '/' text) with
+      | [ Some index; Some count ] when 0 <= index && index < count -> Some (index, count)
+      | _ ->
+          prerr_endline ("TRUSS_TEST_SHARE is `index/count`, such as `0/2`, not `" ^ text ^ "`.");
+          exit 2)
+
 let failures = ref 0
 let count = ref 0
 let current_test = ref ""
@@ -42,7 +67,16 @@ let always name body =
       List.iter (fun problem -> fail "the code database kept a stale result: %s" problem) problems
   | exception exception_ -> fail "auditing raised %s" (Printexc.to_string exception_)
 
-let test name body = if wanted name then always name body
+let ordinal = ref 0
+
+let test name body =
+  if wanted name then begin
+    let is_mine =
+      match share with Some (index, count) -> !ordinal mod count = index | None -> true
+    in
+    incr ordinal;
+    if is_mine then always name body
+  end
 
 let expect_not_recomputed engine ~first ~again query keys =
   let computed step =
@@ -122,10 +156,21 @@ let git directory arguments =
   | _ -> fail "git %s failed" (String.concat " " arguments)
 
 let markdown_documents () =
-  Sys.readdir (workspace_path ".")
-  |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".md")
-  |> List.sort compare
+  let rec markdown directory =
+    Sys.readdir (workspace_path directory)
+    |> Array.to_list
+    |> List.concat_map (fun name ->
+        let path = if directory = "." then name else Filename.concat directory name in
+        if Sys.is_directory (workspace_path path) then markdown path
+        else if Filename.check_suffix name ".md" then [ path ]
+        else [])
+  in
+  let root =
+    Sys.readdir (workspace_path ".")
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".md")
+  in
+  List.sort compare (root @ markdown "standard")
 
 let expect_string ~expected actual =
   if not (String.equal expected actual) then fail "expected %S, got %S" expected actual

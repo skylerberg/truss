@@ -70,8 +70,8 @@ Why3 put a proof program between the two, which weakest preconditions turn
 into conditions; that keeps reading the language apart from the logic, at
 the cost of a second representation of every body that only the walk
 would read, so Truss has none. The MIR that MIR.md describes is a second
-representation that the ownership check and code generation read too, and
-the walk is to read it in place of the core form.
+representation that the ownership check reads, and code generation is to,
+and the walk is to read it in place of the core form.
 
 ### One definition at a time, one obligation at a time
 
@@ -431,7 +431,9 @@ decides when a body is a definition. In the solver:
   proves, the message says that the callee's body is not visible and that
   with it the obligation would be proven, and names the fixes: an
   `ensures` that states the needed fact, or, for a function,
-  `public transparent fn`.
+  `public transparent fn`. The translation reveals every such callee at
+  once, so where it names several, the message says that the proof may
+  need only some of them.
 - **Called on a quantifier's bound values,** a definition with no
   `requires` is stated once, for every argument, since a fact about one
   call would name the bound values. So `forall a: Pair => forall b: Pair
@@ -1505,9 +1507,9 @@ test the prover itself:
 
 ## Not built
 
-- **Reading the MIR.** The prover walks the core form, as the ownership
-  check and code generation each lower it themselves. MIR.md describes the
-  one lowering that all three are to read.
+- **Reading the MIR.** The prover walks the core form, and code generation
+  lowers it itself, where the ownership check reads the MIR that MIR.md
+  describes.
 - **Contracts for the intrinsic module's system calls.** A C function's
   result beyond its row of the table is known only by its type,
   and so is the address of a view of any type but a built-in scalar, whose

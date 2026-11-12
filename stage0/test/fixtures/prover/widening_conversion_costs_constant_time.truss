@@ -1,0 +1,5 @@
+fn widen(value: UInt8) -> USize
+  cost time O(1)
+{
+  USize.from(value)
+}
