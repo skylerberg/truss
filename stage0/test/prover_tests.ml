@@ -310,7 +310,16 @@ let () =
         \    x if x <= 0 => 2\n\
         \    _ => unreachable\n\
         \  }\n\
-         }\n")
+         }\n";
+      not_proven
+        "fn f(value: Int64) -> Int64 {\n\
+        \  match value {\n\
+        \    x if x > 0 => 1\n\
+        \    x if x < 0 => 2\n\
+        \    _ => unreachable\n\
+        \  }\n\
+         }\n"
+        "prover.unreachable")
 
 (* Proofs *)
 

@@ -272,7 +272,6 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                                                 })))) ))
                               fields;
                         }));
-              diverges = false;
             };
           result = variant_type;
         }
@@ -477,7 +476,6 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                           mark = None;
                         };
                     ]));
-          diverges = false;
         }
 
 (* A list literal, desugared to a block: allocate storage with capacity for
@@ -572,7 +570,6 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                   lends = None;
                   uses = [];
                 }));
-      diverges = false;
     }
 
 (* A tagged string, desugared to a call of the tag type's [from_template]
@@ -1049,7 +1046,6 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty)
             {
               statements = [];
               value = (match success_fields with [ (_, field) ] -> Some field | _ -> None);
-              diverges = false;
             };
           arm [ failure_pattern ]
             {
@@ -1071,10 +1067,8 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty)
                                           (Option.value ~default:[] returned_failure.fields)
                                           failure_fields;
                                     }))))));
-              diverges = true;
             };
         ];
-      guards_exhaustive = false;
     }
 
 (* A slice expression, [base[start..stop]]. The node holds the call of the
@@ -1186,12 +1180,7 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
                     T.unit)))
           entries
       in
-      Block
-        {
-          statements = bind :: inserts;
-          value = Some (make type_ (Use collection));
-          diverges = false;
-        }
+      Block { statements = bind :: inserts; value = Some (make type_ (Use collection)) }
 
 (* A list, set, or array literal, or a specification's sequence or set.
    A list or a set literal is desugared to calls. *)
