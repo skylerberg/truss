@@ -202,8 +202,9 @@ let () =
       write directory "other.truss" "fn triple(value: Int64) -> Int64 {\n  value * 4\n}\n";
       expect_errors directory 0;
       let again = computed directory in
-      if List.mem "checked(app::main::double)" again then fail "checked double again";
-      if not (List.mem "checked(app::other::triple)" again) then fail "did not check triple");
+      if List.mem "type_check_result(app::main::double)" again then fail "checked double again";
+      if not (List.mem "type_check_result(app::other::triple)" again) then
+        fail "did not check triple");
   test "reordering a type's fields checks no reader of the type again" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -216,7 +217,7 @@ let () =
       write directory "point.truss" (point "y: Int64, x: Int64");
       expect_errors directory 0;
       let again = computed directory in
-      if List.mem "checked(app::reader::width)" again then fail "checked width again";
+      if List.mem "type_check_result(app::reader::width)" again then fail "checked width again";
       if List.mem "signature(app::reader::width)" again then fail "lowered width's signature again");
   test "editing one method's body checks only that method again" (fun () ->
       fresh_store ();
@@ -238,9 +239,9 @@ let () =
       write directory "shapes.truss" (shapes "10 + 2");
       expect_errors directory 0;
       let again = computed directory in
-      if not (List.mem "checked(app::shapes::impl Shape for Square.area)" again) then
+      if not (List.mem "type_check_result(app::shapes::impl Shape for Square.area)" again) then
         fail "did not check area";
-      if List.mem "checked(app::shapes::impl Shape for Square.sides)" again then
+      if List.mem "type_check_result(app::shapes::impl Shape for Square.sides)" again then
         fail "checked sides again");
   test "a removed module is gone from the package" (fun () ->
       fresh_store ();
@@ -348,8 +349,8 @@ let () =
       write second "main.truss" (program ^ "\nfn extra() -> Int64 {\n  1\n}\n");
       expect_errors second 0;
       let again = computed second in
-      if List.mem "checked(app::main::double)" again then fail "checked double again";
-      if not (List.mem "checked(app::main::extra)" again) then fail "did not check extra");
+      if List.mem "type_check_result(app::main::double)" again then fail "checked double again";
+      if not (List.mem "type_check_result(app::main::extra)" again) then fail "did not check extra");
   test "a new worktree's state is a difference over the state it started from" (fun () ->
       fresh_store ~empty:true ();
       (* Eight modules, of which the second worktree changes one. *)

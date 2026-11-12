@@ -53,8 +53,8 @@ let rec function_value_call state env (value : expression) (callee : expression)
             let parameter : T.parameter_info =
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
-            let conversion, mode = argument_value state env argument.value parameter in
-            { C.expression = argument.value.id; parameter = index; mode; conversion })
+            let mode = argument_value state env argument.value parameter in
+            { C.expression = argument.value.id; parameter_index = index; mode })
           pairs
       in
       let result = output_type function_type.output in
@@ -62,11 +62,11 @@ let rec function_value_call state env (value : expression) (callee : expression)
       state.tables.calls.(value.id) <-
         Some
           {
-            callee = Function_value;
+            callee = Indirect;
             arguments = checked;
-            defaults_left_out = [];
+            omitted_defaults = [];
             uses = function_type.uses;
-            result;
+            callee_result = result;
           };
       Form.register_call ~function_value:callee state value;
       result
@@ -78,9 +78,8 @@ let rec function_value_call state env (value : expression) (callee : expression)
               (show state callee_type)))
 
 (* Checks one argument against its parameter's type and mode. Returns the
-   argument's conversion and the mode it is passed with, which is the
-   parameter's mode except for a field of a yielded constructor that lends
-   a place. *)
+   mode it is passed with, which is the parameter's mode except for a field
+   of a yielded constructor that lends a place. *)
 and argument_value state env (value : expression) (parameter : T.parameter_info) =
   let inner =
     match value.kind with
@@ -97,9 +96,9 @@ and argument_value state env (value : expression) (parameter : T.parameter_info)
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
-  let conversion = coerce state env ~argument:true value ~found ~expected:parameter.type_ in
+  coerce state env ~argument:true value ~found ~expected:parameter.type_;
   check_mode state env value parameter found;
-  (conversion, parameter.mode)
+  parameter.mode
 
 (* Matches arguments to parameters. An argument goes to the parameter named
    by its label, or to the parameter with the same name if the argument is a
@@ -287,8 +286,8 @@ and check_arguments state env (parameters : T.parameter_info list) matched ~offs
   in
   let check ((argument : argument), index) =
     let parameter = List.nth parameters index in
-    let conversion, mode = argument_value state env argument.value parameter in
-    { C.expression = argument.value.id; parameter = index + offset; mode; conversion }
+    let mode = argument_value state env argument.value parameter in
+    { C.expression = argument.value.id; parameter_index = index + offset; mode }
   in
   let first = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in
   let lambdas = List.map check (List.filter is_lambda matched) in
@@ -393,9 +392,9 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
           {
             callee = Constructor { type_ = type_path; variant; type_arguments };
             arguments = checked;
-            defaults_left_out = left_out;
+            omitted_defaults = left_out;
             uses = [];
-            result = type_;
+            callee_result = type_;
           };
       Form.register_call state value;
       type_

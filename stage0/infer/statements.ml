@@ -129,13 +129,8 @@ and statement state env (written : statement) ~last : unit =
                 operator_call
                   ~operands:
                     [
-                      {
-                        C.expression = written_target.id;
-                        parameter = 0;
-                        mode = T.Read;
-                        conversion = None;
-                      };
-                      { C.expression = value.id; parameter = 1; mode = T.Read; conversion = None };
+                      { C.expression = written_target.id; parameter_index = 0; mode = T.Read };
+                      { C.expression = value.id; parameter_index = 1; mode = T.Read };
                     ]
                   state fake ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
@@ -276,7 +271,7 @@ and statement state env (written : statement) ~last : unit =
                 | _ -> T.Read
               in
               Yield { mode; part = Form.operand mode (build_expression state inner) });
-          ignore (coerce state env inner ~found ~expected:element)
+          coerce state env inner ~found ~expected:element
       | _ ->
           ignore (expression state env value);
           report state Wrong_yield written.span
@@ -304,22 +299,20 @@ and assigns_through_index state env (written : statement) (target : expression) 
             { name; mode = Own; type_; has_default = false }
           in
           mutate state env ~by:Assignment base;
-          let key_conversion, _ =
-            Calls.argument_value state env key
-              (parameter "key" (associated state base_type index "Key" ~at:key.span))
-          in
-          let value_conversion, _ =
-            Calls.argument_value state env value
-              (parameter "value" (associated state base_type index "Output" ~at:value.span))
-          in
+          ignore
+            (Calls.argument_value state env key
+               (parameter "key" (associated state base_type index "Key" ~at:key.span)));
+          ignore
+            (Calls.argument_value state env value
+               (parameter "value" (associated state base_type index "Output" ~at:value.span)));
           (* The call is recorded for the statement, which has no
              expression of its own to record it for. *)
           let call : expression =
             { kind = Expression_error; span = written.span; id = written.id }
           in
           record state call T.unit;
-          let argument (given : expression) position mode conversion : C.argument =
-            { expression = given.id; parameter = position; mode; conversion }
+          let argument (given : expression) position mode : C.argument =
+            { expression = given.id; parameter_index = position; mode }
           in
           state.tables.calls.(written.id) <-
             Some
@@ -334,15 +327,10 @@ and assigns_through_index state env (written : statement) (target : expression) 
                       type_arguments = [];
                       evidence = evidence_of found;
                     };
-                arguments =
-                  [
-                    argument base 0 Mut None;
-                    argument key 1 Own key_conversion;
-                    argument value 2 Own value_conversion;
-                  ];
-                defaults_left_out = [];
+                arguments = [ argument base 0 Mut; argument key 1 Own; argument value 2 Own ];
+                omitted_defaults = [];
                 uses = method_.method_signature.uses;
-                result = T.unit;
+                callee_result = T.unit;
               };
           Form.register_call state call;
           register_statement state written (fun () -> Evaluate (build_expression state call));
@@ -409,7 +397,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
             | Some (Ok { output = Yields (yields, _); _ }) -> yields
             | _ -> mode
           in
-          (call.result, yields)
+          (call.callee_result, yields)
       | T.Error _, _ | T.Hole, _ -> (type_, mode)
       | _ -> (
           match each_call state iterable.span type_ mode with

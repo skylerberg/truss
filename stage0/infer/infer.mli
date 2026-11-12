@@ -16,15 +16,43 @@ module Members : sig
   val shape : Query.context -> Path.t -> Types.shape option
 end
 
-type result = Body.result = {
-  checked : Checked.t;
+(** What a name, member, or bracket expression resolves to, once types are known. *)
+type resolution = Tables.resolution =
+  | Local_value of Syntax.id  (** A local, by the id of the name that binds it. *)
+  | Global of { path : Path.t; type_arguments : Types.argument list }
+      (** A function as a value, or a constant. *)
+  | Field_access of { type_ : Types.ty; field : string }
+  | Variant_value of { type_ : Types.ty; variant : string }
+      (** A variant with no fields, or one used as a function. *)
+  | Type_name of Types.ty  (** A type before a [.], such as [Shape] in [Shape.Circle]. *)
+  | Value_parameter of Types.parameter  (** A [USize] generic parameter. *)
+  | Specification_value  (** [result], [old], or a specification function. *)
+
+val show_resolution : resolution -> string
+
+type tables = Tables.published = {
+  types : Types.ty option array;  (** The type of every expression, by its id. *)
+  local_types : Types.ty option array;  (** The type of every binding, by the id of its name. *)
+  resolutions : resolution option array;
+      (** By the id of each [Name], [Member], or [Bracket] expression. *)
+  callees : Path.t option array;
+      (** By the id of each call of a named function or a type's own method: the callee's path. *)
+}
+(** What tools read of a checked definition, such as hover, find references, and the unused-code
+    check. The prover and code generation read the core form instead. Each table is a dense array
+    keyed by the syntax tree's node ids. Every type in them is solved: no [Variable] or [Literal]
+    remains, and no unknown set of capabilities. A [Hole] stays where a [todo]'s type was never
+    decided. *)
+
+type type_check_result = Body.type_check_result = {
+  tables : tables;
   core : Core.t option;
       (** The definition's core form, when it parsed whole and nothing in it is an error. *)
   diagnostics : Diagnostic.t list;
   evidence : string list;  (** The packages whose [impl]s met a bound in the definition *)
 }
 
-val checked : (Resolve.Names.key, result option) Query.query
+val type_check_result : (Resolve.Names.key, type_check_result option) Query.query
 
 val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** The diagnostics of every body in a file, in file offsets and in order. *)
@@ -72,9 +100,9 @@ val exported_specification_of_path : (Path.t, (Core.t * Types.substitution) opti
 val evidence : (Resolve.Names.key, string list) Query.query
 (** The packages whose [impl]s met a bound in a definition. *)
 
-val clean : Query.context -> Resolve.Names.key -> Checked.t option
-(** The checked tables of a definition, or [None] if the definition has a parse error, a resolution
-    error, or a type error. The pattern, use, and ownership checks run only on a definition that has
-    none, so that one mistake is not reported again by a later check. *)
+val clean : Query.context -> Resolve.Names.key -> tables option
+(** The tables of a definition, or [None] if the definition has a parse error, a resolution error,
+    or a type error. The pattern, use, and ownership checks run only on a definition that has none,
+    so that one mistake is not reported again by a later check. *)
 
 val is_clean : Query.context -> Resolve.Names.key -> bool

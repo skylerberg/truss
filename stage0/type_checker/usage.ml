@@ -7,7 +7,7 @@ module T = Types
 
 type context = {
   resolved : Resolve.resolved;
-  checked : Checked.t;
+  tables : Infer.tables;
   text : string;
   mutable diagnostics : Diagnostic.t list;
 }
@@ -19,8 +19,9 @@ let report context ?(fixes = []) code (span : span) message =
 
 (* Unused variables *)
 
-(* The names that a definition reads, by the id of each name's binding. *)
-let references (resolved : Resolve.resolved) =
+(* How many times a definition reads each name, by the id of the name's
+   binding. *)
+let count_uses (resolved : Resolve.resolved) =
   let counts = Hashtbl.create 32 in
   Array.iter
     (function
@@ -56,10 +57,10 @@ let parameter_names (definition : definition) =
 (* The bindings in patterns, with whether each is a bare field of a pattern
    with several fields, which [_] alone would no longer name. *)
 let pattern_bindings (definition : definition) =
-  let found = ref [] in
+  let bindings = ref [] in
   let rec pattern ~bare_field (written : pattern) =
     match written.kind with
-    | Binding_or_constant name -> found := (name, bare_field) :: !found
+    | Binding_or_constant name -> bindings := (name, bare_field) :: !bindings
     | Variant { fields = Some fields; _ } | Record fields -> pattern_fields fields
     | Alternatives alternatives -> List.iter (pattern ~bare_field) alternatives
     | _ -> ()
@@ -92,10 +93,10 @@ let pattern_bindings (definition : definition) =
     Syntax_walk.statement_parts ~expression ~statement written
   in
   Syntax_walk.definition ~statement expression definition;
-  List.rev !found
+  List.rev !bindings
 
 let check_unused context (definition : definition) =
-  let counts = references context.resolved in
+  let counts = count_uses context.resolved in
   let parameters = parameter_names definition in
   List.iter
     (fun ((name : name), bare_field) ->
@@ -117,32 +118,32 @@ let check_unused context (definition : definition) =
 
 (* Unreachable code *)
 
-let never context (value : expression) =
-  match context.checked.types.(value.id) with Some T.Never -> true | _ -> false
+let diverges context (value : expression) =
+  match context.tables.types.(value.id) with Some T.Never -> true | _ -> false
 
-(* Whether a statement never finishes, from types alone. *)
-let rec statement_never context (written : statement) =
+(* Whether a statement diverges, from types alone. *)
+let rec statement_diverges context (written : statement) =
   match written.kind with
   (* A [parallel] or [concurrent] block ends only when every branch does. *)
-  | Parallel body | Concurrent body -> List.exists (statement_never context) body.statements
-  | Expression value -> never context value
-  | Let { value; _ } -> never context value
-  | Assignment { value; _ } -> never context value
+  | Parallel body | Concurrent body -> List.exists (statement_diverges context) body.statements
+  | Expression value -> diverges context value
+  | Let { value; _ } -> diverges context value
+  | Assignment { value; _ } -> diverges context value
   | While { condition = { kind = True; _ }; body; _ } ->
       let rec breaks (block : block) =
-        let found = ref false in
+        let has_break = ref false in
         let rec statement (written : statement) =
           match written.kind with
           | For _ | While _ -> ()
           | _ -> Syntax_walk.statement_parts ~expression ~statement written
         and expression (value : expression) =
           match value.kind with
-          | Break -> found := true
+          | Break -> has_break := true
           | Lambda _ -> ()
           | _ -> Syntax_walk.expression_parts ~expression ~statement value
         in
         List.iter statement block.statements;
-        !found
+        !has_break
       in
       not (breaks body)
   | _ -> false
@@ -152,7 +153,7 @@ let line_start text position = Source.line_start (Source.create ~path:"" text) p
 let check_block context (written : block) =
   let rec go = function
     | first :: (next :: _ as rest) ->
-        if statement_never context first then begin
+        if statement_diverges context first then begin
           let last = List.nth rest (List.length rest - 1) in
           let start = line_start context.text next.span.start in
           let start = if start > 0 then start - 1 else start in
@@ -213,8 +214,8 @@ let definition_diagnostics =
           Infer.clean database key,
           Query.demand database Resolve.Names.text key )
       with
-      | Some definition, Some resolved, Some checked, Some text ->
-          let context = { resolved; checked; text; diagnostics = [] } in
+      | Some definition, Some resolved, Some tables, Some text ->
+          let context = { resolved; tables; text; diagnostics = [] } in
           check_unused context definition;
           check_unreachable context definition;
           List.sort

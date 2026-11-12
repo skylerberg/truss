@@ -46,11 +46,11 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
       arguments =
         List.mapi
           (fun index (written : expression) ->
-            { C.expression = written.id; parameter = index; mode = T.Read; conversion = None })
+            { C.expression = written.id; parameter_index = index; mode = T.Read })
           arguments;
-      defaults_left_out = [];
+      omitted_defaults = [];
       uses = [];
-      result;
+      callee_result = result;
     }
   in
   match literal.tag with
@@ -228,9 +228,8 @@ and lambda state env ?expected (value : expression) parameters body =
         let output = output_type function_type.output in
         let lambda_env = { env with output = Some (Returns output); enclosing = [] } in
         let body_type = block_value state lambda_env ~expected:output body in
-        ignore
-          (convert state lambda_env ?expression:(block_end body) body.span ~found:body_type
-             ~expected:output);
+        convert state lambda_env ?expression:(block_end body) body.span ~found:body_type
+          ~expected:output;
         T.Function function_type
     | Some (T.Function function_type) ->
         untyped
@@ -288,7 +287,7 @@ and lambda state env ?expected (value : expression) parameters body =
 
 and if_ state env ?expected (value : expression) (test : expression) then_ else_ =
   let condition_type = in_statement state env test.span (fun () -> expression state env test) in
-  ignore (coerce state env test ~found:condition_type ~expected:T.bool);
+  coerce state env test ~found:condition_type ~expected:T.bool;
   register_expression state value (fun () ->
       let condition = build_expression state test in
       let then_ = build_block state then_ in
@@ -343,8 +342,7 @@ and join state env ~expected branches =
   | [], _ -> T.Never
   | _, Some expected ->
       List.iter
-        (fun (found, span, expression) ->
-          ignore (convert state env ?expression span ~found ~expected))
+        (fun (found, span, expression) -> convert state env ?expression span ~found ~expected)
         live;
       expected
   | (first, _, _) :: rest, None ->

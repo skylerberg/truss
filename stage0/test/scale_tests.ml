@@ -90,11 +90,11 @@ let () =
       let engine = Engine.of_context database in
       Engine.clear_log engine;
       ignore (edit database "app::part_0" ("\n\n" ^ module_text 0));
-      let checked =
+      let rechecked =
         List.filter
-          (fun label -> String.starts_with ~prefix:"checked(" label)
+          (fun label -> String.starts_with ~prefix:"type_check_result(" label)
           (Engine.executed engine)
       in
-      if checked <> [] then fail "checked [%s]" (String.concat "; " checked))
+      if rechecked <> [] then fail "checked [%s]" (String.concat "; " rechecked))
 
 let () = finish ()

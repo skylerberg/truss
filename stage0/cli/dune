@@ -15,7 +15,6 @@
   query
   workspace
   resolve
-  checked
   infer
   interface
   type_checker

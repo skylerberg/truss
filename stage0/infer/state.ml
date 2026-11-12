@@ -323,12 +323,12 @@ let register_pattern state (written : pattern) kind =
     Some
       (fun () ->
         let id = fresh_node_id state in
-        match state.tables.pattern_types.(written.id) with
+        match state.tables.scrutinee_types.(written.id) with
         | Some type_ -> { Core.id; origin = written.id; type_; kind = kind () }
         | None -> bug "`%s` has a node and no type" (source state written.span))
 
 let build_pattern state (written : pattern) : Core.pattern =
-  if was_hole state (fun t -> t.pattern_types) written.id then
+  if was_hole state (fun t -> t.scrutinee_types) written.id then
     { id = fresh_node_id state; origin = written.id; type_ = T.Never; kind = Wildcard }
   else
     match state.form.pattern_builders.(written.id) with
@@ -760,7 +760,7 @@ let mismatch state span ~expected ~found = ignore (mismatched state span ~expect
 (* Whether an expression is a constant that a type declares, such as
    [UInt8.maximum]. *)
 let is_member_constant state (value : expression) =
-  match state.tables.meanings.(value.id) with
+  match state.tables.resolutions.(value.id) with
   | Some (Global { path = Member_constant _; _ }) -> true
   | _ -> false
 
@@ -860,9 +860,11 @@ type static_ =
       (** The trait's type arguments, if they are written. *)
   | Static_capability of Path.t
 
-(* Checks a value of type [found] where [expected] is expected, and
-   returns the implicit conversion, if one applies. This is the only place
-   where a type converts to another:
+type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
+
+(* Checks a value of type [found] where [expected] is expected, and wraps
+   the expression's core node in the implicit conversion, if one applies.
+   This is the only place where a type converts to another:
 
    - [Never] converts to any type.
    - A function value converts to a function type with more [uses] or
@@ -877,12 +879,11 @@ type static_ =
      fits.
 
    In every other case, [found] must unify with [expected]. *)
-let convert state env ?(argument = false) ?expression (span : span) ~found ~expected :
-    C.conversion option =
+let convert state env ?(argument = false) ?expression (span : span) ~found ~expected =
   (* Wraps the expression's core node in the conversion. The wrapped node
      has the expected type. *)
-  let converted (conversion : C.conversion option) =
-    (match (conversion, expression) with
+  let converted (conversion : conversion option) =
+    match (conversion, expression) with
     | Some conversion, Some id ->
         let before = state.form.expression_builders.(id) in
         state.form.expression_builders.(id) <-
@@ -931,8 +932,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
                            })
                   | given -> bug "`%s` is viewed and has no view" (T.show given)))
             before
-    | _ -> ());
-    conversion
+    | _ -> ()
   in
   converted
   @@
@@ -1212,7 +1212,7 @@ let function_signature state (path : Path.t) =
    never moved. *)
 let note_lending state (value : expression) (output : T.result) =
   match output with
-  | Lends (mode, _) -> state.tables.lends.(value.id) <- Some mode
+  | Lends (mode, _) -> state.tables.lend_modes.(value.id) <- Some mode
   | Returns _ | Yields _ -> ()
 
 (* The mode with which an expression is lent, if it is the result of a
@@ -1220,7 +1220,7 @@ let note_lending state (value : expression) (output : T.result) =
    expression belongs to the receiver of the lending call. *)
 let rec lent state (value : expression) : T.mode option =
   match value.kind with
-  | Call _ -> state.tables.lends.(value.id)
+  | Call _ -> state.tables.lend_modes.(value.id)
   | Member (base, _) | Parenthesized base -> lent state base
   | Bracket (base, _) when state.resolved.brackets.(value.id) <> Some Type_arguments ->
       lent state base
@@ -1314,7 +1314,8 @@ let rec use_mutable_indexes state (value : expression) =
                 arguments =
                   List.map
                     (fun (argument : C.argument) ->
-                      if argument.parameter = 0 then { argument with mode = T.Mut } else argument)
+                      if argument.parameter_index = 0 then { argument with mode = T.Mut }
+                      else argument)
                     arguments;
               }
       | _ -> ());
@@ -1521,7 +1522,7 @@ let check_lent_value state env (operand : expression) =
             | Some type_ when T.contains_unsolved type_ -> false
             | Some type_ ->
                 let fieldless_variant =
-                  match (state.tables.meanings.(value.id), type_) with
+                  match (state.tables.resolutions.(value.id), type_) with
                   | Some (Variant_value _), T.Function _ -> false
                   | Some (Variant_value _), _ -> true
                   | _ -> false
