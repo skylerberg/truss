@@ -59,6 +59,13 @@ bound to, not a copy, and a lent local is the place itself, so a place is
 evaluated once however often it is read. Whether a `use` copies or moves is
 decided by the type, so the MIR is a function of the core form alone.
 
+**A condition's lent locals end with the condition** in an `if` or a
+`while`, unless the core form's `binds_lent_part` says that a name the
+condition binds may alias a lent part. Then the lent locals, their loans, and
+the condition's names end with the then-block or the body, so that no name
+outlives the part it aliases. A `match` guard's end with the `match`'s
+statement.
+
 **A `for` loop is a structured terminator,** over a yielding call, an integer
 range, or a cursor, carrying its clauses and its schedule, because each
 consumer needs the body as a region: code generation inlines a yielding method

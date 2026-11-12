@@ -202,6 +202,11 @@ type scope = {
   provides : bool;
 }
 
+(* How long the lends of a condition last: for the rest of the statement, as
+   a [match] guard's do; until the guarded block ends, where an [if] or a
+   [while] binds a name that may alias a lent part; or for the condition
+   alone. *)
+type condition_lends = For_statement | For_block | For_condition
 type target = Jump of block | Next_iteration
 type enclosing_loop = { break_ : block; continue_ : target; depth : int }
 
@@ -348,9 +353,11 @@ let end_scope b scope origin =
   if scope.provides then emit b Provide_end origin
 
 (* Runs [f] in a new scope, and ends the scope's bindings where control
-   leaves it normally. *)
-let in_scope ?(provides = false) b origin f =
-  let scope = { frame = Bindings; bound = []; loans = []; temporaries = []; provides } in
+   leaves it normally. The scope also ends [held]: what a condition before it
+   handed over, its names, lent temporaries, and loans. *)
+let in_scope ?(provides = false) ?(held = ([], [], [])) b origin f =
+  let names, lent, loans = held in
+  let scope = { frame = Bindings; bound = names; loans; temporaries = lent; provides } in
   b.scopes <- scope :: b.scopes;
   let result = f () in
   b.scopes <- List.tl b.scopes;
@@ -510,12 +517,15 @@ let rec expression b (node : Core.expression) : operand option =
       | To_any { value; trait; evidence } ->
           let* value = expression b value in
           hold (To_any { value; trait; evidence })
-      | If { condition = tested; then_; else_ } ->
+      | If { condition = tested; then_; else_; binds_lent_part } ->
           let result = value_local b node in
           let yes = new_block b and no = new_block b and joined = new_block b in
-          scoped_condition ~keeps_lent:true b tested ~yes ~no;
+          let held =
+            scoped_condition b tested ~yes ~no
+              ~lends:(if binds_lent_part then For_block else For_condition)
+          in
           start b yes;
-          branch_into b result then_ joined origin;
+          branch_into ~held b result then_ joined origin;
           start b no;
           (match else_ with
           | Some else_ -> branch_into b result else_ joined origin
@@ -925,36 +935,56 @@ and condition b (node : Core.expression) ~yes ~no =
       | Some value -> terminate b (Branch { condition = value; yes; no }) node.origin
       | None -> ())
 
-(* A condition whose temporaries end before either way out. *)
-and scoped_condition ?(keeps_lent = false) b (node : Core.expression) ~yes ~no =
+(* A condition, whose temporaries end before either way out. Its lent
+   temporaries and loans last as [lends] says. The result is what the
+   guarded block's scope must end, as [in_scope]'s [held]: with [For_block],
+   the names the condition binds, its lent temporaries, and its loans, so
+   that no name outlives the part it aliases. *)
+and scoped_condition ~lends b (node : Core.expression) ~yes ~no =
+  let naming = List.find_opt (fun scope -> scope.frame = Statement) b.scopes in
+  let named_before = match naming with Some scope -> scope.bound | None -> [] in
   let scope = { frame = Condition; bound = []; loans = []; temporaries = []; provides = false } in
   b.scopes <- scope :: b.scopes;
   let yes' = new_block b and no' = new_block b in
   condition b node ~yes:yes' ~no:no';
   b.scopes <- List.tl b.scopes;
-  (* The condition of an [if] or a guard lends for the rest of its statement,
-     so that what [is] binds of a lent part can be used in the branch. A
-     [while] condition's loans end before the body. *)
-  if keeps_lent then begin
-    let lent, others =
-      List.partition
-        (fun local -> match (Hashtbl.find b.infos local).kind with Lent _ -> true | _ -> false)
-        scope.temporaries
-    in
+  let lent, others =
+    List.partition
+      (fun local -> match (Hashtbl.find b.infos local).kind with Lent _ -> true | _ -> false)
+      scope.temporaries
+  in
+  let loans = scope.loans in
+  (* A guard's lends last for the rest of the [match]'s statement, so that
+     what [is] binds of a lent part can be used in the arm. *)
+  if lends = For_statement then begin
     List.iter (add_temporary b) (List.rev lent);
-    scope.temporaries <- others;
-    match b.scopes with
-    | enclosing :: _ ->
-        enclosing.loans <- scope.loans @ enclosing.loans;
-        scope.loans <- []
-    | [] -> ()
+    match b.scopes with enclosing :: _ -> enclosing.loans <- loans @ enclosing.loans | [] -> ()
   end;
+  (* With [For_block], the names the condition binds move to the guarded
+     block's scope. Where the condition is false, they end with the lent
+     temporaries, since a name may be bound there too, as after [&&]. *)
+  let names =
+    match (lends, naming) with
+    | For_block, Some named ->
+        let names = List.filter (fun local -> not (List.mem local named_before)) named.bound in
+        named.bound <- named_before;
+        names
+    | _ -> []
+  in
+  let kept = { scope with temporaries = others; loans = [] } in
+  let on_true, on_false =
+    match lends with
+    | For_statement -> (kept, kept)
+    | For_block -> (kept, { scope with bound = names })
+    | For_condition -> (scope, scope)
+  in
   List.iter
-    (fun (entry, target) ->
+    (fun (entry, target, ended) ->
       start b entry;
-      end_scope b scope node.origin;
+      end_scope b ended node.origin;
       goto b target node.origin)
-    [ (yes', yes); (no', no) ]
+    [ (yes', yes, on_true); (no', no, on_false) ];
+  if lends = For_block then (names, lent, loans) else ([], [], [])
 
 (* The local an [if] or a [match] writes its value to, if it has one. *)
 and value_local b (node : Core.expression) =
@@ -970,8 +1000,8 @@ and result_of b (node : Core.expression) result =
 
 (* A branch of an [if] or a [match]: its block, its value written to
    [result], then a jump to [joined]. *)
-and branch_into b result (body : Core.block) joined origin =
-  in_scope b origin (fun () ->
+and branch_into ?held b result (body : Core.block) joined origin =
+  in_scope ?held b origin (fun () ->
       match (block b body, result) with
       | Some value, Some local -> assign b (at local) (Operand value) origin
       | _ -> ());
@@ -1238,7 +1268,7 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
                       evaluated
                   in
                   let passed = new_block b and rejected = new_block b in
-                  scoped_condition ~keeps_lent:true b guard ~yes:passed ~no:rejected;
+                  ignore (scoped_condition ~lends:For_statement b guard ~yes:passed ~no:rejected);
                   start b rejected;
                   end_loans b loans current.origin;
                   (match b.scopes with
@@ -1345,15 +1375,18 @@ and statement b (node : Core.statement) =
           | Cursor { cursor; next } ->
               cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each:(fun bind_part ->
                   each ~bind_part))
-      | While { condition = tested; clauses; body } ->
+      | While { condition = tested; clauses; body; binds_lent_part } ->
           let header = new_block b and inside = new_block b and after = new_block b in
           goto b header origin;
           (Hashtbl.find b.pending header).heading <- Some { clauses; schedule = Sequential; origin };
           start b header;
-          scoped_condition b tested ~yes:inside ~no:after;
+          let held =
+            scoped_condition b tested ~yes:inside ~no:after
+              ~lends:(if binds_lent_part then For_block else For_condition)
+          in
           start b inside;
           looping b ~break_:after ~continue_:(Jump header) (fun () ->
-              ignore (in_scope b origin (fun () -> block b body)));
+              ignore (in_scope ~held b origin (fun () -> block b body)));
           goto b header origin;
           start b after
       | Parallel branches | Concurrent branches ->

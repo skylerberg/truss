@@ -255,7 +255,13 @@ and statement state env (written : statement) ~last : unit =
       register_statement state written (fun () ->
           let condition = build_expression state test in
           let clauses = List.map (Form.loop_clause state) clauses in
-          While { condition; clauses; body = build_block state body });
+          While
+            {
+              condition;
+              clauses;
+              body = build_block state body;
+              binds_lent_part = Form.binds_lent_part state condition;
+            });
       loop_body state { env with enclosing = Loop :: env.enclosing } body
   | Parallel body | Concurrent body ->
       let concurrent = match written.kind with Concurrent _ -> true | _ -> false in

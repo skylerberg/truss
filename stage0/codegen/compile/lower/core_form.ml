@@ -282,7 +282,8 @@ and into st (value : Core.expression) (destination : Lir.place) =
           assign (Use (Constant (Bool false)));
           finish st.builder (Goto after);
           start st.builder after)
-  | If { condition; then_; else_ } -> if_ st ~condition ~then_ ~else_ (Some destination)
+  | If { condition; then_; else_; binds_lent_part } ->
+      if_ st ~condition ~then_ ~else_ ~binds_lent_part (Some destination)
   | Match { scrutinees; arms; _ } -> match_ st ~scrutinees ~arms destination
   | Block inner -> block_into st inner (Some destination)
   | Return returned -> return_ st returned
@@ -1655,17 +1656,25 @@ and spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
     ~not_spawned:(fun () -> in_scope st (fun () -> ignore (unbox ())))
     (fun () -> in_scope st (fun () -> each (unbox ())))
 
+(* An [if]. The names that the condition binds live until the then-block
+   ends. The condition's temporaries and lends end before the then-block
+   unless [binds_lent_part], when a name may alias a lent part, and then they
+   end with the then-block. They end before the else-block either way. *)
 and if_ st ~(condition : Core.expression) ~(then_ : Core.block) ~(else_ : Core.block option)
-    destination =
+    ~binds_lent_part destination =
   let yes = block st.builder and no = block st.builder and after = block st.builder in
-  let scope = open_scope st Bindings in
+  let names = open_scope st Bindings in
+  let tested = open_scope st Statement in
   branch st condition ~yes ~no;
   start st.builder yes;
+  if not binds_lent_part then close_scope st tested;
   block_into st then_ destination;
-  close_scope st scope;
+  if binds_lent_part then close_scope st tested;
+  close_scope st names;
   finish st.builder (Goto after);
   start st.builder no;
-  drop_scope st scope;
+  drop_scope st tested;
+  drop_scope st names;
   Option.iter (fun inner -> block_into st inner destination) else_;
   finish st.builder (Goto after);
   start st.builder after
@@ -1805,9 +1814,11 @@ and statement st (node : Core.statement) =
           into st value result;
           st.compound_target <- enclosing;
           emit st.builder (Assign (target, Use (owned st result ty)))
-      | While { condition; body; _ } ->
-          (* The condition's temporaries are dropped before the body and
-             before the exit. The names it binds live until the body ends. *)
+      | While { condition; body; binds_lent_part; _ } ->
+          (* The condition's temporaries and lends end before the exit, and
+             before the body unless [binds_lent_part], when they end with the
+             body, as for an [if]. The names it binds live until the body
+             ends. *)
           let test = block st.builder and inside = block st.builder and failed = block st.builder in
           let after = block st.builder in
           let depth = List.length st.scopes in
@@ -1816,14 +1827,14 @@ and statement st (node : Core.statement) =
           let names = open_scope st Bindings in
           let tested = open_scope st Statement in
           branch st condition ~yes:inside ~no:failed;
-          pop_scope st tested;
           start st.builder failed;
           drop_scope st tested;
           drop_scope st names;
           finish st.builder (Goto after);
           start st.builder inside;
-          drop_scope st tested;
+          if not binds_lent_part then close_scope st tested;
           looping st ~continue_:test ~break_:after ~depth (fun () -> block_into st body None);
+          if binds_lent_part then close_scope st tested;
           close_scope st names;
           finish st.builder (Goto test);
           start st.builder after

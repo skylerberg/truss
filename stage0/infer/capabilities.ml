@@ -332,7 +332,7 @@ and check_statement checking scope (statement : Core.statement) =
             require_available checking scope statement.origin (Types.capability_set [ tasks ]);
             scope)
         body
-  | While { condition; clauses; body } ->
+  | While { condition; clauses; body; _ } ->
       check_expression checking scope condition;
       check_loop_clauses checking clauses;
       check_block checking scope body

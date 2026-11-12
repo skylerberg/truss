@@ -1913,7 +1913,7 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
             | (Time | Calls _), _ -> Costs.zero)
       in
       Some (frame, arrive context frame "any" (type_of context frame node))
-  | If { condition; then_; else_ } -> if_ context frame node condition then_ else_
+  | If { condition; then_; else_; _ } -> if_ context frame node condition then_ else_
   | Match { scrutinees; arms; _ } -> match_ context frame node scrutinees arms
   | Block block_ -> block_value context frame block_
   | Provide { implementations; body } ->
@@ -8112,7 +8112,7 @@ and statement_kind context frame (node : statement) : frame option =
           let frame, current = place_value context frame target in
           let after, new_value = value context { frame with updating = Some current } updated in
           Some (store context { after with updating = frame.updating } target new_value))
-  | While { condition; clauses; body } -> while_ context frame node condition clauses body
+  | While { condition; clauses; body; _ } -> while_ context frame node condition clauses body
   | For { pattern; iteration; clauses; body; _ } ->
       (* A loop's iterations change disjoint places, so however they run, as
          tasks or at once, they can be read one after another. *)

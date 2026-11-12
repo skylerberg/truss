@@ -984,6 +984,13 @@ mut grid.cell(position).visit()
   access, marked on the place: `yield mut part`.
 - **The part is lent for the rest of the caller's statement,** and then the
   method continues after its `yield`, even if the statement leaves early.
+- **In the condition of an `if` or a `while`, the part is lent for the
+  condition alone** when each name the condition binds is a copy: a `Plain`
+  name that is not a view and is not bound `mut`. The guarded block can then
+  change the receiver, as in
+  `if counts.get(word) is Some(count) { counts[word] = count + 1 }`. A name
+  that is not a copy aliases the part, which stays lent until the then-block
+  or the body ends. It is never lent into the `else` block.
 - **For that long, the receiver is lent whole:** the statement makes no other
   use of a receiver lent `mut`, and does not change one lent read-only. Two
   indexes or slices of one `List`, `Slice`, or `Array` can be lent together

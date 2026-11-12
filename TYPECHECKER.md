@@ -633,8 +633,13 @@ and a plain string only reads them.
   those that reach the end of the body or a `continue` repeat, and those that
   `break` or `return` do not, so a body that yields and returns yields once.
 - **A lending call borrows its whole receiver for the rest of the statement.**
-  A `while` loop's condition is a statement of its own, so its loans end
-  before the body. An index of a collection other than `List`, `Slice`, or
+  The condition of an `if` or a `while` is a statement of its own, so its
+  loans end before the then-block or the body, unless a name the condition
+  binds may alias the lent part: a name bound `mut`, or whose type is a view
+  or is not `Plain`. Then they last until that block ends, which prevents a
+  dangling name, and never into the `else` block. The core form records the
+  choice as `binds_lent_part`, so that the check and the code generator
+  agree. An index of a collection other than `List`, `Slice`, or
   `Array` is a lending call, so `grid[a] = grid[b]` needs the right side in a
   `let` first.
 - **A yielded constructor lends the places among its fields,** read-only for a

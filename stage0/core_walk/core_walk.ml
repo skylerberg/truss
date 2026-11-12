@@ -109,7 +109,7 @@ let expression_children visit (node : expression) =
       visit.pattern pattern
   | Cursor_next cursor -> place visit cursor
   | Convert { value; _ } -> visit.expression value
-  | If { condition; then_; else_ } ->
+  | If { condition; then_; else_; _ } ->
       visit.expression condition;
       block visit then_;
       Option.iter (block visit) else_
@@ -167,7 +167,7 @@ let statement_children visit (node : statement) =
       visit.pattern pattern;
       List.iter (loop_clause visit) clauses;
       block visit body
-  | While { condition; clauses; body } ->
+  | While { condition; clauses; body; _ } ->
       visit.expression condition;
       List.iter (loop_clause visit) clauses;
       block visit body

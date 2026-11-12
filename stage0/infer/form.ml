@@ -786,6 +786,30 @@ let comparison state (value : expression) operator (left : expression) (right : 
       | Greater_equal -> not_ (is "Less")
       | _ -> bug "this operator is not a comparison")
 
+(* Whether a condition calls a lending method and binds a name that may
+   alias the lent part: a name bound [mut], or one whose type is a view or
+   is not [Plain]. Such a name would dangle if the lends ended with the
+   condition, so they last until the guarded block ends. A [Plain] name bound
+   read-only holds a copy. *)
+let binds_lent_part state (condition : Core.expression) =
+  let may_alias (pattern : Core.pattern) =
+    match pattern.kind with
+    | Bind { mode = Mut; _ } -> true
+    | Bind { mode = Read | Own; _ } ->
+        State.is_view state pattern.type_ || not (State.plain state pattern.type_)
+    | Wildcard | Variant _ | Record _ | Alternatives _ | Literal _ | Range _ | Equal_to _ -> false
+  in
+  let lends (place : Core.place) = match place with Lent _ -> true | _ -> false in
+  let found_lend = ref false and found_alias = ref false in
+  Core_walk.expression
+    {
+      Core_walk.ignore_all with
+      place = (fun place -> if lends place then found_lend := true);
+      pattern = (fun pattern -> if may_alias pattern then found_alias := true);
+    }
+    condition;
+  !found_lend && !found_alias
+
 (* Whether a condition can be evaluated at run time. It cannot if it
    contains a quantifier, a value of type [Integer], a specification-only
    expression such as [old] or [result], or a call of a specification-only

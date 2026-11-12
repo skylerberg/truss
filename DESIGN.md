@@ -446,6 +446,11 @@ loops and cursors work.
   `mut grid[a].swap(mut grid[b])` is an error for a user's `Grid`.
   `List`, `Slice`, and `Array` can lend two parts because their `at` has
   nothing left to do after its `yield`.
+- **A lend in a condition ends with the condition unless a name aliases the
+  part.** So `if counts.get(word) is Some(count) { counts[word] = count + 1 }`
+  compiles, as in Rust, whose borrow ends at the last use of the reference.
+  A name that aliases the part keeps it lent through the guarded block,
+  because the method may drop a part it made when it resumes.
 - **A lending method always continues afterward,** so a type can update
   values that depend on the part, such as a cached total.
 - **A loop can stop at any `yield`, and the method does not continue.**

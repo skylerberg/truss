@@ -408,7 +408,9 @@ the caller into continuation-passing style. The caller then depends on the
 method's body.
 
 - **A lending method resumes after the caller's statement,** so it may lend a
-  value it made. Its rest, the code after the `yield` and the drops of its
+  value it made. In an `if` or `while` condition it resumes after the
+  condition, or after the then-block or the body when the core form's
+  `binds_lent_part` is set. Its rest, the code after the `yield` and the drops of its
   owned values, is written once, and the scope that owns the lend sets a
   selector to the way it was going and jumps there as it ends, on every way
   out. A lend with nothing left to do, as for an index into a `List`, costs
