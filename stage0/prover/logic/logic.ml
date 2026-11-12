@@ -653,6 +653,10 @@ let numbering query =
     sort_order = Dynarray.create ();
   }
 
+(* A query's canonical text, with the names it gives the query's symbols,
+   sorts and members. *)
+type rendering = { text : string; numbering : numbering }
+
 let render query =
   let numbering = numbering query in
   let assertion term =
@@ -721,13 +725,15 @@ let render query =
             (String.concat " " (List.map body datatypes));
         ]
   in
-  ( String.concat "" (sorts @ datatype_block @ declarations @ assertions) ^ "(check-sat)\n",
-    numbering )
+  {
+    text = String.concat "" (sorts @ datatype_block @ declarations @ assertions) ^ "(check-sat)\n";
+    numbering;
+  }
 
-let text query = fst (render query)
+let rendered_text rendering = rendering.text
+let text query = (render query).text
 
-let term_text query term =
-  let _, numbering = render query in
+let term_text { numbering; _ } term =
   (* A symbol the query declares but its text does not mention has no
      canonical name, and the solver would not know it. *)
   let rec named = function
@@ -747,14 +753,13 @@ let term_text query term =
   end
   else None
 
-let symbols query =
-  let _, numbering = render query in
+let symbols { numbering; _ } =
   List.map
     (fun name -> (name, Hashtbl.find numbering.symbol_names name))
     (Dynarray.to_list numbering.symbol_order)
 
 let members query =
-  let _, numbering = render query in
+  let { numbering; _ } = render query in
   Hashtbl.fold
     (fun datatype constructors entries ->
       match Hashtbl.find_opt numbering.sort_names datatype with

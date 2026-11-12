@@ -814,17 +814,33 @@ let definition_states oracles database (key : Names.key) =
             obligation.cited ))
         (answers oracles outcome.obligations)
 
+(* One query an obligation may ask: the obligation's index, the choice of
+   constants for its bounds, the variant, and whether a counterexample
+   gives the locals too. *)
+type question = {
+  definition : Names.key;
+  index : int;
+  choice : (Logic.symbol * (Z.t * Z.t)) list;
+  variant : variant;
+  with_locals : bool;
+}
+
+let show_question question =
+  Printf.sprintf "%s #%d" (Names.show_key question.definition) question.index
+
 (* A request to an oracle, and the oracle's response, kept by the
-   request's key. A run's response holds the key of the code that ran, so
-   the driver can tell when the code has changed since. *)
-type oracle_request = Solve of Solver.request | Run of run
+   request's key. A solver's request holds no query text, so it carries
+   its question, from which the query is derived again to be run. A run's
+   response holds the key of the code that ran, so the driver can tell
+   when the code has changed since. *)
+type oracle_request = Solve of question * Solver.request | Run of run
 
 type oracle_response =
   | Solver_response of Solver.canonical
   | Run_response of { code_key : string option; result : run_result }
 
 let request_key = function
-  | Solve request -> "solve " ^ Solver.request_key request
+  | Solve (_, request) -> "solve " ^ Solver.request_key request
   | Run (Template_check evaluation) ->
       "template " ^ Digest.to_hex (Digest.string (Marshal.to_string evaluation []))
   | Run (Call call) -> "call " ^ Digest.to_hex (Digest.string (Marshal.to_string call []))
@@ -862,58 +878,52 @@ let runs =
                outcome.obligations)
       | Not_proven_here | Unsupported _ -> [])
 
-type question = {
-  definition : Names.key;
-  index : int;
-  choice : (Logic.symbol * (Z.t * Z.t)) list;
-  variant : variant;
-  with_locals : bool;
-}
+(* The query a question asks, with the symbols and the named terms whose
+   values a counterexample should give. *)
+let question_query database question =
+  match Query.demand database proof question.definition with
+  | Obligations outcome -> (
+      (* The question of whether seeing the hidden bodies would prove it
+         is asked of the same obligation as its revealed proof made it. *)
+      let obligations =
+        if question.variant = Revealed then
+          match Query.demand database revealed_proof question.definition with
+          | Obligations revealed -> revealed.obligations
+          | Not_proven_here | Unsupported _ -> []
+        else outcome.obligations
+      in
+      match List.nth_opt obligations question.index with
+      | Some obligation ->
+          let values =
+            List.map fst obligation.values
+            @ if question.with_locals then List.map fst obligation.locals else []
+          in
+          (* With the locals, each [if]'s reach and condition, for the path a
+             counterexample takes. *)
+          let terms =
+            if question.with_locals then
+              List.concat
+                (List.mapi
+                   (fun index (_, _, reached, condition) ->
+                     [ (Symbol.Reached index, reached); (Symbol.Condition index, condition) ])
+                   obligation.decisions)
+            else []
+          in
+          Option.map
+            (fun query -> (query, values, terms))
+            (variant_query ~call:(call_value database) obligation question.choice question.variant)
+      | None -> None)
+  | Not_proven_here | Unsupported _ -> None
 
-let show_question question =
-  Printf.sprintf "%s #%d" (Names.show_key question.definition) question.index
-
-(* One query an obligation may ask, rendered for the solver: a result of
-   its own, found current when only the solver's responses changed, so a
-   definition's outcome is derived again without rendering anything. *)
+(* A question's request for the solver: a result of its own, found current
+   when only the solver's responses changed, so a definition's outcome is
+   derived again without rendering anything. *)
 let question_request =
   Query.query ~name:"question_request" ~phase:Phases.verdicts ~saved:true ~show:show_question
     (fun database question ->
-      match Query.demand database proof question.definition with
-      | Obligations outcome -> (
-          (* The question of whether seeing the hidden bodies would prove
-             it is asked of the same obligation as its revealed proof made
-             it. *)
-          let obligations =
-            if question.variant = Revealed then
-              match Query.demand database revealed_proof question.definition with
-              | Obligations revealed -> revealed.obligations
-              | Not_proven_here | Unsupported _ -> []
-            else outcome.obligations
-          in
-          match List.nth_opt obligations question.index with
-          | Some obligation ->
-              let values =
-                List.map fst obligation.values
-                @ if question.with_locals then List.map fst obligation.locals else []
-              in
-              (* With the locals, each [if]'s reach and condition, for the path
-                 a counterexample takes. *)
-              let terms =
-                if question.with_locals then
-                  List.concat
-                    (List.mapi
-                       (fun index (_, _, reached, condition) ->
-                         [ (Symbol.Reached index, reached); (Symbol.Condition index, condition) ])
-                       obligation.decisions)
-                else []
-              in
-              Option.map
-                (fun query -> Solver.request ~values ~terms query)
-                (variant_query ~call:(call_value database) obligation question.choice
-                   question.variant)
-          | None -> None)
-      | Not_proven_here | Unsupported _ -> None)
+      Option.map
+        (fun (query, values, terms) -> Solver.request ~values ~terms query)
+        (question_query database question))
 
 (* Each definition's outcome, derived from its obligations and the oracles'
    responses: a saved result, so a definition whose reads have not changed
@@ -935,17 +945,16 @@ let outcome =
             {
               solve =
                 (fun ~index ~choice ~variant ~with_locals ->
-                  match
-                    Query.demand database question_request
-                      { definition = key; index; choice; variant; with_locals }
-                  with
+                  let question = { definition = key; index; choice; variant; with_locals } in
+                  match Query.demand database question_request question with
                   | None -> No_query
                   | Some request -> (
-                      match Query.find database oracle_response (request_key (Solve request)) with
+                      let oracle_request = Solve (question, request) in
+                      match Query.find database oracle_response (request_key oracle_request) with
                       | Some (Solver_response canonical) -> Answered (Solver.read request canonical)
                       | Some (Run_response _) | None ->
-                          if not (List.mem (Solve request) !pending) then
-                            pending := Solve request :: !pending;
+                          if not (List.mem oracle_request !pending) then
+                            pending := oracle_request :: !pending;
                           Unanswered));
               check_template =
                 (fun evaluation ->
@@ -964,16 +973,35 @@ let run_response (evaluator : evaluator) run code_key =
 (* The oracles' responses to the requests, by request key: the solver's,
    several at once, and the evaluator's. The driver records them, so its
    database can save them with its state. *)
-let responses (evaluator : evaluator) solver requests =
+let responses (evaluator : evaluator) database solver requests =
+  (* Questions of different definitions can ask the same query, which is
+     run once. *)
+  let asked = Hashtbl.create 64 in
+  List.iter
+    (function
+      | Solve (question, request) when not (Hashtbl.mem asked (Solver.request_key request)) ->
+          Hashtbl.replace asked (Solver.request_key request) (question, request)
+      | Solve _ | Run _ -> ())
+    requests;
   let solver_requests =
-    List.filter_map (function Solve request -> Some request | Run _ -> None) requests
+    Hashtbl.fold
+      (fun _ (question, request) solver_requests ->
+        match question_query database question with
+        | Some (query, _, _) -> (request, query) :: solver_requests
+        | None -> Compiler_bug.bug ~stage:"Prover" "a pending question asks no query")
+      asked []
   in
-  let answers = List.combine solver_requests (Solver.ask_all solver solver_requests) in
+  let answers = Hashtbl.create (List.length solver_requests) in
+  List.iter2
+    (fun (request, _) answer -> Hashtbl.replace answers (Solver.request_key request) answer)
+    solver_requests
+    (Solver.ask_all solver solver_requests);
   List.map
     (fun request ->
       ( request_key request,
         match request with
-        | Solve solver_request -> Solver_response (List.assq solver_request answers)
+        | Solve (_, solver_request) ->
+            Solver_response (Hashtbl.find answers (Solver.request_key solver_request))
         | Run run -> run_response evaluator run (evaluator.code_key run) ))
     requests
 
@@ -1020,7 +1048,8 @@ let solve_ahead ?(evaluator = no_evaluator) ~record database solver modules =
         keys
     in
     if pending <> [] then begin
-      record (responses evaluator solver (List.sort_uniq compare (List.concat_map snd pending)));
+      record
+        (responses evaluator database solver (List.sort_uniq compare (List.concat_map snd pending)));
       round (List.map fst pending)
     end
   in
