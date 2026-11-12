@@ -1,6 +1,5 @@
-(* [truss references] and [truss dependencies]: what reads a definition,
-   and what a definition reads, part by part, from the graph of results the
-   session keeps. *)
+(* [truss references] and [truss dependencies]: a definition's dependents
+   and dependencies, by part, from the session's dependency graph. *)
 
 type direction = References | Dependencies
 
@@ -10,7 +9,8 @@ let run ~directory ~direction ~name ~json =
   | [] -> Project.cannot_run "No definition named %s in this worktree." name
   | targets ->
       let dependencies = Database.dependencies project.session in
-      (* Each row: the reader, its part, the part it reads, and what it reads. *)
+      (* Each row: the dependent, its part, the dependency's part, and the
+   dependency. *)
       let rows =
         List.concat_map
           (fun target ->
