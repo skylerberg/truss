@@ -68,12 +68,11 @@ let () =
             _;
           };
           {
-            name = { Path.owner = Some "truss"; name = "http" };
+            name = { Path.owner = Some "truss"; name = "postgres" };
             version = 1, 12, 0;
             holds = [ "Clock"; "Handles"; "NetworkClient" ];
             _;
           };
-          { name = { Path.owner = Some "truss"; name = "toml" }; version = 1, 9, 4; holds = []; _ };
         ] as entries ->
           if Lock.print entries <> text then fail "written as %S" (Lock.print entries)
       | _ -> fail "read differently");
