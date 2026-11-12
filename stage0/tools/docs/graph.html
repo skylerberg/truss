@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Library dependency graph</title>
+<link rel="stylesheet" href="graph.css"/>
+</head>
+<body>
+<header>
+  <a href="index.html">Index</a>
+  <h1>Library dependency graph</h1>
+  <input id="find" type="search" list="library-names" placeholder="Find a library" autocomplete="off" aria-label="Find a library"/>
+  <datalist id="library-names"></datalist>
+</header>
+<main>
+  <div id="canvas"></div>
+  <aside id="panel" aria-live="polite"></aside>
+  <div class="zoom">
+    <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+    <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+    <button type="button" id="fit">Fit</button>
+  </div>
+</main>
+<script src="graph_data.js"></script>
+<script src="graph.js"></script>
+</body>
+</html>
