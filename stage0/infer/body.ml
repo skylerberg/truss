@@ -562,7 +562,9 @@ let finalize (state : state) =
     }
   in
   let tables = state.tables in
-  let update table f = Array.iteri (fun index entry -> table.(index) <- Option.map f entry) table in
+  let update table transform =
+    Array.iteri (fun index entry -> table.(index) <- Option.map transform entry) table
+  in
   update tables.types final_type;
   update tables.local_types final_type;
   update tables.scrutinee_types final_type;

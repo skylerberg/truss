@@ -87,7 +87,7 @@ and function_type { inputs; input_names; output; clauses } =
          (List.mapi
             (fun index (input_mode, input) ->
               named index
-              ^ (match input_mode with Some m -> mode m ^ " " | None -> "")
+              ^ (match input_mode with Some input -> mode input ^ " " | None -> "")
               ^ type_expression input)
             inputs);
      ]

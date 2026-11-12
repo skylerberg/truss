@@ -189,7 +189,7 @@ let parse source tokens =
   in
   ( { Syntax.uses; definitions },
     List.stable_sort
-      (fun (a : Diagnostic.t) (b : Diagnostic.t) -> compare a.span.start b.span.start)
+      (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
       diagnostics )
 
 type example = Example_definition | Example_signature

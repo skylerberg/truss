@@ -3,11 +3,9 @@ val record_facts : Nodes.t -> unit
 type saved_node = {
   saved_name : string;
   saved_key : string;
-  saved_value : string option;
+  saved_fingerprint : Nodes.fingerprint;
   saved_reads : int list;
   saved_root : bool;
-  saved_stored : bool;
-  saved_opaque : bool;
 }
 
 type artifact = {

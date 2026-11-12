@@ -435,7 +435,7 @@ let () =
          {\n\
         \  if value is Some(inner) && inner > 0 { inner } else { 0 }\n\
          }\n");
-  test "? goes on with what is inside" (fun () ->
+  test "? continues with the value inside" (fun () ->
       not_proven
         "fn f(value: Option[UInt8]) -> Option[UInt8] {\n\
         \  let inner = value?\n\
@@ -747,11 +747,11 @@ let () =
      fn Pair.tagged(mut self) lends mut Tagged\n" ^ ensures
     ^ "{\n  yield Tagged(tag: 0, value: mut self.second)\n}\n"
   in
-  test "a constructor lent `mut` leaves the places it does not lend" (fun () ->
-      proven (tagged "  ensures self.first == old(self.first)\n"));
-  test "a constructor lent `mut` stores the caller's change in the place it lends" (fun () ->
+  test "a constructor yielded `mut` does not change a field of `self` that it does not lend"
+    (fun () -> proven (tagged "  ensures self.first == old(self.first)\n"));
+  test "a caller's change to a constructor yielded `mut` is written to the lent field" (fun () ->
       not_proven (tagged "  ensures self.second == old(self.second)\n") "prover.ensures");
-  test "a caller of a constructor lent `mut` keeps what the method's contract says" (fun () ->
+  test "a caller of a method that yields a constructor `mut` can rely on its `ensures`" (fun () ->
       proven
         (tagged "  ensures self.first == old(self.first)\n"
         ^ "\n\
@@ -864,7 +864,7 @@ let () =
         \  {\n\
         \  }\n\
          }\n");
-  test "a while loop in a yielding method names what the method handed out" (fun () ->
+  test "a while loop's invariant in a yielding method can name `yielded`" (fun () ->
       proven
         "type Counter(limit: UInt32)\n\n\
          fn Counter.each(self) yields UInt32\n\
@@ -2418,7 +2418,8 @@ let () =
     \  yield mut self.first\n\
      }\n\n"
   in
-  test "a method that lends a part mut does not pay for what is done to it" (fun () -> proven bag);
+  test "a method that lends a part `mut` is not charged for the caller's changes to it" (fun () ->
+      proven bag);
   test "a caller that raises a lent part's potential pays for it" (fun () ->
       let actual =
         codes
@@ -4840,18 +4841,22 @@ let () =
 
 (* Addresses of views *)
 
+(* A module of the standard library, which alone can import
+   [standard::intrinsic]: its diagnostics. *)
+let in_standard text =
+  let database = Engine.context (Engine.create ~log:true ()) in
+  Database.load_package (Engine.of_context database)
+    ~name:{ owner = None; name = "standard" }
+    ~dependencies:[]
+    [ (Support.module_of "standard::probe", text) ];
+  check database (Support.module_of "standard::probe")
+
+let proven_in_standard text =
+  match in_standard text with
+  | [] -> ()
+  | actual -> fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual))
+
 let () =
-  let proven_in_standard text =
-    let database = Engine.context (Engine.create ~log:true ()) in
-    Database.load_package (Engine.of_context database)
-      ~name:{ owner = None; name = "standard" }
-      ~dependencies:[]
-      [ (Support.module_of "standard::probe", text) ];
-    match check database (Support.module_of "standard::probe") with
-    | [] -> ()
-    | actual ->
-        fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual))
-  in
   test "a view of a scalar ends within the address space and is not at zero" (fun () ->
       proven_in_standard
         "use standard::intrinsic\n\n\
@@ -4863,3 +4868,26 @@ let () =
         \  }\n\
         \  first\n\
          }\n")
+
+(* Intrinsic operations *)
+
+let () =
+  test "an intrinsic operation has its operator's facts" (fun () ->
+      proven_in_standard
+        "use standard::intrinsic\n\n\
+         fn low(value: UInt64, mask: UInt64) -> UInt64\n\
+        \  ensures result <= mask\n\
+         {\n\
+        \  intrinsic::bit_and(value, right: mask)\n\
+         }\n");
+  test "an intrinsic shift has its operator's obligation on the amount" (fun () ->
+      match
+        Support.codes
+          (in_standard
+             "use standard::intrinsic\n\n\
+              fn shifted(value: UInt64, amount: UInt64) -> UInt64 {\n\
+             \  intrinsic::shift_left(value, amount: amount)\n\
+              }\n")
+      with
+      | [ "prover.shift" ] -> ()
+      | codes -> fail "expected prover.shift, found %s" (String.concat ", " codes))

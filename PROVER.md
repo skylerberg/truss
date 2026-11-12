@@ -553,11 +553,11 @@ anything, since what it spends is known only where it ran. A `match` arm's guard
 the next arm is tried where they did not, joined with where they did and
 the guard, which may change locals the same way, was false. A binding
 that a pattern lends `mut` is a local of the arm. Wherever the arm ends,
-by its end or by a `return`, `break`, or `continue`, what the binding holds
-is stored back into the part of the scrutinee it was lent from.
+by its end or by a `return`, `break`, or `continue`, the binding's value
+is written to the part of the scrutinee that it was bound to.
 
 A `mut` slice argument's bounds are the values computed for the argument,
-and what the callee changes is stored back through them, so the bounds
+and the callee's changes are written through them, so the bounds
 are not evaluated a second time after the call.
 
 A `parallel` block's branches change disjoint places, so they are read
@@ -666,14 +666,12 @@ call uses the capability method's contract.
 - **In the method's own body,** each `yield` asserts the clauses that
   mention `result`, with the part as `result`. For a `mut` part, the part
   then takes a fresh value that meets its type invariant, since the caller
-  may have changed it, which is stored back into its place, through a
-  collection's `lends mut` index for an element, and the part is appended
-  to `yielded`. A constructor that lends places, as
-  `yield Indexed(index: index, element: mut self[index])` does, stores back
-  each field it lends into its place and discards the fields it built from
-  values; a variant's field is stored back only where the caller left the
-  part that variant, and otherwise its place takes a value nothing more is
-  known about. In a yielding method, each `yield` also asserts the clauses
+  may have changed it. The new value is written to the part's place,
+  through a collection's `lends mut` index for an element, and the part is
+  appended to `yielded`. A constructor that lends places, as
+  `yield Indexed(index: index, element: mut self[index])` does, writes each
+  lent field to its place and discards the fields built from values. In a
+  yielding method, each `yield` also asserts the clauses
   that hold where the method ends, with `finished` false, and the invariant
   of `self`, since a loop may stop there. At the end of the body, those
   clauses are asserted with `finished` true.
@@ -773,7 +771,7 @@ may be none, so what the body assumes holds only for them. A pure call's
   `decreases` makes sound.
 - **A `proof` block's statements** are walked at that point and nowhere
   else. Its calls and `assert`s add facts for the obligations after it.
-  Codegen never sees it, so the program goes on from where the block
+  Codegen never sees it, so the program continues from where the block
   started: nothing the block assigns reaches the code after it, and a
   `return`, a `break`, or a loop that never ends inside it does not end the
   program's path.

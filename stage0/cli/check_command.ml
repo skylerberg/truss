@@ -6,9 +6,10 @@
    applying both could produce neither intended result. A skipped fix is
    reconsidered in the next round, after the file is checked again. *)
 let chosen (diagnostics : Diagnostic.t list) =
-  let overlaps (a : Diagnostic.span Diagnostic.edit) (b : Diagnostic.span Diagnostic.edit) =
-    (a.span.start < b.span.stop && b.span.start < a.span.stop)
-    || (a.span.start = b.span.start && (a.span.start = a.span.stop || b.span.start = b.span.stop))
+  let overlaps (left : Diagnostic.span Diagnostic.edit) (right : Diagnostic.span Diagnostic.edit) =
+    (left.span.start < right.span.stop && right.span.start < left.span.stop)
+    || left.span.start = right.span.start
+       && (left.span.start = left.span.stop || right.span.start = right.span.stop)
   in
   let accepted_edits = ref [] in
   List.filter
@@ -29,7 +30,9 @@ let chosen (diagnostics : Diagnostic.t list) =
 (* Applies non-overlapping edits to a text from last to first, so each
    edit's offsets stay valid. *)
 let apply text (edits : Diagnostic.span Diagnostic.edit list) =
-  List.sort (fun (a : Diagnostic.span Diagnostic.edit) b -> compare b.span.start a.span.start) edits
+  List.sort
+    (fun (left : Diagnostic.span Diagnostic.edit) right -> compare right.span.start left.span.start)
+    edits
   |> List.fold_left
        (fun text (edit : Diagnostic.span Diagnostic.edit) ->
          String.sub text 0 edit.span.start ^ edit.replacement
@@ -124,7 +127,9 @@ let run ~directory ~fix:fixing ~proofs ~json =
   if json then
     Json.print
       (Report.document report
-         ((if fixing then [ ("fixed", Json.List (List.map (fun d -> Json.Raw d) fixed)) ] else [])
+         ((if fixing then
+             [ ("fixed", Json.List (List.map (fun fixed_text -> Json.Raw fixed_text) fixed)) ]
+           else [])
          @ [ ("overlaps", Overlap_command.to_json overlaps) ]))
   else begin
     if fixed <> [] then

@@ -656,8 +656,8 @@ fields, and returning it:
 }
 ```
 
-- The base is handed over the same way as an `own` argument: mark a place with
-  `own` to give it up, or call `copy()` to keep it. Types that copy implicitly
+- The base is moved as an `own` argument is: mark a place with `own` to move
+  it, or call `copy()` to keep it. Types that copy implicitly
   (see [DESIGN.md](DESIGN.md#memory)) need neither, as with `origin` above.
 - A field can be a path, such as `server.port`, to update a nested field.
 - `origin with (x)` uses a local variable named `x`, as building a record
@@ -1387,14 +1387,14 @@ mut grid.cell(position).visit()
 - **The mark is on the place the part is lent from.** In
   `mut grid.cell(position).visit()`, `mut` chooses the `cell` that lends
   `mut`, and the part it lends is then changed by `visit` with no mark of
-  its own. A part cannot be given up with `own`, and `let` keeps one only by
+  its own. A part cannot be moved with `own`, and `let` keeps one only by
   copying it.
 - **A lending method yields exactly once on every path.** A path with no
   `yield`, or with two, is a compile error. A loop body that yields and then
   returns is one path with one `yield`.
 - A lending method cannot drive a `for` loop or be pulled.
 
-A method can also lend a value that it builds around its parts. This is how
+A method can also lend a constructor applied to its parts. This is how
 a lookup that can miss lends an `Option` without copying the element:
 
 ```truss
@@ -1428,8 +1428,8 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
   `yield Some(mut self.second)`, the caller could change the variant, as
   `mut pair.maybe() = None` does, and `self.second` would be left without a
   value: a use after free. To lend an `Option` to be changed, the method
-  yields a local `Option` with `yield mut` and stores what the caller left
-  in it after the `yield`, as Swift's `_modify` accessors do.
+  yields a local `Option` with `yield mut`, and after the `yield` writes
+  the local's value to the field, as Swift's `_modify` accessors do.
 - **The value owns none of what it was lent.** It holds each lent place's
   value for as long as it is lent, and `self` is lent whole for that time,
   as it is when one part is lent.
@@ -1673,7 +1673,7 @@ mut scores.update_each(fn(score) { score = score / 2 })
   alone or inside another value, stored in a place the caller keeps, or
   given to an `own` function-typed parameter, because it would outlive the
   variables it reads. A named function, and a lambda that reads no local
-  variable, can be returned, stored, and given up freely.
+  variable, can be returned, stored, and moved freely.
 - A lambda's capabilities are inferred from its body. A lambda that calls
   `Clock.now()` can only be passed where a function type with `uses Clock`
   is expected.
@@ -1785,7 +1785,7 @@ fn sum[count: USize](values: Array[Int64, count]) -> Int64
 | `scores[i] = 0` | Replaces element `i`, which must be in bounds. |
 | `ports[name]` | The value for `name`, which must be proven present, for example by an earlier `if ports.contains(name)`. |
 | `ports.get(name)` | `Some(value)`, or `None` if `name` is missing. |
-| `ports[own name] = 8080` | Inserts or replaces the value for `name`. The map keeps the key, so a key that is not plain data is given up with `own` or copied. |
+| `ports[own name] = 8080` | Inserts or replaces the value for `name`. The map keeps the key, so a key that is not plain data is moved with `own` or copied. |
 
 - Ranges without a start or an end, such as `2..`, are only allowed inside
   brackets.
@@ -2331,7 +2331,8 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
   branches, waits for them to end, and then leaves. Above, a query that
   fails cancels the other query, and `profile` returns the error.
 - The code after the block does not run when a branch leaves early, so a
-  branch that takes a value out of a place gives one back before it ends.
+  branch that moves a value out of a place reinitializes the place before
+  it ends.
 - In a cancelled task, a call of the standard capabilities that would wait
   returns at once: `Err(SystemError.Cancelled)` where it returns a
   `Result`, and `None` where it returns an `Option`. `Tasks.cancelled()`
@@ -2353,7 +2354,7 @@ The body may read any place but may only change its own element and its
 own variables. `break` leaves the loop and cancels the iterations that are
 still running, and `continue` ends one iteration.
 
-An iteration keeps running after the loop has gone on to the next value,
+An iteration keeps running after the loop has advanced to the next value,
 so what it is given must stay valid until the loop ends:
 
 - A range, a cursor, and a method that `yields own` values give each task
@@ -2523,7 +2524,7 @@ test "two deposits both arrive" {
 
 - The seeded implementation switches tasks only at capability calls, which
   are the only points where one task can see what another did.
-- A test in which no task can go on fails, and reports what each task was
+- A test that deadlocks fails, and reports what each task was
   waiting for. The report is a panic, so a function that provides a
   `SeededTasks` or a `World` outside a test declares `uses Panic`.
 

@@ -137,7 +137,7 @@ check reports a `move` that is not allowed, as it does for a `Use` today.
 | Rvalue | Meaning |
 |---|---|
 | an operand | |
-| `operation(op, operands)` | A primitive operation on built-in types. One that may fail, such as an addition that may overflow, is checked at run time in the builds that CODEGEN.md says check it, and the prover shows that it does not fail. |
+| `operation(op, operands)` | A primitive operation on built-in types. See [Primitive operations](#primitive-operations). |
 | `compare(comparison, left, right)` | A comparison of two values of one built-in type. |
 | `construct(type, variant, fields)` | A record or a variant, with every field, in the order the fields are evaluated. |
 | `is_variant(place, variant)` | Whether a sum type's value holds the variant. |
@@ -152,7 +152,7 @@ check reports a `move` that is not allowed, as it does for a `Use` today.
 | `switch_variant(place, cases, default)` | Branch on a sum type's variant. |
 | `loop(header)` | Enter the natural loop at `header`. The header carries the loop's `invariant`, `decreases`, and `cost` clauses, and its schedule: one iteration after another, or at once as the regions of a `parallel for` or a `concurrent for`. |
 | `each(call, pattern, body, after)` | A `for` loop over a call of a yielding method. `body` is a region that runs once for each part the callee yields, and ends with `continue` or `break`. |
-| `yield(mode, operand, resume)` | In a lending or yielding method, give a part to the caller's loop, and go on at `resume` unless the loop has ended. |
+| `yield(mode, operand, resume)` | In a lending or yielding method, give a part to the caller's loop, and continue at `resume` unless the loop has ended. |
 | `return operand` | Return a value, or nothing. |
 | `exit_tasks(tasks, exit)` | An early exit from `concurrent` code: end these tasks, then take `exit`, a `return`, a `break`, or a `continue`. |
 | `unreachable` | A point the prover shows is never reached: the last arm of a `match` whose guards cover every case, or `unreachable` as written. |
@@ -192,13 +192,76 @@ These are its rules:
 
 SYNTAX.md and DESIGN.md state the rules that a programmer can observe.
 
+## Primitive operations
+
+An operation means one thing however it is written. `a + b` on `Int64`,
+`a.add(b)` on `Int64`, and `intrinsic::add(a, right: b)` are the same
+`operation(add, [a, b])`, and every consumer reads it the same way:
+
+- **The prover** gives it the operation's obligations and facts: no
+  overflow for `add`, a divisor that is not zero for `divide`, an amount
+  below the width for a shift, the bounds of a bitwise result, and the
+  IEEE 754 model of a float.
+- **Code generation** checks at run time, in a build that checks, the
+  operations that may fail. It lowers both spellings through one function
+  already.
+- **The cost** of an operation is a primitive step, which a `time` bound's
+  constant absorbs, however it is written.
+
+The core form keeps the two spellings, `Operator` and a call whose callee
+is `Intrinsic`, because the type checker records what was written. The
+MIR builder maps both to `operation`, so no consumer can tell them apart.
+An intrinsic that is not a primitive operation, such as `storage_push` or a
+system call, stays a call.
+
+This gives the standard library's own arithmetic the program's checks.
+The bodies of `impl Add for Int8` and the other operator traits call
+`intrinsic::add`, and they run when generic code adds through a type
+parameter, so a weaker check there would be a weaker check of every such
+program. Rust writes its `impl Add for i32` as `self + other`, so the
+operator's body is the same MIR operation as every other `+`.
+
+## Pattern matching
+
+The MIR builder lowers every `match`, `is`, and `let ... else` once, for
+every consumer, to tests, bindings, guards, and jumps. No consumer
+interprets a pattern.
+
+A test of a variant, a literal, or a range is a primitive operation: it
+has no effect, cannot fail, and always ends, so the order of these tests
+cannot be observed. An `Equal_to` pattern is different: it calls the
+type's `Equal.equal`, and although that call has no `uses` and ends, an
+`impl` may allocate, and a cost clause can count allocations. A guard is
+code, and runs only after its arm's patterns match.
+
+So the builder may choose the order of the primitive tests, and of nothing
+else:
+
+- **It tests arms in order,** as stage0 does today: each arm's patterns,
+  then its bindings, then its guard, then its body, and on a failure the
+  next arm. The graph is linear in the size of the `match`.
+- **It may build a decision tree** (Maranget, "Compiling Pattern Matching
+  to Good Decision Trees", 2008) over the primitive tests, which tests each
+  part of the value once. A call of `equal` and a guard run on exactly the
+  paths where arm order runs them, and in the same order, so a cost clause
+  can count them by reading the arms in order. The tree is used where it stays linear in the size of the
+  `match`, and arm order elsewhere: a tree can be exponential in the
+  number of columns, and the prover's queries grow with the graph, so the
+  bound keeps a large `match` provable.
+
+Because there is one builder, a better tree is faster code and smaller
+queries at once, and no consumer changes. Each arm's first block records
+the arm's origin, so the prover still says which arm a counterexample
+takes.
+
 ## Lowering the core form
 
 | Core form | MIR |
 |---|---|
 | `Compound_assign`, `Current_target` | The operand, a `lend` of the target, the operation on the old value, a store, and `end_lend` |
 | `Lent`, `Temporary` | A `lend` statement, or a temporary local, with the loan ended at the end of the statement |
-| `If`, `Match`, `Matches`, `let ... else`, `?` | Branches, variant switches, comparisons with literals, and calls of `equal`, with the bindings as assignments of locals |
+| `If`, `Match`, `Matches`, `let ... else`, `?` | Branches, variant switches, comparisons with literals, and calls of `equal`, with the bindings as assignments of locals (see [Pattern matching](#pattern-matching)) |
+| `Operator`, a call of an intrinsic that is a primitive operation | `operation` (see [Primitive operations](#primitive-operations)) |
 | `While`, `For` over a range, `For` over a cursor | A natural loop, with a counter or a `pull` at its header, and the clauses on the header |
 | `For` over a call of a yielding method | `each` |
 | `Parallel`, `Concurrent`, `parallel for`, `concurrent for` | Regions |
@@ -259,23 +322,45 @@ nothing unused. A change that leaves a definition's MIR unchanged, such as
 a renamed local, does not reach the ownership check, the prover, or code
 generation.
 
-## Open questions
+## Specifications
 
-- **Primitive operations and intrinsic calls.** The core form has an
-  `Operator` for `+` and a call of an intrinsic for `intrinsic.add(...)`.
-  The prover checks both for overflow and division by zero, but it checks
-  shift amounts, models floats, and states facts about bitwise operations
-  only for `Operator`. One `operation` in the MIR would give a call of an
-  intrinsic the operator's checks and facts; two would keep the
-  difference.
-- **`match` as a decision tree.** CODEGEN.md's list of what is not built
-  asks for one. The builder could make the tree once, for every consumer.
-  The prover's queries would then test parts of a value in the tree's
-  order, which may change what it can prove quickly.
-- **A type of its own for specifications.** Keeping specifications as core
-  expressions leaves `Result`, `Quantified`, and the other
-  specification-only forms in the core form's executable type. A separate
-  type would let the type of executable code exclude them.
+A specification is a core expression, of the same type as executable code.
+The MIR holds executable code, so code generation and the ownership check
+never read a specification, and the prover reads specifications as core
+expressions and code as MIR.
+
+A type of its own for specifications would let a type exclude `Result`,
+`Old`, `Quantified`, and the other forms that only specifications have.
+It is not worth its cost:
+
+- **Most forms are shared.** A specification calls functions, applies
+  operators, compares, matches, constructs, reads fields, and branches, as
+  code does. A separate type would repeat each of these forms, and the type
+  checker would build two trees, for about a dozen forms that only
+  specifications have.
+- **The MIR already separates them where it matters.** Code generation and
+  the ownership check read the MIR, which has no specification forms, so
+  they have no case for one.
+- **Some conditions are both.** An `assert` that can run is code that the
+  builder lowers and a fact the prover uses, and an executable quantifier
+  in code runs as a loop. One type holds them without a conversion.
+
+Dafny, F*, and Verus also write specifications and code in one language of
+expressions, and tell them apart by mode, as Truss does with
+`condition.executable` and the type checker's rules on where a
+specification-only form may appear.
+
+The prover reads a pure computation in two places: in code, as MIR, and in
+a specification, as a core expression. The two must give the same term, as
+PROVER.md requires of `let sorted = is_sorted(items)` and
+`ensures is_sorted(items)`. Both readings call the same functions for each
+operation and each callee's contract, so only the walk over the two
+representations differs. An `assert` that can run is proven from the
+local that the MIR computes, so it is read once.
+
+The rule that keeps the two apart is checked twice. The type checker
+rejects a specification-only form in code, and the MIR builder treats one
+that reaches it as a bug in the compiler.
 
 ## Not built
 
@@ -294,3 +379,8 @@ the code that it replaces:
 5. **The core form** loses the forms that only the builder then reads,
    such as `Current_target`, and its consumers' cases for
    specification-only forms in executable code.
+
+The prover already reads `Operator` and a call of an intrinsic that is a
+primitive operation through one translation, since the core form names the
+operation in both. Pattern matching as a decision tree comes after step 3,
+as an improvement of the builder.

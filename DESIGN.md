@@ -543,7 +543,7 @@ two variables never refer to the same changeable data.
 - **A field can be moved out on its own,** as in Rust. After
   `own config.name`, the rest of `config` stays usable, and `config` as a
   whole is usable again once `config.name` is assigned. Without this, taking
-  one field from a record would mean copying it or giving up the whole
+  one field from a record would mean copying it or moving the whole
   record. The check stays inside one function, like every other check on
   modes and views.
 - **Recursive types say where they allocate.** A `Tree` whose `Node` holds
@@ -702,7 +702,7 @@ Hylo also keep accessors apart from sequences, and Python's
   reference, so there such a collection cannot be indexed at all.
 - **A lending call lends the whole of what it is called on,** for the rest
   of the caller's statement: read-only when the method takes `self`, and
-  `mut` when it takes `mut self`. The method is waiting to go on, and it was
+  `mut` when it takes `mut self`. The method is waiting to resume, and it was
   proven as if nothing else touches `self` until it does. So the statement
   makes no other use of a place it is lent from `mut`, and does not change
   one that is lent read-only. `mut grid[a].swap(mut grid[b])` is an error
@@ -1031,6 +1031,18 @@ choices below keep method calls predictable:
   `ieee_` comparisons are the exact, single-instruction escape hatch. Making
   floats IEEE by default would instead cost what Rust pays: floats that
   cannot be sorted, used as map keys, or compared in a derived `Equal`.
+- **`serialization::Serialize` and `serialization::Deserialize` can be
+  derived,** as Rust's serde, Swift's `Codable`, and Kotlin's
+  `@Serializable` are. Their methods are generic over a `Serializer` or a
+  `Deserializer`, so one derived implementation writes to and reads from
+  every format: JSON, TOML, and any that a package adds. A record is
+  written as its fields by name, in declaration order. A variant with no
+  fields is written as its name, and a variant with fields as a record of
+  them under its name, which is serde's default form. A field with a
+  default may be missing when it is read, and a missing field of type
+  `Option` reads as `None`. A format may rename every field, as
+  `json::Names.CamelCase` does. A type that needs other names writes its
+  `impl`, since Truss has no attributes to rename one field.
 - **Derived `Ordered` and `Hash` need a derived `Equal`.** Their laws link them
   to `Equal`. Two derived implementations agree by construction. A hand-written
   `Equal`, such as one for a set stored as a list, would not agree with a
@@ -2091,8 +2103,8 @@ effect: code that does it declares `uses Tasks`.
   branch hands its result to the code after the block through a `let`, or
   through its own element of the collection it loops over.
 - **A branch leaves each place whole.** When a branch leaves early, the
-  code after the block does not run. So a branch that takes a value out of
-  a place that outlives the block gives one back itself, where a
+  code after the block does not run. So a branch that moves a value out of
+  a place that outlives the block reinitializes the place itself, where a
   `parallel` branch may leave that to the code after the block.
 - **A task never outlives the block that started it,** as with Trio's
   nurseries, Kotlin's `coroutineScope`, Swift's task groups, and Java's
@@ -2262,7 +2274,7 @@ effect: code that does it declares `uses Tasks`.
 - **A test's clock moves when every task waits.** Time then jumps to the
   next timer, as in Go's `testing/synctest` and Trio's test clock. A test
   of a timeout takes no real time, and its result can be cached.
-- **A test in which no task can go on fails,** and reports what each task
+- **A test that deadlocks fails,** and reports what each task
   was waiting for.
 - **Tasks and `parallel` branches run on one pool.** A program has one set
   of threads, as Go and Java have, so code that computes and code that

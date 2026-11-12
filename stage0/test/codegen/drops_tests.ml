@@ -116,11 +116,28 @@ let () =
       | exception Compiler_bug.Bug bug ->
           if bug.message <> "local 1 may still own a value where the function returns" then
             fail "got %s" bug.message);
-  test "a borrowed local is neither dropped nor counted as owning" (fun () ->
+  test "a borrowed local does not own a value where the function returns" (fun () ->
       expect_lir ~expected:[ "fn(_0: Text)"; "b0: return" ]
         (function_ ~parameters:[ 0 ]
            [ local ~borrowed:true (value text) ]
-           [ block [ Drop (at 0) ] (Return None) ]));
+           [ block [] (Return None) ]));
+  test "a drop of a borrowed local is a compiler bug" (fun () ->
+      match
+        elaborated
+          (function_ ~parameters:[ 0 ]
+             [ local ~borrowed:true (value text) ]
+             [ block [ Drop (at 0) ] (Return None) ])
+      with
+      | _ -> fail "expected a compiler bug"
+      | exception Compiler_bug.Bug bug ->
+          if bug.message <> "a drop of local 0, which a borrowed local holds and its owner drops"
+          then fail "got %s" bug.message);
+  test "a drop through a pointer that a borrowed local holds is kept" (fun () ->
+      expect_lir
+        ~expected:[ "fn(_0: *mut Text)"; "b0: drop *_0; return" ]
+        (function_ ~parameters:[ 0 ]
+           [ local ~borrowed:true (Pointer { target = value text; writable = true }) ]
+           [ block [ Drop (at ~projections:[ Deref ] 0) ] (Return None) ]));
   test "an assignment that moves out of its own place first drops nothing" (fun () ->
       let rebuild = call "rebuild" ~result:(Some (value text)) ~parameters:[ value text ] in
       expect_lir

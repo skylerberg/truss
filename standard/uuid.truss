@@ -1,6 +1,7 @@
 use standard::cryptography
 use standard::hex
 use standard::intrinsic
+use standard::serialization
 use standard::text
 
 public opaque type Uuid(high: UInt64, low: UInt64)
@@ -152,5 +153,17 @@ impl text::Parse for Uuid {
       }
     }
     Ok(Uuid(high: high, low: low))
+  }
+}
+
+impl serialization::Serialize for Uuid {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for Uuid {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Uuid, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "a UUID")
   }
 }

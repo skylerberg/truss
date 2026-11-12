@@ -148,7 +148,7 @@ test "used up" {
   assert first == "a1"
 }
 |};
-  passes "an array given up as a list keeps its elements in order"
+  passes "an array moved into a list keeps its elements in order"
     {|test "to list" {
   let names: Array[String, 2] = ["a${1}", "b${2}"]
   var list = own names.to_list()

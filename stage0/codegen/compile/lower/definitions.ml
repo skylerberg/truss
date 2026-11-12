@@ -173,6 +173,14 @@ let code_of context (path : Path.t) type_arguments : code =
       in
       match (written context path, path) with
       | Some code, _ -> function_code ~anchor:path ~enclosing_impl code ~interface ~substitution
+      | None, Method { owner = Derived { type_; _ }; _ }
+        when demand context Infer.derived path <> None ->
+          {
+            (unwritten ~definition_key:(key_of context type_) ~anchor:path ~substitution
+               ~result:interface.output)
+            with
+            enclosing_impl;
+          }
       | None, Method { owner = (Impl _ | Derived _) as impl; name; receiver } -> (
           (* A method the [impl] leaves to its trait: the trait's own code,
              read with what the trait's [Self] and parameters stand for in

@@ -220,8 +220,8 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
                [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
              else [])
           (Printf.sprintf
-             "`%s` takes ownership of its argument, and a part that is lent cannot be given up. \
-              Pass a copy."
+             "`%s` takes ownership of its argument, and a part that is lent cannot be moved. Pass \
+              a copy."
              name)
   | Mut, (Temporary | Marked (Own, _)) ->
       report state Wrong_mark value.span
@@ -254,20 +254,19 @@ let check_mode state env (value : expression) (parameter : Types.parameter_info)
                [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
              else [])
           (Printf.sprintf
-             "`%s` takes ownership of its argument, and a constant cannot be given up. Pass a copy."
+             "`%s` takes ownership of its argument, and a constant cannot be moved. Pass a copy."
              name)
   | Own, Place ->
       if not (plain state type_) then
         report state Missing_mark value.span
           ~fixes:
-            (fix "Give it up with `own`." [ insert value.span.start "own " ]
+            (fix "Move it with `own`." [ insert value.span.start "own " ]
             ::
             (if copyable state type_ then
                [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
              else []))
           (Printf.sprintf
-             "`%s` takes ownership of its argument. Give the place up with `own`, or pass a copy."
-             name)
+             "`%s` takes ownership of its argument. Move the place with `own`, or pass a copy." name)
   | Own, Marked (Mut, _) ->
       report state Wrong_mark value.span
         (Printf.sprintf "`%s` takes ownership of its argument, so it is marked `own`, not `mut`."
@@ -307,7 +306,7 @@ let check_lent_value state env (operand : expression) =
                         (Printf.sprintf
                            "This place is lent `mut` inside the variant `%s`. The caller could \
                             change the variant, and the place would be left without a value. Lend \
-                            a local of the whole type instead, and store it back after the \
+                            a local of the whole type instead, and write it to the field after the \
                             `yield`."
                            variant)
                       :: state.diagnostics
@@ -368,10 +367,10 @@ let check_owned state env (value : expression) type_ =
                       | _ when is_member_constant state value -> "a constant"
                       | _ -> "part of a constant") )
                 else
-                  ( fix "Give it up with `own`." [ insert value.span.start "own " ] :: copy,
+                  ( fix "Move it with `own`." [ insert value.span.start "own " ] :: copy,
                     Printf.sprintf
-                      "An owned value is needed here, and `%s` is a place. Mark it `own` to give \
-                       it up, or copy it."
+                      "An owned value is needed here, and `%s` is a place. Mark it `own` to move \
+                       it, or copy it."
                       place )
               in
               state.diagnostics <-

@@ -23,14 +23,14 @@ let cut text limit =
 
 let erase_line = "\r\027[K"
 
-let show t text =
-  if t.enabled then begin
+let show status text =
+  if status.enabled then begin
     Output.eprint (erase_line ^ cut text (width ()));
-    t.drawn <- true
+    status.drawn <- true
   end
 
-let clear t =
-  if t.drawn then begin
+let clear status =
+  if status.drawn then begin
     Output.eprint erase_line;
-    t.drawn <- false
+    status.drawn <- false
   end

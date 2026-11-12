@@ -44,7 +44,8 @@ let rec collect engine (node : node) =
     forget engine node;
     Hashtbl.remove engine.own node.id;
     Hashtbl.remove engine.unsaved node.id;
-    if node.written then engine.collected <- (name node, key_bytes node) :: engine.collected;
+    if node.written <> Unwritten then
+      engine.collected <- (name node, key_bytes node) :: engine.collected;
     engine.tally.collections <- engine.tally.collections + 1;
     let reads = node.reads in
     node.reads <- [];
@@ -105,11 +106,9 @@ let shadow engine (base : node) =
         | Unfilled -> invalid_arg "Incremental: a node with no cell"
       in
       own.fingerprint <- base.fingerprint;
-      own.stored <- base.stored;
-      own.opaque <- base.opaque;
       own.identity <- base.identity;
       own.root <- base.root;
-      own.written <- true;
+      own.written <- In_whole;
       Hashtbl.replace engine.shadows base.id own;
       engine.tally.copies <- engine.tally.copies + 1;
       let reads = List.map (resolve engine) base.reads in
@@ -131,7 +130,9 @@ let shadow engine (base : node) =
    engine unless it already was, since its copy is then among the own
    readers if it still reads this. [phase] narrows to one phase. *)
 let readers_here engine (node : node) ~phase =
-  let in_phase (reader : node) = match phase with Some p -> reader.phase = p | None -> true in
+  let in_phase (reader : node) =
+    match phase with Some wanted_phase -> reader.phase = wanted_phase | None -> true
+  in
   let own =
     Hashtbl.fold
       (fun _ (reader : node) readers -> if in_phase reader then reader :: readers else readers)

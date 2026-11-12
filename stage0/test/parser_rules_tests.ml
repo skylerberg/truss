@@ -41,7 +41,7 @@ let () =
         "(fn f ((visit: (fn (Item) (cost time finite)))) (cost amortized time (O (* (call (. items \
          length)) (call time visit)))) (cost allocations (<= 1)) (cost (calls visit) (== 2)) (cost \
          (calls FileRead.read) (== 3)) (cost (calls FileRead) (== 4)) (cost time finite) (block))");
-  test "parsing goes on after a misspelled cost word" (fun () ->
+  test "parsing continues after a misspelled cost word" (fun () ->
       error "fn f() cost time fnite {}" ~code:Cost_word ~at:"fnite"
         ~fixed:"fn f() cost time finite {}";
       let _, diagnostics = parse "fn f() cost tme fnite {}" in

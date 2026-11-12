@@ -1,5 +1,6 @@
 use standard::intrinsic
 use standard::numbers::float_math
+use standard::serialization
 use standard::streams
 use standard::text
 use standard::writing
@@ -1103,24 +1104,9 @@ impl From[Map[String, Value]] for Value {
   }
 }
 
-public type DecodeError(path: String, message: String)
-  derives Equal
-
-impl Display for DecodeError {
-  fn display(self, output: mut TextBuilder)
-  {
-    if self.path.length() > 0 {
-      mut output.write("at ")
-      mut output.write(self.path.slice())
-      mut output.write(": ")
-    }
-    mut output.write(self.message.slice())
-  }
-}
-
 public type Error =
   | Parse(error: ParseError)
-  | Decode(error: DecodeError)
+  | Deserialize(error: serialization::Error)
   derives Equal
 
 impl Display for Error {
@@ -1128,7 +1114,7 @@ impl Display for Error {
   {
     match self {
       Parse(error) => error.display(mut output)
-      Decode(error) => error.display(mut output)
+      Deserialize(error) => error.display(mut output)
     }
   }
 }
@@ -1145,90 +1131,6 @@ impl Display for ReadError {
       System(error) => error.display(mut output)
       Parse(error) => error.display(mut output)
     }
-  }
-}
-
-public trait Encode {
-  fn to_json(self) -> Value
-}
-
-public trait Decode {
-  fn from_json(value: Value) -> Result[Self, DecodeError]
-}
-
-fn type_mismatch(expected: StringSlice) -> DecodeError {
-  var message = "expected "
-  mut message.push(expected)
-  DecodeError(path: "", message: own message)
-}
-
-fn prefix_path(name: StringSlice, error: own DecodeError) -> DecodeError {
-  var path = "/"
-  mut path.push(name)
-  mut path.push(error.path.slice())
-  DecodeError(path: own path, message: own error.message)
-}
-
-fn expect_integer(value: Value) -> Result[Int64, DecodeError] {
-  match value {
-    Number(number) => match number.to_int64() {
-      Some(integer) => Ok(integer)
-      None => Err(type_mismatch("a whole number"))
-    }
-    _ => Err(type_mismatch("a number"))
-  }
-}
-
-public fn encode[Item: Encode](item: Item) -> String {
-  item.to_json().to_text()
-}
-
-public fn encode_pretty[Item: Encode](item: Item, indent: USize = 2) -> String {
-  item.to_json().to_pretty_text(indent: indent)
-}
-
-public fn decode[Item: Decode](text: StringSlice) -> Result[Item, Error] {
-  match parse(text) {
-    Ok(value) => match Item.from_json(value) {
-      Ok(item) => Ok(own item)
-      Err(error) => Err(Error.Decode(error: own error))
-    }
-    Err(error) => Err(Error.Parse(error: error))
-  }
-}
-
-public fn Value.field[Field: Decode](self, name: StringSlice) -> Result[Field, DecodeError] {
-  let key = name.to_string()
-  match self {
-    Object(members) => {
-      if !members.contains(key) {
-        var message = "there is no member `"
-        mut message.push(name)
-        mut message.push("`")
-        return Err(DecodeError(path: "", message: own message))
-      }
-      match Field.from_json(members[key]) {
-        Ok(field) => Ok(own field)
-        Err(error) => Err(prefix_path(name, error: own error))
-      }
-    }
-    _ => Err(type_mismatch("an object"))
-  }
-}
-
-public fn Value.optional_field[Field: Decode](self, name: StringSlice) -> Result[Option[Field], DecodeError] {
-  let key = name.to_string()
-  match self {
-    Object(members) => {
-      if !members.contains(key) || members[key].is_null() {
-        return Ok(None)
-      }
-      match Field.from_json(members[key]) {
-        Ok(field) => Ok(Some(own field))
-        Err(error) => Err(prefix_path(name, error: own error))
-      }
-    }
-    _ => Err(type_mismatch("an object"))
   }
 }
 
@@ -1252,355 +1154,650 @@ public fn write_to[Sink: streams::Writer](value: Value, sink: mut Sink) -> Resul
   mut sink.write_all(text.bytes())
 }
 
-impl Encode for Bool {
-  fn to_json(self) -> Value
-  {
-    Value.Bool(value: self)
-  }
-}
+public type Names = AsWritten | CamelCase
+  derives Equal
 
-impl Decode for Bool {
-  fn from_json(value: Value) -> Result[Bool, DecodeError]
-  {
-    match value {
-      Bool(flag) => Ok(flag)
-      _ => Err(type_mismatch("true or false"))
-    }
-  }
-}
-
-impl Encode for Int8 {
-  fn to_json(self) -> Value
-  {
-    Value.Number(value: Number.from(Int64.from(self)))
-  }
-}
-
-impl Decode for Int8 {
-  fn from_json(value: Value) -> Result[Int8, DecodeError]
-  {
-    match Int8.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `Int8`"))
-    }
-  }
-}
-
-impl Encode for Int16 {
-  fn to_json(self) -> Value
-  {
-    Value.Number(value: Number.from(Int64.from(self)))
-  }
-}
-
-impl Decode for Int16 {
-  fn from_json(value: Value) -> Result[Int16, DecodeError]
-  {
-    match Int16.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `Int16`"))
-    }
-  }
-}
-
-impl Encode for Int32 {
-  fn to_json(self) -> Value
-  {
-    Value.Number(value: Number.from(Int64.from(self)))
-  }
-}
-
-impl Decode for Int32 {
-  fn from_json(value: Value) -> Result[Int32, DecodeError]
-  {
-    match Int32.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `Int32`"))
-    }
-  }
-}
-
-impl Encode for Int64 {
-  fn to_json(self) -> Value
-  {
-    Value.Number(value: Number.from(self))
-  }
-}
-
-impl Decode for Int64 {
-  fn from_json(value: Value) -> Result[Int64, DecodeError]
-  {
-    expect_integer(value)
-  }
-}
-
-impl Encode for UInt8 {
-  fn to_json(self) -> Value
-  {
-    Value.Number(value: Number.from(Int64.from(self)))
-  }
-}
-
-impl Decode for UInt8 {
-  fn from_json(value: Value) -> Result[UInt8, DecodeError]
-  {
-    match UInt8.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `UInt8`"))
-    }
-  }
-}
-
-impl Encode for UInt16 {
-  fn to_json(self) -> Value
-  {
-    Value.Number(value: Number.from(Int64.from(self)))
-  }
-}
-
-impl Decode for UInt16 {
-  fn from_json(value: Value) -> Result[UInt16, DecodeError]
-  {
-    match UInt16.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `UInt16`"))
-    }
-  }
-}
-
-impl Encode for UInt32 {
-  fn to_json(self) -> Value
-  {
-    Value.Number(value: Number.from(Int64.from(self)))
-  }
-}
-
-impl Decode for UInt32 {
-  fn from_json(value: Value) -> Result[UInt32, DecodeError]
-  {
-    match UInt32.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `UInt32`"))
-    }
-  }
-}
-
-impl Encode for UInt64 {
-  fn to_json(self) -> Value
-  {
-    match Int64.try_from(self) {
-      Ok(integer) => Value.Number(value: Number.from(integer))
-      Err(_) => match Number.from_float64(self.to_float64()) {
-        Some(number) => Value.Number(value: number)
-        None => Value.Null
-      }
-    }
-  }
-}
-
-impl Decode for UInt64 {
-  fn from_json(value: Value) -> Result[UInt64, DecodeError]
-  {
-    match UInt64.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `UInt64`"))
-    }
-  }
-}
-
-impl Encode for USize {
-  fn to_json(self) -> Value
-  {
-    match Int64.try_from(self) {
-      Ok(integer) => Value.Number(value: Number.from(integer))
-      Err(_) => match Number.from_float64(self.to_float64()) {
-        Some(number) => Value.Number(value: number)
-        None => Value.Null
-      }
-    }
-  }
-}
-
-impl Decode for USize {
-  fn from_json(value: Value) -> Result[USize, DecodeError]
-  {
-    match USize.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `USize`"))
-    }
-  }
-}
-
-impl Encode for ISize {
-  fn to_json(self) -> Value
-  {
-    Value.Number(value: Number.from(Int64.from(self)))
-  }
-}
-
-impl Decode for ISize {
-  fn from_json(value: Value) -> Result[ISize, DecodeError]
-  {
-    match ISize.try_from(expect_integer(value)?) {
-      Ok(number) => Ok(number)
-      Err(_) => Err(type_mismatch("a number that fits `ISize`"))
-    }
-  }
-}
-
-impl Encode for Float32 {
-  fn to_json(self) -> Value
-  {
-    match Number.from_float64(Float64.from(self)) {
-      Some(number) => Value.Number(value: number)
-      None => Value.Null
-    }
-  }
-}
-
-impl Decode for Float32 {
-  fn from_json(value: Value) -> Result[Float32, DecodeError]
-  {
-    match value {
-      Number(number) => Ok(number.to_float64().to_float32())
-      _ => Err(type_mismatch("a number"))
-    }
-  }
-}
-
-impl Encode for Float64 {
-  fn to_json(self) -> Value
-  {
-    match Number.from_float64(self) {
-      Some(number) => Value.Number(value: number)
-      None => Value.Null
-    }
-  }
-}
-
-impl Decode for Float64 {
-  fn from_json(value: Value) -> Result[Float64, DecodeError]
-  {
-    match value {
-      Number(number) => Ok(number.to_float64())
-      _ => Err(type_mismatch("a number"))
-    }
-  }
-}
-
-impl Encode for String {
-  fn to_json(self) -> Value
-  {
-    Value.String(value: self.copy())
-  }
-}
-
-impl Decode for String {
-  fn from_json(value: Value) -> Result[String, DecodeError]
-  {
-    match value {
-      String(text) => Ok(text.copy())
-      _ => Err(type_mismatch("a string"))
-    }
-  }
-}
-
-impl Encode for Value {
-  fn to_json(self) -> Value
-  {
-    self.copy()
-  }
-}
-
-impl Decode for Value {
-  fn from_json(value: Value) -> Result[Value, DecodeError]
-  {
-    Ok(value.copy())
-  }
-}
-
-impl Encode for List[Element: Encode] {
-  fn to_json(self) -> Value
-  {
-    var items: List[Value] = List.with_capacity(self.length())
-    for item in self {
-      mut items.push(item.to_json())
-    }
-    Value.Array(items: own items)
-  }
-}
-
-impl Decode for List[Element: Decode] {
-  fn from_json(value: Value) -> Result[List[Element], DecodeError]
-  {
-    match value {
-      Array(items) => {
-        var decoded: List[Element] = List.with_capacity(items.length())
-        for index in 0..items.length() {
-          match Element.from_json(items[index]) {
-            Ok(item) => mut decoded.push(own item)
-            Err(error) => return Err(prefix_path(index.format().slice(), error: own error))
-          }
+fn Names.apply(self, name: StringSlice) -> String {
+  match self {
+    AsWritten => name.to_string()
+    CamelCase => {
+      var text = String.with_capacity(name.length())
+      var upper = false
+      for character in name.characters() {
+        if character == Character"_" && text.length() > 0 {
+          upper = true
+        } else if upper {
+          mut text.push_character(character.to_ascii_uppercase())
+          upper = false
+        } else {
+          mut text.push_character(character)
         }
-        Ok(own decoded)
       }
-      _ => Err(type_mismatch("an array"))
+      text
     }
   }
 }
 
-impl Encode for Option[Inner: Encode] {
-  fn to_json(self) -> Value
-  {
-    match self {
-      Some(inner) => inner.to_json()
-      None => Value.Null
+public fn to_value[Item: serialization::Serialize](item: Item, names: Names = Names.AsWritten) -> Value {
+  var writer = ValueWriter.new(names: names)
+  item.serialize(mut writer)
+  own writer.finish()
+}
+
+public fn from_value[Item: serialization::Deserialize](
+  value: own Value,
+  names: Names = Names.AsWritten,
+) -> Result[Item, serialization::Error] {
+  var reader = ValueReader.new(own value, names: names)
+  Item.deserialize(mut reader)
+}
+
+public fn encode[Item: serialization::Serialize](item: Item, names: Names = Names.AsWritten) -> String {
+  to_value(item, names: names).to_text()
+}
+
+public fn encode_pretty[Item: serialization::Serialize](
+  item: Item,
+  indent: USize = 2,
+  names: Names = Names.AsWritten,
+) -> String {
+  to_value(item, names: names).to_pretty_text(indent: indent)
+}
+
+public fn decode[Item: serialization::Deserialize](text: StringSlice, names: Names = Names.AsWritten) -> Result[Item, Error] {
+  match parse(text) {
+    Ok(value) => match from_value[Item](own value, names: names) {
+      Ok(item) => Ok(own item)
+      Err(error) => Err(Error.Deserialize(error: own error))
     }
+    Err(error) => Err(Error.Parse(error: error))
   }
 }
 
-impl Decode for Option[Inner: Decode] {
-  fn from_json(value: Value) -> Result[Option[Inner], DecodeError]
-  {
-    if value.is_null() {
-      return Ok(None)
-    }
-    match Inner.from_json(value) {
-      Ok(inner) => Ok(Some(own inner))
-      Err(error) => Err(own error)
-    }
-  }
+type Open = Items | Members | Variant | UnitVariant
+  derives Equal
+
+public opaque type ValueWriter(
+  names: Names,
+  open: List[Open],
+  items: List[List[Value]],
+  members: List[Map[String, Value]],
+  keys: List[String],
+  variants: List[String],
+  result: Option[Value],
+)
+
+public fn ValueWriter.new(names: Names = Names.AsWritten) -> ValueWriter {
+  ValueWriter(names: names, open: [], items: [], members: [], keys: [], variants: [], result: None)
 }
 
-impl Encode for Map[Key: Hash + Ordered + Display, Member: Encode] {
-  fn to_json(self) -> Value
-  {
-    var members: Map[String, Value] = Map.with_capacity(self.length())
-    for entry in self {
-      mut members.insert("${entry.key}", value: entry.value.to_json())
-    }
-    Value.Object(members: own members)
-  }
+public fn ValueWriter.finish(own self) -> Value {
+  own self.result.unwrap_or(Value.Null)
 }
 
-impl Decode for Map[Key: Hash + Ordered + text::Parse, Member: Decode] {
-  fn from_json(value: Value) -> Result[Map[Key, Member], DecodeError]
-  {
-    match value {
-      Object(members) => {
-        var decoded: Map[Key, Member] = Map.with_capacity(members.length())
-        for entry in members {
-          match Key.parse(entry.key.slice()) {
-            Ok(key) => match Member.from_json(entry.value) {
-              Ok(member) => mut decoded.insert(own key, value: own member)
-              Err(error) => return Err(prefix_path(entry.key.slice(), error: own error))
+fn put(writer: mut ValueWriter, value: own Value) {
+  match mut writer.open.pop() {
+    None => writer.result = Some(own value)
+    Some(open) => {
+      mut writer.open.push(open)
+      if open == Open.Items {
+        match mut writer.items.pop() {
+          Some(items) => {
+            var list = own items
+            mut list.push(own value)
+            mut writer.items.push(own list)
+          }
+          None => {}
+        }
+      } else if open == Open.Members || open == Open.Variant {
+        match mut writer.members.pop() {
+          Some(members) => {
+            var map = own members
+            match mut writer.keys.pop() {
+              Some(key) => mut map.insert(own key, value: own value)
+              None => {}
             }
-            Err(_) => return Err(prefix_path(entry.key.slice(), error: type_mismatch("a key of the map's type")))
+            mut writer.keys.push("")
+            mut writer.members.push(own map)
+          }
+          None => {}
+        }
+      }
+    }
+  }
+}
+
+fn name_next(writer: mut ValueWriter, name: own String) {
+  let _ = mut writer.keys.pop()
+  mut writer.keys.push(own name)
+}
+
+fn open_members(writer: mut ValueWriter, open: Open) {
+  mut writer.open.push(open)
+  mut writer.members.push([:])
+  mut writer.keys.push("")
+}
+
+fn close_members(writer: mut ValueWriter) -> Map[String, Value] {
+  let _ = mut writer.open.pop()
+  let _ = mut writer.keys.pop()
+  match mut writer.members.pop() {
+    Some(members) => own members
+    None => [:]
+  }
+}
+
+impl serialization::Serializer for ValueWriter {
+  fn null(mut self) {
+    put(mut self, value: Value.Null)
+  }
+
+  fn bool(mut self, value: Bool) {
+    put(mut self, value: Value.Bool(value: value))
+  }
+
+  fn integer(mut self, value: Int64) {
+    put(mut self, value: Value.Number(value: Number.from(value)))
+  }
+
+  fn unsigned(mut self, value: UInt64) {
+    match Int64.try_from(value) {
+      Ok(integer) => put(mut self, value: Value.Number(value: Number.from(integer)))
+      Err(_) => mut self.float(value.to_float64())
+    }
+  }
+
+  fn float(mut self, value: Float64) {
+    match Number.from_float64(value) {
+      Some(number) => put(mut self, value: Value.Number(value: number))
+      None => put(mut self, value: Value.Null)
+    }
+  }
+
+  fn text(mut self, value: StringSlice) {
+    put(mut self, value: Value.String(value: value.to_string()))
+  }
+
+  fn begin_list(mut self, length: USize) {
+    mut self.open.push(Open.Items)
+    mut self.items.push(List.with_capacity(length))
+  }
+
+  fn end_list(mut self) {
+    let _ = mut self.open.pop()
+    match mut self.items.pop() {
+      Some(items) => put(mut self, value: Value.Array(items: own items))
+      None => {}
+    }
+  }
+
+  fn begin_record(mut self, length: USize) {
+    open_members(mut self, open: Open.Members)
+  }
+
+  fn field(mut self, name: StringSlice) {
+    name_next(mut self, name: self.names.apply(name))
+  }
+
+  fn end_record(mut self) {
+    let members = close_members(mut self)
+    put(mut self, value: Value.Object(members: own members))
+  }
+
+  fn begin_map(mut self, length: USize) {
+    open_members(mut self, open: Open.Members)
+  }
+
+  fn key(mut self, key: StringSlice) {
+    name_next(mut self, name: key.to_string())
+  }
+
+  fn end_map(mut self) {
+    let members = close_members(mut self)
+    put(mut self, value: Value.Object(members: own members))
+  }
+
+  fn begin_variant(mut self, name: StringSlice, length: USize) {
+    if length == 0 {
+      put(mut self, value: Value.String(value: name.to_string()))
+      mut self.open.push(Open.UnitVariant)
+    } else {
+      mut self.variants.push(name.to_string())
+      open_members(mut self, open: Open.Variant)
+    }
+  }
+
+  fn end_variant(mut self) {
+    match mut self.open.pop() {
+      Some(open) => {
+        if open == Open.Variant {
+          mut self.open.push(open)
+          let fields = close_members(mut self)
+          match mut self.variants.pop() {
+            Some(name) => {
+              var wrapper: Map[String, Value] = [:]
+              mut wrapper.insert(own name, value: Value.Object(members: own fields))
+              put(mut self, value: Value.Object(members: own wrapper))
+            }
+            None => {}
           }
         }
-        Ok(own decoded)
       }
-      _ => Err(type_mismatch("an object"))
+      None => {}
+    }
+  }
+}
+
+type Reading =
+  | Items(items: List[Value], next: USize)
+  | Members(members: Map[String, Value])
+  | Entries(keys: List[String], values: List[Value])
+
+public opaque type ValueReader(names: Names, current: Option[Value], frames: List[Reading], path: List[String])
+
+public fn ValueReader.new(value: own Value, names: Names = Names.AsWritten) -> ValueReader {
+  ValueReader(names: names, current: Some(own value), frames: [], path: [])
+}
+
+fn name_top(reader: mut ValueReader, name: own String) {
+  let _ = mut reader.path.pop()
+  mut reader.path.push(own name)
+}
+
+fn ValueReader.expected(self, what: StringSlice) -> serialization::Error {
+  var message = "expected "
+  mut message.push(what)
+  self.error(message.slice())
+}
+
+fn ValueReader.mismatch(self, what: StringSlice) -> serialization::Error {
+  match self.current {
+    None => self.error("is missing")
+    Some(_) => self.expected(what)
+  }
+}
+
+impl serialization::Deserializer for ValueReader {
+  fn kind(self) -> serialization::Kind {
+    match self.current {
+      None => serialization::Kind.Absent
+      Some(value) => match value {
+        Null => serialization::Kind.Null
+        Bool(_) => serialization::Kind.Bool
+        Number(number) => if number.is_whole() { serialization::Kind.Integer } else { serialization::Kind.Float }
+        String(_) => serialization::Kind.Text
+        Array(_) => serialization::Kind.List
+        Object(_) => serialization::Kind.Record
+      }
+    }
+  }
+
+  fn skip(mut self) {
+    self.current = None
+  }
+
+  fn bool(mut self) -> Result[Bool, serialization::Error] {
+    let found = match self.current {
+      Some(value) => value.as_bool()
+      None => None
+    }
+    match found {
+      Some(flag) => {
+        self.current = None
+        Ok(flag)
+      }
+      None => Err(self.mismatch("true or false"))
+    }
+  }
+
+  fn integer(mut self) -> Result[Int64, serialization::Error] {
+    let found = match self.current {
+      Some(value) => value.as_int64()
+      None => None
+    }
+    match found {
+      Some(integer) => {
+        self.current = None
+        Ok(integer)
+      }
+      None => Err(self.mismatch("a whole number"))
+    }
+  }
+
+  fn unsigned(mut self) -> Result[UInt64, serialization::Error] {
+    let found = match self.current {
+      Some(value) => value.as_int64()
+      None => None
+    }
+    match found {
+      Some(integer) => match UInt64.try_from(integer) {
+        Ok(unsigned) => {
+          self.current = None
+          Ok(unsigned)
+        }
+        Err(_) => Err(self.expected("a whole number that is not negative"))
+      }
+      None => Err(self.mismatch("a whole number that is not negative"))
+    }
+  }
+
+  fn float(mut self) -> Result[Float64, serialization::Error] {
+    let found = match self.current {
+      Some(value) => value.as_float64()
+      None => None
+    }
+    match found {
+      Some(float) => {
+        self.current = None
+        Ok(float)
+      }
+      None => Err(self.mismatch("a number"))
+    }
+  }
+
+  fn text(mut self) -> Result[String, serialization::Error] {
+    if self.kind() != serialization::Kind.Text {
+      return Err(self.mismatch("a string"))
+    }
+    match mut self.current.take() {
+      Some(value) => match own value {
+        String(text) => Ok(own text)
+        _ => Err(self.expected("a string"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn begin_list(mut self) -> Result[Unit, serialization::Error] {
+    if self.kind() != serialization::Kind.List {
+      return Err(self.mismatch("an array"))
+    }
+    match mut self.current.take() {
+      Some(value) => match own value {
+        Array(items) => {
+          var reversed = own items
+          mut reversed.reverse()
+          mut self.frames.push(Reading.Items(items: own reversed, next: 0))
+          mut self.path.push("")
+          Ok(Unit)
+        }
+        _ => Err(self.expected("an array"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn next_element(mut self) -> Bool {
+    match mut self.frames.pop() {
+      Some(frame) => match own frame {
+        Items(items, next) => {
+          var rest = own items
+          match mut rest.pop() {
+            Some(item) => {
+              self.current = Some(own item)
+              name_top(mut self, name: next.format())
+              mut self.frames.push(Reading.Items(items: own rest, next: next.saturating_add(1)))
+              true
+            }
+            None => {
+              self.current = None
+              mut self.frames.push(Reading.Items(items: own rest, next: next))
+              false
+            }
+          }
+        }
+        other => {
+          mut self.frames.push(own other)
+          false
+        }
+      }
+      None => false
+    }
+  }
+
+  fn end_list(mut self) {
+    let _ = mut self.frames.pop()
+    let _ = mut self.path.pop()
+    self.current = None
+  }
+
+  fn begin_record(mut self) -> Result[Unit, serialization::Error] {
+    if self.kind() != serialization::Kind.Record {
+      return Err(self.mismatch("an object"))
+    }
+    match mut self.current.take() {
+      Some(value) => match own value {
+        Object(members) => {
+          mut self.frames.push(Reading.Members(members: own members))
+          mut self.path.push("")
+          Ok(Unit)
+        }
+        _ => Err(self.expected("an object"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn field(mut self, name: StringSlice) -> Bool {
+    let key = self.names.apply(name)
+    match mut self.frames.pop() {
+      Some(frame) => match own frame {
+        Members(members) => {
+          var rest = own members
+          self.current = mut rest.take(key)
+          mut self.frames.push(Reading.Members(members: own rest))
+        }
+        other => {
+          self.current = None
+          mut self.frames.push(own other)
+        }
+      }
+      None => self.current = None
+    }
+    name_top(mut self, name: own key)
+    self.current.is_some()
+  }
+
+  fn end_record(mut self) {
+    let _ = mut self.frames.pop()
+    let _ = mut self.path.pop()
+    self.current = None
+  }
+
+  fn begin_map(mut self) -> Result[Unit, serialization::Error] {
+    if self.kind() != serialization::Kind.Record {
+      return Err(self.mismatch("an object"))
+    }
+    match mut self.current.take() {
+      Some(value) => match own value {
+        Object(members) => {
+          var keys: List[String] = List.with_capacity(members.length())
+          var values: List[Value] = List.with_capacity(members.length())
+          for entry in own members {
+            mut keys.push(own entry.key)
+            mut values.push(own entry.value)
+          }
+          mut keys.reverse()
+          mut values.reverse()
+          mut self.frames.push(Reading.Entries(keys: own keys, values: own values))
+          mut self.path.push("")
+          Ok(Unit)
+        }
+        _ => Err(self.expected("an object"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn next_key(mut self) -> Option[String] {
+    match mut self.frames.pop() {
+      Some(frame) => match own frame {
+        Entries(keys, values) => {
+          var rest_keys = own keys
+          var rest_values = own values
+          let key = mut rest_keys.pop()
+          self.current = mut rest_values.pop()
+          mut self.frames.push(Reading.Entries(keys: own rest_keys, values: own rest_values))
+          match own key {
+            Some(name) => {
+              name_top(mut self, name: name.copy())
+              Some(own name)
+            }
+            None => None
+          }
+        }
+        other => {
+          mut self.frames.push(own other)
+          None
+        }
+      }
+      None => None
+    }
+  }
+
+  fn end_map(mut self) {
+    let _ = mut self.frames.pop()
+    let _ = mut self.path.pop()
+    self.current = None
+  }
+
+  fn variant(mut self) -> Result[String, serialization::Error] {
+    let kind = self.kind()
+    if kind != serialization::Kind.Text && kind != serialization::Kind.Record {
+      return Err(self.mismatch("a variant's name, or an object with one member"))
+    }
+    match mut self.current.take() {
+      Some(value) => match own value {
+        String(name) => {
+          mut self.frames.push(Reading.Members(members: [:]))
+          mut self.path.push("")
+          mut self.path.push("")
+          Ok(own name)
+        }
+        Object(members) => {
+          if members.length() != 1 {
+            return Err(self.expected("an object with one member"))
+          }
+          var found: Option[String] = None
+          var inner: Option[Value] = None
+          for entry in own members {
+            found = Some(own entry.key)
+            inner = Some(own entry.value)
+          }
+          match own found {
+            Some(name) => {
+              mut self.path.push(name.copy())
+              match own inner {
+                Some(content) => match own content {
+                  Object(record) => {
+                    mut self.frames.push(Reading.Members(members: own record))
+                    mut self.path.push("")
+                    Ok(own name)
+                  }
+                  _ => Err(self.expected("an object"))
+                }
+                None => Err(self.expected("an object"))
+              }
+            }
+            None => Err(self.expected("an object with one member"))
+          }
+        }
+        _ => Err(self.expected("a variant"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn end_variant(mut self) {
+    let _ = mut self.frames.pop()
+    let _ = mut self.path.pop()
+    let _ = mut self.path.pop()
+    self.current = None
+  }
+
+  fn error(self, message: StringSlice) -> serialization::Error {
+    var path = ""
+    for segment in self.path {
+      if segment.length() > 0 {
+        mut path.push("/")
+        mut path.push(segment.slice())
+      }
+    }
+    serialization::Error(path: own path, message: message.to_string())
+  }
+}
+
+impl serialization::Serialize for Value {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    match self {
+      Null => mut sink.null()
+      Bool(value) => mut sink.bool(value)
+      Number(number) => match number.to_int64() {
+        Some(integer) => mut sink.integer(integer)
+        None => mut sink.float(number.to_float64())
+      }
+      String(text) => mut sink.text(text.slice())
+      Array(items) => {
+        mut sink.begin_list(items.length())
+        for item in items {
+          item.serialize(mut sink)
+        }
+        mut sink.end_list()
+      }
+      Object(members) => {
+        mut sink.begin_map(members.length())
+        for entry in members {
+          mut sink.key(entry.key.slice())
+          entry.value.serialize(mut sink)
+        }
+        mut sink.end_map()
+      }
+    }
+  }
+}
+
+impl serialization::Deserialize for Value {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Value, serialization::Error] {
+    match source.kind() {
+      Absent => {
+        mut source.skip()
+        Ok(Value.Null)
+      }
+      Null => {
+        mut source.skip()
+        Ok(Value.Null)
+      }
+      Bool => Ok(Value.Bool(value: mut source.bool()?))
+      Integer => Ok(Value.Number(value: Number.from(mut source.integer()?)))
+      Float => {
+        let float = mut source.float()?
+        match Number.from_float64(float) {
+          Some(number) => Ok(Value.Number(value: number))
+          None => Ok(Value.Null)
+        }
+      }
+      Text => Ok(Value.String(value: mut source.text()?))
+      List => {
+        mut source.begin_list()?
+        var items: List[Value] = []
+        while mut source.next_element() {
+          mut items.push(Value.deserialize(mut source)?)
+        }
+        mut source.end_list()
+        Ok(Value.Array(items: own items))
+      }
+      Record => {
+        mut source.begin_map()?
+        var members: Map[String, Value] = [:]
+        while true {
+          match mut source.next_key() {
+            Some(key) => mut members.insert(own key, value: Value.deserialize(mut source)?)
+            None => break
+          }
+        }
+        mut source.end_map()
+        Ok(Value.Object(members: own members))
+      }
     }
   }
 }

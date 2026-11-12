@@ -404,7 +404,7 @@ static void t_stack_release(void *low) {
 
    A context is the stack pointer of code that is not running. Its
    callee-saved registers are on its stack, below that pointer, and the
-   address it goes on at is the return address of its call of
+   address it resumes at is the return address of its call of
    [t_context_switch]. The function saves the caller's registers and stack
    pointer in [from] and loads those of [to]. */
 struct t_context {

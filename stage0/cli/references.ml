@@ -72,11 +72,11 @@ let of_definition database (key : Names.key) =
                  if name.id < Array.length resolved.names then resolved.names.(name.id) else None
                with
                | Some (Definition (_, path)) -> [ occurrence name.span (Definition path) ]
-               | Some (Module m) ->
+               | Some (Module module_) ->
                    (* A module is written either as its import's name, one
                       segment, or as its full path: the package's segments
                       followed by each module's. *)
-                   let parts = Path.module_parts m in
+                   let parts = Path.module_parts module_ in
                    let written_in_full =
                      List.length parts > 1
                      && List.for_all Fun.id
@@ -93,7 +93,7 @@ let of_definition database (key : Names.key) =
                      | Some (last : Syntax.name) -> last
                      | None -> name
                    in
-                   [ occurrence (Syntax.Span.make name.span.start last.span.stop) (Module m) ]
+                   [ occurrence (Syntax.Span.make name.span.start last.span.stop) (Module module_) ]
                | _ -> [])
              names)
       in
@@ -110,7 +110,9 @@ let of_definition database (key : Names.key) =
               (member_targets tables definition)
         | None -> []
       in
-      List.sort (fun a b -> compare a.span.start b.span.start) (declared @ resolved_names @ members)
+      List.sort
+        (fun left right -> compare left.span.start right.span.start)
+        (declared @ resolved_names @ members)
   | _ -> []
 
 (* Every occurrence in the package's code, in order of file and position. *)
@@ -143,7 +145,7 @@ let uses (project : Project.t) (target_module : Path.module_) =
    version of it. *)
 let names_definition (definition : Path.t) occurrence =
   match (occurrence.target, definition) with
-  | Definition (Method { owner; name; _ }), Method { owner = o; name = n; _ } ->
-      Path.equal owner o && name = n
+  | Definition (Method { owner; name; _ }), Method { owner = other_owner; name = other_name; _ } ->
+      Path.equal owner other_owner && name = other_name
   | Definition path, definition -> Path.equal path definition
   | Module _, _ -> false

@@ -159,10 +159,14 @@ let prove ?reveal database (key : Names.key) =
                 Obligations
                   {
                     obligations =
-                      List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
+                      List.concat_map
+                        (fun (outcome : Translate.outcome) -> outcome.obligations)
+                        outcomes;
                     holes =
                       List.sort_uniq compare
-                        (List.concat_map (fun (o : Translate.outcome) -> o.holes) outcomes);
+                        (List.concat_map
+                           (fun (outcome : Translate.outcome) -> outcome.holes)
+                           outcomes);
                   })
         | Test, Test _ -> Obligations (Translate.test ?reveal database source ~path:key.path)
         | Constant, Constant _ ->
@@ -172,8 +176,11 @@ let prove ?reveal database (key : Names.key) =
             Obligations
               {
                 obligations =
-                  List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
-                holes = List.concat_map (fun (o : Translate.outcome) -> o.holes) outcomes;
+                  List.concat_map
+                    (fun (outcome : Translate.outcome) -> outcome.obligations)
+                    outcomes;
+                holes =
+                  List.concat_map (fun (outcome : Translate.outcome) -> outcome.holes) outcomes;
               }
         | Type, Type { invariants = _ :: _; _ } | Type, Type { potential = Some _; _ } ->
             Obligations (Translate.type_ ?reveal database source ~path:key.path)
@@ -246,7 +253,7 @@ let truss_value members text =
             flush ();
             tokens := `Close :: !tokens
         | ' ' | '\n' | '\t' | '\r' -> flush ()
-        | c -> Buffer.add_char buffer c)
+        | character -> Buffer.add_char buffer character)
       text;
     flush ();
     List.rev !tokens
@@ -434,20 +441,27 @@ let exactly (query : Logic.query) =
         match (bitwise_of name, arguments) with
         | Some (operation, bits, signed), first :: rest ->
             let bits_of value = Logic.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
-            let a = bits_of first in
+            let operand_bits = bits_of first in
             let result =
               match (operation, rest) with
-              | "complement", _ -> Some (Logic.Operation ("bvnot", [ a ]))
-              | "and", [ b ] -> Some (Logic.Operation ("bvand", [ a; bits_of b ]))
-              | "or", [ b ] -> Some (Logic.Operation ("bvor", [ a; bits_of b ]))
-              | "xor", [ b ] -> Some (Logic.Operation ("bvxor", [ a; bits_of b ]))
-              | "shift_left", [ b ] -> Some (Logic.Operation ("bvshl", [ a; bits_of b ]))
-              | "shift_right", [ b ] ->
-                  Some (Logic.Operation ((if signed then "bvashr" else "bvlshr"), [ a; bits_of b ]))
-              | ("rotate_left" | "rotate_right"), [ b ] ->
+              | "complement", _ -> Some (Logic.Operation ("bvnot", [ operand_bits ]))
+              | "and", [ second_operand ] ->
+                  Some (Logic.Operation ("bvand", [ operand_bits; bits_of second_operand ]))
+              | "or", [ second_operand ] ->
+                  Some (Logic.Operation ("bvor", [ operand_bits; bits_of second_operand ]))
+              | "xor", [ second_operand ] ->
+                  Some (Logic.Operation ("bvxor", [ operand_bits; bits_of second_operand ]))
+              | "shift_left", [ second_operand ] ->
+                  Some (Logic.Operation ("bvshl", [ operand_bits; bits_of second_operand ]))
+              | "shift_right", [ second_operand ] ->
+                  Some
+                    (Logic.Operation
+                       ( (if signed then "bvashr" else "bvlshr"),
+                         [ operand_bits; bits_of second_operand ] ))
+              | ("rotate_left" | "rotate_right"), [ second_operand ] ->
                   (* By the amount modulo the width, with what leaves one end
                      coming in at the other. *)
-                  let by = bits_of (Logic.Operation ("mod", [ b; Logic.int bits ])) in
+                  let by = bits_of (Logic.Operation ("mod", [ second_operand; Logic.int bits ])) in
                   let rest = Logic.Operation ("bvsub", [ bits_of (Logic.int bits); by ]) in
                   let towards, back =
                     if operation = "rotate_left" then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
@@ -456,12 +470,14 @@ let exactly (query : Logic.query) =
                     (Logic.Operation
                        ( "bvor",
                          [
-                           Logic.Operation (towards, [ a; by ]); Logic.Operation (back, [ a; rest ]);
+                           Logic.Operation (towards, [ operand_bits; by ]);
+                           Logic.Operation (back, [ operand_bits; rest ]);
                          ] ))
               | "swap_bytes", _ ->
                   let byte index =
                     Logic.Operation
-                      (Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index), [ a ])
+                      ( Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index),
+                        [ operand_bits ] )
                   in
                   let bytes = List.init (bits / 8) byte in
                   Some
@@ -564,8 +580,8 @@ let choices (obligations : Translate.obligation list) =
       (fun groups (obligation : Translate.obligation) ->
         List.fold_left
           (fun groups (constants : Costs.constants) ->
-            if List.exists (fun (g : Costs.constants) -> g.factor = constants.factor) groups then
-              groups
+            if List.exists (fun (group : Costs.constants) -> group.factor = constants.factor) groups
+            then groups
             else groups @ [ constants ])
           groups obligation.constants)
       [] obligations
@@ -605,7 +621,7 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
     | Some Timed_out -> Run_timed_out
     | Some Not_run | None -> (
         (* Each question is asked only once what it depends on is
-           answered: a pending response stops the search, which goes on
+           answered: a pending response stops the search, which continues
            once it is answered, rather than asking what the answer may make
            unneeded. *)
         let ask variant ~with_locals = oracles.solve ~index ~choice ~variant ~with_locals in

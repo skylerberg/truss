@@ -102,7 +102,9 @@ let runnable database =
              && List.for_all (fun (condition : Core.condition) -> condition.executable) requires
         -> (
           let ranges =
-            List.map (fun (p : Types.parameter_info) -> integer p.type_) signature.parameters
+            List.map
+              (fun (parameter : Types.parameter_info) -> integer parameter.type_)
+              signature.parameters
           in
           let admits =
             List.map
@@ -140,7 +142,8 @@ let admitting index candidate =
   Printf.sprintf "\nfn fuzz_requires_%d(%s) -> Bool {\n  %s\n}\n" index
     (String.concat ", "
        (List.map
-          (fun (p : Types.parameter_info) -> p.name ^ ": " ^ Types.show p.type_)
+          (fun (parameter : Types.parameter_info) ->
+            parameter.name ^ ": " ^ Types.show parameter.type_)
           candidate.signature.parameters))
     (String.concat " && " candidate.admits)
 
@@ -259,8 +262,9 @@ let () =
             let shown diagnostics =
               if !verbose then
                 List.iter
-                  (fun (d : Diagnostic.t) ->
-                    Printf.printf "seed diagnostic at %d: %s\n" d.span.start d.message)
+                  (fun (diagnostic : Diagnostic.t) ->
+                    Printf.printf "seed diagnostic at %d: %s\n" diagnostic.span.start
+                      diagnostic.message)
                   diagnostics
             in
             match load text with

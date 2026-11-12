@@ -17,8 +17,8 @@ type ty =
       (** [any Cursor[Element = Int64]], with every associated type fixed, sorted by name *)
   | Cursor of yielding  (** The nameless type of a pulled yielding method *)
   | Lent of lent
-      (** A value that a lending or yielding method builds around the places it lends. It owns
-          nothing. *)
+      (** The value of a constructor of lent places that a lending or yielding method yields. It
+          owns nothing. *)
   | Never
 
 (* A value of type [base] in which each of [fields] holds the address of a

@@ -116,7 +116,7 @@ test "an encoder writes integers in either byte order" {
   assert same_bytes(encoder.written(), expected: [1, 2, 3, 4, 5, 6, 7, 8, 255, 254])
 }
 
-test "an encoder appends to bytes it is given, and gives them all back" {
+test "an encoder appends to the bytes it starts with, and returns them all" {
   let start: List[UInt8] = [9]
   var encoder = binary::Encoder.onto(own start)
   mut encoder.bytes([7, 8])

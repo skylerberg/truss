@@ -10,9 +10,11 @@ open Syntax
    signature: bodies, and the contents of an opaque type seen from another
    package. *)
 let bodies ~opaque (definition : definition) =
-  let function_body (f : function_definition) = [ f.body.span ] in
+  let function_body (function_definition : function_definition) =
+    [ function_definition.body.span ]
+  in
   match definition.kind with
-  | Function f -> function_body f
+  | Function function_definition -> function_body function_definition
   | Theorem { body; _ } -> [ body.span ]
   | Test { body; _ } -> [ body.span ]
   | Law_proof { body; _ } -> [ body.span ]
@@ -38,7 +40,9 @@ let bodies ~opaque (definition : definition) =
 (* Removes the spans from the text, then trailing spaces, then empty
    lines. *)
 let cut text spans =
-  let spans = List.sort (fun (a : span) (b : span) -> compare a.start b.start) spans in
+  let spans =
+    List.sort (fun (left : span) (right : span) -> compare left.start right.start) spans
+  in
   let buffer = Buffer.create (String.length text) in
   let at =
     List.fold_left
@@ -53,8 +57,10 @@ let cut text spans =
   Buffer.add_string buffer (String.sub text at (String.length text - at));
   String.split_on_char '\n' (Buffer.contents buffer)
   |> List.map (fun line ->
-      let rec stop n =
-        if n > 0 && (line.[n - 1] = ' ' || line.[n - 1] = '\t') then stop (n - 1) else n
+      let rec stop position =
+        if position > 0 && (line.[position - 1] = ' ' || line.[position - 1] = '\t') then
+          stop (position - 1)
+        else position
       in
       String.sub line 0 (stop (String.length line)))
   |> List.filter (( <> ) "")
@@ -116,5 +122,6 @@ let labeled label signature =
   let indent = String.make (String.length label) ' ' in
   String.concat "\n"
     (List.mapi
-       (fun i line -> Printf.sprintf "    %s %s" (if i = 0 then label else indent) line)
+       (fun line_index line ->
+         Printf.sprintf "    %s %s" (if line_index = 0 then label else indent) line)
        (String.split_on_char '\n' signature))

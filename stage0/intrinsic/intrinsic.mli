@@ -163,7 +163,7 @@ type operation =
       (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
   | Handle_descriptor  (** [(handle) -> Int32]: the descriptor a handle owns *)
   | Handle_release
-      (** [(own handle) -> Int32]: the descriptor of a handle that is given up without closing it,
+      (** [(own handle) -> Int32]: the descriptor of a handle, which is consumed without closing it,
           so that the caller can close it and see whether closing failed *)
   | Run_test
       (** [(index)]: runs a test of the test program, by its place in the program's table of them *)

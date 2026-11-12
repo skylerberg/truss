@@ -47,19 +47,19 @@ let indented text =
    outcomes, omitting outcomes with no test. *)
 let summary (records : Compile.record list) =
   let count outcome =
-    List.length (List.filter (fun (r : Compile.record) -> r.outcome = outcome) records)
+    List.length (List.filter (fun (record : Compile.record) -> record.outcome = outcome) records)
   in
-  let cached = List.length (List.filter (fun (r : Compile.record) -> r.cached) records) in
+  let cached = List.length (List.filter (fun (record : Compile.record) -> record.cached) records) in
   List.filter_map
     (fun outcome ->
       match count outcome with
       | 0 -> None
-      | n ->
+      | count ->
           let words = Compile.show_outcome outcome in
-          let words = String.map (function '_' -> ' ' | c -> c) words in
+          let words = String.map (function '_' -> ' ' | character -> character) words in
           if outcome = Passed && cached > 0 then
-            Some (Printf.sprintf "%d %s (%d cached)" n words cached)
-          else Some (Printf.sprintf "%d %s" n words))
+            Some (Printf.sprintf "%d %s (%d cached)" count words cached)
+          else Some (Printf.sprintf "%d %s" count words))
     [ Passed; Failed; Panicked; Incomplete; Timed_out; Crashed ]
   |> String.concat ", "
 
@@ -74,15 +74,18 @@ let print_report tests (records : Compile.record list) ~timings:show_timings tim
         Option.iter indented record.echo
       end)
     tests records;
-  if List.exists (fun (r : Compile.record) -> r.outcome <> Passed) records then Output.print_line "";
+  if List.exists (fun (record : Compile.record) -> record.outcome <> Passed) records then
+    Output.print_line "";
   if show_timings then begin
     let rows =
       List.combine tests records
-      |> List.stable_sort (fun (_, (a : Compile.record)) (_, (b : Compile.record)) ->
-          compare b.microseconds a.microseconds)
+      |> List.stable_sort (fun (_, (left : Compile.record)) (_, (right : Compile.record)) ->
+          compare right.microseconds left.microseconds)
     in
-    let shown = List.map (fun (_, (r : Compile.record)) -> duration r.microseconds) rows in
-    let width = List.fold_left (fun w s -> max w (String.length s)) 0 shown in
+    let shown =
+      List.map (fun (_, (record : Compile.record)) -> duration record.microseconds) rows
+    in
+    let width = List.fold_left (fun widest name -> max widest (String.length name)) 0 shown in
     List.iter2
       (fun (test, (record : Compile.record)) text ->
         Output.printf "%*s  %s%s\n" width text (label test)
@@ -110,8 +113,8 @@ let test_json test (record : Compile.record option) =
           ("outcome", Json.String (Compile.show_outcome record.outcome));
           ("cached", Json.Bool record.cached);
           ("microseconds", Json.Int record.microseconds);
-          ("message", Json.option (fun m -> Json.String m) record.message);
-          ("echo", Json.option (fun e -> Json.String e) record.echo);
+          ("message", Json.option (fun message -> Json.String message) record.message);
+          ("echo", Json.option (fun echo -> Json.String echo) record.echo);
         ])
 
 let timings_json timings =
@@ -146,7 +149,9 @@ let draw progress =
     match
       Hashtbl.fold
         (fun test start oldest ->
-          match oldest with Some (_, s) when s <= start -> oldest | _ -> Some (test, start))
+          match oldest with
+          | Some (_, oldest_start) when oldest_start <= start -> oldest
+          | _ -> Some (test, start))
         progress.running None
     with
     | Some (test, start) ->
@@ -185,7 +190,7 @@ let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
       match outcome with
       | Error _ -> outcome
       | Ok done_ -> (
-          let own = List.filter (fun t -> t.module_.package = package.name) tests in
+          let own = List.filter (fun test -> test.module_.package = package.name) tests in
           let base = !offset in
           offset := base + List.length own;
           let shifted : Compile.progress -> Compile.progress = function
@@ -200,7 +205,7 @@ let run_all (project : Project.t) compile ~results ~rerun ~progress tests =
                 ~progress:(fun event -> progress (shifted event))
                 compile
                 ~time_limit:(Database.time_limit project.session * 1000)
-                (List.map (fun t -> t.path) own)
+                (List.map (fun test -> test.path) own)
             with
             | Ok records -> Ok (done_ @ records)
             | Error message -> Error message))
@@ -216,14 +221,14 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
     let selected = select project ~paths ~match_ in
     List.concat_map
       (fun (package : Project.package) ->
-        List.filter (fun t -> t.module_.package = package.name) selected)
+        List.filter (fun test -> test.module_.package = package.name) selected)
       project.packages
   in
   if not (Report.clean report) then begin
     if json then
       Json.print
         (Report.document report
-           [ ("tests", Json.List (List.map (fun t -> test_json t None) tests)) ])
+           [ ("tests", Json.List (List.map (fun test -> test_json test None) tests)) ])
     else Report.print report;
     1
   end
@@ -265,8 +270,11 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
           Json.print
             (Json.document ~diagnostics:[]
                [
-                 ("tests", Json.List (List.map2 (fun t r -> test_json t (Some r)) tests records));
+                 ( "tests",
+                   Json.List
+                     (List.map2 (fun test record -> test_json test (Some record)) tests records) );
                  ("timings", timings_json timings);
                ])
         else print_report tests records ~timings:show_timings timings;
-        if List.for_all (fun (r : Compile.record) -> r.outcome = Passed) records then 0 else 1
+        if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records then 0
+        else 1

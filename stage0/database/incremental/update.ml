@@ -24,8 +24,8 @@ and ensure_result : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) res
   else if node.marked then verify engine query cell
   else
     match (cell.outcome, node.fingerprint) with
-    | Some _, _ | None, Some _ -> ()
-    | None, None -> if not (adopt_new engine query cell) then compute engine query cell
+    | Some _, _ | None, (Hashed _ | Opaque _) -> ()
+    | None, Unknown -> if not (adopt_new engine query cell) then compute engine query cell
 
 (* Checks what a marked result read, in order, and computes it again only
    if one of those changed since it was last found current. The check stops
@@ -104,7 +104,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   commit_reads engine node reads;
   (* A result whose old value is in the store and was never read is
      compared by fingerprint, without reading the old value. *)
-  let first = cell.outcome = None && node.fingerprint = None in
+  let first = cell.outcome = None && node.fingerprint = Unknown in
   let changed =
     match (cell.outcome, node.fingerprint) with
     | Some old, _ ->
@@ -114,13 +114,13 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
           forget_fingerprint node
         end;
         changed
-    | None, None ->
+    | None, Unknown ->
         cell.outcome <- Some outcome;
         true
-    | None, Some old -> (
+    | None, ((Hashed _ | Opaque _) as old) ->
         cell.outcome <- Some outcome;
         forget_fingerprint node;
-        match fingerprint engine node with Some now -> now <> old | None -> true)
+        fingerprint engine node <> hash_of old
   in
   if changed then begin
     node.changed_at <- tick engine;
@@ -149,7 +149,7 @@ and adopt :
   match engine.store with
   | Some store when query.saved && candidates <> [] -> (
       let was_marked = node.marked in
-      let held () = cell.outcome <> None || node.fingerprint <> None in
+      let held () = cell.outcome <> None || node.fingerprint <> Unknown in
       let had = held () in
       let rec parts parts_so_far = function
         | [] -> Some (List.rev parts_so_far)
@@ -179,9 +179,7 @@ and adopt :
                 commit_reads engine node (List.map fst parts);
                 if not unchanged then begin
                   cell.outcome <- None;
-                  node.fingerprint <- Some stored_fingerprint;
-                  node.stored <- true;
-                  node.opaque <- false;
+                  node.fingerprint <- Hashed { hash = stored_fingerprint; stored = true };
                   node.changed_at <- tick engine;
                   Dynarray.add_last engine.changed node;
                   engine.tally.changes <- engine.tally.changes + 1;

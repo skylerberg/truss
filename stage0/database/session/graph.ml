@@ -4,10 +4,10 @@
 (* What a node's definition reads of other definitions: its reads, through
    nodes about no definition, to the definitions and parts they reach. *)
 let definition_reads engine memo node =
-  let own = Option.map (fun (s : Query.subject) -> s.path) (Engine.subject node) in
+  let own = Option.map (fun (subject : Query.subject) -> subject.path) (Engine.subject node) in
   let targets = Hashtbl.create 8 in
   let seen = Hashtbl.create 16 in
-  let rec walk n =
+  let rec walk visited =
     List.iter
       (fun read ->
         let identity = Engine.identity read in
@@ -23,13 +23,16 @@ let definition_reads engine memo node =
                 not (Engine.is_fixed read)
               then
                 match Hashtbl.find_opt memo identity with
-                | Some reached -> List.iter (fun r -> Hashtbl.replace targets r ()) reached
+                | Some reached ->
+                    List.iter
+                      (fun reached_target -> Hashtbl.replace targets reached_target ())
+                      reached
                 | None -> walk read)
         end)
-      (Engine.reads engine n)
+      (Engine.reads engine visited)
   in
   walk node;
-  Hashtbl.fold (fun r () acc -> r :: acc) targets []
+  Hashtbl.fold (fun reached_target () acc -> reached_target :: acc) targets []
 
 type dependencies = (Path.t, (Path.t * string * string) list) Hashtbl.t
 
@@ -118,7 +121,7 @@ let overlaps ~base mine theirs =
   let mine_changed = changed mine and theirs_changed = changed theirs in
   let by_identity nodes =
     let table = Hashtbl.create 64 in
-    List.iter (fun n -> Hashtbl.replace table (Engine.identity n) n) nodes;
+    List.iter (fun visited -> Hashtbl.replace table (Engine.identity visited) visited) nodes;
     table
   in
   let mine_table = by_identity mine_changed and theirs_table = by_identity theirs_changed in

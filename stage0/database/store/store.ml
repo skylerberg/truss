@@ -53,8 +53,8 @@ type t = {
   used : (string, unit) Hashtbl.t;  (** Results this process read or added *)
 }
 
-let segments_directory t = Filename.concat t.root "segments"
-let directory t = t.root
+let segments_directory store = Filename.concat store.root "segments"
+let directory store = store.root
 
 let default_directory () =
   match Sys.getenv_opt "TRUSS_CACHE" with
@@ -136,11 +136,11 @@ let scan segment =
 let index_path segment_path = Filename.remove_extension segment_path ^ ".index"
 
 let compare_key index position key =
-  let rec loop i =
-    if i = key_width then 0
+  let rec loop offset =
+    if offset = key_width then 0
     else
-      let c = Char.compare index.[position + i] key.[i] in
-      if c <> 0 then c else loop (i + 1)
+      let order = Char.compare index.[position + offset] key.[offset] in
+      if order <> 0 then order else loop (offset + 1)
   in
   loop 0
 
@@ -150,14 +150,14 @@ let search index key =
     else
       let middle = (low + high) / 2 in
       let position = middle * entry_width in
-      let c = compare_key index position key in
-      if c = 0 then
+      let order = compare_key index position key in
+      if order = 0 then
         Some
           {
             offset = Int64.to_int (String.get_int64_le index (position + key_width));
             length = Int32.to_int (String.get_int32_le index (position + key_width + 8));
           }
-      else if c < 0 then halve (middle + 1) high
+      else if order < 0 then halve (middle + 1) high
       else halve low middle
   in
   halve 0 (String.length index / entry_width)
@@ -175,9 +175,9 @@ let load_segment path =
   segment
 
 (* Finds segments other processes made or grew since the last look. *)
-let refresh t =
-  let directory = segments_directory t in
-  let own = Option.map (fun w -> w.segment.path) t.writer in
+let refresh store =
+  let directory = segments_directory store in
+  let own = Option.map (fun writer -> writer.segment.path) store.writer in
   let present =
     match Sys.readdir directory with
     | entries ->
@@ -189,35 +189,37 @@ let refresh t =
   in
   let there = Hashtbl.create (List.length present) in
   List.iter (fun path -> Hashtbl.replace there path ()) present;
-  let known = List.filter (fun s -> Hashtbl.mem there s.path) t.segments in
-  List.iter (fun s -> if not (Hashtbl.mem there s.path) then close_channel s) t.segments;
+  let known = List.filter (fun segment -> Hashtbl.mem there segment.path) store.segments in
+  List.iter
+    (fun segment -> if not (Hashtbl.mem there segment.path) then close_channel segment)
+    store.segments;
   let had = Hashtbl.create (List.length known) in
-  List.iter (fun s -> Hashtbl.replace had s.path ()) known;
+  List.iter (fun segment -> Hashtbl.replace had segment.path ()) known;
   let fresh =
     List.filter_map
       (fun path -> if Hashtbl.mem had path then None else Some (load_segment path))
       present
   in
   List.iter
-    (fun s ->
-      if s.index = None then
-        if Sys.file_exists (index_path s.path) then
-          begin match File_system.read (index_path s.path) with
-          | index when String.length index mod entry_width = 0 -> s.index <- Some index
-          | _ | (exception Sys_error _) -> scan s
+    (fun segment ->
+      if segment.index = None then
+        if Sys.file_exists (index_path segment.path) then
+          begin match File_system.read (index_path segment.path) with
+          | index when String.length index mod entry_width = 0 -> segment.index <- Some index
+          | _ | (exception Sys_error _) -> scan segment
           end
-        else scan s)
+        else scan segment)
     known;
-  t.segments <- fresh @ known;
-  t.refreshed <- Unix.gettimeofday ()
+  store.segments <- fresh @ known;
+  store.refreshed <- Unix.gettimeofday ()
 
 let writer_name () =
   Random.self_init ();
   Printf.sprintf "%d-%d-%06x" (Unix.getpid ()) (int_of_float (Unix.time ())) (Random.bits ())
 
-let new_writer t =
-  File_system.make_directory (segments_directory t);
-  let path = Filename.concat (segments_directory t) (writer_name () ^ ".segment") in
+let new_writer store =
+  File_system.make_directory (segments_directory store);
+  let path = Filename.concat (segments_directory store) (writer_name () ^ ".segment") in
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC ] 0o644 in
   Unix.lockf descriptor F_LOCK 0;
   File_system.write_all descriptor header;
@@ -261,36 +263,36 @@ let write_index segment =
 
 let writing : t list ref = ref []
 
-let seal t =
-  match t.writer with
+let seal store =
+  match store.writer with
   | None -> ()
   | Some writer ->
       drain writer;
       (try Unix.fsync writer.descriptor with Unix.Unix_error _ -> ());
       write_index writer.segment;
       Unix.close writer.descriptor;
-      t.writer <- None;
-      t.segments <- writer.segment :: t.segments;
-      writing := List.filter (fun other -> other != t) !writing
+      store.writer <- None;
+      store.segments <- writer.segment :: store.segments;
+      writing := List.filter (fun other -> other != store) !writing
 
 (* A process that ends seals what it added, so that the next reads an index
    and not every record. *)
 let () =
   at_exit (fun () ->
-      List.iter (fun t -> try seal t with Sys_error _ | Unix.Unix_error _ -> ()) !writing)
+      List.iter (fun store -> try seal store with Sys_error _ | Unix.Unix_error _ -> ()) !writing)
 
-let writer t =
-  match t.writer with
+let writer store =
+  match store.writer with
   | Some writer when writer.size < seal_size -> writer
   | full_writer ->
-      if Option.is_some full_writer then seal t;
-      let writer = new_writer t in
-      t.writer <- Some writer;
-      writing := t :: !writing;
+      if Option.is_some full_writer then seal store;
+      let writer = new_writer store in
+      store.writer <- Some writer;
+      writing := store :: !writing;
       writer
 
-let append_record t kind key value =
-  let writer = writer t in
+let append_record store kind key value =
+  let writer = writer store in
   let head = Bytes.create (1 + key_width + 4) in
   Bytes.set head 0 kind;
   Bytes.blit_string key 0 head 1 key_width;
@@ -305,20 +307,20 @@ let append_record t kind key value =
 
 let open_ root =
   File_system.make_directory root;
-  let t = { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 } in
-  refresh t;
-  t
+  let store = { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 } in
+  refresh store;
+  store
 
-let close t =
-  seal t;
-  List.iter close_channel t.segments
+let close store =
+  seal store;
+  List.iter close_channel store.segments
 
-let flush t =
+let flush store =
   Option.iter
     (fun writer ->
       drain writer;
       Unix.fsync writer.descriptor)
-    t.writer
+    store.writer
 
 (* The record must be the key's own: an index that is damaged can name
    another record's offset. *)
@@ -335,9 +337,9 @@ let read_own writer key location =
     Some (Buffer.sub writer.pending (location.offset - written + 1 + key_width + 4) location.length)
   else read_from writer.segment key location
 
-let lookup_once t key =
+let lookup_once store key =
   let own =
-    Option.bind t.writer (fun writer ->
+    Option.bind store.writer (fun writer ->
         Option.bind (Hashtbl.find_opt writer.segment.table key) (read_own writer key))
   in
   match own with
@@ -345,7 +347,7 @@ let lookup_once t key =
   | None ->
       List.find_map
         (fun segment -> Option.bind (find_in segment key) (read_from segment key))
-        t.segments
+        store.segments
 
 let refresh_interval = 0.02
 
@@ -353,26 +355,26 @@ let refresh_interval = 0.02
    than every [refresh_interval]: a build that computes everything misses
    on every result, and a result another process added a moment ago is only
    computed again. *)
-let lookup t key =
-  match lookup_once t key with
+let lookup store key =
+  match lookup_once store key with
   | Some value -> Some value
   | None ->
-      if Unix.gettimeofday () -. t.refreshed > refresh_interval then begin
-        refresh t;
-        lookup_once t key
+      if Unix.gettimeofday () -. store.refreshed > refresh_interval then begin
+        refresh store;
+        lookup_once store key
       end
       else None
 
-let present t key =
-  (match t.writer with Some w -> Hashtbl.mem w.segment.table key | None -> false)
-  || List.exists (fun segment -> find_in segment key <> None) t.segments
+let present store key =
+  (match store.writer with Some writer -> Hashtbl.mem writer.segment.table key | None -> false)
+  || List.exists (fun segment -> find_in segment key <> None) store.segments
 
-let put t bytes =
+let put store bytes =
   let key = Blake3.hash bytes in
-  if not (present t key) then append_record t 'v' key bytes;
+  if not (present store key) then append_record store 'v' key bytes;
   key
 
-let get t key = if String.length key <> key_width then None else lookup t key
+let get store key = if String.length key <> key_width then None else lookup store key
 
 (* A result's name. Values share the segments with results, and the
    derive-key mode keeps every result's name apart from every value's. *)
@@ -381,21 +383,21 @@ let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store resul
 let result_key ~kind ~key =
   derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text kind; Cbor.Bytes key ]))
 
-let find_result t ~kind ~key =
+let find_result store ~kind ~key =
   let name = result_key ~kind ~key in
-  match lookup t name with
+  match lookup store name with
   | Some value ->
-      Hashtbl.replace t.used name ();
+      Hashtbl.replace store.used name ();
       Some value
   | None -> None
 
-let add_result t ~kind ~key value =
+let add_result store ~kind ~key value =
   let name = result_key ~kind ~key in
-  Hashtbl.replace t.used name ();
-  if not (present t name) then append_record t 'r' name value
+  Hashtbl.replace store.used name ();
+  if not (present store name) then append_record store 'r' name value
 
-let files t name =
-  let path = Filename.concat t.root name in
+let files store name =
+  let path = Filename.concat store.root name in
   File_system.make_directory path;
   path
 
@@ -405,23 +407,24 @@ type pointer = {
   mutable lock_descriptor : Unix.file_descr option;
 }
 
-let pointers_directory t = Filename.concat t.root "pointers"
+let pointers_directory store = Filename.concat store.root "pointers"
 
 let file_name name =
   String.map
-    (fun c -> match c with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' -> c | _ -> '_')
+    (fun order ->
+      match order with 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' -> order | _ -> '_')
     name
 
-let pointer t name =
-  File_system.make_directory (pointers_directory t);
+let pointer store name =
+  File_system.make_directory (pointers_directory store);
   {
-    store = t;
-    pointer_path = Filename.concat (pointers_directory t) (file_name name ^ ".pointer");
+    store;
+    pointer_path = Filename.concat (pointers_directory store) (file_name name ^ ".pointer");
     lock_descriptor = None;
   }
 
-let pointers t =
-  match Sys.readdir (pointers_directory t) with
+let pointers store =
+  match Sys.readdir (pointers_directory store) with
   | entries ->
       Array.to_list entries
       |> List.filter (fun entry -> Filename.check_suffix entry ".pointer")
@@ -487,10 +490,10 @@ let remove_pointer pointer =
 
 let file_size path = try (Unix.stat path).st_size with Unix.Unix_error _ -> 0
 
-let size t =
-  refresh t;
-  List.fold_left (fun total s -> total + file_size s.path) 0 t.segments
-  + match t.writer with Some w -> w.size | None -> 0
+let size store =
+  refresh store;
+  List.fold_left (fun total segment -> total + file_size segment.path) 0 store.segments
+  + match store.writer with Some writer -> writer.size | None -> 0
 
 (* Whether a segment's writer has gone: its lock can be taken. *)
 let abandoned segment =
@@ -513,8 +516,8 @@ let entries segment =
   | Some index ->
       List.init
         (String.length index / entry_width)
-        (fun i ->
-          let position = i * entry_width in
+        (fun offset ->
+          let position = offset * entry_width in
           ( String.sub index position key_width,
             {
               offset = Int64.to_int (String.get_int64_le index (position + key_width));
@@ -524,7 +527,7 @@ let entries segment =
 
 (* Copies the records of segments that [keep] chooses into this process's
    segment, and deletes those segments. *)
-let rewrite t candidates ~keep =
+let rewrite store candidates ~keep =
   List.iter
     (fun segment ->
       List.iter
@@ -534,14 +537,14 @@ let rewrite t candidates ~keep =
               if
                 keep segment kind key
                 && not
-                     (match t.writer with
-                     | Some w -> Hashtbl.mem w.segment.table key
+                     (match store.writer with
+                     | Some writer -> Hashtbl.mem writer.segment.table key
                      | None -> false)
-              then append_record t kind key value
+              then append_record store kind key value
           | Some _ | None | (exception Sys_error _) -> ())
         (entries segment))
     candidates;
-  flush t;
+  flush store;
   List.iter
     (fun segment ->
       close_channel segment;
@@ -549,22 +552,22 @@ let rewrite t candidates ~keep =
         (fun path -> try Sys.remove path with Sys_error _ -> ())
         [ segment.path; index_path segment.path ])
     candidates;
-  t.segments <- List.filter (fun s -> not (List.memq s candidates)) t.segments
+  store.segments <- List.filter (fun segment -> not (List.memq segment candidates)) store.segments
 
-let collect t ~budget ~live =
-  if size t > budget then begin
+let collect store ~budget ~live =
+  if size store > budget then begin
     let recent path =
       match Unix.stat path with
       | stat -> Unix.time () -. stat.st_mtime < week
       | exception Unix.Unix_error _ -> false
     in
     let young = Hashtbl.create 64 in
-    let candidates = List.filter abandoned t.segments in
+    let candidates = List.filter abandoned store.segments in
     List.iter (fun segment -> Hashtbl.replace young segment.path (recent segment.path)) candidates;
-    rewrite t candidates ~keep:(fun segment kind key ->
+    rewrite store candidates ~keep:(fun segment kind key ->
         match kind with
         | 'v' -> live key
-        | _ -> Hashtbl.find young segment.path || Hashtbl.mem t.used key)
+        | _ -> Hashtbl.find young segment.path || Hashtbl.mem store.used key)
   end
 
 (* Every process that writes leaves a segment, and a lookup searches each
@@ -573,9 +576,9 @@ let collect t ~budget ~live =
 let small = 8 * 1024 * 1024
 let many = 32
 
-let compact t =
-  refresh t;
+let compact store =
+  refresh store;
   let candidates =
-    List.filter (fun segment -> file_size segment.path < small && abandoned segment) t.segments
+    List.filter (fun segment -> file_size segment.path < small && abandoned segment) store.segments
   in
-  if List.length candidates >= many then rewrite t candidates ~keep:(fun _ _ _ -> true)
+  if List.length candidates >= many then rewrite store candidates ~keep:(fun _ _ _ -> true)

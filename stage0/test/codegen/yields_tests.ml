@@ -23,8 +23,8 @@ let body_type : Ground.function_type =
   { parameters = [ (Read, int32) ]; result = Returns bool; uses = [] }
 
 (* A program that loops over [count_to(4)] with a body that adds each item
-   to a total, and goes on while [go_on] says so. *)
-let loop_program go_on =
+   to a total, and continues while [continues] says so. *)
+let loop_program continues =
   let env = shape_env () in
   let method_ = instance "count_to" (Yields.loop_form env ~body:body_type count_to) in
   let total = Lir.Pointer { target = value int32; writable = true } in
@@ -44,7 +44,7 @@ let loop_program go_on =
             Assign
               ( at ~projections:[ Deref; Field "total"; Deref ] 2,
                 Binary (Add, copy ~projections:[ Deref; Field "total"; Deref ] 2, copy 1) );
-            Assign (at 3, go_on (copy 1));
+            Assign (at 3, continues (copy 1));
           ]
           (Return (Some (copy 3)));
       ]

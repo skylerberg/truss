@@ -15,13 +15,14 @@ type checked = {
   fix : string option;
 }
 
-let is_upper c = c >= 'A' && c <= 'Z'
-let is_lower c = c >= 'a' && c <= 'z'
+let is_upper character = character >= 'A' && character <= 'Z'
+let is_lower character = character >= 'a' && character <= 'z'
 
 let kind_of name =
   match
     String.fold_left
-      (fun first c -> match first with None when c <> '_' -> Some c | first -> first)
+      (fun first character ->
+        match first with None when character <> '_' -> Some character | first -> first)
       None name
   with
   | Some first when is_upper first -> Upper
@@ -37,8 +38,8 @@ let to_snake name =
   let length = String.length name in
   let buffer = Buffer.create (length + 4) in
   String.iteri
-    (fun index c ->
-      if is_upper c then begin
+    (fun index character ->
+      if is_upper character then begin
         let starts_word =
           index > 0
           &&
@@ -47,9 +48,9 @@ let to_snake name =
           && ((not (is_upper previous)) || (index + 1 < length && is_lower name.[index + 1]))
         in
         if starts_word then Buffer.add_char buffer '_';
-        Buffer.add_char buffer (Char.lowercase_ascii c)
+        Buffer.add_char buffer (Char.lowercase_ascii character)
       end
-      else Buffer.add_char buffer c)
+      else Buffer.add_char buffer character)
     name;
   String.concat "_" (parts (Buffer.contents buffer))
 

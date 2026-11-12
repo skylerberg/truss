@@ -56,14 +56,14 @@ let compile_one toolchain cache settings (name, text) =
 
 (* Runs the jobs on several domains, each taking every [n]th job, and
    returns the results in the jobs' order. *)
-let parallel jobs work =
+let parallel jobs run_job =
   let jobs = Array.of_list jobs in
   let results = Array.make (Array.length jobs) None in
   let workers = max 1 (min (Array.length jobs) (Domain.recommended_domain_count () - 1)) in
   let work start =
     let next = ref start in
     while !next < Array.length jobs do
-      results.(!next) <- Some (work jobs.(!next));
+      results.(!next) <- Some (run_job jobs.(!next));
       next := !next + workers
     done
   in

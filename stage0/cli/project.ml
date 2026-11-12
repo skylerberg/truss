@@ -37,7 +37,7 @@ let relative ~from path =
   let split path = List.filter (( <> ) "") (String.split_on_char '/' path) in
   let rec drop from path =
     match (from, path) with
-    | f :: from', p :: path' when f = p -> drop from' path'
+    | from_part :: from', path_part :: path' when from_part = path_part -> drop from' path'
     | _ -> (from, path)
   in
   let up, down = drop (split from) (split path) in
@@ -92,39 +92,40 @@ let load directory =
       }
 
 (* The package of a command that acts on exactly one. *)
-let package t =
-  match t.packages with
+let package project =
+  match project.packages with
   | [ package ] -> package
   | [] -> cannot_run "No package here."
   | several ->
       cannot_run
         "This directory contains %d packages: %s. Run the command in one package's directory."
         (List.length several)
-        (String.concat ", " (List.map (fun p -> Path.show_package p.name) several))
+        (String.concat ", " (List.map (fun part -> Path.show_package part.name) several))
 
-let is_own t (module_ : Path.module_) = List.exists (fun p -> p.name = module_.package) t.packages
+let is_own project (module_ : Path.module_) =
+  List.exists (fun part -> part.name = module_.package) project.packages
 
 (* The manifest problems that only the code of the command's packages
    reveals. *)
-let manifest_problems t =
-  Database.manifest_problems t.session
-    (List.map (fun (package : package) -> package.name) t.packages)
+let manifest_problems project =
+  Database.manifest_problems project.session
+    (List.map (fun (package : package) -> package.name) project.packages)
 
 (* Rereads the files after a command edited some, so only the edited files
    are checked again. *)
-let reload t =
-  Database.refresh t.session;
-  t.files <- module_files t.session t.packages
+let reload project =
+  Database.refresh project.session;
+  project.files <- module_files project.session project.packages
 
-let modules t = List.map fst t.files
+let modules project = List.map fst project.files
 
 (* The project's packages that the command's packages depend on,
    transitively, in the project's order. A registry package and the
    standard library are checked and proven when they are published, so
    they are not checked again; a registry package's tests can also use
    dependencies that are not in this build. *)
-let project_dependencies t =
-  let project_packages = List.map snd (Database.packages t.session) in
+let project_dependencies project =
+  let project_packages = List.map snd (Database.packages project.session) in
   let seen = Hashtbl.create 8 in
   let rec visit name =
     List.iter
@@ -134,32 +135,35 @@ let project_dependencies t =
           Hashtbl.replace seen dependency.package ();
           visit dependency.package
         end)
-      (Query.demand t.context Workspace.dependencies name)
+      (Query.demand project.context Workspace.dependencies name)
   in
-  List.iter (fun (package : package) -> visit package.name) t.packages;
+  List.iter (fun (package : package) -> visit package.name) project.packages;
   List.filter
     (fun name ->
       Hashtbl.mem seen name
-      && not (List.exists (fun (package : package) -> package.name = name) t.packages))
+      && not (List.exists (fun (package : package) -> package.name = name) project.packages))
     project_packages
 
 (* The modules that a command checks for a program built from its
    packages: the packages' own, and those of the project's packages they
    depend on. *)
-let program_modules t =
-  modules t
-  @ List.concat_map (fun name -> Database.package_modules t.session name) (project_dependencies t)
+let program_modules project =
+  modules project
+  @ List.concat_map
+      (fun name -> Database.package_modules project.session name)
+      (project_dependencies project)
 
-let file t module_ =
-  match List.assoc_opt module_ t.files with
+let file project module_ =
+  match List.assoc_opt module_ project.files with
   | Some path -> path
-  | None -> Filename.concat (Database.root t.session) (Database.module_file t.session module_)
+  | None ->
+      Filename.concat (Database.root project.session) (Database.module_file project.session module_)
 
 (* The modules in [paths], each a file or a directory, or every module when
    [paths] is empty. *)
-let selected t paths =
+let selected project paths =
   match paths with
-  | [] -> modules t
+  | [] -> modules project
   | paths ->
       let wanted =
         List.map
@@ -177,27 +181,27 @@ let selected t paths =
               wanted
           then Some module_
           else None)
-        t.files
+        project.files
 
-let parsed t module_ = Query.demand t.context Workspace.file module_
+let parsed project module_ = Query.demand project.context Workspace.file module_
 
 (* A module's text as a source named by its path relative to the current
    directory, which every command uses for positions. Offsets match the
    database's source. A module of a package outside the project, such as
    the standard library, keeps its database name. *)
-let source t module_ =
-  let text = Source.text (parsed t module_).source in
-  if is_own t module_ || List.mem_assoc module_ t.files then
-    Source.create ~path:(shown (file t module_)) text
-  else (parsed t module_).source
+let source project module_ =
+  let text = Source.text (parsed project module_).source in
+  if is_own project module_ || List.mem_assoc module_ project.files then
+    Source.create ~path:(shown (file project module_)) text
+  else (parsed project module_).source
 
 (* A file that the compiled program names in a position, such as
    [weather/forecast.truss], as a path relative to the current directory
    when the file belongs to one of the command's packages, and unchanged
    otherwise. *)
-let shown_workspace_path t workspace_path =
+let shown_workspace_path project workspace_path =
   match
-    List.find_opt (fun (module_, _) -> Workspace.file_path module_ = workspace_path) t.files
+    List.find_opt (fun (module_, _) -> Workspace.file_path module_ = workspace_path) project.files
   with
   | Some (_, file) -> shown file
   | None -> workspace_path

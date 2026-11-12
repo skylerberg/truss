@@ -40,7 +40,7 @@ let to_string value =
   write buffer value;
   Buffer.contents buffer
 
-let option f = function Some value -> f value | None -> Null
+let option encode = function Some value -> encode value | None -> Null
 
 (* A command's document: the format version, its diagnostics, and its own
    fields. *)
@@ -66,11 +66,11 @@ let parse text =
         skip_space ()
     | _ -> ()
   in
-  let expect c = if peek () = Some c then advance () else raise Malformed in
+  let expect character = if peek () = Some character then advance () else raise Malformed in
   let literal word value =
-    let n = String.length word in
-    if !position + n <= length && String.sub text !position n = word then begin
-      position := !position + n;
+    let word_length = String.length word in
+    if !position + word_length <= length && String.sub text !position word_length = word then begin
+      position := !position + word_length;
       value
     end
     else raise Malformed
@@ -121,8 +121,8 @@ let parse text =
           | _ -> raise Malformed);
           advance ();
           loop ()
-      | Some c ->
-          Buffer.add_char buffer c;
+      | Some character ->
+          Buffer.add_char buffer character;
           advance ();
           loop ()
     in

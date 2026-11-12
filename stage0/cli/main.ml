@@ -399,7 +399,7 @@ let evaluate arguments =
         Outcome.Exit 2
     | exception Compiler_bug.Bug bug ->
         Output.eprint_line
-          ("The compiler has a bug, and cannot go on. Please report it.\n  "
+          ("The compiler has a bug, and cannot continue. Please report it.\n  "
          ^ Compiler_bug.to_string bug);
         Outcome.Exit 2
   in
@@ -459,7 +459,8 @@ let handle ~progress request =
 let serve key = Database.serve ~key ~handle
 
 (* The command name: the first argument that is not an option. *)
-let command_of arguments = List.find_opt (fun a -> not (String.starts_with ~prefix:"-" a)) arguments
+let command_of arguments =
+  List.find_opt (fun argument -> not (String.starts_with ~prefix:"-" argument)) arguments
 
 let finish (outcome : Outcome.t) =
   match outcome with

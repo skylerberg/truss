@@ -60,7 +60,8 @@ let to_json report =
 (* A command's JSON document, with the report's diagnostics and problems. *)
 let document report fields =
   Json.document ~diagnostics:(to_json report)
-    (("problems", Json.List (List.map (fun p -> Json.String p) report.problems)) :: fields)
+    (("problems", Json.List (List.map (fun problem -> Json.String problem) report.problems))
+    :: fields)
 
 let plural count one many = Printf.sprintf "%d %s" count (if count = 1 then one else many)
 
@@ -77,4 +78,6 @@ let print report =
   List.iter Output.eprint_line report.problems;
   print_files report.checked;
   print_files (Lazy.force report.proven);
-  match count report with 0 -> () | n -> Output.eprintf "%s\n" (plural n "error" "errors")
+  match count report with
+  | 0 -> ()
+  | error_count -> Output.eprintf "%s\n" (plural error_count "error" "errors")

@@ -42,9 +42,14 @@ let weight ((module_ : Path.module_), source) =
   | Some measured -> measured
   | None -> max 1 (letters source / Proof_weights.letters_for_one)
 
+let test_name (module_ : Path.module_) =
+  Printf.sprintf "%s checks cleanly and proves" (Path.show_module module_)
+
+(* With [TRUSS_TEST] set, only the modules whose tests it names are checked
+   and proven. *)
 let modules =
   match share with
-  | None -> Standard_library.modules
+  | None -> List.filter (fun (module_, _) -> wanted (test_name module_)) Standard_library.modules
   | Some (index, count) ->
       let totals = Array.make count 0 in
       let weighed = List.map (fun entry -> (weight entry, entry)) Standard_library.modules in
@@ -200,9 +205,7 @@ let () =
            checked));
   List.iter
     (fun ((module_ : Path.module_), errors) ->
-      test
-        (Printf.sprintf "%s checks cleanly and proves" (Path.show_module module_))
-        (fun () ->
+      test (test_name module_) (fun () ->
           let source = (Query.demand database Workspace.file module_).source in
           let report =
             List.iter (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))
