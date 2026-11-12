@@ -51,14 +51,11 @@ let record (project : Project.t) registry (package : Project.package) =
   in
   let in_registry name = List.find_opt (fun (other, _, _) -> other = name) built in
   let dependencies ~code name =
-    match Workspace.package project.context name with
-    | Some (found : Workspace.package) ->
-        let used = if code then Database.code_packages session name else [] in
-        List.filter_map
-          (fun (dependency : Workspace.dependency) ->
-            if (not code) || List.mem dependency.package used then Some dependency.package else None)
-          found.dependencies
-    | None -> []
+    let used = if code then Database.code_packages session name else [] in
+    List.filter_map
+      (fun (dependency : Manifest.dependency) ->
+        if (not code) || List.mem dependency.package used then Some dependency.package else None)
+      (Query.demand project.context Workspace.dependencies name)
   in
   let problems = ref [] in
   let rec closure name : Lock.t =

@@ -129,8 +129,13 @@ and statement state env (written : statement) ~last : unit =
                 operator_call
                   ~operands:
                     [
-                      { C.expression = written_target.id; parameter_index = 0; mode = T.Read };
-                      { C.expression = value.id; parameter_index = 1; mode = T.Read };
+                      {
+                        C.expression = written_target.id;
+                        parameter_index = 0;
+                        mode = T.Read;
+                        mark = None;
+                      };
+                      { C.expression = value.id; parameter_index = 1; mode = T.Read; mark = None };
                     ]
                   state fake ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
@@ -312,7 +317,7 @@ and assigns_through_index state env (written : statement) (target : expression) 
           in
           record state call T.unit;
           let argument (given : expression) position mode : C.argument =
-            { expression = given.id; parameter_index = position; mode }
+            { expression = given.id; parameter_index = position; mode; mark = None }
           in
           state.tables.calls.(written.id) <-
             Some

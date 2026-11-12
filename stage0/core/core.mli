@@ -81,10 +81,18 @@ and call = {
 }
 
 and argument =
-  | Passed of { mode : Types.mode;  (** The parameter's mode. *) value : operand }
+  | Passed of {
+      mode : Types.mode;  (** The parameter's mode. *)
+      value : operand;
+      mark : mark option;  (** The [mut] or [own] the argument is written with, if any. *)
+    }
   | Default
       (** The argument was omitted, so the parameter takes its default value. The default expression
           is in the callee's core form. *)
+
+and mark = { written : origin; marked : origin }
+(** A [mut] or [own] mark: [written], the syntax node of the mark with what it marks, and [marked],
+    the expression after the mark. *)
 
 (** An operand is either a place, which is borrowed, or a value. *)
 and operand =

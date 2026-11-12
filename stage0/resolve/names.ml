@@ -135,7 +135,7 @@ let receiver (parameters : parameter list) : Path.receiver =
 let packages database (module_ : Path.module_) =
   let dependencies =
     List.map
-      (fun (dependency : Workspace.dependency) -> dependency.package)
+      (fun (dependency : Manifest.dependency) -> dependency.package)
       (Query.demand database Workspace.dependencies module_.package)
   in
   List.sort_uniq compare (module_.package :: Path.standard_package :: dependencies)
@@ -652,10 +652,6 @@ let law_parameters =
 let spans =
   Query.query ~name:"spans" ~phase:Phases.declarations ~show:show_key (fun database key ->
       Option.map Syntax_walk.spans (Query.demand database definition key))
-
-let marks =
-  Query.query ~name:"marks" ~phase:Phases.declarations ~show:show_key (fun database key ->
-      Option.map Syntax_walk.marks (Query.demand database definition key))
 
 (* Where a definition starts in its file, for showing its diagnostics. *)
 let base =

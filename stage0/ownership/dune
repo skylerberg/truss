@@ -12,6 +12,5 @@
   interface
   resolve
   syntax
-  syntax_walk
   diagnostic
   source))

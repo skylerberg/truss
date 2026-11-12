@@ -23,15 +23,12 @@ let signature_parts = [ "interface"; "signature"; "shape" ]
 let declarations context packages =
   List.concat_map
     (fun (_, name) ->
-      match Workspace.package context name with
-      | Some package ->
-          List.concat_map
-            (fun module_ ->
-              List.filter
-                (fun (d : Names.declaration) -> d.ordinal = 0)
-                (try Query.demand context Names.declarations module_ with Not_found -> []))
-            package.modules
-      | None -> [])
+      List.concat_map
+        (fun module_ ->
+          List.filter
+            (fun (d : Names.declaration) -> d.ordinal = 0)
+            (try Query.demand context Names.declarations module_ with Not_found -> []))
+        (Query.demand context Workspace.modules name))
     packages
 
 let signature context path =

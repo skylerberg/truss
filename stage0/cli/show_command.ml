@@ -16,8 +16,7 @@ let declarations database (module_ : Path.module_) =
   |> List.filter (fun (d : Names.declaration) -> d.ordinal = 0)
 
 (* Every module of a package. *)
-let package_modules database package =
-  match Workspace.package database package with Some p -> p.modules | None -> []
+let package_modules database package = Query.demand database Workspace.modules package
 
 (* Whether the packages a command is about can see a definition: anything
    in them, and only what is public elsewhere. *)

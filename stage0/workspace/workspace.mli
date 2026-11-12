@@ -5,18 +5,6 @@
     definition whose tree comes out the same, as one that only moved does, changes nothing that
     reads it. *)
 
-type dependency = Manifest.dependency = { package : Path.package; capabilities : string list }
-(** A dependency from the manifest, with the capabilities it is granted. *)
-
-type package = Project.package = {
-  name : Path.package;
-  dependencies : dependency list;
-  modules : Path.module_ list;
-  usize_bits : int;
-      (** 64 when the manifest says the package runs only on 64-bit targets, and 32 otherwise, so
-          that its code holds for both widths of [USize]. *)
-}
-
 val file_path : Path.module_ -> string
 (** [weather/forecast/hourly.truss], as in diagnostics. *)
 
@@ -31,14 +19,10 @@ type file = {
 val file : (Path.module_, file) Query.query
 (** A module's file, lexed and parsed. Raises [Not_found] if the module has no text. *)
 
-val package : Query.context -> Path.package -> package option
-(** A package, or [None] if there is no such package. Reading it reads the whole of what the
-    manifest says, so a result that needs one thing of it asks for that thing below. *)
-
 val modules : (Path.package, Path.module_ list) Query.query
 (** A package's modules, and none for a package there is not. *)
 
-val dependencies : (Path.package, dependency list) Query.query
+val dependencies : (Path.package, Manifest.dependency list) Query.query
 (** A package's dependencies, each with what it is granted. *)
 
 val usize_bits : (Path.package, int) Query.query

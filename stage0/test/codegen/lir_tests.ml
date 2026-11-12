@@ -459,23 +459,18 @@ let () =
       in
       expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
         (Instance.symbol key));
-  test "a symbol writes a package's owner and name as parts of the module path" (fun () ->
-      expect_string ~expected:"t_acme__geometry__vector__length"
-        (Instance.symbol
-           (Instance.Code
-              {
-                path =
-                  Top
-                    {
-                      module_ =
-                        {
-                          package = { owner = Some "acme"; name = "geometry" };
-                          modules = [ "vector" ];
-                        };
-                      name = "length";
-                    };
-                type_arguments = [];
-              })));
+  let function_in package modules =
+    Instance.symbol
+      (Instance.Code
+         { path = Top { module_ = { package; modules }; name = "length" }; type_arguments = [] })
+  in
+  test "a symbol marks a package's owner apart from its modules" (fun () ->
+      expect_string ~expected:"t_acme_Owns_geometry__vector__length"
+        (function_in { owner = Some "acme"; name = "geometry" } [ "vector" ]);
+      if
+        function_in { owner = Some "acme"; name = "geometry" } [ "vector" ]
+        = function_in { owner = None; name = "acme" } [ "geometry"; "vector" ]
+      then fail "a package with an owner and a module of the same names have one symbol");
   test "a long symbol keeps its start and ends with a hash" (fun () ->
       let long name = Instance.symbol (key (String.make 300 name)) in
       let a = long 'a' and b = long 'b' in

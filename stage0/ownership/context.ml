@@ -11,7 +11,8 @@ type context = {
   database : Query.context;
   bounds : T.parameter -> T.trait_reference list;
   spans : Syntax.span array;
-  marks : (Core.origin * Syntax_walk.mark) list;  (** Each expression's [mut] or [own] mark. *)
+  marks : (Core.origin, Types.mode * Core.mark) Hashtbl.t;
+      (** Each argument written with a [mut] or [own], by the origin of the value passed. *)
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, T.ty) Hashtbl.t;
@@ -99,7 +100,7 @@ let show context (place : Place.t) =
       (List.map (function Place.Field name -> "." ^ name | Element _ -> "[...]") place.steps)
 
 (* The names and kinds of the definition's locals, from its parameters and
-   its patterns. *)
+   its patterns, and the marks of its arguments. *)
 let collect context (definition : Core.definition) =
   (match definition with
   | Function { parameters; _ } ->
@@ -114,6 +115,22 @@ let collect context (definition : Core.definition) =
   Core_walk.definition
     {
       Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with
+          | Call { arguments; _ } ->
+              List.iter
+                (function
+                  | Core.Passed { mode; value; mark = Some mark } ->
+                      let origin =
+                        match value with
+                        | Place found -> Core_walk.place_origin found
+                        | Value value -> value.origin
+                      in
+                      Hashtbl.replace context.marks origin (mode, mark)
+                  | Passed { mark = None; _ } | Default -> ())
+                arguments
+          | _ -> ());
       pattern =
         (fun (node : Core.pattern) ->
           match node.kind with
@@ -129,13 +146,14 @@ let collect context (definition : Core.definition) =
 (* The edits that replace a move by a copy: insert [.copy()] after the place
    and delete the [own] mark before it. *)
 let copy_at context (moved : Core.origin) =
-  (match List.assoc_opt moved context.marks with
-    | Some { mode = Own; mark; _ } -> [ Diagnostic.delete (Source.span mark.start mark.stop) ]
-    | Some { mode = Mut; _ } | None -> [])
+  (match Hashtbl.find_opt context.marks moved with
+    | Some (Own, { written; marked }) ->
+        [ Diagnostic.delete (Source.span (span context written).start (span context marked).start) ]
+    | Some ((Read | Mut), _) | None -> [])
   @ [ Diagnostic.insert (span context moved).stop ".copy()" ]
 
 (* The span of a place together with the [mut] or [own] mark before it. *)
 let with_mark context (place : Core.origin) : Syntax.span =
-  match List.assoc_opt place context.marks with
-  | Some { marked; _ } -> marked
+  match Hashtbl.find_opt context.marks place with
+  | Some (_, { written; _ }) -> span context written
   | None -> span context place

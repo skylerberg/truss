@@ -28,7 +28,7 @@ let find ?cache () =
              version program (String.trim output))
   | _, _, errors -> Error (Printf.sprintf "`%s --version` failed: %s" program (String.trim errors))
 
-type answer = Proven | Counterexample of (Logic.Symbol.t * string) list | Out_of_steps
+type answer = Proven | Counterexample of (Logic.symbol * string) list | Out_of_steps
 
 (* The options every query runs with, which are part of its key. *)
 let header =
@@ -52,7 +52,7 @@ module Asked = Hashtbl.Make (struct
   let hash = Hashtbl.hash
 end)
 
-type rendered = { text : string; named : (Logic.Symbol.t * string) list; text_key : string }
+type rendered = { text : string; named : (Logic.symbol * string) list; text_key : string }
 
 let rendered_queries : rendered Asked.t = Asked.create 1024
 
@@ -102,7 +102,7 @@ let rec show_sexp = function
 type request = {
   text : string;
   key : string;
-  requested : (Logic.Symbol.t * string) list;
+  requested : (Logic.symbol * string) list;
   asked : string list;  (** What [get-value] is given for each of [requested], in order. *)
 }
 

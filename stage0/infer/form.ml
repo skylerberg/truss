@@ -56,6 +56,7 @@ let arguments state (call : C.call) : Core.argument list =
             {
               mode = argument.mode;
               value = operand argument.mode (build_expression_by_id state argument.expression);
+              mark = argument.mark;
             }
       | None -> Default)
 
@@ -417,7 +418,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                  (make T.unit
                     (call (builder_method "write" Mut)
                        [
-                         Passed { mode = Mut; value = Place builder_place };
+                         Passed { mode = Mut; value = Place builder_place; mark = None };
                          Passed
                            {
                              mode = Read;
@@ -426,6 +427,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                                  (make
                                     (T.named (Well_known.path String_slice) [])
                                     (String written.value));
+                             mark = None;
                            };
                        ])));
           ]
@@ -442,8 +444,12 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                          arguments =
                            [
                              Passed
-                               { mode = Read; value = operand Read (build_expression state part) };
-                             Passed { mode = Mut; value = Place builder_place };
+                               {
+                                 mode = Read;
+                                 value = operand Read (build_expression state part);
+                                 mark = None;
+                               };
+                             Passed { mode = Mut; value = Place builder_place; mark = None };
                            ];
                          lends = None;
                          uses = recorded.uses;
@@ -462,7 +468,14 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
             Some
               (make string_type
                  (call (builder_method "finish" Own)
-                    [ Passed { mode = Own; value = Value (make builder_type (Use builder_place)) } ]));
+                    [
+                      Passed
+                        {
+                          mode = Own;
+                          value = Value (make builder_type (Use builder_place));
+                          mark = None;
+                        };
+                    ]));
           diverges = false;
         }
 
@@ -501,7 +514,7 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
            value =
              Value
                (intrinsic Storage_with_capacity storage_type
-                  [ Passed { mode = Read; value = Value capacity } ]);
+                  [ Passed { mode = Read; value = Value capacity; mark = None } ]);
            else_ = None;
          })
   in
@@ -516,8 +529,9 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                     {
                       mode = Mut;
                       value = Place (Local { local = storage; type_ = storage_type; origin });
+                      mark = None;
                     };
-                  Passed { mode = Own; value = Value element };
+                  Passed { mode = Own; value = Value element; mark = None };
                 ])))
       elements
   in
@@ -551,6 +565,7 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                             Value
                               (make storage_type
                                  (Use (Local { local = storage; type_ = storage_type; origin })));
+                          mark = None;
                         };
                     ];
                   lends = None;
@@ -611,7 +626,7 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
           (Call
              {
                callee = callee from_template.callee;
-               arguments = [ Passed { mode = Own; value = Value template } ];
+               arguments = [ Passed { mode = Own; value = Value template; mark = None } ];
                lends = None;
                uses = from_template.uses;
              });
@@ -837,8 +852,8 @@ let compound_assign state (written : statement) (target : expression) (value : e
                 callee = callee recorded.callee;
                 arguments =
                   [
-                    Passed { mode = mode 0; value = Value current };
-                    Passed { mode = mode 1; value = operand (mode 1) right };
+                    Passed { mode = mode 0; value = Value current; mark = None };
+                    Passed { mode = mode 1; value = operand (mode 1) right; mark = None };
                   ];
                 lends = None;
                 uses = recorded.uses;
@@ -866,7 +881,7 @@ let each_of state (call : C.call) (mode : T.mode) (iterable : expression) : Core
     (Call
        {
          callee = callee call.callee;
-         arguments = [ Passed { mode; value = operand mode receiver } ];
+         arguments = [ Passed { mode; value = operand mode receiver; mark = None } ];
          lends = None;
          uses = call.uses;
        })
@@ -1071,7 +1086,7 @@ let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive
            uses = [];
          })
   in
-  let receiver : Core.argument = Passed { mode = Read; value = Place base } in
+  let receiver : Core.argument = Passed { mode = Read; value = Place base; mark = None } in
   let start = match start with Some start -> start | None -> make usize (Integer Z.zero) in
   let stop =
     match stop with
@@ -1087,8 +1102,8 @@ let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive
         call "slice_range"
           [
             receiver;
-            Passed { mode = Read; value = Value start };
-            Passed { mode = Read; value = Value stop };
+            Passed { mode = Read; value = Value start; mark = None };
+            Passed { mode = Read; value = Value stop; mark = None };
           ]
           (type_of state value);
     }
@@ -1118,7 +1133,9 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
   in
   let capacity = make (T.builtin USize) (Integer (Z.of_int (List.length entries))) in
   let created =
-    call "with_capacity" Static [ Passed { mode = Read; value = Value capacity } ] type_
+    call "with_capacity" Static
+      [ Passed { mode = Read; value = Value capacity; mark = None } ]
+      type_
   in
   match entries with
   | [] -> created.kind
@@ -1146,10 +1163,10 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
             statement
               (Evaluate
                  (call insert Mut
-                    (Passed { mode = Mut; value = Place collection }
+                    (Passed { mode = Mut; value = Place collection; mark = None }
                     :: List.map
                          (fun argument : Core.argument ->
-                           Passed { mode = Own; value = Value argument })
+                           Passed { mode = Own; value = Value argument; mark = None })
                          entry)
                     T.unit)))
           entries

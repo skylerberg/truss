@@ -32,7 +32,7 @@ let declarations database package = Query.demand database Names.package_declarat
 
 let dependencies database package =
   List.map
-    (fun (dependency : Workspace.dependency) -> dependency.package)
+    (fun (dependency : Manifest.dependency) -> dependency.package)
     (Query.demand database Workspace.dependencies package)
 
 let header_span (definition : definition) =
@@ -743,7 +743,7 @@ let manifest_problems =
       let checks = List.for_all (Infer.is_clean database) keys in
       let used = List.concat_map (Query.demand database used_packages) keys in
       List.concat_map
-        (fun (dependency : Workspace.dependency) ->
+        (fun (dependency : Manifest.dependency) ->
           (match
              Query.demand database Interface.Grants.granted (package_name, dependency.package)
            with

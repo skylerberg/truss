@@ -20,7 +20,7 @@ val steps : int
 
 type answer =
   | Proven  (** The goal cannot be false. *)
-  | Counterexample of (Logic.Symbol.t * string) list
+  | Counterexample of (Logic.symbol * string) list
       (** The goal can be false: the value of each requested symbol or term, as SMT-LIB text. *)
   | Out_of_steps  (** The solver could not decide within its limit. *)
 
@@ -37,7 +37,7 @@ type canonical
     be kept by its request's key alone. *)
 
 val request :
-  ?values:Logic.Symbol.t list -> ?terms:(Logic.Symbol.t * Logic.term) list -> Logic.query -> request
+  ?values:Logic.symbol list -> ?terms:(Logic.symbol * Logic.term) list -> Logic.query -> request
 (** [values] are the prover's symbols whose values a counterexample should give, and [terms] named
     terms whose values it should give, each by its name. *)
 
@@ -52,12 +52,12 @@ val ask_all : t -> request list -> canonical list
 val read : request -> canonical -> answer
 (** A canonical answer in the request's own symbols. *)
 
-val solve : t -> ?values:Logic.Symbol.t list -> Logic.query -> answer
+val solve : t -> ?values:Logic.symbol list -> Logic.query -> answer
 (** Runs one query. [values] are the prover's symbols whose values a counterexample should give;
     those the query does not mention are left out. Results are cached by {!key} for the life of the
     process, and solving the same text twice gives the same answer. *)
 
-val solve_all : t -> (Logic.Symbol.t list * Logic.query) list -> answer list
+val solve_all : t -> (Logic.symbol list * Logic.query) list -> answer list
 (** Runs each query, as {!solve} does, with [values] given with it, several at once, one for each
     core. The answers are in the queries' order, and are what solving them one at a time gives. *)
 

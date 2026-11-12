@@ -606,8 +606,7 @@ let () =
       [ (geometry, "public fn length(value: Int64) -> Int64 {\n  value\n}\n") ];
     Database.Testing.set_manifest engine
       ~name:{ Path.owner = None; name = "app" }
-      ~dependencies:
-        (List.map (fun package -> { Workspace.package; capabilities = [] }) dependencies);
+      ~dependencies:(List.map (fun package -> { Manifest.package; capabilities = [] }) dependencies);
     database
   in
   let uses_both =

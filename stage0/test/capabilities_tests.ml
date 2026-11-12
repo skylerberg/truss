@@ -418,7 +418,7 @@ let codes_with_grants files grants =
   let database = setup files in
   Database.Testing.set_manifest (Engine.of_context database) ~name:{ owner = None; name = "app" }
     ~dependencies:
-      (List.map (fun (package, capabilities) -> { Workspace.package; capabilities }) grants);
+      (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants);
   (database, codes (check database (module_of "app::main")))
 
 let expect_codes ~expected (_, found) =

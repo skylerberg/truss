@@ -38,7 +38,7 @@ let granted =
       Printf.sprintf "%s to %s" (Path.show_package package) (Path.show_package dependency))
     (fun database (package, dependency) ->
       Option.map
-        (fun (entry : Workspace.dependency) ->
+        (fun (entry : Manifest.dependency) ->
           let found =
             List.map (fun name -> (name, capability database ~package name)) entry.capabilities
           in
@@ -48,7 +48,7 @@ let granted =
               List.filter_map (fun (name, path) -> if path = None then Some name else None) found;
           })
         (List.find_opt
-           (fun (entry : Workspace.dependency) -> entry.package = dependency)
+           (fun (entry : Manifest.dependency) -> entry.package = dependency)
            (Query.demand database Workspace.dependencies package)))
 
 let missing database ~package ~of_ (uses : T.capability list) =

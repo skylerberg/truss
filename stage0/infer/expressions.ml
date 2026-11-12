@@ -356,8 +356,8 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                           };
                       arguments =
                         [
-                          { expression = base.id; parameter_index = 0; mode = Read };
-                          { expression = key.id; parameter_index = 1; mode = Read };
+                          { expression = base.id; parameter_index = 0; mode = Read; mark = None };
+                          { expression = key.id; parameter_index = 1; mode = Read; mark = None };
                         ];
                       omitted_defaults = [];
                       uses = [];

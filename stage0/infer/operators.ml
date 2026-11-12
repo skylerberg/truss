@@ -186,7 +186,8 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           else begin
             Form.register_call state value;
             operator_call
-              ~operands:[ { C.expression = inner.id; parameter_index = 0; mode = T.Read } ]
+              ~operands:
+                [ { C.expression = inner.id; parameter_index = 0; mode = T.Read; mark = None } ]
               state value ~trait:(Well_known.path Negate) ~method_:"negate" ~left:type_ ~right:None
           end)
 
@@ -287,7 +288,7 @@ and built_in_operator state (value : expression) (operands : expression list) re
         arguments =
           List.mapi
             (fun index (operand : expression) ->
-              { C.expression = operand.id; parameter_index = index; mode = Read })
+              { C.expression = operand.id; parameter_index = index; mode = Read; mark = None })
             operands;
         omitted_defaults = [];
         uses = [];
@@ -416,8 +417,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
                   };
               arguments =
                 [
-                  { expression = left.id; parameter_index = 0; mode = Read };
-                  { expression = right.id; parameter_index = 1; mode = Read };
+                  { expression = left.id; parameter_index = 0; mode = Read; mark = None };
+                  { expression = right.id; parameter_index = 1; mode = Read; mark = None };
                 ];
               omitted_defaults = [];
               uses = [];
@@ -506,8 +507,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
               operator_call
                 ~operands:
                   [
-                    { C.expression = left.id; parameter_index = 0; mode = T.Read };
-                    { C.expression = right.id; parameter_index = 1; mode = T.Read };
+                    { C.expression = left.id; parameter_index = 0; mode = T.Read; mark = None };
+                    { C.expression = right.id; parameter_index = 1; mode = T.Read; mark = None };
                   ]
                 state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
             in

@@ -369,7 +369,10 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
             in
             let mode = argument_value state env first.value parameter in
             ignore (default_literal state self_type);
-            ([ { C.expression = first.value.id; parameter_index = 0; mode } ], 1, parameters, rest)
+            ( [ { C.expression = first.value.id; parameter_index = 0; mode; mark = None } ],
+              1,
+              parameters,
+              rest )
         | [] -> ([], 1, parameters, []))
     | None -> ([], 0, parameters, arguments)
   in
@@ -639,6 +642,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
             | Some (Mut, _) -> Mut
             | Some (Own, _) -> Own
             | _ -> Read);
+          mark = None;
         }
       in
       check_specification_call state env value signature;
@@ -693,6 +697,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
       C.expression = receiver.id;
       parameter_index = 0;
       mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
+      mark = None;
     }
   in
   let evidence = match receiver_type with T.Any _ -> C.Dynamic | _ -> C.Built_in in
