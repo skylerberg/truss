@@ -2244,6 +2244,9 @@ a command line can hold.
 
 ## Not built
 
+- **Lowering from the MIR.** Code generation lowers the core form to the
+  LIR itself. MIR.md describes the lowering it is to share with the
+  ownership check and the prover.
 - **A check that reports its caller's position.** A check that fails in a
   function that is called, not inlined, reports the function's own
   position. Rust's `#[track_caller]` reports the caller's by passing its

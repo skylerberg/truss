@@ -71,7 +71,9 @@ One walk reads Truss and makes the verification conditions. Boogie and
 Why3 put a proof program between the two, which weakest preconditions turn
 into conditions; that keeps reading the language apart from the logic, at
 the cost of a second representation of every body that only the walk
-would read, so Truss has none.
+would read, so Truss has none. The MIR that MIR.md describes is a second
+representation that the ownership check and code generation read too, and
+the walk is to read it in place of the core form.
 
 ### One definition at a time, one obligation at a time
 
@@ -1500,6 +1502,9 @@ test the prover itself:
 
 ## Not built
 
+- **Reading the MIR.** The prover walks the core form, as the ownership
+  check and code generation each lower it themselves. MIR.md describes the
+  one lowering that all three are to read.
 - **Contracts for the intrinsic module's system calls.** What a C function
   returns beyond what its row of the table says is known only by its type,
   and so is the address of a view of any type but a built-in scalar, whose
