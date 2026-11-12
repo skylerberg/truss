@@ -140,6 +140,10 @@ let resolved =
             }
       | None -> None)
 
+(* The errors of a file's [use] lines, in the file's offsets: a module that
+   does not exist, two imports with one last name, [standard::intrinsic]
+   outside the standard library, and an import nothing uses, with a fix that
+   deletes it. *)
 let file_diagnostics =
   Query.query ~name:"file_diagnostics" ~phase:Phases.resolution ~show:Path.show_module ~saved:true
     (fun database module_ ->
@@ -222,5 +226,3 @@ let diagnostics database module_ =
         match Query.demand database resolved key with
         | Some resolved -> resolved.diagnostics
         | None -> []))
-
-let closest = Walk.closest

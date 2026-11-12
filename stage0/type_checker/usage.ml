@@ -129,7 +129,7 @@ let rec statement_diverges context (written : statement) =
   | Let { value; _ } -> diverges context value
   | Assignment { value; _ } -> diverges context value
   | While { condition = { kind = True; _ }; body; _ } ->
-      let rec breaks (block : block) =
+      let breaks (block : block) =
         let has_break = ref false in
         let rec statement (written : statement) =
           match written.kind with
@@ -204,6 +204,7 @@ let check_unreachable context (definition : definition) =
   List.iter (check_block context) bodies;
   Syntax_walk.definition ~statement expression definition
 
+(* A definition's errors of use, in its own offsets. *)
 let definition_diagnostics =
   Query.query ~name:"usage_diagnostics" ~phase:Phases.bodies ~saved:true
     ~show:Resolve.Names.show_key (fun database key ->

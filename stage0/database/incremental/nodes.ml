@@ -51,7 +51,7 @@ type t = {
   mutable waiting : int;  (** How many seeds and marks there are *)
   mutable candidates : node list;  (** Nodes to collect, if still unnecessary, once no query runs *)
   logging : bool;
-  mutable log : string list;
+  mutable log : node list;  (** The results computed since the log was cleared, newest first *)
   mutable computed : node list;  (** Newest first *)
   mutable changed : node list;  (** Newest first *)
   tally : tally;
@@ -248,8 +248,6 @@ let create ?(log = false) ?(bases = []) () =
   remember engine;
   engine
 
-let is_frozen engine = engine.frozen
-let bases engine = engine.bases
 let context engine = { engine; frame = None; observing = false }
 let observer engine = { engine; frame = None; observing = true }
 let engine_of (context : context) = context.engine

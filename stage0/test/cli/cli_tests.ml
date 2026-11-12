@@ -928,7 +928,8 @@ let () =
         not (contains output "demo::main::four: its body reads the signature of demo::main::double")
       then fail "wrote %s" output);
   test "a position's line and column count characters, as diagnostics do" (fun () ->
-      if Explain_command.offset_of "ab\ncé x" ~line:2 ~column:4 <> 7 then fail "wrong offset");
+      let source = Source.create ~path:"" "ab\ncé x" in
+      if Source.offset Source.Scalar_values source ~line:1 ~column:3 <> 7 then fail "wrong offset");
   test "explaining a name gives its meaning and the signature it refers to" (fun () ->
       let root = package [ ("main.truss", doubling) ] in
       let status, output =
@@ -1617,5 +1618,3 @@ let () =
           {|"params":{"uri":"file:///project/a%20b.truss","diagnostics":[]}|};
         ];
       if List.length !asked <> 1 then fail "a check with no open file")
-
-let () = Harness.finish ()

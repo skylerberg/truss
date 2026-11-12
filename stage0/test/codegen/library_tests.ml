@@ -9,7 +9,7 @@
 open Harness
 open Codegen_support
 
-let directory = "library"
+let directory = Harness.workspace_path "stage0/test/codegen/library"
 
 let modules =
   Sys.readdir directory |> Array.to_list
@@ -66,5 +66,3 @@ let () =
                       fail "%s%s" (Compile.show_outcome outcome)
                         (match message with Some message -> ": " ^ message | None -> "")))
             tests records)
-
-let () = finish ()

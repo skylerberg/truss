@@ -59,6 +59,10 @@ let is_line_break byte = byte = 0x0A || byte = 0x0D
 let is_end_of_line byte = byte < 0 || is_line_break byte
 let is_space byte = byte = 0x20 || byte = 0x09
 let is_digit byte = byte >= 0x30 && byte <= 0x39
+
+let is_hexadecimal_digit byte =
+  is_digit byte || (byte >= 0x61 && byte <= 0x66) || (byte >= 0x41 && byte <= 0x46)
+
 let is_ascii_letter byte = (byte >= 0x61 && byte <= 0x7A) || (byte >= 0x41 && byte <= 0x5A)
 let is_ascii_name_byte byte = is_ascii_letter byte || is_digit byte || byte = 0x5F
 let quote = Char.code '"'

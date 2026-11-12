@@ -116,9 +116,6 @@ type signature = {
   read_by : Path.t list;
 }
 
-(* The parts a definition's users read. *)
-let signature_parts = [ "interface"; "signature"; "shape" ]
-
 (* What the new versions change that the project's code reads, found in a
    session that has them, before any file is written: each changed signature
    with the definitions that read it, and the diagnostics the project would
@@ -132,8 +129,8 @@ let consequences (project : Project.t) text =
       (List.filter_map
          (fun (path, part, (difference : Database.difference)) ->
            match part with
-           | Some part when difference = Changed && List.mem part signature_parts && not (ours path)
-             ->
+           | Some part
+             when difference = Changed && List.mem part Signatures.parts && not (ours path) ->
                Some path
            | _ -> None)
          (Database.changes trial project.session))
@@ -153,8 +150,8 @@ let consequences (project : Project.t) text =
             Some
               {
                 path;
-                before = Impact_command.signature project.context path;
-                after = Impact_command.signature (Database.context trial) path;
+                before = Signatures.of_path project.context path;
+                after = Signatures.of_path (Database.context trial) path;
                 read_by;
               })
       changed
@@ -202,8 +199,10 @@ let report ~json ~lock ~signatures ~broken =
       List.iter
         (fun (changed : signature) ->
           Output.printf "  %s\n" (Path.show changed.path);
-          Option.iter (Output.printf "    was: %s\n") changed.before;
-          Option.iter (Output.printf "    now: %s\n") changed.after;
+          Option.iter
+            (fun text -> Output.print_line (Signatures.labeled "was:" text))
+            changed.before;
+          Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) changed.after;
           Output.printf "    read by: %s\n"
             (String.concat ", " (List.map Path.show changed.read_by)))
         signatures

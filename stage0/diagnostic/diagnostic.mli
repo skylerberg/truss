@@ -297,6 +297,14 @@ val replace : 'span -> string -> 'span edit
 val insert : int -> string -> span edit
 val delete : 'span -> 'span edit
 
+val edit_distance : string -> string -> int
+(** The optimal string alignment distance: insertions, deletions, substitutions, and swaps of two
+    neighboring letters each count one. *)
+
+val closest : string -> string list -> string option
+(** The candidate closest to a name, if one is near enough to be a typo: at most a third of the
+    name's letters away, and at least one. *)
+
 type reported
 (** Proof that an error was reported. A result that stands for something wrong, such as the type of
     an expression that did not check, holds one, so it cannot be made where nothing was reported.

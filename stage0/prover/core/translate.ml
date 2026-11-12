@@ -1947,7 +1947,7 @@ and expression_kind context frame (node : expression) : (frame * L.term) option 
       match frame.updating with
       | Some term -> Some (frame, term)
       | None -> unsupported (at frame node) "an update's target outside an update")
-  | Quantified { quantifier; binder; body } -> quantified context frame node quantifier binder body
+  | Quantified { quantifier; binder; body } -> quantified context frame quantifier binder body
   | Yielded -> (
       (* What the nearest loop or method hands out: a loop's own parts, or
          else, in a lending or yielding method's body, the method's. *)
@@ -2324,7 +2324,7 @@ and if_ context frame (node : expression) condition (then_ : block) (else_ : blo
   else
     Option.map (fun frame -> (frame, L.Boolean true)) (join_frames context (List.map fst reached))
 
-and quantified context frame (node : expression) (quantifier : Syntax.quantifier) binder body =
+and quantified context frame (quantifier : Syntax.quantifier) binder body =
   let make ?count bound_symbol sort premise body_frame =
     let mark = context.fresh in
     (* The body runs only for the values the premise admits, which may be
@@ -4073,13 +4073,7 @@ and current_bounds context : Interface.Impls.bounds =
         | Some signature -> signature.generics
         | None -> impl_generics current)
   in
-  fun parameter ->
-    List.concat_map
-      (fun (generic : T.generic) ->
-        match generic.kind with
-        | Type_generic bounds when generic.generic = parameter -> bounds
-        | _ -> [])
-      generics
+  fun parameter -> T.bounds_of generics parameter
 
 (* A trait's laws, and those of the traits it requires, as facts about a
    type, each quantified over its parameters. A law is shown for each
@@ -5855,7 +5849,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       (Locals.empty, Locals.empty, None)
       bindings
   in
-  let self_of part self = Option.map fst self
+  let self_of self = Option.map fst self
   and self_type_of part self =
     Option.map (fun (_, ty) -> T.substitute (substitution_of part) ty) self
   in
@@ -5867,8 +5861,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       locals;
       types;
       old_locals = locals;
-      self = self_of part self;
-      old_self = self_of part self;
+      self = self_of self;
+      old_self = self_of self;
       self_type = self_type_of part self;
       result = None;
       checking = false;
@@ -6232,8 +6226,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
               locals = exit_locals;
               types;
               old_locals = entry_locals;
-              self = self_of part exit_self;
-              old_self = self_of part entry_self;
+              self = self_of exit_self;
+              old_self = self_of entry_self;
               self_type = self_type_of part entry_self;
               result = Some result;
               checking = false;
@@ -6264,7 +6258,7 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                     {
                       ensures_frame with
                       locals = entry_locals;
-                      self = self_of part entry_self;
+                      self = self_of entry_self;
                       yielded = None;
                     }
                   else ensures_frame
@@ -8690,12 +8684,14 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let frame, low = value context frame start in
       let frame, high = value context frame stop in
       let outer_yielded = frame.yielded in
-      check_invariants context
-        { frame with yielded = Some (empty_parts context frame element) }
-        clauses ~when_:"on entry to the loop";
+      (* In the loop's clauses, the pattern names the next index: [low] plus
+         the iterations so far. *)
+      let at_index (f : frame) next = snd (pattern_match context f pattern next element) in
+      let entry = at_index { frame with yielded = Some (empty_parts context frame element) } low in
+      check_invariants context entry clauses ~when_:"on entry to the loop";
       let changed = changed_places frame body in
       let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
-      loop_entry context frame costs;
+      loop_entry context entry costs;
       let mark = context.fresh and facts_mark = List.length context.facts in
       let kept = kept_validity context frame changed in
       let head = havoc context frame changed in
@@ -8728,11 +8724,13 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
                     &&& Operation ("<", [ Symbol position; iterations ])
                     ==> equal found (Operation ("+", [ low; Symbol position ]))) ))
        | None -> ());
+      let index = Costs.plus low iterations in
       let head =
-        loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
+        loop_head context
+          (at_index { head with yielded = Some before } index)
+          costs ~iterations:(Some iterations)
       in
       assume_invariants context head clauses;
-      let index = Costs.plus low iterations in
       let exits = { breaks = []; continues = [] } in
       let inside =
         { (restrict head (L.Operation ("<", [ iterations; count ]))) with loop = Some exits }
@@ -8745,7 +8743,9 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let ends =
         (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues
       in
-      let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
+      let with_through (f : frame) =
+        at_index { f with loop = frame.loop; yielded = Some through } (Costs.plus index (L.int 1))
+      in
       loop_iterations context node head costs ~mark
         ~facts:(facts_since context facts_mark @ [ inside.condition ])
         ~ends:(List.map with_through ends)
@@ -9802,8 +9802,7 @@ let type_ ?reveal database (source : source) ~path =
       let ty =
         match Query.demand database Interface.Environment.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
-            T.Named
-              { path; arguments = Interface.Environment.generic_arguments interface.type_generics }
+            T.Named { path; arguments = Types.generic_arguments interface.type_generics }
         | _ -> T.Named { path; arguments = [] }
       in
       let start = { (empty_frame source) with self_type = Some ty } in

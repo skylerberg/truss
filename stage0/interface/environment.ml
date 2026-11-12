@@ -19,7 +19,7 @@ type interface =
   | Error_interface of Diagnostic.reported
       (** A definition whose header did not parse: everything is accepted of it. *)
 
-type lowered = {
+type lowered_interface = {
   interface : interface;
   diagnostics : Syntax.diagnostic list;
   named : (span * T.ty) list;  (** Each named type written, for checking its bounds. *)
@@ -40,15 +40,7 @@ let head_type context owner (head : type_head) =
                (if List.length expected = 1 then "parameter" else "parameters")
                (List.length generics))
       | _ -> ());
-      let arguments =
-        List.map
-          (fun (generic : T.generic) ->
-            match generic.kind with
-            | Value_generic -> T.Value (T.Value_parameter generic.generic)
-            | Type_generic _ -> T.Type (T.Parameter generic.generic)
-            | Capability_generic -> T.Capabilities [ T.Capability_parameter generic.generic ])
-          generics
-      in
+      let arguments = T.generic_arguments generics in
       let type_ =
         match Intrinsic.builtin_of_path type_path with
         | Some Never -> T.Never
@@ -66,15 +58,6 @@ let head_type context owner (head : type_head) =
   | _ -> Lower.bug "the type head `%s` is not resolved" (Names.spell_path head.path)
 
 let trait_self_parameter trait : T.parameter = { owner = trait; name = "Self" }
-
-let generic_arguments generics =
-  List.map
-    (fun (generic : T.generic) ->
-      match generic.kind with
-      | Value_generic -> T.Value (T.Value_parameter generic.generic)
-      | Type_generic _ -> T.Type (T.Parameter generic.generic)
-      | Capability_generic -> T.Capabilities [ T.Capability_parameter generic.generic ])
-    generics
 
 (* The fields of a shape, in the order of their names. The order of
    declaration is not part of a shape, so reordering a type's fields changes
@@ -124,7 +107,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
       let trait_generics = Lower.generics context path generics in
       let self_parameter = trait_self_parameter path in
       let self_trait : T.trait_reference =
-        { trait = path; trait_arguments = generic_arguments trait_generics; associated = [] }
+        { trait = path; trait_arguments = T.generic_arguments trait_generics; associated = [] }
       in
       Hashtbl.replace context.bounds self_parameter [ self_trait ];
       let context =
@@ -415,7 +398,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
               context )
         | Type_definition { generics; body; clauses; _ } ->
             let type_generics = Lower.generics context path generics in
-            let self = T.Named { path; arguments = generic_arguments type_generics } in
+            let self = T.Named { path; arguments = T.generic_arguments type_generics } in
             let context = { context with self_type = Some self } in
             let shape =
               match body with
@@ -539,14 +522,15 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
     },
     context )
 
-(* The lowered form of a definition, with the context in which its bodies
-   are checked. The interface of a trait, an [impl], or a capability is
-   assembled from its header and from the interface of each method written
-   inside it. Each method's interface reads only the header, so neither
-   query depends on the other. *)
-let rec lowered =
+(* The lowered interface of a definition, with what lowering reported. The
+   interface of a trait, an [impl], or a capability is assembled from its
+   header and from the interface of each method written inside it. Each
+   method's interface reads only the header, so neither query depends on
+   the other. *)
+let rec lowered_interface =
   lazy
-    (Query.query ~name:"lowered" ~phase:Phases.interfaces ~show:Names.show_key (fun database key ->
+    (Query.query ~name:"lowered_interface" ~phase:Phases.interfaces ~show:Names.show_key
+       (fun database key ->
          match
            (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
          with
@@ -559,11 +543,11 @@ and lower database key definition resolved =
   lower_definition database
     ~interface_of:(fun member ->
       Option.map
-        (fun (lowered : lowered) -> lowered.interface)
-        (Query.demand database (Lazy.force lowered) member))
+        (fun (lowered : lowered_interface) -> lowered.interface)
+        (Query.demand database (Lazy.force lowered_interface) member))
     key definition resolved
 
-let lowered = Lazy.force lowered
+let lowered_interface = Lazy.force lowered_interface
 
 let interface =
   Query.query ~name:"interface" ~phase:Phases.interfaces ~show:Path.show ~saved:true
@@ -571,7 +555,9 @@ let interface =
     (fun database path ->
       match Query.demand database Summary.key path with
       | Some key ->
-          Option.map (fun lowered -> lowered.interface) (Query.demand database lowered key)
+          Option.map
+            (fun lowered -> lowered.interface)
+            (Query.demand database lowered_interface key)
       | None -> None)
 
 (* The names of a type's fields in declaration order: of a record under

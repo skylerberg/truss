@@ -76,7 +76,7 @@ let check_names (state : state) (parts : span list) ~message =
       state.tables.resolutions
   end
 
-let check (state : state) (lowered : Environment.lowered) =
+let check (state : state) (lowered : Environment.lowered_interface) =
   let clauses, name, body =
     match state.definition.kind with
     | Function { signature; body } -> (signature.clauses, Names.signature_name signature, Some body)

@@ -55,10 +55,10 @@ fn zero_words(count: USize) -> List[UInt64]
   cost time O(count)
 {
   var words: intrinsic::Storage[UInt64] = intrinsic::storage_with_capacity(count)
-  for _ in 0..count
-    invariant intrinsic::storage_length(words) == yielded.length()
+  for index in 0..count
+    invariant intrinsic::storage_length(words) == index
     invariant intrinsic::storage_capacity(words) == count
-    invariant forall i in 0..yielded.length() => intrinsic::storage_model(words)[i] == 0
+    invariant forall i in 0..index => intrinsic::storage_model(words)[i] == 0
   {
     intrinsic::storage_push(mut words, value: 0)
   }

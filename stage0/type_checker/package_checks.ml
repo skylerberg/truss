@@ -79,12 +79,8 @@ let overlap (first : T.impl_interface) (second : T.impl_interface) =
   in
   (* Binding a variable to a type that holds it would make an infinite
      type, which no head can be. *)
-  let rec occurs parameter (type_ : T.ty) =
-    match resolve type_ with
-    | T.Parameter found -> found = parameter
-    | T.Named { arguments; _ } ->
-        List.exists (function T.Type type_ -> occurs parameter type_ | _ -> false) arguments
-    | _ -> false
+  let occurs parameter =
+    T.exists ~resolve (function T.Parameter found -> found = parameter | _ -> false)
   in
   let bind parameter other =
     if other = T.Parameter parameter then true
@@ -197,19 +193,8 @@ let type_fields database path =
       (parameters, fields)
   | None -> ([], [])
 
-let output_type : T.result -> T.ty = function
-  | Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
-
 let type_arguments arguments =
   List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
-
-let bounds_of (generics : T.generic list) parameter =
-  List.concat_map
-    (fun (generic : T.generic) ->
-      match generic.kind with
-      | Type_generic bounds when generic.generic = parameter -> bounds
-      | _ -> [])
-    generics
 
 (* The named types that a type definition's fields contain, each with its
    field and how it occurs in a value of the type. *)
@@ -217,7 +202,7 @@ let contained =
   Query.query ~name:"contained_types" ~phase:Phases.interfaces ~show:Path.show (fun database path ->
       let bounds =
         match Query.demand database Environment.type_interface path with
-        | Some interface -> bounds_of interface.type_generics
+        | Some interface -> T.bounds_of interface.type_generics
         | None -> fun _ -> []
       in
       List.concat_map
@@ -270,14 +255,7 @@ let grows database (start : Path.t) =
     match List.nth_opt parameters index with
     | None -> []
     | Some parameter ->
-        let rec mentions (type_ : T.ty) =
-          match type_ with
-          | T.Parameter found -> found = parameter
-          | T.Named { arguments; _ } -> List.exists mentions (type_arguments arguments)
-          | T.Function { inputs; output; _ } ->
-              List.exists (fun (_, type_) -> mentions type_) inputs || mentions (output_type output)
-          | _ -> false
-        in
+        let mentions = T.exists (function T.Parameter found -> found = parameter | _ -> false) in
         let rec targets (type_ : T.ty) =
           match type_ with
           | T.Named { path = target; arguments } ->
@@ -292,7 +270,7 @@ let grows database (start : Path.t) =
               @ List.concat_map targets arguments
           | T.Function { inputs; output; _ } ->
               List.concat_map (fun (_, type_) -> targets type_) inputs
-              @ targets (output_type output)
+              @ targets (T.result_type output)
           | _ -> []
         in
         List.concat_map (fun (_, (field : T.field)) -> targets field.field_type) fields
@@ -399,7 +377,7 @@ let check_recursion database (declaration : Names.declaration) (definition : def
 let check_associated_types database (declaration : Names.declaration) (definition : definition)
     (impl : T.impl_interface) =
   let key = Names.key_of declaration in
-  let bounds = bounds_of impl.impl_generics in
+  let bounds = T.bounds_of impl.impl_generics in
   let written name =
     match definition.kind with
     | Impl { members; _ } ->
@@ -462,11 +440,10 @@ let instantiation_edges database (key : Names.key) =
   | Some form ->
       let grows = function
         | T.Type (T.Named { arguments; _ }) ->
-            let rec mentions = function
-              | T.Parameter { owner; _ } -> Path.equal owner key.path
-              | T.Named { arguments; _ } ->
-                  List.exists (function T.Type type_ -> mentions type_ | _ -> false) arguments
-              | _ -> false
+            let mentions =
+              T.exists (function
+                | T.Parameter { owner; _ } -> Path.equal owner key.path
+                | _ -> false)
             in
             List.exists (function T.Type type_ -> mentions type_ | _ -> false) arguments
         | _ -> false
@@ -548,8 +525,7 @@ let check_tests database (package : Path.package) =
          else (name :: seen, found))
        ([], []) tests)
 
-(* The package *)
-
+(* A package's errors, by its name. *)
 let check =
   Query.query ~name:"package_checks" ~phase:Phases.checks ~show:Path.show_package ~saved:true
     (fun database package_name ->

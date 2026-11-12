@@ -127,7 +127,7 @@ let prepare_store () = ignore (Lazy.force !standard)
 let session_name root =
   Printf.sprintf "session-%s-%s"
     (Session.Identity.short (Session.identity ()))
-    (String.sub (Blake3.to_hex (Blake3.hash root)) 0 16)
+    (Blake3.hex_digest ~digits:16 root)
 
 let demand session query key = Query.demand (Session.context session) query key
 let own_layout session = demand session Project.layout Project.project_root
@@ -342,10 +342,8 @@ let relative_to root directory =
   if directory = root then ""
   else
     let prefix = root ^ "/" in
-    if
-      String.length directory > String.length prefix
-      && String.sub directory 0 (String.length prefix) = prefix
-    then String.sub directory (String.length prefix) (String.length directory - String.length prefix)
+    if String.starts_with ~prefix directory then
+      String.sub directory (String.length prefix) (String.length directory - String.length prefix)
     else ""
 
 (* Every package of the project: its directory and its name. *)
@@ -359,13 +357,11 @@ let packages session =
 let target_packages session within =
   let packages = packages session in
   let under (directory, _) =
-    within = "" || directory = within
-    || String.length directory > String.length within
-       && String.sub directory 0 (String.length within + 1) = within ^ "/"
+    within = "" || directory = within || String.starts_with ~prefix:(within ^ "/") directory
   in
   match List.filter under packages with
   | [] -> (
-      match Worktree.owner (List.map fst packages) (within ^ "/x.truss") with
+      match Project.package_directory ~is_package:(fun d -> List.mem_assoc d packages) within with
       | Some directory -> List.filter (fun (d, _) -> d = directory) packages
       | None -> [])
   | found -> found

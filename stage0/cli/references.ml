@@ -146,16 +146,3 @@ let names_definition (definition : Path.t) occurrence =
       Path.equal owner o && name = n
   | Definition path, definition -> Path.equal path definition
   | Module _, _ -> false
-
-(* The definitions, apart from itself, whose code names [definition]. *)
-let dependents occurrences (definition : Path.t) =
-  List.filter_map
-    (fun occurrence ->
-      if
-        names_definition definition occurrence
-        && (not occurrence.declares)
-        && not (Path.equal occurrence.in_definition.path definition)
-      then Some occurrence.in_definition.path
-      else None)
-    occurrences
-  |> List.sort_uniq Path.compare

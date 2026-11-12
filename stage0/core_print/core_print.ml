@@ -10,7 +10,7 @@ let local (names : names) (found : local) =
   | Named id, None -> Printf.sprintf "local#%d" id
   | Synthetic number, None -> Printf.sprintf "synthetic#%d" number
 
-let mode : T.mode -> string = function Read -> "" | Mut -> "mut " | Own -> "own "
+let mode = T.show_mode
 let list show items = String.concat ", " (List.map show items)
 let type_arguments = function [] -> "" | arguments -> "[" ^ list T.show_argument arguments ^ "]"
 

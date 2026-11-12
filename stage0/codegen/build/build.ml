@@ -1,13 +1,7 @@
 type cache = { directory : string }
 
-let rec make_directory path =
-  if not (Sys.file_exists path) then begin
-    make_directory (Filename.dirname path);
-    try Sys.mkdir path 0o755 with Sys_error _ when Sys.file_exists path -> ()
-  end
-
 let cache directory =
-  make_directory directory;
+  File_system.make_directory directory;
   { directory }
 
 type settings = { build : Emit_c.build; optimization : Toolchain.optimization; extra : string list }
@@ -28,7 +22,6 @@ let object_key (toolchain : Toolchain.t) settings text =
                Cbor.Array (List.map (fun flag -> Cbor.Text flag) (flags settings));
              ])))
 
-let write path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
 let object_path cache key = Filename.concat cache.directory (key ^ ".o")
 
 (* Writes the object under a temporary name and renames it into place, so a
@@ -45,7 +38,7 @@ let compile_one toolchain cache settings (name, text) =
   else
     let base = Filename.concat cache.directory (Printf.sprintf "%s.%d" key (Unix.getpid ())) in
     let source = base ^ ".c" in
-    write source text;
+    File_system.write source text;
     let partial = base ^ ".o" in
     match
       Toolchain.compile toolchain ~optimization:settings.optimization ~extra:settings.extra ~source

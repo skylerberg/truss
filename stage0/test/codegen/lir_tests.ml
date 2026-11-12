@@ -1036,5 +1036,3 @@ let () =
       match Convention.parameter env Own (array_of 4) with
       | Some (Value _) -> ()
       | _ -> fail "a small array that is given away is passed by address")
-
-let () = Harness.finish ()

@@ -1,11 +1,4 @@
-let read_all channel =
-  let buffer = Buffer.create 256 in
-  (try
-     while true do
-       Buffer.add_channel buffer channel 1
-     done
-   with End_of_file -> ());
-  Buffer.contents buffer
+let read_all = In_channel.input_all
 
 (* A process's status as a shell reports it: its exit code, or [128 +
    signal] for a process a signal ended. *)
@@ -46,7 +39,17 @@ let read_streaming channel on_output =
   Buffer.contents buffer
 
 (* The program is run with its arguments and no shell. *)
-let run ?input ?on_output ?time_limit program arguments =
+(* This process's environment with each of [overrides] set. *)
+let environment_with overrides =
+  let overridden entry =
+    List.exists (fun (name, _) -> String.starts_with ~prefix:(name ^ "=") entry) overrides
+  in
+  Array.append
+    (Array.of_list
+       (List.filter (fun entry -> not (overridden entry)) (Array.to_list (Unix.environment ()))))
+    (Array.of_list (List.map (fun (name, value) -> name ^ "=" ^ value) overrides))
+
+let run ?(environment = []) ?input ?on_output ?time_limit program arguments =
   let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
   let stderr_read, stderr_write = Unix.pipe ~cloexec:true () in
   let stdin_read, stdin_write =
@@ -57,9 +60,9 @@ let run ?input ?on_output ?time_limit program arguments =
     | None -> (Unix.stdin, None)
   in
   let pid =
-    Unix.create_process program
+    Unix.create_process_env program
       (Array.of_list (program :: arguments))
-      stdin_read stdout_write stderr_write
+      (environment_with environment) stdin_read stdout_write stderr_write
   in
   Unix.close stdout_write;
   Unix.close stderr_write;

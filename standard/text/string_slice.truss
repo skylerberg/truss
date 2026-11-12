@@ -148,7 +148,7 @@ internal fn StringSlice.copy_onto(self, output: mut intrinsic::Storage[UInt8])
 {
   let start = intrinsic::storage_length(output)
   for index in 0..self.length()
-    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_length(output) == start + index
     invariant intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
     cost allocations == 0
   {
@@ -913,7 +913,7 @@ public fn StringSlice.repeated(self, times: USize) -> String
   let total = self.length() * times
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(total)
   for index in 0..total
-    invariant intrinsic::storage_length(output) == yielded.length()
+    invariant intrinsic::storage_length(output) == index
     invariant intrinsic::storage_capacity(output) == total
   {
     intrinsic::storage_push(mut output, value: self.byte(index % self.length()))
@@ -936,7 +936,7 @@ public fn StringSlice.reversed(self) -> String
   {
     let start = self.previous_start(end)
     for index in start..end
-      invariant intrinsic::storage_length(output) == self.length() - end + yielded.length()
+      invariant intrinsic::storage_length(output) == self.length() - end + (index - start)
       invariant intrinsic::storage_capacity(output) == self.length()
     {
       intrinsic::storage_push(mut output, value: self.byte(index))
@@ -1076,7 +1076,7 @@ public fn StringSlice.to_ascii_uppercase(self) -> String
 {
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(output) == yielded.length()
+    invariant intrinsic::storage_length(output) == index
     invariant intrinsic::storage_capacity(output) == self.length()
   {
     intrinsic::storage_push(mut output, value: ascii_uppercase(self.byte(index)))
@@ -1090,7 +1090,7 @@ public fn StringSlice.to_ascii_lowercase(self) -> String
 {
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(output) == yielded.length()
+    invariant intrinsic::storage_length(output) == index
     invariant intrinsic::storage_capacity(output) == self.length()
   {
     intrinsic::storage_push(mut output, value: ascii_lowercase(self.byte(index)))
@@ -1184,7 +1184,7 @@ public fn StringSlice.to_bytes(self) -> List[UInt8]
 {
   var bytes: List[UInt8] = List.with_capacity(self.length())
   for index in 0..self.length()
-    invariant bytes.length() == yielded.length()
+    invariant bytes.length() == index
   {
     mut bytes.push(self.byte(index))
   }

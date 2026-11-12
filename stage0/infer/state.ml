@@ -1189,8 +1189,6 @@ let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
         signature.generics;
   }
 
-let output_type = function T.Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
-
 let intrinsic_signature path =
   Option.map Intrinsic_signatures.signature (Intrinsic.operation_of_path path)
 

@@ -101,7 +101,7 @@ or name resolution gives them their meaning where they appear:
 | `result` | Inside `ensures` and `cost`, where it names the return value |
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
 | `identical` | Inside specifications: `identical(a, b)`, whether two values of one type are the same value |
-| `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the `invariant` of a `for` loop, where they name what was handed out so far and whether the method ran to its end |
+| `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the clauses of a `for` loop, where they name what was handed out so far and whether the method ran to its end |
 
 A parameter cannot be named `result`, and a function cannot be named `old`,
 because inside specifications those names mean the return value and a value as
@@ -1556,8 +1556,10 @@ fn Grid.cell(mut self, position: Position) lends mut Cell
   caller changed is the one in the grid afterward.
 - **`finished` is `true` when the method ran to its end,** and `false`
   when a loop stopped it at a `yield`.
-- **A `for` loop's `invariant` may use `yielded`,** for the values of the
-  iterations before the current one:
+- **A `for` loop's clauses may use `yielded`,** for the values of the
+  iterations before the current one. They cannot name the loop's element,
+  which is bound only in the body, since the clauses also hold before the
+  first element and after the last:
 
   ```truss
   var total: Int64 = 0
@@ -1830,6 +1832,22 @@ zero, which proves the loop ends. Both are optional. `invariant` may repeat;
 `decreases` appears at most once, and takes a list of measures compared in
 order, as for a function.
 
+In the clauses of a loop over a range, the loop variable is the index of
+the next iteration. In `for i in start..end`, `i` is `start` on entry, one
+more after each iteration, and `end` where the loop ends; after the last
+iteration of `start..=end`, it is `end + 1`. A range whose start is past its
+end runs no iteration, and `i` stays `start`. Dafny's and Why3's `for` loops
+give the index the same meaning in their invariants:
+
+```truss
+var kept: USize = 1
+for index in 1..count
+  invariant kept <= index
+{
+  todo
+}
+```
+
 A `cost` clause on a loop states what the loop has spent so far, at the
 start of every iteration and when it ends. A loop needs one only when its
 iterations cost different amounts, as when each one handles a row of its own
@@ -1854,7 +1872,7 @@ fn sum_all(rows: List[List[Int64]]) -> Int64
 - A loop's `cost` takes the resources and bounds of a function's, and may
   repeat, but is never `amortized` or `finite`.
 - Its bound can use the variables in scope at the loop and, in a `for`
-  loop, `yielded`.
+  loop, `yielded`, or a range's index.
 - `sum` adds up a measure of each element of a `Sequence`, here each row's
   length. The measure is a lambda or a named function that ends and uses no
   capabilities, and two lambdas with the same body are the same measure.

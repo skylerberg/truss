@@ -68,5 +68,3 @@ let () =
         \  3\n\
          }\n"
         "usage.unreachable_code")
-
-let () = finish ()

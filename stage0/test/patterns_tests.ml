@@ -366,5 +366,3 @@ let () =
         \  }\n\
          }\n"
         "patterns.unreachable_arm")
-
-let () = finish ()

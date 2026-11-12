@@ -661,7 +661,7 @@ let () =
           Database.Testing.set_text engine (module_of "app::main")
             (base ^ "\nimpl Hash for Point {\n  fn hash(self, hasher: mut Hasher) {}\n}\n");
           ignore (Query.demand database asker ()))
-        [ "asker()" ])
+        asker [ () ])
 
 (* What the review of interfaces found *)
 
@@ -884,5 +884,3 @@ let () =
           if Well_known.of_path (Well_known.path known) <> Some known then
             fail "`%s` is not found by its path" (Path.show (Well_known.path known)))
         Well_known.all)
-
-let () = finish ()

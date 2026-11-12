@@ -6,7 +6,7 @@ type state = {
   database : Query.context;
   key : Names.key;
   definition : definition;
-  lowered : Environment.lowered;
+  lowered : Environment.lowered_interface;
   mutable diagnostics : Syntax.diagnostic list;
 }
 
@@ -67,9 +67,8 @@ let check_bounds state =
 
 let rec mentioned = function
   | T.Named { path; arguments } -> path :: List.concat_map mentioned_argument arguments
-  | T.Function { inputs; output; _ } -> (
-      List.concat_map (fun (_, type_) -> mentioned type_) inputs
-      @ match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> mentioned type_)
+  | T.Function { inputs; output; _ } ->
+      List.concat_map (fun (_, type_) -> mentioned type_) inputs @ mentioned (T.result_type output)
   | T.Any trait -> trait.trait :: List.concat_map mentioned_argument trait.trait_arguments
   | T.Projection { base; _ } -> mentioned base
   | _ -> []
@@ -134,7 +133,7 @@ let check_method_location state (head : type_head) =
 (* Every type a signature mentions: its parameters, its result, and the
    bounds of its generic parameters. *)
 let signature_types (signature : T.signature) =
-  (match signature.output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_)
+  T.result_type signature.output
   :: List.map (fun (parameter : T.parameter_info) -> parameter.type_) signature.parameters
   @ List.concat_map
       (fun (generic : T.generic) ->
@@ -412,14 +411,7 @@ let check_proof_bounds state (written : type_head) (generics : T.generic list)
             | Capability_generic -> T.Capabilities [ T.Capability_parameter of_impl.generic ] ))
         generics impl.impl_generics
     in
-    let impl_bounds parameter =
-      List.concat_map
-        (fun (generic : T.generic) ->
-          match generic.kind with
-          | Type_generic bounds when generic.generic = parameter -> bounds
-          | _ -> [])
-        impl.impl_generics
-    in
+    let impl_bounds = T.bounds_of impl.impl_generics in
     List.iteri
       (fun index ((proof : T.generic), (of_impl : T.generic)) ->
         match proof.kind with
@@ -448,7 +440,6 @@ let check_proof_bounds state (written : type_head) (generics : T.generic list)
   end
 
 let show_signature (signature : T.signature) =
-  let mode = function T.Read -> "" | Mut -> "mut " | Own -> "own " in
   Printf.sprintf "(%s)%s"
     (String.concat ", "
        ((match signature.receiver with
@@ -458,13 +449,9 @@ let show_signature (signature : T.signature) =
           | _ -> [])
        @ List.map
            (fun (parameter : T.parameter_info) ->
-             parameter.name ^ ": " ^ mode parameter.mode ^ T.show parameter.type_)
+             parameter.name ^ ": " ^ T.show_mode parameter.mode ^ T.show parameter.type_)
            signature.parameters))
-    (match signature.output with
-    | Returns type_ when type_ = T.unit -> ""
-    | Returns type_ -> " -> " ^ T.show type_
-    | Yields (written, type_) -> " yields " ^ mode written ^ T.show type_
-    | Lends (written, type_) -> " lends " ^ mode written ^ T.show type_)
+    (T.show_output signature.output)
 
 (* Whether two types agree, where an error on either side agrees with
    anything, since it was reported already. *)
@@ -769,7 +756,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
                 (T.substitute_signature
                    (Option.value ~default:[]
                       (T.substitution_of declared.method_signature.generics
-                         (Environment.generic_arguments given.generics)))
+                         (Types.generic_arguments given.generics)))
                    declared.method_signature)
             in
             let expected =
@@ -857,8 +844,8 @@ let check state =
             match
               ( Query.demand database Names.definition container,
                 Option.map
-                  (fun (lowered : Environment.lowered) -> lowered.interface)
-                  (Query.demand database Environment.lowered container) )
+                  (fun (lowered : Environment.lowered_interface) -> lowered.interface)
+                  (Query.demand database Environment.lowered_interface container) )
             with
             | Some { kind = Trait _; _ }, Some (Trait_interface trait) ->
                 check_redeclared state name
@@ -966,7 +953,8 @@ let diagnostics =
   Query.query ~name:"interface_diagnostics" ~phase:Phases.interfaces ~saved:true
     ~show:Names.show_key (fun database key ->
       match
-        (Query.demand database Names.definition key, Query.demand database Environment.lowered key)
+        ( Query.demand database Names.definition key,
+          Query.demand database Environment.lowered_interface key )
       with
       | Some definition, Some lowered ->
           let state = { database; key; definition; lowered; diagnostics = [] } in

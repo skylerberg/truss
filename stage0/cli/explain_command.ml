@@ -4,25 +4,6 @@
 
 module Names = Resolve.Names
 
-(* The byte offset of a line and column, both counting from 1, where a
-   column counts Unicode scalar values, as diagnostics do. *)
-let offset_of text ~line ~column =
-  let length = String.length text in
-  let rec start_of current offset =
-    if current >= line || offset >= length then offset
-    else
-      match String.index_from_opt text offset '\n' with
-      | Some newline -> start_of (current + 1) (newline + 1)
-      | None -> length
-  in
-  let rec advance offset remaining =
-    if remaining <= 0 || offset >= length || text.[offset] = '\n' then offset
-    else
-      let width = Uchar.utf_decode_length (String.get_utf_8_uchar text offset) in
-      advance (offset + max 1 width) (remaining - 1)
-  in
-  advance (start_of 1 0) (column - 1)
-
 (* [FILE:LINE:COLUMN], from the right, so a file name may hold a colon. *)
 let parse_position text =
   match List.rev (String.split_on_char ':' text) with
@@ -42,8 +23,10 @@ let run ~directory ~position ~json =
   | None -> Project.cannot_run "%s is not a module of a package in this worktree." file
   | Some (module_, _) -> (
       let context = project.context in
-      let text = Source.text (Project.parsed project module_).source in
-      let offset = offset_of text ~line ~column in
+      let offset =
+        Source.offset Source.Scalar_values (Project.parsed project module_).source ~line:(line - 1)
+          ~column:(column - 1)
+      in
       let found =
         List.find_map
           (fun (d : Names.declaration) ->

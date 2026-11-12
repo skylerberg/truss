@@ -1,6 +1,8 @@
-(* The pinned solver. *)
-
+(* The Z3 version the prover is pinned to. A different one is refused, since
+   its answers could differ. *)
 let version = "5.3.3"
+
+(* The limit in steps every query runs with. *)
 let steps = 2_000_000
 
 type t = { program : string; cache : string option; mutable solved : int }
@@ -16,10 +18,7 @@ let find ?cache () =
            version program)
   | 0, output, _ ->
       let expected = "Z3 version " ^ version in
-      if
-        String.length output >= String.length expected
-        && String.sub output 0 (String.length expected) = expected
-      then Ok { program; cache; solved = 0 }
+      if String.starts_with ~prefix:expected output then Ok { program; cache; solved = 0 }
       else
         Error
           (Printf.sprintf
@@ -117,12 +116,6 @@ let cache : (string, canonical) Hashtbl.t = Hashtbl.create 256
 let lock = Mutex.create ()
 let locked f = Mutex.protect lock f
 
-let rec make_directories directory =
-  if not (Sys.file_exists directory) then begin
-    make_directories (Filename.dirname directory);
-    try Sys.mkdir directory 0o755 with Sys_error _ when Sys.file_exists directory -> ()
-  end
-
 let render query =
   match locked (fun () -> Asked.find_opt rendered_queries query) with
   | Some rendered -> rendered
@@ -164,6 +157,7 @@ let read request = function
              Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
            request.requested)
 
+(* Runs one request, or reads its answer from a cache. *)
 let ask solver request =
   let file = Option.map (fun directory -> Filename.concat directory request.key) solver.cache in
   let stored =
@@ -172,7 +166,7 @@ let ask solver request =
         (* An answer read is one still asked, so its file's age is how long
            ago a run last asked it, which is what pruning old answers reads. *)
         (try Unix.utimes file 0. 0. with Unix.Unix_error _ -> ());
-        match String.split_on_char '\n' (In_channel.with_open_bin file In_channel.input_all) with
+        match String.split_on_char '\n' (File_system.read file) with
         | "proven" :: _ -> Some Proven_canonical
         | "out_of_steps" :: _ -> Some Out_of_steps_canonical
         | "counterexample" :: lines ->
@@ -237,11 +231,8 @@ let ask solver request =
                        pairs)
           in
           try
-            make_directories (Filename.dirname file);
-            (* Written whole, then moved into place, so a reader never sees half of it. *)
-            let partial = file ^ ".partial" in
-            Out_channel.with_open_bin partial (fun channel -> output_string channel text);
-            Sys.rename partial file
+            File_system.make_directory (Filename.dirname file);
+            File_system.write_atomically file text
           with Sys_error _ -> ())
       | None -> ());
       answer
@@ -266,9 +257,5 @@ let ask_all solver requests =
   work ();
   List.iter Domain.join domains;
   Array.to_list answers
-
-let solve_all solver queries =
-  let requests = List.map (fun (values, query) -> request ~values query) queries in
-  List.map2 read requests (ask_all solver requests)
 
 let solved solver = locked (fun () -> solver.solved)

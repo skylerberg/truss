@@ -1,4 +1,5 @@
-(** Running the tests of one test executable. *)
+(** Running the tests of one test executable. When the executable exits, it prints the result, and
+    exits with status 1 if any test failed. *)
 
 val test : string -> (unit -> unit) -> unit
 (** Runs a test now. An exception it raises is a failure, and so is a result that an engine the test
@@ -16,10 +17,16 @@ val fail : ('a, unit, string, unit) format4 -> 'a
 (** Reports a failure of the test that is running. *)
 
 val expect_not_recomputed :
-  Engine.t -> first:(unit -> unit) -> again:(unit -> unit) -> string list -> unit
-(** Fails the test unless [first] computes each result that a label names, as ["name(key)"], and
-    [again] computes none of them. A label that names no result fails, so a renamed query or key
-    cannot pass the check unnoticed. *)
+  Engine.t ->
+  first:(unit -> unit) ->
+  again:(unit -> unit) ->
+  ('key, 'value) Query.query ->
+  'key list ->
+  unit
+(** Fails the test unless [first] computes the query's result for each key and [again] computes none
+    of them. A key that [first] does not compute fails, so the check cannot pass on a result nothing
+    computes. *)
 
-val finish : unit -> unit
-(** Prints the result and exits with status 1 if any test failed. *)
+val workspace_path : string -> string
+(** The path of a file of the repository, given from the workspace root, such as ["SYNTAX.md"],
+    whatever directory the executable runs in. *)

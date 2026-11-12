@@ -15,58 +15,13 @@
 type encoding = Utf_8 | Utf_16
 
 let encoding_name = function Utf_8 -> "utf-8" | Utf_16 -> "utf-16"
+let units = function Utf_8 -> Source.Bytes | Utf_16 -> Source.Utf_16_code_units
 
-(* The zero-based line and column of a byte offset in a text. *)
 let position encoding text offset =
-  let offset = max 0 (min offset (String.length text)) in
-  let line = ref 0 and start = ref 0 in
-  String.iteri
-    (fun index c ->
-      if index < offset && c = '\n' then begin
-        incr line;
-        start := index + 1
-      end)
-    text;
-  let column =
-    match encoding with
-    | Utf_8 -> offset - !start
-    | Utf_16 ->
-        let rec count at units =
-          if at >= offset then units
-          else
-            let decoded = String.get_utf_8_uchar text at in
-            let width = Uchar.utf_decode_length decoded in
-            let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
-            count (at + width) (units + if code >= 0x10000 then 2 else 1)
-        in
-        count !start 0
-  in
-  (!line, column)
+  Source.location (units encoding) (Source.create ~path:"" text) offset
 
-(* The byte offset of a zero-based line and column, the inverse of
-   [position]: the end of the line where the column is past it. *)
 let offset encoding text ~line ~column =
-  let length = String.length text in
-  let rec line_start at remaining =
-    if remaining = 0 then at
-    else
-      match String.index_from_opt text at '\n' with
-      | Some newline -> line_start (newline + 1) (remaining - 1)
-      | None -> length
-  in
-  let start = line_start 0 line in
-  let rec walk at units =
-    if at >= length || text.[at] = '\n' || units >= column then at
-    else
-      let decoded = String.get_utf_8_uchar text at in
-      let width = Uchar.utf_decode_length decoded in
-      let code = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
-      let step =
-        match encoding with Utf_8 -> width | Utf_16 -> if code >= 0x10000 then 2 else 1
-      in
-      walk (at + width) (units + step)
-  in
-  if start >= length then length else walk start 0
+  Source.offset (units encoding) (Source.create ~path:"" text) ~line ~column
 
 let range encoding text (span : Diagnostic.span) =
   let point offset =

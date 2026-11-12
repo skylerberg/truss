@@ -106,10 +106,33 @@ let errors directory =
   Database.save_session session;
   List.length found + List.length (Database.problems session)
 
-let computed directory =
+let executed directory =
   match Database.Testing.session_engine directory with
   | Some engine -> Engine.executed engine
   | None -> []
+
+let computed directory query =
+  match Database.Testing.session_engine directory with
+  | Some engine -> Engine.computed engine query
+  | None -> []
+
+let checked directory = computed directory Infer.type_check_result
+let top = Support.top_key
+
+let shapes_method name : Resolve.Names.key =
+  let module_ = Support.module_of "app::shapes" in
+  {
+    module_;
+    path =
+      Method
+        {
+          owner =
+            Impl { module_; trait = "Shape"; for_type = { type_name = "Square"; generics = [] } };
+          name;
+          receiver = Read;
+        };
+    ordinal = 0;
+  }
 
 let clear directory = Option.iter Engine.clear_log (Database.Testing.session_engine directory)
 let contains = Substring.contains
@@ -178,7 +201,7 @@ let () =
       expect_errors directory 0;
       Database.reset ();
       expect_errors directory 0;
-      let again = computed directory in
+      let again = executed directory in
       if again <> [] then fail "computed [%s]" (String.concat "; " again));
   test "a change made while no process ran is seen after a restart" (fun () ->
       fresh_store ();
@@ -197,10 +220,9 @@ let () =
       write directory "main.truss" program;
       write directory "other.truss" "fn triple(value: Int64) -> Int64 {\n  value * 4\n}\n";
       expect_errors directory 0;
-      let again = computed directory in
-      if List.mem "type_check_result(app::main::double)" again then fail "checked double again";
-      if not (List.mem "type_check_result(app::other::triple)" again) then
-        fail "did not check triple");
+      let again = checked directory in
+      if List.mem (top "app::main" "double") again then fail "checked double again";
+      if not (List.mem (top "app::other" "triple") again) then fail "did not check triple");
   test "reordering a type's fields checks no reader of the type again" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -209,16 +231,15 @@ let () =
       write directory "reader.truss"
         "use app::point\n\nfn width(of: point::Point) -> Int64 {\n  of.x\n}\n";
       expect_errors directory 0;
-      let first = computed directory in
-      List.iter
-        (fun label -> if not (List.mem label first) then fail "never computed %s" label)
-        [ "type_check_result(app::reader::width)"; "lowered(app::reader::width)" ];
+      let width = top "app::reader" "width" in
+      let lowered directory = computed directory Interface.Environment.lowered_interface in
+      if not (List.mem width (checked directory)) then fail "never checked width";
+      if not (List.mem width (lowered directory)) then fail "never lowered width's interface";
       clear directory;
       write directory "point.truss" (point "y: Int64, x: Int64");
       expect_errors directory 0;
-      let again = computed directory in
-      if List.mem "type_check_result(app::reader::width)" again then fail "checked width again";
-      if List.mem "lowered(app::reader::width)" again then fail "lowered width's signature again");
+      if List.mem width (checked directory) then fail "checked width again";
+      if List.mem width (lowered directory) then fail "lowered width's interface again");
   test "editing one method's body checks only that method again" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -238,11 +259,9 @@ let () =
       (* The change moves [sides], which is the same method where it is. *)
       write directory "shapes.truss" (shapes "10 + 2");
       expect_errors directory 0;
-      let again = computed directory in
-      if not (List.mem "type_check_result(app::shapes::impl Shape for Square.area)" again) then
-        fail "did not check area";
-      if List.mem "type_check_result(app::shapes::impl Shape for Square.sides)" again then
-        fail "checked sides again");
+      let again = checked directory in
+      if not (List.mem (shapes_method "area") again) then fail "did not check area";
+      if List.mem (shapes_method "sides") again then fail "checked sides again");
   test "a removed module is gone from the package" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -356,9 +375,9 @@ let () =
       let second = package () in
       write second "main.truss" (program ^ "\nfn extra() -> Int64 {\n  1\n}\n");
       expect_errors second 0;
-      let again = computed second in
-      if List.mem "type_check_result(app::main::double)" again then fail "checked double again";
-      if not (List.mem "type_check_result(app::main::extra)" again) then fail "did not check extra");
+      let again = checked second in
+      if List.mem (top "app::main" "double") again then fail "checked double again";
+      if not (List.mem (top "app::main" "extra") again) then fail "did not check extra");
   test "a new worktree's state is a difference over the state it started from" (fun () ->
       fresh_store ~empty:true ();
       (* Eight modules, of which the second worktree changes one. *)
@@ -673,12 +692,12 @@ let () =
       let engine = Database.Testing.engine library in
       Engine.clear_log engine;
       check_library library [ first; second ];
-      let executed = Engine.executed engine in
-      if not (List.exists (fun label -> contains label "second") executed) then
-        fail "the edited module was not checked again";
-      List.iter
-        (fun label -> if contains label "first" then fail "%s was computed again" label)
-        executed);
+      let checked = Engine.computed engine Infer.type_check_result in
+      let in_module (module_, _) =
+        List.exists (fun (key : Resolve.Names.key) -> key.module_ = module_) checked
+      in
+      if not (in_module second) then fail "the edited module was not checked again";
+      if in_module first then fail "the unchanged module was checked again");
   test "a library state drops the text of a module that is gone from the sources" (fun () ->
       fresh_store ~empty:true ();
       let first = (library_module "first", library_function "first") in
@@ -701,5 +720,3 @@ let () =
       with
       | _ -> fail "it was declared"
       | exception Invalid_argument _ -> ())
-
-let () = finish ()

@@ -1,6 +1,5 @@
 (* Truss source compiled with the standard library and run: each feature. *)
 
-open Memory_layout
 open Codegen_support
 
 let () =
@@ -1114,5 +1113,3 @@ test "echoes" {
          example/main.truss:8:11: Point(x: 0.1, y: 2.0)\n\
          example/main.truss:9:11: -7\n\
          example/main.truss:10:11: Character\"\195\169\"\n\n")
-
-let () = Harness.finish ()

@@ -6,8 +6,11 @@
    reads this process's. With [on_output], each piece of standard output is
    also handed to it as soon as it is read, for a driver that shows
    progress. With [time_limit], in milliseconds, a program still running
-   then is killed, and its status is [128 + SIGKILL]. *)
+   then is killed, and its status is [128 + SIGKILL]. Each pair of
+   [environment] sets one variable for the program over this process's
+   environment. *)
 val run :
+  ?environment:(string * string) list ->
   ?input:string ->
   ?on_output:(string -> unit) ->
   ?time_limit:int ->

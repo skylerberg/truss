@@ -7,9 +7,7 @@ let () =
   print_string "let files = [\n";
   List.iter
     (fun file ->
-      let channel = open_in_bin file in
-      let text = really_input_string channel (in_channel_length channel) in
-      close_in channel;
+      let text = In_channel.with_open_bin file In_channel.input_all in
       let parts = String.split_on_char '/' file in
       let rec after_standard = function
         | "standard" :: rest -> rest

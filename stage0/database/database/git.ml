@@ -1,48 +1,38 @@
 (* Reading commits from git, for sessions opened for a commit rather than a
    directory. *)
 
-let run ?(environment = []) ~directory arguments =
-  let command =
-    String.concat " "
-      (List.map (fun (k, v) -> k ^ "=" ^ Filename.quote v) environment
-      @ List.map Filename.quote ("git" :: "-C" :: directory :: arguments))
-  in
-  let input = Unix.open_process_in (command ^ " 2>/dev/null") in
-  let output = In_channel.input_all input in
-  match Unix.close_process_in input with Unix.WEXITED 0 -> Some output | _ -> None
-
-let trim text = String.trim text
-
-(* The top of the worktree a directory is in, or [None] outside git. *)
-let toplevel directory = Option.map trim (run ~directory [ "rev-parse"; "--show-toplevel" ])
+let run ?environment ~directory arguments =
+  match Process.run ?environment "git" ("-C" :: directory :: arguments) with
+  | 0, output, _ -> Some output
+  | _ | (exception Unix.Unix_error _) -> None
 
 let common_directory directory =
   Option.map
     (fun path ->
-      let path = trim path in
+      let path = String.trim path in
       let path = if Filename.is_relative path then Filename.concat directory path else path in
       try Unix.realpath path with Unix.Unix_error _ -> path)
     (run ~directory [ "rev-parse"; "--git-common-dir" ])
 
 (* Where a directory is under the top of its worktree. *)
-let prefix directory = Option.map trim (run ~directory [ "rev-parse"; "--show-prefix" ])
+let prefix directory = Option.map String.trim (run ~directory [ "rev-parse"; "--show-prefix" ])
 
 let resolve ~directory revision =
-  Option.map trim (run ~directory [ "rev-parse"; "--verify"; revision ^ "^{commit}" ])
+  Option.map String.trim (run ~directory [ "rev-parse"; "--verify"; revision ^ "^{commit}" ])
 
 let head ~directory = resolve ~directory "HEAD"
 
 (* The default branch: [origin/HEAD]'s target, else [main], else [master]. *)
 let default_branch ~directory =
   match run ~directory [ "symbolic-ref"; "--quiet"; "refs/remotes/origin/HEAD" ] with
-  | Some reference when trim reference <> "" -> Some (trim reference)
+  | Some reference when String.trim reference <> "" -> Some (String.trim reference)
   | _ ->
       List.find_opt
         (fun branch -> resolve ~directory branch <> None)
         [ "main"; "master"; "origin/main"; "origin/master" ]
 
 let merge_base ~directory left right =
-  Option.map trim (run ~directory [ "merge-base"; left; right ])
+  Option.map String.trim (run ~directory [ "merge-base"; left; right ])
 
 (* Every manifest and module file of a commit under a directory, by its
    path from the directory, with its text. *)
@@ -60,12 +50,10 @@ let files ~directory commit =
                 let path = String.sub entry (tab + 1) (String.length entry - tab - 1) in
                 let base = Filename.basename path in
                 let skipped =
-                  List.exists Worktree.skipped (Worktree.segments (Worktree.parent path))
+                  List.exists Worktree.skipped (Project.segments (Project.parent path))
                 in
                 if
-                  (not skipped)
-                  && (base = "truss.toml" || base = "truss.lock"
-                     || Filename.check_suffix base ".truss")
+                  (not skipped) && Registry.Content.is_input base
                   && match meta with [ _; "blob"; _ ] -> true | _ -> false
                 then Some (path, List.nth meta 2)
                 else None)
@@ -83,7 +71,7 @@ let files ~directory commit =
 let merged_files ~directory left right =
   match run ~directory [ "merge-tree"; "--write-tree"; left; right ] with
   | Some output -> (
-      match String.split_on_char '\n' (trim output) with
+      match String.split_on_char '\n' (String.trim output) with
       | tree :: _ when tree <> "" -> files ~directory tree
       | _ -> None)
   | None -> None
@@ -117,9 +105,9 @@ let snapshot ~directory =
                 ("GIT_COMMITTER_EMAIL", "truss@localhost");
               ]
             in
-            Option.map trim
+            Option.map String.trim
               (run ~environment:author ~directory
-                 [ "commit-tree"; trim tree; "-p"; head; "-m"; "truss snapshot" ])
+                 [ "commit-tree"; String.trim tree; "-p"; head; "-m"; "truss snapshot" ])
         | _ -> None)
   in
   (try Sys.remove index with Sys_error _ -> ());

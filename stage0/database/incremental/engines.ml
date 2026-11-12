@@ -37,7 +37,23 @@ let unroot engine (query : ('key, 'value) query) key =
       sweep engine
   | None -> ()
 
-let executed engine = List.rev engine.log
+let executed engine = List.rev_map label engine.log
+
+let result_label (query : ('key, 'value) query) key =
+  Printf.sprintf "%s(%s)" query.name (query.show key)
+
+let computed (type key value) engine (query : (key, value) query) : key list =
+  List.rev
+    (List.filter_map
+       (fun (node : node) ->
+         match node.cell with
+         | Result (found, cell) when found.number = query.number -> (
+             match Type.Id.provably_equal found.cells query.cells with
+             | Some Equal -> Some (cell.key : key)
+             | None -> None)
+         | Result _ | Input _ | Unfilled -> None)
+       engine.log)
+
 let clear_log engine = engine.log <- []
 let by_id nodes = List.sort (fun (a : node) (b : node) -> compare a.id b.id) nodes
 let differing engine = by_id (Hashtbl.fold (fun _ node found -> node :: found) engine.own [])
@@ -105,13 +121,6 @@ let readers engine (node : node) =
           engine.bases
   in
   by_id found
-
-let counterpart (node : node) other =
-  match node.cell with
-  | Input (input, cell) ->
-      Option.map (fun cell -> cell.input_node) (find_input other input cell.input_key)
-  | Result (query, cell) -> Option.map (fun cell -> cell.node) (find_result other query cell.key)
-  | Unfilled -> None
 
 (* The same query and key in another engine, computed there if it has none.
    The other engine only observes it, so comparing two states makes no root

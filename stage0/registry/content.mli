@@ -4,6 +4,9 @@ val skipped : string -> bool
 (** Whether a directory's name is one that never holds a package's files: one that starts with [.],
     [_build], and [node_modules]. *)
 
+val is_input : string -> bool
+(** Whether a file's name is one the compiler reads: a manifest, a lock file, or a module. *)
+
 val hash : (string * string) list -> string
 (** The hash of a package's files, each a path and its bytes: the BLAKE3 hash of a line for each
     file, in order of path, with the path, a space, and the BLAKE3 hash of the file's bytes. It is

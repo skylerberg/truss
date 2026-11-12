@@ -108,10 +108,6 @@ let manifest_problems t =
   Database.manifest_problems t.session
     (List.map (fun (package : package) -> package.name) t.packages)
 
-(* A package as the session holds it: its dependencies, and the targets it
-   runs on. *)
-let manifest t (package : package) = Workspace.package t.context package.name
-
 (* Reads the files again after a command changed some, so only what
    changed is checked again. *)
 let reload t =
@@ -197,10 +193,7 @@ let shown_workspace_path t workspace_path =
   | Some (_, file) -> shown file
   | None -> workspace_path
 
-let write_file path text =
-  let temporary = Printf.sprintf "%s.%d.tmp" path (Unix.getpid ()) in
-  Out_channel.with_open_bin temporary (fun channel -> output_string channel text);
-  Sys.rename temporary path
+let write_file = File_system.write_atomically ~durable:false
 
 (* Every definition [start] reads, directly or not. *)
 let reachable dependencies start =

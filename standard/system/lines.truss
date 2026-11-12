@@ -42,7 +42,7 @@ internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[St
     let start = self.given
     var line: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(end - start)
     for index in start..end
-      invariant intrinsic::storage_length(line) == yielded.length()
+      invariant intrinsic::storage_length(line) == index - start
       invariant intrinsic::storage_capacity(line) == end - start
     {
       intrinsic::storage_push(mut line, value: intrinsic::view_at(intrinsic::storage_view(self.unread), index: index))
@@ -62,7 +62,7 @@ fn LineInput.forget_what_was_given(mut self, room_to_read_into: USize)
   let start = self.given
   var kept: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length - start + room_to_read_into)
   for index in start..length
-    invariant intrinsic::storage_length(kept) == yielded.length()
+    invariant intrinsic::storage_length(kept) == index - start
     invariant intrinsic::storage_capacity(kept) == length - start + room_to_read_into
   {
     intrinsic::storage_push(mut kept, value: intrinsic::view_at(intrinsic::storage_view(self.unread), index: index))

@@ -26,7 +26,6 @@ let module_text ?(first = "core::leaf(value)") ?(more = "") index =
   Buffer.contents buffer
 
 let core_text body = Printf.sprintf "internal fn leaf(value: Int64) -> Int64 {\n  %s\n}\n" body
-let write path text = Out_channel.with_open_bin path (fun out -> output_string out text)
 
 let timed run =
   let start = Unix.gettimeofday () in
@@ -36,15 +35,15 @@ let timed run =
 let () =
   let modules = match Sys.argv with [| _; count |] -> int_of_string count | _ -> 40 in
   let root = Filename.temp_dir "truss-timing" "" in
-  at_exit (fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)));
+  at_exit (fun () -> File_system.remove root);
   Unix.putenv "TRUSS_CACHE" (Filename.concat root "store");
   let directory = Filename.concat root "demo" in
   Unix.mkdir directory 0o755;
   let file name = Filename.concat directory name in
-  write (file "truss.toml") "[package]\nname = \"demo\"\ntruss = \"0.1\"\n";
-  write (file "core.truss") (core_text "value");
+  File_system.write (file "truss.toml") "[package]\nname = \"demo\"\ntruss = \"0.1\"\n";
+  File_system.write (file "core.truss") (core_text "value");
   for index = 0 to modules - 1 do
-    write (file (Printf.sprintf "m%d.truss" index)) (module_text index)
+    File_system.write (file (Printf.sprintf "m%d.truss" index)) (module_text index)
   done;
   Printf.printf "%d modules, %d functions\n" (modules + 1) ((modules * functions) + 1);
   let opened label =
@@ -75,7 +74,7 @@ let () =
       (after.adopted - before.adopted)
   in
   let edit session label name text =
-    write (file name) text;
+    File_system.write (file name) text;
     step session label (fun () ->
         Database.refresh session;
         check session;

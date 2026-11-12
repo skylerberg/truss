@@ -16,8 +16,6 @@ val freeze : ?fixed:bool -> t -> unit
 (** Brings an engine up to date and makes it a base, which never changes again. A [fixed] base is a
     package's whose sources never change, such as the standard library's. *)
 
-val is_frozen : t -> bool
-
 val context : t -> Query.context
 (** For a driver's reads, made outside any query. Each result read through it becomes a root: the
     engine maintains it across changes, with every result it reads, and never collects it. *)
@@ -45,6 +43,15 @@ val stabilize : t -> change
     call, and what came out different. *)
 
 val executed : t -> string list
+(** The results computed since the log was last cleared, as ["name(key)"]: for a check that nothing
+    was computed, and for messages. A check of one result uses {!computed}. *)
+
+val computed : t -> ('key, 'value) Query.query -> 'key list
+(** The keys whose results of the query were computed since the log was last cleared, in order. *)
+
+val result_label : ('key, 'value) Query.query -> 'key -> string
+(** A result as {!executed} names it, for messages. *)
+
 val clear_log : t -> unit
 
 type counters = Incremental.counters = {
@@ -81,7 +88,6 @@ val is_input : node -> bool
 val is_fixed : node -> bool
 val reads : t -> node -> node list
 val readers : t -> node -> node list
-val counterpart : node -> t -> node option
 
 val current_in : node -> t -> node option
 (** The same query and key in another engine, computed there if it has none. The other engine only

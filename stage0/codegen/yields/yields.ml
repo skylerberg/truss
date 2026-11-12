@@ -171,8 +171,6 @@ let member : Lir.ty -> Memory_layout.member = function
   | Pointer { target = Value ty; _ } -> Raw (Pointer (Data ty))
   | Pointer _ | Environment _ | Evidence _ -> bug "a local a cursor cannot keep"
 
-let state_ty = Lir.Raw (Integer UInt32)
-
 let cursor_fields _env ~evidence (f : Lir.function_) =
   (Convention.cursor_state, Memory_layout.Raw (Integer UInt32))
   :: List.map (fun local -> (field_name f local, member f.locals.(local).ty)) (kept ~evidence f)

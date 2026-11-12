@@ -597,5 +597,3 @@ let () =
   test "a match arm's body is a statement" (fun () ->
       statement "match event {\n  Click => clicks += 1\n  Done =>\n    finish()\n}"
         "(match (event) (=> Click (+= clicks 1)) (=> Done (call finish)))")
-
-let () = finish ()

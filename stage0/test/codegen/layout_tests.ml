@@ -142,5 +142,3 @@ let () =
       in
       if Glue.trivial glue (list int64) then fail "a List is trivial";
       if not (Glue.trivial glue (option int64)) then fail "an Option of an Int64 is not trivial")
-
-let () = Harness.finish ()
