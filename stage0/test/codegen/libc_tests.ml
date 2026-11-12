@@ -413,7 +413,7 @@ let () =
       let env = Memory_layout.create target_64 ~shape_of:(Monomorphic.shape standard_context) in
       let glue =
         Glue.create env
-          ~kind_of:(Monomorphic.kind standard_context)
+          ~representation:(Monomorphic.representation standard_context)
           ~usize:(Monomorphic.builtin USize) ()
       in
       let int32 = Monomorphic.builtin Int32 in

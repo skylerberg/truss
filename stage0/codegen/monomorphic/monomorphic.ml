@@ -175,7 +175,7 @@ let shape context (ty : Ground.ty) : Memory_layout.shape =
               | Todo_type -> bug "%s is a todo, which no build reaches" (Path.show path)
               | Error_shape _ -> bug "%s did not parse, which no build reaches" (Path.show path))))
 
-let kind context ty : Glue.kind =
+let representation context ty : Memory_layout.representation =
   match (Storage.elements_of ty, ty) with
   | Some element, _ -> Storage element
   | None, Ground.Named { path; arguments = [] } when Intrinsic.builtin_of_path path = Some Handle ->
@@ -184,11 +184,3 @@ let kind context ty : Glue.kind =
     when Intrinsic.builtin_of_path path = Some Shared ->
       Shared value
   | None, _ -> Shape (shape context ty)
-
-let debug_form : Ground.ty -> Glue.debug_form = function
-  | Named { path; _ } -> (
-      match Well_known.of_path path with
-      | Some (String | String_slice) -> Text
-      | Some (List | Slice) -> Sequence
-      | _ -> Structure)
-  | _ -> Structure

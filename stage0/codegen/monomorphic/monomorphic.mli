@@ -50,10 +50,5 @@ val panic_capability : Path.t
 (* What a ground type is made of, for its layout. *)
 val shape : context -> Ground.ty -> Memory_layout.shape
 
-(* What a ground type is, for its generated drop and copy. *)
-val kind : context -> Ground.ty -> Glue.kind
-
-(* How a ground type's debug output is written. The standard library's text
-   types print as quoted text and its lists and slices as lists; this is the
-   one place code generation knows them by path. *)
-val debug_form : Ground.ty -> Glue.debug_form
+(* How a ground type holds its value: its shape, or a built-in representation. *)
+val representation : context -> Ground.ty -> Memory_layout.representation

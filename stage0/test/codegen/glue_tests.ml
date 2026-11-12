@@ -7,12 +7,13 @@ open Codegen_support
 
 let storage element = named "Storage" ~arguments:[ Type element ]
 
-let kind_of extra (ty : Ground.ty) : Glue.kind =
+let representation extra (ty : Ground.ty) : Memory_layout.representation =
   match ty with
   | Named { path = Top { name = "Storage"; _ }; arguments = [ Type element ] } -> Storage element
   | _ -> Shape (shapes extra ty)
 
-let glue ?(extra = []) () = Glue.create (shape_env ~extra ()) ~kind_of:(kind_of extra) ~usize ()
+let glue ?(extra = []) () =
+  Glue.create (shape_env ~extra ()) ~representation:(representation extra) ~usize ()
 
 (* Statements that allocate a storage of [Int32]s holding [values] into
    local [target], using local [buffer]. *)
@@ -64,7 +65,9 @@ let () =
       if Glue.trivial glue (storage int32) then fail "Storage[Int32] is trivial");
   test "a record's drop drops only the fields that own something" (fun () ->
       let extra = [ ("Holder", Record [ field "items" (storage int32); field "count" int32 ]) ] in
-      let glue = Glue.create (shape_env ~extra ()) ~kind_of:(kind_of extra) ~usize () in
+      let glue =
+        Glue.create (shape_env ~extra ()) ~representation:(representation extra) ~usize ()
+      in
       expect_string ~expected:"fn(_0: *mut Holder)\nb0: drop *_0.items; return"
         (Lir.function_to_string (Lir.canonical (Glue.drop glue (named "Holder")).main)));
   test "a copy of storage of plain data is one allocation and one memory copy" (fun () ->

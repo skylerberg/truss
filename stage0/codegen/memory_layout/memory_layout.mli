@@ -54,6 +54,16 @@ type shape =
 
 and variant_shape = { name : string; indirect : bool; fields : (string * member) list }
 
+(* How a type holds its value: inline as its shape, or as one of the
+   built-in types whose drop and copy are not derived from fields. *)
+type representation =
+  | Shape of shape
+  | Storage of Ground.ty  (** [Storage[Element]], the built-in buffer of elements *)
+  | Handle  (** An operating system's descriptor, in a [descriptor] field, closed when dropped *)
+  | Shared of Ground.ty
+      (** A reference to a reference-counted heap block that holds a value of the type. The [value]
+          field is the address of the value in the block. *)
+
 type t = { size : int; alignment : int; form : form; niche : niche option }
 
 and form =

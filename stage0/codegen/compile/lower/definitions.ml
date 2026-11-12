@@ -26,6 +26,16 @@ type context = {
           each constant's lowering, so that one is folded once and what reads it is known *)
 }
 
+(* The standard library's text types print as quoted text and its lists and
+   slices as lists. *)
+let debug_form : Ground.ty -> Glue.debug_form = function
+  | Named { path; _ } -> (
+      match Well_known.of_path path with
+      | Some (String | String_slice) -> Text
+      | Some (List | Slice) -> Sequence
+      | _ -> Structure)
+  | _ -> Structure
+
 let context ?(checks = false) database target =
   let cursor_fields = ref (fun _ -> bug "no driver gives cursors their fields") in
   let monomorphic : Monomorphic.context =
@@ -42,8 +52,7 @@ let context ?(checks = false) database target =
     database;
     env;
     glue =
-      Glue.create env ~kind_of:(Monomorphic.kind monomorphic) ~usize
-        ~debug_form:Monomorphic.debug_form ();
+      Glue.create env ~representation:(Monomorphic.representation monomorphic) ~usize ~debug_form ();
     monomorphic;
     types = { usize; string_slice = Named { path = Well_known.path String_slice; arguments = [] } };
     bool = Monomorphic.builtin Bool;

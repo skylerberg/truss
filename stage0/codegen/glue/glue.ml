@@ -1,13 +1,5 @@
 let bug format = Compiler_bug.bug ~stage:"Glue" format
 
-type kind =
-  | Shape of Memory_layout.shape
-  | Storage of Ground.ty
-  | Handle  (** An operating system's descriptor, in a [descriptor] field, closed when dropped *)
-  | Shared of Ground.ty
-      (** A reference to a reference-counted heap block that holds a value of the type. The [value]
-          field is the address of the value in the block. *)
-
 module Types = Map.Make (struct
   type t = Ground.ty
 
@@ -18,14 +10,14 @@ type debug_form = Structure | Text | Sequence
 
 type t = {
   env : Memory_layout.env;
-  kind_of : Ground.ty -> kind;
+  representation : Ground.ty -> Memory_layout.representation;
   usize : Ground.ty;
   debug_form : Ground.ty -> debug_form;
   mutable trivial_types : bool Types.t;
 }
 
-let create env ~kind_of ~usize ?(debug_form = fun _ -> Structure) () =
-  { env; kind_of; usize; debug_form; trivial_types = Types.empty }
+let create env ~representation ~usize ?(debug_form = fun _ -> Structure) () =
+  { env; representation; usize; debug_form; trivial_types = Types.empty }
 
 let rec trivial t ty =
   match Types.find_opt ty t.trivial_types with
@@ -46,7 +38,7 @@ let rec trivial t ty =
       let answer =
         if any then false
         else
-          match t.kind_of ty with
+          match t.representation ty with
           | Storage _ | Handle | Shared _ -> false
           | Shape (Scalar _) -> true
           | Shape (Record fields) -> List.for_all (fun (_, m) -> member m) fields
@@ -66,7 +58,7 @@ let loop t b ~count body = loop b ~usize:t.usize ~count body
 let instance key main : Lir.t = { key; main; nested = [||] }
 
 let variant_shapes t ty =
-  match t.kind_of ty with
+  match t.representation ty with
   | Shape (Sum variants) -> variants
   | _ -> bug "%s is not a sum type" (Ground.to_string ty)
 
@@ -81,7 +73,7 @@ let drop t ty =
   let pointer = local b ~name:"value" (Pointer { target = Value ty; writable = true }) in
   let value : Lir.place = { root = Local pointer; projections = [ Deref ] } in
   start b (block b);
-  (match (ty, t.kind_of ty) with
+  (match (ty, t.representation ty) with
   | Any _, _ ->
       (* The value's own drop, from slot 0 of its table, then its block. *)
       emit b
@@ -283,7 +275,7 @@ let copy t ty =
   start b (block b);
   (if trivial t ty then emit b (Assign (result, Use (Copy self)))
    else
-     match t.kind_of ty with
+     match t.representation ty with
      | Handle -> bug "a copy of a handle, which is not Copyable"
      | Shared _ ->
          (* A copy is another reference to the same block. *)
@@ -536,7 +528,7 @@ let debug t ty =
           fields;
         text ")"
   in
-  (match (t.debug_form ty, t.kind_of ty) with
+  (match (t.debug_form ty, t.representation ty) with
   | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
       storage_or_view field_ty (value / Field field) ~as_text:(t.debug_form ty = Text)
   | _, Handle -> text "Handle"
@@ -629,7 +621,7 @@ let encode t ty =
       fields
   in
   (if parameter <> None then
-     match t.kind_of ty with
+     match t.representation ty with
      | Handle -> bug "a handle cannot be worked out while compiling"
      | Shared _ -> bug "a shared value cannot be worked out while compiling"
      | Storage element ->

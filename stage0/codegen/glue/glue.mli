@@ -1,20 +1,11 @@
-(* The functions the compiler writes for every type: drop and copy.
+(* Glue, as rustc names it: the functions the compiler writes for every
+   type rather than the program, here drop, copy, debug output and encoding.
 
    Each is an instance of its own, keyed by the type, so it is compiled once
    and shared. Its code follows the type's shape. [Storage[Element]], the
    one built-in type that owns a buffer of elements, has code of its own:
    dropping drops its live elements and frees the buffer, and copying makes
    one allocation, and for plain elements one memory copy. *)
-
-(* What a type is, for glue: made of fields, or the built-in storage of
-   elements of a type. *)
-type kind =
-  | Shape of Memory_layout.shape
-  | Storage of Ground.ty
-  | Handle  (** An operating system's descriptor, in a [descriptor] field, closed when dropped *)
-  | Shared of Ground.ty
-      (** A reference to a reference-counted heap block that holds a value of the type. The [value]
-          field is the address of the value in the block. *)
 
 (* How a type's debug output is written: from its structure, as Truss would
    build it, such as [Point(x: 1.0, y: 2.0)] or [Some(3)]; as quoted text,
@@ -28,7 +19,7 @@ type t
    for every type. *)
 val create :
   Memory_layout.env ->
-  kind_of:(Ground.ty -> kind) ->
+  representation:(Ground.ty -> Memory_layout.representation) ->
   usize:Ground.ty ->
   ?debug_form:(Ground.ty -> debug_form) ->
   unit ->
