@@ -6,7 +6,7 @@ open Lowering
 open Targets
 open Generated
 
-type unsupported = Lowering.unsupported = { what : string; at : Lir.site option }
+type unsupported = Lowering.unsupported = { construct : string; at : Lir.site option }
 
 exception Unsupported = Lowering.Unsupported
 
@@ -81,7 +81,7 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
 
 (* The pulled version of a yielding method: lowered as the method is, but
    holding its arguments as a cursor does, and with its own [yield]s left
-   for yield lowering. With it, what a cursor that has not started owns:
+   for yield lowering. With it, the values a cursor that has not started owns:
    each [own] argument's local, and for a parameter with a default, the
    mask's local and the parameter's bit in it, since the argument is there
    only when the bit is set. *)

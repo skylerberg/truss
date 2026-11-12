@@ -140,7 +140,7 @@ test "every match is found, and text is split and replaced around matches" {
   assert doubled == "first later"
 }
 
-test "a pattern that is not well formed says what is wrong and where" {
+test "a pattern that is not well formed names the problem and its position" {
   assert refuses("(", kind: regex::PatternErrorKind.UnbalancedParenthesis, offset: 0)
   assert refuses("a)", kind: regex::PatternErrorKind.UnbalancedParenthesis, offset: 1)
   assert refuses("[a", kind: regex::PatternErrorKind.UnbalancedBracket, offset: 0)

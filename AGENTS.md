@@ -39,8 +39,8 @@ It does not mean everyday vocabulary.
    failure. When a sentence needs one, find the term it stands for.
 
 2. **Keep Truss's own terms.** `view`, `own`, `mut`, `lends`, `yields`,
-   `uses`, `provide`, capability, and cursor mean what DESIGN.md and
-   SYNTAX.md define. Do not coin more terms. If a new concept needs a name,
+   `uses`, `provide`, capability, and cursor mean what SPECIFICATION.md
+   defines. Do not coin more terms. If a new concept needs a name,
    define the name once, where the concept is introduced.
 
 3. **Name the failure that a rule prevents.** Write "this prevents a use

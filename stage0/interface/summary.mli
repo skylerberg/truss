@@ -12,9 +12,8 @@ val definition : Query.context -> Path.t -> (Resolve.Names.key * Syntax.definiti
 type generic_kind = Type_kind | Value_kind | Capability_kind
 
 val generics_of : (Path.t, (string * generic_kind) list option) Query.query
-(** The generic parameters a type, trait, or capability takes, which is what naming it with
-    arguments needs. [None] for a definition whose header did not parse, which accepts any
-    arguments. *)
+(** The generic parameters a type, trait, or capability takes, which naming it with arguments needs.
+    [None] for a definition whose header did not parse, which accepts any arguments. *)
 
 type trait_header = {
   associated : string list;

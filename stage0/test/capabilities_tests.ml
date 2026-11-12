@@ -1,4 +1,4 @@
-(* The tests of capabilities: what code may call, lambdas' uses,
+(* The tests of capabilities: capability checking, lambdas' uses,
    capability parameters, provide, and dependency grants. *)
 
 open Harness
@@ -158,7 +158,7 @@ let () =
 (* A grant wherever a dependency's code is named *)
 
 (* The codes of [app::main], whose manifest lists the dependencies given,
-   each with what it is granted. *)
+   each with its grants. *)
 let codes_with_grants files grants =
   let database = setup files in
   Database.For_testing.set_manifest (Engine.of_context database)
@@ -215,7 +215,7 @@ let () =
              ({ owner = None; name = "plugins" }, []);
            ]))
 
-(* What a grant names *)
+(* Grant names *)
 
 let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
 let pays = ("app::main", Fixtures.Capabilities.pays)
@@ -381,7 +381,7 @@ let () =
       one_diagnostic (repeat "Mine") "capabilities.not_available";
       fine (repeat "Mine, Clock"))
 
-(* A capability parameter in what a call gives, and in a type *)
+(* A capability parameter in a call's arguments, and in a type *)
 
 let later = ticks ^ Fixtures.Capabilities.later
 

@@ -379,8 +379,8 @@ let clamp_to_definition database (key : Names.key) (span : span) =
    their type's width, which the solver decides by bit-blasting. A
    definition gives the operation's semantics, so the second query is
    equivalent to the first, and its answer is as sound. *)
-(* An obligation's answer: the solver's, or what running the code that
-   decides it gave, or that it timed out, or none yet, while a response it
+(* An obligation's answer: the solver's, or the result of running the code
+   that decides it, or that it timed out, or none yet, while a response it
    needs is pending. [Solved_hidden] is an answer that is not a proof,
    where the query with the definitions of the callees whose bodies are
    hidden here proves. *)
@@ -398,7 +398,7 @@ type run = Template_check of Translate.evaluation | Call of Translate.known_call
 type run_result = Returned of Z.t | Timed_out | Not_run
 
 (* The caller gives the evaluator, since the prover does not depend on
-   code generation. [code_key] changes exactly when what a run gives may,
+   code generation. [code_key] changes exactly when a run's result may,
    and is [None] where the code cannot be built. *)
 type evaluator = { code_key : run -> string option; run : run -> run_result }
 
@@ -459,8 +459,8 @@ let exactly (query : Logic.query) =
                        ( (if signed then "bvashr" else "bvlshr"),
                          [ operand_bits; bits_of second_operand ] ))
               | ("rotate_left" | "rotate_right"), [ second_operand ] ->
-                  (* By the amount modulo the width, with what leaves one end
-                     coming in at the other. *)
+                  (* By the amount modulo the width, with the bits that leave one
+                     end coming in at the other. *)
                   let by = bits_of (Logic.Operation ("mod", [ second_operand; Logic.int bits ])) in
                   let rest = Logic.Operation ("bvsub", [ bits_of (Logic.int bits); by ]) in
                   let towards, back =
@@ -567,7 +567,7 @@ let query_with ?query ~call (obligation : Translate.obligation) choice =
       obligation.constants
   in
   (* The same query, not a copy, when nothing is added, so the solver finds
-     what it made of it before. *)
+     its earlier answer. *)
   match pins @ call_facts ~call obligation with
   | [] -> query
   | added -> { query with facts = query.facts @ added }
@@ -596,7 +596,7 @@ let choices (obligations : Translate.obligation list) =
   all groups
 
 (* An obligation's query of a variant, with a choice of constants, and
-   with what running code gave of its calls. *)
+   with the results of running its calls. *)
 let variant_query ~call (obligation : Translate.obligation) choice variant =
   let query_of base = query_with ?query:base ~call obligation choice in
   match variant with
@@ -620,7 +620,7 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
     | Some (Returned value) -> if Z.equal value Z.zero then Ran_false else Ran_true
     | Some Timed_out -> Run_timed_out
     | Some Not_run | None -> (
-        (* Each question is asked only once what it depends on is
+        (* Each question is asked only once its dependencies are
            answered: a pending response stops the search, which continues
            once it is answered, rather than asking a question the answer may make
            unneeded. *)
@@ -692,7 +692,7 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
   in
   List.map (fun (index, obligation) -> (obligation, solve index obligation chosen)) indexed
 
-(* An obligation's state: where it is, what it asks, where it was not
+(* An obligation's state: where it is, its goal, where it was not
    shown, the diagnostic that says why, and whether its proof trusts
    compiled code. *)
 type 'span state = {
@@ -707,10 +707,10 @@ let definition_states oracles database (key : Names.key) =
   let clamp_to_definition span = clamp_to_definition database key span in
   match Query.demand database proof key with
   | Not_proven_here -> []
-  | Unsupported (span, what) ->
+  | Unsupported (span, construct) ->
       let message =
         Printf.sprintf "The prover cannot read %s yet, so nothing in this definition is proven."
-          what
+          construct
       in
       [
         ( {
@@ -762,9 +762,9 @@ let definition_states oracles database (key : Names.key) =
                        proven: give it %s."
                       (String.concat ", " (List.map (fun (name, _) -> "`" ^ name ^ "`") callees))
                       (if markable then
-                         "an `ensures` that says what is needed, or make it a `public transparent \
-                          fn`"
-                       else "an `ensures` that says what is needed")
+                         "an `ensures` that states the needed fact, or make it a `public \
+                          transparent fn`"
+                       else "an `ensures` that states the needed fact")
               in
               sentence true ^ sentence false
           in

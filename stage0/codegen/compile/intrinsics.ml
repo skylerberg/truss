@@ -114,7 +114,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
      does not hold. These are the only checks: no [requires] clause is
      evaluated when a program runs. *)
   let panic_if (failed : Lir.rvalue) message =
-    (* What a comparison comes to where its operands decide it: two
+    (* A comparison's value where its operands decide it: two
        constants, or an unsigned value and zero. Such a comparison is not
        written. GCC reports a comparison of an unsigned value with zero
        that always or never holds, and the tests compile the C with every
@@ -847,7 +847,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
               { path = Intrinsic.builtin_path (Intrinsic.libc_builtin scalar); arguments = [] }
           in
           let { Libc.parameters; result; _ } = Libc.signature function_ in
-          (* What is copied back after the call: a structure's numbers to the
+          (* The values copied back after the call: a structure's numbers to the
              arguments they were written for. *)
           let after = ref [] in
           let next = ref 0 in

@@ -13,14 +13,14 @@ let keep = Fixtures.Ownership.keep
 let () =
   let bump = Fixtures.Ownership.bump in
   List.iter
-    (fun (what, text) ->
-      test (what ^ " cannot be written through a slice") (fun () ->
+    (fun (place, text) ->
+      test (place ^ " cannot be written through a slice") (fun () ->
           one_diagnostic (bump ^ text) "ownership.read_only_view"))
     [
       ("a read-only parameter", Fixtures.Ownership.read_only_parameter);
       ("a constant", Fixtures.Ownership.constant);
       ("a `let`", Fixtures.Ownership.let_);
-      ("what a slice in a field views", Fixtures.Ownership.what_a_slice_in_a_field_views);
+      ("the place a slice in a field views", Fixtures.Ownership.place_a_slice_in_a_field_views);
     ];
   test "a `var` and a `mut` parameter can be written through a slice" (fun () ->
       fine (bump ^ Fixtures.Ownership.var_and_a_mut_parameter_can_be_written_through_a))
@@ -314,7 +314,7 @@ let () =
   test "an executable quantifier reads the collection that it iterates over" (fun () ->
       fine Fixtures.Ownership.executable_quantifier_reads_the_collection_that_it)
 
-(* What a place given [mut] is taken to keep *)
+(* The facts a place passed [mut] keeps *)
 
 let () =
   let reader = Fixtures.Ownership.reader in
@@ -445,7 +445,8 @@ let () =
   let names = "let names: List[Int64] = [1, 2]\n\n" in
   let config = Fixtures.Ownership.config in
   List.iter
-    (fun (what, text, code) -> test (what ^ " is an error") (fun () -> one_diagnostic text code))
+    (fun (construct, text, code) ->
+      test (construct ^ " is an error") (fun () -> one_diagnostic text code))
     [
       ( "moving a constant with `own`",
         keep ^ names ^ Fixtures.Ownership.moving_a_constant_with_own,
@@ -832,7 +833,7 @@ let () =
   test "two `mut` indexes of a list in one call produce a `Disjoint` obligation" (fun () ->
       fine Fixtures.Ownership.two_mut_indexes_of_a_list_in_one_call_produce_a)
 
-(* What comes to hold a view *)
+(* Values that come to hold a view *)
 
 let window = "type Window(view: Slice[Int64])\n\n"
 
@@ -907,8 +908,8 @@ let () =
 
 let () =
   let take = Fixtures.Ownership.take in
-  let moved_twice what condition =
-    test (what ^ " may have evaluated its right operand") (fun () ->
+  let moved_twice operator condition =
+    test (operator ^ " may have evaluated its right operand") (fun () ->
         one_diagnostic
           (take
           ^ Printf.sprintf

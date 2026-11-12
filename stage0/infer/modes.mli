@@ -1,5 +1,5 @@
-(** What a call lends, which places may be mutated, and whether each argument is passed in the mode
-    its parameter takes. *)
+(** A call's lent places, which places may be mutated, and whether each argument is passed in the
+    mode its parameter takes. *)
 
 open State
 

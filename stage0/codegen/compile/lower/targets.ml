@@ -1,4 +1,4 @@
-(* Calls and the evidence they need: what a trait method reaches, how each
+(* Calls and the evidence they need: a trait method's implementation, how each
    argument is passed, capabilities' and [any] values' tables, and calling
    an instance; with literals and the standard types lowering builds. *)
 
@@ -137,7 +137,7 @@ let dynamic_slot context trait name =
   method_slot ~first:1 (any_methods context trait) name ~missing:(fun () ->
       bug "%s cannot be called through any" name)
 
-(* What a trait's [Self] and parameters stand for in a method called
+(* The instantiation of a trait's [Self] and parameters in a method called
    through an [any] type: [Self] is the [any] type, which fixes each
    associated type. *)
 let any_substitution context ~(any : Types.trait_reference) trait : Types.substitution =
@@ -158,7 +158,7 @@ let any_substitution context ~(any : Types.trait_reference) trait : Types.substi
   | None -> bug "no interface for %s" (Path.show trait)
 
 (* An entry in an [any] table: its C signature, which is the value's
-   pointer, then the method's own, with the evidence for what it uses; how
+   pointer, then the method's own, with the evidence for its capabilities; how
    its result is passed; and the capabilities that the evidence is for. The
    method is [trait]'s, read for the [any] type. An associated capability
    set of an [any] type is empty, so a method that uses [Self.Uses] takes
@@ -269,10 +269,10 @@ let cursor_into st ~path ~type_arguments ~(signature : Types.signature)
    its place, and its type. In the lambda's own state, [bind_capture] binds
    each captured variable to the place the environment gives it, and [body]
    lowers the body, given the place, the mode, and the type of each
-   parameter. The lambda is given its environment, then what its type
-   takes, then the evidence for what its type uses, which whoever calls it
-   passes: that is the only evidence its code can reach. [output] is what
-   the lambda returns, which a [?] in it returns early. *)
+   parameter. The lambda is given its environment, then its type's
+   parameters, then the evidence for its type's capabilities, which its
+   caller passes: that is the only evidence its code can reach. [output] is
+   the lambda's result, which a [?] in it returns early. *)
 let nested_function st ~(function_type : Ground.function_type) ~(output : Types.result option)
     ~(captures : ('key * Lir.place * Ground.ty) list)
     ~(bind_capture : state -> 'key -> Lir.place -> unit)
@@ -354,7 +354,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
       !(st.nested)
 
 (* Calls a function value with arguments that are already in places, one for
-   each parameter of its type, and the evidence for what its type uses. *)
+   each parameter of its type, and the evidence for its type's capabilities. *)
 let call_indirect st ~(function_type : Ground.function_type) ~(value : Lir.place)
     (places : Lir.place list) destination =
   let passed =
@@ -665,7 +665,7 @@ let yielded_type st path type_arguments =
       Monomorphic.ground st.context.monomorphic (bind signature.generics type_arguments) ty
   | Returns _ -> bug "%s does not yield" (Path.show path)
 
-(* What a yielding method yields, in an instance. *)
+(* A yielding method's yield type, in an instance. *)
 let cursor_element context (yielding : Ground.yielding) =
   let signature = signature_of context yielding.method_ in
   match signature.output with
@@ -673,7 +673,7 @@ let cursor_element context (yielding : Ground.yielding) =
       Monomorphic.ground context.monomorphic (bind signature.generics yielding.type_arguments) ty
   | _ -> bug "%s does not yield" (Path.show yielding.method_)
 
-(* What a cursor's [next] returns: an [Option] of what it yields. *)
+(* A cursor's [next] result type: an [Option] of its yield type. *)
 let cursor_result context yielding : Ground.ty =
   Named { path = Well_known.path Option; arguments = [ Type (cursor_element context yielding) ] }
 

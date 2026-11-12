@@ -12,7 +12,7 @@ val current : unit -> t option
 *)
 
 val configure : string option -> unit
-(** Tells the process which registry to use, in place of what its own environment names. The
+(** Tells the process which registry to use, in place of the one its own environment names. The
     background process is told each client's. *)
 
 val versions : t -> Path.package -> (Version.t * string) list

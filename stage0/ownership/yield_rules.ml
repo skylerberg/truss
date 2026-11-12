@@ -300,8 +300,8 @@ let check_concurrent_loops context ~(task_hazard : Path.t -> Views.task_hazard o
                 if is_view context element then
                   reject at
                     (Printf.sprintf
-                       "The element type `%s` is a view, and the method could invalidate what it \
-                        views when it resumes, which would leave the task with a dangling view."
+                       "The element type `%s` is a view, and the method could invalidate its \
+                        original when it resumes, which would leave the task with a dangling view."
                        (Types.show element))
               in
               match iteration with

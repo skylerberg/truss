@@ -49,7 +49,7 @@ let elaborate_code (context : Lower.context) (instance : Lir.t) =
 
 (* A lowering context of its own for one computation, which reads a pulled
    method's cursor and another constant's value through the queries below,
-   so that each is made once and what read it is known. *)
+   so that each is made once and its readers are known. *)
 let rec fresh_context lowering database =
   Lower.context ~checks:lowering.checks
     ~cursor_fields:(fun context yielding ->
@@ -135,9 +135,9 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
   | Table _ -> Compiled (Table (Lower.table context key))
   | Locked_table capability -> Compiled (Table (Lower.locked_table context key ~capability))
 
-(* What an instance compiles to, or for a constant whose value does not
+(* An instance's compiled form, or for a constant whose value does not
    fold, that its evaluator is to be run, which no query can do, since
-   running code is not a function of what a query reads. *)
+   running code is not a function of a query's reads. *)
 and lowered =
   lazy
     (Query.query ~name:"lowered_instance" ~phase:Phases.lowering ~saved:true ~portable:true
@@ -155,7 +155,7 @@ and lowered =
 
 (* Keys. A test's result is kept under the key of everything its code can
    reach, which is composed from the instances' own keys, so that an edit
-   changes the keys of what can reach the edited code and of nothing else. *)
+   changes the keys of the instances that can reach the edited code and of nothing else. *)
 
 (* Declared when the module is initialized, not when first read: a state
    opened before a query is declared leaves out every result that read
@@ -189,12 +189,12 @@ let references =
 
 (* The tests and programs whose keys have been asked for. The instances
    they reach are those searched for groups that reach each other, so this
-   is an input: a driver says what it wants keys for before it asks for
+   is an input: a driver names the instances it wants keys for before it asks for
    them, and nothing is lowered for a test nobody asked about. *)
 let roots : (lowering, Instance.key list) Query.input =
   Query.input ~name:"roots" ~show:show_lowering ()
 
-(* The roots with more wanted: what a driver sets the input to before it
+(* The roots with more wanted: the value a driver sets the input to before it
    asks for those instances' keys. *)
 let add_roots database lowering wanted =
   List.sort_uniq Instance.compare
@@ -221,7 +221,7 @@ let group =
       Reachable.Keys.find_opt key (Query.demand database recursion lowering))
 
 (* The key of everything an instance can reach: its own hash and the keys
-   of what it refers to, or for an instance of a group, the group as a
+   of its references, or for an instance of a group, the group as a
    walk from the instance reaches it. *)
 let rec reach =
   lazy
@@ -242,7 +242,7 @@ let rec reach =
 
 let () = ignore (Lazy.force reach)
 
-(* What a test's result is kept under: the key of everything its code can
+(* The key a test's result is kept under: the key of everything its code can
    reach, the version of code generation, and the target, since [USize] is
    a [typedef] in the C, so the LIR can be the same for two widths while
    results such as [USize.maximum] are not. *)
@@ -399,7 +399,7 @@ let decode compiler ty text : Lir.static_value =
   if !at <> String.length text then bug "a value written out while compiling has bytes left over";
   result
 
-(* How much code a function is, for choosing what is small: each statement,
+(* A function's code size, for choosing the small ones: each statement,
    and each block twice. *)
 let weight (function_ : Lir.function_) =
   Array.fold_left
@@ -563,7 +563,7 @@ let unsupported_message compiler (unsupported : Lower.unsupported) =
             Printf.sprintf "%s:%d:%d: " anchor.path (anchor.first_line + at.line) at.column
         | None -> "")
   in
-  where ^ "Stage0 cannot build this yet: " ^ unsupported.what ^ "."
+  where ^ "Stage0 cannot build this yet: " ^ unsupported.construct ^ "."
 
 (* Runs a step of a build, giving a failure that is not the compiler's as
    its message. A compiler bug is not caught: it is the caller's to report. *)
@@ -905,7 +905,7 @@ let build_program compiler ~main ~output =
   let root = Instance.Program_main main in
   build compiler ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
 
-(* What a run of code while compiling is kept under: the key of everything
+(* The key a run of code while compiling is kept under: the key of everything
    its root can reach, which its inputs are part of. *)
 let derive_run_key = Blake3.derive_key ~context:"truss 2026-11-12 compile-time run key"
 
@@ -997,9 +997,8 @@ let evaluate_call ?results compiler ~time_limit ~function_ ~arguments =
   | _ -> bug "%s has no result to evaluate" (Path.show function_)
 
 let run_key compiler root = reporting compiler @@ fun () -> run_key compiler root
-let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"
 
-let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)
+let create ?(checks = true) ?(file_name = Workspace.file_path) ~want
     ?(worked_on = fun package -> package <> Path.standard_package) database target toolchain cache
     settings =
   let lowering = { target; checks } in

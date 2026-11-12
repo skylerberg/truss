@@ -1,5 +1,5 @@
-(* Timing the code database on a generated package: what a first check
-   costs, what starting again costs, and what an edit costs. This is a tool,
+(* Timing the code database on a generated package: the cost of a first
+   check, of starting again, and of an edit. This is a tool,
    not a test.
 
      dune exec stage0/tools/database_timing/database_timing.exe -- [MODULES]

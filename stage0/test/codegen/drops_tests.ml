@@ -260,8 +260,8 @@ let () =
 
 let make = call "make" ~result:(Some (value text)) ~parameters:[]
 
-(* A function that makes a text, consumes it on one path, and drops what
-   is left, with [before] and [after] around the three steps. *)
+(* A function that makes a text, consumes it on one path, and drops the
+   rest, with [before] and [after] around the three steps. *)
 let made_and_maybe_consumed ~locals ~before ~after =
   function_ ~parameters:[ 0 ]
     ([ condition; local (value text) ] @ locals)

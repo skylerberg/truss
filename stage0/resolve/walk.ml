@@ -96,7 +96,7 @@ let reported state ?fixes code (span : span) message =
 let report state ?fixes code span message = ignore (reported state ?fixes code span message)
 let set state (name : name) target = state.names.(name.id) <- Some target
 
-let unknown state (name : name) ~what candidates =
+let unknown state (name : name) ~expected candidates =
   let fixes =
     match Diagnostic.closest name.text candidates with
     | Some candidate ->
@@ -110,7 +110,7 @@ let unknown state (name : name) ~what candidates =
   set state name
     (Unknown
        (reported state ~fixes Unknown_name name.span
-          (Printf.sprintf "Nothing named `%s` is %s." name.text what)))
+          (Printf.sprintf "Nothing named `%s` is %s." name.text expected)))
 
 let file_item state text = Query.demand state.database Names.find (state.module_, text)
 
@@ -177,7 +177,7 @@ let in_module state module_ (name : name) ~types =
             else None)
           (Query.demand state.database Names.entries module_)
       in
-      unknown state name ~what:("in `" ^ Path.show_module module_ ^ "`") candidates;
+      unknown state name ~expected:("in `" ^ Path.show_module module_ ^ "`") candidates;
       None
 
 let prelude_type state text =
@@ -219,7 +219,7 @@ let type_name state scope ?(variants = false) (path : path) =
                   match if variants then Prelude.find_variant text else None with
                   | Some (type_, variant) -> set state path.last (Variant (type_, variant))
                   | None ->
-                      unknown state path.last ~what:"a type here"
+                      unknown state path.last ~expected:"a type here"
                         (type_candidates state scope
                         @ if variants then List.map fst Prelude.variants else [])))))
 
@@ -362,7 +362,7 @@ and local_value state scope (name : name) =
                          text)))
             end
             else
-              unknown state name ~what:"a value here"
+              unknown state name ~expected:"a value here"
                 (List.map fst (String_map.bindings scope.values)
                 @ List.filter_map
                     (fun (item : Names.entry) ->
@@ -588,13 +588,13 @@ and arm state scope (arm_ : arm) =
 
 (* Declares a value name, reporting it if it hides another. *)
 and declare_value state scope (name : name) =
-  let hides what =
+  let hides existing =
     report state Hides_name name.span
       (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
-         name.text what)
+         name.text existing)
   in
   (match String_map.find_opt name.text scope.values with
-  | Some (_, what) -> hides what
+  | Some (_, existing) -> hides existing
   | None -> (
       match file_item state name.text with
       | Some item when Names.is_value_kind item.kind ->
@@ -684,7 +684,7 @@ and literal_pattern state scope = function
 and qualified_constant state scope = function
   | Module_constant { modules = []; last } ->
       (* The parser builds a qualified constant only with a module before it. *)
-      unknown state last ~what:"a constant in a module here" []
+      unknown state last ~expected:"a constant in a module here" []
   | Module_constant { modules = first :: rest; last } -> (
       match module_of_names state first rest with
       | Ok module_ -> ignore (in_module state module_ last ~types:false)
@@ -807,10 +807,10 @@ and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop
   | Loop_cost cost -> clause state scope { kind = Cost cost; span = written.span; id = written.id }
 
 let declare_type state scope (name : name) target =
-  let hides what =
+  let hides existing =
     report state Hides_name name.span
       (Printf.sprintf "`%s` is already %s, and a name cannot hide another. Choose another name."
-         name.text what)
+         name.text existing)
   in
   (if String_map.mem name.text scope.types then hides "a generic parameter here"
    else

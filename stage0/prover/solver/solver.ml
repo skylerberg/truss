@@ -109,7 +109,7 @@ type request = {
   text : string;
   key : string;
   requested : (Logic.symbol * string) list;
-  asked : string list;  (** What [get-value] is given for each of [requested], in order. *)
+  asked : string list;  (** The [get-value] argument for each of [requested], in order. *)
 }
 
 (* An answer in the canonical names, the same for every query with the
@@ -119,7 +119,7 @@ type canonical = Proven_canonical | Values of (string * string) list | Out_of_st
 let cache : (string, canonical) Hashtbl.t = Hashtbl.create 256
 
 (* Queries are solved on several domains at once, which share the cache
-   and the count of what was solved. *)
+   and the count of solved queries. *)
 let lock = Mutex.create ()
 let locked work = Mutex.protect lock work
 
@@ -171,7 +171,7 @@ let ask solver request =
     match file with
     | Some file when Sys.file_exists file -> (
         (* An answer read is one still asked, so its file's age is how long
-           ago a run last asked it, which is what pruning old answers reads. *)
+           ago a run last asked it, which pruning old answers reads. *)
         (try Unix.utimes file 0. 0. with Unix.Unix_error _ -> ());
         match String.split_on_char '\n' (File_system.read file) with
         | "proven" :: _ -> Some Proven_canonical

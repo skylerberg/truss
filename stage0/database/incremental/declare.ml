@@ -59,7 +59,7 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
         let cell = make_input engine input key ~below:None in
         Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
         record_read context cell.input_node;
-        (* What a driver only observed is collected again. *)
+        (* A result a driver only observed is collected again. *)
         if context.frame = None && context.observing then begin
           defer_collection engine cell.input_node;
           sweep engine
@@ -204,12 +204,12 @@ let demand (context : context) (query : ('key, 'value) query) (key : 'key) : 'va
   in
   (match (context.frame, result) with
   | None, _ ->
-      (* What a driver only observed is collected again, unless something
+      (* A result a driver only observed is collected again, unless something
          reads it or it is a root. *)
       if context.observing then defer_collection engine node;
       sweep engine
   | Some frame, Error (Cycle labels) ->
-      (* A cycle is an error wherever it is met: what reads a result that
+      (* A cycle is an error wherever it is met: a reader of a result that
          is a cycle has the cycle as its own, whether or not it catches it,
          so that its result does not depend on which query met the cycle
          first. *)

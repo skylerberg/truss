@@ -3,10 +3,10 @@
     graph answers; and the background process that holds sessions between commands.
 
     This is the project's layer over {!Session}, which keeps states in the store and knows no
-    compiler stage. What is here knows manifests, packages, the registry, and git. It names no
-    stage's inputs but the project's own: a driver sets a stage's input with {!set}.
+    compiler stage. This layer knows manifests, packages, the registry, and git. It names no stage's
+    inputs but the project's own: a driver sets a stage's input with {!set}.
 
-    The database answers with data. What a command does with it, and how it is shown, is the command
+    The database answers with data. The command's use of it, and how it is shown, is the command
     line's, in [stage0/cli]; the background process runs the command line's own handler, so a
     command's answer is the same whether a session is in the background process or in the command's
     own. *)
@@ -36,7 +36,7 @@ val root : session -> string
 (** The project's root, absolute; empty for a session whose files are in no directory. *)
 
 val context : session -> Query.context
-(** What a driver reads a session's results through. *)
+(** The context a driver reads a session's results through. *)
 
 val set : session -> ('key, 'value) Query.input -> 'key -> 'value -> unit
 (** Sets an input that a stage declares and a driver gives, such as the roots of code generation, or
@@ -44,14 +44,13 @@ val set : session -> ('key, 'value) Query.input -> 'key -> 'value -> unit
     packages and their modules' text, follow from the session's files. *)
 
 val problems : session -> string list
-(** What reading the project's manifests shows to be wrong, each as its file and sentences: one that
-    could not be read, a package name used twice, a dependency that is no package of the project. *)
+(** The errors in the project's manifests, each as its file and sentences: one that could not be
+    read, a package name used twice, a dependency that is no package of the project. *)
 
 val manifest_problems :
   session -> Path.package list -> (string * Path.package * Type_checker.manifest_problem) list
-(** What only the code of the named packages shows to be wrong with their manifests: each one's
-    file, relative to the project's root, its package, and the problem. Asking checks those
-    packages. *)
+(** The errors in the named packages' manifests that only their code shows: each one's file,
+    relative to the project's root, its package, and the problem. Asking checks those packages. *)
 
 val packages : session -> (string * Path.package) list
 (** Every package of the project: its directory relative to the root, and its name. *)
@@ -79,7 +78,7 @@ val code_packages : session -> Path.package -> Path.package list
 (** The packages a package's code uses, its tests apart. *)
 
 val sessions : unit -> (string * int) list
-(** Each open session, by what names it, with how many results it holds. *)
+(** Each open session, by its name, with how many results it holds. *)
 
 (** {1 Other sessions of a project} *)
 
@@ -189,13 +188,13 @@ val plan_lock :
   (lock_plan, string) result
 (** The lock file a project would have with other versions: each package of [set] at the version
     given, or at the registry's newest, and with [all], every registry package of the build at its
-    newest. The rest follow as a build's versions do. It fetches what it needs and writes no file.
-    An error says, in sentences, why there is no such lock file. *)
+    newest. The rest follow as a build's versions do. It fetches the packages it needs and writes no
+    file. An error says, in sentences, why there is no such lock file. *)
 
 (** {1 The background process} *)
 
 val server_key : string -> string
-(** What names the background process for a directory: the root of the project it is in. *)
+(** The name of the background process for a directory: the root of the project it is in. *)
 
 val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
 (** Runs the background process of a key until it has been idle past its limit, the project's

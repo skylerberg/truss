@@ -60,7 +60,7 @@ let rvalue_moves (rvalue : Lir.rvalue) =
 
 let target_moves target = List.concat_map operand_moves (Lir.target_operands target)
 
-(* What a statement does to ownership: the places it moves out of, then the
+(* A statement's effect on ownership: the places it moves out of, then the
    place it gives a value, then the place it drops. *)
 type ownership = { moves : Lir.place list; init : Lir.place option; dropped : Lir.place option }
 
@@ -260,8 +260,8 @@ let rec promote analysis state path =
       | _ -> ())
   | _ -> ()
 
-(* Giving a place a value gives one to what is inside it, but not to what a
-   pointer in it points at. *)
+(* Giving a place a value gives one to its parts, but not to a pointer's
+   target. *)
 let set_init analysis state place =
   let place = before_index place in
   let reached =
@@ -370,7 +370,7 @@ let variant_fields analysis sum variant =
   | Niche_encoded { dataful; _ } when dataful.name = variant -> of_payload dataful.payload
   | _ -> ([], false)
 
-(* The ops that drop what [path] owns in state [s]. [flag] gives the local
+(* The ops that drop [path]'s owned values in state [s]. [flag] gives the local
    holding a path's drop flag, and records that it needs one. *)
 let rec drop_ops analysis state ~flag path =
   match index analysis path with
@@ -459,9 +459,9 @@ and open_ops analysis state ~flag path =
 let may_own analysis state place =
   List.find_opt (fun path_index -> state.maybe_init.(path_index)) (affected analysis place)
 
-(* What a function made is the function's to give away or drop: where it
-   returns, none of its locals owns a value still. What a pointer points at
-   is not looked at, since it may be the caller's, or a block's. *)
+(* A value a function made is the function's to give away or drop: where
+   it returns, none of its locals owns a value still. A pointer's target is
+   not checked, since it may be the caller's, or a block's. *)
 let check_nothing_owned analysis state =
   Array.iteri
     (fun path_index (path : path) ->

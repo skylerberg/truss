@@ -3,11 +3,9 @@
 This document describes stage0's code generation, in
 [`stage0/codegen/`](stage0/codegen): everything between the type checker's
 output and a program that runs. It follows the decisions in
-[DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md), reads the core form
+[SPECIFICATION.md](SPECIFICATION.md) and [DESIGN.md](DESIGN.md), reads the core form
 that [TYPECHECKER.md](TYPECHECKER.md) describes, and relies on the proofs
 that [PROVER.md](PROVER.md) describes.
-
-## What code generation does
 
 Code generation takes the core form of each definition the program can
 reach and produces C, which a C compiler turns into object files, which a
@@ -59,7 +57,7 @@ It does not:
   do not wait for proofs" describes.
 - compile anything used only by proofs: theorems, laws, `proof` blocks,
   `requires`, `ensures`, invariants, `decreases`, cost clauses, and functions
-  called only from those. Code generation starts from what can run, so they
+  called only from those. Code generation starts from executable code, so they
   are never reached.
 
 ## Structure
@@ -123,7 +121,7 @@ The generated C is C11 plus a few builtins that both clang and gcc provide.
 Clang is the supported compiler; gcc should work too. It never includes a
 header: the compiler declares the types, the functions it calls, and the
 libc functions the standard library uses itself, for each target, so
-compiling a file parses only what that file needs. Each file declares the
+compiling a file parses only the declarations that file needs. Each file declares the
 fixed-width integers from the compiler's own predefined macros, such as
 `__INT64_TYPE__`, the target's `USize`, and the runtime's few functions,
 and defines only the small helpers it uses, such as the one that gives a
@@ -142,7 +140,7 @@ The runtime (see [Program startup and failure](#program-startup-and-failure))
 is the exception. It is one fixed file for each target, compiled once and
 cached, and it includes the system's headers, since its declarations of
 signals and alternate stacks differ between systems and parsing them costs
-nothing on an edit. It holds what must not be Truss: the handler for a
+nothing on an edit. It holds the code that must not be Truss: the handler for a
 stack that ran out, failing, which builds its text in a fixed buffer so
 that it never allocates, and allocation. A test program's runtime is a
 second such file: it adds the count of blocks a test must free and the
@@ -253,7 +251,7 @@ its code different from another:
   checker's substitution has fully decided. A method's are its type's and
   then its own, and an `impl` method's are the `impl`'s and then its own.
   Generic code is compiled once for
-  each set of them, as DESIGN.md says, and the type checker has already
+  each set of them, as SPECIFICATION.md says, and the type checker has already
   rejected instantiation cycles.
 - the capability sets bound to its capability parameters, such as
   `Granted = {FileRead, Clock}`, since the hidden evidence parameters differ
@@ -339,7 +337,7 @@ field reaches into the block of an `indirect` variant, and how it is laid
 out is the emitter's business, as are tags and niches: the LIR names
 variants, never tag values.
 
-Code generation never asks the type checker what a value is: every local
+Code generation never asks the type checker for a value's type: every local
 has a ground type, and the layout of each is computed from it.
 
 **The LIR is canonical.** Locals are numbered with the parameters first and
@@ -375,10 +373,10 @@ no pointers, no `size_of`, and no foreign code.
 ### Records
 
 - **Fields are placed by alignment, largest first, then by name.** Reordering
-  fields in the source never changes the layout, which is what DESIGN.md's
+  fields in the source never changes the layout, as DESIGN.md's
   promise that "reordering fields rebuilds nothing" needs. A derived
   `Ordered` compares in declaration order regardless of layout.
-- **A record with one field is laid out as that field,** as DESIGN.md
+- **A record with one field is laid out as that field,** as SPECIFICATION.md
   promises for `UserId(number: UInt64)`: it has the field's size, alignment,
   and spare values. In C it is a `struct` of that one field, which compilers
   pass and store exactly as the field.
@@ -404,7 +402,7 @@ no pointers, no `size_of`, and no foreign code.
   `Option[Bool]`, and `Option[Character]` are the size of their payload.
   The field with the most spare values is used, the first in placement order
   on a tie, and the variants without fields take its first values, in
-  declaration order. What is left is spare for the type around it, so
+  declaration order. The remaining values are spare for the type around it, so
   `Option[Option[Bool]]` is still one byte.
   More can be added later without any change to the language, because no
   program can see a layout.
@@ -424,10 +422,10 @@ no pointers, no `size_of`, and no foreign code.
 
 These are standard-library types written in Truss on top of intrinsics (see
 [The system interface](#the-system-interface)). Their layouts follow from
-their fields like any other type. Truss types cannot define what dropping
-them does, so the one type that owns a buffer of elements is built in:
+their fields like any other type. Truss types cannot define their own
+drop, so the one type that owns a buffer of elements is built in:
 `Storage[Element]` in `standard::intrinsic`, whose drop and copy the
-compiler generates. What matters to code generation is:
+compiler generates. For code generation:
 
 | Type | Fields | Notes |
 |---|---|---|
@@ -461,7 +459,7 @@ code that fills a table for an `impl` and the code that calls through the
 `any` type agree on it.
 
 `any value` allocates the block and moves the value in, which is the one
-allocation DESIGN.md says it costs.
+allocation SPECIFICATION.md says it costs.
 
 ### Shared values
 
@@ -531,15 +529,15 @@ generation only decides how each Truss parameter becomes C parameters.
 
 - **Every pointer is `restrict`.** Truss guarantees that a place passed `mut`
   is used by nothing else during the call, and that a viewed original does
-  not change while the view is in use. That is exactly what `restrict`
-  promises, and it lets the C compiler keep values in registers across
+  not change while the view is in use. That is exactly the `restrict`
+  guarantee, and it lets the C compiler keep values in registers across
   stores, which it can rarely do for C programs. Rust gives LLVM the same
   facts through `noalias`.
 - **Read-only parameters are never copied to be safe.** The original is
   frozen while a view is in use, so passing a pointer is always correct.
 - **A read-only value that holds an array's elements is passed by
   address, whatever its size.** A view of an array's elements is a view
-  into the array's own bytes, and a function may return a view of what a
+  into the array's own bytes, and a function may return a view of the place a
   read-only parameter views. Passed by value, the parameter would be a
   copy in the callee's frame, and the view would outlive it. A small array
   and a small record with an array in it are the values this changes; one
@@ -550,7 +548,7 @@ generation only decides how each Truss parameter becomes C parameters.
   pointer for each capability in `uses`, ordered by the capability's path;
   and the loop body, for a yielding method.
 - **Parameters of zero size disappear.**
-- **What a call goes through comes first.** A function value's environment,
+- **The call's indirection comes first.** A function value's environment,
   a capability entry's evidence, and an `any` value's pointer come before
   the result's pointer and the written parameters.
 - **A call names the place its result goes,** however the result travels,
@@ -565,14 +563,14 @@ fills in each missing argument from its constant. A call that has an
 argument for every parameter sets every bit: a call through a function
 value, an entry of a table, a call the compiler writes itself, and a call
 that is run while compiling are all such calls. Only a call written in
-source can leave an argument out. This keeps DESIGN.md's rule that defaults
+source can leave an argument out. This keeps SPECIFICATION.md's rule that defaults
 are applied by the function, so changing one compiles only the function
 again. It avoids Kotlin's separate `$default` method, which costs an extra
 call.
 
 Where the default must be owned, for a record field or an `own` parameter,
 filling it in copies the constant: free for numbers, strings, and empty
-collections, one allocation for a non-empty one. That is how DESIGN.md counts
+collections, one allocation for a non-empty one. That is how SPECIFICATION.md counts
 it.
 
 A capability method is the exception: its caller evaluates the defaults of
@@ -594,7 +592,7 @@ to drop.
 Every value lowering makes has an owner from its first moment, so that no
 way out of the code can forget it:
 
-- **A scope owns what is dropped as it ends.** A block's scope owns the
+- **A scope owns the values dropped as it ends.** A block's scope owns the
   names bound in it. Each statement has a scope of its own, which owns the
   statement's temporaries: an argument evaluated before the call, a value a
   pattern looks into, the text an interpolation builds. Scopes are one
@@ -625,9 +623,9 @@ places, may own a value and which may not. Then each `drop(place)` becomes:
 - **a drop of the whole place,** where nothing in it was moved out
 - **a drop of each remaining field,** where a field was moved out with
   `own config.name`, so the rest of `config` is dropped field by field. Once
-  `config.name` is assigned again, `config` is whole again, as DESIGN.md
+  `config.name` is assigned again, `config` is whole again, as SPECIFICATION.md
   describes, and is dropped whole. When the fields of an `indirect`
-  variant are moved out, what is left of them is dropped and the variant's
+  variant are moved out, the remaining fields are dropped and the variant's
   block is freed. A sum type's value is asked which variant it holds
   first: a `match` that owns its value moves a payload out in one arm, and
   where the arms meet the value may hold another variant, which is dropped
@@ -661,17 +659,17 @@ owns it, and moves the temporary in: `items = rebuild(own items)` drops nothing,
 place was moved from, `name = other_name` drops the old `name`, and
 `names[0] = other_name` drops the old element. A compound assignment and a
 field written by `with` do the same, and each evaluates the place it
-names once. The temporary is also what keeps a call's result apart from
+names once. The temporary also keeps a call's result apart from
 its arguments: a callee writes a large result through a `restrict` pointer,
 which must not be to a place the callee was also given, as in
 `point = moved(point)`.
 
-`Drops` checks what it is given, so that a mistake in lowering is a
+`Drops` checks its input, so that a mistake in lowering is a
 compiler bug in whatever code has it, not a leak in the runs that reach
 it:
 - no write is to a place that may still own a value
-- where a function returns, none of its locals owns a value still. What a
-  pointer points at is not looked at, since it may be the caller's or a
+- where a function returns, none of its locals owns a value still. A
+  pointer's target is not checked, since it may be the caller's or a
   block's.
 
 Drops of types with nothing to drop, such as plain data, are removed.
@@ -731,7 +729,7 @@ so they are compiled once and shared:
 ### Updates in place
 
 - **`with` on an owned base** writes the new fields into the base's memory,
-  so `own config with (port: 443)` costs one write per field, as DESIGN.md
+  so `own config with (port: 443)` costs one write per field, as SPECIFICATION.md
   says.
 - **Compound assignment** moves the old value into the operator. When the
   operator's trait has an `own self` version, it reuses the old value's
@@ -753,7 +751,7 @@ declares them through traits so that typing and proofs see ordinary
 - `?`, `is`, `match`, `with`, building values, reading fields, and turning a
   `List` into a `Slice`
 
-Float comparisons follow DESIGN.md's lawful rules:
+Float comparisons follow SPECIFICATION.md's lawful rules:
 
 | Truss | C |
 |---|---|
@@ -805,7 +803,7 @@ and its siblings. Full-width multiplication, used by hashing and
 - **A value is evaluated once for a pattern.** A pattern looks into the
   place an expression names, or into a temporary holding its value, whose
   parts its names then own.
-- **A guard sees views** of what its arm binds, so a guard that fails leaves
+- **A guard sees views** of its arm's bindings, so a guard that fails leaves
   the value whole for the next arm. The body then binds the parts again,
   owning them.
 - **Alternatives that bind a name are tested as separate patterns.**
@@ -842,12 +840,12 @@ and its siblings. Full-width multiplication, used by hashing and
 
 - **A constant** is emitted once as static data, with a symbol, and
   referenced by that symbol. A constant is a read-only place, so its data
-  can go in a read-only section. What an instance compiles to is either
+  can go in a read-only section. An instance compiles to either
   code, its LIR, or data: a ground type and a static value, which the
   emitter writes as C initializers, with the elements of storage and the
   blocks of `indirect` variants as static objects of their own.
-- **A constant's value is what running its expression gives.** Lowering
-  folds what it can to exactly that, to save the run: literals, operators
+- **A constant's value is the result of running its expression.** Lowering
+  folds the expressions it can to exactly that, to save the run: literals, operators
   on integers, with Zarith, on floats, with IEEE arithmetic rounded once to
   their type, and on `Bool`, and records, variants, strings, lists, and
   arrays of parts that fold. The core form desugars a list literal into a
@@ -864,7 +862,7 @@ and its siblings. Full-width multiplication, used by hashing and
   too, and its evaluator copies that one's static data, since nothing is
   moved out of a constant.
 - **A list or map literal in a function body** allocates its buffer and
-  fills it, which is the one allocation DESIGN.md counts. A literal whose
+  fills it, which is the one allocation SPECIFICATION.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
   instead.
 - **A `Set` or `Map` literal** makes the collection empty and inserts each
@@ -882,8 +880,8 @@ and its siblings. Full-width multiplication, used by hashing and
   test is incomplete and ends the worker. Builds refuse programs that can
   reach a `todo`.
 
-What a program can reach is what its `main` calls, takes as a value, reads,
-or drops, and so on from each of those, with one difference from what a
+A program reaches the functions its `main` calls, takes as a value, reads,
+or drops, and so on from each of those, with one difference from the code a
 build compiles. A capability's implementation is compiled whole, since its
 table has an entry for every method, but a method of it is reached only
 where code that is reached calls that method of the capability. So a
@@ -965,7 +963,7 @@ loop ended:
   frame, and return `t_stop`. After the method returns, the caller checks
   the slot and returns too.
 
-A lending method always continues after its `yield`, as DESIGN.md promises,
+A lending method always continues after its `yield`, as SPECIFICATION.md promises,
 even if the caller's statement leaves early. So for a lending call, the
 statement's early exits are recorded the same way, but the method runs to its
 end before the caller acts on them.
@@ -986,18 +984,18 @@ loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then reads the
 method's body, and depends on it.
 
-A lending method resumes after the caller's statement, as DESIGN.md has
+A lending method resumes after the caller's statement, as SPECIFICATION.md has
 it, and its own values live until then, so it may lend one it made. The
 LIR is a graph of blocks, so this needs no function for the rest of the
 statement:
 
 - The method's body is written into the caller up to its `yield`, which
   jumps to the rest of the caller's statement with the place it lends.
-- What is left of the method, its code after the `yield` and the drops of
-  what it owns, is written once, in blocks nothing reaches yet.
+- The rest of the method, its code after the `yield` and the drops of its
+  owned values, is written once, in blocks nothing reaches yet.
 - The scope the lending call is in owns the lend, as it owns a temporary.
   As that scope ends, on each way out of it, the code sets a selector to
-  the way it was going and jumps to what is left of the method, which ends
+  the way it was going and jumps to the rest of the method, which ends
   by continuing that way. So a `return` or a `?` in the statement finishes
   the method first, as an ordinary end does, and lends in one statement
   finish in reverse order.
@@ -1008,7 +1006,7 @@ nothing.
 
 A lending method may have a `yield` on each of several paths, as one
 that yields `self.first` on one path and `self.second` on another. Each
-`yield` then stores the address of what it lends and its own number, and
+`yield` then stores the address of its lent part and its own number, and
 the caller reads through the address. As the caller's scope ends, the code
 resumes from the `yield` that was reached, by its number. A value the
 method makes to lend is built in one place that the caller's statement
@@ -1059,8 +1057,8 @@ over a range it is the counted loop, and over a collection it is the call
 of `each` that a `for` loop makes, which the core form gives it. The
 answer starts as true for `forall` and false for `exists`, each value's
 body is evaluated, and the first one that decides the answer sets it and
-leaves the loop as `break` does, so an `each` that is inlined drops what
-it owns. It costs the same as the loop up to that value, and a quantifier
+leaves the loop as `break` does, so an `each` that is inlined drops its
+owned values. It costs the same as the loop up to that value, and a quantifier
 inside a loop or another quantifier needs nothing more.
 
 A loop over a yielding method that is already inlined around it, as a
@@ -1115,12 +1113,12 @@ loop owns each value it gives.
 
 A cursor's drop function runs the `stop` path of the `yield` it is stopped
 at, which drop elaboration has already filled with the drops of the
-method's owned values there. That is what DESIGN.md means by a dropped cursor ending
+method's owned values there. That is SPECIFICATION.md's meaning of a dropped cursor ending
 the method at its last `yield`. Before the method starts, it drops the
 owned parameters, such as the receiver of an `own self` method, and after
 the end it drops nothing. A method whose yields go through a recursive call has
 no fixed-size state, so the type checker reports any pull of it, as
-DESIGN.md says.
+SPECIFICATION.md says.
 
 A cursor of a yielding method implements the prelude's `Cursor` trait, by
 an `impl` that the compiler derives for the yielding function. A call of
@@ -1234,7 +1232,7 @@ and the pool's threads run the tasks that are ready:
   or ends.
 - **A task that waits parks.** Waiting for a key, for a mutex, or for the
   tasks of a group switches from the task's stack back to the thread,
-  which takes the next ready task. A parked task holds no thread. What it
+  which takes the next ready task. A parked task holds no thread. The event it
   waits for makes it ready again, and it then runs on whichever thread
   takes it.
 - **A thread that is not a task blocks while it waits.** The thread that
@@ -1511,8 +1509,8 @@ the nested function's parameter.
 - **A `concurrent for` over any other yielding method, or over a cursor,**
   runs the method sequentially in the enclosing function and spawns a task
   at each `yield`. The value's bytes go to the task in a heap block whose
-  address is `item`, and the task takes them out and frees the block. What
-  the task then holds depends on the `yield`:
+  address is `item`, and the task takes them out and frees the block. The
+  task's ownership then depends on the `yield`:
 
   | Yielded | The task |
   |---|---|
@@ -1545,7 +1543,7 @@ tasks that it ends, innermost first. Lowering handles one task at a time:
    assigns the exit's number to the local `winner` and moves the return
    value into the local `return_value`. If it returns false, another exit
    won, and the temporary is dropped.
-3. The task ends: it drops what its scopes own and jumps to the end of its
+3. The task ends: it drops its scopes' owned values and jumps to the end of its
    region.
 4. After `Tasks.join`, the enclosing code switches on `winner`. If no
    enclosing task remains, it performs the winning exit. Otherwise it
@@ -1639,8 +1637,8 @@ the prover reads that as it reads any code.
 `storage_shorten` forgets every element after the first `length`, in one
 step, and keeps the capacity. Its element type is `Plain`, which the type
 checker holds a call to, since forgetting an element that owns something
-would leak it; a `List` of any elements is cut short by popping. That is
-what makes `String.truncate` constant time.
+would leak it; a `List` of any elements is cut short by popping. That makes
+`String.truncate` constant time.
 
 Storage with capacity 0 and a nonzero length is static, as a string
 literal's is: it owns no buffer, so dropping it frees nothing and copying
@@ -1655,7 +1653,7 @@ copying it.
 
 The libc functions used are declared by the compiler for each target, so the
 generated C still includes no headers. Allocation failure ends the process
-with a message, as DESIGN.md allows for running out of memory.
+with a message, as SPECIFICATION.md allows for running out of memory.
 
 ### The C library
 
@@ -1677,8 +1675,8 @@ Truss has no pointer type, so memory crosses to C only as a view, as
 storage, or as numbers to write. A small structure a function fills is the
 numbers it is made of: `libc_clock_gettime(clock, seconds: mut seconds,
 nanoseconds: mut nanoseconds)` gives a `timespec`'s two, with nothing on
-the heap. `storage_lengthen` then makes what a function wrote into
-storage's room the storage's own. A row can also fix an argument, which
+the heap. `storage_lengthen` then adds the elements a function wrote into
+the storage's spare capacity to the storage. A row can also fix an argument, which
 the Truss call then does not have: `libc_getentropy(mut value)` always
 asks for the eight bytes of the `UInt64` it fills. A function that reads
 its arguments by a
@@ -1712,8 +1710,8 @@ unset; or nothing ever, for `_exit`, which Truss calls
 A structure whose numbers are not of one type is storage of a number that
 several of them make. `poll` takes `pollfd`s, each a descriptor and two
 numbers of half its size, as a `Storage[Int32]` with two elements for
-each: the descriptor, and what to wait for in the low half of the next
-with what was found in the high half. The table's check holds the
+each: the descriptor, and the requested events in the low half of the next
+with the returned events in the high half. The table's check holds the
 structure to that, byte order included.
 
 A larger structure whose layout differs between systems is filled as
@@ -1774,7 +1772,7 @@ on after a signal interrupts a call; and turning an error number into a
 `FileWriter` are written on those, `SystemConsole` writes with them,
 `SystemClock` reads `clock_gettime`, and `SystemRandom` reads
 `getentropy`. `SystemConsole` and `FileReader` each hold a reader of
-lines, which reads a block at a time and keeps what it has not given out.
+lines, which reads a block at a time and keeps the data it has not given out.
 The console's input and its two outputs as streams are each a new
 descriptor for the same open file, made with `fcntl`, so that a stream
 owns the descriptor it closes and the process keeps its first three. The
@@ -1785,7 +1783,7 @@ is how a program learns that it has no terminal. Raw mode reads the
 terminal's settings with `tcgetattr` as the bytes of a `struct termios`,
 changes the flags at the offsets the table's numbers give, and writes them
 with `tcsetattr`: on, the terminal gives each byte as it is typed, with no
-echo, no signals from keys, and no changes to what is written; off, those
+echo, no signals from keys, and no changes to the output; off, those
 are set again. `SystemLog`
 writes each record to standard error as one line and with one `write`,
 `level=warning message="..."` and then each field as `name=value`, with
@@ -1813,7 +1811,7 @@ the standard library reads at the offsets the table's numbers give, and
 it holds every length an entry states to the bytes that were filled. The
 C library's `opendir` and `readdir` are not used, since they keep the
 directory in a structure of the C library's that Truss would have to hold
-an address of. Where Linux does not say what kind an entry is, the kind
+an address of. Where Linux does not give an entry's kind, the kind
 comes from `lstat`.
 `SystemEnvironment` reads one variable with `getenv` and all of them with
 `environment_entry`, an intrinsic that gives the entry at an index of the
@@ -1838,8 +1836,8 @@ discarded is opened on `/dev/null`, a stream that is piped or captured is
 one end of a `pipe` whose other end this process keeps, and the directory
 the program starts in is `posix_spawn_file_actions_addchdir_np`'s. Both
 ends of each pipe are closed in programs that are run, so a child never
-holds the end that its parent writes to it with. `run` reads what it
-captures from both pipes as `poll` finds it, so that neither fills while
+holds the end that its parent writes to it with. `run` reads its
+captured output from both pipes as `poll` finds it, so that neither fills while
 the other is read, and then waits with `waitpid`. A spawned child is a
 handle whose number is the process's and whose descriptor is none;
 `Handles.wait` reads the exit status, or the signal that ended the
@@ -1888,7 +1886,7 @@ the standard library gives it, which Truss then reads. Its row is in the
 table with the C library's, so the prover holds the call to its room in
 the same way, and the standard library calls it `runtime_` and its name.
 A handle's is the only drop that does more
-than free memory, and it runs no Truss code, as DESIGN.md requires.
+than free memory, and it runs no Truss code, as SPECIFICATION.md requires.
 Standard-library types such as `File` hold one in a field, so their drop
 functions release the resource by dropping that field.
 
@@ -1908,7 +1906,7 @@ The C `main` of a program is generated:
 
 Failures end the process without running anything else:
 
-| Failure | What happens |
+| Failure | Result |
 |---|---|
 | `Panic.crash` | Writes the message and position to stderr with `write`, then exits with status 101, as Rust does |
 | Running out of memory | Writes a message to stderr and calls `abort` |
@@ -2022,7 +2020,7 @@ A worker whose test fails an `assert`, panics, overflows its stack, runs out
 of memory, or reaches a `todo` reports why and ends; one that dies without
 a report is recorded from its exit status. The runner then starts a new
 worker and carries on, so a new process starts only after a failure. Ending
-the worker is also what lets an `assert` inside a lambda end its test, which
+the worker also lets an `assert` inside a lambda end its test, which
 an early return could not. The runner kills a worker whose test exceeds the
 project's time limit.
 
@@ -2053,11 +2051,11 @@ A test's result is cached under a key built from all the code it can reach.
 DESIGN.md requires that renaming a definition or moving it to another module
 finds test results already done, so the key contains no names. It is
 composed from the instances' own keys, so that an edit changes the keys of
-the tests that can reach the edited code, and costs what can reach it:
+the tests that can reach the edited code, and costs the instances that can reach it:
 
 - **An instance's own hash** is the hash of its LIR with each instance it
-  refers to written as that instance's place in the list of what it refers
-  to, and each path as a number given in the order paths are first met. It
+  refers to written as that instance's place in its list of
+  references, and each path as a number given in the order paths are first met. It
   holds no name, so renaming or moving a definition changes no hash. A
   constant computed by running code refers to its evaluator, whose code
   determines its value.
@@ -2068,8 +2066,8 @@ the tests that can reach the edited code, and costs what can reach it:
   each other are found, by Tarjan's algorithm, among everything the wanted
   tests and programs reach, and an instance of a group is keyed by the group
   as a walk from the instance reaches it: each of the group's instances, in
-  the order the walk first reaches them, as its own hash and what it refers
-  to, a number for an instance of the group and a key for any other. An
+  the order the walk first reaches them, as its own hash and its
+  references, a number for an instance of the group and a key for any other. An
   instance that refers only to itself is no group, since its own hash marks
   that.
 - **The wanted tests and programs are an input.** Finding groups needs
@@ -2078,10 +2076,10 @@ the tests that can reach the edited code, and costs what can reach it:
   wants before it asks for them, and the database adds them to this input.
   A key asked for without that is an error wherever the code reaches itself.
 - **The groups come out the same unless one forms or changes.** Finding them
-  reads what every reached instance refers to, which changes when a call is
+  reads every reached instance's references, which changes when a call is
   added or removed, and its result changes only when a group does. It is of
   an earlier phase than the keys, so an edit that changes no group costs the
-  keys nothing but the keys of what can reach the edit.
+  keys nothing but the keys of the instances that can reach the edit.
 - **The test's key** is the key of everything the test's own instance can
   reach, with the version of code generation and the target: its widths
   and its system. `USize` is a
@@ -2097,10 +2095,10 @@ every instance that uses the layout, so it changes the key too. A function
 that a thousand tests reach is hashed once, and an edit to it makes its own
 hash again, and the keys of the instances that reach it.
 
-Finding the groups walks every instance the wanted tests reach, when what
-any of them refers to changes. That is the one step here whose cost follows
-the tests asked about and not the change, and it reads only lists of what
-instances refer to.
+Finding the groups walks every instance the wanted tests reach, when the
+references of any of them change. That is the one step here whose cost follows
+the tests asked about and not the change, and it reads only the instances'
+reference lists.
 
 `truss test` keeps results in the code database's store, as
 [DATABASE.md](DATABASE.md#exact-keys) describes, and builds and runs only
@@ -2118,9 +2116,9 @@ machine may have caused. A sanitized run keeps nothing.
 Code generation fails in three ways, and tells them apart, since each is
 for someone else to act on:
 
-| Failure | What it is | How it is reported |
+| Failure | Description | How it is reported |
 |---|---|---|
-| A compiler bug | An invariant of code generation does not hold: a pass met LIR it cannot have been given, or the verifier refused what a pass made | An exception that carries the stage that found it, what it found, and the compiler's context, such as the instance being lowered. Nothing in code generation catches it: the command line reports it once and exits with status 2. |
+| A compiler bug | An invariant of code generation does not hold: a pass met LIR it cannot have been given, or the verifier refused a pass's output | An exception that carries the stage that found it, its message, and the compiler's context, such as the instance being lowered. Nothing in code generation catches it: the command line reports it once and exits with status 2. |
 | A program stage0 cannot build yet | The program is valid, and lowering has no code for something in it, which [Not built](#not-built) lists | An exception that carries the unsupported construct and its position. The driver gives it as the build's error, with the file and line. |
 | A build that cannot be done | The C compiler or the linker refused, or a program run while compiling ended badly | The build's error, with their output |
 
@@ -2134,7 +2132,7 @@ compiler reads as a failure of the program.
 `Verify` checks the LIR, so that a mistake in lowering or in a pass is a
 compiler bug that names its instance, instead of C that is wrong in a way
 the C compiler cannot see. Each instance is a C file of its own, which
-declares what it calls from its own side, so a caller and a callee that
+declares its callees from its own side, so a caller and a callee that
 disagree compile and link without complaint.
 
 Each instance is checked as it is lowered, once its passes have run:
@@ -2159,7 +2157,7 @@ Everything a build links is checked together before any C is emitted:
   each entry of a table and each named function used as a value
 - a drop reaches a drop function
 - each address of a table or of a constant reaches one
-- what an instance compiles to is the instance that was asked for
+- each instance's compiled code is the code of the instance asked for
 
 ## Building
 
@@ -2175,7 +2173,7 @@ only the instances the edit reached:
 - **Each computation lowers in a context of its own,** made from the
   query's reads. A layout or a piece of generated code computed on the way
   is read through that query, never cached where another query could use it
-  without reading what it came from.
+  without reading its inputs.
 - **A constant that is computed by running code** is the one result a
   query cannot make, since running code is not a function of reads. Its
   query says so instead, and the build runs the constant's evaluator, whose
@@ -2186,7 +2184,7 @@ only the instances the edit reached:
 ### Caching
 
 Lowering is a query of the code database, and so are each instance's own
-hash, what it refers to, and its key (see [Lowering](#lowering) and
+hash, its references, and its key (see [Lowering](#lowering) and
 [Test results](#test-results)). [DATABASE.md](DATABASE.md) describes how
 such results are kept current, and found by any worktree that reads the
 same. The steps after lowering are kept under exact keys, the hash of

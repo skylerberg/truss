@@ -155,7 +155,40 @@ let () =
         "types.integer_for_float"
         ~fixed:Fixtures.Infer.integer_literal_where_a_float_is_expected_is_an_fixed);
   test "a literal shift amount is a USize" (fun () ->
-      has_type Fixtures.Infer.literal_shift_amount_is_a_usize "3" ~occurrence:3 "USize")
+      has_type Fixtures.Infer.literal_shift_amount_is_a_usize "3" ~occurrence:3 "USize");
+  test "a loop variable's literal type is decided by the loop's body" (fun () ->
+      has_type Fixtures.Infer.loop_variables_literal_type_is_decided_by_the "0" "UInt8");
+  test "a local's literal type is decided by a later statement" (fun () ->
+      let text = Fixtures.Infer.locals_literal_type_is_decided_by_a_later in
+      has_type text "10" "UInt8";
+      has_type text "2" "UInt8";
+      has_type text "0.5" "Float32";
+      fine text);
+  test "the literal type a local leaves undecided ends with the local's scope" (fun () ->
+      let text = Fixtures.Infer.literal_type_a_local_leaves_undecided_ends_with in
+      has_type text "0" "UInt8";
+      has_type text "5" "UInt64");
+  test "a specification converts a local whose literal type is undecided to Integer" (fun () ->
+      let text = Fixtures.Infer.specification_converts_a_local_whose_literal_type in
+      has_type text "0" "UInt8";
+      fine text);
+  test "a pattern of a local's undecided literal type is checked once it is decided" (fun () ->
+      let text = Fixtures.Infer.pattern_of_a_locals_undecided_literal_type_is in
+      has_type text "3" "UInt8";
+      fine text);
+  test "a local in a block is decided after the block" (fun () ->
+      has_type Fixtures.Infer.local_in_a_block_is_decided_after_the_block "5" "UInt16");
+  test "a local whose literal does not fit the type a later statement decides is an error"
+    (fun () ->
+      one_diagnostic Fixtures.Infer.local_whose_literal_does_not_fit_the_type_a
+        "types.literal_out_of_range");
+  test "a local used as two types is one error, at the second use" (fun () ->
+      one_diagnostic Fixtures.Infer.local_used_as_two_types_is_one_error "types.mismatch"
+        ~says:"An earlier statement decided that the type of `base` is `UInt8`.");
+  test "a local given its default type by a method call is one error, with a fix" (fun () ->
+      one_diagnostic Fixtures.Infer.local_given_its_default_type_by_a_method_call "types.mismatch"
+        ~says:"`base` took its default type, `Int64`, at an earlier method call."
+        ~fixed:Fixtures.Infer.local_given_its_default_type_by_a_method_call_fixed)
 
 (* Operators *)
 
@@ -289,8 +322,9 @@ let () =
   test "a let cannot be assigned" (fun () ->
       one_diagnostic Fixtures.Infer.let_cannot_be_assigned "types.not_assignable");
   List.iter
-    (fun (what, text) ->
-      test (what ^ " cannot be marked `mut`") (fun () -> one_diagnostic text "types.wrong_mark"))
+    (fun (construct, text) ->
+      test (construct ^ " cannot be marked `mut`") (fun () ->
+          one_diagnostic text "types.wrong_mark"))
     [
       ("a read-only parameter", Fixtures.Infer.read_only_parameter);
       ("an `own` parameter", Fixtures.Infer.own_parameter);
@@ -602,8 +636,6 @@ let () =
       fine Fixtures.Infer.for_loop_over_characters_counts);
   test "an operation on a hole is a hole" (fun () ->
       fine Fixtures.Infer.operation_on_a_hole_is_a_hole);
-  test "a loop variable's type comes from the loop's header" (fun () ->
-      one_diagnostic Fixtures.Infer.loop_variables_type_comes_from_the_loops_header "types.mismatch");
   test "a mistake is not reported again as a type that cannot be inferred" (fun () ->
       let database =
         setup [ ("app::main", Fixtures.Infer.mistake_is_not_reported_again_as_a_type_that) ]
@@ -705,7 +737,7 @@ let () =
       one_diagnostic Fixtures.Infer.loops_cost_bound_is_checked "resolve.unknown_name")
 
 (* Every error type carries its report, so nothing is accepted of code that
-   reported nothing: what was once an error with no report is reported. *)
+   reported nothing: an error that once had no report is reported. *)
 
 let identity = Fixtures.Infer.identity
 
@@ -734,8 +766,8 @@ let () =
       one_diagnostic Fixtures.Infer.type_with_no_fields_is_not_its_own_value "types.not_a_value");
   test "`self` outside a method is an error" (fun () ->
       one_diagnostic Fixtures.Infer.self_outside_a_method_is_an_error "types.not_a_value");
-  test "`old` without what it is about is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.old_without_what_it_is_about_is_an_error "types.not_a_value");
+  test "`old` without its operand is an error" (fun () ->
+      one_diagnostic Fixtures.Infer.old_without_its_operand_is_an_error "types.not_a_value");
   test "a type argument that nothing decides is an error at its call" (fun () ->
       one_diagnostic Fixtures.Infer.type_argument_that_nothing_decides_is_an_error_at
         "types.cannot_infer");

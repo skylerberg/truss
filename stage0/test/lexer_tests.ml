@@ -640,18 +640,18 @@ let between = Documents.between
 let backticked = Documents.backticked
 
 let () =
-  let grammar = document "GRAMMAR.md" in
+  let grammar = document "SPECIFICATION.md" in
   let spellings list = List.sort_uniq compare (List.map fst list) in
-  test "GRAMMAR.md lists the keywords" (fun () ->
+  test "SPECIFICATION.md lists the keywords" (fun () ->
       equal_lists Fun.id "keywords" (spellings Token.keywords)
         (words (block_after grammar "Reserved everywhere:")));
-  test "GRAMMAR.md lists the reserved words" (fun () ->
+  test "SPECIFICATION.md lists the reserved words" (fun () ->
       equal_lists Fun.id "reserved" (spellings Token.reserved_words)
         (words (block_after grammar "Reserved for later use")));
-  test "GRAMMAR.md lists the punctuation" (fun () ->
+  test "SPECIFICATION.md lists the punctuation" (fun () ->
       equal_lists Fun.id "punctuation" (spellings Token.punctuation)
         (words (block_after grammar "### Punctuation")));
-  test "GRAMMAR.md's line-break lists match Layout" (fun () ->
+  test "SPECIFICATION.md's line-break lists match Layout" (fun () ->
       let kind_of spelling =
         match Token.word spelling with
         | Some kind -> Some kind

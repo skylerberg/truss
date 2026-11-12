@@ -23,7 +23,7 @@ fn pattern(count: USize) -> List[UInt8] {
   bytes
 }
 
-test "data that zlib and gzip compressed decompresses to what they compressed" {
+test "data that zlib and gzip compressed decompresses to their input" {
   let fox = "hello hello hello hello, the quick brown fox jumps over the lazy dog"
   let zlibbed = bytes_of("78dacb48cdc9c957c8402775144a3252150a4b3393b315928af2cbf314d2f22b14b24a730b8a15f2cb528bc0d2398955950a29f9e9005d8b18f6")
   assert compression::decompress(zlibbed, format: compression::Format.Zlib) is Ok(plain) && text_of(plain) == fox
@@ -35,7 +35,7 @@ test "data that zlib and gzip compressed decompresses to what they compressed" {
   assert compression::decompress(stored, format: compression::Format.Deflate) is Ok(kept) && text_of(kept) == "stored!"
 }
 
-test "what compress writes decompresses to its input, in each format and at each level" {
+test "compress's output decompresses to its input, in each format and at each level" {
   let inputs: List[List[UInt8]] = [[], "a".bytes().to_list(), pattern(1000), pattern(70000)]
   let formats: List[compression::Format] = [compression::Format.Deflate, compression::Format.Zlib, compression::Format.Gzip]
   let levels: List[compression::Level] = [compression::Level.Fastest, compression::Level.Balanced, compression::Level.Smallest]

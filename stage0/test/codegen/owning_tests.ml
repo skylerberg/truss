@@ -13,8 +13,8 @@ let () =
     Fixtures.Owning.argument_moved_before_a_later_argument_returns;
   passes "an early return while an any value is being made leaves no block"
     Fixtures.Owning.early_return_while_an_any_value_is_being_made;
-  passes "an any value drops what its value owns, also when it is made in a loop"
-    Fixtures.Owning.any_value_drops_what_its_value_owns_also_when_it;
+  passes "an any value drops its value's owned parts, also when it is made in a loop"
+    Fixtures.Owning.any_value_drops_its_values_owned_parts_also_when;
   passes "a pulled loop left without taking its value drops the value"
     Fixtures.Owning.pulled_loop_left_without_taking_its_value_drops;
   passes "a loop that uses up a list takes its elements in order"

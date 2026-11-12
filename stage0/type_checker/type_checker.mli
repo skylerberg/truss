@@ -11,7 +11,7 @@ val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 val file_diagnostics : (Path.module_, Diagnostic.t list) Query.query
 (** {!diagnostics} as a query, which the database keeps current and saves. *)
 
-(** What only a package's code shows to be wrong with its manifest. *)
+(** An error in a package's manifest that only its code shows. *)
 type manifest_problem = Package_checks.manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }
       (** A grant's entry that names no capability *)

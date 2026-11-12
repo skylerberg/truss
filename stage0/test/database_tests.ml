@@ -1,5 +1,5 @@
-(* The tests of the code database's sessions: what a session finds, what a
-   restart or a new worktree computes again, what reads what, comparing
+(* The tests of the code database's sessions: a session's findings, the
+   results a restart or a new worktree computes again, dependencies, comparing
    with a commit, overlaps between worktrees, and the background process. *)
 
 open Harness
@@ -20,7 +20,7 @@ let program = Fixtures.Database.doubling
 
 (* A store that holds the standard library's checked state and nothing
    else, as any store does once Truss has run. Checking the standard
-   library and writing its state is most of what a new store costs, and it
+   library and writing its state is most of a new store's cost, and it
    comes out the same for each, so it is done once. *)
 let store_with_standard =
   lazy

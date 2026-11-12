@@ -65,13 +65,13 @@ let printed_body text name =
   copy 0;
   Buffer.contents renumbered
 
-let expect_definition what text expected =
-  test what (fun () ->
+let expect_definition name text expected =
+  test name (fun () ->
       let actual = printed_definition text "g" in
       if actual <> expected then fail "found:\n%s" actual)
 
-let expect_body what text expected =
-  test what (fun () ->
+let expect_body name text expected =
+  test name (fun () ->
       let actual = printed_body text "g" in
       if actual <> expected then fail "found:\n%s" actual)
 
@@ -589,8 +589,8 @@ let printed_derived text type_name trait name receiver =
   | Some form -> Core_print.show form
   | None -> failwith "the derived method has no core form"
 
-let expect_derived what text type_name trait name receiver expected =
-  test what (fun () ->
+let expect_derived test_name text type_name trait name receiver expected =
+  test test_name (fun () ->
       let actual = printed_derived text type_name trait name receiver in
       if actual <> expected then fail "found:\n%s" actual)
 

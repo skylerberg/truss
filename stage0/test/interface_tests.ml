@@ -270,7 +270,7 @@ let () =
     Fixtures.Interface.types_that_hold_each_other_are_copyable_when
     (fun _ -> Types.named (app "Even") [])
     Interface.Impls.copyable;
-  property "types that hold each other are not Copyable when one holds what is not" false
+  property "types that hold each other are not Copyable when one holds a type that is not" false
     Fixtures.Interface.types_that_hold_each_other_are_not_copyable_when
     (fun _ -> Types.named (app "Even") [])
     Interface.Impls.copyable;

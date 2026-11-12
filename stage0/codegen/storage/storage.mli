@@ -1,5 +1,5 @@
 (* [Storage[Element]] and [View[Element]], the two built-in types that hold
-   a buffer of elements: what each is made of, the states a storage can be
+   a buffer of elements: each one's shape, the states a storage can be
    in, and the places and values the rest of code generation makes of them.
    Nothing else names their fields.
 
@@ -22,7 +22,7 @@ val view_of_elements : Ground.ty -> Ground.ty
 val elements_of : Ground.ty -> Ground.ty option
 val viewed : Ground.ty -> Ground.ty option
 
-(* What each is made of, where [usize] is the type of a length. *)
+(* Each one's shape, where [usize] is the type of a length. *)
 val shape : usize:Ground.ty -> Ground.ty -> Memory_layout.shape
 val view_shape : usize:Ground.ty -> Ground.ty -> Memory_layout.shape
 

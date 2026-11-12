@@ -27,7 +27,7 @@ val cursor_fields :
 
 (* [next]: takes a writable pointer to the cursor, of type [cursor], then
    the method's evidence, and returns [result], the method's [Option] of
-   what it yields, whose variants are [Some], with the field [value], and
+   its yield type, whose variants are [Some], with the field [value], and
    [None]. *)
 val cursor_next :
   Memory_layout.env ->

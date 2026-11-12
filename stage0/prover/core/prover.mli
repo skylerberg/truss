@@ -20,7 +20,7 @@ val proof : (Resolve.Names.key, proof) Query.query
     arguments are known. *)
 type run = Template_check of Translate.evaluation | Call of Translate.known_call
 
-(** What a run gave: an integer, or a [Bool] as 0 or 1; that it timed out; or that it was not run,
+(** A run's result: an integer, or a [Bool] as 0 or 1; that it timed out; or that it was not run,
     since its code cannot be built. *)
 type run_result = Returned of Z.t | Timed_out | Not_run
 

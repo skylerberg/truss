@@ -233,8 +233,8 @@ let selection =
           ~local:named ~load
       in
       let missing = List.sort_uniq compare !missing in
-      (* While a package is still to be fetched, what is wrong with the
-         build is not known yet. *)
+      (* While a package is still to be fetched, the build's errors are
+         not known yet. *)
       let lock_fix = ref None in
       if missing = [] then begin
         List.iter

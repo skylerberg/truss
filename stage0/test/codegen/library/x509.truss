@@ -1,0 +1,82 @@
+use standard::cryptography
+use standard::der
+use standard::files
+use standard::x509
+
+let leaf_pem: String = "-----BEGIN CERTIFICATE-----\nMIICbjCCAVagAwIBAgIBAzANBgkqhkiG9w0BAQsFADAiMSAwHgYDVQQDDBdUcnVz\ncyBUZXN0IEludGVybWVkaWF0ZTAgFw0yNjExMTIyMjIxMjJaGA8yMTI2MTAxOTIy\nMjEyMlowFzEVMBMGA1UEAwwMZXhhbXBsZS50ZXN0MHYwEAYHKoZIzj0CAQYFK4EE\nACIDYgAEvzvKOxz5C93X+OXxQrp3/F0dtxh3eK9pIopcBnV1gVjKYzM4mKt45UQ/\nzGDdhSCOAEOBzULop1k3QI6hM7vDTltWP4mICpcLW2aHRcfMRSDhLuzXlVtsOfzZ\nlpFnVsTGo2YwZDAJBgNVHRMEAjAAMA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAK\nBggrBgEFBQcDATAyBgNVHREEKzApggxleGFtcGxlLnRlc3SCEyouYXBwcy5leGFt\ncGxlLnRlc3SHBAoBAgMwDQYJKoZIhvcNAQELBQADggEBAIutZbGNFD9/bKe4syl2\n3zsPy2RM7QNpEANP1qnre58eQ3jrex5CgUXrjphhM4+aA3JHrYEhnTo0aR+06SNg\n6SdIZRGnarCFyCHLGlU7U6egA5q9lghJmwLW16DCFk0B0cYEB7mqXJI3Ggn+o+Ld\nYaeXx5E32o+Zxk9WAlWZxAJWA8hhYwk7BlrD05tDoHnD8dtRyFZkjPQA2JtiiepX\nDKvL8+nnv38K+TPx3PgKHvlUCXemKXf1IM7BnVuWQ7h11TRcRaOyMI2nj+z9chnH\nb668LZE68cgTcXc2WT+xDpKZ7++gMW8WR/5VD/p8PmGCIuf0q3PX8QxvMubFV57+\nQ8M=\n-----END CERTIFICATE-----\n"
+
+let intermediate_pem: String = "-----BEGIN CERTIFICATE-----\nMIICHTCCAcSgAwIBAgIBAjAKBggqhkjOPQQDAjAaMRgwFgYDVQQDDA9UcnVzcyBU\nZXN0IFJvb3QwIBcNMjYxMTEyMjIyMTIyWhgPMjEyNjEwMTkyMjIxMjJaMCIxIDAe\nBgNVBAMMF1RydXNzIFRlc3QgSW50ZXJtZWRpYXRlMIIBIjANBgkqhkiG9w0BAQEF\nAAOCAQ8AMIIBCgKCAQEA0Qi1aEgwP8H8dvE1sZoerMme7LhKYBmGluu0nGxRXjPI\n1Ny9qZi/fv9aIPki2yGCNpGh6oYZgMkursuEFy/1E3i5sHg0LkF0hvwHj+DmksPS\nL71MtMv9n9mM1GjV44MB88AFmSAFXm3xodQ2KTERqG1LsGU2Dp77Mn6Vg/UdlzcH\nQhaO1PfOHYFllBmn6/Nz798GoUlLZN2iEILDizSRGbiFQMUQAtrAtu5CYA12fS7d\nGuw43xV14mSkDl2TIWAHPbAGYRamLAw4ONzcd6Ha9tAkw8kyxx6kaJ7Hnv0anin7\n5x7KvINq35UxPGTOY9iP2r2GOkYXpVeYX27M0+iitwIDAQABoyYwJDASBgNVHRMB\nAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwICBDAKBggqhkjOPQQDAgNHADBEAiAO\n8JFenyaQPpZU2tNOtXoJJ40Z1eOT2O6iPMSan24s3wIgHAojsSLTw4JnBCx3dS7q\noHD5V4eN6RPW/aJXXw+h0tg=\n-----END CERTIFICATE-----\n"
+
+let root_pem: String = "-----BEGIN CERTIFICATE-----\nMIIBZzCCAQ2gAwIBAgIBATAKBggqhkjOPQQDAjAaMRgwFgYDVQQDDA9UcnVzcyBU\nZXN0IFJvb3QwIBcNMjYxMTEyMjIyMTIyWhgPMjEyNjEwMTkyMjIxMjJaMBoxGDAW\nBgNVBAMMD1RydXNzIFRlc3QgUm9vdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA\nBCfhX1Qdf96EEGtKWroHZr+BKXqWBBA2wlcyEokMJ8/YdaZaZuhy5WrmSA9g86KI\nvvtFrzu+27/Pxx6vVJU4F/CjQjBAMB0GA1UdDgQWBBSCaJNI2d3QmDK3XykacsXN\nZTG9QjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAKBggqhkjOPQQD\nAgNIADBFAiEA8pe+1IlvjVklgXclN5mofhk3LB4GlbXcQ8O/qh1+iBACIDUH1nvd\npxBpi5fLaZ/7HZdobxHaII3PnGetZ0IWCRK9\n-----END CERTIFICATE-----\n"
+
+let leaf_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDBy766aCiN2LsAG1Jlw\nKI4tX3IoEJowFwLE4gwHaedWy839HnUeAhUrSKib+bG7Uv6hZANiAAS/O8o7HPkL\n3df45fFCunf8XR23GHd4r2kiilwGdXWBWMpjMziYq3jlRD/MYN2FII4AQ4HNQuin\nWTdAjqEzu8NOW1Y/iYgKlwtbZodFx8xFIOEu7NeVW2w5/NmWkWdWxMY=\n-----END PRIVATE KEY-----\n"
+
+let intermediate_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDRCLVoSDA/wfx2\n8TWxmh6syZ7suEpgGYaW67ScbFFeM8jU3L2pmL9+/1og+SLbIYI2kaHqhhmAyS6u\ny4QXL/UTeLmweDQuQXSG/AeP4OaSw9IvvUy0y/2f2YzUaNXjgwHzwAWZIAVebfGh\n1DYpMRGobUuwZTYOnvsyfpWD9R2XNwdCFo7U984dgWWUGafr83Pv3wahSUtk3aIQ\ngsOLNJEZuIVAxRAC2sC27kJgDXZ9Lt0a7DjfFXXiZKQOXZMhYAc9sAZhFqYsDDg4\n3Nx3odr20CTDyTLHHqRonsee/RqeKfvnHsq8g2rflTE8ZM5j2I/avYY6RhelV5hf\nbszT6KK3AgMBAAECggEACXUAaBBkBm5rUqJFEJztaFnS09jenIxrF2bgi/cmk0F6\ng47dEdA0UbWRyU4cMpfIgVmDXs3kV3xCnWvdtQLZbqEWnZJCohkaAYVjfjHpnJg5\naSmCT+euuM2p3m5DxwBFVVbJqgzV0VjeBrlIHgL3ToxrUTazBGRS7wzlDMxJI28n\n94la9X2HvUK8zxM1VC56tUITCOT3+eEAMSuUHZRD2hfOLdr9M5eu3STU0wyP9afX\n64rN8px6bSJ9AcaANZ+gtZ32RBSbo4j/6/XzIxf9apgOIc1sXTtX+G3y+lNIgLdC\n+kOb/tG3Ns9mvLH5DuVNNjDtllfqRRQBq9VxVtHzMQKBgQDthjPZNDn3PciN0EqT\n0ib10TENHNKQL/3HuNVBhU8mTH9KQyrEpt+v2wwfHEYYI0+7cNdakcZnstqzvwN+\nG5rTckSo78WLvd1VuE6UARDWWaipYj2Ji/WLbIGY5cKeAlDV9kfN/fC2q3mTXMbX\nZJQQc8NHiqpKmNW+pOpVcc/HfwKBgQDhSy7nzh1P8QkMGn5QraFrD6zTs/NrGHhp\nIpkbWbM3T8zZdHqwU9/qXa39oWzL5gT8Pt7G3ibRQztbQ2Sd8rP95ZvmB6WRkXD7\ndUGap9sj/dClnSizRsFikQ78y4KYlU6C+Hky7emlZNZTAgFzVskxpzPwhjVC/aH9\nqPr/QrsAyQKBgQCbEmoZXaqWi4S7aYi3F5YOGQSAPhgOwPZcBYVdYI57P6g/MLjk\naNpTcpxoV0pAChXNF2/SFqhFHZUBkyzRkW40rD69WMVNZajyhQDwSf3XI/Qkmhn5\nCiJGY5H848x64qIp/r+Eck1MxYj7N7AuAeFVGG8e7x4c08mAzSScolB4OwKBgCC6\n3HCeuBFyEf9pJeqwnt+/4jrLTNTFNFEJzrZzfJ7PgBIjYuOU+9W/kFRljDm/DABd\nXd4ETh1eqBPlIYv0w4NiRRjRCZOxTnmpmkNOmX6MFDDLOSt6XwPj0QqWwj1Ki6Jp\nWKo2eBgoIx7iDrXj6MzG3rvVs40s7ci9MOG+nw5JAoGAb4h8OXyNyOW9pgh0KMBe\nRIgO5lwB92eGgyo2Hc6nPe223Z20wdp6zIRQvBAakhXylry3YrhuRq+RFb+fTfQZ\nrhuULht1t9oGKOE0DF7et3S7PaPwcpukfQEEBnwrXr7uZkhNvPKAv7oDwV+Ue7Pw\nwFX608zezDf3ilFLAj7YRKQ=\n-----END PRIVATE KEY-----\n"
+
+fn one(text: StringSlice) -> x509::Certificate
+  uses Panic
+{
+  match x509::parse_pem(text) {
+    Ok(certificates) => certificates[0].copy()
+    Err(_) => Panic.crash("a certificate")
+  }
+}
+
+fn now() -> Instant
+  uses Panic
+{
+  Instant.from_unix_seconds(1900000000).expect("in range")
+}
+
+test "a certificate is read: names, validity, key, and extensions" {
+  let leaf = one(leaf_pem.slice())
+  assert leaf.common_name() == Some("example.test".slice())
+  assert leaf.dns_names().length() == 2 && !leaf.is_authority()
+  assert leaf.public_key() is Ecdsa(key) && key.curve() == cryptography::Curve.P384
+  assert leaf.not_before() < now() && now() < leaf.not_after()
+  let intermediate = one(intermediate_pem.slice())
+  assert intermediate.is_authority() && intermediate.public_key() is Rsa(_)
+  assert der::parse(leaf.encoded()) is Ok(_)
+}
+
+test "a chain verifies up to a trusted root, and fails for another host, time, or root" {
+  let chain: List[x509::Certificate] = [one(leaf_pem.slice()), one(intermediate_pem.slice())]
+  let roots: List[x509::Certificate] = [one(root_pem.slice())]
+  assert x509::verify_chain(chain, roots: roots, host: "example.test", now: now()) == Ok(Unit)
+  assert x509::verify_chain(chain, roots: roots, host: "API.Apps.Example.Test", now: now()) == Ok(Unit)
+  assert x509::verify_chain(chain, roots: roots, host: "10.1.2.3", now: now()) == Ok(Unit)
+  assert x509::verify_chain(chain, roots: roots, host: "a.b.apps.example.test", now: now()) == Err(x509::VerifyError.WrongHost)
+  assert x509::verify_chain(chain, roots: roots, host: "other.test", now: now()) == Err(x509::VerifyError.WrongHost)
+  let early = Instant.from_unix_seconds(1000000000).expect("in range")
+  assert x509::verify_chain(chain, roots: roots, host: "example.test", now: early) == Err(x509::VerifyError.NotYetValid)
+  let no_roots: List[x509::Certificate] = []
+  assert x509::verify_chain(chain, roots: no_roots, host: "example.test", now: now()) == Err(x509::VerifyError.UnknownIssuer)
+  let only_leaf: List[x509::Certificate] = [one(leaf_pem.slice())]
+  assert x509::verify_chain(only_leaf, roots: roots, host: "example.test", now: now()) == Err(x509::VerifyError.UnknownIssuer)
+  let leaf_as_issuer: List[x509::Certificate] = [one(intermediate_pem.slice())]
+  assert x509::verify_chain(leaf_as_issuer, roots: roots, host: "example.test", now: now()) is Err(_)
+}
+
+test "PKCS #8 keys are read, and sign what their certificates' keys verify" {
+  let blocks = x509::pem_blocks(leaf_key_pem.slice(), label: "PRIVATE KEY")
+  assert blocks.length() == 1
+  assert x509::parse_private_key(blocks[0]) is Some(Ecdsa(key)) && key.verifying_key().curve() == cryptography::Curve.P384
+  let rsa_blocks = x509::pem_blocks(intermediate_key_pem.slice(), label: "PRIVATE KEY")
+  assert x509::parse_private_key(rsa_blocks[0]) is Some(Rsa(private))
+    && one(intermediate_pem.slice()).public_key() == x509::PublicKey.Rsa(key: private.public_key())
+}
+
+test "an ECDSA signature goes to DER and back" {
+  var raw: List[UInt8] = List.filled(1, count: 64)
+  raw[0] = 200
+  raw[32] = 0
+  let encoded = x509::ecdsa_signature_to_der(raw)
+  assert x509::ecdsa_signature_from_der(encoded, size: 32) == Some(own raw)
+}
+
+test "the system's roots are read from the first bundle present" {
+  var disk = files::MemoryFiles.new().with_text(Path.new("/etc/ssl/cert.pem"), contents: root_pem.slice())
+  provide mut disk {
+    assert x509::system_roots() is Ok(roots) && roots.length() == 1
+  }
+}

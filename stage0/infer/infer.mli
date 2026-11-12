@@ -16,7 +16,7 @@ module Members : sig
   val shape : Query.context -> Path.t -> Types.shape option
 end
 
-(** What a name, member, or bracket expression resolves to, once types are known. *)
+(** The resolution of a name, member, or bracket expression, once types are known. *)
 type resolution = Tables.resolution =
   | Local_value of Syntax.id  (** A local, by the id of the name that binds it. *)
   | Global of { path : Path.t; type_arguments : Types.argument list }
@@ -38,11 +38,11 @@ type tables = Tables.published = {
   callees : Path.t option array;
       (** By the id of each call of a named function or a type's own method: the callee's path. *)
 }
-(** What tools read of a checked definition, such as hover, find references, and the unused-code
-    check. The prover and code generation read the core form instead. Each table is a dense array
-    keyed by the syntax tree's node ids. Every type in them is solved: no [Variable] or [Literal]
-    remains, and no unknown set of capabilities. A [Hole] stays where a [todo]'s type was never
-    decided. *)
+(** The tables tools read of a checked definition, such as hover, find references, and the
+    unused-code check. The prover and code generation read the core form instead. Each table is a
+    dense array keyed by the syntax tree's node ids. Every type in them is solved: no [Variable] or
+    [Literal] remains, and no unknown set of capabilities. A [Hole] stays where a [todo]'s type was
+    never decided. *)
 
 type type_check_result = Body.type_check_result = {
   tables : tables;
@@ -91,7 +91,7 @@ val is_clean : Query.context -> Resolve.Names.key -> bool
 
 module For_testing : sig
   val specification : (Resolve.Names.key, Core.t option) Query.query
-  (** What a caller's proof reads of a definition: its core form, without the body of a function
+  (** The part of a definition a caller's proof reads: its core form, without the body of a function
       whose body no caller's proof reads. The parameters and the contract are built before the body,
       so their nodes are numbered the same whatever the body is. Editing such a body leaves this
       result equal, and no caller is proven again.
@@ -104,7 +104,7 @@ module For_testing : sig
       theorem asserts the [requires] and assumes the [ensures]. *)
 
   val exported_specification : (Resolve.Names.key, Core.t option) Query.query
-  (** What a caller's proof in another package reads of a definition. Editing the body of a function
-      that is not [transparent] leaves this result equal, so no proof in a package that depends on
-      this one runs again. *)
+  (** The part of a definition a caller's proof in another package reads. Editing the body of a
+      function that is not [transparent] leaves this result equal, so no proof in a package that
+      depends on this one runs again. *)
 end

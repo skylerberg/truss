@@ -39,7 +39,7 @@ val read : request -> canonical -> answer
 (** A canonical answer in the request's own symbols. *)
 
 val solved : t -> int
-(** How many queries this solver has run itself, leaving out those answered from a cache: what
+(** How many queries this solver has run itself, leaving out those answered from a cache, as
     incremental work's tests count. *)
 
 module For_testing : sig

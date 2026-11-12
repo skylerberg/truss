@@ -29,10 +29,10 @@ let () =
       proven Fixtures.Library_use.take_and_clear_leave_a_map_without_the_key);
   test "maps and sets are compared" (fun () ->
       proven Fixtures.Library_use.maps_and_sets_are_compared);
-  test "a set holds what was inserted and not what was removed" (fun () ->
-      proven Fixtures.Library_use.set_holds_what_was_inserted_and_not_what_was);
-  test "a set literal contains what it lists and nothing else" (fun () ->
-      proven Fixtures.Library_use.set_literal_contains_what_it_lists_and_nothing)
+  test "a set holds inserted elements and not removed ones" (fun () ->
+      proven Fixtures.Library_use.set_holds_inserted_elements_and_not_removed_ones);
+  test "a set literal contains its listed elements and nothing else" (fun () ->
+      proven Fixtures.Library_use.set_literal_contains_its_listed_elements_and)
 
 let () =
   test "a display that ends is proven, and a function with a time clause calls it" (fun () ->

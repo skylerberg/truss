@@ -1,15 +1,15 @@
-(** What a compiler stage sees of the code database: declaring inputs and queries, and reading them
-    while a query runs.
+(** The code database's interface for a compiler stage: declaring inputs and queries, and reading
+    them while a query runs.
 
-    A query is a pure function of what it reads through its context. The database records each read,
-    and when something changes, computes again only the results that read what really changed,
-    stopping wherever a result comes out the same. A stage never sets an input, never names a
-    session, and cannot tell whether it runs in the background process, in a test, or for a commit.
-*)
+    A query is a pure function of the reads it makes through its context. The database records each
+    read, and when something changes, computes again only the readers of the values that really
+    changed, stopping wherever a result comes out the same. A stage never sets an input, never names
+    a session, and cannot tell whether it runs in the background process, in a test, or for a
+    commit. *)
 
 type context = Incremental.context
-(** What a running query reads through. A driver gets one from the database for reads made outside
-    any query. *)
+(** The context a running query reads through. A driver gets one from the database for reads made
+    outside any query. *)
 
 type subject = Incremental.subject = { path : Path.t; part : string option }
 (** The definition, and the part of it, that a result is about, for answering questions about
@@ -56,10 +56,9 @@ val query :
     the store, and each is a fact that a state finds once it has held a result of the same key; its
     keys and values must then hold no functions. With [~portable:true] a state that has never held
     one finds it too, which suits results that many states come to need without starting from one
-    another, such as what an instance of the standard library compiles to. [equal] decides whether a
-    result came out the same, and defaults to structural equality, so a value must not hold
-    functions unless [equal] is given. Reading a query of a later phase raises [Invalid_argument].
-*)
+    another, such as an instance of the standard library's LIR. [equal] decides whether a result
+    came out the same, and defaults to structural equality, so a value must not hold functions
+    unless [equal] is given. Reading a query of a later phase raises [Invalid_argument]. *)
 
 val find : context -> ('key, 'value) input -> 'key -> 'value option
 (** An input's value, or [None] if it is not set. *)

@@ -14,7 +14,7 @@ test "hexadecimal text decodes to bytes, in either case" {
   assert hex::decode("") is Ok(bytes) && bytes.length() == 0
 }
 
-test "decoding says what is wrong with text that is not hexadecimal" {
+test "decoding names the problem with text that is not hexadecimal" {
   assert hex::decode("abc") == Err(hex::DecodeError.OddLength)
   assert hex::decode("ag") == Err(hex::DecodeError.InvalidCharacter(offset: 1))
   assert hex::decode("zz") == Err(hex::DecodeError.InvalidCharacter(offset: 0))

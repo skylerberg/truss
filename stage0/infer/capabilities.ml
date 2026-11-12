@@ -88,13 +88,13 @@ let no_capabilities description =
   }
 
 (* A dependency may only use the capabilities that the package's manifest
-   grants it. [uses] are the capabilities that [what], a definition of
+   grants it. [uses] are the capabilities that [subject], a definition of
    [package], uses. Capability parameters are not checked: they are
    instantiated by the caller. *)
-let check_grant checking (origin : Core.origin) ~what package (uses : Types.capability_set) =
+let check_grant checking (origin : Core.origin) ~subject package (uses : Types.capability_set) =
   List.iter
     (fun capability ->
-      report checking Not_granted origin (Interface.Grants.message ~what ~of_:package capability))
+      report checking Not_granted origin (Interface.Grants.message ~subject ~of_:package capability))
     (Interface.Grants.missing checking.state.database ~package:checking.state.package ~of_:package
        uses)
 
@@ -108,14 +108,14 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
       Option.iter
         (fun (signature : Types.signature) ->
           check_grant checking origin
-            ~what:(Printf.sprintf "`%s`" (Path.show path))
+            ~subject:(Printf.sprintf "`%s`" (Path.show path))
             (Path.package path) signature.uses)
         (Query.demand state.database Environment.signature path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
       (match Members.trait_method state.database trait.trait name receiver with
       | Some method_ ->
           check_grant checking origin
-            ~what:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
+            ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
             (Path.package trait.trait) method_.method_signature.uses
       | None -> ());
       match evidence with
@@ -126,7 +126,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.callee) =
                 (fun (method_name, method_receiver, (method_signature : Types.signature)) ->
                   if method_name = name && method_receiver = receiver then
                     check_grant checking origin
-                      ~what:
+                      ~subject:
                         (Printf.sprintf "The `impl` of `%s` for `%s`"
                            (Types.show_trait interface.implements)
                            (Types.show interface.for_type))
@@ -160,8 +160,8 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
         | Restricted description when scope.available = Types.no_capabilities ->
             report checking Not_available origin
               (Printf.sprintf
-                 "This call uses `%s`, but %s may use no capabilities, not even `Panic`: what it \
-                  means must be a value. A function that fails on some inputs says so with \
+                 "This call uses `%s`, but %s may use no capabilities, not even `Panic`: its \
+                  meaning must be a value. A function that fails on some inputs says so with \
                   `requires` instead."
                  shown description)
         | Restricted description ->
@@ -391,7 +391,7 @@ and check_provide checking scope implementations body =
       List.iter
         (fun ((provided : Core.provided), (interface : Types.impl_interface)) ->
           check_grant checking implementation.origin
-            ~what:
+            ~subject:
               (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show provided.capability)
                  (Types.show interface.for_type))
             (Path.package provided.impl) interface.impl_uses;

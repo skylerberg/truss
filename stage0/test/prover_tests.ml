@@ -212,15 +212,15 @@ let each_index = Fixtures.Prover.each_index
 let () =
   test "a lambda's body is proven where it is written" (fun () ->
       not_proven Fixtures.Prover.lambdas_body_is_proven_where_it_is_written "prover.overflow");
-  test "a lambda may rely on what its callee promises to pass it" (fun () ->
-      proven (each_index ^ Fixtures.Prover.lambda_may_rely_on_what_its_callee_promises_to));
+  test "a lambda may rely on its callee's promise about its arguments" (fun () ->
+      proven (each_index ^ Fixtures.Prover.lambda_may_rely_on_its_callees_promise_about_its));
   test "a lambda without such a promise knows nothing of its arguments" (fun () ->
       not_proven Fixtures.Prover.lambda_without_such_a_promise_knows_nothing_of_its
         "prover.requires");
-  test "a function must meet what it promises its callback" (fun () ->
-      not_proven Fixtures.Prover.function_must_meet_what_it_promises_its_callback "prover.requires");
-  test "a function that meets what it promises its callback" (fun () ->
-      proven Fixtures.Prover.function_that_meets_what_it_promises_its_callback)
+  test "a function must keep its promise to its callback" (fun () ->
+      not_proven Fixtures.Prover.function_must_keep_its_promise_to_its_callback "prover.requires");
+  test "a function that keeps its promise to its callback" (fun () ->
+      proven Fixtures.Prover.function_that_keeps_its_promise_to_its_callback)
 
 (* Models *)
 
@@ -290,8 +290,8 @@ let () =
       proven Fixtures.Prover.loop_over_a_types_own_cursor_calls_its_next);
   test "a loop over a cursor in a field calls its next" (fun () ->
       proven Fixtures.Prover.loop_over_a_cursor_in_a_field_calls_its_next);
-  test "a later arm sees what an earlier arm's guard changed" (fun () ->
-      proven Fixtures.Prover.later_arm_sees_what_an_earlier_arms_guard_changed);
+  test "a later arm sees an earlier arm's guard's changes" (fun () ->
+      proven Fixtures.Prover.later_arm_sees_an_earlier_arms_guards_changes);
   test "assigning an element changes only that element" (fun () ->
       proven Fixtures.Prover.assigning_an_element_changes_only_that_element);
   test "a compound assignment to an element" (fun () ->
@@ -419,10 +419,10 @@ let () =
       not_proven
         (run ^ Fixtures.Prover.named_function_that_does_not_keep_its_parameter)
         "prover.cost");
-  test "a named function must accept what its parameter's type promises" (fun () ->
-      not_proven Fixtures.Prover.named_function_must_accept_what_its_parameters "prover.requires");
-  test "a named function that accepts what its parameter's type promises" (fun () ->
-      proven Fixtures.Prover.named_function_that_accepts_what_its_parameters);
+  test "a named function must accept every argument its parameter's type promises" (fun () ->
+      not_proven Fixtures.Prover.named_function_must_accept_every_argument_its "prover.requires");
+  test "a named function that accepts every argument its parameter's type promises" (fun () ->
+      proven Fixtures.Prover.named_function_that_accepts_every_argument_its);
   test "naming a function that reaches back is recursion that cannot be shown to end" (fun () ->
       not_proven
         (run ^ Fixtures.Prover.naming_a_function_that_reaches_back_is_recursion)
@@ -541,14 +541,14 @@ let () =
 (* Sets and maps *)
 
 let () =
-  test "a set contains what was inserted" (fun () ->
-      proven Fixtures.Prover.set_contains_what_was_inserted);
-  test "inserting what a set contains leaves it as it was" (fun () ->
-      proven Fixtures.Prover.inserting_what_a_set_contains_leaves_it_as_it_was);
+  test "a set contains its inserted elements" (fun () ->
+      proven Fixtures.Prover.set_contains_its_inserted_elements);
+  test "inserting an element a set contains leaves it unchanged" (fun () ->
+      proven Fixtures.Prover.inserting_an_element_a_set_contains_leaves_it);
   test "inserting into a set may change it" (fun () ->
       not_proven Fixtures.Prover.inserting_into_a_set_may_change_it "prover.ensures");
-  test "a map holds what was inserted under its key" (fun () ->
-      proven Fixtures.Prover.map_holds_what_was_inserted_under_its_key);
+  test "a map holds an inserted value under its key" (fun () ->
+      proven Fixtures.Prover.map_holds_an_inserted_value_under_its_key);
   test "a map keeps its other keys' values" (fun () ->
       proven Fixtures.Prover.map_keeps_its_other_keys_values)
 
@@ -559,8 +559,8 @@ let () =
       proven Fixtures.Prover.map_literal_holds_each_keys_value);
   test "a map literal's keys must be distinct" (fun () ->
       not_proven Fixtures.Prover.map_literals_keys_must_be_distinct "prover.requires");
-  test "a set literal contains what it lists and nothing else" (fun () ->
-      proven Fixtures.Prover.set_literal_contains_what_it_lists_and_nothing);
+  test "a set literal contains its listed elements and nothing else" (fun () ->
+      proven Fixtures.Prover.set_literal_contains_its_listed_elements_and);
   test "any is one allocation" (fun () -> proven Fixtures.Prover.any_is_one_allocation);
   test "a provided implementation's calls keep the capability's contract" (fun () ->
       proven (dice ^ Fixtures.Prover.provided_implementations_calls_keep_the));
@@ -601,10 +601,10 @@ let () =
 let () =
   test "self changed on one path is joined with the other" (fun () ->
       not_proven Fixtures.Prover.self_changed_on_one_path_is_joined_with_the_other "prover.ensures");
-  test "what a method yields on one path is joined with the other" (fun () ->
-      not_proven Fixtures.Prover.what_a_method_yields_on_one_path_is_joined_with "prover.ensures")
+  test "a method's yielded part on one path is joined with the other" (fun () ->
+      not_proven Fixtures.Prover.methods_yielded_part_on_one_path_is_joined_with "prover.ensures")
 
-(* What a loop changes *)
+(* Loop changes *)
 
 let () =
   test "a loop forgets a list it changes through a method" (fun () ->
@@ -654,8 +654,8 @@ let () =
       not_proven Fixtures.Prover.calling_a_function_value_twice_per_element_is_not "prover.cost");
   test "a caller counts the calls its callee promises" (fun () ->
       proven Fixtures.Prover.caller_counts_the_calls_its_callee_promises);
-  test "a loop's cost clause bounds what it has spent" (fun () ->
-      proven Fixtures.Prover.loops_cost_clause_bounds_what_it_has_spent);
+  test "a loop's cost clause bounds its cost so far" (fun () ->
+      proven Fixtures.Prover.loops_cost_clause_bounds_its_cost_so_far);
   test "a function value with an O(1) type is one unit" (fun () ->
       proven Fixtures.Prover.function_value_with_an_o_1_type_is_one_unit);
   test "a lambda must meet its type's cost" (fun () ->
@@ -692,8 +692,8 @@ let () =
   test "a lambda that loops over its argument has no bound" (fun () ->
       let actual = codes Fixtures.Prover.lambda_that_loops_over_its_argument_has_no_bound in
       if not (List.mem "prover.cost" actual) then fail "%s" (String.concat ", " actual));
-  test "a loop's cost clause over what it has received" (fun () ->
-      proven (constant_step ^ Fixtures.Prover.loops_cost_clause_over_what_it_has_received));
+  test "a loop's cost clause over its received parts" (fun () ->
+      proven (constant_step ^ Fixtures.Prover.loops_cost_clause_over_its_received_parts));
   test "an impl's method keeps its trait's cost" (fun () ->
       not_proven Fixtures.Prover.impls_method_keeps_its_traits_cost "prover.cost")
 
@@ -756,16 +756,16 @@ let () =
       let text = Fixtures.Prover.todo_in_a_theorem_is_a_hole_not_a_failure in
       proven text;
       if holes text <> 1 then fail "%d holes" (holes text));
-  test "a todo in a proof block leaves what follows on its path to it" (fun () ->
-      let text = Fixtures.Prover.todo_in_a_proof_block_leaves_what_follows_on_its in
+  test "a todo in a proof block leaves the rest of its path to it" (fun () ->
+      let text = Fixtures.Prover.todo_in_a_proof_block_leaves_the_rest_of_its_path in
       proven text;
       if holes text <> 1 then fail "%d holes" (holes text));
   test "a contract on a body that is not written waits for it, and is no hole" (fun () ->
       let text = Fixtures.Prover.contract_on_a_body_that_is_not_written_waits_for in
       proven text;
       if holes text <> 0 then fail "%d holes" (holes text));
-  test "what is before a todo in code is still proven" (fun () ->
-      not_proven Fixtures.Prover.what_is_before_a_todo_in_code_is_still_proven "prover.requires");
+  test "the code before a todo is still proven" (fun () ->
+      not_proven Fixtures.Prover.code_before_a_todo_is_still_proven "prover.requires");
   test "an impl's laws wait while one of its methods is not written" (fun () ->
       proven Fixtures.Prover.impls_laws_wait_while_one_of_its_methods_is_not);
   test "a type that contains itself through a map's values is read" (fun () ->
@@ -802,7 +802,7 @@ let () =
       proven text;
       if holes text <> 1 then fail "%d holes" (holes text))
 
-(* What a caller assumes is what was shown *)
+(* A caller assumes only proven facts *)
 
 let () =
   test "a trait's ensures holds of an impl's method only where the trait's requires does" (fun () ->
@@ -842,8 +842,8 @@ let () =
       not_proven Fixtures.Prover.match_mut_binding_is_written_back_to_the_scrutinee "prover.ensures");
   test "a while condition's cost is the iteration's" (fun () ->
       not_proven Fixtures.Prover.while_conditions_cost_is_the_iterations "prover.cost");
-  test "the right operand of || spends what it spends" (fun () ->
-      not_proven Fixtures.Prover.right_operand_of_spends_what_it_spends "prover.cost");
+  test "the right operand of || is counted at its cost" (fun () ->
+      not_proven Fixtures.Prover.right_operand_of_is_counted_at_its_cost "prover.cost");
   test "a call through an alias of a function value counts as a call of it" (fun () ->
       not_proven Fixtures.Prover.call_through_an_alias_of_a_function_value_counts "prover.cost");
   test "a match mut binding's new value is in the scrutinee after the arm" (fun () ->
@@ -858,8 +858,8 @@ let () =
       not_proven Fixtures.Prover.function_with_a_requires_passed_through_a_local "prover.requires");
   test "a callback's requires names a mut parameter as the caller passed it" (fun () ->
       not_proven Fixtures.Prover.callbacks_requires_names_a_mut_parameter_as_the "prover.requires");
-  test "a forwarded callback must be promised what it requires" (fun () ->
-      not_proven Fixtures.Prover.forwarded_callback_must_be_promised_what_it "prover.requires");
+  test "a forwarded callback must be promised its requires" (fun () ->
+      not_proven Fixtures.Prover.forwarded_callback_must_be_promised_its_requires "prover.requires");
   test "a call through a function value gives a valid result" (fun () ->
       proven Fixtures.Prover.call_through_a_function_value_gives_a_valid_result);
   test "a lambda returns a valid value" (fun () ->
@@ -1209,10 +1209,9 @@ let () =
   test "a counterexample gives the values of the locals where it fails" (fun () ->
       let text = message Fixtures.Prover.counterexample_gives_the_values_of_the_locals in
       if not (contains text "`at` is") then fail "%s" text);
-  test "a file's proof states list what proves as well as what does not" (fun () ->
+  test "a file's proof states list proven and unproven obligations" (fun () ->
       let database =
-        Support.setup
-          [ ("app::main", Fixtures.Prover.files_proof_states_list_what_proves_as_well_as) ]
+        Support.setup [ ("app::main", Fixtures.Prover.files_proof_states_list_proven_and_unproven) ]
       in
       let states =
         Prover.states ~record:(Support.record database) database solver
@@ -1235,7 +1234,7 @@ let () =
       let actual = codes Fixtures.Prover.same_failure_on_another_path_is_reported_once in
       if actual <> [ "prover.requires" ] then fail "%s" (String.concat ", " actual))
 
-(* What is not proven yet *)
+(* Unproven code *)
 
 let () =
   test "a construct the prover cannot read yet" (fun () ->
@@ -1260,8 +1259,9 @@ let () =
       not_proven Fixtures.Prover.derived_ordering_is_not_the_reverse_of_itself "prover.ensures");
   test "recursion on an element of a field's list ends" (fun () ->
       proven Fixtures.Prover.recursion_on_an_element_of_a_fields_list_ends);
-  test "recursion on what is not a part does not end" (fun () ->
-      not_proven Fixtures.Prover.recursion_on_what_is_not_a_part_does_not_end "prover.termination");
+  test "recursion on a value that is not a part does not end" (fun () ->
+      not_proven Fixtures.Prover.recursion_on_a_value_that_is_not_a_part_does_not
+        "prover.termination");
   test "a trait's provided body keeps the trait's clauses on its own" (fun () ->
       not_proven Fixtures.Prover.traits_provided_body_keeps_the_traits_clauses_on "prover.ensures");
   test "a trait's provided body that keeps its clauses proves" (fun () ->
@@ -1487,7 +1487,7 @@ let () =
              Operation ("<", [ applied_f i_term; applied_f (Operation ("+", [ i_term; int 1 ])) ])
              &&& positive (applied_g i_term) ))
         ":pattern ((x2 b0)))");
-  test "a definition triggers on what it defines" (fun () ->
+  test "a definition triggers on the term it defines" (fun () ->
       let text =
         triggered
           (Forall
@@ -1551,11 +1551,11 @@ let () =
       not_proven Fixtures.Prover.function_value_without_a_time_clause_is_a_fresh "prover.ensures");
   test "a lambda applied is its body" (fun () ->
       proven (apply_function ^ Fixtures.Prover.lambda_applied_is_its_body));
-  test "a lambda whose body is not its definition gives what its body shows" (fun () ->
-      proven (apply_function ^ Fixtures.Prover.lambda_whose_body_is_not_its_definition_gives_what));
-  test "what a lambda's body shows is about its own argument" (fun () ->
+  test "a lambda whose body is not its definition gives its body's facts" (fun () ->
+      proven (apply_function ^ Fixtures.Prover.lambda_whose_body_is_not_its_definition_gives_its));
+  test "a lambda body's facts are about its own argument" (fun () ->
       not_proven
-        (apply_function ^ Fixtures.Prover.what_a_lambdas_body_shows_is_about_its_own)
+        (apply_function ^ Fixtures.Prover.lambda_bodys_facts_are_about_its_own_argument)
         "prover.ensures");
   let halved = Fixtures.Prover.halved in
   test "a named function with a requires, as a value, keeps its ensures" (fun () ->
@@ -1564,8 +1564,8 @@ let () =
       not_proven
         (halved ^ Fixtures.Prover.named_function_as_a_value_gives_no_more_than_its)
         "prover.ensures");
-  test "a lambda applied knows what it captures" (fun () ->
-      proven (apply_function ^ Fixtures.Prover.lambda_applied_knows_what_it_captures));
+  test "a lambda applied knows its captures" (fun () ->
+      proven (apply_function ^ Fixtures.Prover.lambda_applied_knows_its_captures));
   test "two lambdas with the same body are the same function" (fun () ->
       proven Fixtures.Prover.two_lambdas_with_the_same_body_are_the_same);
   test "lambdas with different bodies are not known to be the same function" (fun () ->

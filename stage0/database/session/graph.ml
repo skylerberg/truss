@@ -1,4 +1,4 @@
-(* What a state's graph answers. Every answer names definitions and parts;
+(* Graph questions about a state. Every answer names definitions and parts;
    the engine's nodes stay inside. *)
 
 type edge = {
@@ -97,8 +97,8 @@ let reachable engine roots =
 type difference = Changed | Added | Same
 
 (* Every node of [mine] that may differ from the same node in [theirs],
-   with how it compares. A state holds only what differs from its bases, or
-   may, so where the two share a base these are the nodes either holds
+   with how it compares. A state holds only its differences from its bases, or
+   possible ones, so where the two share a base these are the nodes either holds
    itself; a base that only one has is compared whole. *)
 let compare_nodes mine theirs =
   let differs node =

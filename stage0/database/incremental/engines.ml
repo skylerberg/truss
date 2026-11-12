@@ -83,7 +83,7 @@ let unshared engine other =
 let nodes engine = own_and_inherited engine ~skip:(fun base -> base.fixed)
 let reads = current_reads
 
-(* What reads a node, without copying anything: a base's reader that the
+(* A node's readers, without copying anything: a base's reader that the
    engine has not copied reads the engine's copy as it read the base's
    node. *)
 let readers engine (node : node) =

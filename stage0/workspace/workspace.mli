@@ -23,7 +23,7 @@ val modules : (Path.package, Path.module_ list) Query.query
 (** A package's modules, and none for a package there is not. *)
 
 val dependencies : (Path.package, Manifest.dependency list) Query.query
-(** A package's dependencies, each with what it is granted. *)
+(** A package's dependencies, each with its grants. *)
 
 val usize_bits : (Path.package, int) Query.query
 (** The width of [USize] a package's code must hold for. *)

@@ -6,7 +6,7 @@ type context = {
   database : Query.context;
   resolved : Resolve.resolved;
   bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
-  self_type : Types.ty option;  (** What [Self] means here. *)
+  self_type : Types.ty option;  (** The meaning of [Self] here. *)
   self_trait : Types.trait_reference option;  (** In a trait, the trait [Self] implements. *)
   self_associated : (string * Types.ty) list;  (** In an [impl], its associated types. *)
   self_capabilities : (string * Types.capability_set) list;

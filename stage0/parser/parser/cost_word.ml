@@ -4,7 +4,7 @@
 type t = Amortized | Time | Allocations | Allocated_bytes | Calls | O | Finite | Potential
 
 (* The only place each word is spelled. A test checks the list against
-   GRAMMAR.md. *)
+   SPECIFICATION.md. *)
 let spellings =
   [
     ("amortized", Amortized);
@@ -29,9 +29,9 @@ let resources = [ Time; Allocations; Allocated_bytes; Calls ]
    expected. When exactly one of them is within an edit distance of 2, the
    fix replaces the name with that word, and the function returns the word,
    so that the rest of the clause is parsed and checked. *)
-let correct_misspelling cursor (token : Token.t) name ~words ~what =
+let correct_misspelling cursor (token : Token.t) name ~words ~category =
   let message =
-    Printf.sprintf "Expected %s, one of %s, found `%s`." what
+    Printf.sprintf "Expected %s, one of %s, found `%s`." category
       (String.concat ", " (List.map (fun word -> "`" ^ spelling word ^ "`") words))
       name
   in
@@ -52,7 +52,7 @@ let correct_misspelling cursor (token : Token.t) name ~words ~what =
 
 (* The cost word the current token spells, among [accepted], or the one of
    [suggested] it misspells. *)
-let expect ?suggested cursor ~accepted ~what ~expected =
+let expect ?suggested cursor ~accepted ~category ~expected =
   let token = Cursor.peek cursor in
   let word =
     match (of_token token.kind, token.kind) with
@@ -60,7 +60,7 @@ let expect ?suggested cursor ~accepted ~what ~expected =
     | _, (Lower name | Upper name) ->
         correct_misspelling cursor token name
           ~words:(Option.value suggested ~default:accepted)
-          ~what
+          ~category
     | _ -> Cursor.fail cursor expected
   in
   Cursor.advance cursor;

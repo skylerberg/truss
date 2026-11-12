@@ -104,16 +104,8 @@ let changes (project : Project.t) base =
    code but compiles nothing, so it needs no C compiler. *)
 let tests_changed (project : Project.t) base =
   let keys context session =
-    let compile =
-      Compile.create
-        ~want:(fun lowering wanted ->
-          Database.set session Compile.roots lowering (Compile.add_roots context lowering wanted))
-        context (Compiler.target ())
-        { compiler = "cc"; identity = "lowering only" }
-        (Build.cache (Database.objects_directory ()))
-        { build = Development; optimization = O1; extra = [] }
-    in
-    Compile.test_keys compile
+    Compile.test_keys
+      (Compiler.lowering_only session context)
       (List.filter_map
          (fun (declaration : Names.declaration) ->
            match declaration.path with Test _ -> Some declaration.path | _ -> None)

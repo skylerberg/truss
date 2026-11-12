@@ -3,7 +3,7 @@
    library and running it. *)
 
 (* Code generation's tests. Each test gives a small input and states one
-   fact about what code generation makes of it. *)
+   fact about code generation's output. *)
 
 let test = Harness.test
 let fail = Harness.fail

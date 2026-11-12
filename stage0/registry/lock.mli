@@ -1,5 +1,5 @@
 (** A lock file, [truss.lock]: the version and content of each registry package a project's packages
-    use. A published package's lock file is the record of what it was published with, and has no
+    use. A published package's lock file records its dependencies at publication, and has no
     [holds]. *)
 
 type entry = {
@@ -13,7 +13,7 @@ type t = entry list
 (** In order of name. *)
 
 exception Malformed of int * string
-(** The line, counting from 1, and what is wrong there, as whole sentences. *)
+(** The line, counting from 1, and its error, as whole sentences. *)
 
 val parse : string -> t
 (** Raises {!Malformed}. A text with nothing in it is a lock file with no package. *)

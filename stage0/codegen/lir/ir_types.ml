@@ -294,5 +294,5 @@ type table = {
   entries : (Instance.key * signature) list;
 }
 
-(* What an instance compiles to: code, static data, or a table of entries. *)
+(* An instance's compiled form: code, static data, or a table of entries. *)
 type compiled = Code of t | Data of data | Table of table
