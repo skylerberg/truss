@@ -77,35 +77,73 @@ let () =
 
 (* The official BLAKE3 test vectors, test_vectors.json in the BLAKE3
    repository: the input is [length] bytes of 0, 1, ..., 250, 0, 1, ...,
-   and these are the first 32 bytes of each hash output. The lengths cover
-   one block, several blocks, one chunk, and trees of several depths. *)
+   and these are the first 32 bytes of each output, in the default mode and
+   in the derive-key mode under the vectors' context. The lengths cover one
+   block, several blocks, one chunk, and trees of several depths. *)
+let vector_context = "BLAKE3 2019-12-27 16:29:52 test vectors context"
+
 let vectors =
   [
-    (0, "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262");
-    (1, "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213");
-    (63, "e9bc37a594daad83be9470df7f7b3798297c3d834ce80ba85d6e207627b7db7b");
-    (64, "4eed7141ea4a5cd4b788606bd23f46e212af9cacebacdc7d1f4c6dc7f2511b98");
-    (65, "de1e5fa0be70df6d2be8fffd0e99ceaa8eb6e8c93a63f2d8d1c30ecb6b263dee");
-    (1023, "10108970eeda3eb932baac1428c7a2163b0e924c9a9e25b35bba72b28f70bd11");
-    (1024, "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7");
-    (1025, "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444");
-    (2048, "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a");
-    (2049, "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030");
-    (3072, "b98cb0ff3623be03326b373de6b9095218513e64f1ee2edd2525c7ad1e5cffd2");
-    (4096, "015094013f57a5277b59d8475c0501042c0b642e531b0a1c8f58d2163229e969");
-    (4097, "9b4052b38f1c5fc8b1f9ff7ac7b27cd242487b3d890d15c96a1c25b8aa0fb995");
-    (8193, "bab6c09cb8ce8cf459261398d2e7aef35700bf488116ceb94a36d0f5f1b7bc3b");
-    (31744, "62b6960e1a44bcc1eb1a611a8d6235b6b4b78f32e7abc4fb4c6cdcce94895c47");
-    (102400, "bc3e3d41a1146b069abffad3c0d44860cf664390afce4d9661f7902e7943e085");
+    ( 0,
+      "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+      "2cc39783c223154fea8dfb7c1b1660f2ac2dcbd1c1de8277b0b0dd39b7e50d7d" );
+    ( 1,
+      "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213",
+      "b3e2e340a117a499c6cf2398a19ee0d29cca2bb7404c73063382693bf66cb06c" );
+    ( 63,
+      "e9bc37a594daad83be9470df7f7b3798297c3d834ce80ba85d6e207627b7db7b",
+      "b6451e30b953c206e34644c6803724e9d2725e0893039cfc49584f991f451af3" );
+    ( 64,
+      "4eed7141ea4a5cd4b788606bd23f46e212af9cacebacdc7d1f4c6dc7f2511b98",
+      "a5c4a7053fa86b64746d4bb688d06ad1f02a18fce9afd3e818fefaa7126bf73e" );
+    ( 65,
+      "de1e5fa0be70df6d2be8fffd0e99ceaa8eb6e8c93a63f2d8d1c30ecb6b263dee",
+      "51fd05c3c1cfbc8ed67d139ad76f5cf8236cd2acd26627a30c104dfd9d3ff8a8" );
+    ( 1023,
+      "10108970eeda3eb932baac1428c7a2163b0e924c9a9e25b35bba72b28f70bd11",
+      "74a16c1c3d44368a86e1ca6df64be6a2f64cce8f09220787450722d85725dea5" );
+    ( 1024,
+      "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7",
+      "7356cd7720d5b66b6d0697eb3177d9f8d73a4a5c5e968896eb6a689684302706" );
+    ( 1025,
+      "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444",
+      "effaa245f065fbf82ac186839a249707c3bddf6d3fdda22d1b95a3c970379bcb" );
+    ( 2048,
+      "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a",
+      "7b2945cb4fef70885cc5d78a87bf6f6207dd901ff239201351ffac04e1088a23" );
+    ( 2049,
+      "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030",
+      "2ea477c5515cc3dd606512ee72bb3e0e758cfae7232826f35fb98ca1bcbdf273" );
+    ( 3072,
+      "b98cb0ff3623be03326b373de6b9095218513e64f1ee2edd2525c7ad1e5cffd2",
+      "050df97f8c2ead654d9bb3ab8c9178edcd902a32f8495949feadcc1e0480c46b" );
+    ( 4096,
+      "015094013f57a5277b59d8475c0501042c0b642e531b0a1c8f58d2163229e969",
+      "1e0d7f3db8c414c97c6307cbda6cd27ac3b030949da8e23be1a1a924ad2f25b9" );
+    ( 4097,
+      "9b4052b38f1c5fc8b1f9ff7ac7b27cd242487b3d890d15c96a1c25b8aa0fb995",
+      "aca51029626b55fda7117b42a7c211f8c6e9ba4fe5b7a8ca922f34299500ead8" );
+    ( 8193,
+      "bab6c09cb8ce8cf459261398d2e7aef35700bf488116ceb94a36d0f5f1b7bc3b",
+      "af1e0346e389b17c23200270a64aa4e1ead98c61695d917de7d5b00491c9b0f1" );
+    ( 31744,
+      "62b6960e1a44bcc1eb1a611a8d6235b6b4b78f32e7abc4fb4c6cdcce94895c47",
+      "39772aef80e0ebe60596361e45b061e8f417429d529171b6764468c22928e28e" );
+    ( 102400,
+      "bc3e3d41a1146b069abffad3c0d44860cf664390afce4d9661f7902e7943e085",
+      "4652cff7a3f385a6103b5c260fc1593e13c778dbe608efb092fe7ee69df6e9c6" );
   ]
 
 let () =
   List.iter
-    (fun (length, expected) ->
+    (fun (length, expected_hash, expected_derived) ->
+      let input = String.init length (fun index -> Char.chr (index mod 251)) in
       test (Printf.sprintf "BLAKE3 of the %d-byte test vector" length) (fun () ->
-          let input = String.init length (fun index -> Char.chr (index mod 251)) in
           let actual = hex (Blake3.hash input) in
-          if actual <> expected then fail "expected %s, got %s" expected actual))
+          if actual <> expected_hash then fail "expected %s, got %s" expected_hash actual);
+      test (Printf.sprintf "BLAKE3 derive-key of the %d-byte test vector" length) (fun () ->
+          let actual = hex (Blake3.derive_key ~context:vector_context input) in
+          if actual <> expected_derived then fail "expected %s, got %s" expected_derived actual))
     vectors
 
 let () = finish ()

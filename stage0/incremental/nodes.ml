@@ -304,11 +304,16 @@ let key_bytes (node : node) =
   | Result (_, cell) -> bytes_of cell.key
   | Unfilled -> ""
 
+let derive_identity = Blake3.derive_key ~context:"truss 2026-11-12 incremental node identity"
+
 let identity (node : node) =
   match node.identity with
   | Some identity -> identity
   | None ->
-      let identity = Blake3.hash (name node ^ "\000" ^ key_bytes node) in
+      let identity =
+        derive_identity
+          (Cbor.encode (Cbor.Array [ Cbor.Text (name node); Cbor.Bytes (key_bytes node) ]))
+      in
       node.identity <- Some identity;
       identity
 

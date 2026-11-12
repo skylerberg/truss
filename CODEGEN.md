@@ -346,8 +346,9 @@ has a ground type, and the layout of each is computed from it.
 then by first use, blocks in reverse postorder from the entry, unused locals
 and unreachable blocks are removed, and every list is in source order. Two
 builds of the same definition give byte-identical LIR, as DATABASE.md
-requires of every result. The LIR is hashed in deterministic CBOR (RFC 8949,
-section 4.2), with the version of code generation. The encoder is small
+requires of every result. The LIR is encoded in deterministic CBOR (RFC 8949,
+section 4.2), with the version of code generation, and hashed in BLAKE3's
+derive-key mode under a context of its own, as every key is. The encoder is small
 enough to write directly, which keeps the exact byte format under the
 project's control, and the same one must later be written in Truss and
 produce the same bytes. A

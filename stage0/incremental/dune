@@ -1,3 +1,3 @@
 (library
  (name incremental)
- (libraries path blake3))
+ (libraries path blake3 cbor))

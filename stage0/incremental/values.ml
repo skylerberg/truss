@@ -12,24 +12,27 @@ let unset = String.make 32 '\000'
    one too. *)
 let exception_bytes (raised : exn) =
   let block = Obj.repr raised in
-  let name = Printexc.exn_slot_name raised in
-  if Obj.tag block = Obj.object_tag then name
-  else
-    name ^ "\000"
-    ^ bytes_of (Array.init (Obj.size block - 1) (fun index -> Obj.field block (index + 1)))
+  let name = Cbor.Text (Printexc.exn_slot_name raised) in
+  Cbor.encode
+    (if Obj.tag block = Obj.object_tag then Cbor.Array [ name ]
+     else
+       Cbor.Array
+         [
+           name;
+           Cbor.Bytes
+             (bytes_of (Array.init (Obj.size block - 1) (fun index -> Obj.field block (index + 1))));
+         ])
 
 (* A fingerprint that equals no other: for an outcome that has no bytes,
    which is then equal only to itself. *)
 let random = lazy (Random.State.make_self_init ())
 let nonces = ref 0
+let derive_nonce = Blake3.derive_key ~context:"truss 2026-11-12 incremental nonce"
 
 let nonce () =
   incr nonces;
-  Blake3.hash
-    (Printf.sprintf "nonce %d %d %d %d" !nonces
-       (Random.State.bits (Lazy.force random))
-       (Random.State.bits (Lazy.force random))
-       (Random.State.bits (Lazy.force random)))
+  let bits () = Cbor.int (Random.State.bits (Lazy.force random)) in
+  derive_nonce (Cbor.encode (Cbor.Array [ Cbor.int !nonces; bits (); bits (); bits () ]))
 
 let forget_fingerprint (node : node) =
   node.fingerprint <- None;
@@ -44,6 +47,9 @@ let forget_fingerprint (node : node) =
    value or an exception that holds a function, is [opaque]: its fingerprint
    is a nonce, so it compares equal to no other computation's, and what
    reads it is computed again whenever it is. *)
+let derive_exception_fingerprint =
+  Blake3.derive_key ~context:"truss 2026-11-12 incremental exception fingerprint"
+
 let fingerprint engine (node : node) =
   match node.fingerprint with
   | Some fingerprint -> Some fingerprint
@@ -73,7 +79,7 @@ let fingerprint engine (node : node) =
           | exception Invalid_argument _ -> opaque ())
       | Result (_, { outcome = Some (Raised raised); _ }) -> (
           match exception_bytes raised with
-          | bytes -> set (Blake3.hash ("raised\000" ^ bytes))
+          | bytes -> set (derive_exception_fingerprint bytes)
           | exception Invalid_argument _ -> opaque ())
       | _ -> None)
 
@@ -151,14 +157,22 @@ let same_outcomes (query : ('key, 'value) query) left right =
 (* What a result read, as the engine sees each node now. *)
 let current_reads engine (node : node) = List.map (resolve engine) node.reads
 
+(* The keys a fact and its reads are kept under. The store names each
+   result by its kind and key, so these keys need no hash of their own. *)
 let fact_key store (node : node) (parts : (node * string) list) =
-  Blake3.hash
-    (String.concat ""
-       ("fact\000" :: store.version :: "\000" :: identity node
-       :: List.concat_map (fun (read, part) -> [ identity read; part ]) parts))
+  Cbor.encode
+    (Cbor.Array
+       [
+         Cbor.Text store.version;
+         Cbor.Bytes (identity node);
+         Cbor.Array
+           (List.map
+              (fun (read, part) -> Cbor.Array [ Cbor.Bytes (identity read); Cbor.Bytes part ])
+              parts);
+       ])
 
 let reads_key store (node : node) =
-  Blake3.hash ("reads\000" ^ store.version ^ "\000" ^ identity node)
+  Cbor.encode (Cbor.Array [ Cbor.Text store.version; Cbor.Bytes (identity node) ])
 
 (* Restoring nodes from a store needs each input and query by name. *)
 type restorer = {

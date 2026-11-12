@@ -15,13 +15,14 @@ type settings = { build : Emit_c.build; optimization : Toolchain.optimization; e
 let flags settings =
   (Toolchain.optimization_flag settings.optimization :: Toolchain.required_flags) @ settings.extra
 
+let derive_object_key = Blake3.derive_key ~context:"truss 2026-11-12 object key"
+
 let object_key (toolchain : Toolchain.t) settings text =
   Blake3.to_hex
-    (Blake3.hash
+    (derive_object_key
        (Cbor.encode
           (Cbor.Array
              [
-               Text "truss object";
                Bytes text;
                Text toolchain.identity;
                Cbor.Array (List.map (fun flag -> Cbor.Text flag) (flags settings));

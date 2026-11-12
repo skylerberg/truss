@@ -3,6 +3,7 @@
  (libraries
   unix
   blake3
+  cbor
   engine
   query
   store

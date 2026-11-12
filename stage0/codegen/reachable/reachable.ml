@@ -165,6 +165,8 @@ let reachable env ~lookup roots = List.map fst (reached env ~lookup roots)
    [references], itself as a mark, and each path as a number given in the
    order paths are first met. So the hash holds no name, and renaming or
    moving a definition changes no hash. *)
+let derive_own_hash = Blake3.derive_key ~context:"truss 2026-11-12 instance own hash"
+
 let own_hash ~references compiled =
   let self = compiled_key compiled in
   let paths = ref [] in
@@ -194,7 +196,7 @@ let own_hash ~references compiled =
     | Data d -> Lir.encode_data ~path ~instance d
     | Table t -> Lir.encode_table ~path ~instance t
   in
-  Blake3.hash (Cbor.encode encoded)
+  derive_own_hash (Cbor.encode encoded)
 
 module Keys = Map.Make (struct
   type t = Instance.key
@@ -261,7 +263,8 @@ let groups ~edges roots =
     roots;
   !found
 
-let key_of parts = Blake3.hash (Cbor.encode (Cbor.Array parts))
+let derive_reach_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
+let key_of parts = derive_reach_key (Cbor.encode (Cbor.Array parts))
 
 (* The key of everything an instance that is in no group can reach: its own
    hash, and the key of each instance it refers to, in order. *)
