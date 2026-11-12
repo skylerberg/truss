@@ -78,7 +78,8 @@
   registry
   cli)
  (deps
-  (glob_files %{workspace_root}/*.md)))
+  (glob_files %{workspace_root}/*.md)
+  (glob_files_rec %{workspace_root}/standard/*.md)))
 
 (rule
  (target fixtures.ml)

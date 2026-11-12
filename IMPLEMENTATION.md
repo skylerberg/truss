@@ -132,6 +132,8 @@ Each document has one job, and a fact is stated in one of them:
   define Truss,** its grammar and the rules of the language and of
   packages, **and [DESIGN.md](DESIGN.md) says why.** They describe the
   language, whether or not stage0 builds all of it yet.
+- **The Markdown files beside the modules of [`standard/`](standard)
+  document the standard library,** each its module's types and functions.
 - **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
   [TYPECHECKER.md](TYPECHECKER.md), [MIR.md](MIR.md), [PROVER.md](PROVER.md),
   [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and

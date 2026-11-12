@@ -120,10 +120,21 @@ let git directory arguments =
   | _ -> fail "git %s failed" (String.concat " " arguments)
 
 let markdown_documents () =
-  Sys.readdir (workspace_path ".")
-  |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".md")
-  |> List.sort compare
+  let rec markdown directory =
+    Sys.readdir (workspace_path directory)
+    |> Array.to_list
+    |> List.concat_map (fun name ->
+        let path = if directory = "." then name else Filename.concat directory name in
+        if Sys.is_directory (workspace_path path) then markdown path
+        else if Filename.check_suffix name ".md" then [ path ]
+        else [])
+  in
+  let root =
+    Sys.readdir (workspace_path ".")
+    |> Array.to_list
+    |> List.filter (fun name -> Filename.check_suffix name ".md")
+  in
+  List.sort compare (root @ markdown "standard")
 
 let expect_string ~expected actual =
   if not (String.equal expected actual) then fail "expected %S, got %S" expected actual
