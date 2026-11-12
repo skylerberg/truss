@@ -275,15 +275,14 @@ let is_type_kind : named -> bool = function
 
 let is_value_kind kind = not (is_type_kind kind)
 
+let is_public = function
+  | Public | Public_opaque | Public_transparent -> true
+  | Private | Internal -> false
+
 (* Whether code in [from] can see a definition of [module_] with this
    visibility. *)
 let visible ~(from : Path.module_) (module_ : Path.module_) visibility =
-  module_ = from
-  ||
-  match visibility with
-  | Private -> false
-  | Internal -> module_.package = from.package
-  | Public | Public_opaque | Public_transparent -> true
+  module_ = from || is_public visibility || (visibility = Internal && module_.package = from.package)
 
 type module_lookup =
   | Found_module of Path.module_ * [ `Import of string | `Package ]

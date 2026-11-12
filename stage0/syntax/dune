@@ -1,3 +1,4 @@
 (library
  (name syntax)
+ (modules_without_implementation syntax)
  (libraries token zarith))

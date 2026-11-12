@@ -1,16 +1,5 @@
-(* Traversal of the core form.
-
-   A visitor is a record of callbacks. The [*_children] functions call the
-   visitor on the direct children of one node, and do not recurse. [deep]
-   turns a visitor into one that recurses into every descendant. *)
-
 open Core
 
-(* [callee] is called for every callee that is stored in a node other than
-   a [Call]: an interpolated piece's [display], a cursor's [next], and a
-   pattern's [equal]. The
-   callee of a [Call] is not reported here, because the visitor sees the
-   [Call] node itself. *)
 type visit = {
   expression : expression -> unit;
   statement : statement -> unit;
@@ -20,8 +9,6 @@ type visit = {
 
 let ignore_all = { expression = ignore; statement = ignore; pattern = ignore; callee = ignore }
 
-(* A visitor that calls [found] on every callee: the callee of each [Call],
-   and each callee that is stored in another node. *)
 let callees found =
   {
     ignore_all with
@@ -37,9 +24,6 @@ let place_origin : place -> origin = function
   | Local { origin; _ } | Constant { origin; _ } | Field { origin; _ } -> origin
   | Lent value | Temporary value -> value.origin
 
-(* The places that a yielded operand lends: the operand itself if it is a
-   place, and the fields of a yielded construct that are places, to any
-   depth. *)
 let rec lent_places : operand -> place list = function
   | Place found -> [ found ]
   | Value { kind = Construct { fields; _ }; _ } ->
@@ -197,8 +181,6 @@ let pattern_children visit (node : pattern) =
       visit.callee equal
   | Alternatives alternatives -> List.iter visit.pattern alternatives
 
-(* A visitor that calls [visit] on a node and then on all of its
-   descendants, in evaluation order. *)
 let rec deep visit =
   {
     expression =
@@ -216,7 +198,6 @@ let rec deep visit =
     callee = visit.callee;
   }
 
-(* Calls [visit] on an expression and all of its descendants. *)
 let expression visit node = (deep visit).expression node
 
 let parameter visit (parameter : parameter) =
@@ -248,19 +229,11 @@ let definition_children visit = function
   | Test body | Law_proof { body; _ } -> block visit body
   | Empty -> ()
 
-(* Calls [visit] on every node of a definition. *)
 let definition visit found = definition_children (deep visit) found
 let tasks_capability = Well_known.path Tasks
 
-(* How code can use [Tasks]. *)
-type tasks_use =
-  | Uses_tasks  (** It contains [concurrent] code, or a call in it uses [Tasks]. *)
-  | Through_parameter
-      (** A call in it uses a capability parameter, which may be instantiated with [Tasks]. *)
-  | No_tasks
+type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
-(* How code can use [Tasks]. [solved] gives the solution of a capability
-   variable, for a core form whose capability variables are not solved yet. *)
 let tasks_use ?(solved = fun (_ : int) : Types.capability list -> []) (body : block) : tasks_use =
   let found = ref No_tasks in
   let rec used (capability : Types.capability) =
@@ -285,14 +258,8 @@ let tasks_use ?(solved = fun (_ : int) : Types.capability list -> []) (body : bl
     body;
   !found
 
-(* Whether code can use [Tasks]. An implementation that is provided [mut]
-   around such code is a monitor. *)
 let can_use_tasks ?solved (body : block) : bool = tasks_use ?solved body <> No_tasks
 
-(* Whether a yielding method yields by position: its body is one [for] loop
-   over a range of integers, and the loop body is one [yield]. The
-   iterations share no state, so a [parallel for] or a [concurrent for] over
-   the method can run the range loop's iterations at the same time. *)
 let yields_by_position (body : block) : bool =
   match (body.statements, body.value) with
   | ( [

@@ -1,43 +1,29 @@
-(* The syntax tree of one file, shared by every stage after the parser.
+(** The syntax tree of one file, shared by every stage after the parser.
 
-   The tree is an abstract syntax tree: it has the program's constructs and
-   each node's span, not every token. Each definition records its base, the
-   offset of its first token in the file, and every span in its tree is
-   relative to that base, so a definition that only moved has exactly the
-   same tree. Every kind of node that can fail to parse has an [Error]
-   case, whose span covers the tokens that did not parse.
+    The tree is an abstract syntax tree: it has the program's constructs and each node's span, not
+    every token. Each definition records its base, the offset of its first token in the file, and
+    every span in its tree is relative to that base, so a definition that only moved has exactly the
+    same tree. Every kind of node that can fail to parse has an [Error] case, whose span covers the
+    tokens that did not parse.
 
-   Constructs that parse the same are one node, and later stages annotate
-   them without rebuilding them: [Bracket] is an index or type arguments,
-   [Name] is a variable, constant, function, type, or variant, and a bare name
-   in a pattern is [Binding_or_constant]. *)
+    Constructs that parse the same are one node, and later stages annotate them without rebuilding
+    them: [Bracket] is an index or type arguments, [Name] is a variable, constant, function, type,
+    or variant, and a bare name in a pattern is [Binding_or_constant]. *)
 
-(* A span relative to its definition's base: [start] is included and [stop]
-   is not. Spans are made only by [Span.make], so [0 <= start <= stop]. *)
-module Span : sig
-  type t = private { start : int; stop : int }
-
-  val make : int -> int -> t
-end = struct
-  type t = { start : int; stop : int }
-
-  let make start stop =
-    if start < 0 || stop < start then
-      invalid_arg (Printf.sprintf "Syntax.Span.make %d %d" start stop);
-    { start; stop }
-end
+module Span = Span
 
 type span = Span.t
 
-(* A node's id: a small integer, unique within its definition, assigned in
-   the order the parser builds the definition's nodes. Later stages record
-   their results for a node in tables keyed by its id, and never rebuild
-   the tree. The same tokens produce the same ids. *)
 type id = int
+(** A node's id: a small integer, unique within its definition, assigned in the order the parser
+    builds the definition's nodes. Later stages record their results for a node in tables keyed by
+    its id, and never rebuild the tree. The same tokens produce the same ids. *)
+
 type name = { text : string; span : span; id : id }
 
-(* [standard::json::parse] has the modules [standard] and [json]. *)
 type path = { modules : name list; last : name }
+(** [standard::json::parse] has the modules [standard] and [json]. *)
+
 type mode = Mut | Own
 type prefix = Negate | Not | Complement
 
@@ -77,15 +63,14 @@ type assignment =
 
 type quantifier = Forall | Exists
 
-(* A statement, or a member of a trait, an [impl], or a capability: a node
-   that also records whether a blank line came before it, which [truss fmt]
-   keeps. *)
 type 'kind line = { kind : 'kind; span : span; blank_line_before : bool; id : id }
+(** A statement, or a member of a trait, an [impl], or a capability: a node that also records
+    whether a blank line came before it, which [truss fmt] keeps. *)
 
-(* Most of the tree is nodes: a construct's kind, its span, and its id. *)
 type 'kind node = { kind : 'kind; span : span; id : id }
+(** Most of the tree is nodes: a construct's kind, its span, and its id. *)
 
-(* Types *)
+(** {1 Types} *)
 
 type type_expression = type_kind node
 
@@ -107,15 +92,15 @@ and type_argument =
           decides *)
   | Constraint of name * type_expression  (** [Element = Int64] *)
 
-(* A function type in parentheses can carry [Uses], [Cost], and [Requires]
-   clauses. Its inputs are named exactly when it has a [Requires], which
-   names them; the names are not labels, and calls stay positional. *)
 and function_type = {
   inputs : (mode option * type_expression) list;
   input_names : name list;  (** Empty, or one for each input. *)
   output : type_expression option;
   clauses : clause list;
 }
+(** A function type in parentheses can carry [Uses], [Cost], and [Requires] clauses. Its inputs are
+    named exactly when it has a [Requires], which names them; the names are not labels, and calls
+    stay positional. *)
 
 and generic_parameter = generic_kind node
 
@@ -125,16 +110,16 @@ and generic_kind =
   | Capability_parameter of name  (** [capability Granted] *)
   | Generic_error
 
-(* One member of a [uses] list. *)
 and capability_reference = capability_reference_kind node
+(** One member of a [uses] list. *)
 
 and capability_reference_kind =
   | Capability_path of path_type  (** [FileRead], or a capability parameter *)
   | Self_capabilities of name  (** [Self.Uses] *)
   | Associated_capabilities of name * name  (** [Source.Uses] *)
 
-(* Clauses *)
 and clause = clause_kind node
+(** {1 Clauses} *)
 
 and clause_kind =
   | Uses of capability_reference list
@@ -154,8 +139,8 @@ and call_target =
 
 and bound = Big_o of expression | Finite | At_most of expression | Exactly of expression
 
-(* Expressions *)
 and expression = expression_kind node
+(** {1 Expressions} *)
 
 and expression_kind =
   | Integer of Z.t
@@ -199,9 +184,6 @@ and expression_kind =
   | Block of block
   | Expression_error
 
-(* A string literal: its tag, and its texts alternating with its
-   interpolations, starting and ending with a text, as in the lexer's token.
-   Its spelling is the source text under its span. *)
 and string_literal = {
   tag : path option;
   first : text;
@@ -209,6 +191,8 @@ and string_literal = {
   span : span;
   id : id;
 }
+(** A string literal: its tag, and its texts alternating with its interpolations, starting and
+    ending with a text, as in the lexer's token. Its spelling is the source text under its span. *)
 
 and text = { value : string; span : span }
 and argument = { label : name option; value : expression }
@@ -217,9 +201,8 @@ and bracket_item =
   | Item of expression  (** [0], [String], [..3] *)
   | Item_constraint of name * type_expression  (** [Element = Int64] *)
 
-(* [server.port: 443] updates the field [server] at the path [port].
-   [with (x)] has no value. *)
 and update = update_kind node
+(** [server.port: 443] updates the field [server] at the path [port]. [with (x)] has no value. *)
 
 and update_kind =
   | Update of { field : name; path : name list; value : expression option }
@@ -232,8 +215,8 @@ and binder =
 and else_branch = Else of block | Else_if of expression
 and block = { statements : statement list; span : span; id : id }
 
-(* Statements *)
 and statement = statement_kind line
+(** {1 Statements} *)
 
 (** How the iterations of a [for] loop run: one after another, at the same time with no
     capabilities, or each as a task. *)
@@ -280,8 +263,8 @@ and arm = {
   id : id;
 }
 
-(* Patterns *)
 and pattern = pattern_kind node
+(** {1 Patterns} *)
 
 and pattern_kind =
   | Wildcard
@@ -295,7 +278,7 @@ and pattern_kind =
   | Alternatives of pattern list
   | Pattern_error
 
-(* A qualified constant: [http::ok], or [Status.teapot] under a type. *)
+(** A qualified constant: [http::ok], or [Status.teapot] under a type. *)
 and constant = Module_constant of path | Type_constant of path * name
 
 and literal =
@@ -304,8 +287,9 @@ and literal =
   | Literal_false
   | Literal_string of string_literal
 
-(* A bare name at the end of a range can only be a constant. *)
 and range_end = range_end_kind node
+(** A bare name at the end of a range can only be a constant. *)
+
 and range_end_kind = End_literal of literal | End_constant of constant | End_name of name
 and pattern_field = pattern_field_kind node
 
@@ -314,7 +298,7 @@ and pattern_field_kind =
   | Field of pattern  (** [radius], or a pattern for the only field *)
   | Rest  (** [..] *)
 
-(* Definitions *)
+(** {1 Definitions} *)
 
 type visibility =
   | Private
@@ -324,13 +308,10 @@ type visibility =
   | Public_transparent
       (** A function whose body the proofs of callers in other packages can read. *)
 
-let is_public = function
-  | Public | Public_opaque | Public_transparent -> true
-  | Private | Internal -> false
-
-(* The type a method or constant belongs to: [List[Element: Ordered]] in
-   [fn List[Element: Ordered].sort], or [hourly::Forecast]. *)
 type type_head = { path : path; generics : generic_parameter list; span : span; id : id }
+(** The type a method or constant belongs to: [List[Element: Ordered]] in
+    [fn List[Element: Ordered].sort], or [hourly::Forecast]. *)
+
 type definition_name = Plain_name of name | Member_name of type_head * name
 
 type parameter = parameter_kind node
@@ -345,8 +326,8 @@ and parameter_kind =
     }
   | Parameter_error
 
-(* A [yields] method yields parts of [self] any number of times, and a
-   [lends] method lends one part exactly once. *)
+(** A [yields] method yields parts of [self] any number of times, and a [lends] method lends one
+    part exactly once. *)
 type result =
   | Returns of type_expression
   | Yields of mode option * type_expression
@@ -360,9 +341,8 @@ type signature = {
   clauses : clause list;
 }
 
-(* A function with its body. Only a trait or a capability declares a method
-   without one. *)
 type function_definition = { signature : signature; body : block }
+(** A function with its body. Only a trait or a capability declares a method without one. *)
 
 type field = field_kind node
 
@@ -382,9 +362,9 @@ and type_clause_kind =
 
 type law = { name : name; parameters : parameter list; requires : expression list; body : block }
 
-(* The members of a trait, an [impl], or a capability other than its
-   methods. Each method declared inside one is a separate definition, which
-   follows it among the file's definitions and records it as its container. *)
+(** The members of a trait, an [impl], or a capability other than its methods. Each method declared
+    inside one is a separate definition, which follows it among the file's definitions and records
+    it as its container. *)
 type trait_member =
   | Associated_type of name * path_type list
   | Associated_capability of name  (** [capability Uses] *)
@@ -435,11 +415,6 @@ type definition_kind =
       (** A definition whose header did not parse, with its keyword and its name when those were
           read, so that later stages can still know it is there. *)
 
-(* [recovered] lists the spans where the parser recovered from an error in
-   the definition, in order. At each one it built a node that does not
-   match the source text: an [Error] node, or the node that a habit's fix
-   would produce. A part of the definition matches its source text exactly
-   when no recovery lies in its span. *)
 type definition = {
   visibility : visibility;
   kind : definition_kind;
@@ -447,13 +422,11 @@ type definition = {
   recovered : span list;
   id : id;
 }
+(** [recovered] lists the spans where the parser recovered from an error in the definition, in
+    order. At each one it built a node that does not match the source text: an [Error] node, or the
+    node that a habit's fix would produce. A part of the definition matches its source text exactly
+    when no recovery lies in its span. *)
 
-(* An item of a file: a [use] line or a definition, with its base, the
-   absolute offset of its first token, and its source text, from its first
-   token to the end of its last. Spans inside [value] are relative to
-   [base], and index into [text]. A method written inside a trait, an
-   [impl], or a capability is an item of its own, and [container] is the
-   index of that trait, [impl], or capability among the file's definitions. *)
 type 'value item = {
   base : int;
   text : string;
@@ -461,5 +434,10 @@ type 'value item = {
   value : 'value;
   container : int option;
 }
+(** An item of a file: a [use] line or a definition, with its base, the absolute offset of its first
+    token, and its source text, from its first token to the end of its last. Spans inside [value]
+    are relative to [base], and index into [text]. A method written inside a trait, an [impl], or a
+    capability is an item of its own, and [container] is the index of that trait, [impl], or
+    capability among the file's definitions. *)
 
 type file = { uses : path item list; definitions : definition item list }

@@ -1,33 +1,14 @@
-(* The properties of a type that are derived from its shape: [Copyable],
-   [Plain], the view property, and the types that it contains.
-
-   An opaque type is [Copyable] or [Plain] only when it declares so with
-   [derives]. It then has the property under the conditions that its fields
-   give, as any other type does: [Slice[Element]] is [Plain] for every
-   [Element], because it holds a view of its elements, and [List[Element]]
-   is [Copyable] when [Element] is. A generic parameter has these properties
-   only when it is bounded by them, and an associated type of a parameter
-   only when its declared bounds include them. The view property is part of
-   a type's shape, so it is derived from the fields. *)
-
 module T = Types
 
 let copyable_trait = Well_known.path Copyable
 let plain_trait = Well_known.path Plain
 let storable_trait = Well_known.path Storable
 
-(* The substitution for a trait reference: the types that the trait's [Self]
-   and parameters are instantiated with. A reference with the wrong number
-   of arguments, which lowering reported, substitutes [Self] only: an
-   unsubstituted parameter equals no type. *)
 let trait_substitution (interface : T.trait_interface) ~self (reference : T.trait_reference) :
     T.substitution =
   (({ owner = reference.trait; name = "Self" } : T.parameter), T.Type self)
   :: Option.value ~default:[] (T.substitution_of interface.trait_generics reference.trait_arguments)
 
-(* The closure of a bound on a type: the bound's trait and, transitively,
-   the traits that it requires, with [Self] in the required traits
-   substituted by the type. *)
 let rec bound_closure database ?(seen = []) ~self (bound : T.trait_reference) =
   if List.exists (fun (other : T.trait_reference) -> Path.equal other.trait bound.trait) seen then
     []
@@ -57,9 +38,6 @@ let associated_bounds database ~base (trait : T.trait_reference) name =
       | None -> [])
   | None -> []
 
-(* The traits that a type implements according to bounds: the bounds of a
-   generic parameter, or the declared bounds of a projection, each with its
-   closure. *)
 let known_bounds database ~bounds (type_ : T.ty) =
   match type_ with
   | T.Parameter parameter -> List.concat_map (bound_closure database ~self:type_) (bounds parameter)
@@ -90,8 +68,6 @@ type occurrence =
           output of a function type. *)
   | Function_input  (** At any depth in the input of a function type that has a [time] clause. *)
 
-(* The occurrence of a type in a value that contains it through another
-   type. *)
 let through outer inner =
   match (outer, inner) with
   | Function_input, _ | _, Function_input -> Function_input
@@ -480,10 +456,6 @@ let rec is_open = function
   | T.Projection { base; _ } -> is_open base
   | _ -> false
 
-(* Whether a type has a property. [bounds] gives the bounds of each generic
-   parameter in scope, and [normalize] replaces an associated type by its
-   definition in the matching [impl]. An associated type that no [impl]
-   defines is assumed not to be [Copyable] or [Plain], and to be a view. *)
 let has database ~bounds ~normalize property type_ =
   let leaf type_ =
     let bounded trait = has_bound database ~bounds type_ trait in
@@ -506,11 +478,6 @@ let has database ~bounds ~normalize property type_ =
   | Copyable | Plain -> Option.is_some found
   | View | Holds_function -> Option.is_none found
 
-(* Whether a type is [Storable]: it is not a view type for every
-   instantiation of its generic parameters. A generic parameter, or an
-   associated type of one, is [Storable] only when it is bounded by
-   [Storable], because it may be instantiated with a view type. So
-   [List[Element]] is [Storable] where [Element] is. *)
 let storable database ~bounds ~normalize type_ =
   let leaf type_ = if has_bound database ~bounds type_ storable_trait then Some [] else None in
   Option.is_some

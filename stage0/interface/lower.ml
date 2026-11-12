@@ -1,8 +1,3 @@
-(* Lowering written types to [Types.ty], from a definition's resolved form.
-   Lowering reports the errors that a type position alone determines: a name
-   that is not a type, a wrong number of arguments, an associated type that
-   no bound declares. [Check] checks bounds separately. *)
-
 open Syntax
 module T = Types
 
@@ -39,9 +34,6 @@ let reported context code (span : span) message =
 
 let report context code span message = ignore (reported context code span message)
 let error context code span message = T.Error (reported context code span message)
-
-(* Resolution and lowering must agree. A disagreement is a compiler bug, and
-   stopping is better than accepting the code. *)
 let bug format = Compiler_bug.bug ~stage:"Interface" format
 let target context (name : name) = context.resolved.names.(name.id)
 
@@ -264,8 +256,6 @@ and path_type context (path : path_type) : T.ty =
   | Some (Unknown report) -> T.Error report
   | _ -> bug "`%s` is not resolved as a type" shown
 
-(* A bound, an [impl]'s trait, or the trait after [any]. An [impl] may
-   implement a capability too. *)
 and trait_reference ?(capability = false) context (path : path_type) :
     (T.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
@@ -449,8 +439,6 @@ and costs context clauses =
       | _ -> None)
     clauses
 
-(* Generic parameters, each named by its owner and its own name, as
-   resolution names them. *)
 let generics context owner (written : generic_parameter list) : T.generic list =
   let parameter (name : name) : T.parameter = { owner; name = name.text } in
   let declared =
@@ -496,7 +484,6 @@ let rec mentions_integer = function
 
 (* A signature, given the generics of the head before it and the type of
    [self]. *)
-(* Whether a signature promises termination: it has a [time] clause. *)
 let terminates (clauses : clause list) =
   List.exists
     (fun (clause : clause) ->

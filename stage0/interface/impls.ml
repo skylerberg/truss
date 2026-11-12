@@ -1,24 +1,11 @@
-(* Resolving the [impl] of a trait for a type, and normalizing associated
-   types.
-
-   By the orphan rule, an [impl] is defined in the package of its trait, of
-   its type, or of the outermost type of one of the trait's arguments, so
-   resolution searches only those packages. The [impl]s of each package are
-   indexed once, by trait and type. Each lookup is a query over that index,
-   so adding an [impl] re-checks only the definitions whose lookup result
-   changed. *)
-
 module T = Types
 module Names = Resolve.Names
 
-(* The outermost path of a type, which an [impl] is chosen by. *)
 let head = function T.Named { path; _ } -> Some path | _ -> None
 
 let derivable (trait : Path.t) =
   match Well_known.of_path trait with Some (Equal | Hash | Ordered | Default) -> true | _ -> false
 
-(* Every [impl] of a package, written or derived, by trait and type
-   constructor. *)
 let index =
   Query.query ~name:"impl_index" ~phase:Phases.interfaces ~show:Fun.id (fun database package ->
       List.concat_map
@@ -48,8 +35,6 @@ let index =
             | _ -> [])
         (Query.demand database Names.package_declarations package))
 
-(* The system implementation of a capability: its one [impl] in
-   [standard::system], which the program's entry point provides to [main]. *)
 let real_implementation database (capability : Path.t) : Path.t option =
   match
     List.filter_map
@@ -78,7 +63,6 @@ let by_type =
         (Query.demand database index package)
       |> Path.Map.map List.rev)
 
-(* The impls of a package for a type, each with its trait. *)
 let impls_for database (type_ : Path.t) package =
   Option.value ~default:[] (Path.Map.find_opt type_ (Query.demand database by_type package))
 
@@ -98,9 +82,6 @@ let cursor_trait = Well_known.path Cursor
    function. *)
 let cursor_impl (method_ : Path.t) : Path.t = Derived { type_ = method_; trait = cursor_trait }
 
-(* The capabilities that [next] uses on the cursor of a yielding method:
-   the method's, for the cursor's type arguments, since [next] runs the
-   method's code. Any other type has none. *)
 let cursor_uses database (type_ : T.ty) =
   match type_ with
   | T.Cursor { method_; arguments } -> (
@@ -112,9 +93,6 @@ let cursor_uses database (type_ : T.ty) =
       | None -> [])
   | _ -> []
 
-(* The yielding function or method whose cursor an [impl] is for, if the
-   [impl] is a cursor's. No type derives [Cursor], so a derived [impl] of it
-   is a cursor's. *)
 let cursor_of_impl : Path.t -> Path.t option = function
   | Derived { type_ = method_; trait } when Path.equal trait cursor_trait -> Some method_
   | _ -> None
@@ -222,11 +200,6 @@ let impl_interface database (path : Path.t) =
   | Derived { type_; trait } -> derived_interface database ~type_ ~trait
   | _ -> Query.demand database Environment.impl_interface path
 
-(* The substitution for an [impl] of a trait: the types that the trait's
-   [Self] and parameters are instantiated with, in terms of the [impl]'s own
-   generic parameters. It applies to a provided method that the [impl]
-   inherits from the trait, and to the trait's clauses that a method of the
-   [impl] inherits. *)
 let trait_substitution database (impl : Path.t) =
   Option.bind (impl_interface database impl) (fun (interface : T.impl_interface) ->
       Option.map
@@ -238,10 +211,6 @@ let trait_substitution database (impl : Path.t) =
 
 let open_type = function T.Error _ | T.Variable _ | T.Hole -> true | _ -> false
 
-(* Matches a type with an [impl]'s generic parameters in it against a type,
-   extending the substitution, or fails. Inference variables and errors
-   match anything, since a statement that has them is still being
-   checked. *)
 let rec match_type ~variables (substitution : T.substitution) pattern type_ =
   match (pattern, type_) with
   | T.Parameter parameter, _ when List.mem parameter variables -> (
@@ -329,8 +298,6 @@ let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
   then Names_self
   else Callable
 
-(* The element type of a pulled yielding method's cursor: the method's
-   yielded type, with the method's type arguments substituted. *)
 let cursor_element database (method_ : Path.t) arguments =
   match Query.demand database Environment.signature method_ with
   | Some ({ output = Yields (_, element); _ } as signature) ->
@@ -346,8 +313,6 @@ let plain_path = Properties.plain_trait
    bounds, as the definition asking declares them. *)
 type bounds = T.parameter -> T.trait_reference list
 
-(* The obligations of a definition's bounds for given type arguments: each
-   type argument, with a bound that it must satisfy. *)
 let required (generics : T.generic list) (substitution : T.substitution) =
   List.concat_map
     (fun (generic : T.generic) ->
@@ -357,12 +322,6 @@ let required (generics : T.generic list) (substitution : T.substitution) =
       | _ -> [])
     generics
 
-(* The evidence that a type implements a trait. Without [conditions], it is
-   the [impl] whose head matches the type, whether or not the bounds on the
-   [impl]'s parameters hold. An associated type is read from that [impl]: a
-   bound that does not hold is reported where the trait is required, and
-   normalizing the associated type reads nothing more about the type's
-   arguments. *)
 let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : T.ty)
     (wanted : T.trait_reference) : evidence option =
   let arguments_match given_arguments =
@@ -499,8 +458,6 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
                         else None)))
           candidates
 
-(* The associated type a trait's [impl] for a type chooses, or [None].
-   [defining] collects the [impl] that defines it. *)
 and associated_type database ~bounds ?defining type_ (trait : T.trait_reference) name =
   match List.assoc_opt name trait.associated with
   | Some fixed -> Some fixed
@@ -537,12 +494,6 @@ and associated_type database ~bounds ?defining type_ (trait : T.trait_reference)
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
 
-(* The associated capability set of a type, as the trait's [impl] for the
-   type defines it. The set of a generic parameter is known only for each
-   instantiation, so it stays a projection, and so does the set of a type
-   that is not inferred yet. An [any] type fixes every set to the empty one:
-   the code that holds the value cannot name the capabilities of the type
-   that it hides. *)
 and capability_set database ~bounds ?(depth = 0) type_ (trait : T.trait_reference) name =
   let projection = [ T.Capability_projection { base = type_; trait; name } ] in
   if depth > 32 then projection
@@ -558,9 +509,6 @@ and capability_set database ~bounds ?(depth = 0) type_ (trait : T.trait_referenc
     | Some From_bound | Some (Accepted (T.Variable _)) | None -> projection
     | Some (From_any | Built_in | Accepted _) -> []
 
-(* Normalizes a set of capabilities: replaces every associated capability
-   set whose type is known by the capabilities that the [impl] defines for
-   it. *)
 and normalize_capabilities database ~bounds ?depth (capabilities : T.capability list) =
   if not (List.exists (function T.Capability_projection _ -> true | _ -> false) capabilities) then
     capabilities
@@ -574,12 +522,6 @@ and normalize_capabilities database ~bounds ?depth (capabilities : T.capability 
            | capability -> [ capability ])
          capabilities)
 
-(* Normalizes a type: replaces every projection whose base is known by the
-   [impl]'s definition of the associated type, and normalizes every set of
-   capabilities in the type. A projection on a generic parameter stays,
-   unless a bound fixes it. So does a projection that no [impl] defines,
-   which then equals only itself. [defining] collects the [impl]s whose
-   definitions replace associated types. *)
 and normalize database ~bounds ?defining (type_ : T.ty) : T.ty =
   let normalize = normalize database ~bounds ?defining in
   let associated_type = associated_type database ~bounds ?defining in
@@ -603,13 +545,6 @@ and normalize database ~bounds ?defining (type_ : T.ty) : T.ty =
       | _ -> None)
     type_
 
-(* The signature of the function or method at a path, for every path at
-   which code is compiled or proven. A method that an [impl] inherits from
-   its trait, or a method of a derived [impl], is not written in the [impl]:
-   its signature is the trait method's, with [Self] and the trait's
-   parameters substituted by the [impl]'s types, inside that [impl]. Its
-   [uses] are the trait method's for the [impl]'s type, so [Self.Uses] is
-   the set that the [impl] defines. *)
 let signature database (path : Path.t) =
   match (Query.demand database Environment.signature path, path) with
   | Some signature, _ -> Some signature

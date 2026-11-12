@@ -1,6 +1,3 @@
-(* What the parser's tests share: parsing a text, and asserting what it
-   gives, a tree, statements, or one diagnostic with its fixes. *)
-
 open Harness
 
 let document name = Documents.read (Filename.concat "../.." name)
@@ -20,8 +17,6 @@ let no_diagnostics text diagnostics =
       fail "unexpected %s at %d: %s in %S" (Diagnostic.Code.name d.code) d.span.start d.message text)
     diagnostics
 
-(* Asserts that [text] parses with no diagnostics into definitions that
-   print as [expected]. *)
 let definitions text expected =
   let file, diagnostics = parse text in
   no_diagnostics text diagnostics;
@@ -31,15 +26,12 @@ let definitions text expected =
 
 let definition text expected = definitions text [ expected ]
 
-(* The statements of a function's body. *)
 let body_of text =
   let file, diagnostics = parse ("fn example() {\n" ^ text ^ "\n}") in
   match file.definitions with
   | [ { value = { kind = Function { body; _ }; _ }; _ } ] -> (body.statements, diagnostics)
   | _ -> ([], diagnostics)
 
-(* Asserts that [text], as the body of a function, parses with no
-   diagnostics into statements that print as [expected]. *)
 let statements text expected =
   let statements, diagnostics = body_of text in
   no_diagnostics text diagnostics;
@@ -48,12 +40,7 @@ let statements text expected =
     fail "expected [%s], got [%s]" (String.concat "; " expected) (String.concat "; " actual)
 
 let statement text expected = statements text [ expected ]
-let find = Documents.find
 
-(* Asserts that [text] gives exactly one diagnostic, with [code], starting at
-   the [occurrence]th occurrence of [at]. With [fixed], its fixes must turn
-   [text] into [fixed] and then [alternatives], each of which must parse
-   with no diagnostics. Without [fixed], it must have no fix. *)
 let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   match snd (parse text) with
   | [ diagnostic ] -> (
@@ -68,7 +55,7 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
         fail "expected %s, got %s"
           (Diagnostic.Code.name (Parser code))
           (Diagnostic.Code.name diagnostic.code);
-      let expected = find text at ~occurrence in
+      let expected = Documents.find text at ~occurrence in
       if diagnostic.span.start <> expected then
         fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
       let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in
@@ -88,7 +75,6 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   | diagnostics ->
       fail "expected one diagnostic, got [%s] for %S" (String.concat "; " (codes diagnostics)) text
 
-(* An error in a function's body. *)
 let body_error ?fixed ?alternatives ?occurrence text ~code ~at =
   let wrap text = "fn example() {\n" ^ text ^ "\n}" in
   error ?fixed:(Option.map wrap fixed)

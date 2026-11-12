@@ -1,10 +1,3 @@
-(* The interfaces of definitions, as queries.
-
-   [lowered] lowers a definition's outward-facing part and keeps what
-   lowering reported. The other queries project one interface out of it by
-   path, so a definition's diagnostics changing never re-checks a
-   definition that reads its interface. *)
-
 open Syntax
 module T = Types
 module Names = Resolve.Names
@@ -572,7 +565,6 @@ and lower database key definition resolved =
 
 let lowered = Lazy.force lowered
 
-(* The interface a path names, from its definition with ordinal 0. *)
 let interface =
   Query.query ~name:"interface" ~phase:Phases.interfaces ~show:Path.show ~saved:true
     ~about:(fun path -> Some { Query.path; part = Some "interface" })
@@ -608,8 +600,6 @@ let declared_fields =
             variants
       | _ -> [])
 
-(* The fields of a variant of a type, or of a record, in declaration order.
-   [name] gives the name of a field. *)
 let in_declared_order database path ~variant ~name fields =
   match List.assoc_opt variant (Query.demand database declared_fields path) with
   | Some declared ->
@@ -647,9 +637,6 @@ let builtin_shape builtin : T.type_interface =
   in
   { type_generics; shape = Builtin_type builtin; opaque = true; derives = [] }
 
-(* A type's interface, a built-in's included. [None] for a path that is not
-   a type, and the [Error] shape for a type whose definition did not
-   parse. *)
 let type_interface =
   Query.query ~name:"type_interface" ~phase:Phases.interfaces ~show:Path.show ~saved:true
     ~about:(fun path -> Some { Query.path; part = Some "shape" })
@@ -663,7 +650,6 @@ let type_interface =
               Some { type_generics = []; shape = Error_shape report; opaque = false; derives = [] }
           | _ -> None))
 
-(* The signature of a function or a method, wherever it is written. *)
 let signature =
   Query.query ~name:"signature" ~phase:Phases.interfaces ~show:Path.show ~saved:true
     ~about:(fun path -> Some { Query.path; part = Some "signature" })
@@ -672,9 +658,6 @@ let signature =
       | Some (Function_interface signature | Theorem_interface signature) -> Some signature
       | _ -> None)
 
-(* A function's signature for checking a use of it, or, when its header or
-   its member of a trait did not parse, the report of that, since everything
-   is accepted of it. *)
 let signature_or_report database (path : Path.t) =
   let broken path =
     match Query.demand database interface path with

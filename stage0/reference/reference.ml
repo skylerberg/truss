@@ -1,13 +1,9 @@
-(* The reference parser: GRAMMAR.md's grammar, built by Menhir from
-   grammar/truss.mly, which the tests and the fuzzer check the hand-written
-   parser against. It is built only for them. *)
-
 open Token
 
-(* The token Menhir's grammar reads for each of the lexer's. A string is one
-   token, so the grammar does not see interpolations, which are ordinary
-   expressions. Reserved words and foreign sequences have none: no grammar
-   rule accepts them. *)
+type entry = (Lexing.lexbuf -> Truss.token) -> Lexing.lexbuf -> unit
+
+(* The token Menhir's grammar reads for each of the lexer's. Reserved
+   words and foreign sequences have none. *)
 let token (kind : Token.kind) : Truss.token option =
   match kind with
   | Upper _ -> Some UPPER
@@ -128,7 +124,6 @@ let token (kind : Token.kind) : Truss.token option =
         | Shift_left -> SHL
         | Shift_right -> SHR)
 
-(* Whether the reference grammar accepts [tokens] from [entry]. *)
 let accepts entry (tokens : Token.t list) =
   let converted = List.filter_map (fun (written : Token.t) -> token written.kind) tokens in
   if List.compare_lengths converted tokens <> 0 then false
@@ -145,8 +140,6 @@ let accepts entry (tokens : Token.t list) =
 
 let file = Truss.file
 
-(* The documents' examples, split into pieces the way a file is, each parsed
-   by the kind of piece it starts like. *)
 module Snippet = struct
   type kind = Use | Definition | Signature | Statement
   type item = { kind : kind; first : int; stop : int }
@@ -185,7 +178,6 @@ module Snippet = struct
     in
     (List.map fst pieces, List.concat_map snd pieces)
 
-  (* The reference grammar's entry point for each kind of piece. *)
   let entry = function
     | Use -> Truss.snippet_use
     | Definition -> Truss.snippet_definition

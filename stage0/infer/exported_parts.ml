@@ -17,7 +17,7 @@ open State
 
 let public database (module_ : Path.module_) name =
   match Query.demand database Names.find (module_, name) with
-  | Some entry -> is_public entry.visibility
+  | Some entry -> Names.is_public entry.visibility
   | None -> true
 
 (* Whether code in another package can name a function or a constant. A
@@ -30,7 +30,7 @@ let visible_to_other_packages database (path : Path.t) =
       public database module_ name
       &&
       match Interface.Summary.definition database path with
-      | Some (_, definition) -> is_public definition.visibility
+      | Some (_, definition) -> Names.is_public definition.visibility
       | None -> true)
   | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ -> true
 
@@ -40,7 +40,7 @@ let visible_to_other_packages database (path : Path.t) =
    [impl] of a public trait for a type that is public. *)
 let called_from_other_packages (state : state) =
   match Query.demand state.database Names.container state.key with
-  | None -> is_public state.definition.visibility
+  | None -> Names.is_public state.definition.visibility
   | Some container -> (
       (* The container's interface, and not its definition: the definition
          changes with an edit to any method written inside it. *)
