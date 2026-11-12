@@ -396,7 +396,7 @@ let evaluate arguments =
         Outcome.Exit 2
     | exception Compiler_bug.Bug bug ->
         Output.eprint_line
-          ("The compiler has a bug, and cannot go on. Please report it.\n  "
+          ("The compiler has a bug, and cannot continue. Please report it.\n  "
          ^ Compiler_bug.to_string bug);
         Outcome.Exit 2
   in

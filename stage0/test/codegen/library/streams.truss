@@ -121,7 +121,7 @@ test "a buffered reader gives lines, with either line end or none at the end" {
   }
 }
 
-test "a buffered reader reads up to a byte, shows what is coming, and gives back its source" {
+test "a buffered reader reads up to a byte, shows what is coming, and returns its source" {
   provide streams::NoHandles() {
     var reader = streams::BufferedReader.new(drip("key=value;rest", step: 5), capacity: 4)
     var buffer: List[UInt8] = []

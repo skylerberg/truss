@@ -1109,10 +1109,10 @@ let () =
   List.iter
     (fun (what, text, code) -> test (what ^ " is an error") (fun () -> one_diagnostic text code))
     [
-      ( "giving up a constant with `own`",
+      ( "moving a constant with `own`",
         keep ^ names ^ "fn f() {\n  keep(own names)\n}\n",
         "ownership.not_owned" );
-      ( "giving up a field of a constant with `own`",
+      ( "moving a field of a constant with `own`",
         keep ^ config ^ "fn f() {\n  keep(own config.items)\n}\n",
         "ownership.not_owned" );
       ( "passing a constant to an `own` parameter",

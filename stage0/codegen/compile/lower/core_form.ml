@@ -1055,7 +1055,7 @@ and lent_type_of st ~writable ty (parts : Core.operand list) : Ground.lent =
 (* Builds what a [yield] lends into [destination], a lent value of type
    [lent]. A field that holds an address is given the address of a place,
    or of a temporary that the [yield]'s statement owns, which the method
-   drops once it goes on. *)
+   drops once it resumes. *)
 and lend_into st (lent : Ground.lent) (operand : Core.operand) ~destination =
   match operand with
   | Value { kind = Construct { variant; fields }; _ } ->
@@ -1129,14 +1129,19 @@ and copied_lent st (lent : Ground.lent) (source : Lir.place) : Lir.place =
       let fields =
         List.map
           (fun (name, field_ty) ->
-            let from = whole st (project st source (field_of variant name)) in
+            let field_place = whole st (project st source (field_of variant name)) in
             if lent.writable then begin
               scope.owned <-
-                Give_back { lent = copy / field_of variant name; source = from; ty = field_ty }
+                Write_back
+                  {
+                    destination = field_place;
+                    source = copy / field_of variant name;
+                    ty = field_ty;
+                  }
                 :: scope.owned;
-              (name, owned st from field_ty)
+              (name, owned st field_place field_ty)
             end
-            else (name, Lir.Copy from))
+            else (name, Lir.Copy field_place))
           fields
       in
       emit st.builder (Assign (copy, Build { ty; variant; fields })));
@@ -2062,7 +2067,7 @@ and inline ?(several = false) st path type_arguments ~arguments ~call_site ~on_y
       (lent_type st body)
   in
   (* A value the method makes to lend is the caller's statement's to drop,
-     after the method has gone on, whichever [yield] made it. *)
+     after the method has resumed, whichever [yield] made it. *)
   let yield_into =
     if several && lent_into = None then Some (temporary st (yielded_type_of_frame st)) else None
   in
@@ -2103,7 +2108,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
   let goes_on = block st.builder in
   (* A method with a [yield] on each of several paths lends whichever it
      reaches, so the caller reads through the address of what was lent,
-     and the method goes on from the [yield] it reached. *)
+     and the method resumes from the [yield] it reached. *)
   let ty = yielded_type st path type_arguments in
   let through =
     if several && not (is_zero_size st ty) then

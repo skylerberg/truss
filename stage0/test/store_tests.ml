@@ -69,7 +69,7 @@ let () =
       if Store.find_result store ~kind:"proofs" ~key:"k" <> None then fail "found as another kind")
 
 let () =
-  test "a pointer gives back what it was last pointed at" (fun () ->
+  test "a pointer reads the value it was last set to" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let pointer = Store.pointer store "session" in
       Store.write_pointer pointer "first";

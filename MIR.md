@@ -152,7 +152,7 @@ check reports a `move` that is not allowed, as it does for a `Use` today.
 | `switch_variant(place, cases, default)` | Branch on a sum type's variant. |
 | `loop(header)` | Enter the natural loop at `header`. The header carries the loop's `invariant`, `decreases`, and `cost` clauses, and its schedule: one iteration after another, or at once as the regions of a `parallel for` or a `concurrent for`. |
 | `each(call, pattern, body, after)` | A `for` loop over a call of a yielding method. `body` is a region that runs once for each part the callee yields, and ends with `continue` or `break`. |
-| `yield(mode, operand, resume)` | In a lending or yielding method, give a part to the caller's loop, and go on at `resume` unless the loop has ended. |
+| `yield(mode, operand, resume)` | In a lending or yielding method, give a part to the caller's loop, and continue at `resume` unless the loop has ended. |
 | `return operand` | Return a value, or nothing. |
 | `exit_tasks(tasks, exit)` | An early exit from `concurrent` code: end these tasks, then take `exit`, a `return`, a `break`, or a `continue`. |
 | `unreachable` | A point the prover shows is never reached: the last arm of a `match` whose guards cover every case, or `unreachable` as written. |

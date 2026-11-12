@@ -652,7 +652,7 @@ test "arrays" {
 |}
 
 let () =
-  test "a call of a lending method that never yields compiles, and stops where the method does"
+  test "a call of a lending method that never yields compiles, and the code after it is unreachable"
     (fun () ->
       expect_output
         {|type Grid(cells: List[Int64])
@@ -1024,7 +1024,7 @@ test "a slice of a small array reads the array after other calls have used the s
 |}
 
 let () =
-  passes "values that a method builds around places it lends, to read and to change"
+  passes "constructors of lent places, yielded read-only and `mut`"
     {|type Bag(items: List[String])
 
 type Numbered(index: USize, value: String)
@@ -1053,7 +1053,7 @@ fn Counters.slots(mut self) yields mut Slot {
   }
 }
 
-test "values built around lent places" {
+test "constructors of lent places" {
   let bag = Bag(items: ["${1}st", "${2}nd"])
   if bag.first() is Some(name) {
     assert name.length() == 3
@@ -1083,8 +1083,8 @@ test "values built around lent places" {
 
 let () =
   passes
-    "a lent value holds the addresses of its places: read through them, changed in them, and \
-     copied where it is used whole"
+    "a lent value is read and changed through the addresses it holds, and copied where it is used \
+     whole"
     {|use standard::list
 
 type Big(label: String, numbers: Array[Int64, 64])
@@ -1221,7 +1221,7 @@ fn rename_first(names: mut Names, to: String) -> Bool {
   false
 }
 
-test "more shapes of values built around lent places" {
+test "more constructors of lent places" {
   let pair = Names(first: "${1}st", second: "${2}nd!", others: [])
   if pair.both() is Some(both) {
     assert both.left.length() + both.right.length() == 7
@@ -1245,7 +1245,7 @@ test "more shapes of values built around lent places" {
 |}
 
 let () =
-  passes "a method that yields values built around lent places and loops over itself"
+  passes "a method that yields constructors of lent places and loops over itself"
     {|type Tree =
   | Leaf
   | indirect Node(left: Tree, name: String, right: Tree)
@@ -1267,7 +1267,7 @@ fn Tree.entries(self) yields Entry {
   }
 }
 
-test "a method that yields values around lent places, and loops over itself" {
+test "a method that yields constructors of lent places and loops over itself" {
   let tree = Tree.Node(
     left: Tree.Node(left: Tree.Leaf, name: "${1}st", right: Tree.Leaf),
     name: "${2}nd!",
@@ -1285,7 +1285,7 @@ test "a method that yields values around lent places, and loops over itself" {
 |}
 
 let () =
-  passes "a value moved out of a whole place lent mut, which is then given another"
+  passes "a value moved out of a `mut` parameter, which is then reinitialized"
     {|type Holder(slot: Option[String], count: Int64)
 
 fn take(slot: mut Option[String]) -> Option[String] {
@@ -1294,7 +1294,7 @@ fn take(slot: mut Option[String]) -> Option[String] {
   moved
 }
 
-test "a value moved out of a place lent mut, which is then given another" {
+test "moved and reinitialized" {
   var slot: Option[String] = Some("${40 + 2} is the answer")
   let moved = take(mut slot)
   assert slot is None

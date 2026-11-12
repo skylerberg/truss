@@ -847,7 +847,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
               { path = Intrinsic.builtin_path (Intrinsic.libc_builtin scalar); arguments = [] }
           in
           let { Libc.parameters; result; _ } = Libc.signature function_ in
-          (* What goes on after the call: a structure's numbers to the
+          (* What is copied back after the call: a structure's numbers to the
              arguments they were written for. *)
           let after = ref [] in
           let next = ref 0 in

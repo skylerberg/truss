@@ -363,7 +363,7 @@ test "a yielding function that uses its source's set" {
 }
 |}
         (String.concat "" (List.init 8 (Printf.sprintf "test %d passed\n"))));
-  passes "a lending method goes on after its caller's statement"
+  passes "a lending method resumes after its caller's statement"
     {|type Counted(value: Int64, reads: Int64)
 
 fn Counted.current(mut self) lends Int64 {
@@ -378,7 +378,7 @@ test "lent" {
   assert counted.value == 99
 }
 |};
-  passes "a lending method lends a value it made, which lasts for the statement"
+  passes "a lending method lends a local it owns, which lives until the caller's statement ends"
     {|type Holder(id: Int64)
 
 fn Holder.label(self) lends String {
@@ -391,7 +391,7 @@ test "lent" {
   assert holder.label() == "label 1"
 }
 |};
-  (* The caller goes on from either [yield], and only the first has
+  (* The caller continues from either [yield], and only the first has
      [label] in scope. *)
   passes "a lending method owns a value at one of its yields and not at another"
     {|type Pair(first: String, second: String)
@@ -446,7 +446,7 @@ test "the first match, and none" {
   assert bag.first_matching("x") is None
 }
 |};
-  passes "a lending method lends to change from either of two yields, one with a value in scope"
+  passes "a `lends mut` method yields on two paths, and owns a local at one of them"
     {|type Slots(first: List[Int64], second: Int64)
 
 fn Slots.slot(mut self, pick: Bool) lends mut Int64 {
@@ -467,7 +467,7 @@ test "changed through either yield" {
   assert slots.second == 105
 }
 |};
-  passes "a lending method goes on when its caller's statement leaves early"
+  passes "a lending method resumes when its caller's statement exits early"
     {|type Counted(value: Int64, finished: Int64)
 
 fn Counted.current(mut self) lends Int64 {

@@ -2,7 +2,7 @@
    terminators, into code with none.
 
    A method that is looped over takes the caller's loop body as its last
-   parameter, a function value that returns whether to go on. A method that
+   parameter, a function value that returns whether to continue. A method that
    is pulled becomes a state machine: a [next] function over a cursor that
    holds the state number, the parameters, and the locals that are live
    across a [yield], and a drop function that ends the method at the [yield]
@@ -10,8 +10,8 @@
    [yield]'s [stop] path are already in place. *)
 
 (* The loop form. [body] is the type of the caller's loop body, whose result
-   is a [Bool]: true to go on. A lending method's [yield] has no [stop], so
-   it calls the body and always goes on. *)
+   is a [Bool]: true to continue. A lending method's [yield] has no [stop], so
+   it calls the body and always continues. *)
 val loop_form : Memory_layout.env -> body:Ground.function_type -> Lir.function_ -> Lir.function_
 
 (* The fields of a cursor over the method: its state, a [UInt32], then each

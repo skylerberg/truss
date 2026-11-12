@@ -111,9 +111,11 @@ let path_type analysis path =
   Lir.place_type analysis.env ~environment:analysis.environment analysis.function_
     (place_of_path path)
 
+let path_needs_drop analysis path =
+  match path_type analysis path with Some (Value ty) -> analysis.needs_drop ty | _ -> false
+
 let owns analysis path =
-  (not analysis.function_.locals.(path.local).borrowed)
-  && match path_type analysis path with Some (Value ty) -> analysis.needs_drop ty | _ -> false
+  (not analysis.function_.locals.(path.local).borrowed) && path_needs_drop analysis path
 
 (* A path as a message names it: its local, by number and name, and its
    steps. *)
@@ -574,14 +576,15 @@ let elaborate env ~needs_drop ~environment (function_ : Lir.function_) =
                     emit_ops builder (drop_ops analysis state ~flag path);
                     apply analysis state statement;
                     update before state
-                | Some path
-                  when analysis.function_.locals.(path.local).borrowed && List.mem Deref path.steps
-                  ->
+                | Some path when not (path_needs_drop analysis path) -> ()
+                | Some path when List.mem Deref path.steps ->
                     (* A place that a borrowed local points at, such as one
                        that a lent value holds the address of, is another
                        owner's and always holds a value. *)
                     push builder statement
-                | Some _ -> ()
+                | Some path ->
+                    bug "a drop of %s, which a borrowed local holds and its owner drops"
+                      (describe analysis path)
                 | None ->
                     (* An element reached through an index, which always
                        holds a value, since elements are never moved out. *)

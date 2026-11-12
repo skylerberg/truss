@@ -71,7 +71,7 @@ test "months and weekdays have numbers, lengths, and names" {
   assert "${time::Weekday.Wednesday}" == "Wednesday"
 }
 
-test "a time of day is made from its fields and gives them back" {
+test "a time of day built from its fields returns them" {
   assert time::TimeOfDay.new(23, minute: 59, second: 58, nanosecond: 999999999) is Some(late) && late.hour() == 23
     && late.minute() == 59 && late.second() == 58 && late.nanosecond() == 999999999
   assert time::TimeOfDay.new(0, minute: 0) == Some(time::TimeOfDay.midnight)

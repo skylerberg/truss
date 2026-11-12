@@ -80,7 +80,7 @@ let address_of cursor ~(before : Token.t option) ~(ampersand : Token.t) ~(next :
   report cursor Address_of ampersand.span
     (Printf.sprintf
        "Truss has no `&`; write %s, marking a place with `mut` or `own` only when it is changed or \
-        given up."
+        moved."
        marked)
     "Remove the `&`"
     [ Diagnostic.replace (through_next ampersand next) separator ]

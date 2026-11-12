@@ -435,7 +435,7 @@ let () =
          {\n\
         \  if value is Some(inner) && inner > 0 { inner } else { 0 }\n\
          }\n");
-  test "? goes on with what is inside" (fun () ->
+  test "? continues with the value inside" (fun () ->
       not_proven
         "fn f(value: Option[UInt8]) -> Option[UInt8] {\n\
         \  let inner = value?\n\
@@ -747,11 +747,11 @@ let () =
      fn Pair.tagged(mut self) lends mut Tagged\n" ^ ensures
     ^ "{\n  yield Tagged(tag: 0, value: mut self.second)\n}\n"
   in
-  test "a constructor lent `mut` leaves the places it does not lend" (fun () ->
-      proven (tagged "  ensures self.first == old(self.first)\n"));
-  test "a constructor lent `mut` stores the caller's change in the place it lends" (fun () ->
+  test "a constructor yielded `mut` does not change a field of `self` that it does not lend"
+    (fun () -> proven (tagged "  ensures self.first == old(self.first)\n"));
+  test "a caller's change to a constructor yielded `mut` is written to the lent field" (fun () ->
       not_proven (tagged "  ensures self.second == old(self.second)\n") "prover.ensures");
-  test "a caller of a constructor lent `mut` keeps what the method's contract says" (fun () ->
+  test "a caller of a method that yields a constructor `mut` can rely on its `ensures`" (fun () ->
       proven
         (tagged "  ensures self.first == old(self.first)\n"
         ^ "\n\
@@ -864,7 +864,7 @@ let () =
         \  {\n\
         \  }\n\
          }\n");
-  test "a while loop in a yielding method names what the method handed out" (fun () ->
+  test "a while loop's invariant in a yielding method can name `yielded`" (fun () ->
       proven
         "type Counter(limit: UInt32)\n\n\
          fn Counter.each(self) yields UInt32\n\
@@ -2418,7 +2418,8 @@ let () =
     \  yield mut self.first\n\
      }\n\n"
   in
-  test "a method that lends a part mut does not pay for what is done to it" (fun () -> proven bag);
+  test "a method that lends a part `mut` is not charged for the caller's changes to it" (fun () ->
+      proven bag);
   test "a caller that raises a lent part's potential pays for it" (fun () ->
       let actual =
         codes

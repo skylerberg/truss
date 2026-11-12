@@ -89,7 +89,7 @@ test "a buffer is filled and a slice is shuffled from the generator's numbers" {
   assert empty.length() == 0
 }
 
-test "a split generator goes on from here, and the first jumps far ahead" {
+test "a split generator continues from its state, and the first jumps far ahead" {
   var generator = random::Generator.seeded(9)
   var branch = mut generator.split()
   assert mut branch.next() == 47656050712223840
