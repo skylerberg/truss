@@ -6,7 +6,7 @@ open Harness
 open Support
 
 (* Everything the checker reports so far: resolution and interfaces. *)
-let check = Type_checker.through Interface
+let check = Type_checker.For_testing.through Interface
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let app name : Path.t = Top { module_ = module_of "app::main"; name }
@@ -446,20 +446,6 @@ let () =
   test "a law's proof names every generic parameter of its type" (fun () ->
       one_diagnostic (boxed ^ "proof Joined.associative for Box {\n}\n") "types.arity")
 
-(* Real implementations *)
-
-let () =
-  test "a capability's real implementation is the one standard::system holds" (fun () ->
-      let database = setup [] in
-      match Interface.Impls.real_implementation database (standard [ "capabilities" ] "Clock") with
-      | Some (Impl { module_; _ }) when Well_known.in_system module_ -> ()
-      | Some impl -> fail "found %s" (Path.show impl)
-      | None -> fail "none found");
-  test "a trait that is no capability has no real implementation" (fun () ->
-      let database = setup [] in
-      if Option.is_some (Interface.Impls.real_implementation database (standard [ "core" ] "Equal"))
-      then fail "found one")
-
 (* Incremental work *)
 
 let () =
@@ -478,7 +464,7 @@ let () =
       expect_not_recomputed engine
         ~first:(fun () -> if not (Query.demand database asker ()) then fail "no impl of Equal")
         ~again:(fun () ->
-          Database.Testing.set_text engine (module_of "app::main")
+          Database.For_testing.set_text engine (module_of "app::main")
             (base ^ Fixtures.Interface.adding_an_impl_of_one_trait_re_checks_nothing_that);
           ignore (Query.demand database asker ()))
         asker [ () ])
@@ -611,10 +597,10 @@ let () =
           let path = Well_known.path known in
           if not (List.exists (Path.equal path) declared) then
             fail "the standard library has no `%s`" (Path.show path))
-        Well_known.all);
+        Well_known.For_testing.all);
   test "a well-known definition is found by its path" (fun () ->
       List.iter
         (fun known ->
           if Well_known.of_path (Well_known.path known) <> Some known then
             fail "`%s` is not found by its path" (Path.show (Well_known.path known)))
-        Well_known.all)
+        Well_known.For_testing.all)

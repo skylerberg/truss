@@ -80,14 +80,6 @@ val demand : context -> ('key, 'value) query -> 'key -> 'value
     demand made outside any query first brings the state up to date through the query's phase; later
     phases keep their queued results until something of theirs is read, or {!stabilize}. *)
 
-val known : context -> ('key, 'value) query -> 'key -> 'value option
-(** The result the state holds for a query and key, if no change could have reached it: the phases
-    before the query's are brought up to date, and nothing of the query's own phase is computed. No
-    read is recorded and the result is not made a root. [None] for a result the state does not hold,
-    one whose reads may have changed, and one that raised. Raises [Invalid_argument] while a query
-    runs, since a read that is not recorded would make the query's result depend on the engine's
-    contents. *)
-
 (** {1 Engines} *)
 
 val create : ?log:bool -> ?bases:t list -> unit -> t

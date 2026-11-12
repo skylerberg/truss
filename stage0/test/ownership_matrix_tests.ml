@@ -1,6 +1,3 @@
-module Patterns = Type_checker.For_testing.Patterns
-module Usage = Type_checker.For_testing.Usage
-
 (* Generated tests for dangling views: a view cannot be used after the place
    that it borrows is mutated or moved.
 
@@ -19,7 +16,7 @@ module Usage = Type_checker.For_testing.Usage
 open Harness
 open Support
 
-let check = Type_checker.through Ownership
+let check = Type_checker.For_testing.through Ownership
 let helpers = Fixtures.Ownership_matrix.helpers
 
 (* A place that stores a [List[Int64]]. *)

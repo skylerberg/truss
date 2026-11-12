@@ -1,12 +1,7 @@
 (* Graph questions about a state. Every answer names definitions and parts;
    the engine's nodes stay inside. *)
 
-type edge = {
-  dependent : Path.t;
-  dependent_part : string;
-  dependency : Path.t;
-  dependency_part : string;
-}
+open Graph_types
 
 let part_of (subject : Query.subject) = Option.value subject.part ~default:""
 
@@ -137,8 +132,6 @@ let reachable engine roots =
   in
   List.map (reach Path.Set.empty) roots
 
-type difference = Changed | Added | Same
-
 (* Every node of [mine] that may differ from the same node in [theirs],
    with how it compares. A state holds only its differences from its bases, or
    possible ones, so where the two share a base these are the nodes either holds
@@ -173,12 +166,6 @@ let changes mine theirs =
       | Some (subject : Query.subject) -> Some (subject.path, subject.part, difference)
       | None -> None)
     (compare_nodes mine theirs)
-
-type place = { path : Path.t option; part : string option; label : string }
-
-type overlap =
-  | Both_change of place
-  | Reads of { this_worktree : bool; change : place; reads : place }
 
 (* Where two states' changes from a common base meet: each node both
    changed, and each node one changed that depends on a node the other changed. *)

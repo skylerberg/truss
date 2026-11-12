@@ -56,7 +56,6 @@ val target_operands : target -> operand list
    parameters first and then by first use, with unused locals removed. Two
    lowerings of one definition that differ only in numbering give equal
    canonical forms. *)
-val canonical : function_ -> function_
 val canonical_instance : t -> t
 
 (* The version of code generation, part of every key built from the LIR. *)
@@ -75,8 +74,12 @@ val equal_signature : signature -> signature -> bool
 
 (* The BLAKE3 hash of the canonical form's encoding and [version], which
    early cutoff compares. *)
-val hash : t -> string
 
 (* A compact text form, for tests. *)
-val to_string : t -> string
-val function_to_string : function_ -> string
+
+module For_testing : sig
+  val canonical : function_ -> function_
+  val hash : t -> string
+  val to_string : t -> string
+  val function_to_string : function_ -> string
+end

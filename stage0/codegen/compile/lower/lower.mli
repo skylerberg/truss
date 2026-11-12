@@ -22,13 +22,10 @@ val env : context -> Memory_layout.env
 val glue : context -> Glue.t
 val monomorphic : context -> Monomorphic.context
 
-val constant_value : context -> Path.t -> Lir.static_value option
-(** Another constant's value, where it folds. *)
-
 val context :
   ?checks:bool ->
-  ?cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
-  ?constant:(context -> Path.t -> Lir.static_value option) ->
+  cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
+  constant:(context -> Path.t -> Lir.static_value option) ->
   Query.context ->
   Memory_layout.target ->
   context
@@ -94,3 +91,8 @@ val template_checked : context -> Path.t -> int list
    function, which is not generic, called with each argument a constant, an
    integer or a [Bool] as 0 or 1, and its result written out. *)
 val call_evaluation : context -> Instance.key -> function_:Path.t -> arguments:Z.t list -> Lir.t
+
+module For_testing : sig
+  val constant_value : context -> Path.t -> Lir.static_value option
+  (** Another constant's value, where it folds. *)
+end

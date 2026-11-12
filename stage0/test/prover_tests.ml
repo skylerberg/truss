@@ -1337,13 +1337,17 @@ let () =
           goal = Logic.Operation (">=", [ Logic.Symbol now; Logic.Symbol now ]);
         }
       in
-      let file = Filename.concat directory (Solver.key query) in
+      let file = Filename.concat directory (Solver.For_testing.key query) in
       Out_channel.with_open_bin file (fun channel -> output_string channel "proven\n");
       Unix.utimes file 1. 1.;
       match Solver.find ~cache:directory () with
       | Error message -> fail "%s" message
       | Ok cached ->
-          if Solver.solve cached query <> Solver.Proven then fail "expected the stored answer";
+          let request = Solver.request query in
+          if
+            Solver.read request (List.hd (Solver.ask_all cached [ (request, query) ]))
+            <> Solver.Proven
+          then fail "expected the stored answer";
           if (Unix.stat file).st_mtime < 2. then fail "the answer's file was not marked as asked");
   test "a query's text names nothing by its Truss name" (fun () ->
       let database =
@@ -1364,7 +1368,7 @@ let () =
           List.hd (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
         in
         match Query.demand database Prover.proof (Resolve.Names.key_of key) with
-        | Obligations { obligations = [ obligation ]; _ } -> Solver.key obligation.query
+        | Obligations { obligations = [ obligation ]; _ } -> Solver.For_testing.key obligation.query
         | _ -> "none"
       in
       let first = key_of Fixtures.Prover.renaming_a_function_and_its_parameter_gives_the in
@@ -1636,8 +1640,8 @@ let again before after =
   (match prove () with
   | [] -> ()
   | actual -> fail "before the edit: %s" (String.concat "; " (Support.codes actual)));
-  Database.Testing.set_text engine module_ after;
-  Engine.clear_log engine;
+  Database.For_testing.set_text engine module_ after;
+  Engine.For_testing.clear_log engine;
   let solved = Solver.solved solver in
   (match prove () with
   | [] -> ()
@@ -1648,7 +1652,7 @@ let again before after =
         if key.module_ = module_ then
           match key.path with Top { name; _ } -> Some name | path -> Some (Path.show path)
         else None)
-      (Engine.computed engine Prover.proof)
+      (Engine.For_testing.computed engine Prover.proof)
   in
   (List.sort_uniq compare proven, Solver.solved solver - solved)
 

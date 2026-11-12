@@ -13,12 +13,12 @@ let rec needs_drop (ty : Ground.ty) =
   | _ -> false
 
 let elaborate function_ =
-  Lir.canonical
+  Lir.For_testing.canonical
     (Drops.elaborate (shape_env ~extra:drop_shapes ()) ~needs_drop
        ~environment:(fun _ -> [])
        function_)
 
-let elaborated function_ = Lir.function_to_string (elaborate function_)
+let elaborated function_ = Lir.For_testing.function_to_string (elaborate function_)
 let condition = local ~name:"ready" (Raw Bool)
 let consume = call "consume" ~result:None ~parameters:[ value text ]
 
@@ -296,7 +296,7 @@ let () =
              ~after:[ Regions_end { fork = 0 } ])
       in
       let outlined =
-        Lir.to_string
+        Lir.For_testing.to_string
           (Lir.canonical_instance
              (Outline.instance (shape_env ~extra:drop_shapes ()) (instance "entry" elaborated)))
       in

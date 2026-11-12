@@ -139,9 +139,6 @@ tests compare the counts for one edit in a small package and a large one.
   states does, so a question does not change what a state maintains.
 - **A read outside any query first brings the engine up to date through its
   target's phase,** so a driver never sees a result a change has not reached.
-- **`Query.known` gives a result only if no change could have reached it,**
-  computing nothing of its phase. The prover asks it of each verdict, and
-  solves the other definitions' queries together before reading theirs.
 - **A result whose query raised a fatal exception stays queued,** so it is never
   written as current.
 - **Results are recomputed, never patched,** so the engine needs no knowledge

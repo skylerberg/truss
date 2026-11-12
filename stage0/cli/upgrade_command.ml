@@ -127,7 +127,7 @@ let consequences (project : Project.t) text =
   let changed =
     List.sort_uniq Path.compare
       (List.filter_map
-         (fun (path, part, (difference : Database.difference)) ->
+         (fun (path, part, (difference : Graph_types.difference)) ->
            match part with
            | Some part
              when difference = Changed && List.mem part Signatures.parts && not (ours path) ->
@@ -142,7 +142,7 @@ let consequences (project : Project.t) text =
         match
           List.sort_uniq Path.compare
             (List.filter_map
-               (fun (edge : Database.edge) ->
+               (fun (edge : Graph_types.edge) ->
                  if Path.equal edge.dependency path && ours edge.dependent then Some edge.dependent
                  else None)
                edges)

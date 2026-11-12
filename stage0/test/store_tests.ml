@@ -3,6 +3,10 @@
 
 open Harness
 
+(* An input's value, raising [Not_found] when it is not set. *)
+let get database input key =
+  match Query.find database input key with Some value -> value | None -> raise Not_found
+
 let fresh_directory () = scratch "store"
 
 let segment_files directory =
@@ -171,10 +175,10 @@ let unit_query name ?saved ?portable ?(phase = Phases.syntax) compute =
 
 let doubled =
   unit_query "saved_doubled" ~saved:true ~portable:true (fun database () ->
-      2 * Query.get database value_input ())
+      2 * get database value_input ())
 
 let through_unsaved =
-  unit_query "unsaved_middle" (fun database () -> Query.get database value_input () + 1)
+  unit_query "unsaved_middle" (fun database () -> get database value_input () + 1)
 
 let reads_through =
   unit_query "saved_reads_through" ~saved:true ~portable:true ~phase:Phases.bodies
@@ -183,7 +187,7 @@ let reads_through =
 let other_input = Query.input ~name:"saved_other" ~show:(fun () -> "") ()
 
 let tripled =
-  unit_query "saved_tripled" ~saved:true (fun database () -> 3 * Query.get database other_input ())
+  unit_query "saved_tripled" ~saved:true (fun database () -> 3 * get database other_input ())
 
 let attached store =
   let engine = Engine.create ~log:true () in
@@ -212,8 +216,8 @@ let () =
       let store, artifact = written () in
       let engine = opened store artifact in
       if Engine.get engine doubled () <> 8 then fail "another result";
-      if Engine.executed engine <> [] then
-        fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
+      if Engine.For_testing.executed engine <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.For_testing.executed engine)));
   test "a change in an opened state computes its readers" (fun () ->
       let store, artifact = written () in
       let engine = opened store artifact in
@@ -230,7 +234,8 @@ let () =
       let store, artifact = written () in
       let engine = opened store artifact in
       ignore (Engine.get engine doubled ());
-      if Engine.count engine <> 0 then fail "holds %d nodes" (Engine.count engine));
+      if Engine.For_testing.count engine <> 0 then
+        fail "holds %d nodes" (Engine.For_testing.count engine));
   test "two states opened from one artifact each see only their own changes" (fun () ->
       let store, artifact = written () in
       let first = opened store artifact and second = opened store artifact in
@@ -278,7 +283,7 @@ let () =
       let engine = opened empty copied in
       Engine.set engine value_input () 4;
       if Engine.get engine doubled () <> 8 then fail "another result";
-      if Engine.computed engine doubled <> [ () ] then fail "not computed")
+      if Engine.For_testing.computed engine doubled <> [ () ] then fail "not computed")
 
 let () =
   test "a result computed in one state is found by another that reads the same" (fun () ->
@@ -286,29 +291,31 @@ let () =
       let engine = attached store in
       Engine.set engine value_input () 4;
       if Engine.get engine doubled () <> 8 then fail "another result";
-      if Engine.executed engine <> [] then
-        fail "computed [%s]" (String.concat "; " (Engine.executed engine));
+      if Engine.For_testing.executed engine <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.For_testing.executed engine));
       if (Engine.counters engine).adopted <> 1 then fail "not found as a fact");
   test "a result is computed when a dependency has another value" (fun () ->
       let store, _ = written () in
       let engine = attached store in
       Engine.set engine value_input () 5;
       if Engine.get engine doubled () <> 10 then fail "another result";
-      if Engine.executed engine <> [ "saved_doubled()" ] then fail "not computed");
+      if Engine.For_testing.executed engine <> [ "saved_doubled()" ] then fail "not computed");
   test "going back to an earlier input finds the earlier result" (fun () ->
       let store, artifact = written () in
       let engine = opened store artifact in
       Engine.set engine value_input () 5;
       ignore (Engine.get engine doubled ());
       Engine.record_facts engine;
-      Engine.clear_log engine;
+      Engine.For_testing.clear_log engine;
       Engine.set engine value_input () 4;
       if Engine.get engine doubled () <> 8 then fail "another result";
       if Engine.get engine reads_through () <> 50 then fail "another result read through";
       (* The results that are not saved are computed, being cheap; the saved
          ones are found. *)
-      if Engine.computed engine doubled <> [] || Engine.computed engine reads_through <> [] then
-        fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
+      if
+        Engine.For_testing.computed engine doubled <> []
+        || Engine.For_testing.computed engine reads_through <> []
+      then fail "computed [%s]" (String.concat "; " (Engine.For_testing.executed engine)));
   test "a result found as a fact has the computed result's dependencies" (fun () ->
       let store, _ = written () in
       let engine = attached store in
@@ -324,16 +331,14 @@ let pair_input = Query.input ~name:"saved_pair" ~show:(fun () -> "") ()
 
 let pair_length =
   unit_query "saved_pair_length" ~saved:true ~portable:true (fun database () ->
-      let left, right = Query.get database pair_input () in
+      let left, right = get database pair_input () in
       String.length left + String.length right)
 
 let left_text =
-  unit_query "saved_left_text" ~saved:true (fun database () ->
-      fst (Query.get database pair_input ()))
+  unit_query "saved_left_text" ~saved:true (fun database () -> fst (get database pair_input ()))
 
 let right_text =
-  unit_query "saved_right_text" ~saved:true (fun database () ->
-      snd (Query.get database pair_input ()))
+  unit_query "saved_right_text" ~saved:true (fun database () -> snd (get database pair_input ()))
 
 let both_texts =
   unit_query "unsaved_both_texts" ~phase:Phases.declarations (fun database () ->
@@ -373,13 +378,11 @@ let () =
       if counters.marked <> 0 then fail "marked %d results" counters.marked)
 
 let switch_input = Query.input ~name:"saved_switch" ~show:(fun () -> "") ()
-
-let leaf =
-  unit_query "saved_leaf" ~saved:true (fun database () -> Query.get database value_input ())
+let leaf = unit_query "saved_leaf" ~saved:true (fun database () -> get database value_input ())
 
 let top =
   unit_query "saved_top" ~saved:true ~phase:Phases.bodies (fun database () ->
-      if Query.get database switch_input () then Query.demand database leaf () else 0)
+      if get database switch_input () then Query.demand database leaf () else 0)
 
 let maybe_input = Query.input ~name:"saved_maybe" ~show:(fun () -> "") ()
 
@@ -409,8 +412,8 @@ let () =
       if Engine.get engine defaulted () <> 7 then fail "another result";
       let again = opened store (Engine.write engine) in
       if Engine.get again defaulted () <> 7 then fail "another result when opened";
-      if Engine.executed again <> [] then
-        fail "computed [%s]" (String.concat "; " (Engine.executed again));
+      if Engine.For_testing.executed again <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.For_testing.executed again));
       Engine.set again maybe_input () 3;
       if Engine.get again defaulted () <> 3 then fail "setting the input did not reach it");
   test "a node the chain does not hold is written with the first node that reads it" (fun () ->
@@ -426,8 +429,8 @@ let () =
       if Engine.get engine defaulted () <> 7 then fail "another result";
       let again = opened store (Engine.write engine) in
       if Engine.get again defaulted () <> 7 then fail "another result when opened";
-      if Engine.executed again <> [] then
-        fail "computed [%s]" (String.concat "; " (Engine.executed again)));
+      if Engine.For_testing.executed again <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.For_testing.executed again)));
   test "a result that returns to the whole state's takes the place of a difference's" (fun () ->
       let store, artifact = written () in
       let engine = opened store artifact in
@@ -462,13 +465,11 @@ let () =
 
 let layer_value = Query.input ~name:"layer_input" ~show:(fun () -> "") ()
 let own_value = Query.input ~name:"own_input" ~show:(fun () -> "") ()
-
-let layer_unsaved =
-  unit_query "layer_unsaved" (fun database () -> Query.get database layer_value () + 1)
+let layer_unsaved = unit_query "layer_unsaved" (fun database () -> get database layer_value () + 1)
 
 let reads_layer =
   unit_query "reads_layer" ~saved:true ~phase:Phases.bodies (fun database () ->
-      Query.demand database layer_unsaved () + Query.get database own_value ())
+      Query.demand database layer_unsaved () + get database own_value ())
 
 let reads_reader =
   unit_query "reads_reader" ~saved:true ~phase:Phases.bodies (fun database () ->
@@ -551,7 +552,7 @@ let raising_input = Query.input ~name:"raising_input" ~show:(fun () -> "") ()
 
 let raising =
   unit_query "raising" (fun database () ->
-      match Query.get database raising_input () with
+      match get database raising_input () with
       | value when value < 0 -> failwith (string_of_int (value mod 2))
       | value -> value)
 
@@ -566,7 +567,7 @@ let closure =
     ~show:(fun () -> "")
     ~equal:(fun _ _ -> false)
     (fun database () ->
-      let value = Query.get database closure_input () in
+      let value = get database closure_input () in
       fun more -> value + more)
 
 let applies =
@@ -578,12 +579,12 @@ let () =
       let engine = attached (Store.open_ (fresh_directory ())) in
       Engine.set engine raising_input () (-2);
       if Engine.get engine handles () <> 0 then fail "the handler's result";
-      Engine.clear_log engine;
+      Engine.For_testing.clear_log engine;
       (* Another input that raises the same exception. *)
       Engine.set engine raising_input () (-4);
       ignore (Engine.stabilize engine);
-      if Engine.executed engine <> [ "raising()" ] then
-        fail "ran [%s]" (String.concat "; " (Engine.executed engine)));
+      if Engine.For_testing.executed engine <> [ "raising()" ] then
+        fail "ran [%s]" (String.concat "; " (Engine.For_testing.executed engine)));
   test "a state opened again holds a result that read one that raised" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let engine = attached store in
@@ -594,8 +595,8 @@ let () =
       | None -> fail "the state did not open"
       | Some opened ->
           if Engine.get opened handles () <> 0 then fail "the handler's result";
-          if Engine.executed opened <> [] then
-            fail "ran [%s]" (String.concat "; " (Engine.executed opened));
+          if Engine.For_testing.executed opened <> [] then
+            fail "ran [%s]" (String.concat "; " (Engine.For_testing.executed opened));
           Engine.set opened raising_input () 5;
           if Engine.get opened handles () <> 5 then fail "the result after the input changed");
   test "a result that read an opaque one is computed again in a state opened later" (fun () ->

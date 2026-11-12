@@ -1,12 +1,10 @@
-module Package_checks = Type_checker.For_testing.Package_checks
-
 (* The tests of capabilities: capability checking, lambdas' uses,
    capability parameters, provide, and dependency grants. *)
 
 open Harness
 open Support
 
-let check = Type_checker.through Infer
+let check = Type_checker.For_testing.through Infer
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
@@ -101,7 +99,7 @@ let () =
               Fixtures.Capabilities.dependency_can_use_only_the_capabilities_that_it_time );
           ]
       in
-      Database.Testing.set_manifest (Engine.of_context database)
+      Database.For_testing.set_manifest (Engine.of_context database)
         ~name:{ owner = None; name = "app" }
         ~dependencies:[ { package = { owner = None; name = "clock_library" }; capabilities = [] } ];
       match codes (check database (module_of "app::main")) with
@@ -111,7 +109,8 @@ let () =
 let () =
   let with_grant files granted =
     let database = setup files in
-    Database.Testing.set_manifest (Engine.of_context database) ~name:{ owner = None; name = "app" }
+    Database.For_testing.set_manifest (Engine.of_context database)
+      ~name:{ owner = None; name = "app" }
       ~dependencies:
         [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ];
     codes (check database (module_of "app::main"))
@@ -164,7 +163,8 @@ let () =
    each with its grants. *)
 let codes_with_grants files grants =
   let database = setup files in
-  Database.Testing.set_manifest (Engine.of_context database) ~name:{ owner = None; name = "app" }
+  Database.For_testing.set_manifest (Engine.of_context database)
+    ~name:{ owner = None; name = "app" }
     ~dependencies:
       (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants);
   (database, codes (check database (module_of "app::main")))
@@ -223,7 +223,7 @@ let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
 let pays = ("app::main", Fixtures.Capabilities.pays)
 
 let problems database =
-  Query.demand database Package_checks.manifest_problems { owner = None; name = "app" }
+  Query.demand database Type_checker.manifest_problems { owner = None; name = "app" }
 
 let () =
   test "a grant names a capability outside the prelude by its full path" (fun () ->

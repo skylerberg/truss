@@ -1,11 +1,9 @@
-module Patterns = Type_checker.For_testing.Patterns
-
 (* The tests of exhaustiveness and reachability. *)
 
 open Harness
 open Support
 
-let check = Type_checker.through Patterns
+let check = Type_checker.For_testing.through Patterns
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let priority = Fixtures.Patterns.priority

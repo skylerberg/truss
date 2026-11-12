@@ -395,9 +395,9 @@ let () =
       match file.definitions with
       | [ { value; _ } ] ->
           if
-            Syntax_print.definition value
+            Syntax_print.For_testing.definition value
             <> "(fn run_example () error (ensures true) (block first_number))"
-          then fail "got %s" (Syntax_print.definition value)
+          then fail "got %s" (Syntax_print.For_testing.definition value)
       | _ -> fail "wrong definitions");
   test "an error in a member leaves the next member parsed" (fun () ->
       let file, diagnostics =

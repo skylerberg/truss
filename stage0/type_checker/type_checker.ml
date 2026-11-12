@@ -45,7 +45,5 @@ let file_diagnostics =
     diagnostics
 
 module For_testing = struct
-  module Patterns = Patterns
-  module Usage = Usage
-  module Package_checks = Package_checks
+  let through = through
 end

@@ -1,15 +1,9 @@
-module Package_checks = Type_checker.For_testing.Package_checks
-
 (* The tests of the checks across a package. *)
 
 open Harness
 open Support
 
-let check database module_ =
-  Resolve.diagnostics database module_
-  @ Interface.diagnostics database module_
-  @ Package_checks.diagnostics database module_
-
+let check = Type_checker.diagnostics
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
@@ -222,7 +216,7 @@ let () =
           ( module_of "app::main",
             Fixtures.Package_checks.impl_overlaps_an_impl_in_a_package_it_depends_on_2 );
         ];
-      match codes (Package_checks.diagnostics database (module_of "app::main")) with
+      match codes (Type_checker.diagnostics database (module_of "app::main")) with
       | [ "package.overlapping_impls" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "an impl in another package cannot give a type another version of its method" (fun () ->
@@ -240,7 +234,7 @@ let () =
           ( module_of "app::main",
             Fixtures.Package_checks.impl_in_another_package_cannot_give_a_type_another_2 );
         ];
-      match codes (Package_checks.diagnostics database (module_of "app::main")) with
+      match codes (Type_checker.diagnostics database (module_of "app::main")) with
       | [ "package.method_name_clash" ] -> ()
       | actual -> fail "found [%s]" (String.concat "; " actual));
   test "impls whose heads unify only through an infinite type do not overlap" (fun () ->

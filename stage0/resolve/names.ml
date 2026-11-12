@@ -681,3 +681,7 @@ let text =
       | None -> None
       | Some (module_, declaration) ->
           Some (Query.demand database items module_).(declaration.index).text)
+
+module For_testing = struct
+  let imports = imports
+end

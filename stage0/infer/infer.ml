@@ -126,3 +126,8 @@ let clean_tables database key =
   | _ -> None
 
 let is_clean database key = Option.is_some (clean_tables database key)
+
+module For_testing = struct
+  let specification = specification
+  let exported_specification = exported_specification
+end

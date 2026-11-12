@@ -579,7 +579,7 @@ let printed_derived text type_name trait name receiver =
                 List.find
                   (fun (path : Path.t) ->
                     match path with Top { name; _ } -> name = trait | _ -> false)
-                  (List.map Well_known.path Well_known.all);
+                  (List.map Well_known.path Well_known.For_testing.all);
             };
         name;
         receiver;
@@ -823,7 +823,7 @@ let () =
       in
       if actual <> expected then fail "found:\n%s" actual)
 
-(* [Infer.specification] *)
+(* [Infer.For_testing.specification] *)
 
 let () =
   let specification text name =
@@ -835,7 +835,7 @@ let () =
           if Path.show key.path = "app::main::" ^ name then
             Option.map
               (fun form -> (database, key, form))
-              (Query.demand database Infer.specification key)
+              (Query.demand database Infer.For_testing.specification key)
           else None)
         (Query.demand database Resolve.Names.declarations (module_of "app::main"))
     in
@@ -892,7 +892,8 @@ let () =
         in
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
-            Query.demand database Infer.exported_specification (Resolve.Names.key_of declaration))
+            Query.demand database Infer.For_testing.exported_specification
+              (Resolve.Names.key_of declaration))
           (Query.demand database Resolve.Names.declarations (module_of "app::main"))
       in
       (match exported " transparent" with
@@ -915,7 +916,8 @@ let () =
           (fun (declaration : Resolve.Names.declaration) ->
             match declaration.path with
             | Method { name = "bump"; _ } ->
-                Query.demand database Infer.specification (Resolve.Names.key_of declaration)
+                Query.demand database Infer.For_testing.specification
+                  (Resolve.Names.key_of declaration)
             | _ -> None)
           (Query.demand database Resolve.Names.declarations (module_of "app::main"))
       in

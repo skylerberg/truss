@@ -36,7 +36,6 @@ val signature_name : Syntax.signature -> Syntax.name
 val receiver : Syntax.parameter list -> Path.receiver
 val used_module : Query.context -> from:Path.module_ -> Syntax.path -> Path.module_
 val last_name : Path.module_ -> string
-val imports : (Path.module_, (string * Path.module_) list) Query.query
 val module_exists : Query.context -> Path.module_ -> bool
 
 type entry = { name : string; kind : named; visibility : Syntax.visibility; generic : bool }
@@ -79,3 +78,7 @@ val per_definition :
   Query.context -> Path.module_ -> (key -> Syntax.diagnostic list) -> Diagnostic.t list
 
 val text : (key, string option) Query.query
+
+module For_testing : sig
+  val imports : (Path.module_, (string * Path.module_) list) Query.query
+end

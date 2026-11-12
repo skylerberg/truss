@@ -436,7 +436,7 @@ let () =
       in
       expect_string
         ~expected:"fn() -> Int32\nb0: _0 = 1; goto b1\nb1: _1 = _0; goto b2\nb2: return _1"
-        (Lir.function_to_string (Lir.canonical function_)));
+        (Lir.For_testing.function_to_string (Lir.For_testing.canonical function_)));
   ()
 
 let () =
@@ -450,7 +450,7 @@ let () =
       ]
   in
   test "two lowerings that differ only in numbering hash the same" (fun () ->
-      let hash function_ = Lir.hash (instance "run_example" function_) in
+      let hash function_ = Lir.For_testing.hash (instance "run_example" function_) in
       let left = numbered 0 1 and right = numbered 1 0 in
       if hash left <> hash right then fail "the hashes differ");
   test "a change to an instance's code changes its hash" (fun () ->
@@ -460,7 +460,8 @@ let () =
           [ block [ Assign (at 0, Use (constant_int32 2)) ] (Return (Some (copy 0))) ]
       in
       if
-        Lir.hash (instance "run_example" (numbered 0 1)) = Lir.hash (instance "run_example" changed)
+        Lir.For_testing.hash (instance "run_example" (numbered 0 1))
+        = Lir.For_testing.hash (instance "run_example" changed)
       then fail "the hashes are equal");
   test "a symbol names the path and the type arguments" (fun () ->
       let key =

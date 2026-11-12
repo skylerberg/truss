@@ -1,5 +1,3 @@
-module Layout = Lexer.For_testing.Layout
-
 (* Each test gives an input and the parser's exact output: the tree,
    printed compactly, or the one diagnostic with its code, position, and
    fixes. *)
@@ -89,7 +87,7 @@ let () =
       let file, _ =
         parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn run_example() {}"
       in
-      let printed = Syntax_print.definitions file.definitions in
+      let printed = Syntax_print.For_testing.definitions file.definitions in
       if
         printed
         <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn run_example () (block))" ]
@@ -99,9 +97,9 @@ let () =
       match file.definitions with
       | first :: _ ->
           if
-            Syntax_print.definition first.value
+            Syntax_print.For_testing.definition first.value
             <> "(fn run_example ((first_number: Int64)) -> Int64 (block error))"
-          then fail "got %s" (Syntax_print.definition first.value)
+          then fail "got %s" (Syntax_print.For_testing.definition first.value)
       | [] -> fail "no definitions");
   test "the definition after a broken one parses" (fun () ->
       let file, diagnostics = parse "fn run_example() -> {\n}\nfn second_example() {}" in
@@ -280,7 +278,7 @@ let () =
   test "a definition's diagnostics are placed in the file by its base" (fun () ->
       match pieces "fn second_example() {}\nfn run_example() { first_number = }" with
       | source, tokens, [ _; second ] -> (
-          let parsed, _ = Parser.definition source tokens second in
+          let parsed, _ = Parser.For_testing.definition source tokens second in
           match Parser.diagnostics_in_file parsed with
           | [ diagnostic ] ->
               if diagnostic.span.start <> 57 then fail "start %d" diagnostic.span.start
@@ -291,7 +289,7 @@ let () =
       let parsed text =
         let source, tokens, pieces = pieces text in
         let last = List.nth pieces (List.length pieces - 1) in
-        let parsed, _ = Parser.definition source tokens last in
+        let parsed, _ = Parser.For_testing.definition source tokens last in
         (parsed.value.value, parsed.diagnostics)
       in
       if parsed text <> parsed ("fn second_example() {}\n\n\n" ^ text) then
@@ -302,7 +300,7 @@ let () =
         let source, tokens, pieces =
           pieces ("impl Clock for Fixed {\n" ^ indentation ^ "fn now(self) -> Instant\n}")
         in
-        match Parser.definition source tokens (List.hd pieces) with
+        match Parser.For_testing.definition source tokens (List.hd pieces) with
         | _, [ method_ ] ->
             if Parser.diagnostics_in_file method_ = [] then fail "the method has no diagnostic";
             (method_.value.value, method_.value.text, method_.diagnostics)
@@ -345,8 +343,8 @@ let () =
       List.iter
         (fun kind ->
           if
-            Parser.begins_statement kind
-            && (not (Layout.can_begin kind))
+            Parser.For_testing.begins_statement kind
+            && (not (Lexer.For_testing.can_begin kind))
             && not (List.mem kind only_in_brackets)
           then
             fail "%s begins a statement, but a line break before it is not a NEWLINE"
@@ -558,8 +556,10 @@ let () =
       let file, _ = parse "type Payload(first_number: Int64, 1)" in
       (match file.definitions with
       | [ { value; _ } ] ->
-          if Syntax_print.definition value <> "(type Payload ((first_number: Int64) error))" then
-            fail "got %s" (Syntax_print.definition value)
+          if
+            Syntax_print.For_testing.definition value
+            <> "(type Payload ((first_number: Int64) error))"
+          then fail "got %s" (Syntax_print.For_testing.definition value)
       | _ -> fail "wrong definitions");
       let statements, _ = body_of "let second_number = first_number with (1)" in
       if
