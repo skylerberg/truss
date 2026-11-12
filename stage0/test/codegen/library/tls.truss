@@ -1,5 +1,6 @@
 use standard::http
 use standard::network
+use standard::url
 use standard::simulation
 use standard::tls
 use standard::x509
@@ -137,5 +138,87 @@ fn secure_exchange() -> String
 test "an HTTPS client and server exchange a request and a response" {
   provide world() {
     assert secure_exchange() == "200 secure /page"
+  }
+}
+
+fn routes(request: http::Request) -> http::Response {
+  if request.matches(http::Route"POST /upload") is Some(_) {
+    let tag = request.header("x-tag").unwrap_or("none".slice()).to_string()
+    return http::Response.text("${request.body.length()} ${tag}".slice())
+  }
+  if request.matches(http::Route"GET /empty") is Some(_) {
+    return http::Response.new(status: http::Status.no_content)
+  }
+  if request.matches(http::Route"GET /big") is Some(_) {
+    let text = "x".slice().repeated(200000)
+    return http::Response.text(text.slice())
+  }
+  http::Response.text("served ${request.path()}".slice())
+}
+
+fn summary(outcome: own Result[http::Response, http::Error]) -> String {
+  match own outcome {
+    Ok(response) => "${response.status.code} ${response.body.length()} ${response.text_body().unwrap_or("")}"
+    Err(error) => "failed: ${error}"
+  }
+}
+
+fn client_exchanges(is_secure: Bool) -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  let port: UInt16 = if is_secure { 8443 } else { 8080 }
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: port)).expect("the port is free")
+  concurrent {
+    if is_secure {
+      http::serve_tls(mut listener, config: server_config(), handler: routes)
+    } else {
+      http::serve(mut listener, handler: routes)
+    }
+    {
+      var seen: List[String] = []
+      var client = http::Client.new(http::ClientOptions(roots: Some([certificate(root_pem.slice())])))
+      let base = if is_secure { "https://example.test:8443" } else { "http://example.test:8080" }
+      mut seen.push(summary(mut client.get("${base}/first".slice())))
+      mut seen.push(summary(mut client.get("${base}/second?page=2".slice())))
+      var headers = http::Headers.new()
+      mut headers.add("X-Tag", value: "tagged")
+      let upload: List[UInt8] = List.filled(7, count: 3000000)
+      let upload_url = url::parse("${base}/upload".slice()).expect("a URL")
+      mut seen.push(summary(mut client.send(http::Method.Post, url: upload_url, headers: headers, body: upload)))
+      mut seen.push(summary(mut client.get("${base}/empty".slice())))
+      match mut client.get("${base}/big".slice()) {
+        Ok(response) => mut seen.push("${response.status.code} ${response.body.length()}")
+        Err(error) => mut seen.push("failed: ${error}")
+      }
+      let head_url = url::parse("${base}/first".slice()).expect("a URL")
+      mut seen.push(summary(mut client.send(http::Method.Head, url: head_url)))
+      return own seen
+    }
+  }
+}
+
+test "a client sends several requests over one HTTP/2 connection, with uploads larger than a window" {
+  provide world() {
+    let seen = client_exchanges(true)
+    assert seen.length() == 6
+    assert seen[0] == "200 13 served /first"
+    assert seen[1] == "200 14 served /second"
+    assert seen[2] == "200 14 3000000 tagged"
+    assert seen[3] == "204 0 "
+    assert seen[4] == "200 200000"
+    assert seen[5] == "200 0 "
+  }
+}
+
+test "a client keeps an HTTP/1.1 connection open between requests" {
+  provide world() {
+    let seen = client_exchanges(false)
+    assert seen.length() == 6
+    assert seen[0] == "200 13 served /first"
+    assert seen[1] == "200 14 served /second"
+    assert seen[2] == "200 14 3000000 tagged"
+    assert seen[3] == "204 0 "
+    assert seen[4] == "200 200000"
+    assert seen[5] == "200 0 "
   }
 }

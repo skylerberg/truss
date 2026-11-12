@@ -20,7 +20,7 @@ let weights =
     ("standard::console", 41);
     ("standard::core", 23);
     ("standard::core::range", 5);
-    ("standard::cryptography", 2250);
+    ("standard::cryptography", 1541);
     ("standard::cryptography::elliptic", 247);
     ("standard::cryptography::modular", 201);
     ("standard::csv", 45);
@@ -31,7 +31,9 @@ let weights =
     ("standard::growth", 2);
     ("standard::hex", 21);
     ("standard::html", 102);
-    ("standard::http", 198);
+    ("standard::http", 182);
+    ("standard::http::hpack", 56);
+    ("standard::http::two", 173);
     ("standard::json", 1513);
     ("standard::list", 104);
     ("standard::list::array", 43);
@@ -59,7 +61,7 @@ let weights =
     ("standard::set", 320);
     ("standard::simulation", 1911);
     ("standard::specification", 3);
-    ("standard::streams", 33);
+    ("standard::streams", 28);
     ("standard::system::calls", 7);
     ("standard::system::clock", 1);
     ("standard::system::console", 1);

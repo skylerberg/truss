@@ -4237,6 +4237,7 @@ public opaque type RsaPrivateKey(
   second_exponent: List[UInt8],
   coefficient: List[UInt8],
 )
+  derives Copyable
 
 public fn RsaPrivateKey.new(
   public_key: RsaPublicKey,
