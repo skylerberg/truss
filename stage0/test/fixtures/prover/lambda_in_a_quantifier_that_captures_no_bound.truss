@@ -6,10 +6,10 @@ fn apply(change: (fn(Bool) -> Bool cost time finite), value: Bool) -> Bool
 }
 
 theorem each_kept(items: List[Bool])
-  ensures forall step_index in 0..items.length() =>
-    apply(fn(first_number) {
-      var held = first_number
+  ensures forall i in 0..items.length() =>
+    apply(fn(x) {
+      var held = x
       held
-    }, value: items[step_index]) == items[step_index]
+    }, value: items[i]) == items[i]
 {
 }

@@ -15,7 +15,7 @@ impl Shown for Numbers {
 
 type Kept[Source: Shown](part: Source.Part)
 
-fn run_example() -> Kept[Numbers] {
+fn f() -> Kept[Numbers] {
   let numbers = Numbers([1, 2, 3])
   Kept(numbers.part())
 }

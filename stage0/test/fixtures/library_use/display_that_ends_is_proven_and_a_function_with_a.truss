@@ -1,11 +1,11 @@
-type Point(first_number: Int64, second_number: Int64)
+type Point(x: Int64, y: Int64)
 
 impl Display for Point {
   fn display(self, output: mut TextBuilder) {
     mut output.write("(")
-    self.first_number.display(mut output)
+    self.x.display(mut output)
     mut output.write(", ")
-    self.second_number.display(mut output)
+    self.y.display(mut output)
     mut output.write(")")
   }
 }

@@ -1,6 +1,6 @@
 use framework::sources
 use plugins::timers
 
-fn run_example() -> any sources::Source {
+fn f() -> any sources::Source {
   any timers::Timer()
 }

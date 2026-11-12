@@ -1,7 +1,7 @@
 fn sum_below(limit: Int64) -> Int64 {
   var total = 0
-  for step_index in 0..limit {
-    total += step_index
+  for i in 0..limit {
+    total += i
   }
   total
 }

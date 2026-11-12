@@ -1,4 +1,4 @@
-fn run_example(items: mut List[Int64], others: List[Int64]) {
+fn f(items: mut List[Int64], others: List[Int64]) {
   var part = others.slice()
   take(mut items, view: part)
   measure(mut items, count: items.length())

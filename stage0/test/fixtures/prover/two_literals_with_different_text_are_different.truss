@@ -1,4 +1,4 @@
-fn run_example() -> String
+fn f() -> String
   ensures identical(result, "b")
 {
   "a"

@@ -1,10 +1,10 @@
 type Broken =
-  | Alpha
-  | Beta(first_number: )
+  | A
+  | B(x: )
 
-fn run_example(fifth_value: Broken) -> Int64 {
-  match fifth_value {
-    Alpha => 1
-    Beta(..) => 2
+fn f(e: Broken) -> Int64 {
+  match e {
+    A => 1
+    B(..) => 2
   }
 }

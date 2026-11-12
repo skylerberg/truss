@@ -1,3 +1,3 @@
-fn run_example() {
+fn f() {
   let points: Set[Point] = []
 }

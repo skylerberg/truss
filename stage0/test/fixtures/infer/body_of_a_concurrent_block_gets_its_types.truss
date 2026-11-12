@@ -1,7 +1,7 @@
-fn second_example(count: UInt16) {}
+fn g(count: UInt16) {}
 
-fn run_example(count: UInt16) {
+fn f(count: UInt16) {
   concurrent {
-    second_example(count + 2)
+    g(count + 2)
   }
 }

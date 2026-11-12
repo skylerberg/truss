@@ -2,4 +2,4 @@ fn compute() -> Int64 {
   1
 }
 
-fn run_example(count: Int64 = compute()) {}
+fn f(count: Int64 = compute()) {}

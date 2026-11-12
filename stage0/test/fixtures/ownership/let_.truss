@@ -1,4 +1,4 @@
-fn run_example() -> USize {
+fn f() -> USize {
   let items: List[Int64] = [3, 1, 2]
   var part = items.slice()
   part[0] = 7

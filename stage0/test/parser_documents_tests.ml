@@ -44,9 +44,7 @@ let () =
 
 let () =
   test "a signature without a body in an example is checked" (fun () ->
-      let _, _, diagnostics =
-        snippet "fn run_example(first_number: Int64)\n  requires first_number & 1 < 2"
-      in
+      let _, _, diagnostics = snippet "fn f(x: Int64)\n  requires x & 1 < 2" in
       if codes diagnostics <> [ "parser.needs_parentheses" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)))
 
@@ -83,8 +81,8 @@ let () =
           let tokens, _ = Lexer.lex (source text) in
           if Reference.accepts Reference.file (Array.to_list tokens) then fail "accepted %S" text)
         [
-          "fn run_example() { first_value & second_value == third_value }\n";
-          "fn run_example() { first_value && second_value || third_value }\n";
-          "fn run_example() { first_number = 0.. }\n";
-          "type Payload = | \n";
+          "fn f() { a & b == c }\n";
+          "fn f() { a && b || c }\n";
+          "fn f() { x = 0.. }\n";
+          "type T = | \n";
         ])

@@ -1,5 +1,5 @@
-type Point(first_number: Int64)
+type Point(x: Int64)
 
-fn run_example(point: Point) -> String {
+fn f(point: Point) -> String {
   "${point}"
 }

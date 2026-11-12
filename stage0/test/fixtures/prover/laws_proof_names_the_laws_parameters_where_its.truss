@@ -9,13 +9,13 @@ trait Sized {
   }
 }
 
-type Box(limit_count: Int64)
+type Box(n: Int64)
 
 impl Sized for Box {
   fn size(self) -> Int64
     cost time finite
   {
-    self.limit_count
+    self.n
   }
 }
 

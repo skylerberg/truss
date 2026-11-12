@@ -1,11 +1,11 @@
 
-fn run_example() -> UInt8
+fn f() -> UInt8
   ensures result == 7
 {
   count_up(7)
 }
 
-fn second_example(value: UInt8) -> UInt8
+fn g(value: UInt8) -> UInt8
   ensures result == value
 {
   value

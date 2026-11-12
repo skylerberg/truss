@@ -1,4 +1,4 @@
-fn run_example(shape: Shape) -> Int64 {
+fn f(shape: Shape) -> Int64 {
   match shape {
     Circle(radius) => radius + 1
     _ => 0

@@ -1,6 +1,6 @@
-fn run_example(items: own List[Int64], count: USize) {
-  for step_index in 0..count {
-    let _ = step_index
+fn f(items: own List[Int64], count: USize) {
+  for i in 0..count {
+    let _ = i
     keep(own items)
   }
 }

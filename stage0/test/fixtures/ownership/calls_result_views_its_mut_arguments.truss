@@ -2,7 +2,7 @@ fn first(data: mut List[Int64]) -> Slice[Int64] {
   data[0..1]
 }
 
-fn run_example() -> USize {
+fn f() -> USize {
   var numbers: List[Int64] = [1, 2]
   let view = first(mut numbers)
   mut numbers.push(3)

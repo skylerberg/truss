@@ -1,4 +1,4 @@
-fn run_example(ready: Bool) {
+fn f(ready: Bool) {
   while ready {
     let Some(text) = make() else {
       return

@@ -2,7 +2,7 @@ type Pair(first: Int64, second: Int64)
   derives Equal, Ordered
 
 theorem pairs_order_by_first_then_second()
-  ensures forall first_value: Pair => forall second_value: Pair =>
-    (first_value < second_value) == (first_value.first < second_value.first || (first_value.first == second_value.first && first_value.second < second_value.second))
+  ensures forall a: Pair => forall b: Pair =>
+    (a < b) == (a.first < b.first || (a.first == b.first && a.second < b.second))
 {
 }

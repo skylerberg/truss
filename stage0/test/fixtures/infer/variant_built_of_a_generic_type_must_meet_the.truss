@@ -2,6 +2,6 @@ type Slot[Value: Shape] =
   | Empty
   | Full(value: Value)
 
-fn run_example() {
+fn f() {
   let _ = Slot.Full(5)
 }

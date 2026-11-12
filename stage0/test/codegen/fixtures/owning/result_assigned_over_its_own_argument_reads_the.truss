@@ -1,12 +1,12 @@
-type Quad(first_value: Int64, second_value: Int64, third_value: Int64, fourth_value: Int64)
+type Quad(a: Int64, b: Int64, c: Int64, d: Int64)
 
-fn swapped(second_point: Quad) -> Quad {
-  second_point with (first_value: second_point.second_value, second_value: second_point.first_value)
+fn swapped(q: Quad) -> Quad {
+  q with (a: q.b, b: q.a)
 }
 
 test "swapped" {
-  var second_point = Quad(first_value: 1, second_value: 2, third_value: 3, fourth_value: 4)
-  second_point = swapped(second_point)
-  assert second_point.first_value == 2
-  assert second_point.second_value == 1
+  var q = Quad(a: 1, b: 2, c: 3, d: 4)
+  q = swapped(q)
+  assert q.a == 2
+  assert q.b == 1
 }

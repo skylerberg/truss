@@ -208,7 +208,7 @@ let () =
       fresh_store ();
       let directory = package () in
       let point fields = "internal type Point(" ^ fields ^ ")\n" in
-      write directory "point.truss" (point "first_number: Int64, second_number: Int64");
+      write directory "point.truss" (point "x: Int64, y: Int64");
       write directory "reader.truss"
         Fixtures.Database.reordering_a_types_fields_checks_no_reader_of_the;
       expect_errors directory 0;
@@ -217,7 +217,7 @@ let () =
       if not (List.mem width (checked directory)) then fail "never checked width";
       if not (List.mem width (lowered directory)) then fail "never lowered width's interface";
       clear directory;
-      write directory "point.truss" (point "second_number: Int64, first_number: Int64");
+      write directory "point.truss" (point "y: Int64, x: Int64");
       expect_errors directory 0;
       if List.mem width (checked directory) then fail "checked width again";
       if List.mem width (lowered directory) then fail "lowered width's interface again");

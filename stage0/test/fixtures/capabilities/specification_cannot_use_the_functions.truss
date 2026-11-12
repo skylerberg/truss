@@ -5,7 +5,7 @@ fn stamp() -> Bool
   todo
 }
 
-fn run_example()
+fn f()
   uses Clock
   requires stamp()
 {

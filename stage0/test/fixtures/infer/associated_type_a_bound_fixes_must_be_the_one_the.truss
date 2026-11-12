@@ -2,6 +2,6 @@ fn text_of[Input: Source[Item = String]](input: Input) -> String {
   input.first()
 }
 
-fn run_example(numbers: Numbers) -> String {
+fn f(numbers: Numbers) -> String {
   text_of(numbers)
 }

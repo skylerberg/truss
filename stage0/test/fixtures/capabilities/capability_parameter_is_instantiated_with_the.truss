@@ -4,7 +4,7 @@ fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))
   todo
 }
 
-fn run_example()
+fn f()
   uses Clock
 {
   for_each(3, visit: fn(value) {

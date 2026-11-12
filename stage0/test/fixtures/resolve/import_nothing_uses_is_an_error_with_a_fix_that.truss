@@ -1,3 +1,3 @@
 use app::shapes
 
-fn run_example() {}
+fn f() {}

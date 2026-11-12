@@ -1,4 +1,4 @@
-fn run_example() -> Instant {
+fn f() -> Instant {
   var action: fn() -> Instant = still
   action = tick
   action()

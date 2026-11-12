@@ -1,8 +1,8 @@
-fn second_example() {}
+fn g() {}
 
-fn run_example() {
+fn f() {
   concurrent {
-    second_example()
-    second_example()
+    g()
+    g()
   }
 }

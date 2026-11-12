@@ -13,7 +13,7 @@ impl Source for Numbers {
   }
 }
 
-fn second_example(numbers: own Numbers) -> Int64 {
+fn g(numbers: own Numbers) -> Int64 {
   let source: any Source[Item = Int64] = any numbers
   source.first()
 }

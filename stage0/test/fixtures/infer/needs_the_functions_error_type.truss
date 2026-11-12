@@ -1,6 +1,6 @@
 fn parse() -> Result[Int64, Bool] { todo }
 
-fn run_example() -> Result[Int64, String] {
+fn f() -> Result[Int64, String] {
   let value = parse()?
   Ok(value)
 }

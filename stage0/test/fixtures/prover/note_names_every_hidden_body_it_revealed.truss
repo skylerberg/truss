@@ -1,6 +1,6 @@
-fn twice(limit_count: Int64) -> Int64
-  requires limit_count < 1000 && limit_count > -1000
-  ensures result == limit_count + limit_count
+fn twice(n: Int64) -> Int64
+  requires n < 1000 && n > -1000
+  ensures result == n + n
 {
-  numbers::double(numbers::identity(limit_count))
+  numbers::double(numbers::identity(n))
 }

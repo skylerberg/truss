@@ -1,4 +1,4 @@
-fn run_example(byte: UInt8) -> Int64 {
+fn f(byte: UInt8) -> Int64 {
   match byte {
     0..=127 => 1
     128..=255 => 2

@@ -2,7 +2,7 @@ fn first_of[Input: Source[Item = Output], Output](input: Input) -> Output {
   input.first()
 }
 
-fn run_example(numbers: Numbers) -> Int64 {
+fn f(numbers: Numbers) -> Int64 {
   let first = first_of(numbers)
   first
 }

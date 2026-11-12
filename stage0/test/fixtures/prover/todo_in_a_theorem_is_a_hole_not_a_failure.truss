@@ -1,4 +1,4 @@
-theorem term_value(count: Int64)
+theorem t(count: Int64)
   ensures count > count
 {
   todo

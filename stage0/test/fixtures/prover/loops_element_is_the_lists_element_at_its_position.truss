@@ -1,8 +1,8 @@
-fn run_example(items: List[Int64]) -> Bool
-  ensures result ==> (forall step_index in 0..items.length() => items[step_index] > 0)
+fn f(items: List[Int64]) -> Bool
+  ensures result ==> (forall i in 0..items.length() => items[i] > 0)
 {
   for item in items
-    invariant forall step_index in 0..yielded.length() => items[step_index] > 0
+    invariant forall i in 0..yielded.length() => items[i] > 0
   {
     if item <= 0 { return false }
   }

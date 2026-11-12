@@ -1,4 +1,4 @@
-fn second_example(items: List[Int64]) -> Bool
+fn g(items: List[Int64]) -> Bool
   ensures result == (exists item in items => item < 0)
 {
   exists item in items => item < 0

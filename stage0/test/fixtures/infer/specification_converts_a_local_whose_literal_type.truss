@@ -4,7 +4,7 @@ fn is_small(value: Integer) -> Bool
   value < 99
 }
 
-fn run_example() {
+fn f() {
   for index in 0..10
     invariant index + 1 <= 11
     invariant is_small(index)

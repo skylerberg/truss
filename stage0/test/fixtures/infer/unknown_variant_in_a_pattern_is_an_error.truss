@@ -1,4 +1,4 @@
-fn run_example(present: Option[Int64]) -> Int64 {
+fn f(present: Option[Int64]) -> Int64 {
   match present {
     Sone(value) => value
     _ => 0

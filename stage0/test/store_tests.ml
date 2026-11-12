@@ -68,11 +68,9 @@ let () =
       if Store.get again name <> None then fail "a damaged value was got");
   test "a result is found by its kind and key" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
-      Store.add_result store ~kind:"tests" ~key:"lookup_key" "passed";
-      if Store.find_result store ~kind:"tests" ~key:"lookup_key" <> Some "passed" then
-        fail "not found";
-      if Store.find_result store ~kind:"proofs" ~key:"lookup_key" <> None then
-        fail "found as another kind")
+      Store.add_result store ~kind:"tests" ~key:"k" "passed";
+      if Store.find_result store ~kind:"tests" ~key:"k" <> Some "passed" then fail "not found";
+      if Store.find_result store ~kind:"proofs" ~key:"k" <> None then fail "found as another kind")
 
 let () =
   test "a pointer reads the value it was last set to" (fun () ->

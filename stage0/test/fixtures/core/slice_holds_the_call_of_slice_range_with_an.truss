@@ -1,3 +1,3 @@
-fn second_example(items: List[Int64], last: USize) -> Slice[Int64] {
+fn g(items: List[Int64], last: USize) -> Slice[Int64] {
   items[..=last]
 }

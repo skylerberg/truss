@@ -1,20 +1,20 @@
 trait Scaled {
-  fn scale(self, limit_count: Int64) -> Int64
-    requires limit_count > 0
+  fn scale(self, n: Int64) -> Int64
+    requires n > 0
     ensures result > 0
 }
 
 type Box()
 
 impl Scaled for Box {
-  fn scale(self, limit_count: Int64) -> Int64
-    requires limit_count >= 0
+  fn scale(self, n: Int64) -> Int64
+    requires n >= 0
   {
-    limit_count
+    n
   }
 }
 
-fn run_example() -> Int64
+fn f() -> Int64
   ensures result > 0
 {
   Box().scale(0)

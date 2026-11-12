@@ -1,8 +1,8 @@
-fn run_example(first_number: Int64) -> Int64
-  ensures result > first_number
-  requires first_number > 0
-  decreases first_number, 1
+fn f(x: Int64) -> Int64
+  ensures result > x
+  requires x > 0
+  decreases x, 1
   uses Clock
 {
-  first_number
+  x
 }

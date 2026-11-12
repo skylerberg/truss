@@ -1,7 +1,7 @@
 type Version(major: Int64, minor: Int64)
   derives Equal, Ordered
 
-fn run_example(first: Version, second: Version) -> Bool
+fn f(first: Version, second: Version) -> Bool
   requires first.major < second.major
   ensures result
 {

@@ -1,8 +1,8 @@
-type Point(first_number: Int64, second_number: Int64)
+type Point(x: Int64, y: Int64)
   derives Equal
 
 test "updates" {
-  let origin = Point(first_number: 0, second_number: 0)
-  let moved = origin with (first_number: 5)
-  assert moved == Point(first_number: 5, second_number: 0)
+  let origin = Point(x: 0, y: 0)
+  let moved = origin with (x: 5)
+  assert moved == Point(x: 5, y: 0)
 }

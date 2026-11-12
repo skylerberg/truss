@@ -1,8 +1,8 @@
-fn first_positive(first_value: Int64, second_value: Int64) -> Option[Int64] {
-  if first_value > 0 { Some(first_value) } else if second_value > 0 { Some(second_value) } else { None }
+fn first_positive(a: Int64, b: Int64) -> Option[Int64] {
+  if a > 0 { Some(a) } else if b > 0 { Some(b) } else { None }
 }
 
 test "options" {
-  assert first_positive(-1, second_value: 4) == Some(4)
-  assert first_positive(-1, second_value: -2).is_none()
+  assert first_positive(-1, b: 4) == Some(4)
+  assert first_positive(-1, b: -2).is_none()
 }

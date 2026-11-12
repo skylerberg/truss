@@ -11,10 +11,10 @@ impl Hits for Counter {
   }
 }
 
-fn run_example(flag: Bool, visit: (fn() uses Hits cost time finite), other: (fn() uses Hits cost time finite))
+fn f(flag: Bool, visit: (fn() uses Hits cost time finite), other: (fn() uses Hits cost time finite))
   uses Hits
   cost calls(visit) == 0
 {
-  let second_example = if flag { visit } else { other }
-  second_example()
+  let g = if flag { visit } else { other }
+  g()
 }

@@ -1,4 +1,4 @@
-fn run_example(count: UInt32)
+fn f(count: UInt32)
   requires count > 0
 {
   for index in 0..count

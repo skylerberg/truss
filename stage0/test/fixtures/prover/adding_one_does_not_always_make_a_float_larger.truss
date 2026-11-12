@@ -1,4 +1,4 @@
-fn run_example(value: Float64) -> Float64
+fn f(value: Float64) -> Float64
   ensures result > value
 {
   value + 1.0

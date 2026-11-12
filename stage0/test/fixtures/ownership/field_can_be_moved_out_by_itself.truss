@@ -2,7 +2,7 @@ type Config(name: String, port: UInt16)
 
 fn take(name: own String) {}
 
-fn run_example(config: own Config) -> UInt16 {
+fn f(config: own Config) -> UInt16 {
   take(own config.name)
   config.port
 }

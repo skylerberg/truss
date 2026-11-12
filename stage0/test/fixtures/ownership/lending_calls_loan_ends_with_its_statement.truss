@@ -1,4 +1,4 @@
-fn run_example(grid: mut Grid) -> USize {
+fn f(grid: mut Grid) -> USize {
   mut grid.cell(0).visit()
   grid.cells.length()
 }

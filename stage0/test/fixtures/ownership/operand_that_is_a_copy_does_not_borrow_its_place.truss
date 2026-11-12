@@ -5,6 +5,6 @@ fn bump(count: mut USize) -> USize {
   count
 }
 
-fn run_example(count: mut USize) {
+fn f(count: mut USize) {
   sum(count, second: bump(mut count))
 }

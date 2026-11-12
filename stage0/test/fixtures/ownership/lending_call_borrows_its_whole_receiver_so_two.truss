@@ -1,5 +1,5 @@
 fn touch(first: mut Cell, second: mut Cell) {}
 
-fn run_example(grid: mut Grid) {
+fn f(grid: mut Grid) {
   touch(mut grid.cell(0), second: mut grid.cell(1))
 }

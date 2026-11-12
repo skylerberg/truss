@@ -1,4 +1,4 @@
-fn run_example(present: Result[Int64, Int64]) -> Int64 {
+fn f(present: Result[Int64, Int64]) -> Int64 {
   match present {
     Ok(value) | Err(value) => value
   }

@@ -2,7 +2,7 @@ fn count_to(limit: Int64) yields Int64 {
   yield limit
 }
 
-fn run_example() {
+fn f() {
   var first = count_to(3)
   while mut first.next() is Some(left) {
     let _ = left

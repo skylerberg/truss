@@ -1,5 +1,5 @@
-fn run_example(count: UInt32) {
-  for step_index in 0..count {
-    let _ = step_index + 1
+fn f(count: UInt32) {
+  for i in 0..count {
+    let _ = i + 1
   }
 }

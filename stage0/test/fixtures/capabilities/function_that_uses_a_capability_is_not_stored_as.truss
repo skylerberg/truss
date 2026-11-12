@@ -1,5 +1,5 @@
 type Job(action: fn() -> Instant)
 
-fn run_example() -> Job {
+fn f() -> Job {
   Job(tick)
 }
