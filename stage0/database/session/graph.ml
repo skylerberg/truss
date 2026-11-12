@@ -1,71 +1,98 @@
 (* What a state's graph answers. Every answer names definitions and parts;
    the engine's nodes stay inside. *)
 
-(* What a node's definition reads of other definitions: its reads, through
-   nodes about no definition, to the definitions and parts they reach. *)
-let definition_reads engine memo node =
-  let own = Option.map (fun (subject : Query.subject) -> subject.path) (Engine.subject node) in
-  let targets = Hashtbl.create 8 in
-  let seen = Hashtbl.create 16 in
-  let rec walk visited =
+type edge = {
+  dependent : Path.t;
+  dependent_part : string;
+  dependency : Path.t;
+  dependency_part : string;
+}
+
+let part_of (subject : Query.subject) = Option.value subject.part ~default:""
+
+(* The edges from a node about a definition: on each path of reads from the
+   node, the first node about another definition. A path passes through
+   nodes about no definition and nodes about the same definition, but not
+   through a fixed base's nodes, so that a definition does not depend on
+   everything the standard library's own queries read. *)
+let edges_of_node engine node (subject : Query.subject) =
+  let dependencies = Hashtbl.create 8 in
+  let visited = Hashtbl.create 16 in
+  let rec traverse node =
     List.iter
       (fun read ->
         let identity = Engine.identity read in
-        if not (Hashtbl.mem seen identity) then begin
-          Hashtbl.replace seen identity ();
+        if not (Hashtbl.mem visited identity) then begin
+          Hashtbl.replace visited identity ();
           match Engine.subject read with
-          | Some subject when Some subject.path <> own ->
-              Hashtbl.replace targets (subject.path, Option.value subject.part ~default:"") ()
-          | Some _ | None -> (
-              if
-                (* A fixed base's own lookups are not followed, so a
-                   definition is not said to read everything they read. *)
-                not (Engine.is_fixed read)
-              then
-                match Hashtbl.find_opt memo identity with
-                | Some reached ->
-                    List.iter
-                      (fun reached_target -> Hashtbl.replace targets reached_target ())
-                      reached
-                | None -> walk read)
+          | Some read_subject when not (Path.equal read_subject.path subject.path) ->
+              Hashtbl.replace dependencies (read_subject.path, part_of read_subject) ()
+          | Some _ | None -> if not (Engine.is_fixed read) then traverse read
         end)
-      (Engine.reads engine visited)
+      (Engine.reads engine node)
   in
-  walk node;
-  Hashtbl.fold (fun reached_target () acc -> reached_target :: acc) targets []
+  traverse node;
+  Hashtbl.fold
+    (fun (dependency, dependency_part) () edges ->
+      { dependent = subject.path; dependent_part = part_of subject; dependency; dependency_part }
+      :: edges)
+    dependencies []
 
-type dependencies = (Path.t, (Path.t * string * string) list) Hashtbl.t
-
-(* For every definition a state holds results about, what it reads of every
-   other. *)
-let dependencies engine : dependencies =
-  let memo = Hashtbl.create 1024 in
-  let table = Hashtbl.create 256 in
-  List.iter
+(* The edges from every node about a definition [is_dependent] accepts. *)
+let edges_from engine ~is_dependent =
+  List.concat_map
     (fun node ->
       match Engine.subject node with
-      | Some subject ->
-          let part = Option.value subject.part ~default:"" in
-          let reads = definition_reads engine memo node in
-          let previous = Option.value (Hashtbl.find_opt table subject.path) ~default:[] in
-          Hashtbl.replace table subject.path
-            (List.map (fun (path, read_part) -> (path, part, read_part)) reads @ previous)
-      | None -> ())
+      | Some subject when is_dependent subject.path -> edges_of_node engine node subject
+      | Some _ | None -> [])
+    (Engine.nodes engine)
+
+let dependencies engine paths =
+  let paths = Path.Set.of_list paths in
+  List.sort_uniq compare (edges_from engine ~is_dependent:(fun path -> Path.Set.mem path paths))
+
+(* Edges are found from the dependent's nodes, so the dependents of a
+   definition take the edges of every definition. *)
+let dependents engine = function
+  | [] -> []
+  | paths ->
+      let paths = Path.Set.of_list paths in
+      List.filter
+        (fun edge -> Path.Set.mem edge.dependency paths)
+        (edges_from engine ~is_dependent:(fun _ -> true))
+      |> List.sort_uniq compare
+
+(* The definitions each root reaches through edges, the root included.
+   A definition's dependencies do not depend on the root that reaches it,
+   so roots share them. *)
+let reachable engine roots =
+  let nodes_about = Hashtbl.create 1024 in
+  List.iter
+    (fun node ->
+      Option.iter
+        (fun (subject : Query.subject) -> Hashtbl.add nodes_about subject.path (node, subject))
+        (Engine.subject node))
     (Engine.nodes engine);
-  table
-
-let reads (table : dependencies) path = Option.value (Hashtbl.find_opt table path) ~default:[]
-
-let readers (table : dependencies) target =
-  Hashtbl.fold
-    (fun reader reads acc ->
-      List.filter_map
-        (fun (path, reader_part, read_part) ->
-          if Path.equal path target then Some (reader, reader_part, read_part) else None)
-        reads
-      @ acc)
-    table []
-  |> List.sort_uniq compare
+  let dependencies_of = Hashtbl.create 256 in
+  let dependency_paths path =
+    match Hashtbl.find_opt dependencies_of path with
+    | Some paths -> paths
+    | None ->
+        let paths =
+          List.concat_map
+            (fun (node, subject) -> edges_of_node engine node subject)
+            (Hashtbl.find_all nodes_about path)
+          |> List.map (fun edge -> edge.dependency)
+          |> List.sort_uniq Path.compare
+        in
+        Hashtbl.replace dependencies_of path paths;
+        paths
+  in
+  let rec reach reached path =
+    if Path.Set.mem path reached then reached
+    else List.fold_left reach (Path.Set.add path reached) (dependency_paths path)
+  in
+  List.map (reach Path.Set.empty) roots
 
 type difference = Changed | Added | Same
 

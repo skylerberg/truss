@@ -1,8 +1,13 @@
-type dependencies = (Path.t, (Path.t * string * string) list) Hashtbl.t
+type edge = {
+  dependent : Path.t;
+  dependent_part : string;
+  dependency : Path.t;
+  dependency_part : string;
+}
 
-val dependencies : Engine.t -> dependencies
-val reads : dependencies -> Path.t -> (Path.t * string * string) list
-val readers : dependencies -> Path.t -> (Path.t * string * string) list
+val dependencies : Engine.t -> Path.t list -> edge list
+val dependents : Engine.t -> Path.t list -> edge list
+val reachable : Engine.t -> Path.t list -> Path.Set.t list
 
 type difference = Changed | Added | Same
 

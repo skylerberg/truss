@@ -768,7 +768,7 @@ let () =
       let root = repository doubling in
       rewrite root "main.truss" (replace doubling "value * 2" "value + value");
       match impact root with
-      | [ { status = `Changed parts; read_by = []; _ } ] when not (List.mem "signature" parts) ->
+      | [ { status = `Changed parts; dependents = []; _ } ] when not (List.mem "signature" parts) ->
           if not (List.mem "body" parts) then fail "parts [%s]" (String.concat "; " parts)
       | changes ->
           fail "found [%s]"
@@ -791,10 +791,14 @@ let () =
           (fun (change : Impact_command.change) -> Path.show change.path = "demo::main::double")
           (impact root)
       with
-      | Some { before = Some before; after = Some after; read_by; _ } ->
+      | Some { before = Some before; after = Some after; dependents; _ } ->
           if not (contains before "(value: Int64)" && contains after "by: Int64 = 2") then
             fail "signatures %s, %s" before after;
-          if not (List.exists (fun (reader, _, _) -> Path.show reader = "demo::main::four") read_by)
+          if
+            not
+              (List.exists
+                 (fun (edge : Database.edge) -> Path.show edge.dependent = "demo::main::four")
+                 dependents)
           then fail "four does not read it"
       | _ -> fail "double did not change its signature");
   test "moving a definition within its file changes nothing" (fun () ->

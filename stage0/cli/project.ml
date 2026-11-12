@@ -207,15 +207,3 @@ let shown_workspace_path project workspace_path =
   | None -> workspace_path
 
 let write_file = File_system.write_atomically ~durable:false
-
-(* The transitive dependencies of [start]. *)
-let reachable dependencies start =
-  let seen = Hashtbl.create 64 in
-  let rec walk path =
-    if not (Hashtbl.mem seen path) then begin
-      Hashtbl.replace seen path ();
-      List.iter (fun (read, _, _) -> walk read) (Database.reads dependencies path)
-    end
-  in
-  walk start;
-  seen

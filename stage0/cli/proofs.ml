@@ -47,13 +47,13 @@ let diagnostics (project : Project.t) modules =
 (* Each definition that [main] reaches and whose proofs have a hole. A
    program with such a definition cannot be built. *)
 let holes_reached (project : Project.t) main =
-  let seen = Project.reachable (Database.dependencies project.session) main in
+  let reached = List.hd (Database.reachable project.session [ main ]) in
   List.concat_map
     (fun module_ ->
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
           match Query.demand project.context Prover.proof (Resolve.Names.key_of declaration) with
-          | Obligations { holes = _ :: _; _ } when Hashtbl.mem seen declaration.path ->
+          | Obligations { holes = _ :: _; _ } when Path.Set.mem declaration.path reached ->
               Some declaration.path
           | _ -> None)
         (Query.demand project.context Resolve.Names.declarations module_))

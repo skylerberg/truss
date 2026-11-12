@@ -52,21 +52,20 @@ let gather (project : Project.t) paths =
    hole's definition transitively. *)
 let fill_blocks (project : Project.t) holes =
   if holes <> [] then begin
-    let dependencies = Database.dependencies project.session in
     let roots =
       (match Program_command.mains project with [ main ] -> [ ("main", main) ] | _ -> [])
       @ List.map
           (fun (test : Test_command.test) -> ("test " ^ Test_command.label test, test.path))
           (Test_command.select project ~paths:[] ~match_:None)
     in
-    List.iter
-      (fun (label, root) ->
-        let seen = Project.reachable dependencies root in
+    List.iter2
+      (fun (label, _) reached ->
         List.iter
           (fun hole ->
-            if Hashtbl.mem seen hole.definition then hole.blocks <- hole.blocks @ [ label ])
+            if Path.Set.mem hole.definition reached then hole.blocks <- hole.blocks @ [ label ])
           holes)
       roots
+      (Database.reachable project.session (List.map snd roots))
   end
 
 let to_json hole =

@@ -466,14 +466,20 @@ let sessions = Session.sessions
 
 let check_all session = ignore (diagnostics_of session (packages session))
 
-type dependencies = Session.Graph.dependencies
+type edge = Session.Graph.edge = {
+  dependent : Path.t;
+  dependent_part : string;
+  dependency : Path.t;
+  dependency_part : string;
+}
 
-let dependencies session =
+let after_checking question session paths =
   check_all session;
-  Session.Graph.dependencies (Session.engine session)
+  question (Session.engine session) paths
 
-let reads = Session.Graph.reads
-let readers = Session.Graph.readers
+let dependencies = after_checking Session.Graph.dependencies
+let dependents = after_checking Session.Graph.dependents
+let reachable = after_checking Session.Graph.reachable
 
 let all_declarations session =
   List.concat_map
