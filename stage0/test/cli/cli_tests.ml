@@ -25,18 +25,18 @@ let read root path = In_channel.with_open_bin (Filename.concat root path) In_cha
 (* Runs [f] as a command would, with what it writes kept, and returns its
    result and its output, then saves the sessions it opened, as the command
    line does after each command. *)
-let captured f =
+let captured work =
   let out = Buffer.create 256 and err = Buffer.create 256 in
   let result =
     Output.with_
       { out = Buffer.add_string out; err = Buffer.add_string err; terminal = false; columns = None }
-      f
+      work
   in
   List.iter Database.save_session !Project.opened;
   Project.opened := [];
   (result, Buffer.contents out ^ Buffer.contents err)
 
-let quietly f = fst (captured f)
+let quietly work = fst (captured work)
 
 (* The tests' sessions are in a store of their own, apart from the user's. *)
 let () = Unix.putenv "TRUSS_CACHE" (Harness.scratch "store")
@@ -60,7 +60,7 @@ let () =
 
 let names (project : Project.t) =
   List.sort compare
-    (List.map (fun (p : Project.package) -> Path.show_package p.name) project.packages)
+    (List.map (fun (package : Project.package) -> Path.show_package package.name) project.packages)
 
 let () =
   test "the package is found from a directory below its manifest" (fun () ->
@@ -489,14 +489,14 @@ let () =
       expect_strings
         ~expected:[ "doubles two"; "doubles three" ]
         (List.map
-           (fun (t : Test_command.test) -> t.name)
+           (fun (test : Test_command.test) -> test.name)
            (Test_command.select project ~paths:[] ~match_:(Some "doubles"))));
   test "a file narrows the tests to those defined in it" (fun () ->
       let root = package [ ("main.truss", suite); ("other.truss", "test \"elsewhere\" {\n}\n") ] in
       let project = Project.load root in
       expect_strings ~expected:[ "elsewhere" ]
         (List.map
-           (fun (t : Test_command.test) -> t.name)
+           (fun (test : Test_command.test) -> test.name)
            (Test_command.select project ~paths:[ Filename.concat root "other.truss" ] ~match_:None)))
 
 (* Signatures *)
@@ -532,7 +532,7 @@ let () =
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
         (List.map
-           (fun (f : Show_command.shown_definition) -> f.text)
+           (fun (work : Show_command.shown_definition) -> work.text)
            (Show_command.find project ~body:false "demo::main::Point")))
 
 (* Holes *)
@@ -816,10 +816,13 @@ let repository text =
 
 (* The text with its one occurrence of [part] replaced. *)
 let replace text part by =
-  let n = String.length part in
-  let rec at i = if String.sub text i n = part then i else at (i + 1) in
-  let i = at 0 in
-  String.sub text 0 i ^ by ^ String.sub text (i + n) (String.length text - i - n)
+  let part_length = String.length part in
+  let rec at position =
+    if String.sub text position part_length = part then position else at (position + 1)
+  in
+  let position = at 0 in
+  String.sub text 0 position ^ by
+  ^ String.sub text (position + part_length) (String.length text - position - part_length)
 
 let rewrite root path text =
   Out_channel.with_open_bin (Filename.concat root path) (fun out -> output_string out text);
@@ -878,9 +881,12 @@ let () =
           fail "found [%s]"
             (String.concat "; "
                (List.map
-                  (fun (c : Impact_command.change) ->
-                    Path.show c.path ^ " "
-                    ^ match c.status with `Changed parts -> String.concat "," parts | _ -> "?")
+                  (fun (change : Impact_command.change) ->
+                    Path.show change.path ^ " "
+                    ^
+                    match change.status with
+                    | `Changed parts -> String.concat "," parts
+                    | _ -> "?")
                   changes)));
   test "a changed signature is shown before and after, with what reads it" (fun () ->
       let root = repository doubling in
@@ -889,7 +895,7 @@ let () =
            "fn double(value: Int64, by: Int64 = 2) -> Int64");
       match
         List.find_opt
-          (fun (c : Impact_command.change) -> Path.show c.path = "demo::main::double")
+          (fun (change : Impact_command.change) -> Path.show change.path = "demo::main::double")
           (impact root)
       with
       | Some { before = Some before; after = Some after; read_by; _ } ->

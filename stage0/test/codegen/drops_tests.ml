@@ -12,16 +12,18 @@ let rec needs_drop (ty : Ground.ty) =
   | Named { path = Top { name = "Option"; _ }; arguments = [ Type inner ] } -> needs_drop inner
   | _ -> false
 
-let elaborate f =
+let elaborate function_ =
   Lir.canonical
-    (Drops.elaborate (shape_env ~extra:drop_shapes ()) ~needs_drop ~environment:(fun _ -> []) f)
+    (Drops.elaborate (shape_env ~extra:drop_shapes ()) ~needs_drop
+       ~environment:(fun _ -> [])
+       function_)
 
-let elaborated f = Lir.function_to_string (elaborate f)
+let elaborated function_ = Lir.function_to_string (elaborate function_)
 let condition = local ~name:"ready" (Raw Bool)
 let consume = call "consume" ~result:None ~parameters:[ value text ]
 
-let expect_lir ~expected f =
-  let actual = elaborated f in
+let expect_lir ~expected function_ =
+  let actual = elaborated function_ in
   if actual <> String.concat "\n" expected then
     fail "expected:\n%s\ngot:\n%s" (String.concat "\n" expected) actual
 
@@ -242,9 +244,9 @@ let () =
                 ~environment:(fun _ -> [])
                 keep.main;
           };
-          ( entry [] [] |> fun e ->
+          ( entry [] [] |> fun built_entry ->
             {
-              e with
+              built_entry with
               main =
                 Drops.elaborate (shape_env ~extra:drop_shapes ()) ~needs_drop
                   ~environment:(fun _ -> [])

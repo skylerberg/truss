@@ -4,8 +4,8 @@
 open Memory_layout
 open Codegen_support
 
-let expect_bug ~saying f =
-  match f () with
+let expect_bug ~saying work =
+  match work () with
   | () -> fail "expected a compiler bug saying %S" saying
   | exception Compiler_bug.Bug bug ->
       let text = Compiler_bug.to_string bug in
@@ -91,7 +91,7 @@ let () =
   let find units key =
     List.find_opt
       (fun unit -> Instance.equal (Reachable.compiled_key unit) key)
-      (List.map (fun i -> Lir.Code i) units)
+      (List.map (fun instance -> Lir.Code instance) units)
   in
   test "a callee named with a signature it does not have is a bug" (fun () ->
       let caller =
