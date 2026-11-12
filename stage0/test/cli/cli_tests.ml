@@ -823,6 +823,19 @@ let () =
       if
         not (contains output "demo::main::four: its body reads the signature of demo::main::double")
       then fail "wrote %s" output);
+  test "references to a mut self method are found by its name without the receiver" (fun () ->
+      let root = package [ ("main.truss", Fixtures.counter) ] in
+      let status, output =
+        captured (fun () ->
+            Graph_command.run ~directory:root ~direction:References ~name:"Counter.bump" ~json:false)
+      in
+      if status <> 0 then fail "status %d" status;
+      if
+        not
+          (contains output
+             "demo::main::bumped: its body reads the signature of demo::main::Counter.bump(mut \
+              self)")
+      then fail "wrote %s" output);
   test "a position's line and column count characters, as diagnostics do" (fun () ->
       let source = Source.create ~path:"" "ab\ncé x" in
       if Source.offset Source.Scalar_values source ~line:1 ~column:3 <> 7 then fail "wrong offset");
@@ -840,6 +853,34 @@ let () =
           (contains output "means the definition demo::main::double"
           && contains output "internal fn double(value: Int64) -> Int64")
       then fail "wrote %s" output);
+  let explain root position =
+    let status, output =
+      captured (fun () ->
+          Explain_command.run ~directory:root
+            ~position:(Filename.concat root "main.truss" ^ ":" ^ position)
+            ~json:false)
+    in
+    if status <> 0 then fail "status %d" status;
+    output
+  in
+  test "explaining a definition's declared name gives the definition" (fun () ->
+      let root = package [ ("main.truss", Fixtures.counter) ] in
+      let output = explain root "3:13" in
+      if
+        not
+          (contains output "means the definition demo::main::Counter.bump(mut self)"
+          && contains output "fn Counter.bump(mut self)")
+      then fail "wrote %s" output);
+  test "explaining a method call's callee gives the method" (fun () ->
+      let root = package [ ("main.truss", Fixtures.counter) ] in
+      let output = explain root "9:16" in
+      if not (contains output "means the definition demo::main::Counter.bump(mut self)") then
+        fail "wrote %s" output);
+  test "explaining a variable where it is bound gives its type" (fun () ->
+      let root = package [ ("main.truss", Fixtures.counter) ] in
+      let output = explain root "8:8" in
+      if not (contains output "means a name bound here" && contains output "has type Counter") then
+        fail "wrote %s" output);
   test "an overlap is told as a sentence about the parts that meet" (fun () ->
       let place path part : Database.place =
         {

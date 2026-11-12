@@ -492,14 +492,24 @@ let all_declarations session =
         (package_modules session name))
     (packages session)
 
-let matches name path =
-  let shown = Path.show path in
+(* Whether [name] is a path's text or the end of it after [::] or [.]. *)
+let ends_path name shown =
   shown = name
   ||
   let name_length = String.length name and shown_length = String.length shown in
   shown_length > name_length
   && String.sub shown (shown_length - name_length) name_length = name
   && (shown.[shown_length - name_length - 1] = ':' || shown.[shown_length - name_length - 1] = '.')
+
+(* A method is written without its receiver, which [Path.show] appends for
+   [mut self] and [own self], so [Counter.bump] names every version of the
+   method and [Counter.bump(mut self)] names one. *)
+let matches name (path : Path.t) =
+  ends_path name (Path.show path)
+  ||
+  match path with
+  | Method method_ -> ends_path name (Path.show (Method { method_ with receiver = Read }))
+  | _ -> false
 
 let find_definitions session name =
   List.sort_uniq Path.compare

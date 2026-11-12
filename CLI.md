@@ -499,7 +499,8 @@ truss dependencies [--json] NAME
 its dependencies, by part, such as `weather::main::main: its body reads the
 signature of weather::forecast::parse`. `NAME` is a full path or a suffix of
 one, such as `parse` or `Forecast.summary`, and selects every definition it
-matches. The answers come from the code database's dependency graph, so no
+matches. A method's name selects every version of it, whatever its
+receiver, and `Counter.bump(mut self)` selects one. The answers come from the code database's dependency graph, so no
 dependency is missing: a use through a method that type checking resolved,
 or through an `impl`, is found as well as a use by name. The answers
 over-approximate: a use of a result about a whole package, such as the
@@ -513,7 +514,8 @@ truss explain [--json] FILE:LINE:COLUMN
 
 Describes the name or expression at a position, written as diagnostics write
 positions: a name's referent, its type, and the signature of its
-definition. An agent can ask about one name without reading the file around
+definition. The name may be a reference, a method call's callee, a binding,
+or the declared name of a definition. An agent can ask about one name without reading the file around
 it.
 
 ### `truss overlap`

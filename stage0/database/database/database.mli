@@ -154,7 +154,8 @@ val reachable : session -> Path.t list -> Path.Set.t list
 (** For each root, in order, the definitions it reaches through edges, the root included. *)
 
 val find_definitions : session -> string -> Path.t list
-(** The definitions a name means: a full path, or the end of one after [::] or [.]. *)
+(** The definitions a name means: a full path, or the end of one after [::] or [.]. A method's name
+    without its receiver means every version of the method. *)
 
 (** {1 Comparing} *)
 
