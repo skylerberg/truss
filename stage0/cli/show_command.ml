@@ -2,7 +2,12 @@
 
 module Names = Resolve.Names
 
-type found = { declaration : Names.declaration; file : string; line : int; text : string }
+type shown_definition = {
+  declaration : Names.declaration;
+  file : string;
+  line : int;
+  text : string;
+}
 
 (* The module a path names, if it names one: [weather], or
    [weather::forecast]. *)
@@ -15,7 +20,6 @@ let declarations database (module_ : Path.module_) =
   Query.demand database Names.declarations module_
   |> List.filter (fun (d : Names.declaration) -> d.ordinal = 0)
 
-(* Every module of a package. *)
 let package_modules database package = Query.demand database Workspace.modules package
 
 (* Whether the packages a command is about can see a definition: anything
@@ -66,7 +70,7 @@ let resolve (project : Project.t) text =
                        package
                   @ List.filter (fun (d : Names.declaration) -> impl_of_type d.path last) package
                   |> List.filter (visible project)
-              | found -> List.filter (visible project) found)
+              | declarations -> List.filter (visible project) declarations)
           | Some member ->
               let owner : Path.t = Top { module_; name = last } in
               in_package module_.package
@@ -99,8 +103,8 @@ let find (project : Project.t) ~body text =
 
 let run ~directory ~paths ~body ~json =
   let project = Project.load directory in
-  let found = List.map (fun path -> (path, find project ~body path)) paths in
-  let missing = List.filter (fun (_, found) -> found = []) found in
+  let results = List.map (fun path -> (path, find project ~body path)) paths in
+  let missing = List.filter (fun (_, definitions) -> definitions = []) results in
   if json then
     Json.print
       (Json.document ~diagnostics:[]
@@ -108,7 +112,7 @@ let run ~directory ~paths ~body ~json =
            ( "definitions",
              Json.List
                (List.concat_map
-                  (fun (_, found) ->
+                  (fun (_, definitions) ->
                     List.map
                       (fun f ->
                         Json.Object
@@ -119,21 +123,21 @@ let run ~directory ~paths ~body ~json =
                             ("line", Json.Int f.line);
                             ("text", Json.String f.text);
                           ])
-                      found)
-                  found) );
+                      definitions)
+                  results) );
            ("not_found", Json.List (List.map (fun (path, _) -> Json.String path) missing));
          ])
   else begin
     let first = ref true in
     List.iter
-      (fun (_, found) ->
+      (fun (_, definitions) ->
         List.iter
           (fun f ->
             if not !first then Output.print_line "";
             first := false;
             Output.printf "%s:%d\n%s\n" f.file f.line f.text)
-          found)
-      found;
+          definitions)
+      results;
     List.iter (fun (path, _) -> Output.eprintf "Nothing named `%s` is visible here.\n" path) missing
   end;
   (* A path that names nothing is a bad argument, not a problem in the code. *)

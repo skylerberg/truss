@@ -349,8 +349,8 @@ internal fn build_url(scheme: own String, authority: own Option[Authority], rest
 {
   var parts = own rest
   match own authority {
-    Some(found) => {
-      var named = own found
+    Some(written) => {
+      var named = own written
       Url(
         scheme: own scheme,
         user_information: own named.user_information,
@@ -472,7 +472,7 @@ internal fn percent_decode(text: StringSlice, from: USize, to: USize, form: Bool
 {
   let bytes = percent_decode_bytes(text, from: from, to: to, form: form)?
   match String.from_utf8(own bytes) {
-    Ok(found) => Ok(own found)
+    Ok(decoded) => Ok(own decoded)
     Err(_) => Err(ParseError.InvalidCharacter(offset: from))
   }
 }
@@ -688,7 +688,7 @@ public fn Url.scheme(self) -> StringSlice
 public fn Url.user_information(self) -> Option[StringSlice]
   cost time O(1)
 {
-  self.user_information.map(fn(found) { found.slice() })
+  self.user_information.map(fn(part) { part.slice() })
 }
 
 public fn Url.host(self) lends Option[Host]
@@ -766,14 +766,14 @@ public fn Url.path_segments(self) -> List[String]
 public fn Url.query(self) -> Option[StringSlice]
   cost time O(1)
 {
-  self.query.map(fn(found) { found.slice() })
+  self.query.map(fn(part) { part.slice() })
 }
 
 public fn Url.query_parameters(self) -> List[Parameter]
   cost time finite
 {
   match self.query {
-    Some(found) => if decode_query(found.slice()) is Ok(parameters) { parameters } else { [] }
+    Some(query) => if decode_query(query.slice()) is Ok(parameters) { parameters } else { [] }
     None => []
   }
 }
@@ -793,7 +793,7 @@ public fn Url.query_parameter(self, name: StringSlice) -> Option[String]
 public fn Url.fragment(self) -> Option[StringSlice]
   cost time O(1)
 {
-  self.fragment.map(fn(found) { found.slice() })
+  self.fragment.map(fn(part) { part.slice() })
 }
 
 public fn Url.join(self, reference: StringSlice) -> Result[Url, ParseError]

@@ -1255,7 +1255,7 @@ let blocks = function
   | Tasks_lock | Tasks_unlock | Tasks_yield ->
       false
 
-let of_the_runtime = function
+let is_runtime_function = function
   | Addresses_of_host | Signals_wait | Descriptor_watch | Descriptor_wait | Descriptors_watch
   | Descriptors_wait | Sleep | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled
   | Tasks_watch | Tasks_wait | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ->

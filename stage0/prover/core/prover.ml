@@ -49,7 +49,7 @@ let impl_laws ?reveal database (key : Names.key) source =
 
 (* [standard::specification]'s contracts say what the mathematical
    collections are, so they are the trusted base, not obligations. *)
-let specification (key : Names.key) = key.module_ = Well_known.specification
+let is_specification_module (key : Names.key) = key.module_ = Well_known.specification
 
 let declaration database (key : Names.key) =
   Names.Declaration_map.find_opt (key.path, key.ordinal)
@@ -57,7 +57,7 @@ let declaration database (key : Names.key) =
 
 let prove ?reveal database (key : Names.key) =
   match (declaration database key, Translate.source_at_key database key) with
-  | _ when specification key -> Not_proven_here
+  | _ when is_specification_module key -> Not_proven_here
   | Some declaration, Some source -> (
       try
         match (declaration.kind, source.core.definition) with
@@ -100,8 +100,6 @@ let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key 
 let revealed_proof =
   Query.query ~phase:Phases.proofs ~name:"revealed_proof" ~show:Names.show_key (prove ~reveal:true)
 
-(* Messages *)
-
 (* A value from the solver's model, written as Truss writes it: a negative
    number with its sign, and a datatype's value as its variant or record,
    with its fields in parentheses. *)
@@ -111,11 +109,11 @@ let float_text bits =
   (* The fewest significant digits, up to [most], that read back as
      [value], by [same]. *)
   let shortest ~most ~same value =
-    let rec go digits =
+    let rec shortest_digits digits =
       let text = Printf.sprintf "%.*g" digits value in
-      if digits >= most || same (float_of_string text) then text else go (digits + 1)
+      if digits >= most || same (float_of_string text) then text else shortest_digits (digits + 1)
     in
-    go 1
+    shortest_digits 1
   in
   let text =
     match String.length bits with
@@ -141,10 +139,10 @@ let float_text bits =
 
 let truss_value members text =
   let tokens =
-    let buffer = Buffer.create 16 and found = ref [] in
+    let buffer = Buffer.create 16 and tokens = ref [] in
     let flush () =
       if Buffer.length buffer > 0 then begin
-        found := `Atom (Buffer.contents buffer) :: !found;
+        tokens := `Atom (Buffer.contents buffer) :: !tokens;
         Buffer.clear buffer
       end
     in
@@ -152,15 +150,15 @@ let truss_value members text =
       (function
         | '(' ->
             flush ();
-            found := `Open :: !found
+            tokens := `Open :: !tokens
         | ')' ->
             flush ();
-            found := `Close :: !found
+            tokens := `Close :: !tokens
         | ' ' | '\n' | '\t' | '\r' -> flush ()
         | c -> Buffer.add_char buffer c)
       text;
     flush ();
-    List.rev !found
+    List.rev !tokens
   in
   (* A constructor's name as Truss writes it: its variant, or for a record
      its type's own name. *)
@@ -271,7 +269,7 @@ let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover
 (* A span inside its definition's text, which every span of the
    definition's own tree is; anything else would be a bug, and is shown at
    the definition's start rather than outside its file. *)
-let within database (key : Names.key) (span : span) =
+let clamp_to_definition database (key : Names.key) (span : span) =
   match Query.demand database Names.text key with
   | Some text when span.stop <= String.length text -> span
   | _ -> Syntax.Span.make 0 0
@@ -298,12 +296,7 @@ type answer =
 
 let proven = function Solved Proven | Ran_true -> true | _ -> false
 
-(* A run of compiled code that decides part of a proof: a template's
-   check, or a call whose arguments are known. *)
 type run = Template_check of Translate.evaluation | Call of Translate.known_call
-
-(* What a run gave: an integer, or a [Bool] as 0 or 1; that it timed out;
-   or that it was not run, since its code cannot be built. *)
 type run_result = Returned of Z.t | Timed_out | Not_run
 
 (* The caller gives the evaluator, since the prover does not depend on
@@ -333,12 +326,12 @@ let bitwise_of : L.symbol -> _ = function
   | _ -> None
 
 let exactly (query : L.query) =
-  let found = ref [] in
+  let bitwise_terms = ref [] in
   let rec walk bound = function
     | L.Apply (name, arguments) as term ->
-        (if bitwise_of name <> None && not (List.mem_assoc term !found) then
+        (if bitwise_of name <> None && not (List.mem_assoc term !bitwise_terms) then
            let named = List.filter (fun (symbol, _) -> L.mentions [ symbol ] term) bound in
-           found := (term, named) :: !found);
+           bitwise_terms := (term, named) :: !bitwise_terms);
         List.iter (walk bound) arguments
     | L.Forall (symbols, body) | L.Exists (symbols, body) -> walk (symbols @ bound) body
     | term -> List.iter (walk bound) (L.arguments term)
@@ -408,7 +401,7 @@ let exactly (query : L.query) =
       (fun definition -> if named = [] then definition else L.Forall (named, definition))
       (definition term)
   in
-  match List.filter_map defined (List.rev !found) with
+  match List.filter_map defined (List.rev !bitwise_terms) with
   | [] -> None
   | definitions -> Some { query with facts = query.facts @ definitions }
 
@@ -416,7 +409,7 @@ let exactly (query : L.query) =
    bitwise operations defined exactly, either of those without its
    callees' definitions, or with the definitions of the callees whose
    bodies are hidden here. *)
-type variant = Made | Exact | Alone | Alone_exact | Revealed
+type variant = Plain | Exact | Alone | Alone_exact | Revealed
 
 (* The oracles a definition's proof is decided by: the solver, of one of
    its obligations' queries, by the obligation's index, the choice of
@@ -443,7 +436,7 @@ and solver_response = Answered of Solver.answer | Unanswered | No_query
 (* The values of the calls a query mentions that running them gave, as
    facts, which are only as true as the compiled code, which the prover
    trusts. *)
-let given ~call (obligation : Translate.obligation) =
+let call_facts ~call (obligation : Translate.obligation) =
   List.filter_map
     (fun (known : Translate.known_call) ->
       Option.map
@@ -466,7 +459,7 @@ let query_with ?query ~call (obligation : Translate.obligation) choice =
   in
   (* The same query, not a copy, when nothing is added, so the solver finds
      what it made of it before. *)
-  match pins @ given ~call obligation with
+  match pins @ call_facts ~call obligation with
   | [] -> query
   | added -> { query with facts = query.facts @ added }
 
@@ -496,13 +489,14 @@ let choices (obligations : Translate.obligation list) =
 (* An obligation's query of a variant, with a choice of constants, and
    with what running code gave of its calls. *)
 let variant_query ~call (obligation : Translate.obligation) choice variant =
-  let made base = query_with ?query:base ~call obligation choice in
+  let query_of base = query_with ?query:base ~call obligation choice in
   match variant with
-  | Made -> Some (made None)
-  | Exact -> exactly (made None)
-  | Alone -> Option.map (fun query -> made (Some query)) obligation.contracts_alone
-  | Alone_exact -> Option.bind obligation.contracts_alone (fun query -> exactly (made (Some query)))
-  | Revealed -> Some (made None)
+  | Plain -> Some (query_of None)
+  | Exact -> exactly (query_of None)
+  | Alone -> Option.map (fun query -> query_of (Some query)) obligation.contracts_alone
+  | Alone_exact ->
+      Option.bind obligation.contracts_alone (fun query -> exactly (query_of (Some query)))
+  | Revealed -> Some (query_of None)
 
 (* Each obligation's answer. One that mentions the constants of [O(...)]
    bounds is asked with each choice of a pair for every bound in turn, the
@@ -522,8 +516,8 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
            once it is answered, rather than asking what the answer may make
            unneeded. *)
         let ask variant ~with_locals = oracles.solve ~index ~choice ~variant ~with_locals in
-        let asked made exact =
-          match ask made ~with_locals:false with
+        let asked plain exact =
+          match ask plain ~with_locals:false with
           | Answered Solver.Proven -> Some Solver.Proven
           | Answered first -> (
               match ask exact ~with_locals:false with
@@ -533,7 +527,7 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
           | Unanswered -> None
           | No_query -> Some Solver.Out_of_steps
         in
-        match (asked Made Exact, obligation.contracts_alone) with
+        match (asked Plain Exact, obligation.contracts_alone) with
         | None, _ -> Pending_answer
         | Some Solver.Out_of_steps, Some _ -> (
             (* Without its callees' definitions, a query is about their
@@ -548,11 +542,11 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
             (* Where a counterexample is, the values of the locals there too,
                asked for only now, so that a query that proves keeps its
                key. *)
-            match ask Made ~with_locals:true with
+            match ask Plain ~with_locals:true with
             | Answered (Solver.Counterexample _ as answer) -> Solved answer
             | Unanswered -> Pending_answer
             | Answered _ | No_query -> (
-                match asked Made Exact with Some answer -> Solved answer | None -> Pending_answer))
+                match asked Plain Exact with Some answer -> Solved answer | None -> Pending_answer))
         | Some answer, _ -> Solved answer)
   in
   (* Where an obligation is not proven, whether seeing the bodies hidden
@@ -601,7 +595,7 @@ type 'span state = {
 }
 
 let definition_states oracles database (key : Names.key) =
-  let within span = within database key span in
+  let clamp_to_definition span = clamp_to_definition database key span in
   match Query.demand database proof key with
   | Not_proven_here -> []
   | Unsupported (span, what) ->
@@ -612,9 +606,9 @@ let definition_states oracles database (key : Names.key) =
       [
         ( {
             code = Unsupported;
-            span = within span;
+            span = clamp_to_definition span;
             shows = message;
-            failure = Some (diagnostic Unsupported (within span) message);
+            failure = Some (diagnostic Unsupported (clamp_to_definition span) message);
             trusts_compiled_code = false;
           },
           None );
@@ -622,7 +616,7 @@ let definition_states oracles database (key : Names.key) =
   | Obligations outcome ->
       List.map
         (fun ((obligation : Translate.obligation), (answer : answer)) ->
-          let span = within obligation.span in
+          let span = clamp_to_definition obligation.span in
           (* These fixes change what the code means, so they are named, not
              applied. *)
           let others =
@@ -692,7 +686,7 @@ let definition_states oracles database (key : Names.key) =
               trusts_compiled_code =
                 (match answer with
                 | Ran_true -> true
-                | Solved Proven -> given ~call:oracles.call obligation <> []
+                | Solved Proven -> call_facts ~call:oracles.call obligation <> []
                 | _ -> false);
             },
             obligation.cited ))
@@ -917,7 +911,7 @@ let decided database key =
 
 (* Each definition's states, in the file's offsets. A failure of a clause
    that another definition of the file states has a note at that clause. *)
-let moved_states ?evaluator ~record database solver module_ =
+let file_states ?evaluator ~record database solver module_ =
   solve_ahead ?evaluator ~record database solver [ module_ ];
   List.filter_map
     (fun declaration ->
@@ -933,7 +927,7 @@ let moved_states ?evaluator ~record database solver module_ =
                    | Some ((cited : Names.key), span) when cited.module_ = module_ ->
                        Option.map
                          (fun offset ->
-                           ( Span.to_source ~base:offset (within database cited span),
+                           ( Span.to_source ~base:offset (clamp_to_definition database cited span),
                              "This is the clause that must hold." ))
                          (base_of cited)
                    | _ -> None
@@ -950,7 +944,8 @@ let moved_states ?evaluator ~record database solver module_ =
                        with
                        | Some offset, Some file ->
                            let start =
-                             (Span.to_source ~base:offset (within database cited span)).start
+                             (Span.to_source ~base:offset (clamp_to_definition database cited span))
+                               .start
                            in
                            let line, _ = Source.position file.source start in
                            Printf.sprintf " The clause that must hold is at `%s:%d`."
@@ -975,14 +970,14 @@ let moved_states ?evaluator ~record database solver module_ =
       | None -> None)
     (Query.demand database Names.declarations module_)
 
-let in_order list =
+let sorted_diagnostics list =
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
     list
 
 let states ?evaluator ~record database solver module_ =
-  List.concat (moved_states ?evaluator ~record database solver module_)
+  List.concat (file_states ?evaluator ~record database solver module_)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
 (* The failures among the states. The same failure on another path of one
@@ -999,5 +994,5 @@ let diagnostics ?evaluator ~record database solver module_ =
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
-    (moved_states ?evaluator ~record database solver module_)
-  |> in_order
+    (file_states ?evaluator ~record database solver module_)
+  |> sorted_diagnostics

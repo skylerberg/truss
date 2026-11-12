@@ -4,8 +4,6 @@
 open Definitions
 open Lir_builder
 
-(* Lowering one function *)
-
 (* What leaving a scope does: drop what a place still owns, free the heap
    block a pointer points at, once what is in it has been dropped, free the
    block of a value whose variant is one of [variants] without dropping
@@ -180,7 +178,7 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
    in a lending or yielding method that is inlined: a [yield] in a part
    would run the caller's code there, which may leave, and a region has
    one way out. *)
-let at_once st = (not st.pulling) && st.frame.on_yield = None && st.frame.exit = None
+let may_fork st = (not st.pulling) && st.frame.on_yield = None && st.frame.exit = None
 
 let fresh_fork st =
   st.forks <- st.forks + 1;
@@ -196,7 +194,7 @@ let new_early_exits st =
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 let trivial st ty = Glue.trivial st.context.glue ty
-let zero_size st = Memory_layout.has_zero_size st.context.env
+let is_zero_size st = Memory_layout.has_zero_size st.context.env
 
 let site st (span : S.span) : Lir.site =
   let text = st.frame.code.text in
@@ -336,7 +334,7 @@ let drop_scope st (scope : scope) =
             List.map
               (fun variant ->
                 let case = block st.b in
-                aside st.b case (fun () ->
+                in_block st.b case (fun () ->
                     emit st.b (Free_block { place; variant });
                     finish st.b (Goto after));
                 (variant, case))
@@ -355,7 +353,7 @@ let drop_scope st (scope : scope) =
                  Use (Constant (Integer (UInt32, Z.of_int (List.length lend.ways)))) ));
           lend.ways <- way :: lend.ways;
           finish st.b (Goto lend.resume);
-          aside st.b lend.finished (fun () ->
+          in_block st.b lend.finished (fun () ->
               List.iter (fun place -> emit st.b (Drop place)) lend.owned;
               finish st.b
                 (match lend.ways with
@@ -396,14 +394,14 @@ let close_scope st scope =
   drop_scope st scope;
   pop_scope st scope
 
-let within st kind f =
+let with_scope st kind f =
   let scope = open_scope st kind in
   let result = f () in
   close_scope st scope;
   result
 
-let in_scope st f = within st Bindings f
-let in_statement st f = within st Statement f
+let in_scope st f = with_scope st Bindings f
+let in_statement st f = with_scope st Statement f
 
 (* Ends the function being written: what its scope still owns is dropped
    and its result returned. Its parameters are [first], which it is given

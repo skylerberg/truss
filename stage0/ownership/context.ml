@@ -12,7 +12,6 @@ type context = {
   bounds : T.parameter -> T.trait_reference list;
   spans : Syntax.span array;
   marks : (Core.origin, Types.mode * Core.mark) Hashtbl.t;
-      (** Each argument written with a [mut] or [own], by the origin of the value passed. *)
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, T.ty) Hashtbl.t;
@@ -118,7 +117,7 @@ let collect context (definition : Core.definition) =
                   | Core.Passed { mode; value; mark = Some mark } ->
                       let origin =
                         match value with
-                        | Place found -> Core_walk.place_origin found
+                        | Place core_place -> Core_walk.place_origin core_place
                         | Value value -> value.origin
                       in
                       Hashtbl.replace context.marks origin (mode, mark)
@@ -128,8 +127,8 @@ let collect context (definition : Core.definition) =
       pattern =
         (fun (node : Core.pattern) ->
           match node.kind with
-          | Bind { local; name; mode; mutable_ } ->
-              if mutable_ then context.mutable_locals <- local :: context.mutable_locals;
+          | Bind { local; name; mode; is_var } ->
+              if is_var then context.mutable_locals <- local :: context.mutable_locals;
               Hashtbl.replace context.names local name;
               Hashtbl.replace context.kinds local (kind_of_mode mode);
               Hashtbl.replace context.types local node.type_

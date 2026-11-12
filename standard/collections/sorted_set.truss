@@ -282,20 +282,20 @@ fn combined[Element: Ordered + Copyable](
   match first.length().checked_add(second.length()) {
     Some(steps) => {
       let room = if keeps_second_only { steps } else { first.length() }
-      var kept: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(room)
+      var output: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(room)
       var index: USize = 0
       var other_index: USize = 0
       for _ in 0..steps
-        invariant intrinsic::storage_capacity(kept) == room
+        invariant intrinsic::storage_capacity(output) == room
         invariant index <= first.length()
         invariant other_index <= second.length()
-        invariant intrinsic::storage_length(kept) <= index + other_index
-        invariant !keeps_second_only ==> intrinsic::storage_length(kept) <= index
-        invariant strictly_ascending(intrinsic::storage_model(kept))
-        invariant forall i in 0..intrinsic::storage_length(kept) => forall j in index..first.length() =>
-          intrinsic::storage_model(kept)[i] < first.model()[j]
-        invariant forall i in 0..intrinsic::storage_length(kept) => forall j in other_index..second.length() =>
-          intrinsic::storage_model(kept)[i] < second.model()[j]
+        invariant intrinsic::storage_length(output) <= index + other_index
+        invariant !keeps_second_only ==> intrinsic::storage_length(output) <= index
+        invariant strictly_ascending(intrinsic::storage_model(output))
+        invariant forall i in 0..intrinsic::storage_length(output) => forall j in index..first.length() =>
+          intrinsic::storage_model(output)[i] < first.model()[j]
+        invariant forall i in 0..intrinsic::storage_length(output) => forall j in other_index..second.length() =>
+          intrinsic::storage_model(output)[i] < second.model()[j]
       {
         if index < first.length() && other_index < second.length() {
           match first[index].compare(second[other_index]) {
@@ -304,7 +304,7 @@ fn combined[Element: Ordered + Copyable](
                 proof {
                   ascending_above(second.model(), element: first.model()[index], first: other_index, bound: other_index + 1)
                 }
-                intrinsic::storage_push(mut kept, value: first[index].copy())
+                intrinsic::storage_push(mut output, value: first[index].copy())
               }
               index += 1
             }
@@ -314,7 +314,7 @@ fn combined[Element: Ordered + Copyable](
                   slice::greater_is_less_reversed(first[index], second: second[other_index])
                   ascending_above(first.model(), element: second.model()[other_index], first: index, bound: index + 1)
                 }
-                intrinsic::storage_push(mut kept, value: second[other_index].copy())
+                intrinsic::storage_push(mut output, value: second[other_index].copy())
               }
               other_index += 1
             }
@@ -323,7 +323,7 @@ fn combined[Element: Ordered + Copyable](
                 proof {
                   ascending_above(second.model(), element: first.model()[index], first: other_index, bound: other_index + 1)
                 }
-                intrinsic::storage_push(mut kept, value: first[index].copy())
+                intrinsic::storage_push(mut output, value: first[index].copy())
               }
               index += 1
               other_index += 1
@@ -331,17 +331,17 @@ fn combined[Element: Ordered + Copyable](
           }
         } else if index < first.length() {
           if keeps_first_only {
-            intrinsic::storage_push(mut kept, value: first[index].copy())
+            intrinsic::storage_push(mut output, value: first[index].copy())
           }
           index += 1
         } else if other_index < second.length() {
           if keeps_second_only {
-            intrinsic::storage_push(mut kept, value: second[other_index].copy())
+            intrinsic::storage_push(mut output, value: second[other_index].copy())
           }
           other_index += 1
         }
       }
-      List(storage: own kept)
+      List(storage: own output)
     }
     None => intrinsic::crash("two sorted sets cannot hold that many elements".slice())
   }
@@ -424,11 +424,11 @@ public fn collections::SortedSet[Element: Ordered].take(mut self, element: Eleme
         ascending_below(self.elements.model(), element: element, last: index, bound: index)
         ascending_above(self.elements.model(), element: element, first: index, bound: index + 1)
       }
-      let taken = mut self.elements.remove_at(index)
+      let removed = mut self.elements.remove_at(index)
       proof {
         absent_where_split(self, element: element, split: index)
       }
-      Some(own taken)
+      Some(own removed)
     }
     Err(_) => None
   }
@@ -481,7 +481,7 @@ public fn collections::SortedSet[Element: Ordered].pop_last(mut self) -> Option[
 }
 
 public fn collections::SortedSet[Element: Ordered].at_or_before(self, element: Element) lends Option[Element]
-  ensures !(result is Some(found) && element < found)
+  ensures !(result is Some(before) && element < before)
   cost time O(log(self.length()) * time(Element.compare))
 {
   let position = self.index_after(element)
@@ -496,7 +496,7 @@ public fn collections::SortedSet[Element: Ordered].at_or_before(self, element: E
 }
 
 public fn collections::SortedSet[Element: Ordered].at_or_after(self, element: Element) lends Option[Element]
-  ensures !(result is Some(found) && found < element)
+  ensures !(result is Some(after) && after < element)
   cost time O(log(self.length()) * time(Element.compare))
 {
   let position = self.index_at_or_after(element)
@@ -510,7 +510,7 @@ public fn collections::SortedSet[Element: Ordered].at_or_after(self, element: El
   }
 }
 
-public fn collections::SortedSet[Element: Ordered].within(self, range: Range[Element]) yields Element
+public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[Element]) yields Element
   ensures range.contains(result)
   cost time O(self.length() + log(self.length()) * time(Element.compare))
 {
@@ -534,24 +534,24 @@ public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(El
 {
   var elements = map::exchange(mut self.elements, value: [])
   let count = elements.length()
-  var kept: USize = 0
+  var retained: USize = 0
   for index in 0..count
     invariant elements.length() == count
-    invariant kept <= index
-    invariant forall i in 0..kept => forall j in 0..kept =>
+    invariant retained <= index
+    invariant forall i in 0..retained => forall j in 0..retained =>
       i < j ==> elements.model()[i] < elements.model()[j]
-    invariant forall i in 0..kept => forall j in index..count =>
+    invariant forall i in 0..retained => forall j in index..count =>
       elements.model()[i] < elements.model()[j]
     invariant forall i in index..count =>
       forall j in index..count =>
         i < j ==> elements.model()[i] < elements.model()[j]
   {
     if keep(elements[index]) {
-      mut elements.swap(kept, second: index)
-      kept += 1
+      mut elements.swap(retained, second: index)
+      retained += 1
     }
   }
-  mut elements.truncate(kept)
+  mut elements.truncate(retained)
   self.elements = own elements
 }
 

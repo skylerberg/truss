@@ -17,7 +17,7 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | Free -> "t_runtime_free(" ^ all ^ ")"
   | Copy_bytes -> "__builtin_memcpy(" ^ all ^ ")"
   | Move_bytes -> "__builtin_memmove(" ^ all ^ ")"
-  | Compare_bytes -> helper context "t_compare_bytes" ^ "(" ^ all ^ ")"
+  | Compare_bytes -> use_helper context "t_compare_bytes" ^ "(" ^ all ^ ")"
   | Add_overflow -> "((uint8_t)__builtin_add_overflow(" ^ all ^ "))"
   | Subtract_overflow -> "((uint8_t)__builtin_sub_overflow(" ^ all ^ "))"
   | Multiply_overflow -> "((uint8_t)__builtin_mul_overflow(" ^ all ^ "))"
@@ -58,11 +58,11 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
   | Round_even -> Printf.sprintf "%s(%s)" (float_builtin "__builtin_roundeven") all
   | Float_bits ->
       Printf.sprintf "%s(%s)"
-        (helper context (if scalar 0 = Float32 then "t_float32_bits" else "t_float64_bits"))
+        (use_helper context (if scalar 0 = Float32 then "t_float32_bits" else "t_float64_bits"))
         all
   | Float_from_bits ->
       Printf.sprintf "%s(%s)"
-        (helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
+        (use_helper context (if width 0 = 32 then "t_float32_from_bits" else "t_float64_from_bits"))
         all
   | Run_test -> "t_runtime_run_test(" ^ all ^ ")"
   | Coroutine_start ->
@@ -145,7 +145,7 @@ let call_c context fc (target : Lir.target) arguments =
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
   | Foreign declaration -> (
       declare_prototype context declaration.symbol (Libc.prototype declaration);
-      let given =
+      let cast_arguments =
         try
           List.map2
             (fun c (text, _) -> Printf.sprintf "(%s)(%s)" (Libc.show_c_type c) text)
@@ -153,7 +153,7 @@ let call_c context fc (target : Lir.target) arguments =
         with Invalid_argument _ ->
           bug "a call of %s with an argument of zero size" declaration.symbol
       in
-      let called = Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " given) in
+      let called = Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " cast_arguments) in
       (* An address comes back as C's own type for it, which the local it
          goes to need not be. *)
       match declaration.returns with

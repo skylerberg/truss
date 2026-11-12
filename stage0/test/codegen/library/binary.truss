@@ -39,7 +39,7 @@ test "reading past the end says how much was needed and reads nothing" {
   assert mut decoder.skip(2) == Ok(Unit)
   assert decoder.remaining().length() == 1
   assert mut decoder.skip(2) == Err(binary::DecodeError.UnexpectedEnd(needed: 2, available: 1))
-  assert mut decoder.bytes(1) is Ok(taken) && taken.length() == 1 && taken[0] == 3
+  assert mut decoder.bytes(1) is Ok(chunk) && chunk.length() == 1 && chunk[0] == 3
   assert decoder.is_at_end()
   assert mut decoder.uint8() == Err(binary::DecodeError.UnexpectedEnd(needed: 1, available: 0))
   assert "${binary::DecodeError.UnexpectedEnd(needed: 4, available: 3)}" == "the bytes end: 4 needed, 3 left"
@@ -93,12 +93,12 @@ test "a signed variable-length integer folds the sign into the low bit" {
   assert signed(greatest) == Ok(Int64.maximum)
 }
 
-fn same_bytes(found: Slice[UInt8], expected: Slice[UInt8]) -> Bool {
-  if found.length() != expected.length() {
+fn same_bytes(actual: Slice[UInt8], expected: Slice[UInt8]) -> Bool {
+  if actual.length() != expected.length() {
     return false
   }
-  for index in 0..found.length() {
-    if found[index] != expected[index] {
+  for index in 0..actual.length() {
+    if actual[index] != expected[index] {
       return false
     }
   }

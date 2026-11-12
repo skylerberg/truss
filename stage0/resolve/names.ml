@@ -127,8 +127,6 @@ let receiver (parameters : parameter list) : Path.receiver =
   | { kind = Self_parameter (Some Own); _ } :: _ -> Own
   | _ -> Static
 
-(* Imports *)
-
 (* The packages a file can name at the start of a path: its own, the
    standard library, and its dependencies. *)
 let packages database (module_ : Path.module_) =
@@ -152,7 +150,6 @@ let full_module database ~(from : Path.module_) (names : string list) : Path.mod
   | Some module_ -> module_
   | None -> { package = { owner = None; name = "" }; modules = [] }
 
-(* The module a [use] line names. *)
 let used_module database ~from (path : path) =
   full_module database ~from
     (List.map (fun (name : name) -> name.text) path.modules @ [ path.last.text ])
@@ -173,8 +170,6 @@ let imports =
 
 let module_exists database (module_ : Path.module_) =
   module_ = Intrinsic.module_ || Query.demand database Workspace.module_exists module_
-
-(* Declarations *)
 
 let top module_ name : Path.t = Top { module_; name }
 
@@ -315,7 +310,7 @@ let lookup_module database ~(from : Path.module_) (names : string list) =
 (* The type a method's or constant's head names, from the file it is
    written in, or [None]. *)
 let head_type database ~(from : Path.module_) (path : path) =
-  let found module_ name =
+  let visible_type module_ name =
     match Query.demand database find (module_, name) with
     | Some item when is_type_kind item.kind && visible ~from module_ item.visibility ->
         Some (top module_ name)
@@ -323,17 +318,17 @@ let head_type database ~(from : Path.module_) (path : path) =
   in
   match path.modules with
   | [] -> (
-      match found from path.last.text with
+      match visible_type from path.last.text with
       | Some path -> Some path
       | None -> (
           match Prelude.find_type path.last.text with
-          | Some module_ -> found module_ path.last.text
+          | Some module_ -> visible_type module_ path.last.text
           | None -> None))
   | modules -> (
       match
         lookup_module database ~from (List.map (fun (name : Syntax.name) -> name.text) modules)
       with
-      | Found_module (module_, _) -> found module_ path.last.text
+      | Found_module (module_, _) -> visible_type module_ path.last.text
       | Ambiguous_module _ | No_module _ -> None)
 
 (* A head that names no type still gets a path, so the definition is
@@ -487,7 +482,7 @@ let member_index =
           | (Method { owner; name; _ } | Member_constant { owner; name })
             when declaration.ordinal = 0 ->
               Member_map.update (owner, name)
-                (fun found -> Some (key_of declaration :: Option.value ~default:[] found))
+                (fun keys -> Some (key_of declaration :: Option.value ~default:[] keys))
                 index
           | _ -> index)
         Member_map.empty
@@ -516,16 +511,16 @@ let trait_index =
               match List.assoc_opt (declaration.module_, container) traits with
               | Some trait ->
                   String_map.update name
-                    (fun found ->
-                      let found = Option.value ~default:[] found in
+                    (fun traits ->
+                      let traits = Option.value ~default:[] traits in
                       Some
-                        (if List.exists (Path.equal trait) found then found else found @ [ trait ]))
+                        (if List.exists (Path.equal trait) traits then traits
+                         else traits @ [ trait ]))
                     index
               | None -> index)
           | _ -> index)
         String_map.empty declared)
 
-(* The traits of a package that declare a method with a name. *)
 let traits_declaring =
   Query.query ~name:"traits_declaring" ~phase:Phases.declarations ~saved:true
     ~show:(fun (package, name) -> Path.show_package package ^ " " ^ name)
@@ -625,20 +620,21 @@ let law_parameters =
             Declaration_map.find_opt (trait, 0) (Query.demand database declaration_index module_)
           in
           match
-            Option.bind declaration (fun found -> Query.demand database definition (key_of found))
+            Option.bind declaration (fun trait_declaration ->
+                Query.demand database definition (key_of trait_declaration))
           with
           | Some { kind = Trait { members; _ }; _ } ->
               List.find_map
                 (fun (member : trait_member line) ->
                   match member.kind with
-                  | Law found when found.name.text = law ->
+                  | Law written_law when written_law.name.text = law ->
                       Some
                         (List.filter_map
                            (fun (parameter : parameter) ->
                              match parameter.kind with
                              | Named_parameter { name; _ } -> Some name.text
                              | Self_parameter _ | Parameter_error -> None)
-                           found.parameters)
+                           written_law.parameters)
                   | _ -> None)
                 members
           | _ -> None)

@@ -2259,6 +2259,9 @@ a command line can hold.
 
 ## Not built
 
+- **Lowering from the MIR.** Code generation lowers the core form to the
+  LIR itself. MIR.md describes the lowering it is to share with the
+  ownership check and the prover.
 - **A check that reports its caller's position.** A check that fails in a
   function that is called, not inlined, reports the function's own
   position. Rust's `#[track_caller]` reports the caller's by passing its
@@ -2292,7 +2295,7 @@ a command line can hold.
   blocks the signals it waits for. A program installs a handler instead,
   and sees the signal.
 - **A cursor over a method that lends places to be changed.** `next` would
-  have to hand out a value it takes back.
+  have to yield a value it takes back.
 - **A lambda in a yielding method that is pulled,** and in a pulled method
   a default for a parameter that is passed by address or is a view.
 - **A range without both of its ends, as a value.**

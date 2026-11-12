@@ -13,13 +13,13 @@ impl Environment for SystemEnvironment {
   fn variables(self) -> List[environment::Variable] {
     var all: List[environment::Variable] = []
     var index: USize = 0
-    var found = true
-    while found {
-      let entry = intrinsic::environment_entry(index, found: mut found)
+    var is_present = true
+    while is_present {
+      let entry = intrinsic::environment_entry(index, is_present: mut is_present)
       proof {
         assert forall k in 0..intrinsic::view_length(entry) => intrinsic::view_at(entry, index: k) != 0
       }
-      if found {
+      if is_present {
         mut all.push(variable_from(entry))
         index = index.wrapping_add(1)
       }
@@ -96,9 +96,9 @@ impl Environment for SystemEnvironment {
 fn variable(name: StringSlice) -> Option[String] {
   match calls::ended_with_zero_byte(name.bytes) {
     Ok(name_for_c) => {
-      var found = false
-      let value = intrinsic::libc_getenv(intrinsic::storage_view(name_for_c), found: mut found)
-      if found { Some(calls::text_copied_from(value)) } else { None }
+      var is_present = false
+      let value = intrinsic::libc_getenv(intrinsic::storage_view(name_for_c), is_present: mut is_present)
+      if is_present { Some(calls::text_copied_from(value)) } else { None }
     }
     Err(_) => None
   }

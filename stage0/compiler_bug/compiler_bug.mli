@@ -3,7 +3,7 @@
    for a broken invariant, so a driver can tell it from a failure of the
    program or of the machine, and reports it in one place. A general
    library, such as [Incremental], raises [Invalid_argument] for a broken
-   precondition, which [within] turns into a bug of the stage that called
+   precondition, which [while_doing] turns into a bug of the stage that called
    it. *)
 
 (* The stage that found the broken invariant, what it found, and what the
@@ -18,7 +18,7 @@ val bug : stage:string -> ('a, unit, string, 'b) format4 -> 'a
    what the compiler was doing, and an exception the standard library
    raises for a broken invariant, such as [Not_found], [Invalid_argument],
    or a failed [assert], becomes a bug of [stage]. *)
-val within : stage:string -> string -> (unit -> 'a) -> 'a
+val while_doing : stage:string -> string -> (unit -> 'a) -> 'a
 
 (* A bug as a report: the stage and what it found, then each thing the
    compiler was doing, a line each. *)

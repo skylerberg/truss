@@ -42,8 +42,6 @@ let subtract ranges removed =
   in
   merge (List.concat_map (fun range -> cut range removed) ranges)
 
-(* Output *)
-
 let output = Buffer.create (1 lsl 20)
 
 let line text =

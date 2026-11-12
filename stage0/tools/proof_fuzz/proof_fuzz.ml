@@ -85,7 +85,6 @@ type candidate = {
   ranges : (int * bool) list;
 }
 
-(* The functions the fuzzer can run. *)
 let runnable database =
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
@@ -114,10 +113,10 @@ let runnable database =
           (* [admitting] writes each clause as code, where [==>] is not
              allowed. *)
           match List.filter_map Fun.id ranges with
-          | found
-            when List.length found = List.length ranges
+          | ranges_written
+            when List.length ranges_written = List.length ranges
                  && not (List.exists (fun admit -> Substring.contains admit "==>") admits) ->
-              Some { path = declaration.path; key; signature; admits; ranges = found }
+              Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
     (Query.demand database Resolve.Names.declarations example)

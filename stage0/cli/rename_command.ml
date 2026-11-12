@@ -248,7 +248,7 @@ let run ~directory ~from_ ~to_ ~json =
     in
     match caused with
     | _ :: _ ->
-        let caused = { Report.files = caused; problems = [] } in
+        let caused = Report.of_files caused in
         if json then Json.print (Report.document caused [])
         else begin
           Report.print caused;

@@ -6,12 +6,11 @@ type context = {
   resolved : Resolve.resolved;
   bounds : (T.parameter, T.trait_reference list) Hashtbl.t;
   self_type : T.ty option;  (** What [Self] means here. *)
-  self_trait : T.trait_reference option;  (** In a trait, the trait [Self] implements. *)
-  self_associated : (string * T.ty) list;  (** In an [impl], its associated types. *)
+  self_trait : T.trait_reference option;
+  self_associated : (string * T.ty) list;
   self_capabilities : (string * T.capability list) list;
-      (** In an [impl], each associated capability set that its trait declares. *)
-  diagnostics : Syntax.diagnostic list ref;  (** Shared by every copy of the context. *)
-  named : (span * T.ty) list ref;  (** Each named type lowered, for checking its bounds. *)
+  diagnostics : Syntax.diagnostic list ref;
+  named : (span * T.ty) list ref;
 }
 
 let create database resolved =
@@ -49,8 +48,6 @@ let parameter_of context (name : name) =
   | Some (Unknown report) -> Error report
   | _ -> bug "`%s` is not resolved as a generic parameter" name.text
 
-(* Types *)
-
 let show_path (path : path) = Resolve.Names.spell_path path
 
 let rec type_ context (written : type_expression) : T.ty =
@@ -87,7 +84,7 @@ let rec type_ context (written : type_expression) : T.ty =
           T.Any trait
       | Error report -> T.Error report)
   | Function_type function_type -> T.Function (function_type_ context function_type)
-  | Type_error -> T.Error (Resolve.Parts.error_node written.span)
+  | Type_error -> T.Error (Resolve.Parts.recovery_report written.span)
 
 (* What [Self] means, which only lowering knows: resolution cannot tell a
    method of a type from a function. *)
@@ -142,7 +139,7 @@ and declaring ?(capability = false) context trait name =
 (* [Items.Element]: the associated type of a generic parameter's bound. *)
 and associated context base parameter (key : name) =
   let bounds = Option.value ~default:[] (Hashtbl.find_opt context.bounds parameter) in
-  let found =
+  let associated_type =
     List.find_map
       (fun (bound : T.trait_reference) ->
         match List.assoc_opt key.text bound.associated with
@@ -158,8 +155,8 @@ and associated context base parameter (key : name) =
             | None -> None))
       bounds
   in
-  match found with
-  | Some found -> found
+  match associated_type with
+  | Some associated_type -> associated_type
   | None ->
       error context Unknown_associated_type key.span
         (Printf.sprintf "No bound of `%s` declares an associated type `%s`." parameter.name key.text)
@@ -199,15 +196,15 @@ and check_arity context (path : path_type) shown expected =
   match expected with
   | None -> ()
   | Some expected ->
-      let given =
+      let argument_count =
         List.length (List.filter (function Constraint _ -> false | _ -> true) path.arguments)
       in
-      if given <> List.length expected then
+      if argument_count <> List.length expected then
         report context Arity path.span
           (Printf.sprintf "`%s` takes %d %s, and %d %s given." shown (List.length expected)
              (if List.length expected = 1 then "argument" else "arguments")
-             given
-             (if given = 1 then "is" else "are"))
+             argument_count
+             (if argument_count = 1 then "is" else "are"))
       else
         (* Each argument must be of its parameter's kind: a type, or a
            [USize] value. *)
@@ -217,10 +214,10 @@ and check_arity context (path : path_type) shown expected =
             let is_value = match argument with Count _ | Count_name _ -> true | _ -> false in
             match (kind, is_value) with
             | Summary.Value_kind, false ->
-                report context Arity path.span
+                report context Argument_kind path.span
                   (Printf.sprintf "`%s`'s parameter `%s` is a `USize` value, not a type." shown name)
             | (Summary.Type_kind | Summary.Capability_kind), true ->
-                report context Arity path.span
+                report context Argument_kind path.span
                   (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
             | _ -> ())
           written expected
@@ -259,7 +256,7 @@ and path_type context (path : path_type) : T.ty =
 and trait_reference ?(capability = false) context (path : path_type) :
     (T.trait_reference, Diagnostic.reported) Stdlib.result =
   let shown = show_path path.path in
-  let found trait : (T.trait_reference, Diagnostic.reported) Stdlib.result =
+  let trait_reference_of trait : (T.trait_reference, Diagnostic.reported) Stdlib.result =
     check_arity context path shown (Query.demand context.database Summary.generics_of trait);
     let associated =
       List.sort compare
@@ -272,8 +269,8 @@ and trait_reference ?(capability = false) context (path : path_type) :
     Ok { trait; trait_arguments = arguments context path; associated }
   in
   match target context path.path.last with
-  | Some (Definition (Trait, trait)) -> found trait
-  | Some (Definition (Capability, trait)) when capability -> found trait
+  | Some (Definition (Trait, trait)) -> trait_reference_of trait
+  | Some (Definition (Capability, trait)) when capability -> trait_reference_of trait
   | Some (Definition _) ->
       Error (reported context Not_a_trait path.span (Printf.sprintf "`%s` is not a trait." shown))
   | Some (Type_parameter _ | Capability_parameter _) ->

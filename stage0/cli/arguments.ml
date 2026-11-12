@@ -27,5 +27,4 @@ let program_arguments = function
       program :: "run" :: options rest
   | arguments -> arguments
 
-(* Both, in order. *)
 let prepare arguments = program_arguments (leading_directory arguments)

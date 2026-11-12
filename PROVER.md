@@ -71,7 +71,9 @@ One walk reads Truss and makes the verification conditions. Boogie and
 Why3 put a proof program between the two, which weakest preconditions turn
 into conditions; that keeps reading the language apart from the logic, at
 the cost of a second representation of every body that only the walk
-would read, so Truss has none.
+would read, so Truss has none. The MIR that MIR.md describes is a second
+representation that the ownership check and code generation read too, and
+the walk is to read it in place of the core form.
 
 ### One definition at a time, one obligation at a time
 
@@ -107,7 +109,7 @@ Every fact the prover must show, and where it comes from:
 | `unreachable` is never reached | Each `unreachable`, including the ones after guards that the type checker added |
 | A call's `requires` holds | Each call, including calls to theorems in proofs and calls in specifications |
 | An `ensures` holds | Each way a function returns, and for a lending or yielding method, each `yield` and each way it ends |
-| A type's invariant holds | Each value built or updated with `with`, each argument and returned value, each `mut` parameter when its function ends, each part handed out by a `yield`, each part lent `mut` when the lend ends, each value a loop changes at the end of each iteration, and each `yield` where a method may end |
+| A type's invariant holds | Each value built or updated with `with`, each argument and returned value, each `mut` parameter when its function ends, each part a `yield` yields, each part lent `mut` when the lend ends, each value a loop changes at the end of each iteration, and each `yield` where a method may end |
 | A loop invariant holds | On entry to the loop, and at the end of each iteration |
 | A loop's `cost` holds | On entry to the loop, and at the end of each iteration |
 | A callback's `requires` holds | Each call through a function-typed parameter whose type has a `requires` |
@@ -636,9 +638,9 @@ call uses the capability method's contract.
   and appends the value, as the body left it, to `yielded`, or leaves with
   `finished` true. A `break` leaves with `finished` false.
 - **`yielded` in a loop's clauses** names what the nearest loop or method
-  hands out: a `for` loop's own parts, which for a range are its indexes so
-  far, or else, in a lending or yielding method, what the method has handed
-  out.
+  yields: a `for` loop's own parts, which for a range are its indexes so
+  far, or else, in a lending or yielding method, what the method has
+  yielded.
 - **A range of integers is the one loop the prover knows itself.** In
   `for i in 0..count`, `i` starts at the range's start, each iteration has
   the next index, and `i < count`. In the loop's clauses, `i` is the next
@@ -674,12 +676,12 @@ call uses the capability method's contract.
   to change exactly the one cell.
 - **A pulled cursor** is what a yielding method called outside a `for`
   loop makes. The call meets the method's `requires` and spends its whole
-  cost there. The cursor carries what it has handed out, `yielded`, and
+  cost there. The cursor carries what it has yielded, `yielded`, and
   whether it has ended, as ghost parts of its value. `next()` gives `Some`
   of a value that meets the method's clauses for each `yield`, or `None`,
   after which the method's other clauses hold with `finished` true. A
   `for` loop over a cursor pulls it so, with `yielded` everything the
-  cursor has handed out.
+  cursor has yielded.
 - **A loop over a value of a type's own `Cursor`** calls its `next` by the
   `impl`'s contract until `None`. Such a cursor promises no end, so in a
   function that must end the loop needs a `decreases` clause, which each
@@ -696,7 +698,7 @@ invariants and the validity of its fields.
 - **Validity is asserted** where DESIGN.md says an invariant must hold:
   where a value is built or updated with `with`, where it is passed to a
   call or returned, for each `mut` parameter where its function ends, for
-  each part handed out by a `yield` and for `self` at each `yield` where a
+  each part a `yield` yields and for `self` at each `yield` where a
   yielding method may end, and for a part lent `mut` where the lend ends.
   The value the part was lent from is valid after the lend only if the
   part is.
@@ -1239,7 +1241,7 @@ plus what happens before and after:
 ## Running code while proving
 
 Some obligations are about values known when compiling. The check of a
-tagged template, `requires is_valid_pattern(template.literals)`, applies a
+tagged template, `requires is_valid_template(template.literals)`, applies a
 function to literal text, which no solver can decide by reasoning about a
 regular-expression parser. Stage0 runs two kinds of code while proving.
 
@@ -1500,6 +1502,9 @@ test the prover itself:
 
 ## Not built
 
+- **Reading the MIR.** The prover walks the core form, as the ownership
+  check and code generation each lower it themselves. MIR.md describes the
+  one lowering that all three are to read.
 - **Contracts for the intrinsic module's system calls.** What a C function
   returns beyond what its row of the table says is known only by its type,
   and so is the address of a view of any type but a built-in scalar, whose

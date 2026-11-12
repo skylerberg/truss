@@ -19,16 +19,16 @@ let absolute path = if Filename.is_relative path then Filename.concat (Sys.getcw
 (* A path with [.] and [..] parts worked out, and no trailing separator. *)
 let normalize path =
   let parts = String.split_on_char '/' (absolute path) in
-  let kept =
+  let segments =
     List.fold_left
-      (fun kept part ->
+      (fun segments part ->
         match part with
-        | "" | "." -> kept
-        | ".." -> ( match kept with _ :: rest -> rest | [] -> [])
-        | part -> part :: kept)
+        | "" | "." -> segments
+        | ".." -> ( match segments with _ :: rest -> rest | [] -> [])
+        | part -> part :: segments)
       [] parts
   in
-  "/" ^ String.concat "/" (List.rev kept)
+  "/" ^ String.concat "/" (List.rev segments)
 
 (* [path] as written from [from], both normalized: [forecast.truss], or
    [../weather/forecast.truss]. *)
@@ -170,7 +170,6 @@ let selected t paths =
           else None)
         t.files
 
-(* A module's parsed file. *)
 let parsed t module_ = Query.demand t.context Workspace.file module_
 
 (* A module's text as a source named by its file as the current directory

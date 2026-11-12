@@ -50,9 +50,9 @@ type t = {
   mutable waiting : int;
   mutable candidates : node list;
   logging : bool;
-  mutable log : node list;
-  mutable computed : node list;
-  mutable changed : node list;
+  log : node Dynarray.t;
+  computed : node Dynarray.t;
+  changed : node Dynarray.t;
   tally : tally;
   mutable store : store option;
   unsaved : (int, node) Hashtbl.t;
@@ -130,7 +130,7 @@ and 'value outcome = Value of 'value | Raised of exn
 
 and frame = {
   owner : node;
-  mutable read : node list;
+  read : node Dynarray.t;
   seen : (int, unit) Hashtbl.t;
   mutable cyclic : string list option;
 }

@@ -1,4 +1,4 @@
-val record : Nodes.t -> unit
+val record_facts : Nodes.t -> unit
 
 type saved_node = {
   saved_name : string;
@@ -22,9 +22,9 @@ type artifact = {
 
 val write : ?full:bool -> Nodes.t -> string
 
-type debt = { whole : int; differences : int; depth : int }
+type chain_size = { whole : int; differences : int; depth : int }
 
-val debt : Nodes.t -> debt
+val chain_size : Nodes.t -> chain_size
 val artifact : Nodes.t -> string option
 val unwritten : Nodes.t -> bool
 val values_in : Nodes.store -> string -> string list

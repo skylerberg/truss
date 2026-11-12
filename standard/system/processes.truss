@@ -189,12 +189,12 @@ fn add_variables(
   texts: mut intrinsic::Storage[UInt8],
   starts: mut intrinsic::Storage[USize],
 ) -> Result[Unit, Int32] {
-  if !command.clear_variables {
+  if command.inherits_variables {
     var index: USize = 0
-    var found = true
-    while found {
-      let entry = intrinsic::environment_entry(index, found: mut found)
-      if found {
+    var is_present = true
+    while is_present {
+      let entry = intrinsic::environment_entry(index, is_present: mut is_present)
+      if is_present {
         if !set_again(entry, by: command.variables.slice()) {
           add_ended_with_zero_byte(entry, texts: mut texts, starts: mut starts)?
         }

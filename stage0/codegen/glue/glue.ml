@@ -62,8 +62,6 @@ let variant_shapes t ty =
   | Shape (Sum variants) -> variants
   | _ -> bug "%s is not a sum type" (Ground.to_string ty)
 
-(* Drop *)
-
 let droppable t : Memory_layout.member -> bool = function
   | Typed ty -> not (trivial t ty)
   | Raw _ -> false
@@ -167,7 +165,7 @@ let drop t ty =
           (fun (v : Memory_layout.variant_shape) ->
             if v.indirect || List.exists (fun (_, m) -> droppable t m) v.fields then begin
               let block = block b in
-              aside b block (fun () ->
+              in_block b block (fun () ->
                   List.iter
                     (fun (field, member) ->
                       if droppable t member then
@@ -209,14 +207,11 @@ let any_drop t ty =
   finish b (Return None);
   instance (Any_drop ty) (build b ~parameters:[ untyped ] ~result:None)
 
-(* Copy *)
-
 let copy_signature t ty : Lir.signature =
   Convention.signature
     (Option.to_list (Convention.parameter t.env Read ty))
     (Convention.result t.env ty)
 
-(* Copies [source] into [destination], both of type [ty]. *)
 let copy_into t b ~destination ~source ty =
   if trivial t ty then emit b (Assign (destination, Use (Copy source)))
   else
@@ -362,7 +357,7 @@ let copy t ty =
            List.map
              (fun (v : Memory_layout.variant_shape) ->
                let block = block b in
-               aside b block (fun () ->
+               in_block b block (fun () ->
                    let fields =
                      List.map
                        (fun (name, member) ->
@@ -388,10 +383,6 @@ let copy t ty =
        ~result:
          (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None))
 
-(* Debug output *)
-
-(* What a debug or an encode function appends to: storage of bytes, which
-   its caller owns and passes to be changed. *)
 let builtin builtin : Ground.ty = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let output_ty = Storage.of_elements (builtin UInt8)
 let bytes_ty = Storage.view_of_elements (builtin UInt8)
@@ -472,7 +463,7 @@ let scalar_debug t b ~output (scalar : Memory_layout.scalar) (place : Lir.place)
   | Integer (UInt8 | UInt16 | UInt32 | UInt64 | USize) -> widened "unsigned" UInt64
   | Float32 -> write t b ~output "float32" (builtin Float32) place
   | Float64 -> write t b ~output "float64" (builtin Float64) place
-  | Bool -> write t b ~output "truth" (builtin Bool) place
+  | Bool -> write t b ~output "boolean" (builtin Bool) place
   | Character -> write t b ~output "quoted_character" (builtin Character) place
   | Pointer _ | Nullable_pointer _ -> text t b ~output "pointer"
 
@@ -557,7 +548,7 @@ let debug t ty =
             List.map
               (fun (v : Memory_layout.variant_shape) ->
                 let case = block b in
-                aside b case (fun () ->
+                in_block b case (fun () ->
                     fields_debug v.name v.fields (fun field ->
                         value / Variant_field { variant = v.name; field });
                     finish b (Goto after));
@@ -568,8 +559,6 @@ let debug t ty =
           start b after));
   finish b (Return None);
   instance (Debug ty) (build b ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
-
-(* Encoding *)
 
 (* A value's binary form, which code run while compiling writes its result
    in and the compiler reads back as static data: a scalar as its bytes, a
@@ -643,7 +632,7 @@ let encode t ty =
            List.mapi
              (fun i (v : Memory_layout.variant_shape) ->
                let case = block b in
-               aside b case (fun () ->
+               in_block b case (fun () ->
                    let index = local b (Raw (Integer UInt32)) in
                    emit b (Assign (at index, Use (Constant (Integer (UInt32, Z.of_int i)))));
                    bytes (at index) 4;

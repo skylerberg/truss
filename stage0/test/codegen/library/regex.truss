@@ -2,7 +2,7 @@ use standard::regex
 
 fn compiled(pattern: StringSlice) -> regex::Regex {
   match regex::Regex.parse(pattern) {
-    Ok(found) => found
+    Ok(parsed) => parsed
     Err(_) => regex::Regex"x^"
   }
 }
@@ -12,7 +12,7 @@ fn finds(pattern: StringSlice, text: StringSlice, start: USize, end: USize) -> B
 }
 
 fn misses(pattern: StringSlice, text: StringSlice) -> Bool {
-  regex::Regex.parse(pattern) is Ok(found) && found.find(text) is None && !found.is_match(text)
+  regex::Regex.parse(pattern) is Ok(parsed) && parsed.find(text) is None && !parsed.is_match(text)
 }
 
 fn refuses(pattern: StringSlice, kind: regex::PatternErrorKind, offset: USize) -> Bool {

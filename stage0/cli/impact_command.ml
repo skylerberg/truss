@@ -187,9 +187,11 @@ let run ~directory ~base ~json =
                    ( "tests",
                      Json.List
                        (List.map
-                          (fun (path, kept) ->
+                          (fun (path, is_cached) ->
                             Json.Object
-                              [ ("test", Json.String (Path.show path)); ("kept", Json.Bool kept) ])
+                              [
+                                ("test", Json.String (Path.show path)); ("kept", Json.Bool is_cached);
+                              ])
                           tests) );
                  ])
           else begin
@@ -201,12 +203,12 @@ let run ~directory ~base ~json =
               List.iter print_change changes
             end;
             if tests <> [] then begin
-              let kept = List.length (List.filter snd tests) in
+              let cached_count = List.length (List.filter snd tests) in
               Output.printf "\nTests whose code changed: %d%s\n" (List.length tests)
-                (if kept > 0 then Printf.sprintf " (%d kept)" kept else "");
+                (if cached_count > 0 then Printf.sprintf " (%d kept)" cached_count else "");
               List.iter
-                (fun (path, kept) ->
-                  Output.printf "  %s%s\n" (Path.show path) (if kept then "  kept" else ""))
+                (fun (path, is_cached) ->
+                  Output.printf "  %s%s\n" (Path.show path) (if is_cached then "  kept" else ""))
                 tests
             end
           end;

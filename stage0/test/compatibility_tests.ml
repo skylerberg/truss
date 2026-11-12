@@ -19,18 +19,18 @@ let changes ?(usize_bits = (32, 32)) before after =
     ~after:(state after (snd usize_bits))
     { owner = None; name = "lib" }
 
-let show (found, _) =
+let show (actual, _) =
   List.map
-    (fun ({ path; change } : Compatibility.found) ->
+    (fun ({ path; change } : Compatibility.public_change) ->
       match change with
       | Breaks what -> Printf.sprintf "breaks: %s %s" (Path.show path) what
       | Grows what -> Printf.sprintf "grows: %s %s" (Path.show path) what)
-    found
+    actual
 
 let expect before after expected =
-  let found = show (changes before after) in
-  if found <> expected then
-    fail "found [%s], expected [%s]" (String.concat "; " found) (String.concat "; " expected)
+  let actual = show (changes before after) in
+  if actual <> expected then
+    fail "found [%s], expected [%s]" (String.concat "; " actual) (String.concat "; " expected)
 
 let area body = Printf.sprintf "public fn area(side: Int64) -> Int64\n%s{\n  side\n}\n" body
 
@@ -185,11 +185,11 @@ let () =
         square ^ "\nimpl Default for Square {\n  fn default() -> Square {\n    Square(1)\n  }\n}\n"
       in
       (match show (changes with_impl square) with
-      | [ found ] when Substring.contains found "is gone: the `impl` of" -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | [ actual ] when Substring.contains actual "is gone: the `impl` of" -> ()
+      | actual -> fail "found [%s]" (String.concat "; " actual));
       match show (changes square with_impl) with
-      | [ found ] when Substring.contains found "is new: the `impl` of" -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | [ actual ] when Substring.contains actual "is new: the `impl` of" -> ()
+      | actual -> fail "found [%s]" (String.concat "; " actual));
   test "an impl whose associated capability set gains a capability breaks" (fun () ->
       let feed uses =
         Printf.sprintf
@@ -208,17 +208,17 @@ let () =
       in
       let gains = show (changes (feed "") (feed "  capability Uses = Clock\n")) in
       (match gains with
-      | [ found ]
-        when Substring.find found "breaks:" = Some 0
-             && Substring.contains found "has `Clock` in its `Uses`, which it did not" ->
+      | [ actual ]
+        when Substring.find actual "breaks:" = Some 0
+             && Substring.contains actual "has `Clock` in its `Uses`, which it did not" ->
           ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | actual -> fail "found [%s]" (String.concat "; " actual));
       (match show (changes (feed "  capability Uses = Clock\n") (feed "")) with
-      | [ found ]
-        when Substring.find found "grows:" = Some 0
-             && Substring.contains found "has fewer capabilities in its `Uses`" ->
+      | [ actual ]
+        when Substring.find actual "grows:" = Some 0
+             && Substring.contains actual "has fewer capabilities in its `Uses`" ->
           ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | actual -> fail "found [%s]" (String.concat "; " actual));
       expect (feed "  capability Uses = Clock\n") (feed "  capability Uses = Clock\n") []);
   test "a trait that loses an associated capability set breaks" (fun () ->
       let feed member =

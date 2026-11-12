@@ -59,7 +59,7 @@ let by_type =
       List.fold_left
         (fun table ((trait, type_), impl) ->
           Path.Map.update type_
-            (fun found -> Some ((trait, impl) :: Option.value ~default:[] found))
+            (fun impls -> Some ((trait, impl) :: Option.value ~default:[] impls))
             table)
         Path.Map.empty
         (Query.demand database index package)
@@ -207,8 +207,6 @@ let trait_substitution database (impl : Path.t) =
           Properties.trait_substitution trait ~self:interface.for_type interface.implements)
         (Query.demand database Environment.trait_interface interface.implements.trait))
 
-(* Matching *)
-
 let open_type = function T.Error _ | T.Variable _ | T.Hole -> true | _ -> false
 
 let rec match_type ~variables (substitution : T.substitution) pattern type_ =
@@ -245,47 +243,30 @@ and match_arguments ~variables substitution patterns arguments =
             | _ -> None))
       (Some substitution) patterns arguments
 
-(* Evidence *)
-
 type evidence =
   | From_impl of { impl : Path.t; substitution : T.substitution }
   | From_bound
-      (** A bound in scope, on a generic parameter or on an associated type of one, or a trait such
-          a bound requires: the [impl] is found when the code is instantiated. *)
-  | From_any  (** [any Trait] implements its trait. *)
-  | Built_in  (** [Copyable] and [Plain], which the compiler implements. *)
+  | From_any
+  | Built_in
   | Accepted of T.ty
-      (** This type satisfies every bound: it is an [Error], a [Hole], or a type that the statement
-          has not inferred yet. A trait whose definition did not parse is satisfied by every type,
-          with the [Error] of its report. *)
 
-(* Whether a trait's method can be called through an [any] value, and if
-   not, why. An [any] value has one compiled version of each method, for
-   the type that it hides. *)
-type through_any =
-  | Callable
-  | Has_generics
-      (** The method has generic parameters of its own, so it has a version for each set of type
-          arguments. *)
-  | Names_self
-      (** A parameter's type or the result's type names [Self], the hidden type, at any depth. An
-          associated type of [Self] does not count: the [any] type fixes it. *)
+type through_any = Callable | Has_generics | Names_self
 
 let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
   let self : T.parameter = { owner = trait; name = "Self" } in
   let names_self type_ =
-    let found = ref false in
+    let mentions_self = ref false in
     ignore
       (T.map
          (function
            | T.Projection { base = T.Parameter base; _ } as projected when base = self ->
                Some projected
            | T.Parameter parameter as named when parameter = self ->
-               found := true;
+               mentions_self := true;
                Some named
            | _ -> None)
          type_);
-    !found
+    !mentions_self
   in
   let signature = method_.method_signature in
   let result = T.result_type signature.output in
@@ -307,8 +288,6 @@ let cursor_element database (method_ : Path.t) arguments =
 let copyable_path = Properties.copyable_trait
 let plain_path = Properties.plain_trait
 
-(* The bounds in scope where a question is asked: each generic parameter's
-   bounds, as the definition asking declares them. *)
 type bounds = T.parameter -> T.trait_reference list
 
 let required (generics : T.generic list) (substitution : T.substitution) =
@@ -322,17 +301,17 @@ let required (generics : T.generic list) (substitution : T.substitution) =
 
 let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : T.ty)
     (wanted : T.trait_reference) : evidence option =
-  let arguments_match given_arguments =
-    List.length given_arguments = List.length wanted.trait_arguments
+  let arguments_match actual_arguments =
+    List.length actual_arguments = List.length wanted.trait_arguments
     && List.for_all2
-         (fun wanted given ->
-           match (wanted, given) with
-           | T.Type wanted, T.Type given ->
-               open_type wanted || open_type given
-               || T.equal (normalize database ~bounds wanted) (normalize database ~bounds given)
-           | T.Value wanted, T.Value given -> wanted = given
+         (fun wanted actual ->
+           match (wanted, actual) with
+           | T.Type wanted, T.Type actual ->
+               open_type wanted || open_type actual
+               || T.equal (normalize database ~bounds wanted) (normalize database ~bounds actual)
+           | T.Value wanted, T.Value actual -> wanted = actual
            | _ -> false)
-         wanted.trait_arguments given_arguments
+         wanted.trait_arguments actual_arguments
   in
   (* The associated types that the [impl] defines must equal the ones that
      the wanted trait reference fixes. An associated type that the reference
@@ -344,7 +323,8 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
         if open_type wanted_type then true
         else
           match List.assoc_opt name fixed with
-          | Some given -> open_type given || T.equal (normalize database ~bounds given) wanted_type
+          | Some defined ->
+              open_type defined || T.equal (normalize database ~bounds defined) wanted_type
           | None -> (
               match (base, wanted_type) with
               | Some base, T.Projection { base = projected; name = projected_name; _ } ->

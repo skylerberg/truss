@@ -40,7 +40,7 @@ let checked ~check database name =
 (* Fails the test if a core form breaks one of the invariants every core
    form has:
 
-   - node ids are unique and less than [node_count];
+   - node ids are unique;
    - no type contains an inference variable, a hole, or an error;
    - every generic parameter that appears is declared by the definition
      or by its enclosing type, trait, or impl, and never by a callee;
@@ -84,14 +84,15 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     | Some container -> declared container.path
     | None -> []
   in
-  let parameter what (found : T.parameter) =
-    if not (List.mem found own) then
-      wrong "%s mentions `%s`, a generic parameter of `%s`" what found.name (Path.show found.owner)
+  let parameter what (mentioned : T.parameter) =
+    if not (List.mem mentioned own) then
+      wrong "%s mentions `%s`, a generic parameter of `%s`" what mentioned.name
+        (Path.show mentioned.owner)
   in
   let rec capabilities what =
     List.iter (function
       | T.Capability _ -> ()
-      | T.Capability_parameter found -> parameter what found
+      | T.Capability_parameter mentioned -> parameter what mentioned
       | T.Capability_projection { base; trait = reference; name } ->
           (match base with
           | Parameter _ | Projection _ -> ()
@@ -99,8 +100,8 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           type_ what base;
           trait what reference
       | T.Capability_variable _ -> wrong "%s contains a capability inference variable" what)
-  and type_ what (found : T.ty) =
-    match found with
+  and type_ what (ty : T.ty) =
+    match ty with
     | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter (argument what) arguments
     | Parameter named -> parameter what named
     | Projection { base; trait = reference; _ } ->
@@ -113,20 +114,19 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     | Any reference -> trait what reference
     | Never | Integer -> ()
     | Variable _ | Literal _ | Hole | Error _ ->
-        wrong "%s has the type `%s`, which is not fully inferred" what (T.show found)
+        wrong "%s has the type `%s`, which is not fully inferred" what (T.show ty)
   and argument what = function
-    | T.Type given -> type_ what given
+    | T.Type inner -> type_ what inner
     | T.Value (Value_parameter named) -> parameter what named
     | T.Value (Known _) -> ()
     | T.Value (Value_variable _) -> wrong "%s contains a value inference variable" what
     | T.Capabilities set -> capabilities what set
   and trait what (reference : T.trait_reference) =
     List.iter (argument what) reference.trait_arguments;
-    List.iter (fun (_, given) -> type_ what given) reference.associated
+    List.iter (fun (_, inner) -> type_ what inner) reference.associated
   in
   let seen = Hashtbl.create 64 in
   let unique id =
-    if id < 0 || id >= form.node_count then wrong "the node id %d is out of range" id;
     if Hashtbl.mem seen id then wrong "the node id %d is used twice" id;
     Hashtbl.replace seen id ()
   in
@@ -142,7 +142,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
             (* The [next] of a yielding method's cursor is a [Cursor_next]. *)
             if name = "next" && Option.is_some (Interface.Impls.cursor_of_impl impl) then
               wrong "the `next` of a yielding method's cursor is a call";
-            List.iter (fun (_, given) -> argument "an `impl`'s type argument" given) arguments
+            List.iter (fun (_, inner) -> argument "an `impl`'s type argument" inner) arguments
         | Bound | Dynamic -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (argument "an intrinsic's type argument") type_arguments
@@ -173,8 +173,8 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           | _ -> ());
     }
     form.definition;
-  let rec place (found : Core.place) =
-    match found with
+  let rec place (core_place : Core.place) =
+    match core_place with
     | Local { local; type_ = used; _ } -> (
         type_ "a local" used;
         match Hashtbl.find_opt local_types local with
@@ -189,12 +189,12 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
         type_ "a field" field;
         place base
   in
-  let operand (found : Core.operand) =
-    match found with Place found -> place found | Value _ -> ()
+  let operand (core_operand : Core.operand) =
+    match core_operand with Place core_place -> place core_place | Value _ -> ()
   in
-  let rec mutable_place what (found : Core.place) =
-    place found;
-    match found with
+  let rec mutable_place what (core_place : Core.place) =
+    place core_place;
+    match core_place with
     | Local _ | Temporary _ -> ()
     | Constant { path; _ } -> wrong "%s mutates the constant `%s`" what (Path.show path)
     | Field { base; _ } -> mutable_place what base
@@ -216,7 +216,8 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   in
   let rec yielded_operand ~lends (mode : T.mode) (part : Core.operand) =
     match part with
-    | Place found -> if mode = Mut then mutable_place "a `yield mut`" found else place found
+    | Place core_place ->
+        if mode = Mut then mutable_place "a `yield mut`" core_place else place core_place
     | Value ({ kind = Construct { fields; _ }; _ } as node) ->
         Hashtbl.replace yielded node.id ();
         List.iter (fun (_, field) -> Option.iter (yielded_operand ~lends mode) field) fields
@@ -260,7 +261,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           unique node.id;
           type_ "an expression" node.type_;
           match node.kind with
-          | Use found -> place found
+          | Use core_place -> place core_place
           | Quantified { binder = Over_each { call; _ }; _ } -> (
               match call.kind with
               | Call { arguments = [ Passed { mode = Read; _ } ]; _ } -> ()
@@ -304,7 +305,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                 (fun (implementation : Core.implementation) ->
                   type_ "an implementation" implementation.type_;
                   match (implementation.mode, implementation.value) with
-                  | Mut, Place found -> mutable_place "a `provide`" found
+                  | Mut, Place core_place -> mutable_place "a `provide`" core_place
                   | _, value -> operand value)
                 implementations
           | Call call ->
@@ -317,8 +318,8 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                       mutable_place "a slice passed `mut`" base
                   | Core.Passed { mode = Mut; value = Value _; _ } ->
                       wrong "a `mut` parameter receives a value that is not a slice"
-                  | Passed { mode = Mut; value = Place found; _ } ->
-                      mutable_place "a `mut` argument" found
+                  | Passed { mode = Mut; value = Place core_place; _ } ->
+                      mutable_place "a `mut` argument" core_place
                   | Passed { mode = Own; value = Place _; _ } ->
                       wrong "an `own` parameter receives a place"
                   | Passed { value; _ } -> operand value
@@ -334,7 +335,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
           | Let { pattern; value; _ } -> (
               binds_own "a `let`" value pattern;
               match (pattern.kind, value) with
-              | Bind { mutable_ = true; _ }, Place _ ->
+              | Bind { is_var = true; _ }, Place _ ->
                   wrong "a `let` that binds a mutable local receives a place"
               | _ -> ())
           | For { iteration = Cursor { cursor; _ }; _ } -> mutable_place "a `for` loop" cursor
@@ -425,12 +426,12 @@ let no_diagnostics ~check files =
     (fun (name, _) ->
       (match checked ~check database name with
       | [] -> ()
-      | found ->
+      | reported ->
           fail "%s: %s" name
             (String.concat "; "
                (List.map
                   (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code ^ " " ^ d.message)
-                  found)));
+                  reported)));
       ignore (check_module_core_invariants database (module_of name)))
     files
 
@@ -456,12 +457,12 @@ let one_diagnostic ~check ?(setup = setup) ?(others = []) ?fixed ?says text code
             match checked ~check database "app::main" with
             | [] -> ()
             | left -> fail "after the fix: %s" (String.concat "; " (codes left))))
-  | found ->
+  | reported ->
       fail "expected one %s, got [%s]" code
         (String.concat "; "
            (List.map
               (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code ^ " " ^ d.message)
-              found))
+              reported))
 
 let record database responses =
   let engine = Engine.of_context database in

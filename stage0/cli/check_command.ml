@@ -10,7 +10,7 @@ let chosen (diagnostics : Diagnostic.t list) =
     (a.span.start < b.span.stop && b.span.start < a.span.stop)
     || (a.span.start = b.span.start && (a.span.start = a.span.stop || b.span.start = b.span.stop))
   in
-  let taken = ref [] in
+  let accepted_edits = ref [] in
   List.filter
     (fun (diagnostic : Diagnostic.t) ->
       match diagnostic.fixes with
@@ -18,10 +18,10 @@ let chosen (diagnostics : Diagnostic.t list) =
           let clear =
             List.for_all
               (fun (edit : Diagnostic.span Diagnostic.edit) ->
-                not (List.exists (overlaps edit) !taken))
+                not (List.exists (overlaps edit) !accepted_edits))
               fix.edits
           in
-          if clear then taken := fix.edits @ !taken;
+          if clear then accepted_edits := fix.edits @ !accepted_edits;
           clear
       | _ -> false)
     diagnostics
@@ -113,10 +113,10 @@ let fix (project : Project.t) =
 (* A check also lists where this worktree's changes meet those of other
    open worktrees of the repository. Overlaps are not diagnostics: nothing is wrong with either worktree's
    code, so they do not change the exit status. *)
-let run ~directory ~fix:fixing ~json =
+let run ~directory ~fix:fixing ~proofs ~json =
   let project = Project.load directory in
   let fixed = if fixing then fix project else [] in
-  let report = Report.gather ~proofs:true project in
+  let report = Report.gather ~proofs project in
   let overlaps = Overlap_command.with_other_worktrees project.session in
   if json then
     Json.print

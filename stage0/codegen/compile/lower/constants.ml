@@ -6,8 +6,6 @@ open Lowering
 open Targets
 open Lir_builder
 
-(* Constants *)
-
 let ( let* ) = Option.bind
 
 (* Every value, if each of them is there. *)
@@ -244,7 +242,7 @@ let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value re
 (* The folded value at a place: another constant's, or a local's. *)
 and fold_place st locals (place : Core.place) =
   match place with
-  | Constant { path; _ } -> !(st.context.constant) path
+  | Constant { path; _ } -> st.context.constant path
   | Local { local; _ } -> Option.map ( ! ) (Hashtbl.find_opt locals local)
   | Field _ | Lent _ | Temporary _ -> None
 

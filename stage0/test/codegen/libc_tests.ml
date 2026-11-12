@@ -32,7 +32,6 @@ let built_entry body =
   Lir_builder.finish b (Return (Some (Copy (Lir_builder.at result))));
   instance "entry" (Lir_builder.build b ~parameters:[] ~result:(Some (value int32)))
 
-(* A view of static bytes. *)
 let view_of b text =
   let open Lir_builder in
   let view = local b (value view_ty) in
@@ -392,14 +391,14 @@ let () =
               operate b ~destination:(at ready) (Libc Poll)
                 [ Place (at waited); Value (usize 1); Value (constant_int32 1000) ];
               (* What was found is the high half of the second number. *)
-              let found = local b (value int32) in
+              let actual = local b (value int32) in
               emit b
                 (Assign
-                   ( at found,
+                   ( at actual,
                      Binary (Shift_right, Copy (Storage.at (at waited) (usize 1)), constant_int32 16)
                    ));
-              emit b (Assign (at found, Binary (Bit_and, Copy (at found), Copy (at reading))));
-              emit b (Assign (at ready, Binary (Multiply, Copy (at ready), Copy (at found))));
+              emit b (Assign (at actual, Binary (Bit_and, Copy (at actual), Copy (at reading))));
+              emit b (Assign (at ready, Binary (Multiply, Copy (at ready), Copy (at actual))));
               free b (at waited);
               ready);
         ])

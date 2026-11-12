@@ -37,12 +37,12 @@ test "a fixed environment answers with the variables it was given" {
 test "a fixed environment answers with its directory, platform, and locations" {
   provide fixed() {
     assert Environment.current_directory() is Ok(directory) && "${directory}" == "/work"
-    let found = Environment.platform()
-    assert found.operating_system == environment::OperatingSystem.Linux
-      && found.architecture == environment::Architecture.Arm64
-      && found.processor_count == 8
-      && found.host_name == "build-7"
-      && found.process_identifier == 4242
+    let reported = Environment.platform()
+    assert reported.operating_system == environment::OperatingSystem.Linux
+      && reported.architecture == environment::Architecture.Arm64
+      && reported.processor_count == 8
+      && reported.host_name == "build-7"
+      && reported.process_identifier == 4242
     assert Environment.location(environment::Location.Cache) is Some(cache) && "${cache}" == "/var/cache"
     assert Environment.location(environment::Location.Home) is None
   }

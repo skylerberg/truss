@@ -35,7 +35,7 @@ and verify : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cel
  fun engine query cell ->
   let node = cell.node in
   node.busy <- true;
-  let frame = { owner = node; read = []; seen = Hashtbl.create 1; cyclic = None } in
+  let frame = { owner = node; read = Dynarray.create (); seen = Hashtbl.create 1; cyclic = None } in
   engine.frames <- frame :: engine.frames;
   let finish () =
     engine.frames <- List.tl engine.frames;
@@ -71,9 +71,9 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
  fun engine query cell ->
   let node = cell.node in
   node.busy <- true;
-  let frame = { owner = node; read = []; seen = Hashtbl.create 8; cyclic = None } in
+  let frame = { owner = node; read = Dynarray.create (); seen = Hashtbl.create 8; cyclic = None } in
   engine.frames <- frame :: engine.frames;
-  if engine.logging then engine.log <- node :: engine.log;
+  if engine.logging then Dynarray.add_last engine.log node;
   let finish () =
     engine.frames <- List.tl engine.frames;
     node.busy <- false
@@ -99,7 +99,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
           Hashtbl.replace seen read.id ();
           Some read
         end)
-      (List.rev frame.read)
+      (Dynarray.to_list frame.read)
   in
   commit_reads engine node reads;
   (* A result whose old value is in the store and was never read is
@@ -124,7 +124,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   in
   if changed then begin
     node.changed_at <- tick engine;
-    engine.changed <- node :: engine.changed;
+    Dynarray.add_last engine.changed node;
     engine.tally.changes <- engine.tally.changes + 1;
     (* What read a result while it was first being computed is on a cycle
        with it, and has the cycle as its result, as this one has. *)
@@ -132,7 +132,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   end;
   node.verified_at <- engine.clock;
   node.marked <- false;
-  engine.computed <- node :: engine.computed;
+  Dynarray.add_last engine.computed node;
   engine.tally.computations <- engine.tally.computations + 1;
   engine.activity <- engine.activity + 1;
   Hashtbl.replace engine.unsaved node.id node
@@ -151,15 +151,15 @@ and adopt :
       let was_marked = node.marked in
       let held () = cell.outcome <> None || node.fingerprint <> None in
       let had = held () in
-      let rec parts found = function
-        | [] -> Some (List.rev found)
+      let rec parts parts_so_far = function
+        | [] -> Some (List.rev parts_so_far)
         | read :: rest ->
             let read = resolve engine read in
             if read.busy || read.phase > node.phase then None
             else begin
               ensure engine read;
               match key_part engine read with
-              | Some part -> parts ((read, part) :: found) rest
+              | Some part -> parts ((read, part) :: parts_so_far) rest
               | None -> None
             end
       in
@@ -174,16 +174,16 @@ and adopt :
           else
             match store.find ~kind:"fact" ~key:(fact_key store node parts) with
             | None -> false
-            | Some found ->
-                let unchanged = had && fingerprint engine node = Some found in
+            | Some stored_fingerprint ->
+                let unchanged = had && fingerprint engine node = Some stored_fingerprint in
                 commit_reads engine node (List.map fst parts);
                 if not unchanged then begin
                   cell.outcome <- None;
-                  node.fingerprint <- Some found;
+                  node.fingerprint <- Some stored_fingerprint;
                   node.stored <- true;
                   node.opaque <- false;
                   node.changed_at <- tick engine;
-                  engine.changed <- node :: engine.changed;
+                  Dynarray.add_last engine.changed node;
                   engine.tally.changes <- engine.tally.changes + 1;
                   seed engine node
                 end;

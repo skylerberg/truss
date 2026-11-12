@@ -1,11 +1,11 @@
 use standard::url
 
-fn same(found: StringSlice, expected: StringSlice) -> Bool {
-  found == expected
+fn same(actual: StringSlice, expected: StringSlice) -> Bool {
+  actual == expected
 }
 
-fn holds(found: Option[StringSlice], expected: StringSlice) -> Bool {
-  match found {
+fn holds(actual: Option[StringSlice], expected: StringSlice) -> Bool {
+  match actual {
     Some(text) => text == expected
     None => false
   }
@@ -13,7 +13,7 @@ fn holds(found: Option[StringSlice], expected: StringSlice) -> Bool {
 
 fn shows(text: StringSlice, expected: StringSlice) -> Bool {
   match url::parse(text) {
-    Ok(found) => "${found}" == expected.to_string()
+    Ok(parsed) => "${parsed}" == expected.to_string()
     Err(_) => false
   }
 }
@@ -26,20 +26,20 @@ fn fails(text: StringSlice, expected: url::ParseError) -> Bool {
 }
 
 test "a URL is taken apart into its parts" {
-  assert url::parse("https://user:pw@Example.COM:8443/a/b%20c?x=1&y=two#frag") is Ok(found)
-    && same(found.scheme(), expected: "https")
-    && holds(found.user_information(), expected: "user:pw")
-    && found.port() == Some(8443)
-    && same(found.path(), expected: "/a/b%20c")
-    && holds(found.query(), expected: "x=1&y=two")
-    && holds(found.fragment(), expected: "frag")
-  assert url::parse("https://Example.COM/") is Ok(found) && found.host() is Some(Domain(name)) && name == "example.com"
-  assert url::parse("mailto:someone@example.com") is Ok(found)
-    && found.host() is None
-    && same(found.path(), expected: "someone@example.com")
-    && found.query() is None
-    && found.fragment() is None
-    && found.user_information() is None
+  assert url::parse("https://user:pw@Example.COM:8443/a/b%20c?x=1&y=two#frag") is Ok(parsed)
+    && same(parsed.scheme(), expected: "https")
+    && holds(parsed.user_information(), expected: "user:pw")
+    && parsed.port() == Some(8443)
+    && same(parsed.path(), expected: "/a/b%20c")
+    && holds(parsed.query(), expected: "x=1&y=two")
+    && holds(parsed.fragment(), expected: "frag")
+  assert url::parse("https://Example.COM/") is Ok(parsed) && parsed.host() is Some(Domain(name)) && name == "example.com"
+  assert url::parse("mailto:someone@example.com") is Ok(parsed)
+    && parsed.host() is None
+    && same(parsed.path(), expected: "someone@example.com")
+    && parsed.query() is None
+    && parsed.fragment() is None
+    && parsed.user_information() is None
 }
 
 test "a URL is displayed as it was read, with its scheme and host in lower case" {
@@ -78,33 +78,33 @@ test "text that is not a URL says what is wrong with it" {
 }
 
 test "a port is the one written, or the scheme's own" {
-  assert url::parse("http://x") is Ok(found) && found.port() is None && found.port_or_default() == Some(80)
-  assert url::parse("https://x") is Ok(found) && found.port_or_default() == Some(443)
-  assert url::parse("https://x:8443") is Ok(found) && found.port_or_default() == Some(8443)
-  assert url::parse("gopher://x") is Ok(found) && found.port_or_default() is None
+  assert url::parse("http://x") is Ok(parsed) && parsed.port() is None && parsed.port_or_default() == Some(80)
+  assert url::parse("https://x") is Ok(parsed) && parsed.port_or_default() == Some(443)
+  assert url::parse("https://x:8443") is Ok(parsed) && parsed.port_or_default() == Some(8443)
+  assert url::parse("gopher://x") is Ok(parsed) && parsed.port_or_default() is None
 }
 
 test "a path's segments and a query's parameters are given decoded" {
-  assert url::parse("http://x/a/b%20c/%C3%A9/") is Ok(found)
-    && found.path_segments().length() == 4
-    && found.path_segments()[0] == "a"
-    && found.path_segments()[1] == "b c"
-    && found.path_segments()[2] == "\u{e9}"
-    && found.path_segments()[3] == ""
-  assert url::parse("http://x") is Ok(found) && found.path_segments().length() == 0
-  assert url::parse("http://x/") is Ok(found) && found.path_segments().length() == 1
-  assert url::parse("http://x/p?a+b=1%262&%C3%A9=&&flag") is Ok(found)
-    && found.query_parameters().length() == 3
-    && found.query_parameters()[0] == url::Parameter(name: "a b", value: "1&2")
-    && found.query_parameters()[1] == url::Parameter(name: "\u{e9}", value: "")
-    && found.query_parameters()[2] == url::Parameter(name: "flag", value: "")
-    && found.query_parameter("a b") == Some("1&2")
-    && found.query_parameter("missing") is None
-  assert url::parse("http://x/p") is Ok(found) && found.query_parameters().length() == 0
-  assert url::parse("http://x/a/%C3") is Ok(found)
-    && found.path_segments().length() == 2
-    && found.path_segments()[1] == "%C3"
-  assert url::parse("http://x/p?a=1&b=%C3") is Ok(found) && found.query_parameters().length() == 0
+  assert url::parse("http://x/a/b%20c/%C3%A9/") is Ok(parsed)
+    && parsed.path_segments().length() == 4
+    && parsed.path_segments()[0] == "a"
+    && parsed.path_segments()[1] == "b c"
+    && parsed.path_segments()[2] == "\u{e9}"
+    && parsed.path_segments()[3] == ""
+  assert url::parse("http://x") is Ok(parsed) && parsed.path_segments().length() == 0
+  assert url::parse("http://x/") is Ok(parsed) && parsed.path_segments().length() == 1
+  assert url::parse("http://x/p?a+b=1%262&%C3%A9=&&flag") is Ok(parsed)
+    && parsed.query_parameters().length() == 3
+    && parsed.query_parameters()[0] == url::Parameter(name: "a b", value: "1&2")
+    && parsed.query_parameters()[1] == url::Parameter(name: "\u{e9}", value: "")
+    && parsed.query_parameters()[2] == url::Parameter(name: "flag", value: "")
+    && parsed.query_parameter("a b") == Some("1&2")
+    && parsed.query_parameter("missing") is None
+  assert url::parse("http://x/p") is Ok(parsed) && parsed.query_parameters().length() == 0
+  assert url::parse("http://x/a/%C3") is Ok(parsed)
+    && parsed.path_segments().length() == 2
+    && parsed.path_segments()[1] == "%C3"
+  assert url::parse("http://x/p?a=1&b=%C3") is Ok(parsed) && parsed.query_parameters().length() == 0
 }
 
 test "text is percent-encoded and decoded" {
@@ -129,7 +129,7 @@ test "text is percent-encoded and decoded" {
 fn joins(reference: StringSlice, expected: StringSlice) -> Bool {
   match url::parse("http://a/b/c/d;p?q") {
     Ok(start) => match start.join(reference) {
-      Ok(found) => "${found}" == expected.to_string()
+      Ok(parsed) => "${parsed}" == expected.to_string()
       Err(_) => false
     }
     Err(_) => false
@@ -178,14 +178,14 @@ test "a reference is resolved as RFC 3986 gives its abnormal examples" {
   assert joins("g;x=1/../y", expected: "http://a/b/c/y")
   assert joins("g?y/./x", expected: "http://a/b/c/g?y/./x")
   assert joins("g#s/../x", expected: "http://a/b/c/g#s/../x")
-  assert url::parse("http://host") is Ok(bare) && bare.join("x") is Ok(found) && "${found}" == "http://host/x"
+  assert url::parse("http://host") is Ok(bare) && bare.join("x") is Ok(parsed) && "${parsed}" == "http://host/x"
   assert url::parse("http://host") is Ok(bare) && bare.join("a b") is Err(error)
     && error == url::ParseError.InvalidCharacter(offset: 1)
 }
 
 fn example() -> url::Url {
   match url::parse("http://example.com/start?old=1#top") {
-    Ok(found) => found
+    Ok(parsed) => parsed
     Err(_) => example()
   }
 }

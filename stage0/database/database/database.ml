@@ -11,8 +11,8 @@ let set_root engine root (files : (string * string) list) =
   Engine.set engine Project.tree root (List.sort compare (List.map fst files))
 
 let add_root engine root =
-  let given = Option.value (Query.find (Engine.observer engine) Project.roots ()) ~default:[] in
-  if not (List.mem root given) then Engine.set engine Project.roots () (given @ [ root ])
+  let roots = Option.value (Query.find (Engine.observer engine) Project.roots ()) ~default:[] in
+  if not (List.mem root roots) then Engine.set engine Project.roots () (roots @ [ root ])
 
 (* A manifest of one package, as [Manifest.parse] reads it. *)
 let manifest_text ~usize_bits ~name ~(dependencies : Manifest.dependency list) =
@@ -70,8 +70,6 @@ let standard_base () =
    changed. *)
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
-(* Sessions *)
-
 (* What a session's files are, for what is asked of git. *)
 type kind =
   | Worktree of string  (** A project's root *)
@@ -103,12 +101,12 @@ let standard_key identity = Cbor.encode (Cbor.Array [ Cbor.Text identity; Cbor.T
 
 let stored_standard () =
   let store = Session.store () and identity = Session.identity () in
-  let found =
+  let stored =
     Option.bind
       (Store.find_result store ~kind:"package" ~key:(standard_key identity))
       (Engine.open_base store ~version:identity ~bases:[])
   in
-  match found with
+  match stored with
   | Some base when Engine.inputs_stored base -> base
   | Some _ | None ->
       let engine = Engine.create () in
@@ -135,8 +133,6 @@ let own_layout session = demand session Project.layout Project.project_root
 (* The project's files that are inputs now. *)
 let held_files session =
   Option.value (Query.find (Session.observer session) Project.tree Project.project_root) ~default:[]
-
-(* Registry packages *)
 
 (* A published package's directory in the store, fetched into it from the
    registry if it is not there yet. *)
@@ -255,7 +251,7 @@ let scan (files : Files.t) session =
       end)
     was;
   Engine.set engine Project.tree Project.project_root
-    (List.sort compare (Hashtbl.fold (fun path () found -> path :: found) present []));
+    (List.sort compare (Hashtbl.fold (fun path () paths -> path :: paths) present []));
   Engine.set engine Project.roots () [ Project.standard_root; Project.project_root ];
   resolve_registry session ~before
 
@@ -354,17 +350,20 @@ let packages session =
 
 (* The packages a request in a directory is about: those at or under it, or
    the one it is in. *)
-let target_packages session within =
+let target_packages session requested =
   let packages = packages session in
   let under (directory, _) =
-    within = "" || directory = within || String.starts_with ~prefix:(within ^ "/") directory
+    requested = "" || directory = requested
+    || String.starts_with ~prefix:(requested ^ "/") directory
   in
   match List.filter under packages with
   | [] -> (
-      match Project.package_directory ~is_package:(fun d -> List.mem_assoc d packages) within with
+      match
+        Project.package_directory ~is_package:(fun d -> List.mem_assoc d packages) requested
+      with
       | Some directory -> List.filter (fun (d, _) -> d = directory) packages
       | None -> [])
-  | found -> found
+  | under_requested -> under_requested
 
 let package_modules session name =
   match Query.demand (Session.context session) Project.package name with
@@ -417,7 +416,9 @@ let diagnostics_of session packages =
     (fun (_, name) ->
       List.filter_map
         (fun module_ ->
-          match diagnostics session module_ with [] -> None | found -> Some (module_, found))
+          match diagnostics session module_ with
+          | [] -> None
+          | module_diagnostics -> Some (module_, module_diagnostics))
         (package_modules session name))
     packages
 
@@ -435,7 +436,7 @@ let open_session directory =
         | Ok session ->
             Session.touch session;
             (* Before any command holds the session's engine. *)
-            Session.fold ~waited_for:true session;
+            Session.compact ~waited_for:true session;
             update session;
             (* The state is written when the command is done, with what the
                command computed, so that a first write holds a whole state. *)
@@ -514,8 +515,6 @@ let base_commit session base =
 
 let open_commit_of session commit = open_commit ~repository:(root session) commit
 
-(* Parallel work *)
-
 type place = Session.Graph.place = { path : Path.t option; part : string option; label : string }
 
 type overlap = Session.Graph.overlap =
@@ -537,11 +536,9 @@ let git_place root =
       Hashtbl.replace git_places root place;
       place
 
-(* The sessions of the same project in the other worktrees of its
-   repository: those open in this process, and for each other worktree that
-   a background process serves, a snapshot of the state that process saves,
-   brought up to date with the worktree's files. The same project in another
-   worktree is at the same place under its worktree's top. *)
+(* A snapshot is of the state the background process saves, brought up to
+   date with the worktree's files. The same project in another worktree is
+   at the same place under its worktree's top. *)
 let other_worktrees session =
   let root = root session in
   let common, prefix = git_place root in
@@ -621,7 +618,7 @@ let trial session changes = trial_over session (Files.with_changes (project sess
 (* The standard library as a state of its own *)
 
 let library_prefix = Printf.sprintf "library-%s-" (String.sub Compiler_version.digest 0 16)
-let () = Session.trust Compiler_version.digest
+let () = Session.allow_reading Compiler_version.digest
 
 (* The inputs of the [standard] package, set from sources: its modules'
    files. The file of a module that the sources no longer have is removed. *)
@@ -648,11 +645,9 @@ let open_library ?(modules = Standard_library.modules) name =
            });
       (* A process that opens the state pays its size already, so this is
          when its differences are folded into one whole state. *)
-      Session.fold session;
+      Session.compact session;
       update session;
       Ok session
-
-(* Choosing versions *)
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
 
@@ -750,10 +745,8 @@ let plan_lock session ~set ~all =
             in
             Ok { text = Registry.Lock.print after; before; after })
 
-(* A published package at a version, as a session of its own with the
-   packages it was published with, for comparing a release with it. Its
-   files in the store are a project of one package, whose lock file names
-   those packages. *)
+(* The package's files in the store are a project of one package, whose
+   lock file names the packages it was published with. *)
 let published name version =
   match
     Option.bind (Registry.Index.current ()) (fun registry ->
@@ -823,8 +816,6 @@ let merge_preview session other =
 let recovering = Session.recovering
 let reset = Session.reset
 
-(* The background process *)
-
 (* Watching: each open worktree's file stamps are checked every second while
    no request is waiting, so that results are current before they are asked
    for. A request scans again before it is answered, so it always sees every
@@ -842,7 +833,7 @@ let watch () =
     (Session.all ())
 
 (* The standard library's state is kept when the store is collected. *)
-let kept () =
+let standard_artifacts () =
   let identity = Session.identity () in
   Option.to_list
     (Option.map
@@ -858,7 +849,7 @@ let server_key directory = Option.value (root_of directory) ~default:""
 let serve ~key ~handle =
   Session.Server.serve ~key
     ~alive:(fun () -> key = "" || Sys.file_exists key)
-    ~idle:watch ~keep:kept ~handle
+    ~idle:watch ~keep:standard_artifacts ~handle
 
 let call ?program ?start_server ?key ~progress request =
   let key = match key with Some key -> key | None -> server_key (Sys.getcwd ()) in
@@ -867,8 +858,6 @@ let call ?program ?start_server ?key ~progress request =
 let servers = Session.Server.serving
 let stop = Session.Server.stop
 let store_directory = Session.Server.store_directory
-
-(* For tests *)
 
 module Testing = struct
   (* Gives one module of a package given by itself another text. *)

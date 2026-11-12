@@ -87,10 +87,10 @@ let yield_counts (body : Core.block) : count list =
 let check_yields_once context (body : Core.block) ~(name : Syntax.span) =
   let counts = yield_counts body in
   if List.mem Zero counts then
-    report context Lends_count name
+    report context Yield_count name
       "A path through this lending method never yields. It must yield exactly once on every path."
   else if List.mem Many counts then
-    report context Lends_count name
+    report context Yield_count name
       "A path through this lending method yields more than once. It must yield exactly once on \
        every path."
 
@@ -157,16 +157,16 @@ let pullable =
       let yields_places () =
         match body_of database path with
         | Some body ->
-            let found = ref false in
+            let yields_place = ref false in
             each_statement body (fun (node : Core.statement) ->
                 match node.kind with
                 | Yield { part; _ }
                   when List.exists
                          (fun lent -> Option.is_some (Place.of_core lent))
                          (Core_walk.lent_places part) ->
-                    found := true
+                    yields_place := true
                 | _ -> ());
-            !found
+            !yields_place
         | None -> false
       in
       match

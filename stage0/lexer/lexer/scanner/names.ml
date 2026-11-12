@@ -21,7 +21,7 @@ let is_lower c = c >= 'a' && c <= 'z'
 let kind_of name =
   match
     String.fold_left
-      (fun found c -> match found with None when c <> '_' -> Some c | found -> found)
+      (fun first c -> match first with None when c <> '_' -> Some c | first -> first)
       None name
   with
   | Some first when is_upper first -> Upper

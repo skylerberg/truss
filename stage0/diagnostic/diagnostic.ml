@@ -26,6 +26,7 @@ module Code = struct
     | Number_invalid_digit
     | Number_followed_by_name
     | Number_underscore
+    | Number_digit_separator
     | Number_leading_zero
     | Unterminated_string
     | Invalid_escape
@@ -92,7 +93,7 @@ module Code = struct
     | Misplaced_loop_exit
     | Leaves_parallel
     | Echo_in_specification
-    | Reserved_name
+    | Reserved_specification_name
 
   type resolve =
     | Unknown_name
@@ -112,7 +113,7 @@ module Code = struct
     | Null
 
   type types =
-    | Bad_character
+    | Character_scalar_count
     | Misplaced_self_type
     | Mismatch
     | Cannot_infer
@@ -157,6 +158,7 @@ module Code = struct
     | Not_a_capability
     | Misplaced_capability_parameter
     | Arity
+    | Argument_kind
     | Unsatisfied_bound
     | Private_in_public
     | Method_outside_package
@@ -193,7 +195,7 @@ module Code = struct
     | Self_referential
     | View_crosses_capability
     | Needs_owned
-    | Lends_count
+    | Yield_count
     | Not_pullable
     | Data_race
     | Keeps_lent_part
@@ -215,7 +217,7 @@ module Code = struct
     | Overflow
     | Division
     | Shift
-    | Fits
+    | Out_of_range
     | Requires
     | Ensures
     | Invariant
@@ -237,7 +239,6 @@ module Code = struct
     | Instantiation_cycle
     | Duplicate_test
 
-  (* Each stage adds its own group; its codes are named "stage.code". *)
   type t =
     | Lexer of lexer
     | Parser of parser
@@ -277,6 +278,7 @@ module Code = struct
     | Number_invalid_digit -> "number_invalid_digit"
     | Number_followed_by_name -> "number_followed_by_name"
     | Number_underscore -> "number_underscore"
+    | Number_digit_separator -> "number_digit_separator"
     | Number_leading_zero -> "number_leading_zero"
     | Unterminated_string -> "unterminated_string"
     | Invalid_escape -> "invalid_escape"
@@ -344,7 +346,7 @@ module Code = struct
     | Misplaced_loop_exit -> "misplaced_loop_exit"
     | Leaves_parallel -> "leaves_parallel"
     | Echo_in_specification -> "echo_in_specification"
-    | Reserved_name -> "reserved_name"
+    | Reserved_specification_name -> "reserved_specification_name"
 
   let resolve_name code =
     match code with
@@ -366,7 +368,7 @@ module Code = struct
 
   let types_name code =
     match code with
-    | Bad_character -> "bad_character"
+    | Character_scalar_count -> "character_scalar_count"
     | Misplaced_self_type -> "misplaced_self_type"
     | Mismatch -> "mismatch"
     | Cannot_infer -> "cannot_infer"
@@ -411,6 +413,7 @@ module Code = struct
     | Not_a_capability -> "not_a_capability"
     | Misplaced_capability_parameter -> "misplaced_capability_parameter"
     | Arity -> "arity"
+    | Argument_kind -> "argument_kind"
     | Unsatisfied_bound -> "unsatisfied_bound"
     | Private_in_public -> "private_in_public"
     | Method_outside_package -> "method_outside_package"
@@ -455,7 +458,7 @@ module Code = struct
     | Self_referential -> "self_referential"
     | View_crosses_capability -> "view_crosses_capability"
     | Needs_owned -> "needs_owned"
-    | Lends_count -> "lends_count"
+    | Yield_count -> "yield_count"
     | Not_pullable -> "not_pullable"
     | Data_race -> "data_race"
     | Keeps_lent_part -> "keeps_lent_part"
@@ -490,7 +493,7 @@ module Code = struct
     | Overflow -> "overflow"
     | Division -> "division"
     | Shift -> "shift"
-    | Fits -> "fits"
+    | Out_of_range -> "out_of_range"
     | Requires -> "requires"
     | Ensures -> "ensures"
     | Invariant -> "invariant"
@@ -540,11 +543,6 @@ let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
 
-(* Suggestions *)
-
-(* The optimal string alignment distance: insertions, deletions,
-   substitutions, and swaps of two neighboring letters, the usual typos,
-   each count one. *)
 let edit_distance left right =
   let rows = String.length left + 1 and columns = String.length right + 1 in
   let table = Array.make_matrix rows columns 0 in
@@ -653,8 +651,6 @@ let shown diagnostics =
     | (first : t) :: rest -> first :: take (count + 1) first.span.stop rest
   in
   take 0 0 diagnostics
-
-(* Rendering *)
 
 let location source offset =
   let line, column = Source.position source offset in

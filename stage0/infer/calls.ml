@@ -10,6 +10,8 @@ module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 open Hooks
 open Lookups
 
@@ -57,7 +59,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
             let parameter : T.parameter_info =
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
-            let mode = argument_value state env argument.value parameter in
+            let mode = check_argument state env argument.value parameter in
             {
               C.expression = argument.value.id;
               parameter_index = index;
@@ -89,24 +91,24 @@ let rec function_value_call state env (value : expression) (callee : expression)
 (* Checks one argument against its parameter's type and mode. Returns the
    mode it is passed with, which is the parameter's mode except for a field
    of a yielded constructor that lends a place. *)
-and argument_value state env (value : expression) (parameter : T.parameter_info) =
+and check_argument state env (value : expression) (parameter : T.parameter_info) =
   let inner =
     match value.kind with
     | Mode (_, inner) when Option.is_none (marked_call state inner) -> inner
     | _ -> value
   in
-  let found = expression state env ~expected:parameter.type_ inner in
+  let actual = expression state env ~expected:parameter.type_ inner in
   if inner != value then begin
-    record state value found;
+    record state value actual;
     alias_expression state value inner
   end;
   let parameter =
-    match lent_field state value found with
+    match lent_field state value actual with
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
-  coerce state env ~argument:true value ~found ~expected:parameter.type_;
-  check_mode state env value parameter found;
+  coerce state env ~argument:true value ~actual ~expected:parameter.type_;
+  check_mode state env value parameter actual;
   parameter.mode
 
 (* Matches arguments to parameters. An argument goes to the parameter named
@@ -131,7 +133,7 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
   let matched =
     List.mapi
       (fun position (argument : argument) ->
-        let found =
+        let parameter_index =
           match argument.label with
           | Some label -> (
               match List.assoc_opt label.text named with
@@ -208,7 +210,7 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
                     None
                   end)
         in
-        (match found with
+        (match parameter_index with
         | Some index ->
             if Hashtbl.mem assigned index then begin
               report state Repeated_argument argument.value.span
@@ -216,7 +218,7 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
             end
             else Hashtbl.replace assigned index ()
         | None -> ());
-        (argument, found))
+        (argument, parameter_index))
       arguments
   in
   (* Arguments must be in parameter order, except the fields of a
@@ -267,7 +269,7 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
   (* If an argument matched no parameter, the checker cannot tell which
      parameter was meant, so it does not also report the parameters that got
      no argument. *)
-  if List.for_all (fun (_, found) -> Option.is_some found) matched then
+  if List.for_all (fun (_, parameter_index) -> Option.is_some parameter_index) matched then
     List.iter
       (fun (name, _) ->
         report state Missing_argument value.span
@@ -282,7 +284,8 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
       named
   in
   ( List.filter_map
-      (fun (argument, found) -> Option.map (fun index -> (argument, index)) found)
+      (fun (argument, parameter_index) ->
+        Option.map (fun index -> (argument, index)) parameter_index)
       matched,
     left_out )
 
@@ -295,7 +298,7 @@ and check_arguments state env (parameters : T.parameter_info list) matched ~offs
   in
   let check ((argument : argument), index) =
     let parameter = List.nth parameters index in
-    let mode = argument_value state env argument.value parameter in
+    let mode = check_argument state env argument.value parameter in
     {
       C.expression = argument.value.id;
       parameter_index = index + offset;
@@ -335,7 +338,7 @@ and named_call state env ?expected (value : expression) path (signature : T.sign
 and construct state env ?expected ?type_arguments (value : expression) type_path variant arguments =
   let type_arguments =
     match type_arguments with
-    | Some given -> given
+    | Some written -> written
     | None -> instantiate_type state value.span type_path
   in
   let type_ = T.Named { path = type_path; arguments = type_arguments } in

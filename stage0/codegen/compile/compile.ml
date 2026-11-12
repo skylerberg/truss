@@ -49,18 +49,16 @@ let elaborate_code (context : Lower.context) (instance : Lir.t) =
    method's cursor and another constant's value through the queries below,
    so that each is made once and what read it is known. *)
 let rec fresh_context lowering database =
-  let context = Lower.context ~checks:lowering.checks database lowering.target in
-  (context.cursor_fields :=
-     fun yielding ->
-       let f, _ = Query.demand database (Lazy.force pulled) (lowering, yielding) in
-       Yields.cursor_fields context.env ~evidence:(Lower.pulled_evidence context yielding f) f);
-  (context.constant :=
-     fun path ->
-       match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
-       | Compiled (Data data) -> Some data.value
-       | Evaluate _ -> None
-       | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path));
-  context
+  Lower.context ~checks:lowering.checks
+    ~cursor_fields:(fun context yielding ->
+      let f, _ = Query.demand database (Lazy.force pulled) (lowering, yielding) in
+      Yields.cursor_fields context.env ~evidence:(Lower.pulled_evidence context yielding f) f)
+    ~constant:(fun _ path ->
+      match Query.demand database (Lazy.force lowered) (lowering, Instance.Constant path) with
+      | Compiled (Data data) -> Some data.value
+      | Evaluate _ -> None
+      | Compiled _ -> Compiler_bug.bug ~stage:"Compile" "%s is not a constant" (Path.show path))
+    database lowering.target
 
 (* A pulled method's version, with its drops elaborated. *)
 and pulled =
@@ -69,7 +67,7 @@ and pulled =
        ~show:(fun (lowering, yielding) ->
          show_lowering lowering ^ " " ^ Ground.to_string (Cursor yielding))
        (fun database (lowering, yielding) ->
-         Compiler_bug.within ~stage:"Compile"
+         Compiler_bug.while_doing ~stage:"Compile"
            ("lowering the pulled form of " ^ Ground.to_string (Cursor yielding))
            (fun () ->
              let context = fresh_context lowering database in
@@ -141,7 +139,7 @@ and lowered =
     (Query.query ~name:"lowered_instance" ~phase:Phases.lowering ~saved:true ~portable:true
        ~show:(fun (lowering, key) -> show_lowering lowering ^ " " ^ Instance.to_string key)
        (fun database (lowering, key) ->
-         Compiler_bug.within ~stage:"Compile"
+         Compiler_bug.while_doing ~stage:"Compile"
            ("lowering " ^ Instance.to_string key)
            (fun () ->
              let context = fresh_context lowering database in
@@ -209,12 +207,11 @@ let recursion =
       let wanted = Option.value (Query.find database roots lowering) ~default:[] in
       let edges key =
         match Query.demand database references (lowering, key) with
-        | found -> found
+        | edges -> edges
         | exception (Compiler_bug.Bug _ | Lower.Unsupported _) -> []
       in
       Reachable.groups ~edges wanted)
 
-(* The group an instance is in, if it is in one. *)
 let group =
   Query.query ~name:"group" ~phase:Phases.keys ~saved:true ~portable:true ~show:show_instance
     (fun database (lowering, key) ->
@@ -447,32 +444,34 @@ let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_a
 
 (* Builds what the roots reach into a program at [output], with the given
    startup code, once the instances agree with one another. An instance
-   among [made] is itself, and no query's. *)
-let rec build ?progress ?tests ?in_order ?(made = []) t ~roots ~startup ~output =
+   among [supplied] is itself, and no query's. *)
+let rec build ?progress ?tests ?in_order ?(supplied = []) t ~roots ~startup ~output =
   let lookup key =
-    match List.find_opt (fun (instance : Lir.t) -> Instance.equal instance.key key) made with
+    match List.find_opt (fun (instance : Lir.t) -> Instance.equal instance.key key) supplied with
     | Some instance -> Lir.Code instance
     | None -> compiled t key
   in
   let units = Reachable.reachable t.context.env ~lookup roots in
-  let found =
+  let units_by_key =
     List.fold_left
-      (fun found unit -> Reachable.Keys.add (Reachable.compiled_key unit) unit found)
+      (fun units_by_key unit -> Reachable.Keys.add (Reachable.compiled_key unit) unit units_by_key)
       Reachable.Keys.empty units
   in
   List.iter
     (fun unit ->
-      Compiler_bug.within ~stage:"Compile"
+      Compiler_bug.while_doing ~stage:"Compile"
         ("linking " ^ Instance.to_string (Reachable.compiled_key unit))
         (fun () ->
-          Verify.links t.context.env ~find:(fun key -> Reachable.Keys.find_opt key found) unit))
+          Verify.links t.context.env
+            ~find:(fun key -> Reachable.Keys.find_opt key units_by_key)
+            unit))
     units;
   let code = List.filter_map (function Lir.Code i -> Some i | _ -> None) units in
   let paths = List.sort_uniq Path.compare (List.concat_map anchored code) in
   let anchors = List.filter_map (anchor t) paths in
   let target = Memory_layout.target t.context.env in
   let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
-  let find key = Reachable.Keys.find_opt key found in
+  let find key = Reachable.Keys.find_opt key units_by_key in
   let copied =
     match t.settings.build with
     | Development -> small_callees ~find ~worked_on:t.worked_on
@@ -488,8 +487,8 @@ let rec build ?progress ?tests ?in_order ?(made = []) t ~roots ~startup ~output 
 
 (* Builds the program that runs the tests at [roots], in that order, with
    the standard library's runner. *)
-and build_test_program ?progress ?made t ~time_limit ~roots ~output =
-  build ?progress ?made t ~tests:true ~roots:(test_runner :: roots)
+and build_test_program ?progress ?supplied t ~time_limit ~roots ~output =
+  build ?progress ?supplied t ~tests:true ~roots:(test_runner :: roots)
     ~startup:
       (Startup.tests_calling ~time_limit ~runner:(Instance.symbol test_runner)
          (List.map Instance.symbol roots))
@@ -580,8 +579,6 @@ let outcomes =
 
 let show_outcome outcome = fst (List.find (fun (_, o) -> o = outcome) outcomes)
 
-(* One test's result: its outcome, its message and echo output, if any, how
-   long it ran, and whether it came from the kept results. *)
 type record = {
   outcome : outcome;
   message : string option;
@@ -664,24 +661,22 @@ let feed reader text =
   drain reader
 
 let parse_report text =
-  let found = ref [] in
-  let reader = reader (fun number record -> found := (number, record) :: !found) in
+  let records = ref [] in
+  let reader = reader (fun number record -> records := (number, record) :: !records) in
   match
     feed reader text;
     if Buffer.length reader.pending > 0 || reader.message <> None || reader.echo <> None then
       malformed "it ends partway through a record"
   with
-  | () -> Ok (List.map snd (List.sort (fun (a, _) (b, _) -> compare a b) !found))
+  | () -> Ok (List.map snd (List.sort (fun (a, _) (b, _) -> compare a b) !records))
   | exception Cannot_build message -> Error message
 
 (* The results that are kept: a pass with nothing to show. A failure's
    message and any echo give positions, which the key leaves out so that
    moving code keeps its results, and a time limit or a crash may come from
    the machine, so those tests run again. *)
-let keep record = record.outcome = Passed && record.message = None && record.echo = None
+let is_cacheable record = record.outcome = Passed && record.message = None && record.echo = None
 
-(* Where test results are kept, by the key of the code each test can run.
-   The database keeps them in its store. *)
 type results = { find : string -> string option; add : string -> string -> unit }
 
 (* A kept result is a pass, so it is only the microseconds of the run that
@@ -723,21 +718,23 @@ let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests
     List.mapi
       (fun index (test, root) ->
         let key = if keyed test then Some (test_key t test) else None in
-        let kept =
+        let stored_record =
           match (results, key) with
           | Some results, Some key when not rerun -> stored results key
           | _ -> None
         in
-        (index, root, key, kept))
+        (index, root, key, stored_record))
       (List.combine tests roots)
   in
   (* Kept results are reported first, as ended, so progress counts them, and
      then each test that runs as it ends. *)
   List.iter
-    (fun (index, _, _, kept) ->
-      Option.iter (fun record -> progress (Ended { test = index; record })) kept)
+    (fun (index, _, _, stored_record) ->
+      Option.iter (fun record -> progress (Ended { test = index; record })) stored_record)
     known;
-  let missing = Array.of_list (List.filter (fun (_, _, _, kept) -> kept = None) known) in
+  let missing =
+    Array.of_list (List.filter (fun (_, _, _, stored_record) -> stored_record = None) known)
+  in
   let fresh = Array.make (Array.length missing) None in
   if Array.length missing > 0 then begin
     let roots = Array.to_list (Array.map (fun (_, root, _, _) -> root) missing) in
@@ -762,7 +759,7 @@ let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests
           let _, _, key, _ = missing.(number) in
           fresh.(number) <- Some record;
           (match (results, key) with
-          | Some results, Some key when keep record -> store results key record
+          | Some results, Some key when is_cacheable record -> store results key record
           | _ -> ());
           progress (Ended { test = index; record }))
     in
@@ -776,8 +773,8 @@ let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests
   end;
   let fresh = ref (List.filter_map Fun.id (Array.to_list fresh)) in
   List.map
-    (fun (_, _, _, kept) ->
-      match kept with
+    (fun (_, _, _, stored_record) ->
+      match stored_record with
       | Some record -> record
       | None -> (
           match !fresh with
@@ -787,10 +784,10 @@ let run_tests ?results ?(rerun = false) ?(progress = ignore) t ~time_limit tests
           | [] -> bug "fewer results than tests"))
     known
 
-let build_made_tests t ~time_limit made ~output =
+let build_supplied_tests t ~time_limit supplied ~output =
   reporting t @@ fun () ->
-  build_test_program t ~made ~time_limit
-    ~roots:(List.map (fun (instance : Lir.t) -> instance.key) made)
+  build_test_program t ~supplied ~time_limit
+    ~roots:(List.map (fun (instance : Lir.t) -> instance.key) supplied)
     ~output
 
 (* Code that cannot ship: a [todo] or an [echo] a program can reach. *)
@@ -817,7 +814,7 @@ let unshippable t ~main ~echo =
         [ main ] keys
       |> List.rev
     in
-    let found =
+    let reports =
       List.concat_map
         (fun (compiled, keys) ->
           match compiled with
@@ -859,7 +856,7 @@ let unshippable t ~main ~echo =
     List.sort_uniq
       (fun a b ->
         compare (a.file, a.line, a.column, a.failure) (b.file, b.line, b.column, b.failure))
-      found
+      reports
     |> List.fold_left
          (fun acc u ->
            match acc with
@@ -918,7 +915,7 @@ let check_template ?results t ~time_limit ~from_template ~texts =
       let root = Instance.Template_check { from_template; texts } in
       let key = run_key t root in
       match Hashtbl.find_opt t.checked key with
-      | Some found -> found
+      | Some checked -> checked
       | None ->
           let status, output, errors =
             match Option.bind results (fun (results : results) -> results.find key) with
@@ -928,7 +925,7 @@ let check_template ?results t ~time_limit ~from_template ~texts =
                   ~startup:(Startup.evaluator_calling (Instance.symbol root))
                   ~arguments:[]
           in
-          let found =
+          let checked =
             match status with
             | 0 when String.length output = List.length positions ->
                 Option.iter (fun (results : results) -> results.add key output) results;
@@ -941,8 +938,8 @@ let check_template ?results t ~time_limit ~from_template ~texts =
                 cannot_build "Checking a template of %s ended with status %d: %s"
                   (Path.show from_template) status errors
           in
-          Hashtbl.replace t.checked key found;
-          found)
+          Hashtbl.replace t.checked key checked;
+          checked)
 
 (* Works out a call whose arguments are known, by running it: its result as
    static data, or that it ran past [time_limit]. *)
@@ -954,7 +951,7 @@ let evaluate_call ?results t ~time_limit ~function_ ~arguments =
       let root = Instance.Call_evaluation { function_; arguments } in
       let key = run_key t root in
       match Hashtbl.find_opt t.called key with
-      | Some found -> found
+      | Some evaluated -> evaluated
       | None ->
           let status, output, errors =
             match Option.bind results (fun (results : results) -> results.find key) with
@@ -964,7 +961,7 @@ let evaluate_call ?results t ~time_limit ~function_ ~arguments =
                   ~startup:(Startup.evaluator_calling (Instance.symbol root))
                   ~arguments:[]
           in
-          let found =
+          let evaluated =
             match status with
             | 0 ->
                 let value = decode t ty output in
@@ -977,8 +974,8 @@ let evaluate_call ?results t ~time_limit ~function_ ~arguments =
                 cannot_build "Working out a call of %s ended with status %d: %s"
                   (Path.show function_) status errors
           in
-          Hashtbl.replace t.called key found;
-          found)
+          Hashtbl.replace t.called key evaluated;
+          evaluated)
   | _ -> bug "%s has no result to work out" (Path.show function_)
 
 let run_key t root = reporting t @@ fun () -> run_key t root

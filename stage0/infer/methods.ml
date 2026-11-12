@@ -11,6 +11,8 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 open Hooks
 open Lookups
 open Calls
@@ -31,7 +33,7 @@ let rec call state env ?expected (value : expression) (callee : expression)
       method_call state env ?expected value base member ~type_arguments:items arguments
   | _ -> (
       match head state callee with
-      | Some found -> call_named state env ?expected value callee found arguments
+      | Some resolution -> call_named state env ?expected value callee resolution arguments
       | None -> function_value_call state env value callee arguments)
 
 (* A call whose callee is a name. The callee is the name's referent. *)
@@ -56,7 +58,7 @@ and call_named state env ?expected (value : expression) (callee : expression)
           let first_type = expression state env first.value in
           let second_type = expression state env ~expected:first_type second.value in
           if not (unify state first_type second_type) then
-            mismatch state second.value.span ~expected:first_type ~found:second_type;
+            mismatch state second.value.span ~expected:first_type ~actual:second_type;
           register_expression state value (fun () ->
               let first = build_expression state first.value in
               Identical (first, build_expression state second.value));
@@ -126,18 +128,18 @@ and call_named state env ?expected (value : expression) (callee : expression)
 and method_time state (value : expression) (type_ : T.ty) (member : name) =
   let versions =
     List.fold_left
-      (fun found (bound : T.trait_reference) ->
+      (fun methods (bound : T.trait_reference) ->
         List.fold_left
-          (fun found (method_ : T.trait_method) ->
+          (fun methods (method_ : T.trait_method) ->
             if
               List.exists
                 (fun ((other : T.trait_reference), (known : T.trait_method)) ->
                   Path.equal other.trait bound.trait
                   && known.method_receiver = method_.method_receiver)
-                found
-            then found
-            else found @ [ (bound, method_) ])
-          found
+                methods
+            then methods
+            else methods @ [ (bound, method_) ])
+          methods
           (Members.trait_methods state.database bound.trait member.text))
       []
       (Properties.known_bounds state.database ~bounds:(bounds state) type_)
@@ -251,8 +253,8 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           | [] -> (
               match versions state type_ member.text with
               | Error traits -> ambiguous traits
-              | Ok found -> (
-                  match (arguments, List.assoc_opt wanted found) with
+              | Ok versions -> (
+                  match (arguments, List.assoc_opt wanted versions) with
                   | receiver :: rest, Some (Own_version method_path) ->
                       let inner =
                         match receiver.value.kind with
@@ -265,7 +267,7 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                         alias_expression state receiver.value inner
                       end;
                       if not (unify state receiver_type type_) then
-                        mismatch state inner.span ~expected:type_ ~found:receiver_type;
+                        mismatch state inner.span ~expected:type_ ~actual:receiver_type;
                       let mode : T.mode = match wanted with Mut -> Mut | Own -> Own | _ -> Read in
                       check_mode state env receiver.value
                         { name = "self"; mode; type_; has_default = false }
@@ -275,8 +277,8 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
                   | _ :: _, Some (Trait_version (trait, method_)) ->
                       trait_method_through_type state env ?expected value type_ trait method_
                         arguments
-                  | _ :: _, None when found <> [] -> wrong_receiver ()
-                  | [], _ when found <> [] ->
+                  | _ :: _, None when versions <> [] -> wrong_receiver ()
+                  | [], _ when versions <> [] ->
                       error state Missing_argument value.span
                         "A method written in full takes its receiver as its first argument."
                   | _ ->
@@ -294,15 +296,15 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
          arguments determine. *)
       let without_self =
         List.fold_left
-          (fun found (bound : T.trait_reference) ->
+          (fun methods (bound : T.trait_reference) ->
             match Members.trait_method state.database bound.trait member.text Static with
             | Some method_
               when not
                      (List.exists
                         (fun ((other : T.trait_reference), _) -> Path.equal other.trait bound.trait)
-                        found) ->
-                found @ [ (bound, method_) ]
-            | _ -> found)
+                        methods) ->
+                methods @ [ (bound, method_) ]
+            | _ -> methods)
           []
           (Properties.known_bounds state.database ~bounds:(bounds state) (T.Parameter parameter))
       in
@@ -311,12 +313,12 @@ and static_call state env ?expected (value : expression) type_ (member : name) a
           trait_method_through_type state env ?expected value type_ trait method_ arguments
       | (_ :: _ :: _ as several), _ -> ambiguous (List.map fst several)
       | [], Error traits -> ambiguous traits
-      | [], Ok found -> (
-          match List.assoc_opt wanted found with
+      | [], Ok versions -> (
+          match List.assoc_opt wanted versions with
           | Some (Trait_version (trait, method_)) ->
               trait_method_through_type state env ?expected value type_ trait method_ arguments
           | Some (Own_version _) -> bug "a generic parameter has a method of its own"
-          | None when found <> [] -> wrong_receiver ()
+          | None when versions <> [] -> wrong_receiver ()
           | None ->
               error state Unknown_member member.span
                 (Printf.sprintf "`%s` has no method `%s`." parameter.name member.text)))
@@ -367,7 +369,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
             let parameter : T.parameter_info =
               { name = "self"; mode; type_ = receiver_type; has_default = false }
             in
-            let mode = argument_value state env first.value parameter in
+            let mode = check_argument state env first.value parameter in
             ignore (default_literal state self_type);
             ( [ { C.expression = first.value.id; parameter_index = 0; mode; mark = None } ],
               1,
@@ -420,7 +422,7 @@ and trait_call_in_full state env (value : expression) trait ~trait_arguments (me
     match arguments with receiver :: _ -> marked_receiver receiver.value | [] -> Read
   in
   let version = Members.trait_method state.database trait member.text in
-  match match version Static with None -> version wanted | found -> found with
+  match match version Static with None -> version wanted | trait_method -> trait_method with
   | Some method_ ->
       (* [Self] is the receiver's type. Checking the receiver as the first
          argument infers it. *)
@@ -483,12 +485,12 @@ and method_call state env ?expected (value : expression) (base : expression) (me
        temporary it selects the [own] version if there is one. A [Plain]
        place can be copied for an [own] version. *)
     match List.assoc_opt wanted versions with
-    | Some found -> Some (wanted, found)
+    | Some method_path -> Some (wanted, method_path)
     | None when lent_mode = Some T.Mut && List.mem_assoc Path.Read versions ->
         Some (Path.Read, List.assoc Path.Read versions)
     | None when (not marked) && ((not place) || plain state receiver_type) -> (
         match List.assoc_opt Path.Own versions with
-        | Some found -> Some (Path.Own, found)
+        | Some method_path -> Some (Path.Own, method_path)
         | None -> None)
     | None -> None
   in
@@ -496,7 +498,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
     let chosen =
       if (not marked) && not place then
         match List.assoc_opt Path.Own versions with
-        | Some found -> Some (Path.Own, found)
+        | Some method_path -> Some (Path.Own, method_path)
         | None -> choose versions
       else choose versions
     in
@@ -515,7 +517,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
      its mark. The fix adds the mark. *)
   let missing_receiver_mark : 'a. (Path.receiver * 'a) list -> T.ty =
    fun versions ->
-    let has receiver = List.exists (fun (found, _) -> found = receiver) versions in
+    let has receiver = List.exists (fun (version, _) -> version = receiver) versions in
     if (not marked) && place && (has Path.Mut || has Path.Own) then begin
       let mark = if has Path.Mut then "mut" else "own" in
       error state Missing_mark base.span
@@ -562,14 +564,14 @@ and method_call state env ?expected (value : expression) (base : expression) (me
                         ]
                     | None -> [])
                   (Printf.sprintf "`%s` has no method `%s`." (show state receiver_type) member.text))
-      | Ok found -> (
+      | Ok versions -> (
           match
             Option.map
               (fun (chosen, version) ->
                 (chosen, impl_method_if_resolved state receiver_type version))
-              (choose_temporary found)
+              (choose_temporary versions)
           with
-          | None -> missing_receiver_mark found
+          | None -> missing_receiver_mark versions
           | Some (_, Own_version method_path) ->
               method_with_receiver state env ?expected ~type_arguments value ~receiver:base
                 ~receiver_type method_path arguments
@@ -624,7 +626,7 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
       (match instance.signature.receiver with
       | Some (_, self_type) ->
           if not (unify state self_type receiver_type) then
-            mismatch state receiver.span ~expected:self_type ~found:receiver_type
+            mismatch state receiver.span ~expected:self_type ~actual:receiver_type
       | None -> ());
       (match (expected, instance.signature.output) with
       | Some expected, Returns output -> unify_as_hint state output expected

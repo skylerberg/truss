@@ -134,6 +134,21 @@ let rec statement f written = statement_parts ~expression:f ~statement:(statemen
 let block f (block : block) = List.iter (statement f) block.statements
 let children f value = expression_parts ~expression:f ~statement:(statement f) value
 
+let contains_break (body : block) =
+  let has_break = ref false in
+  let rec statement (written : statement) =
+    match written.kind with
+    | For _ | While _ -> ()
+    | _ -> statement_parts ~expression ~statement written
+  and expression (value : expression) =
+    match value.kind with
+    | Break -> has_break := true
+    | Lambda _ -> ()
+    | _ -> expression_parts ~expression ~statement value
+  in
+  List.iter statement body.statements;
+  !has_break
+
 let generic_parameter f (parameter : generic_parameter) =
   match parameter.kind with
   | Type_parameter (_, bounds) -> List.iter (path_type f) bounds
@@ -582,8 +597,8 @@ let walk_names ~on_name:add (definition_ : definition) =
   | Definition_error { name; _ } -> Option.iter definition_name name
 
 let names definition_ =
-  let found = ref [] in
-  walk_names ~on_name:(fun name -> found := name :: !found) definition_;
+  let names = ref [] in
+  walk_names ~on_name:(fun name -> names := name :: !names) definition_;
   List.stable_sort
     (fun (left : name) (right : name) -> compare left.span.start right.span.start)
-    !found
+    !names

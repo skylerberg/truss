@@ -11,6 +11,8 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 
 (* One version of a method: a method of the type, or a trait method. *)
 type version = Own_version of Path.t | Trait_version of T.trait_reference * T.trait_method
@@ -22,8 +24,8 @@ let marked_receiver (receiver : expression) : Path.receiver =
 
 (* Checks a value of type [found] against an expected type, and records the
    conversion in the core form. *)
-let rec coerce state env ?argument (value : expression) ~found ~expected =
-  convert state env ?argument ~expression:value.id value.span ~found ~expected
+let rec coerce state env ?argument (value : expression) ~actual ~expected =
+  convert state env ?argument ~expression:value.id value.span ~actual ~expected
 
 and literal_type state ~expected kind =
   match Option.map (resolve state) expected with
@@ -45,7 +47,9 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       match List.nth_opt state.law_parameters index with
       | Some (_, type_) ->
           register_expression state value (fun () ->
-              Use (Local { local = Synthetic index; type_ = final state type_; origin = value.id }));
+              Use
+                (Local
+                   { local = Synthetic index; type_ = final_type state type_; origin = value.id }));
           type_
       | None -> bug "the law has no parameter `%s`" text)
   | Value_parameter parameter ->
@@ -131,7 +135,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       in
       match part with
       | Some part -> T.Named { path = Well_known.path Sequence; arguments = [ T.Type part ] }
-      | None -> bug "`yielded` is named where nothing is handed out")
+      | None -> bug "`yielded` is named where nothing is yielded")
   | Finished ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Finished);
@@ -270,33 +274,33 @@ and static_member state (value : expression) type_ (member : name) =
    for each parameter, of the parameter's kind. *)
 and explicit_type_arguments ?(head = 0) state (value : expression) instance items =
   if items <> [] then begin
-    let given =
+    let written =
       List.filter_map
         (function
           | Item item -> Some (type_argument_of_expression state item) | Item_constraint _ -> None)
         items
     in
     let own = List.filteri (fun index _ -> index >= head) instance.type_arguments in
-    if List.length given <> List.length own then
+    if List.length written <> List.length own then
       report state Arity value.span
         (Printf.sprintf "This takes %d type %s, and %d %s given." (List.length own)
            (if List.length own = 1 then "argument" else "arguments")
-           (List.length given)
-           (if List.length given = 1 then "is" else "are"))
+           (List.length written)
+           (if List.length written = 1 then "is" else "are"))
     else
       List.iter2
-        (fun given own ->
-          match (given, own) with
-          | T.Type given, T.Type own -> ignore (unify state given own)
-          | T.Value given, T.Value own -> ignore (Unify.unify_value state.unifier given own)
+        (fun written own ->
+          match (written, own) with
+          | T.Type written, T.Type own -> ignore (unify state written own)
+          | T.Value written, T.Value own -> ignore (Unify.unify_value state.unifier written own)
           | T.Type _, T.Value _ ->
-              report state Arity value.span
+              report state Argument_kind value.span
                 "A type argument is given where a `USize` value is expected."
           | T.Value _, T.Type _ ->
-              report state Arity value.span
+              report state Argument_kind value.span
                 "A `USize` value is given where a type argument is expected."
           | _ -> ())
-        given own
+        written own
   end
 
 and finish_call state (value : expression) callee (instance : instance) arguments left_out =
@@ -525,8 +529,12 @@ and impl_method_if_resolved state type_ (version : version) =
 
 and each_call state (span : span) type_ mode =
   let receiver : Path.receiver = match mode with T.Read -> Read | Mut -> Mut | Own -> Own in
-  let found = match versions state type_ "each" with Ok found -> found | Error _ -> [] in
-  match Option.map (impl_method_if_resolved state type_) (List.assoc_opt receiver found) with
+  let each_versions =
+    match versions state type_ "each" with Ok each_versions -> each_versions | Error _ -> []
+  in
+  match
+    Option.map (impl_method_if_resolved state type_) (List.assoc_opt receiver each_versions)
+  with
   | Some (Own_version method_path) -> (
       match function_signature state method_path with
       | Some (Ok signature) -> (

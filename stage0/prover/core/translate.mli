@@ -80,7 +80,7 @@ and frame = {
   self_type : T.ty option;
   yielded : L.term option;
   finished : L.term option;
-  handed_out : L.term option;
+  yielded_so_far : L.term option;
   updating : L.term option;
   spent : (Costs.counter * L.term) list;
 }
@@ -100,7 +100,13 @@ type loop_cost = {
 
 type place_value = One of L.term | Run of L.term * L.term
 type cursor = { method_frame : frame; own : part; element : T.ty }
-type received = { another : L.term; element : L.term; through : L.term; advance : frame -> frame }
+
+type received = {
+  has_another : L.term;
+  element : L.term;
+  through : L.term;
+  advance : frame -> frame;
+}
 
 type passed = {
   position : int;
@@ -143,8 +149,9 @@ type context = {
   mutable instantiating : Path.t list;
   disjoint : (int * int) list;
   mutable indexes : (int * (place_value * span)) list;
-  mutable hands_out : (T.ty * [ `Lends | `Yields ]) option;
-  mutable handing : (Core.expression list * Core.expression list) option;
+  mutable evaluated_keys : (Core.id * L.term) list;
+  mutable yielded_part : (T.ty * [ `Lends | `Yields ]) option;
+  mutable yield_ensures : (Core.expression list * Core.expression list) option;
   home : Names.key;
   mutable laws_assumed : string list;
   mutable counters : Costs.counter list;
@@ -185,7 +192,7 @@ type context = {
 val quote : source -> int -> string
 val source_at_key : Query.context -> Names.key -> source option
 
-type found = Written | Derived | Provided
+type form_origin = Written | Derived | Provided
 
 val law_proofs :
   Query.context ->

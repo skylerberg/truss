@@ -333,9 +333,9 @@ internal fn read_link(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage
 internal fn resolve(path: intrinsic::View[UInt8]) -> Result[intrinsic::Storage[UInt8], Int32] {
   let name = ended_with_zero_byte(path)?
   var room: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(intrinsic::libc_path_max())
-  var found = false
-  let resolved = intrinsic::libc_realpath(intrinsic::storage_view(name), resolved: mut room, found: mut found)
-  if found { Ok(copy_of(resolved)) } else { Err(intrinsic::libc_errno()) }
+  var is_present = false
+  let resolved = intrinsic::libc_realpath(intrinsic::storage_view(name), resolved: mut room, is_present: mut is_present)
+  if is_present { Ok(copy_of(resolved)) } else { Err(intrinsic::libc_errno()) }
 }
 
 internal fn sleep(seconds: Int64, nanoseconds: Int64) {
@@ -404,9 +404,9 @@ internal fn wait_for(process: Int32) -> Result[Int32, Int32] {
 internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32] {
   let room = intrinsic::libc_path_max()
   var buffer: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
-  var found = false
-  let path = intrinsic::libc_getcwd(mut buffer, size: room, found: mut found)
-  if found { Ok(copy_of(path)) } else { Err(intrinsic::libc_errno()) }
+  var is_present = false
+  let path = intrinsic::libc_getcwd(mut buffer, size: room, is_present: mut is_present)
+  if is_present { Ok(copy_of(path)) } else { Err(intrinsic::libc_errno()) }
 }
 
 internal fn host_name() -> intrinsic::Storage[UInt8] {

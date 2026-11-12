@@ -11,7 +11,7 @@ let describe_outcome (outcome : 'value outcome option) =
   | Some (Value _) -> "a value"
   | Some (Raised exception_) -> "raising " ^ Printexc.to_string exception_
 
-let audit ?(flat = false) ?before engine =
+let audit ?(include_bases = false) ?before engine =
   if engine.frozen then []
   else begin
     check_can_change engine;
@@ -21,7 +21,7 @@ let audit ?(flat = false) ?before engine =
     let fresh =
       Fun.protect
         ~finally:(fun () -> within_audit := false)
-        (fun () -> create ~bases:(if flat then [] else engine.bases) ())
+        (fun () -> create ~bases:(if include_bases then [] else engine.bases) ())
     in
     (* The new engine reads stored values, and finds no facts, since a fact
        this engine recorded would only be its own result again. *)
@@ -43,7 +43,7 @@ let audit ?(flat = false) ?before engine =
           | None -> remove fresh input cell.input_key)
       | Result _ | Unfilled -> ()
     in
-    if flat then
+    if include_bases then
       List.iter
         (fun (base : t) ->
           Hashtbl.iter
@@ -82,14 +82,14 @@ let audit ?(flat = false) ?before engine =
 let skip_audit engine = engine.audited <- max_int
 
 let audit_all () =
-  let found = ref [] in
+  let problems = ref [] in
   let table = !remembered in
   for i = 0 to Weak.length table - 1 do
     match Weak.get table i with
     | Some engine
       when (not engine.frozen) && engine.audited <> max_int && engine.activity <> engine.audited
            && engine.frames = [] ->
-        found := audit engine @ !found
+        problems := audit engine @ !problems
     | _ -> ()
   done;
-  !found
+  !problems

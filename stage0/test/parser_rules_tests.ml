@@ -65,9 +65,9 @@ let () =
   test "self only first" (fun () ->
       error "fn T.f(x: Int64, self) {}" ~code:Misplaced_self ~at:"self");
   test "a parameter cannot be named result" (fun () ->
-      error "fn f(result: Int64) {}" ~code:Reserved_name ~at:"result");
+      error "fn f(result: Int64) {}" ~code:Reserved_specification_name ~at:"result");
   test "a function cannot be named old" (fun () ->
-      error "fn old() {}" ~code:Reserved_name ~at:"old");
+      error "fn old() {}" ~code:Reserved_specification_name ~at:"old");
   test "types" (fun () ->
       definition "type Point(x: Float64, y: Float64 = 0.0)"
         "(type Point ((x: Float64) (y: Float64 (= 0e0))))";
@@ -265,8 +265,8 @@ let () =
       definition "fn f() -> Bool {\n  a ==> forall value: Int64 => value == value\n}"
         "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
   test "a yielding method's parameter cannot be named yielded or finished" (fun () ->
-      error "fn T.each(self, yielded: Int64) yields Int64 {\n  yield 1\n}" ~code:Reserved_name
-        ~at:"yielded";
+      error "fn T.each(self, yielded: Int64) yields Int64 {\n  yield 1\n}"
+        ~code:Reserved_specification_name ~at:"yielded";
       definition "fn f(finished: Bool) {}" "(fn f ((finished: Bool)) (block))");
   test "a loop's cost clause" (fun () ->
       statement "for row in rows\n  cost time O(yielded.length())\n{}"

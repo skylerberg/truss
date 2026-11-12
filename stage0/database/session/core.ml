@@ -67,8 +67,11 @@ let budget () =
 (* The versions whose states this program can read: its own identity, and
    each a client names. An artifact is marshaled, so a state of any other
    version is never read. *)
-let trusted : string list ref = ref []
-let trust version = if not (List.mem version !trusted) then trusted := version :: !trusted
+let readable_versions : string list ref = ref []
+
+let allow_reading version =
+  if not (List.mem version !readable_versions) then
+    readable_versions := version :: !readable_versions
 
 (* A pointer's record: the version that wrote the state, its artifact's
    name, and each file's fingerprint. It is text, not a marshaled value, so
@@ -124,9 +127,9 @@ let open_state state ~version ~bases artifact =
 let point session pointer artifact =
   let files =
     List.sort compare
-      (Hashtbl.fold (fun path print found -> (path, print) :: found) session.fingerprints [])
+      (Hashtbl.fold (fun path print files -> (path, print) :: files) session.fingerprints [])
   in
-  Store.point pointer (print_record { version = session.version; artifact; files });
+  Store.write_pointer pointer (print_record { version = session.version; artifact; files });
   session.pointed <- true
 
 (* Writes what changed in a session's state since it was last written, as a
@@ -136,7 +139,7 @@ let save session =
   match session.pointer with
   | Some pointer when Engine.unwritten session.engine || not session.pointed ->
       point session pointer (Engine.write session.engine)
-  | _ -> Engine.record session.engine
+  | _ -> Engine.record_facts session.engine
 
 let stabilize session =
   let change = Engine.stabilize session.engine in
@@ -151,12 +154,12 @@ let stabilize session =
    state's size already. *)
 let serving = ref false
 
-let fold ?(waited_for = false) session =
+let compact ?(waited_for = false) session =
   match session.pointer with
   | Some pointer ->
-      let debt = Engine.debt session.engine in
-      let limit = max (debt.whole / 2) 256 in
-      if debt.differences > if waited_for && !serving then 4 * limit else limit then begin
+      let chain_size = Engine.chain_size session.engine in
+      let limit = max (chain_size.whole / 2) 256 in
+      if chain_size.differences > if waited_for && !serving then 4 * limit else limit then begin
         let artifact = Engine.write ~full:true session.engine in
         point session pointer artifact;
         Option.iter
@@ -367,7 +370,7 @@ let sessions () =
 let all () =
   match !state with
   | None -> []
-  | Some state -> Hashtbl.fold (fun _ session found -> session :: found) state.sessions []
+  | Some state -> Hashtbl.fold (fun _ session sessions -> session :: sessions) state.sessions []
 
 let directory name = Store.files (store ()) name
 
@@ -481,8 +484,8 @@ let collect ~keep =
         List.iter
           (fun name ->
             match read_record (Store.pointer state.store name) with
-            | Some record when record.version = state.identity || List.mem record.version !trusted
-              ->
+            | Some record
+              when record.version = state.identity || List.mem record.version !readable_versions ->
                 keep_artifact ~version:record.version record.artifact
             | Some _ | None -> ())
           (Store.pointers state.store);

@@ -132,14 +132,14 @@ internal fn unpadded_length(text: StringSlice) -> USize
   cost time O(1)
   cost allocations == 0
 {
-  var data = text.length()
-  if data > 0 && text.byte(data - 1) == 61 {
-    data -= 1
-    if data > 0 && text.byte(data - 1) == 61 {
-      data -= 1
+  var length = text.length()
+  if length > 0 && text.byte(length - 1) == 61 {
+    length -= 1
+    if length > 0 && text.byte(length - 1) == 61 {
+      length -= 1
     }
   }
-  data
+  length
 }
 
 internal fn symbol_at(text: StringSlice, index: USize, alphabet: Alphabet) -> Result[UInt8, DecodeError]
@@ -180,21 +180,21 @@ internal fn decode_group(
 internal fn decode_tail(
   text: StringSlice,
   index: USize,
-  rest: USize,
+  tail_symbols: USize,
   alphabet: Alphabet,
   bytes: mut intrinsic::Storage[UInt8],
 ) -> Result[Unit, DecodeError]
-  requires rest == 2 || rest == 3
+  requires tail_symbols == 2 || tail_symbols == 3
   requires index <= text.length()
-  requires rest <= text.length() - index
-  requires intrinsic::storage_length(bytes) + rest - 1 <= intrinsic::storage_capacity(bytes)
+  requires tail_symbols <= text.length() - index
+  requires intrinsic::storage_length(bytes) + tail_symbols - 1 <= intrinsic::storage_capacity(bytes)
   cost time O(1)
   cost allocations == 0
 {
   let first = symbol_at(text, index: index, alphabet: alphabet)?
   let second = symbol_at(text, index: index + 1, alphabet: alphabet)?
   intrinsic::storage_push(mut bytes, value: first * 4 + second / 16)
-  if rest == 2 {
+  if tail_symbols == 2 {
     if second % 16 != 0 {
       return Err(DecodeError.InvalidPadding)
     }
@@ -212,32 +212,32 @@ public fn decode(text: StringSlice, alphabet: Alphabet = Alphabet.Standard) -> R
   cost time O(text.length())
   cost allocations <= 1
 {
-  let data = unpadded_length(text)
-  let padded = text.length() - data
-  let rest = data % 4
-  if rest == 1 {
+  let symbol_count = unpadded_length(text)
+  let padded = text.length() - symbol_count
+  let tail_symbols = symbol_count % 4
+  if tail_symbols == 1 {
     return Err(DecodeError.InvalidLength)
   }
-  if padded > 0 && rest + padded != 4 {
+  if padded > 0 && tail_symbols + padded != 4 {
     return Err(DecodeError.InvalidPadding)
   }
-  let tail: USize = if rest == 0 { 0 } else { rest - 1 }
-  var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(data / 4 * 3 + tail)
+  let tail_bytes: USize = if tail_symbols == 0 { 0 } else { tail_symbols - 1 }
+  var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(symbol_count / 4 * 3 + tail_bytes)
   var index: USize = 0
-  while index + 4 <= data
-    invariant index <= data
+  while index + 4 <= symbol_count
+    invariant index <= symbol_count
     invariant index % 4 == 0
     invariant intrinsic::storage_length(bytes) == index / 4 * 3
-    invariant intrinsic::storage_capacity(bytes) == data / 4 * 3 + tail
-    decreases data - index
+    invariant intrinsic::storage_capacity(bytes) == symbol_count / 4 * 3 + tail_bytes
+    decreases symbol_count - index
     cost time O(index)
     cost allocations == 0
   {
     decode_group(text, index: index, alphabet: alphabet, bytes: mut bytes)?
     index += 4
   }
-  if rest >= 2 {
-    decode_tail(text, index: index, rest: rest, alphabet: alphabet, bytes: mut bytes)?
+  if tail_symbols >= 2 {
+    decode_tail(text, index: index, tail_symbols: tail_symbols, alphabet: alphabet, bytes: mut bytes)?
   }
   Ok(List(storage: own bytes))
 }

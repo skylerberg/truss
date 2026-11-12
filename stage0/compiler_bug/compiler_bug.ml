@@ -5,7 +5,7 @@ exception Bug of t
 let bug ~stage format =
   Printf.ksprintf (fun message -> raise (Bug { stage; message; doing = [] })) format
 
-let within ~stage doing f =
+let while_doing ~stage doing f =
   let broken message = raise (Bug { stage; message; doing = [ doing ] }) in
   try f () with
   | Bug bug -> raise (Bug { bug with doing = bug.doing @ [ doing ] })

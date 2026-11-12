@@ -37,9 +37,8 @@ let rec is_prefix prefix steps =
   | _ :: _, [] -> false
 
 (* [inner] is [outer] or lies inside it. *)
-let within ~outer inner = outer.local = inner.local && is_prefix outer.steps inner.steps
+let is_inside ~outer inner = outer.local = inner.local && is_prefix outer.steps inner.steps
 
-(* The places an operand moves out of, in order. *)
 let rec operand_moves (operand : Lir.operand) =
   match operand with
   | Move place | Moved_address place -> place_index_moves place @ [ place ]
@@ -93,8 +92,6 @@ let terminator_moves (terminator : Lir.terminator) =
   | Switch_variant { place; _ } -> place_index_moves place
   | Goto _ | Unreachable -> []
 
-(* The analysis *)
-
 type analysis = {
   env : Memory_layout.env;
   needs_drop : Ground.ty -> bool;
@@ -140,8 +137,8 @@ let before_index (place : Lir.place) : Lir.place =
    has something to drop, and every path around one that holds a value. *)
 let analyse env ~needs_drop ~environment (f : Lir.function_) =
   let partial = { env; needs_drop; environment; f; paths = [||]; inside = [||] } in
-  let found = ref [] in
-  let add path = if not (List.mem path !found) then found := path :: !found in
+  let candidates = ref [] in
+  let add path = if not (List.mem path !candidates) then candidates := path :: !candidates in
   let consider place =
     match path_of_place place with
     | Some path when owns partial path ->
@@ -164,13 +161,13 @@ let analyse env ~needs_drop ~environment (f : Lir.function_) =
       List.iter consider (terminator_moves block.terminator))
     f.blocks;
   let paths =
-    Array.of_list (List.filter (fun path -> owns partial path) (List.sort compare !found))
+    Array.of_list (List.filter (fun path -> owns partial path) (List.sort compare !candidates))
   in
   let inside =
     Array.map
       (fun outer ->
         List.filter_map
-          (fun (i, inner) -> if within ~outer inner then Some i else None)
+          (fun (i, inner) -> if is_inside ~outer inner then Some i else None)
           (List.mapi (fun i p -> (i, p)) (Array.to_list paths)))
       paths
   in
@@ -213,7 +210,7 @@ let affected a place =
   | None -> []
   | Some outer ->
       List.filter_map
-        (fun (i, inner) -> if within ~outer inner then Some i else None)
+        (fun (i, inner) -> if is_inside ~outer inner then Some i else None)
         (List.mapi (fun i p -> (i, p)) (Array.to_list a.paths))
 
 let set_uninit a s place =
@@ -234,12 +231,12 @@ let rec promote a s path =
       let parent = { path with steps = List.rev rest } in
       match (index a parent, path_type a parent) with
       | Some p, Some (Value ty) when not (definitely_init s p) ->
-          let given (field : Memory_layout.field) =
+          let is_initialized (field : Memory_layout.field) =
             let inner = { parent with steps = parent.steps @ [ Field field.name ] } in
             (not (owns a inner))
             || match index a inner with Some j -> definitely_init s j | None -> false
           in
-          if List.for_all given (fields_of (Memory_layout.of_type a.env ty)) then begin
+          if List.for_all is_initialized (fields_of (Memory_layout.of_type a.env ty)) then begin
             s.maybe_init.(p) <- true;
             s.maybe_uninit.(p) <- false;
             promote a s parent
@@ -330,8 +327,6 @@ let status s i =
   | true, false -> Yes
   | false, _ -> No
   | true, true -> Maybe
-
-(* Elaborating one drop *)
 
 type op =
   | Statement of Lir.statement
@@ -437,8 +432,6 @@ let check_nothing_owned a s =
       if s.maybe_init.(i) && not (List.mem Deref path.steps) then
         bug "%s may still own a value where the function returns" (describe a path))
     a.paths
-
-(* Rewriting *)
 
 type builder = {
   mutable blocks : Lir.basic_block array;

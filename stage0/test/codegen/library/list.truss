@@ -103,12 +103,12 @@ test "chunks yields runs of a size, with a shorter last one" {
   assert empty == 0
 }
 
-fn same_items(found: Slice[Int64], expected: Slice[Int64]) -> Bool {
-  if found.length() != expected.length() {
+fn same_items(actual: Slice[Int64], expected: Slice[Int64]) -> Bool {
+  if actual.length() != expected.length() {
     return false
   }
-  for index in 0..found.length() {
-    if found[index] != expected[index] {
+  for index in 0..actual.length() {
+    if actual[index] != expected[index] {
       return false
     }
   }
@@ -342,9 +342,9 @@ test "zip yields pairs up to the shorter length, and lends both to change" {
   var left: List[Int64] = [1, 2, 3]
   var right: List[Int64] = [10, 20, 30]
   for pair in mut left.zip(mut right[..]) {
-    let kept = pair.first
+    let first = pair.first
     pair.first = pair.second
-    pair.second = kept
+    pair.second = first
   }
   assert same_items(left, expected: [10, 20, 30])
   assert same_items(right, expected: [1, 2, 3])
@@ -423,8 +423,8 @@ test "retain, filter, and deduplicate keep elements in their order" {
   mut items.retain(fn(item) { item > 100 })
   assert items.length() == 0
   let odd: List[Int64] = [1, 2, 3, 4, 5]
-  let kept = own odd.filter(fn(item) { item % 2 == 1 })
-  assert same_items(kept, expected: [1, 3, 5])
+  let odds = own odd.filter(fn(item) { item % 2 == 1 })
+  assert same_items(odds, expected: [1, 3, 5])
   var runs: List[Int64] = [1, 1, 2, 2, 2, 3, 1, 1]
   mut runs.deduplicate()
   assert same_items(runs, expected: [1, 2, 3, 1])

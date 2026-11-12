@@ -12,18 +12,24 @@ type context = {
   monomorphic : Monomorphic.context;
   types : Intrinsics.types;
   bool : Ground.ty;
-  cursor_fields : (Ground.yielding -> (string * Memory_layout.member) list) ref;
   checks : bool;
-  constant : (Path.t -> Lir.static_value option) ref;
+  constant : Path.t -> Lir.static_value option;
 }
 
-val context : ?checks:bool -> Query.context -> Memory_layout.target -> context
+val context :
+  ?checks:bool ->
+  ?cursor_fields:(context -> Ground.yielding -> (string * Memory_layout.member) list) ->
+  ?constant:(context -> Path.t -> Lir.static_value option) ->
+  Query.context ->
+  Memory_layout.target ->
+  context
+
 val test_key : Path.t -> Instance.key
 
 type code = {
   definition_key : Names.key;
   anchor : Path.t;
-  within : Path.t option;
+  enclosing_impl : Path.t option;
   text : string;
   result : T.result;
   substitution : T.substitution;

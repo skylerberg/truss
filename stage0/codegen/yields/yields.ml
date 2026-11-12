@@ -1,8 +1,6 @@
 let bug format = Compiler_bug.bug ~stage:"Yields" format
 let local_place = Lir.local_place
 
-(* The loop form *)
-
 let loop_form env ~(body : Ground.function_type) (f : Lir.function_) =
   let go_on_ty =
     match body.result with
@@ -104,7 +102,6 @@ let terminator_reads (terminator : Lir.terminator) =
   | Yield { value; _ } -> operand_reads value
   | Goto _ | Unreachable -> []
 
-(* The locals live at the start of each block. *)
 let live_in (f : Lir.function_) =
   let n = Array.length f.locals in
   let live = Array.map (fun _ -> Array.make n false) f.blocks in
@@ -145,20 +142,20 @@ let yields (f : Lir.function_) =
    takes it from its caller. A cursor that held the evidence it was made
    with could use an implementation after the [provide] block that
    provided it had ended, which is a use after free. *)
-let kept ~evidence (f : Lir.function_) =
+let saved_locals ~evidence (f : Lir.function_) =
   let live = live_in f in
-  let keep = Array.make (Array.length f.locals) false in
-  List.iter (fun p -> keep.(p) <- true) f.parameters;
+  let is_saved = Array.make (Array.length f.locals) false in
+  List.iter (fun p -> is_saved.(p) <- true) f.parameters;
   List.iter
     (fun (_, resume, stop) ->
       List.iter
-        (fun b -> Array.iteri (fun i v -> if v then keep.(i) <- true) live.(b))
+        (fun b -> Array.iteri (fun i v -> if v then is_saved.(i) <- true) live.(b))
         (resume :: Option.to_list stop))
     (yields f);
-  List.iter (fun local -> keep.(local) <- false) evidence;
-  List.filter (fun i -> keep.(i)) (List.init (Array.length f.locals) Fun.id)
+  List.iter (fun local -> is_saved.(local) <- false) evidence;
+  List.filter (fun i -> is_saved.(i)) (List.init (Array.length f.locals) Fun.id)
 
-(* A kept local's field of the cursor: a parameter's is named by its place
+(* A saved local's field of the cursor: a parameter's is named by its place
    among the parameters, which is how whoever makes a cursor fills it in. *)
 let field_name (f : Lir.function_) local =
   match List.find_index (Int.equal local) f.parameters with
@@ -173,19 +170,19 @@ let member : Lir.ty -> Memory_layout.member = function
 
 let cursor_fields _env ~evidence (f : Lir.function_) =
   (Convention.cursor_state, Memory_layout.Raw (Integer UInt32))
-  :: List.map (fun local -> (field_name f local, member f.locals.(local).ty)) (kept ~evidence f)
-
-(* The state machine *)
+  :: List.map
+       (fun local -> (field_name f local, member f.locals.(local).ty))
+       (saved_locals ~evidence f)
 
 (* The function's blocks, shifted up by one for a new entry block, with
-   every kept local moved into the cursor that local [cursor] points at,
+   every saved local moved into the cursor that local [cursor] points at,
    every other local shifted by [base], and each [yield] and [return] given
    to [yield_] and [return_]. *)
 let state_machine (f : Lir.function_) ~evidence ~cursor ~base ~yield_ ~return_ =
-  let kept = kept ~evidence f in
+  let saved = saved_locals ~evidence f in
   let place (p : Lir.place) =
     match p.root with
-    | Local local when List.mem local kept ->
+    | Local local when List.mem local saved ->
         {
           Lir.root = Local cursor;
           projections = Deref :: Field (field_name f local) :: p.projections;
@@ -336,14 +333,14 @@ let cursor_drop _env ~cursor ~owned ~evidence (f : Lir.function_) =
     statements := []
   in
   List.iter
-    (fun (local, given) ->
-      match given with
+    (fun (local, default_bit) ->
+      match default_bit with
       | None -> statements := Lir.Drop (field local) :: !statements
       | Some (mask, bit) ->
-          let passed = new_local (Raw (Integer UInt64)) and given = new_local (Raw Bool) in
+          let passed = new_local (Raw (Integer UInt64)) and is_passed = new_local (Raw Bool) in
           statements :=
             Lir.Assign
-              ( local_place given,
+              ( local_place is_passed,
                 Binary (Not_equal, Copy (local_place passed), Constant (Integer (UInt64, Z.zero)))
               )
             :: Assign
@@ -357,7 +354,7 @@ let cursor_drop _env ~cursor ~owned ~evidence (f : Lir.function_) =
           close
             (Switch
                {
-                 value = Copy (local_place given);
+                 value = Copy (local_place is_passed);
                  cases = [ (Z.one, here + 1) ];
                  default = Some (here + 2);
                });

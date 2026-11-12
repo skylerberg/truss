@@ -228,7 +228,7 @@ and loop_mode = Sequential | Parallel_loop | Concurrent_loop
 
 and statement_kind =
   | Let of {
-      mutable_ : bool;  (** [var] rather than [let] *)
+      is_var : bool;  (** [var] rather than [let] *)
       pattern : pattern;
       annotation : type_expression option;
       value : expression;

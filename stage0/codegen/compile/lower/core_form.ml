@@ -30,7 +30,7 @@ let site_of st (origin : Core.origin) = site st (spans st).(origin)
    inlined into a program's, at the program's call. An index past the end
    of a list fails in the library's method, and the index is the
    program's. *)
-let check_site st (origin : Core.origin) =
+let failure_site st (origin : Core.origin) =
   match st.frame.reported with Some site -> site | None -> site_of st origin
 
 let local_place st (local : Core.local) : Lir.place =
@@ -57,8 +57,6 @@ let binary : Core.comparison -> Lir.binary = function
   | Less_equal -> Less_equal
   | Greater -> Greater
   | Greater_equal -> Greater_equal
-
-(* Patterns *)
 
 let rec binds_name (pattern : Core.pattern) =
   match pattern.kind with
@@ -151,7 +149,7 @@ and part st (source : Core.place) : Lir.place =
   | Constant { path; _ } -> static_constant st path
   | Field { base; field; _ } -> project st (part st base) (Field field)
   | Temporary value -> value_place st value
-  | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(check_site st origin)
+  | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(failure_site st origin)
   | Lent _ -> bug "a lent place that is not a call"
 
 and operand_place st (operand : Core.operand) : Lir.place =
@@ -265,7 +263,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
         (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
            ~type_arguments:(List.map (fun (a : Core.expression) -> ground st a.type_) arguments)
            (List.map (fun argument -> Intrinsics.Value (operand st argument)) arguments)
-           ~destination:(Some destination) ~site:(check_site st value.origin))
+           ~destination:(Some destination) ~site:(failure_site st value.origin))
   | Compare { comparison; left; right } ->
       assign (Binary (binary comparison, operand st left, operand st right))
   | Not inner -> assign (Unary (Not, operand st inner))
@@ -312,7 +310,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
           (fun (implementation : Core.implementation) ->
             let place = operand_place st implementation.value in
             let pointer =
-              if zero_size st (ground st implementation.type_) then Lir.Constant Null
+              if is_zero_size st (ground st implementation.type_) then Lir.Constant Null
               else Address { place; writable = true }
             in
             ( implementation.mode,
@@ -376,11 +374,11 @@ and into st (value : Core.expression) (destination : Lir.place) =
                (capture.local, whole st (local_place st capture.local), ground st capture.type_))
              captures)
         ~bind_capture:bind_local
-        ~body:(fun inner taken ->
+        ~body:(fun inner parameter_places ->
           List.iter2
             (fun pattern (place, _, _) ->
               match_patterns inner [ (pattern, place) ] ~failed:(block inner.b))
-            parameters taken;
+            parameters parameter_places;
           block_into inner body (result_place inner))
         destination
   | Slice { call; _ } -> into st call destination
@@ -600,7 +598,7 @@ and capability_defaults st ~capability ~name (arguments : Core.argument list) ev
             caller.code with
             definition_key = key;
             anchor = capability;
-            within = None;
+            enclosing_impl = None;
             text = text_of st.context key;
             substitution = [];
           };
@@ -637,7 +635,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
      source. *)
   let schedule =
     match (st.next_range, schedule) with
-    | Sequential, Chunked when not (at_once st) -> Sequential
+    | Sequential, Chunked when not (may_fork st) -> Sequential
     | Sequential, own -> own
     | inherited, _ -> inherited
   in
@@ -841,12 +839,12 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
             ~on_yield:(fun yielded ~owned ~resume ~stop ->
               let inner = st.frame in
               st.frame <- caller;
-              let around = List.length st.scopes in
+              let scope_depth = List.length st.scopes in
               in_scope st (fun () ->
                   st.loops <-
                     {
                       continue_ = resume;
-                      continue_depth = around;
+                      continue_depth = scope_depth;
                       break_ = after;
                       break_depth = depth;
                     }
@@ -900,10 +898,10 @@ and construct_copied st (built : Core.expression) ~destination =
             match field with
             | Some (Place source) ->
                 let field_ty = ground st (Core_walk.place_type source) in
-                let made = temporary st field_ty in
-                Glue.copy_into st.context.glue st.b ~destination:made ~source:(place st source)
-                  field_ty;
-                (name, owned st made field_ty)
+                let fresh_copy = temporary st field_ty in
+                Glue.copy_into st.context.glue st.b ~destination:fresh_copy
+                  ~source:(place st source) field_ty;
+                (name, owned st fresh_copy field_ty)
             | Some (Value ({ kind = Construct _; _ } as nested))
               when Core_walk.lent_places (Value nested) <> [] ->
                 let nested_ty = ground st nested.type_ in
@@ -954,7 +952,7 @@ and each_variant st ty (source : Lir.place) build =
         List.map
           (fun (variant, fields) ->
             let case = block st.b in
-            aside st.b case (fun () ->
+            in_block st.b case (fun () ->
                 build variant fields;
                 finish st.b (Goto after));
             (Option.get variant, case))
@@ -968,8 +966,9 @@ and field_of variant field : Lir.projection =
 
 and lent_field (lent : Ground.lent) variant field =
   List.find_map
-    (fun (found : Ground.lent_field) ->
-      if found.variant = variant && found.field = field then Some found.holds else None)
+    (fun (lent_field : Ground.lent_field) ->
+      if lent_field.variant = variant && lent_field.field = field then Some lent_field.holds
+      else None)
     lent.fields
 
 (* Whether a [yield]'s operand is a constructor that lends a place. *)
@@ -1003,22 +1002,23 @@ and lent_type st (body : Core.block) : Ground.lent option =
   else Some (lent_type_of st ~writable:(mode = Mut) (yielded_type_of_frame st) !parts)
 
 and lent_type_of st ~writable ty (parts : Core.operand list) : Ground.lent =
-  let given variant name =
+  let field_operands variant name =
     List.concat_map
       (fun (part : Core.operand) ->
         match part with
-        | Value { kind = Construct { variant = built; fields }; _ } when built = variant -> (
+        | Value { kind = Construct { variant = constructed; fields }; _ } when constructed = variant
+          -> (
             match List.assoc_opt name fields with Some (Some field) -> [ field ] | _ -> [])
         | _ -> [])
       parts
   in
-  let held variant (name, field_ty) : Ground.lent_field option =
-    let given = given variant name in
+  let lent_field_for variant (name, field_ty) : Ground.lent_field option =
+    let operands = field_operands variant name in
     let holds : Ground.holds option =
-      if List.exists lends_a_place given then
-        Some (Nested (lent_type_of st ~writable field_ty given))
+      if List.exists lends_a_place operands then
+        Some (Nested (lent_type_of st ~writable field_ty operands))
       else if
-        List.exists (function Core.Place _ -> true | Value _ -> false) given
+        List.exists (function Core.Place _ -> true | Value _ -> false) operands
         || not (trivial st field_ty)
       then Some Address
       else None
@@ -1030,7 +1030,7 @@ and lent_type_of st ~writable ty (parts : Core.operand list) : Ground.lent =
     writable;
     fields =
       List.concat_map
-        (fun (variant, fields) -> List.filter_map (held variant) fields)
+        (fun (variant, fields) -> List.filter_map (lent_field_for variant) fields)
         (variants_of st ty);
   }
 
@@ -1053,9 +1053,9 @@ and lend_into st (lent : Ground.lent) (operand : Core.operand) ~destination =
             in
             match (holds, field) with
             | Some (Nested inner), Some (Value ({ kind = Construct _; _ } as nested)) ->
-                let built = at (local st.b ~borrowed:true (Value (Lent inner))) in
-                lend_into st inner (Value nested) ~destination:built;
-                (name, Lir.Copy built)
+                let nested_lent = at (local st.b ~borrowed:true (Value (Lent inner))) in
+                lend_into st inner (Value nested) ~destination:nested_lent;
+                (name, Lir.Copy nested_lent)
             | Some (Nested inner), _ -> (name, Copy (lent_from st inner (evaluated ())))
             | Some Address, _ ->
                 (name, Address { place = whole st (evaluated ()); writable = lent.writable })
@@ -1070,8 +1070,8 @@ and lend_into st (lent : Ground.lent) (operand : Core.operand) ~destination =
    parts. *)
 and lent_from st (lent : Ground.lent) (source : Lir.place) : Lir.place =
   match lent_at st source with
-  | Some found when Ground.compare (Lent found) (Lent lent) = 0 -> source
-  | Some found -> lend_fields st lent (copied_lent st found source)
+  | Some existing when Ground.compare (Lent existing) (Lent lent) = 0 -> source
+  | Some existing -> lend_fields st lent (copied_lent st existing source)
   | None -> lend_fields st lent source
 
 and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
@@ -1080,11 +1080,11 @@ and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
       let fields =
         List.map
           (fun (name, _) ->
-            let from = source / field_of variant name in
+            let field_place = source / field_of variant name in
             match lent_field lent variant name with
-            | Some Address -> (name, Lir.Address { place = from; writable = lent.writable })
-            | Some (Nested inner) -> (name, Copy (lent_from st inner from))
-            | None -> (name, Copy from))
+            | Some Address -> (name, Lir.Address { place = field_place; writable = lent.writable })
+            | Some (Nested inner) -> (name, Copy (lent_from st inner field_place))
+            | None -> (name, Copy field_place))
           fields
       in
       emit st.b (Assign (built, Build { ty = Lent lent; variant; fields })));
@@ -1579,8 +1579,8 @@ and spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
     ~(each : Lir.place -> unit) =
   let ty = loop.element in
   let item = at loop.item in
-  let boxed = not (zero_size st ty) in
-  let taken place : Lir.operand = if is_owned then owned st place ty else Copy place in
+  let boxed = not (is_zero_size st ty) in
+  let move_or_copy place : Lir.operand = if is_owned then owned st place ty else Copy place in
   (* The block's address, read back from the item, and the value's place
      in the block. The pointer is [borrowed] so that drop elaboration does
      not track the block's contents. *)
@@ -1597,7 +1597,7 @@ and spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
     if boxed then begin
       let unboxed = if is_owned then binding st ty else at (local st.b ~borrowed:true (Value ty)) in
       let pointer, inside = block_of () in
-      emit st.b (Assign (unboxed, Use (taken inside)));
+      emit st.b (Assign (unboxed, Use (move_or_copy inside)));
       emit st.b
         (Call { target = Intrinsic Free; arguments = [ Copy (at pointer) ]; result = Discarded });
       unboxed
@@ -1614,7 +1614,7 @@ and spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
            result = Returned (at pointer);
          });
     emit st.b (Assign (item, Convert (Copy (at pointer), Integer UInt64)));
-    emit st.b (Assign (snd (block_of ()), Use (taken value)))
+    emit st.b (Assign (snd (block_of ()), Use (move_or_copy value)))
   end
   else emit st.b (Assign (item, Use (constant_int UInt64 Z.zero)));
   spawn_iteration st loop
@@ -1689,7 +1689,7 @@ and statement st (node : Core.statement) =
       | Concurrent branches -> concurrent_block st ~origin:node.origin branches
       | For { pattern; iteration; body; mode = Concurrent_loop; _ } ->
           concurrent_for st ~origin:node.origin ~pattern ~iteration ~body
-      | Parallel statements when at_once st ->
+      | Parallel statements when may_fork st ->
           (* Each branch is a region, which outlining makes a function of
              its own once drops are elaborated. A branch cannot leave the
              block early, so its region has one way out. *)
@@ -1721,18 +1721,19 @@ and statement st (node : Core.statement) =
           let failed = block st.b in
           Option.iter
             (fun else_ ->
-              aside st.b failed (fun () ->
+              in_block st.b failed (fun () ->
                   block_into st else_ None;
                   finish st.b Unreachable))
             else_;
           match_patterns st [ (pattern, scrutinee) ] ~failed
       | Assign { target; value } ->
-          (* The new value is evaluated into a temporary before it replaces
-             the old one, because evaluating it can read the target. *)
+          (* The new value is evaluated first, into a temporary, because
+             evaluating it can read the target. Then the target's index keys
+             are evaluated. *)
           let ty = ground st value.type_ in
-          let target = place st target in
           let new_value = temporary st ty in
           into st value new_value;
+          let target = place st target in
           replace st target ty ~by:new_value
       | Assert { value; _ } ->
           let condition = operand st value in
@@ -1749,9 +1750,19 @@ and statement st (node : Core.statement) =
                  site = site_of st node.origin;
                });
           start st.b after
-      | Compound_assign { target; value } ->
-          (* The target place is evaluated once. The operator reads its
-             current value, and the result replaces it. *)
+      | Compound_assign { target; operand; bound; value } ->
+          (* The operand is evaluated first, so that no code but the
+             operator runs while the target is moved out. Then the target
+             place is evaluated once, and the operator takes its current
+             value. The target then holds nothing, so the result is moved in
+             without a drop: dropping it would free the taken value a second
+             time. *)
+          let right =
+            match operand with
+            | Place source -> snapshot st (place st source)
+            | Value right -> value_place st right
+          in
+          bind_local st bound right;
           let ty = ground st value.type_ in
           let target = place st target in
           let result = temporary st ty in
@@ -1759,7 +1770,7 @@ and statement st (node : Core.statement) =
           st.compound_target <- Some target;
           into st value result;
           st.compound_target <- enclosing;
-          replace st target ty ~by:result
+          emit st.b (Assign (target, Use (owned st result ty)))
       | While { condition; body; _ } ->
           (* The condition's temporaries are dropped before the body and
              before the exit. The names it binds live until the body ends. *)
@@ -2062,7 +2073,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
      and the method goes on from the [yield] it reached. *)
   let ty = yielded_type st path type_arguments in
   let through =
-    if several && not (zero_size st ty) then
+    if several && not (is_zero_size st ty) then
       let writable =
         match (signature_of st.context path).output with Lends (Mut, _) -> true | _ -> false
       in
@@ -2108,7 +2119,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
         | [ only ] -> only
         | _ ->
             let chosen = block st.b in
-            aside st.b chosen (fun () ->
+            in_block st.b chosen (fun () ->
                 finish st.b
                   (Switch
                      {
@@ -2157,15 +2168,16 @@ and fill_defaults st mask (parameters : Core.parameter list) =
   List.iteri
     (fun bit ((parameter : Core.parameter), (default : Core.expression)) ->
       let ty = ground st parameter.type_ in
-      let passed = local b (Raw (Integer UInt64)) and given = local b (Raw Bool) in
+      let passed = local b (Raw (Integer UInt64)) and is_passed = local b (Raw Bool) in
       emit b
         (Assign
            ( at passed,
              Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit)) ));
-      emit b (Assign (at given, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
+      emit b
+        (Assign (at is_passed, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
       let arrived = local_place st parameter.local in
       let fill = block b and after = block b in
-      let unless_given other = Lir_builder.branch b (Copy (at given)) ~yes:other ~no:fill in
+      let unless_passed other = Lir_builder.branch b (Copy (at is_passed)) ~yes:other ~no:fill in
       let pulled what =
         if st.pulling then
           unsupported ~at:(site_of st default.origin)
@@ -2174,16 +2186,16 @@ and fill_defaults st mask (parameters : Core.parameter list) =
       if parameter.mode = Own && not (trivial st ty) then begin
         let owned_here = binding st ~name:parameter.name ty in
         bind_local st parameter.local owned_here;
-        let taken = block b in
-        unless_given taken;
-        start b taken;
+        let passed_block = block b in
+        unless_passed passed_block;
+        start b passed_block;
         emit b (Assign (owned_here, Use (Move arrived)));
         finish b (Goto after);
         start b fill;
         in_statement st (fun () -> into st default owned_here)
       end
       else begin
-        unless_given after;
+        unless_passed after;
         start b fill;
         in_statement st (fun () ->
             match arrived with

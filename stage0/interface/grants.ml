@@ -5,7 +5,7 @@ module Names = Resolve.Names
    and any other by its full path, which must be one the package granting
    it can see. *)
 let capability database ~package written : Path.t option =
-  let found (module_ : Path.module_) name =
+  let visible_capability (module_ : Path.module_) name =
     match Query.demand database Names.find (module_, name) with
     | Some { kind = Capability; visibility; _ }
       when module_.package = package || Names.is_public visibility ->
@@ -14,10 +14,10 @@ let capability database ~package written : Path.t option =
   in
   match Option.map List.rev (Path.parse_names written) with
   | Some [ name ] ->
-      Option.bind (Resolve.Prelude.find_type name) (fun module_ -> found module_ name)
+      Option.bind (Resolve.Prelude.find_type name) (fun module_ -> visible_capability module_ name)
   | Some (name :: modules) -> (
       match Workspace.split_module database (List.rev modules) with
-      | Some module_ -> found module_ name
+      | Some module_ -> visible_capability module_ name
       | None -> None)
   | Some [] | None -> None
 
@@ -27,10 +27,7 @@ let written (path : Path.t) =
   | Top { module_; name } when Resolve.Prelude.find_type name = Some module_ -> name
   | _ -> Path.show path
 
-type grant = {
-  capabilities : Path.t list;
-  unknown : string list;  (** The entries that name no capability *)
-}
+type grant = { capabilities : Path.t list; unknown : string list }
 
 let granted =
   Query.query ~name:"granted" ~phase:Phases.interfaces ~saved:true
@@ -39,13 +36,15 @@ let granted =
     (fun database (package, dependency) ->
       Option.map
         (fun (entry : Manifest.dependency) ->
-          let found =
+          let resolved_entries =
             List.map (fun name -> (name, capability database ~package name)) entry.capabilities
           in
           {
-            capabilities = List.filter_map snd found;
+            capabilities = List.filter_map snd resolved_entries;
             unknown =
-              List.filter_map (fun (name, path) -> if path = None then Some name else None) found;
+              List.filter_map
+                (fun (name, path) -> if path = None then Some name else None)
+                resolved_entries;
           })
         (List.find_opt
            (fun (entry : Manifest.dependency) -> entry.package = dependency)

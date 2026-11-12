@@ -143,22 +143,22 @@ test "the clock advances while one task sleeps and another waits for its message
   }
 }
 
-test "within returns None when the limit passes before the work ends" {
+test "with_timeout returns None when the limit passes before the work ends" {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide simulation::World.new(seed: seed) {
       let never = tasks::Channel[Int64].new()
-      assert tasks::within(Duration.seconds(5), work: fn() { never.receive() }) is None
+      assert tasks::with_timeout(Duration.seconds(5), work: fn() { never.receive() }) is None
       assert Clock.monotonic() == Duration.seconds(5)
     }
   }
 }
 
-test "within returns the output of work that ends before the limit, and cancels the timer" {
+test "with_timeout returns the output of work that ends before the limit, and cancels the timer" {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide simulation::World.new(seed: seed) {
-      let output = tasks::within(Duration.seconds(5), work: fn() {
+      let output = tasks::with_timeout(Duration.seconds(5), work: fn() {
         Clock.sleep(Duration.seconds(2))
         7
       })

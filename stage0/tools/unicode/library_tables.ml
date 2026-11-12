@@ -22,7 +22,9 @@ let property rows name =
   Ucd.merge
     (List.filter_map
        (function
-         | range :: found :: _ when found = name -> Some (Ucd.code_point_range range) | _ -> None)
+         | range :: property_name :: _ when property_name = name ->
+             Some (Ucd.code_point_range range)
+         | _ -> None)
        rows)
 
 (* A code point of UnicodeData.txt: its general category, its canonical
@@ -284,7 +286,8 @@ let grapheme_ranges ~breaks ~core ~emoji =
   let conjunct name =
     List.filter_map
       (function
-        | range :: "InCB" :: found :: _ when found = name -> Some (Ucd.code_point_range range)
+        | range :: "InCB" :: property_name :: _ when property_name = name ->
+            Some (Ucd.code_point_range range)
         | _ -> None)
       core
   in
@@ -292,17 +295,17 @@ let grapheme_ranges ~breaks ~core ~emoji =
     (fun index name -> add (16 * (index + 1)) (conjunct name))
     [ "Consonant"; "Extend"; "Linker" ];
   add 64 (property emoji "Extended_Pictographic");
-  Hashtbl.fold (fun code found all -> (code, found) :: all) properties []
+  Hashtbl.fold (fun code property_bits all -> (code, property_bits) :: all) properties []
   |> List.sort compare
   |> List.fold_left
-       (fun runs (code, found) ->
+       (fun runs (code, property_bits) ->
          match runs with
-         | (first, last, earlier) :: rest when last = code - 1 && earlier = found ->
+         | (first, last, earlier) :: rest when last = code - 1 && earlier = property_bits ->
              (first, code, earlier) :: rest
-         | _ -> (code, code, found) :: runs)
+         | _ -> (code, code, property_bits) :: runs)
        []
   |> List.rev
-  |> List.concat_map (fun (first, last, found) -> [ first; last; found ])
+  |> List.concat_map (fun (first, last, property_bits) -> [ first; last; property_bits ])
 
 let flat ranges = List.concat_map (fun (first, last) -> [ first; last ]) ranges
 

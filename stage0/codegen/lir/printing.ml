@@ -2,8 +2,6 @@
 
 open Ir
 
-(* Printing *)
-
 let scalar_name = function
   | Memory_layout.Nullable_pointer _ -> "nullable"
   | scalar -> Memory_layout.scalar_to_string scalar

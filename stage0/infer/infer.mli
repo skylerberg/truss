@@ -97,10 +97,10 @@ val specification_of_path : (Path.t, (Core.t * Types.substitution) option) Query
 val exported_specification_of_path : (Path.t, (Core.t * Types.substitution) option) Query.query
 (** As {!core_of_path}, for {!exported_specification}. *)
 
-val evidence : (Resolve.Names.key, Path.package list) Query.query
+val evidence_packages : (Resolve.Names.key, Path.package list) Query.query
 (** The packages whose [impl]s met a bound in a definition. *)
 
-val clean : Query.context -> Resolve.Names.key -> tables option
+val clean_tables : Query.context -> Resolve.Names.key -> tables option
 (** The tables of a definition, or [None] if the definition has a parse error, a resolution error,
     or a type error. The pattern, use, and ownership checks run only on a definition that has none,
     so that one mistake is not reported again by a later check. *)

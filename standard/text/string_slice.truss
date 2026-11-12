@@ -397,15 +397,15 @@ internal fn StringSlice.find_first(self, pattern: StringSlice, table: Slice[USiz
     && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   cost time O(self.length())
 {
-  var found = false
+  var has_match = false
   var first: USize = 0
   var matched: USize = 0
   var index: USize = 0
-  while index < self.length() && !found
+  while index < self.length() && !has_match
     invariant index <= self.length()
     invariant matched < pattern.length()
     invariant matched <= index
-    invariant found ==> first + pattern.length() <= self.length() && self.is_boundary(first)
+    invariant has_match ==> first + pattern.length() <= self.length() && self.is_boundary(first)
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
@@ -414,13 +414,13 @@ internal fn StringSlice.find_first(self, pattern: StringSlice, table: Slice[USiz
     if matched == pattern.length() {
       let offset = index - matched
       if self.is_boundary(offset) {
-        found = true
+        has_match = true
         first = offset
       }
       matched = table[matched - 1]
     }
   }
-  if found { Some(first) } else { None }
+  if has_match { Some(first) } else { None }
 }
 
 public fn StringSlice.contains(self, pattern: StringSlice) -> Bool
@@ -451,7 +451,7 @@ public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[USize]
     return Some(self.length())
   }
   let table = failure_table(pattern)
-  var found = false
+  var has_match = false
   var last: USize = 0
   var matched: USize = 0
   var index: USize = 0
@@ -459,7 +459,7 @@ public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[USize]
     invariant index <= self.length()
     invariant matched < pattern.length()
     invariant matched <= index
-    invariant found ==> last + pattern.length() <= self.length() && self.is_boundary(last)
+    invariant has_match ==> last + pattern.length() <= self.length() && self.is_boundary(last)
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
@@ -468,33 +468,33 @@ public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[USize]
     if matched == pattern.length() {
       let offset = index - matched
       if self.is_boundary(offset) {
-        found = true
+        has_match = true
         last = offset
       }
       matched = table[matched - 1]
     }
   }
-  if found { Some(last) } else { None }
+  if has_match { Some(last) } else { None }
 }
 
 public fn StringSlice.find_character(
   self,
-  matching: (fn(Character) -> Bool cost time finite),
+  predicate: (fn(Character) -> Bool cost time finite),
 ) -> Option[USize]
   ensures match result {
     Some(offset) => offset < self.length() && self.is_boundary(offset)
     None => true
   }
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
   var offset: USize = 0
   while offset < self.length()
     invariant offset <= self.length()
     decreases self.length() - offset
-    cost time O(offset * time(matching))
+    cost time O(offset * time(predicate))
   {
     let decoded = self.decode(offset)
-    if matching(decoded.character) && self.is_boundary(offset) {
+    if predicate(decoded.character) && self.is_boundary(offset) {
       return Some(offset)
     }
     offset += decoded.length
@@ -618,18 +618,18 @@ public fn StringSlice.trim_end(self) -> StringSlice
   self.part(0, to: self.trailing_whitespace_start())
 }
 
-internal fn StringSlice.leading_matching(self, matching: (fn(Character) -> Bool cost time finite)) -> USize
+internal fn StringSlice.leading_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> USize
   ensures result <= self.length()
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
   var start: USize = 0
   while start < self.length()
     invariant start <= self.length()
     decreases self.length() - start
-    cost time O(start * time(matching))
+    cost time O(start * time(predicate))
   {
     let decoded = self.decode(start)
-    if !matching(decoded.character) {
+    if !predicate(decoded.character) {
       return start
     }
     start += decoded.length
@@ -639,23 +639,23 @@ internal fn StringSlice.leading_matching(self, matching: (fn(Character) -> Bool 
 
 internal fn StringSlice.trailing_matching_start(
   self,
-  matching: (fn(Character) -> Bool cost time finite),
+  predicate: (fn(Character) -> Bool cost time finite),
   from: USize,
 ) -> USize
   requires from <= self.length()
   ensures from <= result
   ensures result <= self.length()
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
   var end = self.length()
   while end > from
     invariant from <= end
     invariant end <= self.length()
     decreases end
-    cost time O((self.length() - end) * time(matching))
+    cost time O((self.length() - end) * time(predicate))
   {
     let start = self.previous_start(end)
-    if start < from || !matching(self.decode(start).character) {
+    if start < from || !predicate(self.decode(start).character) {
       return end
     }
     end = start
@@ -663,12 +663,12 @@ internal fn StringSlice.trailing_matching_start(
   end
 }
 
-public fn StringSlice.trim_matching(self, matching: (fn(Character) -> Bool cost time finite)) -> StringSlice
+public fn StringSlice.trim_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> StringSlice
   ensures result.length() <= self.length()
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
-  let start = self.leading_matching(matching)
-  self.part(start, to: self.trailing_matching_start(matching, from: start))
+  let start = self.leading_matching(predicate)
+  self.part(start, to: self.trailing_matching_start(predicate, from: start))
 }
 
 public fn StringSlice.split(self, separator: StringSlice) yields StringSlice
@@ -743,9 +743,9 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: USize) 
   yield self.part(start, to: self.length())
 }
 
-public fn StringSlice.split_matching(self, matching: (fn(Character) -> Bool cost time finite)) yields StringSlice
+public fn StringSlice.split_matching(self, predicate: (fn(Character) -> Bool cost time finite)) yields StringSlice
   ensures yielded.length() <= self.length() + 1
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
   var start: USize = 0
   var offset: USize = 0
@@ -754,10 +754,10 @@ public fn StringSlice.split_matching(self, matching: (fn(Character) -> Bool cost
     invariant offset <= self.length()
     invariant yielded.length() <= offset
     decreases self.length() - offset
-    cost time O(offset * time(matching))
+    cost time O(offset * time(predicate))
   {
     let decoded = self.decode(offset)
-    if matching(decoded.character) {
+    if predicate(decoded.character) {
       yield self.part(start, to: offset)
       start = offset + decoded.length
     }

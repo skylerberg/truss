@@ -68,8 +68,6 @@ let default_directory () =
           in
           Filename.concat (Filename.concat home ".cache") "truss")
 
-(* Reading records *)
-
 let close_channel segment =
   Option.iter close_in_noerr segment.channel;
   segment.channel <- None
@@ -213,8 +211,6 @@ let refresh t =
   t.segments <- fresh @ known;
   t.refreshed <- Unix.gettimeofday ()
 
-(* Writing *)
-
 let writer_name () =
   Random.self_init ();
   Printf.sprintf "%d-%d-%06x" (Unix.getpid ()) (int_of_float (Unix.time ())) (Random.bits ())
@@ -286,8 +282,8 @@ let () =
 let writer t =
   match t.writer with
   | Some writer when writer.size < seal_size -> writer
-  | found ->
-      if Option.is_some found then seal t;
+  | full_writer ->
+      if Option.is_some full_writer then seal t;
       let writer = new_writer t in
       t.writer <- Some writer;
       writing := t :: !writing;
@@ -324,13 +320,11 @@ let flush t =
       Unix.fsync writer.descriptor)
     t.writer
 
-(* Looking up *)
-
 (* The record must be the key's own: an index that is damaged can name
    another record's offset. *)
 let read_from segment key location =
   match read_record (channel segment) ~offset:location.offset with
-  | Some (_, found, value) when found = key -> Some value
+  | Some (_, record_key, value) when record_key = key -> Some value
   | Some _ | None -> None
   | exception Sys_error _ -> None
 
@@ -402,8 +396,6 @@ let files t name =
   let path = Filename.concat t.root name in
   File_system.make_directory path;
   path
-
-(* Pointers *)
 
 type pointer = {
   store : t;
@@ -482,7 +474,7 @@ let read pointer =
 
 (* Written beside the pointer and renamed over it, after the values it may
    name are durable, so a pointer never names a value a crash lost. *)
-let point pointer bytes =
+let write_pointer pointer bytes =
   flush pointer.store;
   File_system.write_atomically ~durable:true pointer.pointer_path (framed bytes)
 
@@ -490,8 +482,6 @@ let remove_pointer pointer =
   List.iter
     (fun path -> try Sys.remove path with Sys_error _ -> ())
     [ pointer.pointer_path; pointer.pointer_path ^ ".lock" ]
-
-(* Collection *)
 
 let file_size path = try (Unix.stat path).st_size with Unix.Unix_error _ -> 0
 
@@ -538,7 +528,7 @@ let rewrite t candidates ~keep =
       List.iter
         (fun (key, location) ->
           match read_record (channel segment) ~offset:location.offset with
-          | Some (kind, found, value) when found = key ->
+          | Some (kind, record_key, value) when record_key = key ->
               if
                 keep segment kind key
                 && not

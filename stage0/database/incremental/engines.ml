@@ -10,9 +10,11 @@ let stabilize engine =
   check_can_change engine;
   sweep engine;
   settle engine;
-  let change = { computed = List.rev engine.computed; changed = List.rev engine.changed } in
-  engine.computed <- [];
-  engine.changed <- [];
+  let change =
+    { computed = Dynarray.to_list engine.computed; changed = Dynarray.to_list engine.changed }
+  in
+  Dynarray.clear engine.computed;
+  Dynarray.clear engine.changed;
   change
 
 let freeze ?(fixed = false) engine =
@@ -37,57 +39,49 @@ let unroot engine (query : ('key, 'value) query) key =
       sweep engine
   | None -> ()
 
-let executed engine = List.rev_map label engine.log
+let executed engine = List.map label (Dynarray.to_list engine.log)
 
 let result_label (query : ('key, 'value) query) key =
   Printf.sprintf "%s(%s)" query.name (query.show key)
 
 let computed (type key value) engine (query : (key, value) query) : key list =
-  List.rev
-    (List.filter_map
-       (fun (node : node) ->
-         match node.cell with
-         | Result (found, cell) when found.number = query.number -> (
-             match Type.Id.provably_equal found.cells query.cells with
-             | Some Equal -> Some (cell.key : key)
-             | None -> None)
-         | Result _ | Input _ | Unfilled -> None)
-       engine.log)
+  List.filter_map
+    (fun (node : node) ->
+      match node.cell with
+      | Result (stored_query, cell) when stored_query.number = query.number -> (
+          match Type.Id.provably_equal stored_query.cells query.cells with
+          | Some Equal -> Some (cell.key : key)
+          | None -> None)
+      | Result _ | Input _ | Unfilled -> None)
+    (Dynarray.to_list engine.log)
 
-let clear_log engine = engine.log <- []
+let clear_log engine = Dynarray.clear engine.log
 let by_id nodes = List.sort (fun (a : node) (b : node) -> compare a.id b.id) nodes
-let differing engine = by_id (Hashtbl.fold (fun _ node found -> node :: found) engine.own [])
+let differing engine = by_id (Hashtbl.fold (fun _ node nodes -> node :: nodes) engine.own [])
 let count engine = Hashtbl.length engine.own
 
-let unshared engine other =
-  let found = Hashtbl.fold (fun _ node found -> node :: found) engine.own [] in
+(* The engine's own nodes and those of each base that [skip] does not
+   exclude and the engine has not replaced. *)
+let own_and_inherited engine ~skip =
+  let own = Hashtbl.fold (fun _ node nodes -> node :: nodes) engine.own [] in
   by_id
     (List.fold_left
-       (fun found (base : t) ->
-         if base.fixed || List.memq base other.bases then found
+       (fun nodes (base : t) ->
+         if skip base then nodes
          else
            Hashtbl.fold
-             (fun _ (node : node) found ->
-               if Hashtbl.mem engine.shadows node.id then found else node :: found)
-             base.own found)
-       found engine.bases)
+             (fun _ (node : node) nodes ->
+               if Hashtbl.mem engine.shadows node.id then nodes else node :: nodes)
+             base.own nodes)
+       own engine.bases)
+
+let unshared engine other =
+  own_and_inherited engine ~skip:(fun base -> base.fixed || List.memq base other.bases)
 
 (* The state's nodes, apart from its fixed bases': the engine's own, and
    those of an earlier state it has not replaced. *)
-let nodes engine =
-  let found = Hashtbl.fold (fun _ node found -> node :: found) engine.own [] in
-  by_id
-    (List.fold_left
-       (fun found (base : t) ->
-         if base.fixed then found
-         else
-           Hashtbl.fold
-             (fun _ (node : node) found ->
-               if Hashtbl.mem engine.shadows node.id then found else node :: found)
-             base.own found)
-       found engine.bases)
-
-let reads engine (node : node) = List.map (resolve engine) node.reads
+let nodes engine = own_and_inherited engine ~skip:(fun base -> base.fixed)
+let reads = current_reads
 
 (* What reads a node, without copying anything: a base's reader that the
    engine has not copied reads the engine's copy as it read the base's
@@ -96,31 +90,31 @@ let readers engine (node : node) =
   let below = if node.engine == engine then node.below else Some node in
   let own =
     if node.engine == engine then
-      Hashtbl.fold (fun _ reader found -> reader :: found) node.readers []
+      Hashtbl.fold (fun _ reader readers -> reader :: readers) node.readers []
     else
       match Hashtbl.find_opt engine.foreign node.id with
-      | Some table -> Hashtbl.fold (fun _ reader found -> reader :: found) table []
+      | Some table -> Hashtbl.fold (fun _ reader readers -> reader :: readers) table []
       | None -> []
   in
-  let found =
+  let readers =
     match below with
     | None -> own
     | Some base ->
-        let from table found =
+        let from table readers =
           Hashtbl.fold
-            (fun _ (reader : node) found ->
-              if Hashtbl.mem engine.shadows reader.id then found else reader :: found)
-            table found
+            (fun _ (reader : node) readers ->
+              if Hashtbl.mem engine.shadows reader.id then readers else reader :: readers)
+            table readers
         in
         List.fold_left
-          (fun found (other : t) ->
+          (fun readers (other : t) ->
             match Hashtbl.find_opt other.foreign base.id with
-            | Some table -> from table found
-            | None -> found)
+            | Some table -> from table readers
+            | None -> readers)
           (if base.engine == engine then own else from base.readers own)
           engine.bases
   in
-  by_id found
+  by_id readers
 
 (* The same query and key in another engine, computed there if it has none.
    The other engine only observes it, so comparing two states makes no root

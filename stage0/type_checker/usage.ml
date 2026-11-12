@@ -16,8 +16,6 @@ let report context ?(fixes = []) code (span : span) message =
   context.diagnostics <-
     Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 
-(* Unused variables *)
-
 (* How many times a definition reads each name, by the id of the name's
    binding. *)
 let count_uses (resolved : Resolve.resolved) =
@@ -115,8 +113,6 @@ let check_unused context (definition : definition) =
           (Printf.sprintf "`%s` is never used. Bind it to `_` instead." name.text))
     (pattern_bindings definition)
 
-(* Unreachable code *)
-
 let diverges context (value : expression) =
   match context.tables.types.(value.id) with Some T.Never -> true | _ -> false
 
@@ -148,7 +144,7 @@ let rec statement_diverges context (written : statement) =
   | _ -> false
 
 let check_block context (written : block) =
-  let rec go = function
+  let rec check_statements = function
     | first :: (next :: _ as rest) ->
         if statement_diverges context first then begin
           let last = List.nth rest (List.length rest - 1) in
@@ -162,10 +158,10 @@ let check_block context (written : block) =
               ]
             "This code can never run: the statement before it never finishes."
         end
-        else go rest
+        else check_statements rest
     | _ -> ()
   in
-  go written.statements
+  check_statements written.statements
 
 let check_unreachable context (definition : definition) =
   let rec expression (value : expression) =
@@ -209,7 +205,7 @@ let definition_diagnostics =
       match
         ( Query.demand database Resolve.Names.definition key,
           Query.demand database Resolve.resolved key,
-          Infer.clean database key,
+          Infer.clean_tables database key,
           Query.demand database Resolve.Names.text key )
       with
       | Some definition, Some resolved, Some tables, Some text ->

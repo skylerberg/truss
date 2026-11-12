@@ -8,8 +8,6 @@
    with the open files' texts in place of what is on disk. Nothing is
    written to a file. *)
 
-(* Positions *)
-
 (* An LSP position counts columns in UTF-16 code units unless the client
    accepts UTF-8, which is the file's bytes. *)
 type encoding = Utf_8 | Utf_16
@@ -25,8 +23,6 @@ let range encoding source (span : Diagnostic.span) =
     Json.Object [ ("line", Json.Int line); ("character", Json.Int character) ]
   in
   Json.Object [ ("start", point span.start); ("end", point span.stop) ]
-
-(* File names in URIs *)
 
 let hex_digit c =
   match c with
@@ -61,8 +57,6 @@ let path_of_uri uri =
     in
     decode 0;
     Some (Buffer.contents buffer)
-
-(* Checking the open files *)
 
 (* A diagnostic as the protocol states it, with its notes as related
    information in the same file. *)
@@ -144,13 +138,14 @@ let check ~root encoding (buffers : (string * string) list) =
     List.map
       (fun (uri, path, text) ->
         let module_ = module_of (Project.normalize path) in
-        let found = Option.map (Database.diagnostics trial) module_ in
-        (uri, Source.create ~path text, module_, found))
+        let module_diagnostics = Option.map (Database.diagnostics trial) module_ in
+        (uri, Source.create ~path text, module_, module_diagnostics))
       buffers
   in
   let provable =
     List.filter_map
-      (fun (_, _, module_, found) -> if found = Some [] then module_ else None)
+      (fun (_, _, module_, module_diagnostics) ->
+        if module_diagnostics = Some [] then module_ else None)
       checked
   in
   let proofs = Proofs.checked project provable in
@@ -159,11 +154,11 @@ let check ~root encoding (buffers : (string * string) list) =
       ( "files",
         Json.List
           (List.map
-             (fun (uri, source, module_, found) ->
+             (fun (uri, source, module_, module_diagnostics) ->
                let diagnostics, states =
-                 match (module_, found) with
+                 match (module_, module_diagnostics) with
                  | Some module_, Some [] -> proofs module_
-                 | _, Some found -> (Diagnostic.shown found, [])
+                 | _, Some module_diagnostics -> (Diagnostic.shown module_diagnostics, [])
                  | _, None -> ([], [])
                in
                Json.Object
@@ -175,8 +170,6 @@ let check ~root encoding (buffers : (string * string) list) =
                  ])
              checked) );
     ]
-
-(* The protocol *)
 
 (* One message's body from a stream of messages, each after a header that
    gives its length, or [None] at the stream's end. *)

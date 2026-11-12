@@ -144,21 +144,21 @@ public fn Generator.unit(mut self) -> Float64
   if value >= 0.0 && value < 1.0 { value } else { 0.0 }
 }
 
-public fn Generator.fraction(mut self, low: Float64, high: Float64) -> Float64
+public fn Generator.uniform(mut self, low: Float64, high: Float64) -> Float64
   requires low < high
   cost time O(1)
 {
   low + (high - low) * mut self.unit()
 }
 
-public fn Generator.normal(mut self, mean: Float64 = 0.0, deviation: Float64 = 1.0) -> Float64
-  requires deviation >= 0.0
+public fn Generator.normal(mut self, mean: Float64 = 0.0, standard_deviation: Float64 = 1.0) -> Float64
+  requires standard_deviation >= 0.0
   cost time O(1)
 {
   let first = 1.0 - mut self.unit()
   let second = mut self.unit()
   let radius = (-2.0 * first.logarithm()).square_root()
-  mean + deviation * radius * (6.283185307179586 * second).cosine()
+  mean + standard_deviation * radius * (6.283185307179586 * second).cosine()
 }
 
 public fn Generator.chance(mut self, probability: Float64) -> Bool
@@ -200,7 +200,7 @@ public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
   }
 }
 
-public fn Generator.choose[Element](mut self, items: Slice[Element]) -> Option[USize]
+public fn Generator.choose_index[Element](mut self, items: Slice[Element]) -> Option[USize]
   ensures match result {
     Some(index) => index < items.length()
     None => items.length() == 0

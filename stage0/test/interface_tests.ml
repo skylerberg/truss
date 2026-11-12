@@ -256,7 +256,7 @@ let () =
       in
       match codes (check database (module_of "app::main")) with
       | [ "types.trait_cycle"; "types.trait_cycle" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | reported -> fail "found [%s]" (String.concat "; " reported));
   test "a trait cannot redeclare a method of a trait it requires" (fun () ->
       one_diagnostic "trait Sorted: Ordered {\n  fn compare(self, other: Self) -> Ordering\n}\n"
         "types.redeclared_method");
@@ -341,7 +341,7 @@ let holder = "type Holder[Value](value: Value)\n"
 let held type_ = Types.named (app "Holder") [ type_ ]
 let chain = "type Chain[Value] =\n  | End\n  | indirect Link(value: Value, rest: Chain[Value])\n"
 
-let kept =
+let projection_holder =
   "trait Shown {\n\
   \  type Part\n\
    }\n\n\
@@ -393,22 +393,24 @@ let () =
      type Odd(even: Even, token: Token)\n"
     (fun _ -> Types.named (app "Even") [])
     Interface.Impls.copyable;
-  property "a type that holds an associated type is a view when that type is one" true kept
+  property "a type that holds an associated type is a view when that type is one" true
+    projection_holder
     (fun _ -> Types.named (app "Kept") [ Types.named (app "Numbers") [] ])
     Interface.Impls.is_view;
-  property "a type that holds an associated type is not a view when that type is not" false kept
+  property "a type that holds an associated type is not a view when that type is not" false
+    projection_holder
     (fun _ -> Types.named (app "Kept") [ Types.named (app "Counted") [] ])
     Interface.Impls.is_view;
-  property "a type that holds an associated type is Plain when that type is" true kept
+  property "a type that holds an associated type is Plain when that type is" true projection_holder
     (fun _ -> Types.named (app "Kept") [ Types.named (app "Counted") [] ])
     Interface.Impls.plain;
   property "a type that holds a type holding an associated type is a view when that type is one"
     true
-    (kept ^ "\ntype Outer(kept: Kept[Numbers])\n")
+    (projection_holder ^ "\ntype Outer(held: Kept[Numbers])\n")
     (fun _ -> Types.named (app "Outer") [])
     Interface.Impls.is_view;
   let through_itself =
-    kept
+    projection_holder
     ^ "\n\
        type Marker()\n\n\
        impl Shown for Marker {\n\
@@ -416,7 +418,7 @@ let () =
        }\n\n\
        type Tree =\n\
       \  | Leaf\n\
-      \  | indirect Branch(kept: Kept[Marker])\n"
+      \  | indirect Branch(held: Kept[Marker])\n"
   in
   property "a type that contains itself through an associated type is Copyable" true through_itself
     (fun _ -> Types.named (app "Tree") [])
@@ -759,7 +761,7 @@ let () =
       in
       match Interface.diagnostics database (module_of "app::main") with
       | [] -> ()
-      | found -> fail "found [%s]" (String.concat "; " (codes found)));
+      | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "an opaque generic type is Copyable by its declaration and its arguments" (fun () ->
       let database =
         setup [ ("app::main", "public opaque type Box[Value](inner: Value)\n  derives Copyable\n") ]
@@ -796,7 +798,7 @@ let () =
       one_diagnostic "type Box[Value](value: Value)\n\nfn Box.get(self) -> Int64 { todo }\n"
         "types.arity");
   test "a type argument must be of its parameter's kind" (fun () ->
-      one_diagnostic "fn f(items: List[3]) {}\n" "types.arity");
+      one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
   test "a constant in a type argument must have a value" (fun () ->
       let database =
         setup

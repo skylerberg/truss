@@ -11,7 +11,7 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 
 type change = Breaks of string | Grows of string
-type found = { path : Path.t; change : change }
+type public_change = { path : Path.t; change : change }
 
 (* A method written inside a trait or a capability is compared with that
    one, not on its own. *)
@@ -22,8 +22,6 @@ let declarations database package = Query.demand database Names.package_declarat
 
 let definition database declaration =
   Query.demand database Names.definition (Names.key_of declaration)
-
-(* Contracts, as written *)
 
 let written kind (clauses : clause list) =
   List.filter_map
@@ -56,8 +54,6 @@ let contract ~(before : clause list) ~(after : clause list) =
        else if missing_from cost_before cost_after <> [] then [ Grows "promises a cost more" ]
        else []);
     ]
-
-(* Signatures *)
 
 let uses_more : T.capability -> change = function
   | Capability path -> Breaks (Printf.sprintf "uses `%s`, which it did not" (Path.show path))
@@ -146,8 +142,6 @@ let clauses_of (definition : definition option) =
   | Some { kind = Theorem { clauses; _ }; _ } -> clauses
   | _ -> []
 
-(* Types *)
-
 let type_clauses (definition : definition option) select =
   match definition with
   | Some { kind = Type_definition { clauses; _ }; _ } ->
@@ -180,8 +174,6 @@ let type_ ~(before : T.type_interface) ~(after : T.type_interface) ~before_defin
        else if missing_from before.derives after.derives <> [] then [ Grows "derives a trait more" ]
        else []);
     ]
-
-(* Traits and capabilities *)
 
 (* The clauses of a method written inside a trait or a capability, which
    is a definition of its own. *)
@@ -260,8 +252,6 @@ let trait ~(before : T.trait_interface) ~(after : T.trait_interface) ~before_def
       gained;
     ]
 
-(* Constants *)
-
 let constant_value database path (definition : definition option) =
   match Query.demand database Interface.Constants.value_of path with
   | Some _ as value -> `Value value
@@ -269,8 +259,6 @@ let constant_value database path (definition : definition option) =
       match definition with
       | Some { kind = Constant { value; _ }; _ } -> `Written (Syntax_print.expression value)
       | _ -> `Value None)
-
-(* [impl]s *)
 
 let impls database package =
   List.filter_map
@@ -290,19 +278,19 @@ let impls database package =
 let compare ~before ~after package =
   let old = List.filter public (declarations before package) in
   let now = List.filter public (declarations after package) in
-  let found path change = { path; change } in
+  let public_change path change = { path; change } in
   let definitions =
     List.concat_map
       (fun (was : Names.declaration) ->
         let path = was.path in
         match List.find_opt (fun (other : Names.declaration) -> Path.equal other.path path) now with
-        | None -> [ found path (Breaks "is gone, or is no longer public") ]
+        | None -> [ public_change path (Breaks "is gone, or is no longer public") ]
         | Some is when is.kind <> was.kind ->
-            [ found path (Breaks "is another kind of definition") ]
+            [ public_change path (Breaks "is another kind of definition") ]
         | Some is ->
             let before_definition = definition before was
             and after_definition = definition after is in
-            List.map (found path)
+            List.map (public_change path)
               (match
                  ( Query.demand before Environment.interface path,
                    Query.demand after Environment.interface path )
@@ -338,7 +326,7 @@ let compare ~before ~after package =
     List.filter_map
       (fun (is : Names.declaration) ->
         if List.exists (fun (was : Names.declaration) -> Path.equal was.path is.path) old then None
-        else Some (found is.path (Grows "is new")))
+        else Some (public_change is.path (Grows "is new")))
       now
   in
   let old_impls = impls before package and new_impls = impls after package in
@@ -349,7 +337,7 @@ let compare ~before ~after package =
     List.concat_map
       (fun (path, shown, old_sets) ->
         match List.find_opt (fun (_, other, _) -> other = shown) new_impls with
-        | None -> [ found path (Breaks (Printf.sprintf "is gone: %s" shown)) ]
+        | None -> [ public_change path (Breaks (Printf.sprintf "is gone: %s" shown)) ]
         | Some (_, _, new_sets) ->
             let set name sets = Option.value ~default:[] (List.assoc_opt name sets) in
             List.concat_map
@@ -357,7 +345,7 @@ let compare ~before ~after package =
                 let was = set name old_sets and is = set name new_sets in
                 List.map
                   (fun capability ->
-                    found path
+                    public_change path
                       (Breaks
                          (Printf.sprintf "has `%s` in its `%s`, which it did not: %s"
                             (T.show_capability capability) name shown)))
@@ -365,7 +353,7 @@ let compare ~before ~after package =
                 @
                 if missing_from is was <> [] then
                   [
-                    found path
+                    public_change path
                       (Grows (Printf.sprintf "has fewer capabilities in its `%s`: %s" name shown));
                   ]
                 else [])
@@ -374,7 +362,7 @@ let compare ~before ~after package =
     @ List.filter_map
         (fun (path, shown, _) ->
           if List.exists (fun (_, other, _) -> other = shown) old_impls then None
-          else Some (found path (Grows (Printf.sprintf "is new: %s" shown))))
+          else Some (public_change path (Grows (Printf.sprintf "is new: %s" shown))))
         new_impls
   in
   let targets =
@@ -385,12 +373,12 @@ let compare ~before ~after package =
   in
   (definitions @ added @ impl_changes, targets)
 
-let breaks found =
+let breaks changes =
   List.filter_map
     (fun { path; change } -> match change with Breaks what -> Some (path, what) | Grows _ -> None)
-    found
+    changes
 
-let grows found =
+let grows changes =
   List.filter_map
     (fun { path; change } -> match change with Grows what -> Some (path, what) | Breaks _ -> None)
-    found
+    changes

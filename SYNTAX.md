@@ -101,7 +101,7 @@ or name resolution gives them their meaning where they appear:
 | `result` | Inside `ensures` and `cost`, where it names the return value |
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
 | `identical` | Inside specifications: `identical(a, b)`, whether two values of one type are the same value |
-| `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the clauses of a `for` loop, where they name what was handed out so far and whether the method ran to its end |
+| `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the clauses of a `for` loop, where they name what was yielded so far and whether the method ran to its end |
 
 A parameter cannot be named `result`, and a function cannot be named `old`,
 because inside specifications those names mean the return value and a value as
@@ -354,7 +354,7 @@ Values are built like this:
 ```truss
 let origin = Point(x: 0.0, y: 0.0)
 let unit_circle = Shape.Circle(center: origin, radius: 1.0)
-let found = Some(3)
+let answer = Some(3)
 let quiet = DiscardLog()
 ```
 
@@ -1203,9 +1203,9 @@ takes what a `mut` place holds and leaves something else there:
 
 ```truss
 fn Option[Value].take(mut self) -> Option[Value] {
-  let taken = own self
+  let previous = own self
   self = None
-  taken
+  previous
 }
 ```
 
@@ -1246,7 +1246,7 @@ checks this within each function, with no annotations.
   parameters themselves, never of its own locals, as `items[1..4]`,
   `split_at`, `split_first`, and `text.trim()` do. The caller treats the
   result as viewing everything its read-only and view arguments view: after
-  `let chosen = found.unwrap_or(default: backup[..])`, `backup` is frozen
+  `let chosen = cached.unwrap_or(default: backup[..])`, `backup` is frozen
   while `chosen` is in use.
 - A function keeps only the views that it is given. To keep a view of an
   argument in a `mut` parameter or in `mut self`, take the argument as a
@@ -1524,7 +1524,7 @@ A yielding method gives out parts one after another:
 
 #### Contracts of lending and yielding methods
 
-A lending or yielding method's `ensures` says what it hands out and what it
+A lending or yielding method's `ensures` says what it yields and what it
 leaves behind:
 
 ```truss
@@ -1551,12 +1551,12 @@ fn Grid.cell(mut self, position: Position) lends mut Cell
 ```
 
 - **A clause that mentions `result` holds at each `yield`,** where `result`
-  is the part being handed out. The caller's statement, or the loop's body,
+  is the part being yielded. The caller's statement, or the loop's body,
   may rely on it.
 - **Every other clause holds wherever the method ends:** after its last
   statement, and, for a yielding method, at any `yield` where the loop
   stops.
-- **`yielded` is a `Sequence` of the parts handed out so far,** each as the
+- **`yielded` is a `Sequence` of the parts yielded so far,** each as the
   caller left it. A lending method's `yielded` holds its one part once the
   caller is done with it, which is how `Grid.cell` says that the cell the
   caller changed is the one in the grid afterward.
@@ -2022,6 +2022,16 @@ flags |= Permission.write
   update in place.
 - `truss fmt` writes `x = x + y` as `x += y`.
 
+#### Evaluation order of assignments
+
+- `target = value` evaluates `value` first, then the index keys of `target`,
+  and then stores. In `items[next()] = compute()`, `compute()` runs before
+  `next()`.
+- `target += operand` evaluates `operand` first, then the index keys of
+  `target`, once. Then the operator takes the old value of `target`, and the
+  result is stored. In `totals[region()] += parse(text)?`, a failed `parse`
+  returns before `region()` runs, and `totals` is left as it was.
+
 #### Integer division and shifts
 
 - `/` on integers rounds toward zero, and `%` gives a result with the sign of
@@ -2210,7 +2220,7 @@ impl FileRead for FilesWithin
   uses FileRead
 {
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
-    FileRead.read(self.root.join_within(file)?)
+    FileRead.read(self.root.join_confined(file)?)
   }
 }
 
@@ -2374,7 +2384,7 @@ A time limit is a function. Each of its two branches returns from the
 function when it finishes, which cancels the other:
 
 ```truss
-public fn within[Output, capability Granted](
+public fn with_timeout[Output, capability Granted](
   limit: Duration,
   work: (fn() -> Output uses Granted),
 ) -> Option[Output]
@@ -2526,7 +2536,7 @@ sleeping task. So a test of a time limit takes no real time:
 test "a reply that never arrives ends at the time limit" {
   let world = simulation::World.new(seed: 3)
   provide world {
-    let reply = tasks::within(Duration.seconds(5), work: fn() { wait_for_reply() })
+    let reply = tasks::with_timeout(Duration.seconds(5), work: fn() { wait_for_reply() })
     assert reply is None
     assert Clock.monotonic() == Duration.seconds(5)
     assert world.output() == ""
@@ -2707,7 +2717,7 @@ impl FromTemplate for Regex {
   type Part = RegexPart
 
   fn from_template(template: Template[RegexPart]) -> Regex
-    requires is_valid_pattern(template.literals)
+    requires is_valid_template(template.literals)
   {
     todo
   }
@@ -2715,7 +2725,7 @@ impl FromTemplate for Regex {
 ```
 
 The literal text is known when the code is compiled, so the compiler proves the
-`requires` by running `is_valid_pattern` on it. A check reads each piece's
+`requires` by running `is_valid_template` on it. A check reads each piece's
 text with `literal.text()`, a `StringSlice`, and its bytes with
 `text.byte(index)`. `Regex"[a-z"` is a compile
 error, and `Regex"[a-z]+"` needs no `?`, because building it cannot fail. Text

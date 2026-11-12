@@ -107,9 +107,9 @@ fn total(count: Int64) -> Int64
 
 test "a cursor that outlives the block it was made in" {
   var cursor = provide Table(values: [1, 2, 4]) {
-    var made = readings(4)
-    assert mut made.next() == Some(7)
-    own made
+    var built = readings(4)
+    assert mut built.next() == Some(7)
+    own built
   }
   provide Table(values: [100]) {
     assert mut cursor.next() == Some(101)
@@ -1003,18 +1003,18 @@ test "defaults" {
 }
 |};
   passes "names an is test binds are used where it holds"
-    {|fn describe(found: Option[String], limit: USize) -> String {
-  if found is Some(text) && text.length() > limit {
+    {|fn describe(present: Option[String], limit: USize) -> String {
+  if present is Some(text) && text.length() > limit {
     text.copy()
-  } else if !(found is Some(_)) || limit == 0 {
+  } else if !(present is Some(_)) || limit == 0 {
     "nothing"
   } else {
     "short"
   }
 }
 
-fn longer(found: Option[String]) -> Bool {
-  found is Some(text) && text.length() > 3
+fn longer(present: Option[String]) -> Bool {
+  present is Some(text) && text.length() > 3
 }
 
 test "is" {
@@ -1027,8 +1027,8 @@ test "is" {
 }
 |};
   passes "a guard that fails leaves the value for the next arm"
-    {|fn classify(found: Option[String]) -> String {
-  match found {
+    {|fn classify(present: Option[String]) -> String {
+  match present {
     Some(text) if text.length() > 3 => text.copy()
     Some(text) => "short ${text}"
     None => "none"

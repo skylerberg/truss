@@ -178,8 +178,6 @@ let map_arguments f = function
   | Is (constructor, argument) -> Is (constructor, f argument)
   | (Symbol _ | Integer _ | Boolean _ | Bits _ | Forall _ | Exists _) as term -> term
 
-(* Building terms *)
-
 let int value = Integer (Z.of_int value)
 
 let ( &&& ) left right =
@@ -270,8 +268,6 @@ let rec replace ~from ~into term =
     | Exists (bound, body) ->
         if mentions (List.map fst bound) from then term else Exists (bound, replace ~from ~into body)
 
-(* Triggers *)
-
 (* The terms that make the solver use a quantified statement, as Dafny
    chooses them: sets of applications of the query's own functions that
    together name every bound variable, each variable as an argument and not
@@ -305,24 +301,24 @@ let triggers ~triggering variables body =
   in
   walk body;
   let applications = List.rev !applications in
-  let covers term = List.filter (fun name -> mentions [ name ] term) names in
-  let rec within inner term =
+  let bound_names_in term = List.filter (fun name -> mentions [ name ] term) names in
+  let rec is_proper_subterm inner term =
     inner <> term
     &&
     match term with
     | Apply (_, arguments) | Operation (_, arguments) ->
-        List.exists (fun argument -> argument = inner || within inner argument) arguments
-    | Is (_, argument) -> argument = inner || within inner argument
+        List.exists (fun argument -> argument = inner || is_proper_subterm inner argument) arguments
+    | Is (_, argument) -> argument = inner || is_proper_subterm inner argument
     | _ -> false
   in
   (* Whether [pattern] matches [term], binding its bound variables. *)
   let rec matching bindings pattern term =
     match (pattern, bindings) with
     | _, None -> None
-    | Symbol name, Some found when List.mem name names -> (
-        match List.assoc_opt name found with
+    | Symbol name, Some matched when List.mem name names -> (
+        match List.assoc_opt name matched with
         | Some bound -> if bound = term then bindings else None
-        | None -> Some ((name, term) :: found))
+        | None -> Some ((name, term) :: matched))
     | Apply (name, arguments), _ -> (
         match term with
         | Apply (other, others) when name = other && List.length arguments = List.length others ->
@@ -346,7 +342,8 @@ let triggers ~triggering variables body =
     | term -> term
   in
   match conclusion body with
-  | Operation ("=", [ (Apply _ as defined); _ ]) when candidate defined && covers defined = names ->
+  | Operation ("=", [ (Apply _ as defined); _ ])
+    when candidate defined && bound_names_in defined = names ->
       [ [ defined ] ]
   | _ -> (
       let candidates = List.filter candidate applications in
@@ -355,12 +352,13 @@ let triggers ~triggering variables body =
           (fun term ->
             not
               (List.exists
-                 (fun inner -> within inner term && covers inner = covers term)
+                 (fun inner ->
+                   is_proper_subterm inner term && bound_names_in inner = bound_names_in term)
                  candidates))
           candidates
       in
-      let chosen candidates =
-        match List.filter (fun term -> covers term = names) candidates with
+      let covering_triggers candidates =
+        match List.filter (fun term -> bound_names_in term = names) candidates with
         | _ :: _ as whole -> List.map (fun term -> [ term ]) whole
         | [] ->
             List.concat_map
@@ -370,16 +368,17 @@ let triggers ~triggering variables body =
                     if
                       first < second
                       && List.for_all
-                           (fun name -> List.mem name (covers first @ covers second))
+                           (fun name ->
+                             List.mem name (bound_names_in first @ bound_names_in second))
                            names
                     then Some [ first; second ]
                     else None)
                   candidates)
               candidates
       in
-      match chosen (List.filter (fun term -> not (loops term)) candidates) with
-      | [] -> chosen candidates
-      | found -> found)
+      match covering_triggers (List.filter (fun term -> not (loops term)) candidates) with
+      | [] -> covering_triggers candidates
+      | triggers -> triggers)
 
 (* The functions a trigger may apply: a declared function or a datatype's
    constructor or selector. *)
@@ -410,19 +409,17 @@ let untriggered query =
   in
   List.exists without query.facts
 
-(* Pruning *)
-
 (* The declared symbols a term mentions. A datatype's constructors and
    selectors are shared vocabulary, like SMT-LIB's own operations, so they
    connect nothing. *)
 let declared_symbols declared term =
-  let found = ref [] in
+  let symbols = ref [] in
   let rec walk bound = function
     | Symbol name ->
-        if (not (List.mem name bound)) && Hashtbl.mem declared name then found := name :: !found
+        if (not (List.mem name bound)) && Hashtbl.mem declared name then symbols := name :: !symbols
     | Integer _ | Boolean _ | Bits _ -> ()
     | Apply (name, arguments) ->
-        if Hashtbl.mem declared name then found := name :: !found;
+        if Hashtbl.mem declared name then symbols := name :: !symbols;
         List.iter (walk bound) arguments
     | Operation (_, arguments) -> List.iter (walk bound) arguments
     | Is (_, argument) -> walk bound argument
@@ -430,7 +427,7 @@ let declared_symbols declared term =
         walk (List.map fst variables @ bound) body
   in
   walk [] term;
-  !found
+  !symbols
 
 let prune query =
   let declared = Hashtbl.create 64 in
@@ -466,22 +463,20 @@ let prune query =
            (symbols, needs fact symbols))
          query.facts)
   in
-  let kept = Array.make (Array.length facts) false in
+  let is_needed = Array.make (Array.length facts) false in
   let changed = ref true in
   while !changed do
     changed := false;
     Array.iteri
       (fun index (symbols, ready) ->
-        if (not kept.(index)) && ready () then begin
-          kept.(index) <- true;
+        if (not is_needed.(index)) && ready () then begin
+          is_needed.(index) <- true;
           reach symbols;
           changed := true
         end)
       facts
   done;
-  { query with facts = List.filteri (fun index _ -> kept.(index)) query.facts }
-
-(* Canonical text *)
+  { query with facts = List.filteri (fun index _ -> is_needed.(index)) query.facts }
 
 (* Numbering: every declared symbol and every sort is named by the order
    of its first appearance in a walk of the facts, in order, and then the
@@ -496,9 +491,9 @@ type numbering = {
       (** Each constructor and selector: its datatype and its canonical suffix. *)
   triggering : symbol -> bool;
   symbol_names : (symbol, string) Hashtbl.t;
-  mutable symbol_order : symbol list;  (** Reversed. *)
+  symbol_order : symbol Dynarray.t;
   sort_names : (string, string) Hashtbl.t;
-  mutable sort_order : string list;  (** Reversed. *)
+  sort_order : string Dynarray.t;
 }
 
 let rec sort_name numbering = function
@@ -511,7 +506,7 @@ let rec sort_name numbering = function
       | None ->
           let canonical = Printf.sprintf "S%d" (Hashtbl.length numbering.sort_names) in
           Hashtbl.replace numbering.sort_names name canonical;
-          numbering.sort_order <- name :: numbering.sort_order;
+          Dynarray.add_last numbering.sort_order name;
           (* A datatype's fields' sorts are numbered with it. *)
           (match Hashtbl.find_opt numbering.datatypes name with
           | Some constructors ->
@@ -531,7 +526,7 @@ let symbol_name numbering name =
       | Some declaration ->
           let canonical = Printf.sprintf "x%d" (Hashtbl.length numbering.symbol_names) in
           Hashtbl.replace numbering.symbol_names name canonical;
-          numbering.symbol_order <- name :: numbering.symbol_order;
+          Dynarray.add_last numbering.symbol_order name;
           (* The sorts a declaration mentions are numbered with it. *)
           (match declaration with
           | Constant (_, sort) -> ignore (sort_name numbering sort)
@@ -650,9 +645,9 @@ let numbering query =
     member_of;
     triggering = triggering_in query.declarations;
     symbol_names = Hashtbl.create 64;
-    symbol_order = [];
+    symbol_order = Dynarray.create ();
     sort_names = Hashtbl.create 8;
-    sort_order = [];
+    sort_order = Dynarray.create ();
   }
 
 let render query =
@@ -666,7 +661,7 @@ let render query =
   in
   let assertions = List.map assertion query.facts @ [ assertion (not_ query.goal) ] in
   let declarations =
-    List.rev_map
+    List.map
       (fun name ->
         let canonical = Hashtbl.find numbering.symbol_names name in
         match Hashtbl.find numbering.declared name with
@@ -677,12 +672,12 @@ let render query =
               (String.concat " " (List.map (sort_name numbering) inputs))
               (sort_name numbering output)
         | Datatype _ -> "")
-      numbering.symbol_order
+      (Dynarray.to_list numbering.symbol_order)
   in
   (* Every datatype goes in one block, so that datatypes may refer to each
      other; every other sort is declared on its own. Sorts are listed only
      once the walk above has numbered them all. *)
-  let sort_order = List.rev numbering.sort_order in
+  let sort_order = Dynarray.to_list numbering.sort_order in
   let sorts =
     List.filter_map
       (fun name ->
@@ -751,20 +746,22 @@ let term_text query term =
 
 let symbols query =
   let _, numbering = render query in
-  List.rev_map (fun name -> (name, Hashtbl.find numbering.symbol_names name)) numbering.symbol_order
+  List.map
+    (fun name -> (name, Hashtbl.find numbering.symbol_names name))
+    (Dynarray.to_list numbering.symbol_order)
 
 let members query =
   let _, numbering = render query in
   Hashtbl.fold
-    (fun datatype constructors found ->
+    (fun datatype constructors entries ->
       match Hashtbl.find_opt numbering.sort_names datatype with
       | Some sort ->
           List.mapi
             (fun index (constructor, fields) ->
               (Printf.sprintf "%s_c%d" sort index, (constructor, List.map fst fields)))
             constructors
-          @ found
-      | None -> found)
+          @ entries
+      | None -> entries)
     numbering.datatypes []
   |> List.sort compare
 

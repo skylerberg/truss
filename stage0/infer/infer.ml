@@ -69,29 +69,11 @@ let callers_read_body database ~same_package (path : Path.t) =
          Types.body_is_definition signature && (same_package || signature.transparent)
      | None -> true
 
-(* A form without the body of its function, with the counts of the nodes
-   that are left. *)
+(* A form without the body of its function. *)
 let without_body (form : Core.t) : Core.t =
   match form.definition with
   | Function { parameters; contract; body = Some _ } ->
-      let definition : Core.definition = Function { parameters; contract; body = None } in
-      let nodes = ref 0 and synthetic_locals = ref 0 in
-      let node id = nodes := max !nodes (id + 1) in
-      Core_walk.definition
-        {
-          Core_walk.ignore_all with
-          expression = (fun node_ -> node node_.id);
-          statement = (fun node_ -> node node_.id);
-          pattern =
-            (fun node_ ->
-              node node_.id;
-              match node_.kind with
-              | Bind { local = Synthetic number; _ } ->
-                  synthetic_locals := max !synthetic_locals (number + 1)
-              | _ -> ());
-        }
-        definition;
-      { definition; node_count = !nodes; synthetic_local_count = !synthetic_locals }
+      { definition = Function { parameters; contract; body = None } }
   | _ -> form
 
 let specification =
@@ -119,14 +101,14 @@ let exported_specification_of_path =
   Query.query ~name:"exported_specification_of_path" ~phase:Phases.bodies ~show:Path.show
     (of_path ~written:exported_specification)
 
-let evidence =
-  Query.query ~name:"evidence" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+let evidence_packages =
+  Query.query ~name:"evidence_packages" ~phase:Phases.bodies ~show:Resolve.Names.show_key
     (fun database key ->
       match Query.demand database type_check_result key with
       | Some (result : type_check_result) -> result.evidence
       | None -> [])
 
-let clean database key =
+let clean_tables database key =
   match
     ( Query.demand database Resolve.Names.definition key,
       Query.demand database Resolve.resolved key,
@@ -143,4 +125,4 @@ let clean database key =
       Some tables
   | _ -> None
 
-let is_clean database key = Option.is_some (clean database key)
+let is_clean database key = Option.is_some (clean_tables database key)

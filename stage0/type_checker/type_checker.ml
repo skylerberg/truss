@@ -16,15 +16,13 @@ let stages =
   ]
 
 let through last database module_ =
-  let rec go = function
+  let rec stage_diagnostics = function
     | [] -> []
     | (stage, diagnostics) :: rest ->
-        diagnostics database module_ @ if stage = last then [] else go rest
+        diagnostics database module_ @ if stage = last then [] else stage_diagnostics rest
   in
-  go stages
+  stage_diagnostics stages
 
-(* Every diagnostic of a file, from the lexer to the package checks, in the
-   file's offsets and in order. *)
 let diagnostics database module_ =
   let file = Query.demand database Workspace.file module_ in
   List.sort_uniq

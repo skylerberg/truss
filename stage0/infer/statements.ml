@@ -9,6 +9,8 @@ module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 open Hooks
 open Lookups
 open Pattern_typing
@@ -17,19 +19,19 @@ open Operators
 (* A block used as a value. Its last expression is checked against the
    expected type of the block, as part of the enclosing statement. *)
 let rec block_value state env ?expected (written : block) =
-  let rec go = function
+  let rec statements_value = function
     | [] -> T.unit
     | [ (last : statement) ] -> (
         match last.kind with
         | Expression value -> expression state env ?expected value
         | _ ->
             ignore (statement state env last ~last:true);
-            if statement_never state last then T.Never else T.unit)
+            if statement_diverges state last then T.Never else T.unit)
     | (first : statement) :: rest ->
         ignore (in_statement state env first.span (fun () -> statement state env first ~last:false));
-        go rest
+        statements_value rest
   in
-  go written.statements
+  statements_value written.statements
 
 (* Checks a statement. A statement that is not the last of its block must
    have type [Unit] or [Never]: a value of any other type would be unused. *)
@@ -54,7 +56,7 @@ and statement state env (written : statement) ~last : unit =
                        "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
                        (T.show resolved));
                 true)
-  | Let { mutable_; pattern = written_pattern; annotation; value; else_ } ->
+  | Let { is_var; pattern = written_pattern; annotation; value; else_ } ->
       let type_ =
         match annotation with
         | Some annotation ->
@@ -63,7 +65,7 @@ and statement state env (written : statement) ~last : unit =
             annotated
         | None -> expression state env value
       in
-      if mutable_ then check_owned state env value type_;
+      if is_var then check_owned state env value type_;
       (match else_ with
       | Some block -> (
           let else_type = block_value state env block in
@@ -74,12 +76,12 @@ and statement state env (written : statement) ~last : unit =
                 "The `else` of a `let` must leave the block, with `return`, `break`, `continue`, \
                  or `unreachable`.")
       | None -> ());
-      let mode = if mutable_ then T.Own else if borrowed state value then T.Read else T.Own in
+      let mode = if is_var then T.Own else if borrowed state value then T.Read else T.Own in
       register_statement state written (fun () ->
           let value = Form.operand mode (build_expression state value) in
           let pattern = build_pattern state written_pattern in
           Let { pattern; value; else_ = Option.map (build_block state) else_ });
-      binding_pattern state env written_pattern type_ ~mutable_ ~mode
+      binding_pattern state env written_pattern type_ ~is_var ~mode
   | Assignment { target; operator = Assign; value }
     when assigns_through_index state env written target value ->
       ()
@@ -140,7 +142,7 @@ and statement state env (written : statement) ~last : unit =
                   state fake ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
               if not (unify state result target_type) then
-                mismatch state value.span ~expected:target_type ~found:result
+                mismatch state value.span ~expected:target_type ~actual:result
           | Shift_left | Shift_right ->
               (match resolve state right_type with
               | T.Literal (Integer_literal, _) -> ignore (unify state right_type (T.builtin USize))
@@ -163,7 +165,7 @@ and statement state env (written : statement) ~last : unit =
                       true)
           | _ ->
               if not (unify state target_type right_type) then
-                mismatch state value.span ~expected:target_type ~found:right_type;
+                mismatch state value.span ~expected:target_type ~actual:right_type;
               defer state (fun () ->
                   match normalize state target_type with
                   | T.Literal _ | T.Variable _ -> false
@@ -192,7 +194,7 @@ and statement state env (written : statement) ~last : unit =
              | Some type_ -> record state iterable type_
              | None -> ());
           if mode = T.Mut then mutate state env ~by:Mut_mark inner;
-          binding_pattern state env written_pattern element ~mutable_:false ~mode:variable_mode);
+          binding_pattern state env written_pattern element ~is_var:false ~mode:variable_mode);
       List.iter
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
         clauses;
@@ -261,8 +263,8 @@ and statement state env (written : statement) ~last : unit =
           in
           Hashtbl.replace state.yielded inner.id
             (match env.output with Some (Yields (Mut, _) | Lends (Mut, _)) -> Mut | _ -> Read);
-          let found = expression state env ~expected:element inner in
-          if inner != value then record state value found;
+          let actual = expression state env ~expected:element inner in
+          if inner != value then record state value actual;
           check_lent_value state env inner;
           (* A part that is yielded or lent [mut] is mutated, so the index
              expressions in it use the [mut self] version of [at]. *)
@@ -276,7 +278,7 @@ and statement state env (written : statement) ~last : unit =
                 | _ -> T.Read
               in
               Yield { mode; part = Form.operand mode (build_expression state inner) });
-          coerce state env inner ~found ~expected:element
+          coerce state env inner ~actual ~expected:element
       | _ ->
           ignore (expression state env value);
           report state Wrong_yield written.span
@@ -298,17 +300,17 @@ and assigns_through_index state env (written : statement) (target : expression) 
         ( implements state base_type trait,
           Members.trait_method state.database trait.trait "assign" Mut )
       with
-      | Some ((Impls.From_impl _ | From_bound | From_any) as found), Some method_ ->
+      | Some ((Impls.From_impl _ | From_bound | From_any) as evidence_source), Some method_ ->
           let index = trait_reference (Well_known.path Index) in
           let parameter name type_ : T.parameter_info =
             { name; mode = Own; type_; has_default = false }
           in
           mutate state env ~by:Assignment base;
           ignore
-            (Calls.argument_value state env key
+            (Calls.check_argument state env key
                (parameter "key" (associated state base_type index "Key" ~at:key.span)));
           ignore
-            (Calls.argument_value state env value
+            (Calls.check_argument state env value
                (parameter "value" (associated state base_type index "Output" ~at:value.span)));
           (* The call is recorded for the statement, which has no
              expression of its own to record it for. *)
@@ -316,8 +318,8 @@ and assigns_through_index state env (written : statement) (target : expression) 
             { kind = Expression_error; span = written.span; id = written.id }
           in
           record state call T.unit;
-          let argument (given : expression) position mode : C.argument =
-            { expression = given.id; parameter_index = position; mode; mark = None }
+          let argument (argument_expression : expression) position mode : C.argument =
+            { expression = argument_expression.id; parameter_index = position; mode; mark = None }
           in
           state.tables.calls.(written.id) <-
             Some
@@ -330,7 +332,7 @@ and assigns_through_index state env (written : statement) (target : expression) 
                       receiver = Mut;
                       self_type = base_type;
                       type_arguments = [];
-                      evidence = evidence_of found;
+                      evidence = evidence_of evidence_source;
                     };
                 arguments = [ argument base 0 Mut; argument key 1 Own; argument value 2 Own ];
                 omitted_defaults = [];

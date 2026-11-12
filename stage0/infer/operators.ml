@@ -9,6 +9,7 @@ module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 open State
+open Instantiation
 open Hooks
 open Lookups
 open Pattern_typing
@@ -23,8 +24,8 @@ let rec try_ state env (value : expression) (inner : expression) =
   register_expression state value (fun () ->
       match output with
       | Some output ->
-          Form.try_ state value inner ~output:(final state output)
-            ~leaves:(tasks_exited_by Return_exit env.enclosing)
+          Form.try_ state value inner ~output:(final_type state output)
+            ~exited_tasks:(tasks_exited_by Return_exit env.enclosing)
       | None -> bug "`?` where nothing is returned");
   match (inner_type, output) with
   | ( T.Named { path; arguments = [ T.Type ok; T.Type error ] },
@@ -94,7 +95,7 @@ and with_ state env (value : expression) (base : expression) updates =
                       match Hashtbl.find_opt state.locals id with
                       | Some local ->
                           if not (unify state type_ local.type_) then
-                            mismatch state first.span ~expected:type_ ~found:local.type_
+                            mismatch state first.span ~expected:type_ ~actual:local.type_
                       | None -> ())
                   | _ -> ()))
           | None -> Option.iter (fun new_value -> ignore (expression state env new_value)) new_value
@@ -335,7 +336,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
           Form.operator state value (Form.operation_of operator) [ left; right ]);
       literal_operands state ~left:left_type ~right:right_type;
       if not (unify state left_type right_type) then
-        mismatch state right.span ~expected:left_type ~found:right_type;
+        mismatch state right.span ~expected:left_type ~actual:right_type;
       defer state (fun () ->
           match normalize state left_type with
           | T.Literal _ | T.Variable _ -> false
@@ -555,7 +556,7 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
          "Integer types never convert implicitly: this compares or combines `%s` with `%s`."
          (T.show left_type) (T.show right_type))
   end
-  else mismatched state right.span ~expected:left_type ~found:right_type
+  else mismatched state right.span ~expected:left_type ~actual:right_type
 
 (* [any value] *)
 and any_ state env ?expected (value : expression) (inner : expression) =
@@ -565,8 +566,8 @@ and any_ state env ?expected (value : expression) (inner : expression) =
       register_expression state value (fun () ->
           let inner = build_expression state inner in
           match (Form.type_of state value, implements state inner.type_ trait) with
-          | T.Any trait, Some found ->
-              To_any { value = inner; trait; evidence = Form.evidence (evidence_of found) }
+          | T.Any trait, Some implementation ->
+              To_any { value = inner; trait; evidence = Form.evidence (evidence_of implementation) }
           | _ -> bug "`any` of a value whose type does not implement the trait");
       require state ~at:value.span inner_type trait ~unmet:(fun inner_type other ->
           report state No_impl value.span
@@ -574,9 +575,9 @@ and any_ state env ?expected (value : expression) (inner : expression) =
             | None ->
                 Printf.sprintf "`%s` does not implement `%s`." (T.show inner_type)
                   (T.show_trait trait)
-            | Some (name, given) ->
+            | Some (name, associated_type) ->
                 Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`." (T.show any_type)
-                  name (T.show inner_type) (show state given)));
+                  name (T.show inner_type) (show state associated_type)));
       (* Code that holds the [any] value calls its methods without the
          capabilities of the type that it hides, so that type's associated
          capability sets must be empty. Otherwise a method would use a

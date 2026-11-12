@@ -6,8 +6,6 @@ open Lowering
 open Targets
 open Lir_builder
 
-(* Derived implementations *)
-
 (* The fields of a variant, or of a record, with their ground types. *)
 let shape_fields st ty variant =
   match (Monomorphic.shape st.context.monomorphic ty, variant) with
@@ -37,7 +35,7 @@ let each_variant st ty place f =
         List.mapi
           (fun index name ->
             let case = block st.b in
-            aside st.b case (fun () ->
+            in_block st.b case (fun () ->
                 f (Some name) index;
                 finish st.b (Goto after));
             (name, case))
@@ -62,12 +60,12 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
   let ground_parameters =
     List.map (fun (mode, t) -> (mode, ground st t)) (interface_parameters signature)
   in
-  let taken =
+  let parameter_places =
     List.map
       (fun (mode, t) -> parameter st ~owned:(mode = T.Own) (Monomorphic.mode mode) t)
       ground_parameters
   in
-  let places = List.map snd taken in
+  let places = List.map snd parameter_places in
   let result_ty =
     match signature.output with Returns t -> ground st t | _ -> bug "a derived method that yields"
   in
@@ -203,7 +201,11 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
           in
           emit b (Assign (result_place, Build { ty; variant = None; fields })))
   | _ -> bug "%s cannot be derived" (Path.show path));
-  { key; main = finish_function st ~first:[] ~rest:(List.filter_map fst taken) (); nested = [||] }
+  {
+    key;
+    main = finish_function st ~first:[] ~rest:(List.filter_map fst parameter_places) ();
+    nested = [||];
+  }
 
 (* Capabilities: entries, tables, and the real implementations *)
 
