@@ -102,10 +102,10 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
     | Projection { base; trait = reference; _ } ->
         type_ what base;
         trait what reference
-    | Function { inputs; output; uses; _ } -> (
+    | Function { inputs; output; uses; _ } ->
         List.iter (fun (_, input) -> type_ what input) inputs;
         capabilities what uses;
-        match output with Returns given | Yields (_, given) | Lends (_, given) -> type_ what given)
+        type_ what (Types.result_type output)
     | Any reference -> trait what reference
     | Never | Integer -> ()
     | Variable _ | Literal _ | Hole | Error _ ->

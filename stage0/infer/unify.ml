@@ -123,21 +123,10 @@ and zonk_function unifier (function_type : T.function_type) =
     uses = zonk_capabilities unifier function_type.uses;
   }
 
-let rec occurs unifier index (type_ : T.ty) =
-  match resolve unifier type_ with
-  | Variable other | Literal (_, other) -> other = index
-  | Named { arguments; _ } | Cursor { arguments; _ } ->
-      List.exists
-        (function
-          | T.Type type_ -> occurs unifier index type_ | T.Value _ | T.Capabilities _ -> false)
-        arguments
-  | Function { inputs; output; _ } -> (
-      List.exists (fun (_, type_) -> occurs unifier index type_) inputs
-      ||
-      match output with
-      | Returns type_ | Yields (_, type_) | Lends (_, type_) -> occurs unifier index type_)
-  | Projection { base; _ } -> occurs unifier index base
-  | _ -> false
+let occurs unifier index =
+  T.exists ~resolve:(resolve unifier) (function
+    | Variable other | Literal (_, other) -> other = index
+    | _ -> false)
 
 let literal_fits (kind : T.literal_kind) (type_ : T.ty) =
   match kind with
@@ -169,9 +158,9 @@ let unknowns unifier (type_ : T.ty) =
     | Projection { base; trait = reference; _ } ->
         go base;
         trait reference
-    | Function { inputs; output; _ } -> (
+    | Function { inputs; output; _ } ->
         List.iter (fun (_, type_) -> go type_) inputs;
-        match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> go type_)
+        go (T.result_type output)
     | Any reference -> trait reference
     | Parameter _ | Never | Integer | Hole | Error _ -> ()
   and argument = function

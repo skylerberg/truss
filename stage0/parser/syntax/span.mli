@@ -4,3 +4,6 @@
 type t = private { start : int; stop : int }
 
 val make : int -> int -> t
+
+val to_source : t -> Source.span
+(** The same offsets as a {!Source.span}. *)

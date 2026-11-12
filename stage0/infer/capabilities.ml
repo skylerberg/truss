@@ -47,7 +47,7 @@ type checking = {
 let report checking ?(fixes = []) code (origin : Core.origin) message =
   let span = checking.spans.(origin) in
   checking.state.diagnostics <-
-    Diagnostic.make ~fixes ~code:(Capabilities code) (Source.span span.start span.stop) message
+    Diagnostic.make ~fixes ~code:(Capabilities code) (Syntax.Span.to_source span) message
     :: checking.state.diagnostics
 
 let union left right = List.sort_uniq compare (left @ right)
@@ -488,7 +488,7 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
   | T.Function { uses; inputs; output; _ } ->
       uses <> []
       || List.exists (fun (_, input) -> inside input) inputs
-      || inside (match output with Returns given | Yields (_, given) | Lends (_, given) -> given)
+      || inside (T.result_type output)
   | T.Any trait -> trait_uses trait
   | T.Parameter parameter -> List.exists trait_uses (bounds parameter)
   | T.Cursor { arguments = given; _ } -> arguments given
@@ -576,14 +576,7 @@ let check_monitor_callbacks checking implementations =
                 List.iter
                   (fun (method_ : T.trait_method) ->
                     let signature = method_.method_signature in
-                    let bounds (parameter : T.parameter) =
-                      List.concat_map
-                        (fun (generic : T.generic) ->
-                          match generic.kind with
-                          | Type_generic bounds when generic.generic = parameter -> bounds
-                          | _ -> [])
-                        signature.generics
-                    in
+                    let bounds = T.bounds_of signature.generics in
                     match
                       List.find_opt
                         (fun (parameter : T.parameter_info) ->

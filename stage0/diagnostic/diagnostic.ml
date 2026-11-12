@@ -536,6 +536,52 @@ let replace span replacement = { span; replacement }
 let insert offset replacement = { span = Source.zero_width offset; replacement }
 let delete span = { span; replacement = "" }
 
+(* Suggestions *)
+
+(* The optimal string alignment distance: insertions, deletions,
+   substitutions, and swaps of two neighboring letters, the usual typos,
+   each count one. *)
+let edit_distance left right =
+  let rows = String.length left + 1 and columns = String.length right + 1 in
+  let table = Array.make_matrix rows columns 0 in
+  for i = 0 to rows - 1 do
+    table.(i).(0) <- i
+  done;
+  for j = 0 to columns - 1 do
+    table.(0).(j) <- j
+  done;
+  for i = 1 to rows - 1 do
+    for j = 1 to columns - 1 do
+      let cost = if left.[i - 1] = right.[j - 1] then 0 else 1 in
+      let best =
+        min (min (table.(i - 1).(j) + 1) (table.(i).(j - 1) + 1)) (table.(i - 1).(j - 1) + cost)
+      in
+      table.(i).(j) <-
+        (if i > 1 && j > 1 && left.[i - 1] = right.[j - 2] && left.[i - 2] = right.[j - 1] then
+           min best (table.(i - 2).(j - 2) + 1)
+         else best)
+    done
+  done;
+  table.(rows - 1).(columns - 1)
+
+(* The visible name closest to [text], if one is near enough to be a typo:
+   at most a third of the name's letters away, and at least one. *)
+let closest text candidates =
+  let limit = max 1 (String.length text / 3) in
+  let best =
+    List.fold_left
+      (fun best candidate ->
+        let distance = edit_distance text candidate in
+        if candidate = text || distance > limit then best
+        else
+          match best with
+          | Some (_, best_distance) when best_distance <= distance -> best
+          | _ -> Some (candidate, distance))
+      None
+      (List.sort_uniq compare candidates)
+  in
+  Option.map fst best
+
 let move offset diagnostic =
   let move_span (span : span) = Source.span (span.start + offset) (span.stop + offset) in
   {
