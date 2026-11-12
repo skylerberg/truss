@@ -1,0 +1,238 @@
+use standard::core
+use standard::intrinsic
+
+public type Value =
+  | Boolean(value: Bool)
+  | Integer(bytes: List[UInt8])
+  | BitString(unused_bits: UInt8, bytes: List[UInt8])
+  | OctetString(bytes: List[UInt8])
+  | Null
+  | ObjectIdentifier(bytes: List[UInt8])
+  | Text(tag: UInt8, bytes: List[UInt8])
+  | Time(tag: UInt8, bytes: List[UInt8])
+  | Sequence(items: List[Value])
+  | Set(items: List[Value])
+  | Tagged(number: UInt8, constructed: Bool, bytes: List[UInt8])
+  | Other(tag: UInt8, bytes: List[UInt8])
+  derives Equal
+
+public type Error(offset: USize)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write("malformed DER at byte ")
+    self.offset.display(mut output)
+  }
+}
+
+type Header(tag: UInt8, start: USize, end: USize)
+
+fn read_header(bytes: Slice[UInt8], at: USize) -> Result[Header, Error]
+  ensures !(result is Ok(header) && (header.start > header.end || header.end > bytes.length()))
+{
+  if at >= bytes.length() || bytes.length() - at < 2 {
+    return Err(Error(offset: at))
+  }
+  let tag = bytes[at]
+  if (tag & 31) == 31 {
+    return Err(Error(offset: at))
+  }
+  let first = bytes[at + 1]
+  var length: USize = 0
+  var start = at + 2
+  if first < 128 {
+    length = intrinsic::convert(first)
+  } else {
+    let count: USize = intrinsic::convert(first & 127)
+    if count == 0 || count > 4 || bytes.length() - start < count {
+      return Err(Error(offset: at))
+    }
+    for index in 0..count {
+      length = (length << 8) | intrinsic::convert[UInt8, USize](bytes[start + index])
+    }
+    if (count == 1 && length < 128) || bytes[start] == 0 {
+      return Err(Error(offset: at))
+    }
+    start += count
+  }
+  if start > bytes.length() || bytes.length() - start < length {
+    return Err(Error(offset: at))
+  }
+  Ok(Header(tag: tag, start: start, end: start + length))
+}
+
+fn read_value(bytes: Slice[UInt8], at: USize, depth: USize) -> Result[core::Pair[Value, USize], Error] {
+  if depth > 64 {
+    return Err(Error(offset: at))
+  }
+  let header = read_header(bytes, at: at)?
+  let content = bytes[header.start..header.end].to_list()
+  let tag = header.tag
+  let value = if tag == 1 {
+    if content.length() != 1 || (content[0] != 0 && content[0] != 255) {
+      return Err(Error(offset: at))
+    }
+    Value.Boolean(value: content[0] == 255)
+  } else if tag == 2 {
+    if content.is_empty() || (content.length() > 1 && ((content[0] == 0 && content[1] < 128) || (content[0] == 255 && content[1] >= 128))) {
+      return Err(Error(offset: at))
+    }
+    Value.Integer(bytes: own content)
+  } else if tag == 3 {
+    if content.is_empty() || content[0] > 7 {
+      return Err(Error(offset: at))
+    }
+    Value.BitString(unused_bits: content[0], bytes: content[1..].to_list())
+  } else if tag == 4 {
+    Value.OctetString(bytes: own content)
+  } else if tag == 5 {
+    if !content.is_empty() {
+      return Err(Error(offset: at))
+    }
+    Value.Null
+  } else if tag == 6 {
+    Value.ObjectIdentifier(bytes: own content)
+  } else if tag == 12 || tag == 19 || tag == 20 || tag == 22 || tag == 30 {
+    Value.Text(tag: tag, bytes: own content)
+  } else if tag == 23 || tag == 24 {
+    Value.Time(tag: tag, bytes: own content)
+  } else if tag == 48 || tag == 49 {
+    var items: List[Value] = []
+    var position = header.start
+    while position < header.end {
+      let read = read_value(bytes[..header.end], at: position, depth: depth + 1)?
+      mut items.push(own read.first)
+      if read.second <= position {
+        return Err(Error(offset: position))
+      }
+      position = read.second
+    }
+    if tag == 48 { Value.Sequence(items: own items) } else { Value.Set(items: own items) }
+  } else if (tag & 192) == 128 {
+    Value.Tagged(number: tag & 31, constructed: (tag & 32) != 0, bytes: own content)
+  } else {
+    Value.Other(tag: tag, bytes: own content)
+  }
+  Ok(core::Pair(first: own value, second: header.end))
+}
+
+public fn parse(bytes: Slice[UInt8]) -> Result[Value, Error] {
+  let read = read_value(bytes, at: 0, depth: 0)?
+  if read.second != bytes.length() {
+    return Err(Error(offset: read.second))
+  }
+  Ok(own read.first)
+}
+
+public fn parse_tagged(value: Value) -> Result[Value, Error] {
+  match value {
+    Tagged(constructed, bytes, ..) => {
+      if !constructed {
+        return Err(Error(offset: 0))
+      }
+      parse(bytes.slice())
+    }
+    _ => Err(Error(offset: 0))
+  }
+}
+
+fn push_length(output: mut List[UInt8], length: USize) {
+  if length < 128 {
+    mut output.push(intrinsic::convert(length))
+    return
+  }
+  var digits: List[UInt8] = []
+  var rest = length
+  while rest > 0 {
+    mut digits.push(intrinsic::convert(rest & 255))
+    rest = rest >> 8
+  }
+  mut output.push(128 | intrinsic::convert[USize, UInt8](digits.length()))
+  mut digits.reverse()
+  mut output.append(own digits)
+}
+
+fn push_element(output: mut List[UInt8], tag: UInt8, content: Slice[UInt8]) {
+  mut output.push(tag)
+  push_length(mut output, length: content.length())
+  mut output.append_slice(content)
+}
+
+public fn encode(value: Value) -> List[UInt8] {
+  var output: List[UInt8] = []
+  match value {
+    Boolean(flag) => push_element(mut output, tag: 1, content: (if flag { [255] } else { [0] }).slice())
+    Integer(bytes) => push_element(mut output, tag: 2, content: bytes.slice())
+    BitString(unused_bits, bytes) => {
+      var content: List[UInt8] = [unused_bits]
+      mut content.append_slice(bytes.slice())
+      push_element(mut output, tag: 3, content: content.slice())
+    }
+    OctetString(bytes) => push_element(mut output, tag: 4, content: bytes.slice())
+    Null => {
+      let empty: List[UInt8] = []
+      push_element(mut output, tag: 5, content: empty.slice())
+    }
+    ObjectIdentifier(bytes) => push_element(mut output, tag: 6, content: bytes.slice())
+    Text(tag, bytes) => push_element(mut output, tag: tag, content: bytes.slice())
+    Time(tag, bytes) => push_element(mut output, tag: tag, content: bytes.slice())
+    Sequence(items) => {
+      var content: List[UInt8] = []
+      for item in items {
+        mut content.append(encode(item))
+      }
+      push_element(mut output, tag: 48, content: content.slice())
+    }
+    Set(items) => {
+      var content: List[UInt8] = []
+      for item in items {
+        mut content.append(encode(item))
+      }
+      push_element(mut output, tag: 49, content: content.slice())
+    }
+    Tagged(number, constructed, bytes) => push_element(mut output, tag: 128 | (if constructed { 32 } else { 0 }) | number, content: bytes.slice())
+    Other(tag, bytes) => push_element(mut output, tag: tag, content: bytes.slice())
+  }
+  output
+}
+
+public fn unsigned_integer(bytes: Slice[UInt8]) -> Value {
+  var start: USize = 0
+  while start < bytes.length() && bytes.length() - start > 1 && bytes[start] == 0
+    invariant start <= bytes.length()
+  {
+    start += 1
+  }
+  var content: List[UInt8] = []
+  if start < bytes.length() && bytes[start] >= 128 {
+    mut content.push(0)
+  }
+  mut content.append_slice(bytes[start..])
+  if content.is_empty() {
+    mut content.push(0)
+  }
+  Value.Integer(bytes: own content)
+}
+
+public fn Value.unsigned_bytes(self, length: USize) -> Option[List[UInt8]] {
+  match self {
+    Integer(bytes) => {
+      var start: USize = 0
+      while start < bytes.length() && bytes[start] == 0
+        invariant start <= bytes.length()
+      {
+        start += 1
+      }
+      let digits = bytes[start..]
+      if digits.length() > length || (bytes.length() > 0 && bytes[0] >= 128) {
+        return None
+      }
+      var padded: List[UInt8] = List.filled(0, count: length - digits.length())
+      mut padded.append_slice(digits)
+      Some(own padded)
+    }
+    _ => None
+  }
+}
