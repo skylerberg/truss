@@ -312,6 +312,14 @@ impl Handles for SystemHandles {
     with_file_error(sockets::accept(descriptor_of(listener)))
   }
 
+  fn accept_local(self, listener: streams::Handle) -> Result[streams::Handle, SystemError] {
+    with_file_error(sockets::accept_local(descriptor_of(listener)))
+  }
+
+  fn configure(self, socket: streams::Handle, option: network::SocketOption) -> Result[Unit, SystemError] {
+    with_file_error(sockets::configure(descriptor_of(socket), option: option))
+  }
+
   fn send_to(
     self,
     socket: streams::Handle,

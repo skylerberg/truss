@@ -1046,6 +1046,73 @@ fn main(arguments: List[String]) -> ExitCode
         output)
 
 let () =
+  test "a program serves on a local socket, and sets a connection's TCP options" (fun () ->
+      let path = Filename.concat (Lazy.force scratch) "served.socket" in
+      let status, output, _ =
+        run_main ~arguments:[ path ]
+          {|use standard::network
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, NetworkServer, NetworkClient, Handles
+{
+  let path = Path.new(arguments[1].slice())
+  if NetworkServer.listen_local(path) is Ok(opened) {
+    var listener = own opened
+    say("listening at the path ${listener.path() == path}")
+    if NetworkClient.connect_local(path) is Ok(made) {
+      var client = own made
+      if mut listener.accept() is Ok(moved) {
+        var server = own moved
+        let _ = mut client.write("ping".bytes())
+        var heard: List[UInt8] = []
+        if mut server.read(mut heard, limit: 100) is Ok(count) {
+          say("the server read ${count}")
+        }
+      }
+    }
+    if NetworkServer.listen_local(path) is Err(error) {
+      say("the path is taken ${error == SystemError.AddressInUse}")
+    }
+  }
+  if NetworkClient.connect_local(Path.new("${arguments[1]}.missing".slice())) is Err(_) {
+    say("a missing path is refused")
+  }
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  let shared = network::ListenOptions(backlog: 16, reuse_port: true)
+  if NetworkServer.listen(loopback, options: shared) is Ok(opened) {
+    let listener = own opened
+    if NetworkClient.connect(listener.local_address(), timeout: None) is Ok(made) {
+      var client = own made
+      say("no delay ${mut client.set_no_delay(true) is Ok(_)}")
+      say("keep alive ${mut client.set_keep_alive(Some(Duration.seconds(30))) is Ok(_)}")
+      say("keep alive off ${mut client.set_keep_alive(None) is Ok(_)}")
+    }
+  }
+  ExitCode(0)
+}
+|}
+      in
+      expect_int ~expected:0 status;
+      expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "listening at the path true";
+               "the server read 4";
+               "the path is taken true";
+               "a missing path is refused";
+               "no delay true";
+               "keep alive true";
+               "keep alive off true";
+               "";
+             ])
+        output)
+
+let () =
   (* A refusal can arrive before the first system call after [connect]. On
      macOS a [setsockopt] then fails, so a connect that set an option
      before it read its result reported that failure for some of these. *)
