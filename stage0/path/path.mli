@@ -15,9 +15,6 @@ val show_package : package -> string
 val compare_package : package -> package -> int
 (** In the order of their text, which is the order a lock file lists packages in. *)
 
-val package_of_parts : string list -> package option
-(** A package from one name, or an owner and a name; [None] from any other number of names. *)
-
 val parse_names : string -> string list option
 (** The names a text joins with [::]: [a::b::Name] is [a], [b], and [Name]; [None] where a name is
     empty or a [:] is not part of a [::]. *)

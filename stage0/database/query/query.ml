@@ -2,7 +2,7 @@ type context = Incremental.context
 type subject = Incremental.subject = { path : Path.t; part : string option }
 type ('key, 'value) input = ('key, 'value) Incremental.input
 type ('key, 'value) query = ('key, 'value) Incremental.query
-type phase = { name : string; rank : int }
+type phase = int
 
 let declared : (string, unit) Hashtbl.t = Hashtbl.create 16
 
@@ -11,17 +11,16 @@ let declared : (string, unit) Hashtbl.t = Hashtbl.create 16
    before every phase, at rank 0. *)
 let phase ~name ~after =
   if Hashtbl.mem declared name then invalid_arg ("Query.phase: two phases are named " ^ name);
-  let rank = 1 + List.fold_left (fun highest (phase : phase) -> max highest phase.rank) 0 after in
+  let rank = 1 + List.fold_left max 0 after in
   if rank >= Incremental.phases then invalid_arg ("Query.phase: too many phases before " ^ name);
   Hashtbl.replace declared name ();
-  { name; rank }
+  rank
 
-let phase_name (phase : phase) = phase.name
-let phase_rank (phase : phase) = phase.rank
+let phase_rank phase = phase
 let input = Incremental.input
 
 let query ~name ~show ~phase ?saved ?portable ?equal ?about compute =
-  Incremental.query ~name ~show ~phase:phase.rank ?saved ?portable ?equal ?about compute
+  Incremental.query ~name ~show ~phase ?saved ?portable ?equal ?about compute
 
 let find = Incremental.read
 

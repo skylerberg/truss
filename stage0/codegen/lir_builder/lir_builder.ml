@@ -24,7 +24,6 @@ let local b ?name ?(borrowed = false) ty =
   b.local_count <- b.local_count + 1;
   b.local_count - 1
 
-let local_count b = b.local_count
 let local_type b local = (List.nth b.locals (b.local_count - 1 - local)).ty
 
 let block b =

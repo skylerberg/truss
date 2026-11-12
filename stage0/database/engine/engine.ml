@@ -3,7 +3,6 @@ type t = Incremental.t
 let seal = Incremental.seal
 let create = Incremental.create
 let freeze = Incremental.freeze
-let is_frozen = Incremental.is_frozen
 let context = Incremental.context
 let observer = Incremental.observer
 let of_context = Incremental.engine_of
@@ -41,7 +40,6 @@ let is_input = Incremental.is_input
 let is_fixed = Incremental.is_fixed
 let reads = Incremental.reads
 let readers = Incremental.readers
-let counterpart = Incremental.counterpart
 let current_in = Incremental.current_in
 let same_outcome = Incremental.same_outcome
 

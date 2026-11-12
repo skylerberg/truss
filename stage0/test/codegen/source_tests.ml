@@ -1,6 +1,5 @@
 (* Truss source compiled with the standard library and run: the basics. *)
 
-open Memory_layout
 open Codegen_support
 
 let () =

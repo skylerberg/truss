@@ -1,1 +1,6 @@
 (dirs stage0 grammar standard)
+
+(env
+ (dev
+  (flags
+   (:standard %{dune-warnings}))))

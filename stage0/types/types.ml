@@ -68,6 +68,7 @@ let builtin_of = function
 let is_builtin wanted type_ = builtin_of type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
+(* The built-in integer types, which an integer literal can fill. *)
 let integer_types : Intrinsic.builtin list =
   [ Int8; Int16; Int32; Int64; UInt8; UInt16; UInt32; UInt64; USize; ISize ]
 
@@ -195,13 +196,6 @@ let rec map ?(capabilities = Fun.id) f type_ =
       | Any reference -> Any (trait reference)
       | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
       | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
-
-let map_capabilities f type_ = map ~capabilities:f (fun _ -> None) type_
-
-let map_argument_capabilities f = function
-  | Type type_ -> Type (map_capabilities f type_)
-  | Capabilities capabilities -> Capabilities (f capabilities)
-  | Value _ as value -> value
 
 let has_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
@@ -357,14 +351,6 @@ and show_function (function_type : function_type) =
 
 type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
 type generic = { generic : parameter; kind : generic_kind }
-
-let capability_parameters (generics : generic list) =
-  List.filter_map
-    (fun generic ->
-      match generic.kind with
-      | Capability_generic -> Some generic.generic
-      | Type_generic _ | Value_generic -> None)
-    generics
 
 let substitution_of (generics : generic list) arguments : substitution option =
   if List.length generics = List.length arguments then

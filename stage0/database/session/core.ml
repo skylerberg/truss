@@ -377,7 +377,6 @@ let results ~kind =
     fun key value -> Store.add_result store ~kind ~key value )
 
 let find_result ~kind ~key = Store.find_result (store ()) ~kind ~key
-let add_result ~kind ~key value = Store.add_result (store ()) ~kind ~key value
 let flush () = Store.flush (store ())
 
 let close_all state =
