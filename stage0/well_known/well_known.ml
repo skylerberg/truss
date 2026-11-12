@@ -19,6 +19,9 @@ type t =
   | Divide
   | Remainder
   | Negate
+  | Fixed_width_integer
+  | Signed_integer
+  | Unsigned_integer
   | Range
   | Exit_code
   | Option
@@ -71,6 +74,9 @@ let all =
     Divide;
     Remainder;
     Negate;
+    Fixed_width_integer;
+    Signed_integer;
+    Unsigned_integer;
     Range;
     Exit_code;
     Option;
@@ -123,6 +129,9 @@ let modules_and_name = function
   | Divide -> ([ "core" ], "Divide")
   | Remainder -> ([ "core" ], "Remainder")
   | Negate -> ([ "core" ], "Negate")
+  | Fixed_width_integer -> ([ "numbers"; "integers" ], "FixedWidthInteger")
+  | Signed_integer -> ([ "numbers"; "integers" ], "SignedInteger")
+  | Unsigned_integer -> ([ "numbers"; "integers" ], "UnsignedInteger")
   | Range -> ([ "core" ], "Range")
   | Exit_code -> ([ "core" ], "ExitCode")
   | Option -> ([ "option" ], "Option")

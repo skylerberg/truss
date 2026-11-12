@@ -201,6 +201,7 @@ module Code = struct
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Lent_mut_in_variant
     | Task_outlives_yield
 
   type capabilities =
@@ -230,6 +231,7 @@ module Code = struct
 
   type package =
     | Impl_location
+    | Sealed_trait_impl
     | Overlapping_impls
     | Method_name_clash
     | Needs_indirect
@@ -463,6 +465,7 @@ module Code = struct
     | Keeps_lent_part -> "keeps_lent_part"
     | Read_only_view -> "read_only_view"
     | Owned_beside_lent -> "owned_beside_lent"
+    | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Task_outlives_yield -> "task_outlives_yield"
 
   let capabilities_name code =
@@ -478,6 +481,7 @@ module Code = struct
   let package_name code =
     match code with
     | Impl_location -> "impl_location"
+    | Sealed_trait_impl -> "sealed_trait_impl"
     | Overlapping_impls -> "overlapping_impls"
     | Method_name_clash -> "method_name_clash"
     | Needs_indirect -> "needs_indirect"

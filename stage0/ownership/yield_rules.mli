@@ -1,5 +1,3 @@
-module T = Types
-
 type count = Zero | One | Many
 
 val check_yields_once : Context.context -> Core.block -> name:Syntax.span -> unit

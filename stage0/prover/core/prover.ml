@@ -3,8 +3,7 @@
 open Syntax
 module Translate = Translate
 module Names = Resolve.Names
-module L = Logic
-module S = Logic.Symbol
+module Symbol = Logic.Symbol
 
 type proof = Obligations of Translate.outcome | Unsupported of span * string | Not_proven_here
 
@@ -55,6 +54,70 @@ let declaration database (key : Names.key) =
   Names.Declaration_map.find_opt (key.path, key.ordinal)
     (Query.demand database Names.declaration_index key.module_)
 
+(* The built-in types a type parameter can be, when one of its bounds is an
+   integer trait. Only the built-in integer types implement those traits,
+   so a definition generic over one is proven once for each type. *)
+let integer_implementors (bounds : Types.trait_reference list) =
+  let signed = Intrinsic.[ Int8; Int16; Int32; Int64; ISize ]
+  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64; USize ] in
+  List.fold_left
+    (fun found (bound : Types.trait_reference) ->
+      let these =
+        if Well_known.is Signed_integer bound.trait then Some signed
+        else if Well_known.is Unsigned_integer bound.trait then Some unsigned
+        else if Well_known.is Fixed_width_integer bound.trait then Some (signed @ unsigned)
+        else None
+      in
+      match (found, these) with
+      | Some found, Some these -> Some (List.filter (fun builtin -> List.mem builtin these) found)
+      | None, these | these, None -> these)
+    None bounds
+
+(* Each assignment of built-in types to a definition's type parameters that
+   integer traits bound, with its description, as in [`Number` is `Int8`].
+   A provided method of an integer trait has [Self] among them. *)
+let integer_instances database (path : Path.t) =
+  let generics =
+    match Interface.Impls.signature database path with
+    | Some signature ->
+        List.filter_map
+          (fun (generic : Types.generic) ->
+            match generic.kind with
+            | Type_generic bounds -> Some (generic.generic, bounds)
+            | Value_generic | Capability_generic -> None)
+          signature.generics
+    | None -> []
+  in
+  let self =
+    match path with
+    | Method { owner; _ } ->
+        [
+          ( { Types.owner; name = "Self" },
+            [ { Types.trait = owner; trait_arguments = []; associated = [] } ] );
+        ]
+    | _ -> []
+  in
+  List.fold_left
+    (fun instances ((parameter : Types.parameter), bounds) ->
+      match integer_implementors bounds with
+      | None -> instances
+      | Some builtins ->
+          List.concat_map
+            (fun (shown, substitution) ->
+              List.map
+                (fun builtin ->
+                  ( shown
+                    @ [
+                        Printf.sprintf "`%s` is `%s`" parameter.name
+                          (Intrinsic.builtin_name builtin);
+                      ],
+                    (parameter, Types.Type (Types.builtin builtin)) :: substitution ))
+                builtins)
+            instances)
+    [ ([], []) ]
+    (self @ generics)
+  |> List.filter (fun (shown, _) -> shown <> [])
+
 let prove ?reveal database (key : Names.key) =
   match (declaration database key, Translate.source_at_key database key) with
   | _ when is_specification_module key -> Not_proven_here
@@ -68,11 +131,39 @@ let prove ?reveal database (key : Names.key) =
         | (Function | Method), Function { body = None; _ } -> Not_proven_here
         | Theorem, Function _ ->
             Obligations (Translate.theorem ?reveal database source ~path:key.path)
-        | (Function | Method), Function { body = Some _; _ } ->
-            Obligations
-              (Translate.function_ ?reveal
-                 ~updating_helper:(Translate.is_updating_helper database key.path)
-                 ?inherited:(inherited database key.path) database source ~path:key.path)
+        | (Function | Method), Function { body = Some _; _ } -> (
+            let prove_with substitution =
+              Translate.function_ ?reveal
+                ~updating_helper:(Translate.is_updating_helper database key.path)
+                ?inherited:(inherited database key.path) ~substitution database source
+                ~path:key.path
+            in
+            match integer_instances database key.path with
+            | [] -> Obligations (prove_with [])
+            | instances ->
+                let outcomes =
+                  List.map
+                    (fun (shown, substitution) ->
+                      let outcome = prove_with substitution in
+                      let prefix = "Where " ^ String.concat " and " shown ^ ": " in
+                      {
+                        outcome with
+                        Translate.obligations =
+                          List.map
+                            (fun (obligation : Translate.obligation) ->
+                              { obligation with message = prefix ^ obligation.message })
+                            outcome.obligations;
+                      })
+                    instances
+                in
+                Obligations
+                  {
+                    obligations =
+                      List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
+                    holes =
+                      List.sort_uniq compare
+                        (List.concat_map (fun (o : Translate.outcome) -> o.holes) outcomes);
+                  })
         | Test, Test _ -> Obligations (Translate.test ?reveal database source ~path:key.path)
         | Constant, Constant _ ->
             Obligations (Translate.constant ?reveal database source ~path:key.path)
@@ -162,14 +253,14 @@ let truss_value members text =
   in
   (* A constructor's name as Truss writes it: its variant, or for a record
      its type's own name. *)
-  let constructor : L.symbol -> string = function
+  let constructor : Logic.symbol -> string = function
     | Constructor { variant = Some variant; _ } -> variant
     | Constructor { type_name; variant = None; _ } -> type_name
-    | other -> L.show_symbol other
+    | other -> Logic.show_symbol other
   in
-  let field : L.symbol -> string = function
+  let field : Logic.symbol -> string = function
     | Field { field; _ } -> field
-    | other -> L.show_symbol other
+    | other -> Logic.show_symbol other
   in
   let opaque atom =
     (* The solver's name for a value of a sort it knows nothing about. *)
@@ -253,8 +344,8 @@ let counterexample members (obligation : Translate.obligation) answer_values =
       (List.mapi
          (fun index (holding, failing, _, _) ->
            match
-             ( List.assoc_opt (S.Reached index) answer_values,
-               List.assoc_opt (S.Condition index) answer_values )
+             ( List.assoc_opt (Symbol.Reached index) answer_values,
+               List.assoc_opt (Symbol.Condition index) answer_values )
            with
            | Some "true", Some "true" -> Some holding
            | Some "true", Some "false" -> failing
@@ -319,77 +410,79 @@ let bitwise_operations =
     "swap_bytes";
   ]
 
-let bitwise_of : L.symbol -> _ = function
+let bitwise_of : Logic.symbol -> _ = function
   | Opaque_operation { operation; integer = Some (bits, signed); _ }
     when List.mem operation bitwise_operations ->
       Some (operation, bits, signed)
   | _ -> None
 
-let exactly (query : L.query) =
+let exactly (query : Logic.query) =
   let bitwise_terms = ref [] in
   let rec walk bound = function
-    | L.Apply (name, arguments) as term ->
+    | Logic.Apply (name, arguments) as term ->
         (if bitwise_of name <> None && not (List.mem_assoc term !bitwise_terms) then
-           let named = List.filter (fun (symbol, _) -> L.mentions [ symbol ] term) bound in
+           let named = List.filter (fun (symbol, _) -> Logic.mentions [ symbol ] term) bound in
            bitwise_terms := (term, named) :: !bitwise_terms);
         List.iter (walk bound) arguments
-    | L.Forall (symbols, body) | L.Exists (symbols, body) -> walk (symbols @ bound) body
-    | term -> List.iter (walk bound) (L.arguments term)
+    | Logic.Forall (symbols, body) | Logic.Exists (symbols, body) -> walk (symbols @ bound) body
+    | term -> List.iter (walk bound) (Logic.arguments term)
   in
   List.iter (walk []) (query.goal :: query.facts);
   let definition term =
     match term with
-    | L.Apply (name, arguments) -> (
+    | Logic.Apply (name, arguments) -> (
         match (bitwise_of name, arguments) with
         | Some (operation, bits, signed), first :: rest ->
-            let bits_of value = L.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
+            let bits_of value = Logic.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ]) in
             let a = bits_of first in
             let result =
               match (operation, rest) with
-              | "complement", _ -> Some (L.Operation ("bvnot", [ a ]))
-              | "and", [ b ] -> Some (L.Operation ("bvand", [ a; bits_of b ]))
-              | "or", [ b ] -> Some (L.Operation ("bvor", [ a; bits_of b ]))
-              | "xor", [ b ] -> Some (L.Operation ("bvxor", [ a; bits_of b ]))
-              | "shift_left", [ b ] -> Some (L.Operation ("bvshl", [ a; bits_of b ]))
+              | "complement", _ -> Some (Logic.Operation ("bvnot", [ a ]))
+              | "and", [ b ] -> Some (Logic.Operation ("bvand", [ a; bits_of b ]))
+              | "or", [ b ] -> Some (Logic.Operation ("bvor", [ a; bits_of b ]))
+              | "xor", [ b ] -> Some (Logic.Operation ("bvxor", [ a; bits_of b ]))
+              | "shift_left", [ b ] -> Some (Logic.Operation ("bvshl", [ a; bits_of b ]))
               | "shift_right", [ b ] ->
-                  Some (L.Operation ((if signed then "bvashr" else "bvlshr"), [ a; bits_of b ]))
+                  Some (Logic.Operation ((if signed then "bvashr" else "bvlshr"), [ a; bits_of b ]))
               | ("rotate_left" | "rotate_right"), [ b ] ->
                   (* By the amount modulo the width, with what leaves one end
                      coming in at the other. *)
-                  let by = bits_of (L.Operation ("mod", [ b; L.int bits ])) in
-                  let rest = L.Operation ("bvsub", [ bits_of (L.int bits); by ]) in
+                  let by = bits_of (Logic.Operation ("mod", [ b; Logic.int bits ])) in
+                  let rest = Logic.Operation ("bvsub", [ bits_of (Logic.int bits); by ]) in
                   let towards, back =
                     if operation = "rotate_left" then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
                   in
                   Some
-                    (L.Operation
+                    (Logic.Operation
                        ( "bvor",
-                         [ L.Operation (towards, [ a; by ]); L.Operation (back, [ a; rest ]) ] ))
+                         [
+                           Logic.Operation (towards, [ a; by ]); Logic.Operation (back, [ a; rest ]);
+                         ] ))
               | "swap_bytes", _ ->
                   let byte index =
-                    L.Operation
+                    Logic.Operation
                       (Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index), [ a ])
                   in
                   let bytes = List.init (bits / 8) byte in
                   Some
                     (List.fold_left
-                       (fun swapped next -> L.Operation ("concat", [ swapped; next ]))
+                       (fun swapped next -> Logic.Operation ("concat", [ swapped; next ]))
                        (List.hd bytes) (List.tl bytes))
               | _ -> None
             in
             Option.map
               (fun result ->
-                let unsigned = L.Operation ("bv2nat", [ result ]) in
+                let unsigned = Logic.Operation ("bv2nat", [ result ]) in
                 let value =
                   if signed then
-                    let half = L.Integer (Z.shift_left Z.one (bits - 1)) in
-                    L.ite
-                      (L.Operation (">=", [ unsigned; half ]))
-                      (L.Operation ("-", [ unsigned; L.Integer (Z.shift_left Z.one bits) ]))
+                    let half = Logic.Integer (Z.shift_left Z.one (bits - 1)) in
+                    Logic.ite
+                      (Logic.Operation (">=", [ unsigned; half ]))
+                      (Logic.Operation ("-", [ unsigned; Logic.Integer (Z.shift_left Z.one bits) ]))
                       unsigned
                   else unsigned
                 in
-                L.equal term value)
+                Logic.equal term value)
               result
         | _ -> None)
     | _ -> None
@@ -398,7 +491,7 @@ let exactly (query : L.query) =
      each of their values. *)
   let defined (term, named) =
     Option.map
-      (fun definition -> if named = [] then definition else L.Forall (named, definition))
+      (fun definition -> if named = [] then definition else Logic.Forall (named, definition))
       (definition term)
   in
   match List.filter_map defined (List.rev !bitwise_terms) with
@@ -420,7 +513,7 @@ type variant = Plain | Exact | Alone | Alone_exact | Revealed
 type oracles = {
   solve :
     index:int ->
-    choice:(L.symbol * (Z.t * Z.t)) list ->
+    choice:(Logic.symbol * (Z.t * Z.t)) list ->
     variant:variant ->
     with_locals:bool ->
     solver_response;
@@ -441,9 +534,9 @@ let call_facts ~call (obligation : Translate.obligation) =
     (fun (known : Translate.known_call) ->
       Option.map
         (fun value ->
-          L.equal known.term
-            (if known.result_is_bool then L.Boolean (not (Z.equal value Z.zero))
-             else L.Integer value))
+          Logic.equal known.term
+            (if known.result_is_bool then Logic.Boolean (not (Z.equal value Z.zero))
+             else Logic.Integer value))
         (call known))
     obligation.known_calls
 
@@ -743,7 +836,7 @@ let runs =
 type question = {
   definition : Names.key;
   index : int;
-  choice : (L.symbol * (Z.t * Z.t)) list;
+  choice : (Logic.symbol * (Z.t * Z.t)) list;
   variant : variant;
   with_locals : bool;
 }
@@ -782,7 +875,7 @@ let question_request =
                   List.concat
                     (List.mapi
                        (fun index (_, _, reached, condition) ->
-                         [ (S.Reached index, reached); (S.Condition index, condition) ])
+                         [ (Symbol.Reached index, reached); (Symbol.Condition index, condition) ])
                        obligation.decisions)
                 else []
               in

@@ -1,23 +1,25 @@
 (* The signatures of [standard::intrinsic]'s operations. Arithmetic and
    comparison are generic over the built-in number type, which code generation
    sees after monomorphization. *)
-
-module T = Types
-
-let parameter operation name : T.parameter = { owner = Intrinsic.operation_path operation; name }
+let parameter operation name : Types.parameter =
+  { owner = Intrinsic.operation_path operation; name }
 
 let storage element =
-  T.Named { path = Intrinsic.builtin_path Storage; arguments = [ T.Type element ] }
+  Types.Named { path = Intrinsic.builtin_path Storage; arguments = [ Types.Type element ] }
 
-let view element = T.Named { path = Intrinsic.builtin_path View; arguments = [ T.Type element ] }
-let libc_scalar scalar = T.builtin (Intrinsic.libc_builtin scalar)
-let sequence element = T.Named { path = Well_known.path Sequence; arguments = [ T.Type element ] }
+let view element =
+  Types.Named { path = Intrinsic.builtin_path View; arguments = [ Types.Type element ] }
 
-let signature (operation : Intrinsic.operation) : T.signature =
-  let generic name = { T.generic = parameter operation name; kind = Type_generic [] } in
-  let p name = T.Parameter (parameter operation name) in
-  let input ?(mode = T.Read) name type_ = { T.name; mode; type_; has_default = false } in
-  let make ?(generics = []) ?(output = T.Returns T.unit) parameters : T.signature =
+let libc_scalar scalar = Types.builtin (Intrinsic.libc_builtin scalar)
+
+let sequence element =
+  Types.Named { path = Well_known.path Sequence; arguments = [ Types.Type element ] }
+
+let signature (operation : Intrinsic.operation) : Types.signature =
+  let generic name = { Types.generic = parameter operation name; kind = Type_generic [] } in
+  let p name = Types.Parameter (parameter operation name) in
+  let input ?(mode = Types.Read) name type_ = { Types.name; mode; type_; has_default = false } in
+  let make ?(generics = []) ?(output = Types.Returns Types.unit) parameters : Types.signature =
     {
       generics = List.map generic generics;
       receiver = None;
@@ -31,32 +33,33 @@ let signature (operation : Intrinsic.operation) : T.signature =
     }
   in
   let value = p "Value" and element = p "Element" in
-  let usize = T.builtin USize and bool = T.bool in
+  let usize = Types.builtin USize and bool = Types.bool in
   let binary output =
     make ~generics:[ "Value" ] ~output:(Returns output) [ input "left" value; input "right" value ]
   in
   let unary output = make ~generics:[ "Value" ] ~output:(Returns output) [ input "value" value ] in
   (* An operation on an [Array[Element, count]], generic over both. *)
-  let over_array ?(output = fun _ -> T.Returns T.unit) parameters =
+  let over_array ?(output = fun _ -> Types.Returns Types.unit) parameters =
     let count = parameter operation "count" in
     let array =
-      T.Named
+      Types.Named
         {
           path = Intrinsic.builtin_path Array;
-          arguments = [ T.Type element; T.Value (Value_parameter count) ];
+          arguments = [ Types.Type element; Types.Value (Value_parameter count) ];
         }
     in
     {
       (make ~output:(output array) (parameters array)) with
-      generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
+      generics = [ generic "Element"; { Types.generic = count; kind = Value_generic } ];
     }
   in
   (* The work a coroutine or a task runs: a function of one [UInt64]. *)
-  let work_item = T.builtin UInt64 in
+  let work_item = Types.builtin UInt64 in
   let work =
-    T.Function { inputs = [ (Read, work_item) ]; output = Returns T.unit; uses = []; costs = [] }
+    Types.Function
+      { inputs = [ (Read, work_item) ]; output = Returns Types.unit; uses = []; costs = [] }
   in
-  let with_storage ?(mode = T.Read) ?(output = T.Returns T.unit) rest =
+  let with_storage ?(mode = Types.Read) ?(output = Types.Returns Types.unit) rest =
     make ~generics:[ "Element" ] ~output (input ~mode "storage" (storage element) :: rest)
   in
   match operation with
@@ -91,8 +94,8 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~generics:[ "Bits"; "Value" ] ~output:(Returns value) [ input "bits" (p "Bits") ]
   | Compare_bytes ->
       make
-        ~output:(Returns (T.builtin Int8))
-        [ input "left" (view (T.builtin UInt8)); input "right" (view (T.builtin UInt8)) ]
+        ~output:(Returns (Types.builtin Int8))
+        [ input "left" (view (Types.builtin UInt8)); input "right" (view (Types.builtin UInt8)) ]
   | Storage_empty -> make ~generics:[ "Element" ] ~output:(Returns (storage element)) []
   | Storage_with_capacity ->
       make ~generics:[ "Element" ] ~output:(Returns (storage element)) [ input "capacity" usize ]
@@ -101,12 +104,13 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_lengthen -> with_storage ~mode:Mut [ input "by" usize ]
   | Storage_shorten ->
       (* Only elements with nothing to drop can be forgotten. *)
-      let plain : T.trait_reference =
+      let plain : Types.trait_reference =
         { trait = Well_known.path Plain; trait_arguments = []; associated = [] }
       in
       {
         (with_storage ~mode:Mut [ input "length" usize ]) with
-        generics = [ { T.generic = parameter operation "Element"; kind = Type_generic [ plain ] } ];
+        generics =
+          [ { Types.generic = parameter operation "Element"; kind = Type_generic [ plain ] } ];
       }
   | Storage_push -> with_storage ~mode:Mut [ input ~mode:Own "value" element ]
   | Storage_pop -> with_storage ~mode:Mut ~output:(Returns element) []
@@ -177,15 +181,17 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | View_address ->
       make ~generics:[ "Element" ] ~output:(Returns usize) [ input "view" (view element) ]
   | Crash ->
-      make ~output:(Returns T.Never)
-        [ input "message" (T.Named { path = Well_known.path String_slice; arguments = [] }) ]
+      make ~output:(Returns Types.Never)
+        [ input "message" (Types.Named { path = Well_known.path String_slice; arguments = [] }) ]
   | Handle_from ->
-      make ~output:(Returns (T.builtin Handle)) [ input "descriptor" (T.builtin Int32) ]
+      make ~output:(Returns (Types.builtin Handle)) [ input "descriptor" (Types.builtin Int32) ]
   | Handle_descriptor ->
-      make ~output:(Returns (T.builtin Int32)) [ input "handle" (T.builtin Handle) ]
+      make ~output:(Returns (Types.builtin Int32)) [ input "handle" (Types.builtin Handle) ]
   | Handle_release ->
-      make ~output:(Returns (T.builtin Int32)) [ input ~mode:Own "handle" (T.builtin Handle) ]
-  | Run_test -> make [ input "index" (T.builtin UInt32) ]
+      make
+        ~output:(Returns (Types.builtin Int32))
+        [ input ~mode:Own "handle" (Types.builtin Handle) ]
+  | Run_test -> make [ input "index" (Types.builtin UInt32) ]
   | Coroutine_start ->
       {
         (make ~output:(Returns usize) [ input ~mode:Own "work" work; input "item" work_item ]) with
@@ -199,13 +205,15 @@ let signature (operation : Intrinsic.operation) : T.signature =
         stores_functions = [ "work" ];
       }
   | Shared_new | Shared_update | Shared_key -> (
-      let storable : T.trait_reference =
+      let storable : Types.trait_reference =
         { trait = Well_known.path Storable; trait_arguments = []; associated = [] }
       in
       let bounded name =
-        { T.generic = parameter operation name; kind = Type_generic [ storable ] }
+        { Types.generic = parameter operation name; kind = Type_generic [ storable ] }
       in
-      let shared = T.Named { path = Intrinsic.builtin_path Shared; arguments = [ T.Type value ] } in
+      let shared =
+        Types.Named { path = Intrinsic.builtin_path Shared; arguments = [ Types.Type value ] }
+      in
       match operation with
       | Shared_new ->
           {
@@ -213,7 +221,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
             generics = [ bounded "Value" ];
           }
       | Shared_update ->
-          let change : T.function_type =
+          let change : Types.function_type =
             {
               inputs = [ (Mut, value); (Own, p "Input") ];
               output = Returns (p "Result");
@@ -227,23 +235,23 @@ let signature (operation : Intrinsic.operation) : T.signature =
                [
                  input "shared" shared;
                  input ~mode:Own "input" (p "Input");
-                 input "change" (T.Function change);
+                 input "change" (Types.Function change);
                ])
             with
             generics = [ bounded "Value"; generic "Input"; bounded "Result" ];
           }
       | _ ->
           {
-            (make ~output:(Returns (T.builtin UInt64)) [ input "shared" shared ]) with
+            (make ~output:(Returns (Types.builtin UInt64)) [ input "shared" shared ]) with
             generics = [ bounded "Value" ];
           })
   | Coroutine_resume -> make ~output:(Returns bool) [ input "coroutine" usize ]
   | Coroutine_suspend -> make []
-  | Report_tests_to -> make [ input "descriptor" (T.builtin Int32) ]
+  | Report_tests_to -> make [ input "descriptor" (Types.builtin Int32) ]
   | Live_blocks -> make ~output:(Returns usize) []
   | Environment_entry ->
       make
-        ~output:(Returns (view (T.builtin UInt8)))
+        ~output:(Returns (view (Types.builtin UInt8)))
         [ input "index" usize; input ~mode:Mut "is_present" bool ]
   | System_is_os _ | System_is_architecture _ -> make ~output:(Returns bool) []
   | Libc function_ ->
@@ -254,8 +262,8 @@ let signature (operation : Intrinsic.operation) : T.signature =
           (Returns
              (match result with
              | Returns scalar | Points_at scalar -> libc_scalar scalar
-             | Text -> view (T.builtin UInt8)
-             | Never -> T.Never))
+             | Text -> view (Types.builtin UInt8)
+             | Never -> Types.Never))
         (List.concat_map
            (fun (name, (passes : Libc.passes)) ->
              match passes with

@@ -44,6 +44,22 @@ let () =
   test "an overflow's counterexample names the value" (fun () ->
       let actual = message "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
       if not (contains actual "`count` is 255") then fail "message %S" actual);
+  test "code generic over an integer trait is proven for each type that implements it" (fun () ->
+      proven
+        "fn twice[Number: SignedInteger](value: Number) -> Number\n\
+        \  requires -50 <= value && value <= 50\n\
+         {\n\
+        \  value + value\n\
+         }\n";
+      let actual =
+        message
+          "fn twice[Number: UnsignedInteger](value: Number) -> Number\n\
+          \  requires value <= 200\n\
+           {\n\
+          \  value + value\n\
+           }\n"
+      in
+      if not (contains actual "`Number` is `UInt8`") then fail "message %S" actual);
   test "a requires rules out the overflow" (fun () ->
       proven "fn f(count: UInt8) -> UInt8\n  requires count < 255\n{\n  count + 1\n}\n");
   test "a check in an if rules out the overflow" (fun () ->
@@ -735,14 +751,6 @@ let () =
       proven (tagged "  ensures self.first == old(self.first)\n"));
   test "a constructor lent `mut` stores the caller's change in the place it lends" (fun () ->
       not_proven (tagged "  ensures self.second == old(self.second)\n") "prover.ensures");
-  test "a variant lent `mut` stores back only into the place it lends" (fun () ->
-      let maybe ensures =
-        "type Pair(first: Int64, second: Int64)\n\n\
-         fn Pair.maybe(mut self) lends mut Option[Int64]\n" ^ ensures
-        ^ "{\n  yield Some(mut self.second)\n}\n"
-      in
-      proven (maybe "  ensures self.first == old(self.first)\n");
-      not_proven (maybe "  ensures self.second == old(self.second)\n") "prover.ensures");
   test "a caller of a constructor lent `mut` keeps what the method's contract says" (fun () ->
       proven
         (tagged "  ensures self.first == old(self.first)\n"

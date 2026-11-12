@@ -12,7 +12,6 @@
 
 open Syntax
 module Names = Resolve.Names
-module T = Types
 
 type edge =
   | Calls of Path.t  (** A call, or a function named as a value. *)
@@ -20,7 +19,7 @@ type edge =
 
 type t = (Path.t * edge list) list
 
-let head_of (ty : T.ty) = match ty with Named { path; _ } -> Some path | _ -> None
+let head_of (ty : Types.ty) = match ty with Named { path; _ } -> Some path | _ -> None
 
 (* The traits a trait requires, and itself, so that using an [impl] of
    [Ordered] also uses one of [Equal]. *)
@@ -29,7 +28,7 @@ let rec traits_with_required database (trait : Path.t) =
   | Some (Interface.Environment.Trait_interface interface) ->
       trait
       :: List.concat_map
-           (fun (required : T.trait_reference) -> traits_with_required database required.trait)
+           (fun (required : Types.trait_reference) -> traits_with_required database required.trait)
            interface.requires
   | _ -> [ trait ]
 
@@ -86,21 +85,22 @@ let impls_used database impls (callee : Core.callee) =
   match callee with
   | Function { path; type_arguments } -> (
       match Query.demand database Interface.Environment.signature path with
-      | Some (signature : T.signature) ->
+      | Some (signature : Types.signature) ->
           let rec pairs generics arguments =
             match (generics, arguments) with
-            | (generic : T.generic) :: generics, T.Type ty :: arguments ->
+            | (generic : Types.generic) :: generics, Types.Type ty :: arguments ->
                 (generic, ty) :: pairs generics arguments
             | _ :: generics, _ :: arguments -> pairs generics arguments
             | _ -> []
           in
           List.concat_map
-            (fun ((generic : T.generic), ty) ->
+            (fun ((generic : Types.generic), ty) ->
               match generic.kind with
               | Type_generic bounds ->
                   let traits =
                     List.concat_map
-                      (fun (bound : T.trait_reference) -> traits_with_required database bound.trait)
+                      (fun (bound : Types.trait_reference) ->
+                        traits_with_required database bound.trait)
                       bounds
                   in
                   impls_for impls traits ty
@@ -114,6 +114,16 @@ let impls_used database impls (callee : Core.callee) =
    bound on [Self], in a trait's provided body. A call through a bound on
    another type parameter reaches the [impl] for the type the parameter is
    given where the generic code is used, which that use's edges name. *)
+(* The traits that only the built-in integer types implement, and those
+   types. *)
+let integer_trait owner =
+  Well_known.is Fixed_width_integer owner
+  || Well_known.is Signed_integer owner
+  || Well_known.is Unsigned_integer owner
+
+let integer_types =
+  List.filter (fun builtin -> Types.is_integer_type (Types.builtin builtin)) Intrinsic.builtins
+
 let dispatched (called : Core.callee) =
   match called with
   | Trait_method { evidence = Dynamic; _ } -> true
@@ -138,6 +148,37 @@ let edges database impls (body : Core.block) =
             impls
         in
         add [ Calls (if writes then own else Path.Method { owner = trait.trait; name; receiver }) ]
+    | Trait_method
+        {
+          trait;
+          name;
+          receiver;
+          evidence = Bound;
+          self_type = Parameter { owner; name = "Self" };
+          _;
+        }
+      when integer_trait owner ->
+        (* [Self] in an integer trait's provided body is a built-in integer
+           type, so the call reaches that type's [impl], not every one. *)
+        let own =
+          List.concat_map
+            (fun builtin ->
+              List.concat_map
+                (fun impl ->
+                  let method_ = Path.Method { owner = impl; name; receiver } in
+                  if
+                    List.exists
+                      (fun (written, _, _, methods) ->
+                        Path.equal written impl && List.exists (Path.equal method_) methods)
+                      impls
+                  then [ method_ ]
+                  else [])
+                (impls_for impls [ trait.trait ] (Types.builtin builtin)))
+            integer_types
+        in
+        add
+          (if own = [] then [ Calls (Path.Method { owner = trait.trait; name; receiver }) ]
+           else List.map (fun method_ -> Calls method_) own)
     | Trait_method { trait; name; receiver; _ } when dispatched called ->
         add [ Calls (Path.Method { owner = trait.trait; name; receiver }) ]
     | Trait_method _ -> ()

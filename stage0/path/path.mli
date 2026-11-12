@@ -21,7 +21,7 @@ val parse_names : string -> string list option
 
 val parse_package : string -> package option
 (** A package from its text, one name or two joined by [::]; [None] for any other text. It does not
-    check that the names are [lower_snake_case], which [Manifest.valid_name] does. *)
+    check that the names are [lower_snake_case]. *)
 
 type module_ = { package : package; modules : string list }
 (** [weather::forecast::hourly] is the package [weather] and the modules [forecast; hourly]. A

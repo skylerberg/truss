@@ -139,76 +139,12 @@ impl text::Parse for Int8 {
   }
 }
 
-public fn Int8.parse_radix(text: StringSlice, radix: UInt32) -> Result[Int8, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  if text.length() > 0 && text.byte(0) == 45 {
-    let magnitude = parse_magnitude(text, start: 1, radix: radix, limit: 128)?
-    if magnitude == 0 {
-      Ok(0)
-    } else {
-      let below: Int8 = intrinsic::convert(magnitude - 1)
-      Ok(-below - 1)
-    }
-  } else {
-    let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-    let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 127)?
-    Ok(intrinsic::convert(magnitude))
-  }
-}
-
-public fn Int8.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + Int8.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self.unsigned_absolute()),
-    negative: self < 0,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
-}
-
 impl text::Parse for Int16 {
   type Error = core::ParseIntegerError
 
   fn parse(text: StringSlice) -> Result[Int16, core::ParseIntegerError] {
     Int16.parse_radix(text, radix: 10)
   }
-}
-
-public fn Int16.parse_radix(text: StringSlice, radix: UInt32) -> Result[Int16, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  if text.length() > 0 && text.byte(0) == 45 {
-    let magnitude = parse_magnitude(text, start: 1, radix: radix, limit: 32768)?
-    if magnitude == 0 {
-      Ok(0)
-    } else {
-      let below: Int16 = intrinsic::convert(magnitude - 1)
-      Ok(-below - 1)
-    }
-  } else {
-    let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-    let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 32767)?
-    Ok(intrinsic::convert(magnitude))
-  }
-}
-
-public fn Int16.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + Int16.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self.unsigned_absolute()),
-    negative: self < 0,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
 }
 
 impl text::Parse for Int32 {
@@ -219,76 +155,12 @@ impl text::Parse for Int32 {
   }
 }
 
-public fn Int32.parse_radix(text: StringSlice, radix: UInt32) -> Result[Int32, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  if text.length() > 0 && text.byte(0) == 45 {
-    let magnitude = parse_magnitude(text, start: 1, radix: radix, limit: 2147483648)?
-    if magnitude == 0 {
-      Ok(0)
-    } else {
-      let below: Int32 = intrinsic::convert(magnitude - 1)
-      Ok(-below - 1)
-    }
-  } else {
-    let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-    let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 2147483647)?
-    Ok(intrinsic::convert(magnitude))
-  }
-}
-
-public fn Int32.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + Int32.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self.unsigned_absolute()),
-    negative: self < 0,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
-}
-
 impl text::Parse for Int64 {
   type Error = core::ParseIntegerError
 
   fn parse(text: StringSlice) -> Result[Int64, core::ParseIntegerError] {
     Int64.parse_radix(text, radix: 10)
   }
-}
-
-public fn Int64.parse_radix(text: StringSlice, radix: UInt32) -> Result[Int64, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  if text.length() > 0 && text.byte(0) == 45 {
-    let magnitude = parse_magnitude(text, start: 1, radix: radix, limit: 9223372036854775808)?
-    if magnitude == 0 {
-      Ok(0)
-    } else {
-      let below: Int64 = intrinsic::convert(magnitude - 1)
-      Ok(-below - 1)
-    }
-  } else {
-    let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-    let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 9223372036854775807)?
-    Ok(intrinsic::convert(magnitude))
-  }
-}
-
-public fn Int64.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + Int64.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self.unsigned_absolute()),
-    negative: self < 0,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
 }
 
 impl text::Parse for ISize {
@@ -299,66 +171,12 @@ impl text::Parse for ISize {
   }
 }
 
-public fn ISize.parse_radix(text: StringSlice, radix: UInt32) -> Result[ISize, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  if text.length() > 0 && text.byte(0) == 45 {
-    let magnitude = parse_magnitude(text, start: 1, radix: radix, limit: 9223372036854775808)?
-    if magnitude == 0 {
-      Ok(0)
-    } else {
-      let below: ISize = intrinsic::convert(magnitude - 1)
-      Ok(-below - 1)
-    }
-  } else {
-    let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-    let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 9223372036854775807)?
-    Ok(intrinsic::convert(magnitude))
-  }
-}
-
-public fn ISize.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + ISize.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self.unsigned_absolute()),
-    negative: self < 0,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
-}
-
 impl text::Parse for UInt8 {
   type Error = core::ParseIntegerError
 
   fn parse(text: StringSlice) -> Result[UInt8, core::ParseIntegerError] {
     UInt8.parse_radix(text, radix: 10)
   }
-}
-
-public fn UInt8.parse_radix(text: StringSlice, radix: UInt32) -> Result[UInt8, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-  let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 255)?
-  Ok(intrinsic::convert(magnitude))
-}
-
-public fn UInt8.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + UInt8.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self),
-    negative: false,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
 }
 
 impl text::Parse for UInt16 {
@@ -369,56 +187,12 @@ impl text::Parse for UInt16 {
   }
 }
 
-public fn UInt16.parse_radix(text: StringSlice, radix: UInt32) -> Result[UInt16, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-  let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 65535)?
-  Ok(intrinsic::convert(magnitude))
-}
-
-public fn UInt16.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + UInt16.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self),
-    negative: false,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
-}
-
 impl text::Parse for UInt32 {
   type Error = core::ParseIntegerError
 
   fn parse(text: StringSlice) -> Result[UInt32, core::ParseIntegerError] {
     UInt32.parse_radix(text, radix: 10)
   }
-}
-
-public fn UInt32.parse_radix(text: StringSlice, radix: UInt32) -> Result[UInt32, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-  let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 4294967295)?
-  Ok(intrinsic::convert(magnitude))
-}
-
-public fn UInt32.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + UInt32.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self),
-    negative: false,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
 }
 
 impl text::Parse for UInt64 {
@@ -429,54 +203,10 @@ impl text::Parse for UInt64 {
   }
 }
 
-public fn UInt64.parse_radix(text: StringSlice, radix: UInt32) -> Result[UInt64, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-  let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 18446744073709551615)?
-  Ok(intrinsic::convert(magnitude))
-}
-
-public fn UInt64.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + UInt64.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self),
-    negative: false,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
-}
-
 impl text::Parse for USize {
   type Error = core::ParseIntegerError
 
   fn parse(text: StringSlice) -> Result[USize, core::ParseIntegerError] {
     USize.parse_radix(text, radix: 10)
   }
-}
-
-public fn USize.parse_radix(text: StringSlice, radix: UInt32) -> Result[USize, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
-  cost time O(text.length())
-{
-  let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-  let magnitude = parse_magnitude(text, start: start, radix: radix, limit: 18446744073709551615)?
-  Ok(intrinsic::convert(magnitude))
-}
-
-public fn USize.format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
-  requires 2 <= radix && radix <= 36
-  cost time O(minimum_digits + USize.bits)
-{
-  format_magnitude(
-    intrinsic::convert(self),
-    negative: false,
-    radix: radix,
-    minimum_digits: minimum_digits,
-    uppercase: uppercase,
-  )
 }

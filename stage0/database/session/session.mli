@@ -56,7 +56,7 @@ val attachment : t -> attachment
 val attach : t -> attachment -> unit
 
 val touch : t -> unit
-(** Says the session was used now. One not used for an hour is saved and closed. *)
+(** Says the session was used now. One left unused past a limit is saved and closed. *)
 
 val fingerprint : string -> string
 (** A file's fingerprint, from its text. *)
@@ -166,11 +166,11 @@ module Server : sig
     keep:(unit -> (string * string) list) ->
     handle:(progress:(string -> unit) -> 'request -> 'response) ->
     unit
-  (** Runs the background process that serves a key, until it has gone three hours without a
-      request, {!stop} is called, or [alive] says no. One request is answered at a time; requests
-      for different keys go to different processes, and so are answered at once. [idle] runs each
-      second that no request waits, and [keep] names states to keep when the store is collected,
-      each as its version and artifact. *)
+  (** Runs the background process that serves a key, until it has been idle past its limit, {!stop}
+      is called, or [alive] says no. One request is answered at a time; requests for different keys
+      go to different processes, and so are answered at once. [idle] runs each second that no
+      request waits, and [keep] names states to keep when the store is collected, each as its
+      version and artifact. *)
 
   val call :
     ?program:string ->

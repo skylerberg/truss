@@ -5,13 +5,15 @@ open Definitions
 open Lir_builder
 
 (* What leaving a scope does: drop what a place still owns, free the heap
-   block a pointer points at, once what is in it has been dropped, give a
-   place back the value that was lent out of it to be changed, let a
-   lending method go on, or join a task group with the given call of
-   [Tasks.join]. *)
+   block a pointer points at, once what is in it has been dropped, free the
+   block of a value whose variant is one of [variants] without dropping
+   what is in it, give a place back the value that was lent out of it to be
+   changed, let a lending method go on, or join a task group with the given
+   call of [Tasks.join]. *)
 type cleanup =
   | Drop_value of Lir.place
   | Free_pointed of Lir.place
+  | Free_blocks of { place : Lir.place; variants : string list }
   | Give_back of { lent : Lir.place; source : Lir.place; ty : Ground.ty }
   | Finish_lend of lend
   | Join_group of Lir.statement
@@ -51,7 +53,7 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
    method inlined into it, each with its own tables and names. *)
 type frame = {
   code : code;
-  bindings : (S.id, Lir.place) Hashtbl.t;
+  bindings : (Syntax.id, Lir.place) Hashtbl.t;
   synthetic : (int, Lir.place) Hashtbl.t;
       (** The places of the core form's synthetic locals, by number *)
   mutable self_place : Lir.place option;
@@ -62,6 +64,9 @@ type frame = {
   yield_into : Lir.place option;
       (** In an inlined lending method with a [yield] on each of several paths, where a value the
           method makes to lend is put, so that one owner drops it whichever [yield] is reached *)
+  lent_into : (Lir.place * Ground.lent) option;
+      (** In an inlined lending or yielding method that yields a constructor of places, the local
+          that every [yield] builds its lent value in, and the value's type *)
   inlined : Path.t list;  (** The methods inlined around this frame, to refuse recursion *)
   reported : Lir.site option;
       (** In the standard library's code that is inlined into a program's, the position of the
@@ -116,7 +121,7 @@ type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
 type state = {
   context : context;
   mutable frame : frame;
-  b : Lir_builder.t;
+  builder : Lir_builder.t;
   mutable scopes : scope list;  (** Innermost first *)
   mutable loops : loop list;
   mutable result : result_slot;
@@ -142,6 +147,7 @@ let frame_of code ~inlined =
     self_place = None;
     on_yield = None;
     yield_into = None;
+    lent_into = None;
     inlined;
     reported = None;
     exit = None;
@@ -153,7 +159,7 @@ let enter context ?(pulling = false) ?(nested = ref []) frame =
   {
     context;
     frame;
-    b = Lir_builder.create ();
+    builder = Lir_builder.create ();
     scopes = [ { kind = Bindings; owned = [] } ];
     loops = [];
     result = No_result;
@@ -182,21 +188,21 @@ let fresh_fork st =
    iterations. The current scope owns the return value, so the value
    outlives the tasks. *)
 let new_early_exits st =
-  let winner = at (local st.b ~name:"winner" (Raw (Integer UInt32))) in
-  emit st.b (Assign (winner, Use (Constant (Integer (UInt32, Z.zero)))));
+  let winner = at (local st.builder ~name:"winner" (Raw (Integer UInt32))) in
+  emit st.builder (Assign (winner, Use (Constant (Integer (UInt32, Z.zero)))));
   { winner; return_value = None; scope = List.hd st.scopes; exits = [] }
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 let trivial st ty = Glue.trivial st.context.glue ty
 let is_zero_size st = Memory_layout.has_zero_size st.context.env
 
-let site st (span : S.span) : Lir.site =
+let site st (span : Syntax.span) : Lir.site =
   let text = st.frame.code.text in
   let line = ref 0 and column = ref 1 in
   String.iteri
-    (fun i c ->
-      if i < span.start then
-        if c = '\n' then begin
+    (fun position capability ->
+      if position < span.start then
+        if capability = '\n' then begin
           incr line;
           column := 1
         end
@@ -210,7 +216,7 @@ exception Unsupported of unsupported
 
 let unsupported ?at format = Printf.ksprintf (fun what -> raise (Unsupported { what; at })) format
 
-let source st (span : S.span) =
+let source st (span : Syntax.span) =
   let text = st.frame.code.text in
   let start = min span.start (String.length text) in
   String.sub text start (min span.stop (String.length text) - start)
@@ -238,7 +244,7 @@ let free_in_scope st pointer =
    its owner drops whatever it still holds, and nothing it is given can be
    forgotten. A type with nothing to drop needs no owner. *)
 let owned_local st ?name (scope : scope) ty =
-  let place = at (local st.b ?name (Value ty)) in
+  let place = at (local st.builder ?name (Value ty)) in
   if not (trivial st ty) then scope.owned <- Drop_value place :: scope.owned;
   place
 
@@ -260,12 +266,12 @@ let parameter st ?how ~owned (mode : Ground.mode) ty =
   match how mode ty with
   | None -> (None, temporary st ty)
   | Some (Lir.Pointer _ as pointer) ->
-      let arrives = local st.b pointer in
+      let arrives = local st.builder pointer in
       let place : Lir.place = { root = Local arrives; projections = [ Deref ] } in
       own place;
       (Some arrives, place)
   | Some passed ->
-      let arrives = local st.b ~borrowed:(not owned) passed in
+      let arrives = local st.builder ~borrowed:(not owned) passed in
       own (at arrives);
       (Some arrives, at arrives)
 
@@ -274,10 +280,13 @@ let parameter st ?how ~owned (mode : Ground.mode) ty =
 let evidence_parameters st capabilities =
   let arriving =
     List.map
-      (fun capability -> (capability, local st.b ~name:"evidence" Convention.evidence))
+      (fun capability -> (capability, local st.builder ~name:"evidence" Convention.evidence))
       capabilities
   in
-  st.evidence <- List.map (fun (capability, l) -> (capability, Lir.Copy (at l))) arriving;
+  st.evidence <-
+    List.map
+      (fun (capability, evidence_local) -> (capability, Lir.Copy (at evidence_local)))
+      arriving;
   List.map snd arriving
 
 (* Makes the slot for the function's result, as the convention passes one.
@@ -285,8 +294,8 @@ let evidence_parameters st capabilities =
 let result_slot st (convention : Convention.result) =
   st.result <-
     (match convention with
-    | Through_pointer pointer -> Through (local st.b ~name:"result" pointer)
-    | Returned ty -> Returned_in (local st.b ~name:"result" ty)
+    | Through_pointer pointer -> Through (local st.builder ~name:"result" pointer)
+    | Returned ty -> Returned_in (local st.builder ~name:"result" ty)
     | Nothing -> No_result)
 
 (* Where the function's result is written, if it has one with a size. *)
@@ -300,7 +309,7 @@ let result_place st : Lir.place option =
 let returned_type st =
   match st.result with
   | Through slot | Returned_in slot -> (
-      match local_type st.b slot with
+      match local_type st.builder slot with
       | Value ty | Pointer { target = Value ty; _ } -> Some ty
       | _ -> None)
   | No_result -> None
@@ -309,7 +318,7 @@ let returned_type st =
    [return] can come after part of the result was written. *)
 let clear_result st =
   match (returned_type st, result_place st) with
-  | Some ty, Some place -> if not (trivial st ty) then emit st.b (Drop place)
+  | Some ty, Some place -> if not (trivial st ty) then emit st.builder (Drop place)
   | _ -> ()
 
 let return_result st : Lir.terminator =
@@ -318,24 +327,38 @@ let return_result st : Lir.terminator =
 let drop_scope st (scope : scope) =
   List.iter
     (function
-      | Drop_value place -> emit st.b (Drop place)
+      | Drop_value place -> emit st.builder (Drop place)
       | Free_pointed pointer ->
-          emit st.b
+          emit st.builder
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
+      | Free_blocks { place; variants } ->
+          let after = block st.builder in
+          let cases =
+            List.map
+              (fun variant ->
+                let case = block st.builder in
+                in_block st.builder case (fun () ->
+                    emit st.builder (Free_block { place; variant });
+                    finish st.builder (Goto after));
+                (variant, case))
+              variants
+          in
+          finish st.builder (Switch_variant { place; cases; default = Some after });
+          start st.builder after
       | Give_back { lent; source; ty } ->
-          emit st.b (Assign (source, Use (if trivial st ty then Copy lent else Move lent)))
+          emit st.builder (Assign (source, Use (if trivial st ty then Copy lent else Move lent)))
       | Finish_lend lend ->
           (* The method goes on from its [yield] now, and comes back here. *)
-          let way = block st.b in
-          emit st.b
+          let way = block st.builder in
+          emit st.builder
             (Assign
                ( at lend.selector,
                  Use (Constant (Integer (UInt32, Z.of_int (List.length lend.ways)))) ));
           lend.ways <- way :: lend.ways;
-          finish st.b (Goto lend.resume);
-          in_block st.b lend.finished (fun () ->
-              List.iter (fun place -> emit st.b (Drop place)) lend.owned;
-              finish st.b
+          finish st.builder (Goto lend.resume);
+          in_block st.builder lend.finished (fun () ->
+              List.iter (fun place -> emit st.builder (Drop place)) lend.owned;
+              finish st.builder
                 (match lend.ways with
                 | [ only ] -> Goto only
                 | ways ->
@@ -343,18 +366,20 @@ let drop_scope st (scope : scope) =
                       {
                         value = Copy (at lend.selector);
                         cases =
-                          List.mapi (fun i way -> (Z.of_int (List.length ways - 1 - i), way)) ways;
+                          List.mapi
+                            (fun position way -> (Z.of_int (List.length ways - 1 - position), way))
+                            ways;
                         default = None;
                       }));
-          start st.b way
-      | Join_group join -> emit st.b join)
+          start st.builder way
+      | Join_group join -> emit st.builder join)
     scope.owned
 
 (* Drops everything owned in the scopes inside the [depth] outermost, as a
    [return], [break], or [continue] leaves them. *)
 let leave_to st depth =
   List.iteri
-    (fun i scope -> if List.length st.scopes - i > depth then drop_scope st scope)
+    (fun position scope -> if List.length st.scopes - position > depth then drop_scope st scope)
     st.scopes
 
 (* A scope opened here and ended by [close_scope], with its drops, or by
@@ -374,14 +399,14 @@ let close_scope st scope =
   drop_scope st scope;
   pop_scope st scope
 
-let with_scope st kind f =
+let with_scope st kind body =
   let scope = open_scope st kind in
-  let result = f () in
+  let result = body () in
   close_scope st scope;
   result
 
-let in_scope st f = with_scope st Bindings f
-let in_statement st f = with_scope st Statement f
+let in_scope st body = with_scope st Bindings body
+let in_statement st body = with_scope st Statement body
 
 (* Ends the function being written: what its scope still owns is dropped
    and its result returned. Its parameters are [first], which it is given
@@ -389,13 +414,13 @@ let in_statement st f = with_scope st Statement f
    has one, and [rest]. *)
 let finish_function st ?(returns = true) ~first ~rest () : Lir.function_ =
   (match st.scopes with [ scope ] -> drop_scope st scope | _ -> bug "a function ended in a scope");
-  finish st.b (if returns then return_result st else Unreachable);
+  finish st.builder (if returns then return_result st else Unreachable);
   let pointer = match st.result with Through pointer -> Some pointer | _ -> None in
   let result =
-    match st.result with Returned_in local -> Some (local_type st.b local) | _ -> None
+    match st.result with Returned_in local -> Some (local_type st.builder local) | _ -> None
   in
   let built =
-    Lir_builder.build st.b ?written_result:pointer
+    Lir_builder.build st.builder ?written_result:pointer
       ~parameters:(first @ Option.to_list pointer @ rest)
       ~result
   in
@@ -404,11 +429,11 @@ let finish_function st ?(returns = true) ~first ~rest () : Lir.function_ =
 (* The lambdas the function made, in order. *)
 let nested_functions st =
   Array.of_list
-    (List.map (function Some f -> f | None -> bug "a lambda left unfinished") !(st.nested))
+    (List.map (function Some body -> body | None -> bug "a lambda left unfinished") !(st.nested))
 
 let unreachable_block st =
-  finish st.b Unreachable;
-  start st.b (block st.b)
+  finish st.builder Unreachable;
+  start st.builder (block st.builder)
 
 (* An operand for an owned position: a [var], an [own] argument, a field, a
    returned value. The type checker has made sure a place there is a
@@ -421,8 +446,8 @@ let owned st place ty = if trivial st ty then Lir.Copy place else Lir.Move place
 let take st (place : Lir.place) ty ~destination =
   match place.root with
   | Static _ when not (trivial st ty) ->
-      Glue.copy_into st.context.glue st.b ~destination ~source:place ty
-  | Static _ | Local _ -> emit st.b (Assign (destination, Use (owned st place ty)))
+      Glue.copy_into st.context.glue st.builder ~destination ~source:place ty
+  | Static _ | Local _ -> emit st.builder (Assign (destination, Use (owned st place ty)))
 
 (* A place whose indexes are fixed now, so that an alias of it refers to the
    same element however the index variables change later. *)
@@ -434,7 +459,7 @@ let snapshot st (place : Lir.place) =
         (function
           | Lir.Index (Copy index_place) ->
               let fixed = binding st st.context.types.usize in
-              emit st.b (Assign (fixed, Use (Copy index_place)));
+              emit st.builder (Assign (fixed, Use (Copy index_place)));
               Lir.Index (Copy fixed)
           | projection -> projection)
         place.projections;
@@ -442,17 +467,58 @@ let snapshot st (place : Lir.place) =
 
 (* Runs [f], the body of a loop whose [continue] and [break] each leave
    every scope inside the [depth] outermost. *)
-let looping st ~continue_ ~break_ ~depth f =
+let looping st ~continue_ ~break_ ~depth body =
   st.loops <- { continue_; continue_depth = depth; break_; break_depth = depth } :: st.loops;
-  f ();
+  body ();
   st.loops <- List.tl st.loops
 
 (* Replaces the value at a place the program names with one worked out
    beforehand: what the place still owns is dropped, and the new value moved
    in. *)
 let replace st place ty ~by =
-  if not (trivial st ty) then emit st.b (Drop place);
-  emit st.b (Assign (place, Use (owned st by ty)))
+  if not (trivial st ty) then emit st.builder (Drop place);
+  emit st.builder (Assign (place, Use (owned st by ty)))
+
+(* The type of a place in the function being written, or [None] where it has
+   zero size or is reached through a lambda's environment. *)
+let place_type st (place : Lir.place) =
+  let environment _ = bug "a place in an environment, whose type lowering does not track" in
+  let rec projected (ty : Lir.ty) = function
+    | [] -> Some ty
+    | _ :: _ when match ty with Environment _ | Evidence _ -> true | _ -> false -> None
+    | projection :: rest ->
+        Option.bind (Lir.projection_type st.context.env ~environment ty projection) (fun ty ->
+            projected ty rest)
+  in
+  let root : Lir.ty =
+    match place.root with
+    | Local local -> local_type st.builder local
+    | Static { ty; _ } -> Value ty
+  in
+  if Lir.erased st.context.env root then None else projected root place.projections
+
+(* The lent value at a place, if the place holds one. *)
+let lent_at st place =
+  match place_type st place with Some (Value (Lent lent)) -> Some lent | _ -> None
+
+(* A field or a variant's field of a place. A field of a lent value that
+   holds an address is the place it points at. *)
+let project st (place : Lir.place) (projection : Lir.projection) =
+  let projected = place / projection in
+  let variant, field =
+    match projection with
+    | Field field -> (None, field)
+    | Variant_field { variant; field } -> (Some variant, field)
+    | Index _ | Deref -> (None, "")
+  in
+  match lent_at st place with
+  | Some lent
+    when List.exists
+           (fun (lent : Ground.lent_field) ->
+             lent.variant = variant && lent.field = field && lent.holds = Address)
+           lent.fields ->
+      projected / Deref
+  | _ -> projected
 
 let constant_int integer value = Lir.Constant (Integer (integer, value))
 

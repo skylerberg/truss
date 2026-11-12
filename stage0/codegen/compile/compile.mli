@@ -70,8 +70,7 @@ type record = {
   cached : bool;
 }
 
-(* A test program's whole report, as [Startup.tests_calling] describes it,
-   one record a test, in the order of the tests however they ended, or why
+(* A test program's whole report, one record a test, in the order of the tests however they ended, or why
    it cannot be read. *)
 val parse_report : string -> (record list, string) result
 

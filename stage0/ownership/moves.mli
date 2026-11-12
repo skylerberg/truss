@@ -1,6 +1,4 @@
-module T = Types
-
-type verdict = Moves | Reads | Refused of (Context.context -> Syntax.span -> Context.T.ty -> unit)
+type verdict = Moves | Reads | Refused of (Context.context -> Syntax.span -> Types.ty -> unit)
 
 val verdict :
   Context.context -> Place.t -> type_:Types.ty -> returned:bool -> captured:bool -> verdict

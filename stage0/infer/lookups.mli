@@ -1,14 +1,10 @@
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 
-type version =
-  | Own_version of Path.t
-  | Trait_version of State.T.trait_reference * State.T.trait_method
+type version = Own_version of Path.t | Trait_version of Types.trait_reference * Types.trait_method
 
 val marked_receiver : Syntax.expression -> Path.receiver
 
@@ -17,14 +13,14 @@ val coerce :
   State.env ->
   ?argument:bool ->
   Syntax.expression ->
-  actual:Unify.T.ty ->
-  expected:Unify.T.ty ->
+  actual:Types.ty ->
+  expected:Types.ty ->
   unit
 
-val literal_type : State.state -> expected:Unify.T.ty option -> Unify.T.literal_kind -> Unify.T.ty
-val named : State.state -> State.env -> Syntax.expression -> Resolve.head -> State.T.ty
-val field : State.state -> Syntax.expression -> Unify.T.ty -> Syntax.name -> State.T.ty
-val static_member : State.state -> Syntax.expression -> State.T.ty -> Syntax.name -> State.T.ty
+val literal_type : State.state -> expected:Types.ty option -> Types.literal_kind -> Types.ty
+val named : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
+val field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
+val static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
 
 val explicit_type_arguments :
   ?head:int ->
@@ -37,32 +33,31 @@ val explicit_type_arguments :
 val finish_call :
   State.state ->
   Syntax.expression ->
-  State.C.callee ->
+  Tables.callee ->
   Instantiation.instance ->
-  State.C.argument list ->
+  Tables.argument list ->
   string list ->
-  State.T.ty
+  Types.ty
 
 val check_specification_call :
-  State.state -> State.env -> Syntax.expression -> State.T.signature -> unit
+  State.state -> State.env -> Syntax.expression -> Types.signature -> unit
 
 val trait_static_method :
   State.state ->
   Path.t ->
   State.Names.String_map.key ->
   Path.receiver ->
-  (State.T.trait_reference * Members.T.trait_method) list
+  (Types.trait_reference * Types.trait_method) list
 
-val resolve_evidence :
-  State.state -> Syntax.expression -> Unify.T.ty -> State.T.trait_reference -> unit
+val resolve_evidence : State.state -> Syntax.expression -> Types.ty -> Types.trait_reference -> unit
 
 val versions :
   State.state ->
-  State.T.ty ->
+  Types.ty ->
   State.Names.String_map.key ->
-  ((Path.receiver * version) list, State.T.trait_reference list) Result.t
+  ((Path.receiver * version) list, Types.trait_reference list) Result.t
 
-val impl_method_if_resolved : State.state -> Unify.T.ty -> version -> version
+val impl_method_if_resolved : State.state -> Types.ty -> version -> version
 
 val each_call :
-  State.state -> Syntax.span -> State.T.ty -> State.T.mode -> (State.C.call * State.T.ty) option
+  State.state -> Syntax.span -> Types.ty -> Types.mode -> (Tables.call * Types.ty) option

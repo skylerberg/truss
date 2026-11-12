@@ -209,6 +209,7 @@ module Code : sig
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Lent_mut_in_variant
     | Task_outlives_yield
 
   type capabilities =
@@ -238,6 +239,7 @@ module Code : sig
 
   type package =
     | Impl_location
+    | Sealed_trait_impl
     | Overlapping_impls
     | Method_name_clash
     | Needs_indirect

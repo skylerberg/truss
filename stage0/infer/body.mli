@@ -1,5 +1,3 @@
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Lower = Interface.Lower

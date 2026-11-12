@@ -2,8 +2,6 @@
    and literals in patterns, and the values of character and byte literals. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -59,10 +57,10 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
       | Some (Value_parameter parameter) ->
           register_pattern state written (fun () ->
               Literal
-                (synthetic_expression state ~origin:written.id (T.builtin USize)
+                (synthetic_expression state ~origin:written.id (Types.builtin USize)
                    (Value_parameter parameter)));
-          if not (unify state (T.builtin USize) type_) then
-            mismatch state written.span ~expected:type_ ~actual:(T.builtin USize)
+          if not (unify state (Types.builtin USize) type_) then
+            mismatch state written.span ~expected:type_ ~actual:(Types.builtin USize)
       | _ -> ())
   | Qualified_constant written_constant ->
       constant ();
@@ -88,8 +86,9 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
          other type is one error, and its bounds are not checked against the
          type. *)
       match resolve state type_ with
-      | (T.Named _ | T.Function _ | T.Any _ | T.Cursor _ | T.Parameter _) as resolved
-        when not (T.is_integer_type resolved || T.is_builtin Character resolved) ->
+      | (Types.Named _ | Types.Function _ | Types.Any _ | Types.Cursor _ | Types.Parameter _) as
+        resolved
+        when not (integer_type state resolved || Types.is_builtin Character resolved) ->
           report state Mismatch written.span
             (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
                (show state resolved))
@@ -107,16 +106,16 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
             [ start; stop ])
   | Variant { name = variant_name; fields } -> (
       match type_ with
-      | T.Named { path; arguments } -> (
+      | Types.Named { path; arguments } -> (
           match Members.variants state.database path arguments with
           | Some variants -> (
               if not (Members.fields_visible state.database ~package:state.package path) then
                 report state Private_field written.span
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
-                     (T.show type_));
+                     (Types.show type_));
               match
                 List.find_opt
-                  (fun (variant : T.variant) -> variant.variant_name = variant_name.last.text)
+                  (fun (variant : Types.variant) -> variant.variant_name = variant_name.last.text)
                   variants
               with
               | Some variant ->
@@ -149,7 +148,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                          (match
                             Diagnostic.closest variant_name.last.text
                               (List.map
-                                 (fun (variant : T.variant) -> variant.variant_name)
+                                 (fun (variant : Types.variant) -> variant.variant_name)
                                  variants)
                           with
                          | Some candidate ->
@@ -159,41 +158,41 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
                                  [ replace variant_name.last.span candidate ];
                              ]
                          | None -> [])
-                       (Printf.sprintf "`%s` has no variant `%s`." (T.show type_)
+                       (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_)
                           variant_name.last.text))
           | None -> (
               match Members.broken state.database path with
-              | Some report -> unknown (T.Error report)
+              | Some report -> unknown (Types.Error report)
               | None ->
                   unknown
                     (error state Unknown_variant written.span
-                       (Printf.sprintf "`%s` has no variants." (T.show type_)))))
-      | T.Error _ | T.Hole -> unknown type_
+                       (Printf.sprintf "`%s` has no variants." (Types.show type_)))))
+      | Types.Error _ | Types.Hole -> unknown type_
       | _ ->
           unknown
             (error state Unknown_variant written.span
                (Printf.sprintf "`%s` has no variants." (show state type_))))
   | Record fields -> (
       match type_ with
-      | T.Named { path; arguments } -> (
+      | Types.Named { path; arguments } -> (
           match Members.fields state.database path arguments with
           | Some record_fields ->
               if not (Members.fields_visible state.database ~package:state.package path) then
                 report state Private_field written.span
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
-                     (T.show type_));
+                     (Types.show type_));
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
               let matched = pattern_fields state env written record_fields fields ~is_var ~mode in
               register_pattern state written (fun () ->
                   Record (Form.pattern_fields state record_fields matched))
           | None -> (
               match Members.broken state.database path with
-              | Some report -> unknown (T.Error report)
+              | Some report -> unknown (Types.Error report)
               | None ->
                   unknown
                     (error state Not_a_record written.span
                        (Printf.sprintf "`%s` is not a record." (show state type_)))))
-      | T.Error _ | T.Hole -> unknown type_
+      | Types.Error _ | Types.Hole -> unknown type_
       | _ ->
           unknown
             (error state Not_a_record written.span
@@ -203,7 +202,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
       register_pattern state written (fun () ->
           Alternatives (List.map (build_pattern state) alternatives))
 
-and pattern_fields state env (written : pattern) (fields : T.field list)
+and pattern_fields state env (written : pattern) (fields : Types.field list)
     (written_fields : pattern_field list) ~is_var ~mode =
   let bare_name (inner : pattern) =
     match inner.kind with Binding_or_constant name -> Some name.text | _ -> None
@@ -217,7 +216,8 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
         | Field inner -> (
             match bare_name inner with
             | Some name
-              when List.exists (fun (declared : T.field) -> declared.field_name = name) fields ->
+              when List.exists (fun (declared : Types.field) -> declared.field_name = name) fields
+              ->
                 Some name
             | _ -> ( match fields with [ only ] -> Some only.field_name | _ -> None))
         | Rest -> None)
@@ -230,7 +230,7 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
   in
   (if (not rest) && all_matched then
      match
-       List.filter (fun (declared : T.field) -> not (List.mem declared.field_name named)) fields
+       List.filter (fun (declared : Types.field) -> not (List.mem declared.field_name named)) fields
      with
      | [] -> ()
      | missing ->
@@ -238,7 +238,9 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
            report state Missing_argument written.span
              (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
                 (String.concat ", "
-                   (List.map (fun (declared : T.field) -> "`" ^ declared.field_name ^ "`") missing))
+                   (List.map
+                      (fun (declared : Types.field) -> "`" ^ declared.field_name ^ "`")
+                      missing))
                 (if List.length missing = 1 then "it" else "them")));
   List.filter_map
     (fun (field : pattern_field) ->
@@ -246,7 +248,7 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
       | Rest -> None
       | Named_field (name, inner) -> (
           match
-            List.find_opt (fun (declared : T.field) -> declared.field_name = name.text) fields
+            List.find_opt (fun (declared : Types.field) -> declared.field_name = name.text) fields
           with
           | Some declared ->
               pattern_with state env inner declared.field_type ~is_var ~mode;
@@ -257,7 +259,7 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
                    ~fixes:
                      (match
                         Diagnostic.closest name.text
-                          (List.map (fun (declared : T.field) -> declared.field_name) fields)
+                          (List.map (fun (declared : Types.field) -> declared.field_name) fields)
                       with
                      | Some candidate ->
                          [
@@ -271,7 +273,7 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
       | Field inner -> (
           let named =
             Option.bind (bare_name inner) (fun name ->
-                List.find_opt (fun (declared : T.field) -> declared.field_name = name) fields)
+                List.find_opt (fun (declared : Types.field) -> declared.field_name = name) fields)
           in
           match (named, fields) with
           | Some declared, _ | None, [ declared ] ->
@@ -280,7 +282,9 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
           | None, _ ->
               let names =
                 String.concat ", "
-                  (List.map (fun (declared : T.field) -> "`" ^ declared.field_name ^ "`") fields)
+                  (List.map
+                     (fun (declared : Types.field) -> "`" ^ declared.field_name ^ "`")
+                     fields)
               in
               pattern_with state env inner ~is_var ~mode
                 (error state Unknown_member inner.span
@@ -331,16 +335,16 @@ and constant_pattern state id span path type_ =
 (* Whether a type has structural equality: values that are equal cannot be
    told apart. This holds for built-in equality, and for a derived [Equal]
    if every field has structural equality. *)
-and structural ?(seen = []) state (type_ : T.ty) =
+and structural ?(seen = []) state (type_ : Types.ty) =
   if
-    T.is_integer_type type_ || T.is_builtin Bool type_ || T.is_builtin Character type_
-    || T.is_builtin Unit type_ || T.is_well_known String type_
+    integer_type state type_ || Types.is_builtin Bool type_ || Types.is_builtin Character type_
+    || Types.is_builtin Unit type_ || Types.is_well_known String type_
   then true
-  else if T.is_float_type type_ then false
-  else if List.exists (T.equal type_) seen then true
+  else if Types.is_float_type type_ then false
+  else if List.exists (Types.equal type_) seen then true
   else
     match type_ with
-    | T.Named { path; arguments } -> (
+    | Types.Named { path; arguments } -> (
         match Query.demand state.database Environment.interface path with
         | Some (Environment.Type_interface interface)
           when (not interface.opaque) || Path.package path = state.package ->
@@ -348,13 +352,13 @@ and structural ?(seen = []) state (type_ : T.ty) =
               List.exists (fun derived -> Well_known.is Equal derived) interface.derives
             in
             let substitution =
-              Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
+              Option.value ~default:[] (Types.substitution_of interface.type_generics arguments)
             in
-            let fields_structural (fields : T.field list) =
+            let fields_structural (fields : Types.field list) =
               List.for_all
-                (fun (field : T.field) ->
+                (fun (field : Types.field) ->
                   structural ~seen:(type_ :: seen) state
-                    (T.substitute substitution field.field_type))
+                    (Types.substitute substitution field.field_type))
                 fields
             in
             derives_equal
@@ -362,7 +366,7 @@ and structural ?(seen = []) state (type_ : T.ty) =
             | Record fields -> fields_structural fields
             | Sum variants ->
                 List.for_all
-                  (fun (variant : T.variant) ->
+                  (fun (variant : Types.variant) ->
                     match variant.fields with
                     | Some fields -> fields_structural fields
                     | None -> true)
@@ -391,13 +395,17 @@ and qualified_constant state id span constant type_ =
 and check_literal_fits state (value : expression) number type_ =
   defer state (fun () ->
       match resolve state type_ with
-      | T.Literal _ | T.Variable _ -> false
+      | Types.Literal _ | Types.Variable _ -> false
       | resolved ->
-          (match builtin_range ~usize_bits:(usize_bits state) resolved with
+          (match
+             match resolved with
+             | Types.Parameter _ | Types.Projection _ -> state.unifier.integer_range resolved
+             | _ -> builtin_range ~usize_bits:(usize_bits state) resolved
+           with
           | Some (low, high) when Z.lt number low || Z.gt number high ->
               report state Literal_out_of_range value.span
                 (Printf.sprintf "`%s` does not fit in `%s`, which holds %s to %s."
-                   (Z.to_string number) (T.show resolved) (Z.to_string low) (Z.to_string high))
+                   (Z.to_string number) (Types.show resolved) (Z.to_string low) (Z.to_string high))
           | _ -> ());
           true)
 
@@ -405,7 +413,7 @@ and check_literal_fits state (value : expression) number type_ =
    for: 32, unless the manifest says [usize_bits = 64]. Code checked for 32
    bits is correct on every target. *)
 and usize_bits state = Query.demand state.database Workspace.usize_bits state.package
-and builtin_range ?usize_bits type_ = T.integer_range ?usize_bits type_
+and builtin_range ?usize_bits type_ = Types.integer_range ?usize_bits type_
 
 (* [Character"a"] and [UInt8"\n"]: a character or byte literal is a tagged
    string with exactly one Unicode scalar value or one ASCII character, and
@@ -451,7 +459,7 @@ and character_value state id (literal : string_literal) (builtin : Intrinsic.bui
 
 and character_literal state id literal builtin =
   character_value state id literal builtin;
-  T.builtin builtin
+  Types.builtin builtin
 
 (* A literal used as a pattern or as a bound of a range pattern. It is
    recorded under the node's id, and its type must be the matched type. *)
@@ -459,28 +467,33 @@ and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
       state.tables.literals.(id) <- Some (Integer_value number);
-      if not (T.is_integer_type type_ || T.is_error type_ || type_ = T.Hole) then
+      if not (integer_type state type_ || Types.is_error type_ || type_ = Types.Hole) then
         report state Mismatch span
-          (Printf.sprintf "An integer pattern matches an integer, not `%s`." (T.show type_))
+          (Printf.sprintf "An integer pattern matches an integer, not `%s`." (Types.show type_))
       else
         match builtin_range ~usize_bits:(usize_bits state) type_ with
         | Some (low, high) when Z.lt number low || Z.gt number high ->
             report state Literal_out_of_range span
-              (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (T.show type_))
+              (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (Types.show type_))
         | _ -> ())
   | Literal_true | Literal_false ->
-      if not (unify state type_ T.bool) then mismatch state span ~expected:type_ ~actual:T.bool
+      if not (unify state type_ Types.bool) then
+        mismatch state span ~expected:type_ ~actual:Types.bool
   | Literal_string tagged -> (
       match character_tag state tagged with
       | Some builtin ->
           character_value state id tagged builtin;
-          if not (unify state type_ (T.builtin builtin)) then
-            mismatch state span ~expected:type_ ~actual:(T.builtin builtin)
+          if not (unify state type_ (Types.builtin builtin)) then
+            mismatch state span ~expected:type_ ~actual:(Types.builtin builtin)
       | None -> string_pattern state span type_)
 
 (* A string literal used as a pattern matches a string. *)
 and string_pattern state span type_ =
-  if not (T.is_well_known String type_ || T.is_well_known String_slice type_ || T.is_error type_)
+  if
+    not
+      (Types.is_well_known String type_
+      || Types.is_well_known String_slice type_
+      || Types.is_error type_)
   then
     report state Mismatch span
-      (Printf.sprintf "A string pattern matches a string, not `%s`." (T.show type_))
+      (Printf.sprintf "A string pattern matches a string, not `%s`." (Types.show type_))

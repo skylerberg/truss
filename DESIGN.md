@@ -1224,6 +1224,22 @@ comparisons over `&&`. Every other combination needs parentheses.
   overflow must be proven safe. Otherwise the code must use an explicit
   alternative: `checked_add` (returns an `Option`), `wrapping_add`, or
   `saturating_add`.
+- **Code for every width is written once, against the integer traits.**
+  `FixedWidthInteger` is implemented by every built-in integer type,
+  `SignedInteger` by `Int8` through `ISize`, and `UnsignedInteger` by `UInt8`
+  through `USize`. A provided method such as `checked_power` is then a method
+  of every width, as a Swift extension of `FixedWidthInteger` is. Rust's
+  standard library writes each width's methods with a macro, which Truss
+  does not have. Zig's `i8` is one width of `iN`, but naming `Int8` as
+  `Int[8]` would need a type alias, which Truss does not have either.
+- **The integer traits are sealed.** No other type can implement them, so
+  generic code over one is proven once for each built-in type that does,
+  and each proof sees that type's range and bits (see PROVER.md). A type of
+  one's own that behaves like an integer is a record over a built-in one.
+- **A literal of a type that an integer trait bounds must fit every type
+  that implements it:** -128 to 127 under `SignedInteger`, 0 to 255 under
+  `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`. A type's own
+  bounds are `minimum_value()`, `maximum_value()`, and `bit_width()`.
 - The standard library provides APIs that avoid index arithmetic, such as
   `items.last()`, `enumerate`, `zip`, and reverse ranges.
 
@@ -2367,10 +2383,11 @@ operating system, through means internal to the compiler.
 
 ## The standard library and prelude
 
-The standard library's root module is `standard`. Truss aims to include
-enough in it, plus a set of approved packages, that most programs need few
-outside dependencies. Every dependency is a possible target for a supply-chain
-attack.
+The standard library's root module is `standard`. Truss is batteries
+included: the standard library holds what a command-line tool or a network
+service needs, so that most programs need no outside dependency. Every
+dependency is a possible target for a supply-chain attack, and the standard
+library is the one package that every Truss program already trusts.
 
 - **The standard library is part of the toolchain.** It has no version of
   its own and is in no manifest and no lock file: every package may use it,
@@ -2384,39 +2401,49 @@ attack.
   names, so a package written for an older Truss builds unchanged beside
   one written for a newer, as Rust's editions and Go's per-module language
   versions allow.
-- **The standard library never breaks within a language version.** It
-  follows the rule every published package follows (see
-  [Versions](#versions)), and has no second name to move to.
-- **It holds only what will not need a breaking change.** That is three
-  kinds of code:
+- **The standard library never breaks.** It follows the rule every
+  published package follows (see [Versions](#versions)): a release may add
+  to a module but not change what the module already has.
+- **A module that must break gets a successor beside it,** named with
+  `_v2` as a package is, as Go added `math/rand/v2` and `encoding/json/v2`
+  beside the modules they replace. The old module stays and keeps working,
+  so no program breaks, and its documentation names its successor.
+- **It holds what most programs would otherwise depend on a package for:**
   - **Code that needs the compiler or the operating system:** the prelude,
     the built-in types and collections, the capabilities and their real
     implementations, and platform-specific code.
   - **Types that packages must share to interoperate:** `Reader` and
-    `Writer`, `Path`, `Instant`, network addresses, `json::Value`.
-  - **Implementations of published standards:** JSON, CSV, Base64, URLs,
-    UUIDs, Unicode, SHA-2. A standard that is frozen cannot make its
-    implementation stale, which is how Python's standard library modules
-    went stale. This is what lets the library be large.
+    `Writer`, `Path`, `Instant`, network addresses, `json::Value`,
+    `http::Request` and `http::Response`.
+  - **Implementations of published standards:** JSON, TOML, CSV, Base64,
+    URLs, UUIDs, Unicode, DEFLATE and gzip, ASN.1 DER and X.509, and the
+    cryptographic algorithms.
+  - **The protocols and formats of a network service:** HTTP, TLS, HTML
+    escaping and templates.
 
-  The cryptographic primitives are in it for a second reason. They need
-  processor instructions, and only the standard library can reach those
-  (see [No foreign code](#no-foreign-code)). The standard library is also
-  the only package that needs no grant (see
+  Go's `net/http` and `crypto/tls` show that a standard library can hold
+  protocols that still evolve: HTTP/2 was added to `net/http` without a
+  breaking change. Python's standard library modules went stale because
+  they could be neither fixed nor removed; a successor module fixes a
+  module without removing it.
+
+  The cryptographic primitives need processor instructions, and only the
+  standard library can reach those (see
+  [No foreign code](#no-foreign-code)). TLS needs the system's root
+  certificates, which on macOS only the standard library can read. The
+  standard library is also the only package that needs no grant (see
   [Dependencies](#dependencies)).
-- **Anything still evolving is an approved package.** HTTP, TLS,
-  compression formats, database clients, and markup languages change with
-  practice, so a library for one of them will need breaking changes.
+- **Clients for a product are approved packages.** A database client, a
+  cache client, or an exporter for a telemetry service follows a product's
+  releases, not a published standard, and few programs need any one of
+  them.
 - **The approved packages are the registry's packages owned by `truss`,**
-  such as `truss::http` and `truss::toml`. They are plain Truss, written on
-  the standard library's capabilities and granted them like any dependency,
-  and are held to the review and release rules of the toolchain itself. Go's
-  `golang.org/x` and Deno's `@std` are kept the same way. They are apart
-  from the standard library so that each can have versions of its own, and a
-  second name when it must break, which the standard library never can:
-  Python's standard library holds modules that could neither be fixed nor
-  removed for decades. A package another owner wrote becomes approved by
-  moving to `truss`, which is a rename for its users.
+  such as `truss::postgres`. They are plain Truss, written on the standard
+  library's capabilities and granted them like any dependency, and are held
+  to the review and release rules of the toolchain itself. Go's
+  `golang.org/x` and Deno's `@std` are kept the same way. A package another
+  owner wrote becomes approved by moving to `truss`, which is a rename for
+  its users.
 
 A small prelude of names that nearly every program needs (built-in types,
 `Option`, `Result`, the core collections and traits, and the standard

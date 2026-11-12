@@ -12,6 +12,8 @@
   syntax
   syntax_walk
   types
+  intrinsic
+  well_known
   core
   core_walk
   interface

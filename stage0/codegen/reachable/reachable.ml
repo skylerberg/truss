@@ -3,7 +3,7 @@ let add key keys = if List.exists (Instance.equal key) keys then keys else key :
 let rec place_keys (place : Lir.place) keys =
   let keys = match place.root with Static { key; _ } -> add key keys | Local _ -> keys in
   List.fold_left
-    (fun keys -> function Lir.Index o -> operand_keys o keys | _ -> keys)
+    (fun keys -> function Lir.Index lir_operand -> operand_keys lir_operand keys | _ -> keys)
     keys place.projections
 
 and operand_keys (operand : Lir.operand) keys =
@@ -12,22 +12,26 @@ and operand_keys (operand : Lir.operand) keys =
   | Constant (Symbol_address key) -> add key keys
   | Constant _ -> keys
 
-let function_ref_keys (f : Lir.function_ref) keys =
-  match f with Instance key -> add key keys | Nested _ -> keys
+let function_ref_keys (function_ref : Lir.function_ref) keys =
+  match function_ref with Instance key -> add key keys | Nested _ -> keys
 
 let rvalue_keys (rvalue : Lir.rvalue) keys =
   match rvalue with
-  | Use o | Unary (_, o) | Convert (o, _) -> operand_keys o keys
-  | Binary (_, a, b) -> operand_keys b (operand_keys a keys)
-  | Build { fields; _ } -> List.fold_left (fun keys (_, o) -> operand_keys o keys) keys fields
+  | Use lir_operand | Unary (_, lir_operand) | Convert (lir_operand, _) ->
+      operand_keys lir_operand keys
+  | Binary (_, left, right) -> operand_keys right (operand_keys left keys)
+  | Build { fields; _ } ->
+      List.fold_left (fun keys (_, lir_operand) -> operand_keys lir_operand keys) keys fields
   | Is_variant (place, _) -> place_keys place keys
   | Function_value { code; environment } ->
-      Option.fold ~none:keys ~some:(fun e -> operand_keys e keys) environment
+      Option.fold ~none:keys
+        ~some:(fun environment_operand -> operand_keys environment_operand keys)
+        environment
       |> function_ref_keys code
 
 let references env (instance : Lir.t) =
-  let environment n = instance.nested.(n).environment in
-  let in_function keys (f : Lir.function_) =
+  let environment nested_index = instance.nested.(nested_index).environment in
+  let in_function keys (function_ref : Lir.function_) =
     Array.fold_left
       (fun keys (block : Lir.basic_block) ->
         let keys =
@@ -41,23 +45,29 @@ let references env (instance : Lir.t) =
                     | Direct { function_; _ } -> function_ref_keys function_ keys
                     | _ ->
                         List.fold_left
-                          (fun keys o -> operand_keys o keys)
+                          (fun keys lir_operand -> operand_keys lir_operand keys)
                           keys (Lir.target_operands target)
                   in
-                  let keys = List.fold_left (fun keys o -> operand_keys o keys) keys arguments in
+                  let keys =
+                    List.fold_left
+                      (fun keys lir_operand -> operand_keys lir_operand keys)
+                      keys arguments
+                  in
                   match result with
-                  | Returned p | Written p -> place_keys p keys
+                  | Returned lir_place | Written lir_place -> place_keys lir_place keys
                   | Discarded -> keys)
               | Drop place -> (
                   let keys = place_keys place keys in
-                  match Lir.place_type env ~environment f place with
+                  match Lir.place_type env ~environment function_ref place with
                   | Some (Value ty) -> add (Drop ty) keys
                   | _ -> keys)
               | Free_block { place; _ } -> place_keys place keys
               | Echo { text; length; _ } -> operand_keys length (operand_keys text keys)
               | Region _ | Regions_end _ -> keys
               | Fork { branches } ->
-                  List.fold_left (fun keys (_, o) -> operand_keys o keys) keys branches
+                  List.fold_left
+                    (fun keys (_, lir_operand) -> operand_keys lir_operand keys)
+                    keys branches
               | Fork_range { environment; first; last; _ } ->
                   operand_keys last (operand_keys first (operand_keys environment keys)))
             keys block.statements
@@ -65,24 +75,25 @@ let references env (instance : Lir.t) =
         match block.terminator with
         | Switch { value; _ } -> operand_keys value keys
         | Switch_variant { place; _ } -> place_keys place keys
-        | Return value -> Option.fold ~none:keys ~some:(fun o -> operand_keys o keys) value
+        | Return value ->
+            Option.fold ~none:keys ~some:(fun lir_operand -> operand_keys lir_operand keys) value
         | Fail { message; length; _ } -> operand_keys length (operand_keys message keys)
         | Yield { value; _ } -> operand_keys value keys
         | Goto _ | Unreachable -> keys)
-      keys f.blocks
+      keys function_ref.blocks
   in
   let keys = Array.fold_left in_function (in_function [] instance.main) instance.nested in
   List.filter (fun key -> not (Instance.equal key instance.key)) (List.rev keys)
 
 let compiled_key : Lir.compiled -> Instance.key = function
-  | Code t -> t.key
-  | Data d -> d.data_key
-  | Table t -> t.table_key
+  | Code lir -> lir.key
+  | Data data -> data.data_key
+  | Table lir -> lir.table_key
 
 let compiled_references env : Lir.compiled -> Instance.key list = function
-  | Code t -> references env t
+  | Code lir -> references env lir
   | Data _ -> []
-  | Table t -> List.map fst t.entries
+  | Table lir -> List.map fst lir.entries
 
 module Table = Hashtbl.Make (struct
   type t = Instance.key
@@ -96,7 +107,7 @@ let bug format = Compiler_bug.bug ~stage:"Reachable" format
 (* The methods of capabilities an instance calls: each capability, with the
    method's place among its methods. *)
 let methods_called (instance : Lir.t) =
-  let in_function calls (f : Lir.function_) =
+  let in_function calls (function_ref : Lir.function_) =
     Array.fold_left
       (fun calls (block : Lir.basic_block) ->
         List.fold_left
@@ -106,7 +117,7 @@ let methods_called (instance : Lir.t) =
                 (capability, slot) :: calls
             | _ -> calls)
           calls block.statements)
-      calls f.blocks
+      calls function_ref.blocks
   in
   List.rev (Array.fold_left in_function (in_function [] instance.main) instance.nested)
 
@@ -166,31 +177,31 @@ let derive_own_hash = Blake3.derive_key ~context:"truss 2026-11-12 instance own 
 let own_hash ~references compiled =
   let self = compiled_key compiled in
   let paths = ref [] in
-  let path p =
-    let rec find i = function
+  let path lir_place =
+    let rec find position = function
       | [] ->
-          paths := !paths @ [ p ];
-          i
-      | q :: rest -> if Path.equal p q then i else find (i + 1) rest
+          paths := !paths @ [ lir_place ];
+          position
+      | known :: rest -> if Path.equal lir_place known then position else find (position + 1) rest
     in
     Cbor.int (find 0 !paths)
   in
   let instance key =
     if Instance.equal key self then Cbor.Array [ Text "self" ]
     else
-      let rec find i = function
+      let rec find position = function
         | [] ->
             Compiler_bug.bug ~stage:"Reachable" "a reference that was not collected, to %s"
               (Instance.to_string key)
-        | other :: rest -> if Instance.equal other key then i else find (i + 1) rest
+        | other :: rest -> if Instance.equal other key then position else find (position + 1) rest
       in
       Cbor.Array [ Text "instance"; Cbor.int (find 0 references) ]
   in
   let encoded =
     match compiled with
-    | Lir.Code i -> Lir.encode ~path ~instance (Lir.canonical_instance i)
-    | Data d -> Lir.encode_data ~path ~instance d
-    | Table t -> Lir.encode_table ~path ~instance t
+    | Lir.Code position -> Lir.encode ~path ~instance (Lir.canonical_instance position)
+    | Data data -> Lir.encode_data ~path ~instance data
+    | Table lir -> Lir.encode_table ~path ~instance lir
   in
   derive_own_hash (Cbor.encode encoded)
 

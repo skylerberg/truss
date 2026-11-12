@@ -22,6 +22,9 @@ type t =
   | Divide
   | Remainder
   | Negate
+  | Fixed_width_integer
+  | Signed_integer
+  | Unsigned_integer
   | Range
   | Exit_code
   | Option

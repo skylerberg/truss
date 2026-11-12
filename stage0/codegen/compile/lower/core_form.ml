@@ -46,7 +46,7 @@ let bind_local st (local : Core.local) place =
   | Synthetic number -> Hashtbl.replace st.frame.synthetic number place
   | Self -> st.frame.self_place <- Some place
 
-let operand_type : Core.operand -> T.ty = function
+let operand_type : Core.operand -> Types.ty = function
   | Place place -> Core_walk.place_type place
   | Value value -> value.type_
 
@@ -99,7 +99,7 @@ let rec expand_alternatives (pattern : Core.pattern) : Core.pattern list =
 type bound_name = {
   local : Core.local;
   name : string;
-  mode : T.mode;
+  mode : Types.mode;
   ty : Ground.ty;
   part : Lir.place;
 }
@@ -112,7 +112,7 @@ type slot = Value_slot of Lir.place | Pointer_slot of Lir.local
    copies implicitly and the name does not change it. Otherwise the name
    aliases the part. *)
 let has_own_local st (bound : bound_name) =
-  bound.mode = Own || (trivial st bound.ty && bound.mode <> Mut)
+  (bound.mode = Own || (trivial st bound.ty && bound.mode <> Mut)) && lent_at st bound.part = None
 
 let rec bound_names st (pattern : Core.pattern) (place : Lir.place) : bound_name list =
   match pattern.kind with
@@ -120,10 +120,13 @@ let rec bound_names st (pattern : Core.pattern) (place : Lir.place) : bound_name
       [ { local; name; mode; ty = ground st pattern.type_; part = place } ]
   | Variant { variant; fields } ->
       List.concat_map
-        (fun (field, inner) -> bound_names st inner (place / Variant_field { variant; field }))
+        (fun (field, inner) ->
+          bound_names st inner (project st place (Variant_field { variant; field })))
         fields
   | Record fields ->
-      List.concat_map (fun (field, inner) -> bound_names st inner (place / Field field)) fields
+      List.concat_map
+        (fun (field, inner) -> bound_names st inner (project st place (Field field)))
+        fields
   | Wildcard | Literal _ | Range _ | Equal_to _ | Alternatives _ -> []
 
 (* Binds a name to its part: moved or copied into a local of its own, or as
@@ -131,22 +134,34 @@ let rec bound_names st (pattern : Core.pattern) (place : Lir.place) : bound_name
 let bind_name st (bound : bound_name) =
   if has_own_local st bound then begin
     let variable = binding st ~name:bound.name bound.ty in
-    emit st.b (Assign (variable, Use (owned st bound.part bound.ty)));
+    emit st.builder (Assign (variable, Use (owned st bound.part bound.ty)));
     bind_local st bound.local variable
   end
   else bind_local st bound.local bound.part
 
-let rec place st (source : Core.place) : Lir.place =
+let rec place st (source : Core.place) : Lir.place = whole st (part st source)
+
+(* A place as the code names it, which may hold a lent value: the base of a
+   field, or what a pattern is matched against. *)
+and part st (source : Core.place) : Lir.place =
   match source with
   | Local { local; _ } -> local_place st local
   | Constant { path; _ } -> static_constant st path
-  | Field { base; field; _ } -> place st base / Field field
+  | Field { base; field; _ } -> project st (part st base) (Field field)
   | Temporary value -> value_place st value
   | Lent { kind = Call call; origin; _ } -> lend st call ~call_site:(failure_site st origin)
   | Lent _ -> bug "a lent place that is not a call"
 
 and operand_place st (operand : Core.operand) : Lir.place =
   match operand with Place source -> place st source | Value value -> value_place st value
+
+and operand_part st (operand : Core.operand) : Lir.place =
+  match operand with Place source -> part st source | Value value -> value_place st value
+
+(* The value at a place as a value of its type. A lent value there is
+   copied into one. *)
+and whole st (source : Lir.place) : Lir.place =
+  match lent_at st source with Some lent -> copied_lent st lent source | None -> source
 
 (* Evaluates an expression into a new temporary, which lives until the end
    of the statement. *)
@@ -171,7 +186,7 @@ and operand st (value : Core.expression) : Lir.operand =
 (* Evaluates an expression and writes its value to [destination]. *)
 and into st (value : Core.expression) (destination : Lir.place) =
   let ty = ground st value.type_ in
-  let assign rvalue = emit st.b (Assign (destination, rvalue)) in
+  let assign rvalue = emit st.builder (Assign (destination, rvalue)) in
   match value.kind with
   | Integer _ | Float _ | Boolean _ -> assign (Use (operand st value))
   | Use source -> take st (place st source) ty ~destination
@@ -218,7 +233,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Convert { conversion = To_integer | From_integer; _ } ->
       bug "a conversion that exists only in specifications"
   | Copy source ->
-      Glue.copy_into st.context.glue st.b ~destination ~source:(operand_place st source) ty
+      Glue.copy_into st.context.glue st.builder ~destination ~source:(operand_place st source) ty
   | Value_parameter parameter -> (
       match
         Monomorphic.ground_argument st.context.monomorphic st.frame.code.substitution
@@ -245,8 +260,10 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Call call -> call_into st value call destination
   | Operator { operation; arguments } ->
       ignore
-        (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types operation
-           ~type_arguments:(List.map (fun (a : Core.expression) -> ground st a.type_) arguments)
+        (Intrinsics.lower ~checks:st.context.checks st.context.env st.builder st.context.types
+           operation
+           ~type_arguments:
+             (List.map (fun (argument : Core.expression) -> ground st argument.type_) arguments)
            (List.map (fun argument -> Intrinsics.Value (operand st argument)) arguments)
            ~destination:(Some destination) ~site:(failure_site st value.origin))
   | Compare { comparison; left; right } ->
@@ -256,15 +273,15 @@ and into st (value : Core.expression) (destination : Lir.place) =
       (* A condition used as a value: true on the path to [yes], and false
          on the path to [no]. *)
       in_scope st (fun () ->
-          let yes = block st.b and no = block st.b and after = block st.b in
+          let yes = block st.builder and no = block st.builder and after = block st.builder in
           branch st value ~yes ~no;
-          start st.b yes;
+          start st.builder yes;
           assign (Use (Constant (Bool true)));
-          finish st.b (Goto after);
-          start st.b no;
+          finish st.builder (Goto after);
+          start st.builder no;
           assign (Use (Constant (Bool false)));
-          finish st.b (Goto after);
-          start st.b after)
+          finish st.builder (Goto after);
+          start st.builder after)
   | If { condition; then_; else_ } -> if_ st ~condition ~then_ ~else_ (Some destination)
   | Match { scrutinees; arms; _ } -> match_ st ~scrutinees ~arms destination
   | Block inner -> block_into st inner (Some destination)
@@ -277,7 +294,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
   | Continue -> continue_loop st
   | Todo ->
       let message = "todo reached" in
-      finish st.b
+      finish st.builder
         (Fail
            {
              failure = Todo;
@@ -285,7 +302,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
              length = usize (String.length message);
              site = site_of st value.origin;
            });
-      start st.b (block st.b)
+      start st.builder (block st.builder)
   | Unreachable -> unreachable_block st
   | Provide { implementations; body } ->
       (* The body runs with the evidence of each implementation added. *)
@@ -321,7 +338,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
       in
       let added =
         List.concat_map
-          (fun ((mode : T.mode), evidence) ->
+          (fun ((mode : Types.mode), evidence) ->
             match tasks with
             | Some tasks when mode = Mut && not (List.exists is_tasks evidence) ->
                 locked_evidence st ~tasks evidence
@@ -349,20 +366,25 @@ and into st (value : Core.expression) (destination : Lir.place) =
       if st.pulling then
         unsupported ~at:(site_of st value.origin) "a lambda in a yielding method that is pulled";
       let function_type =
-        match ty with Function f -> f | _ -> bug "a lambda of %s" (Ground.to_string ty)
+        match ty with
+        | Function function_type -> function_type
+        | _ -> bug "a lambda of %s" (Ground.to_string ty)
       in
       nested_function st ~function_type
-        ~output:(match value.type_ with T.Function f -> Some f.output | _ -> None)
+        ~output:
+          (match value.type_ with
+          | Types.Function function_type -> Some function_type.output
+          | _ -> None)
         ~captures:
           (List.map
              (fun (capture : Core.capture) ->
-               (capture.local, local_place st capture.local, ground st capture.type_))
+               (capture.local, whole st (local_place st capture.local), ground st capture.type_))
              captures)
         ~bind_capture:bind_local
         ~body:(fun inner parameter_places ->
           List.iter2
             (fun pattern (place, _, _) ->
-              match_patterns inner [ (pattern, place) ] ~failed:(block inner.b))
+              match_patterns inner [ (pattern, place) ] ~failed:(block inner.builder))
             parameters parameter_places;
           block_into inner body (result_place inner))
         destination
@@ -381,21 +403,21 @@ and into st (value : Core.expression) (destination : Lir.place) =
       in
       assign (Use (Constant (Bool (not deciding))));
       for_each st ~origin:value.origin ~schedule:Sequential ~iteration ~each:(fun bound ->
-          match_patterns st [ (pattern, bound) ] ~failed:(block st.b);
+          match_patterns st [ (pattern, bound) ] ~failed:(block st.builder);
           let holds = temporary st st.context.bool in
           in_statement st (fun () -> into st body holds);
-          let decided = block st.b and goes_on = block st.b in
-          finish st.b
+          let decided = block st.builder and goes_on = block st.builder in
+          finish st.builder
             (Switch
                {
                  value = Copy holds;
                  cases = [ ((if deciding then Z.one else Z.zero), decided) ];
                  default = Some goes_on;
                });
-          start st.b decided;
+          start st.builder decided;
           assign (Use (Constant (Bool deciding)));
           break_loop st;
-          start st.b goes_on)
+          start st.builder goes_on)
   | Result | Old _ | Yielded | Finished | Identical _ | Specification_function _ | Method_time _ ->
       bug "a specification-only expression in code that runs"
   | Task_exit { tasks; exit } ->
@@ -421,7 +443,8 @@ and into st (value : Core.expression) (destination : Lir.place) =
    temporary, which the callee fills with the default. The returned mask has
    one bit for each parameter with a default, set where the call passes an
    argument. *)
-and evaluate_arguments st (signature : T.signature) substitution (arguments : Core.argument list) =
+and evaluate_arguments st (signature : Types.signature) substitution
+    (arguments : Core.argument list) =
   let parameters = interface_parameters signature in
   if List.length parameters <> List.length arguments then
     bug "a call with %d arguments for %d parameters" (List.length arguments)
@@ -502,8 +525,8 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
         match arguments with
         | [ (_, _, message) ] ->
             ignore
-              (Intrinsics.lower ~checks:st.context.checks st.context.env st.b st.context.types Crash
-                 ~type_arguments:[] [ Intrinsics.Place message ] ~destination:None
+              (Intrinsics.lower ~checks:st.context.checks st.context.env st.builder st.context.types
+                 Crash ~type_arguments:[] [ Intrinsics.Place message ] ~destination:None
                  ~site:(site_of st value.origin))
         | _ -> bug "Panic.crash takes one message"
       else begin
@@ -512,7 +535,7 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
           Lir.Evidence_call
             { evidence = evidence_of st capability; capability; slot; signature = lir_signature }
         in
-        emit st.b
+        emit st.builder
           (Call
              {
                target;
@@ -525,9 +548,9 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
   | None, Trait_method { trait; name; self_type; _ } -> (
       (* Through an [any] value, which is the receiver. *)
       let any_type =
-        match T.substitute st.frame.code.substitution self_type with
-        | T.Any reference -> reference
-        | receiver -> bug "a call through any on %s" (T.show receiver)
+        match Types.substitute st.frame.code.substitution self_type with
+        | Types.Any reference -> reference
+        | receiver -> bug "a call through any on %s" (Types.show receiver)
       in
       match List.map (argument_place st) call.arguments with
       | (_, _, any) :: arguments ->
@@ -536,7 +559,7 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
   | None, Indirect function_value ->
       let function_type =
         match ground st (operand_type function_value) with
-        | Function f -> f
+        | Function function_type -> function_type
         | callee_ty -> bug "a call of %s" (Ground.to_string callee_ty)
       in
       let value = operand_place st function_value in
@@ -561,7 +584,9 @@ and capability_defaults st ~capability ~name (arguments : Core.argument list) ev
       match demand st.context Environment.trait_interface capability with
       | Some interface -> (
           match
-            List.find_opt (fun (m : T.trait_method) -> m.method_name = name) interface.methods
+            List.find_opt
+              (fun (trait_method : Types.trait_method) -> trait_method.method_name = name)
+              interface.methods
           with
           | Some declared -> declared.method_receiver
           | None -> bug "%s has no method %s" (Path.show capability) name)
@@ -646,13 +671,13 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
     (scalar, constant, scalar = Character)
   in
   let both first second =
-    let answer = local st.b (Raw Bool) in
-    emit st.b (Assign (at answer, Binary (Bit_and, first, second)));
+    let answer = local st.builder (Raw Bool) in
+    emit st.builder (Assign (at answer, Binary (Bit_and, first, second)));
     Lir.Copy (at answer)
   in
   let compare op left right =
-    let answer = local st.b (Raw Bool) in
-    emit st.b (Assign (at answer, Binary (op, left, right)));
+    let answer = local st.builder (Raw Bool) in
+    emit st.builder (Assign (at answer, Binary (op, left, right)));
     Lir.Copy (at answer)
   in
   match (iteration, schedule) with
@@ -667,86 +692,91 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
       let one = constant_int UInt64 Z.one in
       let first_value = binding st ~name:"start" element in
       let last_value = binding st element in
-      emit st.b (Assign (first_value, Use (operand st low)));
-      emit st.b (Assign (last_value, Use (operand st high)));
-      let going = local st.b (Raw Bool) in
-      emit st.b
+      emit st.builder (Assign (first_value, Use (operand st low)));
+      emit st.builder (Assign (last_value, Use (operand st high)));
+      let going = local st.builder (Raw Bool) in
+      emit st.builder
         (Assign
            ( at going,
              Binary ((if inclusive then Less_equal else Less), Copy first_value, Copy last_value) ));
-      let inside = block st.b and after = block st.b in
+      let inside = block st.builder and after = block st.builder in
       let depth = List.length st.scopes in
-      Lir_builder.branch st.b (Copy (at going)) ~yes:inside ~no:after;
-      start st.b inside;
-      let first = local st.b ~name:"first" wide and last = local st.b ~name:"last" wide in
-      let low_wide = local st.b wide and high_wide = local st.b wide in
-      emit st.b (Assign (at first, Use (constant_int UInt64 Z.zero)));
-      emit st.b (Assign (at low_wide, Convert (Copy first_value, Integer UInt64)));
-      emit st.b (Assign (at high_wide, Convert (Copy last_value, Integer UInt64)));
-      emit st.b (Assign (at last, Binary (Subtract, Copy (at high_wide), Copy (at low_wide))));
-      if not inclusive then emit st.b (Assign (at last, Binary (Subtract, Copy (at last), one)));
+      Lir_builder.branch st.builder (Copy (at going)) ~yes:inside ~no:after;
+      start st.builder inside;
+      let first = local st.builder ~name:"first" wide
+      and last = local st.builder ~name:"last" wide in
+      let low_wide = local st.builder wide and high_wide = local st.builder wide in
+      emit st.builder (Assign (at first, Use (constant_int UInt64 Z.zero)));
+      emit st.builder (Assign (at low_wide, Convert (Copy first_value, Integer UInt64)));
+      emit st.builder (Assign (at high_wide, Convert (Copy last_value, Integer UInt64)));
+      emit st.builder (Assign (at last, Binary (Subtract, Copy (at high_wide), Copy (at low_wide))));
+      if not inclusive then
+        emit st.builder (Assign (at last, Binary (Subtract, Copy (at last), one)));
       if characters then
-        when_ st.b
+        when_ st.builder
           (both
              (compare Less (Copy first_value) (constant 0xD800))
              (compare Greater (Copy last_value) (constant 0xDFFF)))
           (fun () ->
-            emit st.b
+            emit st.builder
               (Assign
                  (at last, Binary (Subtract, Copy (at last), constant_int UInt64 (Z.of_int 0x800)))));
       let fork = fresh_fork st in
-      emit st.b (Region { fork; region = Chunk { first; last } });
-      let index = local st.b ~name:"index" wide in
-      emit st.b (Assign (at index, Use (Copy (at first))));
-      let again = block st.b and step = block st.b and done_ = block st.b in
-      finish st.b (Goto again);
-      start st.b again;
+      emit st.builder (Region { fork; region = Chunk { first; last } });
+      let index = local st.builder ~name:"index" wide in
+      emit st.builder (Assign (at index, Use (Copy (at first))));
+      let again = block st.builder and step = block st.builder and done_ = block st.builder in
+      finish st.builder (Goto again);
+      start st.builder again;
       in_scope st (fun () ->
           let offset = binding st element in
           let bound = binding st element in
-          emit st.b (Assign (offset, Convert (Copy (at index), scalar)));
-          emit st.b (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
+          emit st.builder (Assign (offset, Convert (Copy (at index), scalar)));
+          emit st.builder (Assign (bound, Binary (Add, Copy first_value, Copy offset)));
           if characters then
-            when_ st.b
+            when_ st.builder
               (both
                  (compare Less (Copy first_value) (constant 0xD800))
                  (compare Greater_equal (Copy bound) (constant 0xD800)))
-              (fun () -> emit st.b (Assign (bound, Binary (Add, Copy bound, constant 0x800))));
+              (fun () -> emit st.builder (Assign (bound, Binary (Add, Copy bound, constant 0x800))));
           looping st ~continue_:step ~break_:done_ ~depth (fun () -> each bound));
-      finish st.b (Goto step);
-      start st.b step;
-      let ended = local st.b (Raw Bool) in
-      emit st.b (Assign (at ended, Binary (Equal, Copy (at index), Copy (at last))));
-      let next = block st.b in
-      Lir_builder.branch st.b (Copy (at ended)) ~yes:done_ ~no:next;
-      start st.b next;
-      emit st.b (Assign (at index, Binary (Add, Copy (at index), one)));
-      finish st.b (Goto again);
-      start st.b done_;
-      emit st.b (Regions_end { fork });
-      finish st.b (Goto after);
-      start st.b after
+      finish st.builder (Goto step);
+      start st.builder step;
+      let ended = local st.builder (Raw Bool) in
+      emit st.builder (Assign (at ended, Binary (Equal, Copy (at index), Copy (at last))));
+      let next = block st.builder in
+      Lir_builder.branch st.builder (Copy (at ended)) ~yes:done_ ~no:next;
+      start st.builder next;
+      emit st.builder (Assign (at index, Binary (Add, Copy (at index), one)));
+      finish st.builder (Goto again);
+      start st.builder done_;
+      emit st.builder (Regions_end { fork });
+      finish st.builder (Goto after);
+      start st.builder after
   | Integer_range { start = low; stop = high; inclusive }, (Sequential | Spawned _) ->
       let element = ground st low.type_ in
       let scalar, constant, characters = counting element in
       let index = binding st ~name:"index" element in
       let stop = binding st element in
-      emit st.b (Assign (index, Use (operand st low)));
-      emit st.b (Assign (stop, Use (operand st high)));
-      let test = block st.b and inside = block st.b and step = block st.b and after = block st.b in
+      emit st.builder (Assign (index, Use (operand st low)));
+      emit st.builder (Assign (stop, Use (operand st high)));
+      let test = block st.builder
+      and inside = block st.builder
+      and step = block st.builder
+      and after = block st.builder in
       let depth = List.length st.scopes in
-      finish st.b (Goto test);
-      start st.b test;
-      let going = local st.b (Raw Bool) in
-      emit st.b
+      finish st.builder (Goto test);
+      start st.builder test;
+      let going = local st.builder (Raw Bool) in
+      emit st.builder
         (Assign (at going, Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop)));
-      Lir_builder.branch st.b (Copy (at going)) ~yes:inside ~no:after;
-      start st.b inside;
+      Lir_builder.branch st.builder (Copy (at going)) ~yes:inside ~no:after;
+      start st.builder inside;
       looping st ~continue_:step ~break_:after ~depth (fun () ->
           let run value =
             in_scope st (fun () ->
                 let bound = binding st element in
-                emit st.b (Assign (bound, value));
+                emit st.builder (Assign (bound, value));
                 each bound)
           in
           match schedule with
@@ -754,28 +784,28 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
               (* The task's argument is the index, converted to [UInt64]
                  and back. *)
               let item = at loop.item in
-              emit st.b (Assign (item, Convert (Copy index, Integer UInt64)));
+              emit st.builder (Assign (item, Convert (Copy index, Integer UInt64)));
               spawn_iteration st loop ~not_spawned:ignore (fun () ->
                   run (Convert (Copy item, scalar)))
           | Sequential | Chunked -> run (Use (Copy index)));
-      finish st.b (Goto step);
-      start st.b step;
+      finish st.builder (Goto step);
+      start st.builder step;
       (* An inclusive range stops after its last value without adding
          one to it, which could overflow. *)
       if inclusive then begin
-        let last = local st.b (Raw Bool) in
-        emit st.b (Assign (at last, Binary (Equal, Copy index, Copy stop)));
-        let next = block st.b in
-        Lir_builder.branch st.b (Copy (at last)) ~yes:after ~no:next;
-        start st.b next
+        let last = local st.builder (Raw Bool) in
+        emit st.builder (Assign (at last, Binary (Equal, Copy index, Copy stop)));
+        let next = block st.builder in
+        Lir_builder.branch st.builder (Copy (at last)) ~yes:after ~no:next;
+        start st.builder next
       end;
-      emit st.b (Assign (index, Binary (Add, Copy index, constant 1)));
+      emit st.builder (Assign (index, Binary (Add, Copy index, constant 1)));
       if characters then
-        when_ st.b
+        when_ st.builder
           (compare Equal (Copy index) (constant 0xD800))
-          (fun () -> emit st.b (Assign (index, Use (constant 0xE000))));
-      finish st.b (Goto test);
-      start st.b after
+          (fun () -> emit st.builder (Assign (index, Use (constant 0xE000))));
+      finish st.builder (Goto test);
+      start st.builder after
   | Yielding_call ({ kind = Call call; _ } as iterated), _ -> (
       (* The yielding method is inlined here, with the loop body at each
          of its [yield]s. *)
@@ -800,7 +830,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
           let arguments = arguments_to_inline st path type_arguments call.arguments in
           let caller = st.frame in
           let depth = List.length st.scopes in
-          let after = block st.b in
+          let after = block st.builder in
           (* A method that yields by position has one range loop, and that
              loop takes this loop's schedule. Any other method runs
              sequentially in the enclosing code, and a task is spawned at
@@ -818,7 +848,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
                 if mode = Mut then
                   bug "a `concurrent for` over %s, which yields `mut` places and not by position"
                     (Path.show path);
-                fun value ~owned -> spawn_with_item st loop value ~owned ~each
+                fun value ~owned -> spawn_with_item st loop (whole st value) ~owned ~each
           in
           inline st path type_arguments ~arguments ~call_site:(site_of st origin)
             ~on_yield:(fun yielded ~owned ~resume ~stop ->
@@ -836,11 +866,11 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
                     :: st.loops;
                   each_yielded yielded ~owned;
                   st.loops <- List.tl st.loops);
-              finish st.b (Goto resume);
+              finish st.builder (Goto resume);
               ignore stop;
               st.frame <- inner);
-          finish st.b (Goto after);
-          start st.b after)
+          finish st.builder (Goto after);
+          start st.builder after)
   | Yielding_call _, _ -> bug "a loop over what is not a call"
   | Cursor { cursor; next = None }, _ -> (
       match ground st (Core_walk.place_type cursor) with
@@ -866,89 +896,261 @@ and pull_cursor st (yielding : Ground.yielding) cursor ~(each : Lir.place -> uni
     ~call_next:(fun destination -> call_next st yielding cursor destination)
     ~body:each
 
-(* The value a method yields with places lent into it.
-
-   Lent to be read, it holds the bytes of each place and owns nothing, so
-   nothing drops it, and the places keep their values.
-
-   Lent to be changed, each place's value is moved into it, and the scope
-   around moves each back as it ends, on every way out. So while the caller
-   has it, it owns what it holds: a field the caller replaces is dropped
-   first, as in any value, and what goes back is whatever the caller left. *)
-and lending st (mode : T.mode) (built : Core.expression) : Lir.place =
-  let changed = mode = Mut in
-  let lent = at (local st.b ~borrowed:(not changed) (Value (ground st built.type_))) in
-  (* Once each place has its value back, what is left owns nothing, and
-     this drop, which comes after them, says so. *)
-  if changed then begin
-    let scope = innermost_scope st in
-    scope.owned <- Drop_value lent :: scope.owned
-  end;
-  let lent_operand source ty ~from =
-    if changed then begin
-      let scope = innermost_scope st in
-      scope.owned <- Give_back { lent = from; source; ty } :: scope.owned;
-      owned st source ty
-    end
-    else Lir.Copy source
-  in
-  construct_lending st built ~borrowed:(not changed) ~lent:lent_operand ~destination:lent
-    ~field_path:lent;
-  lent
-
 (* For a cursor, whose caller keeps what [next] gives it: the value with a
    copy of each place in place of the place, which it owns. *)
 and copied st (built : Core.expression) : Lir.place =
   let copy = temporary st (ground st built.type_) in
-  let copy_of source ty ~from:_ =
-    let fresh_copy = temporary st ty in
-    Glue.copy_into st.context.glue st.b ~destination:fresh_copy ~source ty;
-    owned st fresh_copy ty
-  in
-  construct_lending st built ~borrowed:false ~lent:copy_of ~destination:copy ~field_path:copy;
+  construct_copied st built ~destination:copy;
   copy
 
-(* Builds a construct that has places for fields, at any depth, into
-   [destination]. [lent] gives the operand for a place of a type, and is
-   told where the field will be within the outermost value, [field_path]. A
-   construct inside another is built in a local of its own, which owns
-   nothing where [borrowed]. *)
-and construct_lending st (built : Core.expression) ~borrowed ~lent ~destination ~field_path =
+and construct_copied st (built : Core.expression) ~destination =
   match built.kind with
   | Construct { variant; fields } ->
       let ty = ground st built.type_ in
-      let part name : Lir.projection =
-        match variant with
-        | Some variant -> Variant_field { variant; field = name }
-        | None -> Field name
-      in
       let fields =
         List.map
           (fun (name, (field : Core.operand option)) ->
             match field with
             | Some (Place source) ->
-                ( name,
-                  lent
-                    (snapshot st (place st source))
-                    (ground st (Core_walk.place_type source))
-                    ~from:(field_path / part name) )
+                let field_ty = ground st (Core_walk.place_type source) in
+                let fresh_copy = temporary st field_ty in
+                Glue.copy_into st.context.glue st.builder ~destination:fresh_copy
+                  ~source:(place st source) field_ty;
+                (name, owned st fresh_copy field_ty)
             | Some (Value ({ kind = Construct _; _ } as nested))
               when Core_walk.lent_places (Value nested) <> [] ->
-                let ty = ground st nested.type_ in
-                let inner = at (local st.b ~borrowed (Value ty)) in
-                construct_lending st nested ~borrowed ~lent ~destination:inner
-                  ~field_path:(field_path / part name);
-                (name, if borrowed then Lir.Copy inner else owned st inner ty)
+                let nested_ty = ground st nested.type_ in
+                let inner = at (local st.builder (Value nested_ty)) in
+                construct_copied st nested ~destination:inner;
+                (name, owned st inner nested_ty)
             | Some (Value value) -> (name, owned st (value_place st value) (ground st value.type_))
             | None ->
-                let default = field_default st ty ~variant ~field:name in
-                in_type_definition st ty (fun () ->
-                    (name, owned st (value_place st default) (ground st default.type_))))
+                let default, default_ty = field_default_place st ty ~variant ~field:name in
+                (name, owned st default default_ty))
           fields
       in
-      emit st.b (Assign (destination, Build { ty; variant; fields }))
+      emit st.builder (Assign (destination, Build { ty; variant; fields }))
   | _ -> bug "a value that lends places and is no construct"
 
+(* A field's default value and its type, evaluated in the type's
+   definition, where the default is written. *)
+and field_default_place st ty ~variant ~field =
+  let default = field_default st ty ~variant ~field in
+  in_type_definition st ty (fun () -> (value_place st default, ground st default.type_))
+
+(* The variants of a record or sum type, a record's as one with no name,
+   each with its fields and their types. *)
+and variants_of st (ty : Ground.ty) : (string option * (string * Ground.ty) list) list =
+  let typed fields =
+    List.map
+      (fun (name, (member : Memory_layout.member)) ->
+        match member with
+        | Typed field_ty -> (name, field_ty)
+        | Raw _ -> bug "a field %s of %s that no Truss type names" name (Ground.to_string ty))
+      fields
+  in
+  match Memory_layout.shape st.context.env ty with
+  | Record fields -> [ (None, typed fields) ]
+  | Sum variants ->
+      List.map
+        (fun (variant_shape : Memory_layout.variant_shape) ->
+          (Some variant_shape.name, typed variant_shape.fields))
+        variants
+  | Scalar _ | Array _ -> bug "the fields of %s, which has none" (Ground.to_string ty)
+
+(* Writes [build] for each variant that the value at [source], of type
+   [ty], may have, with the variant's fields: once for a record, and for a
+   sum type in a case of a switch on the variant. *)
+and each_variant st ty (source : Lir.place) build =
+  match variants_of st ty with
+  | [ (None, fields) ] -> build None fields
+  | variants ->
+      let after = block st.builder in
+      let cases =
+        List.map
+          (fun (variant, fields) ->
+            let case = block st.builder in
+            in_block st.builder case (fun () ->
+                build variant fields;
+                finish st.builder (Goto after));
+            (Option.get variant, case))
+          variants
+      in
+      finish st.builder (Switch_variant { place = source; cases; default = None });
+      start st.builder after
+
+and field_of variant field : Lir.projection =
+  match variant with Some variant -> Variant_field { variant; field } | None -> Field field
+
+and lent_field (lent : Ground.lent) variant field =
+  List.find_map
+    (fun (lent_field : Ground.lent_field) ->
+      if lent_field.variant = variant && lent_field.field = field then Some lent_field.holds
+      else None)
+    lent.fields
+
+(* Whether a [yield]'s operand is a constructor that lends a place. *)
+and lends_a_place (operand : Core.operand) =
+  match operand with
+  | Value { kind = Construct _; _ } -> Core_walk.lent_places operand <> []
+  | _ -> false
+
+(* The type of the lent value that the current frame's method builds at
+   each [yield], where one of its [yield]s is a constructor that lends a
+   place. Each field that some [yield] gives a place, or that has a type
+   with something to drop, holds an address, and a field that some [yield]
+   gives such a constructor holds a lent value of its own. *)
+and lent_type st (body : Core.block) : Ground.lent option =
+  let mode =
+    match st.frame.code.result with
+    | Yields (mode, _) | Lends (mode, _) -> mode
+    | Returns _ -> bug "a yield in %s, which does not yield" (Path.show st.frame.code.anchor)
+  in
+  let parts = ref [] in
+  Core_walk.block
+    (Core_walk.deep
+       {
+         Core_walk.ignore_all with
+         statement =
+           (fun (node : Core.statement) ->
+             match node.kind with Yield { part; _ } -> parts := part :: !parts | _ -> ());
+       })
+    body;
+  if mode = Own || not (List.exists lends_a_place !parts) then None
+  else Some (lent_type_of st ~writable:(mode = Mut) (yielded_type_of_frame st) !parts)
+
+and lent_type_of st ~writable ty (parts : Core.operand list) : Ground.lent =
+  let field_operands variant name =
+    List.concat_map
+      (fun (part : Core.operand) ->
+        match part with
+        | Value { kind = Construct { variant = constructed; fields }; _ } when constructed = variant
+          -> (
+            match List.assoc_opt name fields with Some (Some field) -> [ field ] | _ -> [])
+        | _ -> [])
+      parts
+  in
+  let lent_field_for variant (name, field_ty) : Ground.lent_field option =
+    let operands = field_operands variant name in
+    let holds : Ground.holds option =
+      if List.exists lends_a_place operands then
+        Some (Nested (lent_type_of st ~writable field_ty operands))
+      else if
+        List.exists (function Core.Place _ -> true | Value _ -> false) operands
+        || not (trivial st field_ty)
+      then Some Address
+      else None
+    in
+    Option.map (fun holds -> { Ground.variant; field = name; holds }) holds
+  in
+  {
+    base = ty;
+    writable;
+    fields =
+      List.concat_map
+        (fun (variant, fields) -> List.filter_map (lent_field_for variant) fields)
+        (variants_of st ty);
+  }
+
+(* Builds what a [yield] lends into [destination], a lent value of type
+   [lent]. A field that holds an address is given the address of a place,
+   or of a temporary that the [yield]'s statement owns, which the method
+   drops once it goes on. *)
+and lend_into st (lent : Ground.lent) (operand : Core.operand) ~destination =
+  match operand with
+  | Value { kind = Construct { variant; fields }; _ } ->
+      let fields =
+        List.map
+          (fun (name, (field : Core.operand option)) ->
+            let holds = lent_field lent variant name in
+            let evaluated () =
+              match field with
+              | Some (Place source) -> snapshot st (part st source)
+              | Some (Value value) -> value_place st value
+              | None -> fst (field_default_place st lent.base ~variant ~field:name)
+            in
+            match (holds, field) with
+            | Some (Nested inner), Some (Value ({ kind = Construct _; _ } as nested)) ->
+                let nested_lent = at (local st.builder ~borrowed:true (Value (Lent inner))) in
+                lend_into st inner (Value nested) ~destination:nested_lent;
+                (name, Lir.Copy nested_lent)
+            | Some (Nested inner), _ -> (name, Copy (lent_from st inner (evaluated ())))
+            | Some Address, _ ->
+                (name, Address { place = whole st (evaluated ()); writable = lent.writable })
+            | None, _ -> (name, Copy (whole st (evaluated ()))))
+          fields
+      in
+      emit st.builder (Assign (destination, Build { ty = Lent lent; variant; fields }))
+  | Place _ | Value _ ->
+      emit st.builder
+        (Assign (destination, Use (Copy (lent_from st lent (operand_part st operand)))))
+
+(* The value at [source] as a lent value of type [lent], which lends its
+   parts. *)
+and lent_from st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+  match lent_at st source with
+  | Some existing when Ground.compare (Lent existing) (Lent lent) = 0 -> source
+  | Some existing -> lend_fields st lent (copied_lent st existing source)
+  | None -> lend_fields st lent source
+
+and lend_fields st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+  let built = at (local st.builder ~borrowed:true (Value (Lent lent))) in
+  each_variant st lent.base source (fun variant fields ->
+      let fields =
+        List.map
+          (fun (name, _) ->
+            let field_place = source / field_of variant name in
+            match lent_field lent variant name with
+            | Some Address -> (name, Lir.Address { place = field_place; writable = lent.writable })
+            | Some (Nested inner) -> (name, Copy (lent_from st inner field_place))
+            | None -> (name, Copy field_place))
+          fields
+      in
+      emit st.builder (Assign (built, Build { ty = Lent lent; variant; fields })));
+  built
+
+(* A lent value copied into a value of its type, which owns nothing: a
+   variant's block, which the copy has and the lent value does not, is
+   freed as the scope ends. Lent to be changed, each value is moved out of
+   its place instead, and moved back as the scope ends, on every way out,
+   so the caller's changes reach the place. The checker allows this only
+   for a record, so the variant cannot change. *)
+and copied_lent st (lent : Ground.lent) (source : Lir.place) : Lir.place =
+  let ty = lent.base in
+  let copy = at (local st.builder ~borrowed:(not lent.writable) (Value ty)) in
+  let scope = innermost_scope st in
+  if lent.writable then begin
+    (match variants_of st ty with
+    | [ (None, _) ] -> ()
+    | _ -> bug "%s is lent to be changed" (Ground.to_string (Lent lent)));
+    scope.owned <- Drop_value copy :: scope.owned
+  end;
+  each_variant st ty source (fun variant fields ->
+      let fields =
+        List.map
+          (fun (name, field_ty) ->
+            let from = whole st (project st source (field_of variant name)) in
+            if lent.writable then begin
+              scope.owned <-
+                Give_back { lent = copy / field_of variant name; source = from; ty = field_ty }
+                :: scope.owned;
+              (name, owned st from field_ty)
+            end
+            else (name, Lir.Copy from))
+          fields
+      in
+      emit st.builder (Assign (copy, Build { ty; variant; fields })));
+  (match
+     List.filter_map
+       (fun (variant_shape : Memory_layout.variant_shape) ->
+         if variant_shape.indirect then Some variant_shape.name else None)
+       (match Memory_layout.shape st.context.env ty with Sum variants -> variants | _ -> [])
+   with
+  | [] -> ()
+  | variants -> scope.owned <- Free_blocks { place = copy; variants } :: scope.owned);
+  copy
+
+(* The type that the current frame's method yields. *)
 and yielded_type_of_frame st =
   match st.frame.code.result with
   | Yields (_, ty) | Lends (_, ty) -> ground st ty
@@ -1024,18 +1226,22 @@ and shared_update st ~shared ~input ~change ~destination =
     | _ -> bug "shared_update with a function that takes no value or returns none"
   in
   let pointer = Lir.Copy (shared / Field "value") in
-  emit st.b (Call { target = Intrinsic Shared_lock; arguments = [ pointer ]; result = Discarded });
+  emit st.builder
+    (Call { target = Intrinsic Shared_lock; arguments = [ pointer ]; result = Discarded });
   (* The pointer is [borrowed] so that drop elaboration does not track the
      value, which the [Shared] owns. *)
-  let typed = local st.b ~borrowed:true (Pointer { target = Value value_ty; writable = true }) in
-  emit st.b (Assign (at typed, Use pointer));
+  let typed =
+    local st.builder ~borrowed:true (Pointer { target = Value value_ty; writable = true })
+  in
+  emit st.builder (Assign (at typed, Use pointer));
   let result =
     match destination with Some destination -> destination | None -> temporary st result_ty
   in
   call_indirect st ~function_type ~value:change
     [ { root = Local typed; projections = [ Deref ] }; input ]
     result;
-  emit st.b (Call { target = Intrinsic Shared_unlock; arguments = [ pointer ]; result = Discarded })
+  emit st.builder
+    (Call { target = Intrinsic Shared_unlock; arguments = [ pointer ]; result = Discarded })
 
 and intrinsic_operation st operation ~type_arguments (arguments : Core.argument list) ~destination
     ~site =
@@ -1060,12 +1266,13 @@ and intrinsic_operation st operation ~type_arguments (arguments : Core.argument 
             (* An intrinsic takes storage and views by place. *)
             if Storage.elements_of ty <> None || Storage.viewed ty <> None then
               Intrinsics.Place evaluated
-            else Intrinsics.Value (if mode = T.Own then owned st evaluated ty else Copy evaluated)
+            else
+              Intrinsics.Value (if mode = Types.Own then owned st evaluated ty else Copy evaluated)
         | Default -> bug "an intrinsic called with an omitted argument")
       arguments
   in
-  Intrinsics.lower ~checks:st.context.checks ~value_arguments st.context.env st.b st.context.types
-    operation ~type_arguments arguments ~destination ~site
+  Intrinsics.lower ~checks:st.context.checks ~value_arguments st.context.env st.builder
+    st.context.types operation ~type_arguments arguments ~destination ~site
 
 (* The place that a lending call lends. A lending method is inlined up to
    its [yield]; a lending intrinsic gives the place directly. *)
@@ -1113,12 +1320,12 @@ and return_ st (returned : Core.expression option) =
    pointer, and the implementation's own evidence and the evidence for
    [Tasks] as its outer evidence. *)
 and locked_evidence st ~(tasks : Lir.operand) (evidence : (Path.t * Lir.operand) list) =
-  let mutex = at (local st.b ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
-  emit st.b (Assign (mutex, Use (constant_int UInt64 Z.zero)));
+  let mutex = at (local st.builder ~name:"mutex" (Value (Monomorphic.builtin UInt64))) in
+  emit st.builder (Assign (mutex, Use (constant_int UInt64 Z.zero)));
   List.map
     (fun (capability, implementation) ->
-      let slot = local st.b (Evidence 2) in
-      emit st.b
+      let slot = local st.builder (Evidence 2) in
+      emit st.builder
         (Call
            {
              target = Intrinsic Evidence_fill;
@@ -1141,26 +1348,26 @@ and return_from_frame st =
   (match st.frame.exit with
   | Some (exit, depth) ->
       leave_to st depth;
-      finish st.b (Goto exit)
+      finish st.builder (Goto exit)
   | None ->
       leave_to st 0;
-      finish st.b (return_result st));
-  start st.b (block st.b)
+      finish st.builder (return_result st));
+  start st.builder (block st.builder)
 
 and break_loop st =
   match st.loops with
   | loop :: _ ->
       leave_to st loop.break_depth;
-      finish st.b (Goto loop.break_);
-      start st.b (block st.b)
+      finish st.builder (Goto loop.break_);
+      start st.builder (block st.builder)
   | [] -> bug "a break outside a loop"
 
 and continue_loop st =
   match st.loops with
   | loop :: _ ->
       leave_to st loop.continue_depth;
-      finish st.b (Goto loop.continue_);
-      start st.b (block st.b)
+      finish st.builder (Goto loop.continue_);
+      start st.builder (block st.builder)
   | [] -> bug "a continue outside a loop"
 
 (* A call of the [Tasks] method [name]. [places] holds one argument for
@@ -1189,25 +1396,25 @@ and tasks_call st name ?result (places : Lir.place list) : Lir.statement =
 
 (* Calls a [Tasks] method that returns a [Bool], and gives the result. *)
 and tasks_bool st name places : Lir.operand =
-  let result = at (local st.b (Value st.context.bool)) in
-  emit st.b (tasks_call st name ~result places);
+  let result = at (local st.builder (Value st.context.bool)) in
+  emit st.builder (tasks_call st name ~result places);
   Copy result
 
 (* Opens a task group, runs [f] with it, and joins it. A scope owns the
    join, so an early exit from [f] joins the group too. The scope's other
    temporaries are dropped after the join, because a task may still read
    them until then. *)
-and with_group st ~origin (f : Lir.place -> unit) =
+and with_group st ~origin (function_type : Lir.place -> unit) =
   if st.pulling then
     unsupported ~at:(site_of st origin) "`concurrent` code in a yielding method that is pulled";
   let scope = open_scope st Statement in
-  let group = at (local st.b ~name:"group" (Value (Monomorphic.builtin UInt64))) in
-  emit st.b (tasks_call st "open" ~result:group []);
+  let group = at (local st.builder ~name:"group" (Value (Monomorphic.builtin UInt64))) in
+  emit st.builder (tasks_call st "open" ~result:group []);
   let join = tasks_call st "join" [ group ] in
   let cleanup = Join_group join in
   scope.owned <- [ cleanup ];
-  f group;
-  emit st.b join;
+  function_type group;
+  emit st.builder join;
   scope.owned <- List.filter (fun owned -> owned != cleanup) scope.owned;
   close_scope st scope
 
@@ -1221,15 +1428,15 @@ and task_function_type st : Lir.ty =
 (* Lowers the body of a task with [f]. The body starts at the region mark
    that the caller has just emitted. Every exit from the task jumps to
    [end_block], which is the current block when this returns. *)
-and task_body st ~(id : Core.task) ~group ~early_exits (f : task -> unit) =
+and task_body st ~(id : Core.task) ~group ~early_exits (function_type : task -> unit) =
   let task =
-    { id; group; early_exits; end_block = block st.b; scope_depth = List.length st.scopes }
+    { id; group; early_exits; end_block = block st.builder; scope_depth = List.length st.scopes }
   in
   st.tasks <- task :: st.tasks;
-  f task;
+  function_type task;
   st.tasks <- List.tl st.tasks;
-  finish st.b (Goto task.end_block);
-  start st.b task.end_block
+  finish st.builder (Goto task.end_block);
+  start st.builder task.end_block
 
 (* Lowers an early exit that still has to end [tasks], the enclosing tasks
    it leaves, innermost first. [value] holds the return value of a
@@ -1247,7 +1454,7 @@ and early_exit st ~(tasks : Core.task list) ~(exit : Core.expression) ~(value : 
           (match (value, result_place st, returned_type st) with
           | Some value, Some result, Some ty ->
               clear_result st;
-              emit st.b (Assign (result, Use (owned st value ty)))
+              emit st.builder (Assign (result, Use (owned st value ty)))
           | _ -> ());
           return_from_frame st
       | Break -> break_loop st
@@ -1257,8 +1464,8 @@ and early_exit st ~(tasks : Core.task list) ~(exit : Core.expression) ~(value : 
       let exits = task.early_exits in
       exits.exits <- (rest, exit) :: exits.exits;
       let number = List.length exits.exits in
-      when_ st.b (tasks_bool st "cancel" [ task.group ]) (fun () ->
-          emit st.b (Assign (exits.winner, Use (constant_int UInt32 (Z.of_int number))));
+      when_ st.builder (tasks_bool st "cancel" [ task.group ]) (fun () ->
+          emit st.builder (Assign (exits.winner, Use (constant_int UInt32 (Z.of_int number))));
           match (value, returned_type st) with
           | Some value, Some ty ->
               let return_value =
@@ -1275,8 +1482,8 @@ and early_exit st ~(tasks : Core.task list) ~(exit : Core.expression) ~(value : 
               replace st return_value ty ~by:value
           | _ -> ());
       leave_to st task.scope_depth;
-      finish st.b (Goto task.end_block);
-      start st.b (block st.b)
+      finish st.builder (Goto task.end_block);
+      start st.builder (block st.builder)
   | _ -> bug "an early exit leaves a task that is not the innermost enclosing task"
 
 (* After a group is joined: if one of its tasks' early exits won, performs
@@ -1285,9 +1492,9 @@ and resume_early_exit st ~of_loop (exits : early_exits) =
   match List.rev exits.exits with
   | [] -> ()
   | recorded ->
-      let after = block st.b in
-      let targets = List.map (fun _ -> block st.b) recorded in
-      finish st.b
+      let after = block st.builder in
+      let targets = List.map (fun _ -> block st.builder) recorded in
+      finish st.builder
         (Switch
            {
              value = Copy exits.winner;
@@ -1296,28 +1503,28 @@ and resume_early_exit st ~of_loop (exits : early_exits) =
            });
       List.iter2
         (fun target ((tasks, exit) : Core.task list * Core.expression) ->
-          start st.b target;
+          start st.builder target;
           (match (tasks, exit.kind) with
           (* A [break] of the [concurrent for] itself. The loop has already
              ended. *)
           | [], Break when of_loop -> ()
           | _, Return _ -> early_exit st ~tasks ~exit ~value:exits.return_value
           | _ -> early_exit st ~tasks ~exit ~value:None);
-          finish st.b (Goto after))
+          finish st.builder (Goto after))
         targets recorded;
-      start st.b after
+      start st.builder after
 
 (* Lowers a [concurrent] block. Each branch is a [Task] region, which
    outlining turns into a nested function. The code after the regions
    spawns each function as a task of one group. *)
 and concurrent_block st ~origin (branches : Core.statement list) =
   let function_type = task_function_type st in
-  let item = local st.b (Value (Monomorphic.builtin UInt64)) in
-  emit st.b (Assign (at item, Use (constant_int UInt64 Z.zero)));
+  let item = local st.builder (Value (Monomorphic.builtin UInt64)) in
+  emit st.builder (Assign (at item, Use (constant_int UInt64 Z.zero)));
   let branches =
     List.mapi
       (fun index branch ->
-        (index, branch, new_early_exits st, local st.b ~name:"task" function_type))
+        (index, branch, new_early_exits st, local st.builder ~name:"task" function_type))
       branches
   in
   if branches <> [] then
@@ -1325,13 +1532,13 @@ and concurrent_block st ~origin (branches : Core.statement list) =
         let fork = fresh_fork st in
         List.iter
           (fun (index, branch, early_exits, function_value) ->
-            emit st.b (Region { fork; region = Task { function_value; item } });
+            emit st.builder (Region { fork; region = Task { function_value; item } });
             task_body st
               ~id:(Branch { block = origin; index })
               ~group ~early_exits
               (fun _ -> statement st branch))
           branches;
-        emit st.b (Regions_end { fork });
+        emit st.builder (Regions_end { fork });
         (* [spawn] returns false once the group is cancelled, and the
            branch then never runs. *)
         List.iter
@@ -1350,12 +1557,12 @@ and concurrent_for st ~origin ~(pattern : Core.pattern) ~iteration ~(body : Core
           origin;
           group;
           early_exits;
-          item = local st.b ~name:"item" (Value (Monomorphic.builtin UInt64));
+          item = local st.builder ~name:"item" (Value (Monomorphic.builtin UInt64));
           element = ground st pattern.type_;
         }
       in
       for_each st ~origin ~schedule:(Spawned loop) ~iteration ~each:(fun value ->
-          match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+          match_patterns st [ (pattern, value) ] ~failed:(block st.builder);
           block_into st body None));
   resume_early_exit st ~of_loop:true early_exits
 
@@ -1364,25 +1571,27 @@ and concurrent_for st ~origin ~(pattern : Core.pattern) ~iteration ~(body : Core
    [loop.item]. If the group is already cancelled, [spawn] returns false:
    [not_spawned] then releases what the item owns, and the enclosing code
    breaks out of the loop that produces the items. *)
-and spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit) (f : unit -> unit) =
+and spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit)
+    (function_type : unit -> unit) =
   let fork = fresh_fork st in
-  let function_value = local st.b ~name:"task" (task_function_type st) in
-  emit st.b (Region { fork; region = Task { function_value; item = loop.item } });
+  let function_value = local st.builder ~name:"task" (task_function_type st) in
+  emit st.builder (Region { fork; region = Task { function_value; item = loop.item } });
   task_body st
     ~id:(Iteration { loop = loop.origin })
     ~group:loop.group ~early_exits:loop.early_exits
     (fun task ->
       (* A [continue] of the loop ends the task. A [break] of the loop
          never jumps: it is an early exit that ends the task. *)
-      looping st ~continue_:task.end_block ~break_:task.end_block ~depth:task.scope_depth f);
-  emit st.b (Regions_end { fork });
+      looping st ~continue_:task.end_block ~break_:task.end_block ~depth:task.scope_depth
+        function_type);
+  emit st.builder (Regions_end { fork });
   let spawned = tasks_bool st "spawn" [ loop.group; at function_value; at loop.item ] in
-  let next = block st.b and cancelled = block st.b in
-  Lir_builder.branch st.b spawned ~yes:next ~no:cancelled;
-  start st.b cancelled;
+  let next = block st.builder and cancelled = block st.builder in
+  Lir_builder.branch st.builder spawned ~yes:next ~no:cancelled;
+  start st.builder cancelled;
   not_spawned ();
   break_loop st;
-  start st.b next
+  start st.builder next
 
 (* Spawns one iteration of a [concurrent for] loop with the value at
    [value]. The value's bytes go into a heap block, the block's address is
@@ -1403,87 +1612,89 @@ and spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
      in the block. The pointer is [borrowed] so that drop elaboration does
      not track the block's contents. *)
   let block_of () : Lir.local * Lir.place =
-    let pointer = local st.b (Raw (Pointer Opaque)) in
-    emit st.b (Assign (at pointer, Convert (Copy item, Pointer Opaque)));
-    let typed = local st.b ~borrowed:true (Pointer { target = Value ty; writable = true }) in
-    emit st.b (Assign (at typed, Use (Copy (at pointer))));
+    let pointer = local st.builder (Raw (Pointer Opaque)) in
+    emit st.builder (Assign (at pointer, Convert (Copy item, Pointer Opaque)));
+    let typed = local st.builder ~borrowed:true (Pointer { target = Value ty; writable = true }) in
+    emit st.builder (Assign (at typed, Use (Copy (at pointer))));
     (pointer, { root = Local typed; projections = [ Deref ] })
   in
   (* Takes the value out of the block into a local and frees the block.
      The enclosing scope drops the local only if the value is owned. *)
   let unbox () : Lir.place =
     if boxed then begin
-      let unboxed = if is_owned then binding st ty else at (local st.b ~borrowed:true (Value ty)) in
+      let unboxed =
+        if is_owned then binding st ty else at (local st.builder ~borrowed:true (Value ty))
+      in
       let pointer, inside = block_of () in
-      emit st.b (Assign (unboxed, Use (move_or_copy inside)));
-      emit st.b
+      emit st.builder (Assign (unboxed, Use (move_or_copy inside)));
+      emit st.builder
         (Call { target = Intrinsic Free; arguments = [ Copy (at pointer) ]; result = Discarded });
       unboxed
     end
-    else at (local st.b (Value ty))
+    else at (local st.builder (Value ty))
   in
   if boxed then begin
-    let pointer = local st.b (Raw (Pointer Opaque)) in
-    emit st.b
+    let pointer = local st.builder (Raw (Pointer Opaque)) in
+    emit st.builder
       (Call
          {
            target = Intrinsic Allocate;
            arguments = [ Constant (Size_of ty); Constant (Alignment_of ty) ];
            result = Returned (at pointer);
          });
-    emit st.b (Assign (item, Convert (Copy (at pointer), Integer UInt64)));
-    emit st.b (Assign (snd (block_of ()), Use (move_or_copy value)))
+    emit st.builder (Assign (item, Convert (Copy (at pointer), Integer UInt64)));
+    emit st.builder (Assign (snd (block_of ()), Use (move_or_copy value)))
   end
-  else emit st.b (Assign (item, Use (constant_int UInt64 Z.zero)));
+  else emit st.builder (Assign (item, Use (constant_int UInt64 Z.zero)));
   spawn_iteration st loop
     ~not_spawned:(fun () -> in_scope st (fun () -> ignore (unbox ())))
     (fun () -> in_scope st (fun () -> each (unbox ())))
 
 and if_ st ~(condition : Core.expression) ~(then_ : Core.block) ~(else_ : Core.block option)
     destination =
-  let yes = block st.b and no = block st.b and after = block st.b in
+  let yes = block st.builder and no = block st.builder and after = block st.builder in
   let scope = open_scope st Bindings in
   branch st condition ~yes ~no;
-  start st.b yes;
+  start st.builder yes;
   block_into st then_ destination;
   close_scope st scope;
-  finish st.b (Goto after);
-  start st.b no;
+  finish st.builder (Goto after);
+  start st.builder no;
   drop_scope st scope;
   Option.iter (fun inner -> block_into st inner destination) else_;
-  finish st.b (Goto after);
-  start st.b after
+  finish st.builder (Goto after);
+  start st.builder after
 
 (* Lowers a condition to jumps: to [yes] when it is true, and to [no] when it
    is false. *)
 and branch st (condition : Core.expression) ~yes ~no =
   match condition.kind with
   | And (left, right) ->
-      let middle = block st.b in
+      let middle = block st.builder in
       branch st left ~yes:middle ~no;
-      start st.b middle;
+      start st.builder middle;
       branch st right ~yes ~no
   | Or (left, right) ->
-      let middle = block st.b in
+      let middle = block st.builder in
       branch st left ~yes ~no:middle;
-      start st.b middle;
+      start st.builder middle;
       branch st right ~yes ~no
   | Implies (left, right) ->
       (* A [requires] clause of a tag's [from_template], which a template's
          check evaluates while compiling, may hold [==>]. It holds where
          [left] does not, and [right] is evaluated only where [left] holds,
          since [right] may be defined only there. *)
-      let middle = block st.b in
+      let middle = block st.builder in
       branch st left ~yes:middle ~no:yes;
-      start st.b middle;
+      start st.builder middle;
       branch st right ~yes ~no
   | Not inner -> branch st inner ~yes:no ~no:yes
   | Matches { value; pattern } ->
-      match_patterns st [ (pattern, operand_place st value) ] ~failed:no;
-      finish st.b (Goto yes)
+      match_patterns st [ (pattern, operand_part st value) ] ~failed:no;
+      finish st.builder (Goto yes)
   | _ ->
       let value = operand st condition in
-      Lir_builder.branch st.b value ~yes ~no
+      Lir_builder.branch st.builder value ~yes ~no
 
 and block_into st (inner : Core.block) destination =
   in_scope st (fun () ->
@@ -1514,10 +1725,10 @@ and statement st (node : Core.statement) =
           let fork = fresh_fork st in
           List.iter
             (fun branch ->
-              emit st.b (Region { fork; region = Branch });
+              emit st.builder (Region { fork; region = Branch });
               statement st branch)
             statements;
-          emit st.b (Regions_end { fork })
+          emit st.builder (Regions_end { fork })
       | Parallel statements -> List.iter (statement st) statements
       | Let { pattern = { kind = Bind { local; name; _ }; type_; _ }; value; else_ = None } -> (
           let ty = ground st type_ in
@@ -1535,13 +1746,13 @@ and statement st (node : Core.statement) =
               into st value variable;
               bind_local st local variable)
       | Let { pattern; value; else_ } ->
-          let scrutinee = operand_place st value in
-          let failed = block st.b in
+          let scrutinee = operand_part st value in
+          let failed = block st.builder in
           Option.iter
             (fun else_ ->
-              in_block st.b failed (fun () ->
+              in_block st.builder failed (fun () ->
                   block_into st else_ None;
-                  finish st.b Unreachable))
+                  finish st.builder Unreachable))
             else_;
           match_patterns st [ (pattern, scrutinee) ] ~failed
       | Assign { target; value } ->
@@ -1555,11 +1766,11 @@ and statement st (node : Core.statement) =
           replace st target ty ~by:new_value
       | Assert { value; _ } ->
           let condition = operand st value in
-          let failed = block st.b and after = block st.b in
-          Lir_builder.branch st.b condition ~yes:after ~no:failed;
-          start st.b failed;
+          let failed = block st.builder and after = block st.builder in
+          Lir_builder.branch st.builder condition ~yes:after ~no:failed;
+          start st.builder failed;
           let message = "assert " ^ source st (spans st).(value.origin) in
-          finish st.b
+          finish st.builder
             (Fail
                {
                  failure = Assertion;
@@ -1567,7 +1778,7 @@ and statement st (node : Core.statement) =
                  length = usize (String.length message);
                  site = site_of st node.origin;
                });
-          start st.b after
+          start st.builder after
       | Compound_assign { target; operand; bound; value } ->
           (* The operand is evaluated first, so that no code but the
              operator runs while the target is moved out. Then the target
@@ -1588,105 +1799,101 @@ and statement st (node : Core.statement) =
           st.compound_target <- Some target;
           into st value result;
           st.compound_target <- enclosing;
-          emit st.b (Assign (target, Use (owned st result ty)))
+          emit st.builder (Assign (target, Use (owned st result ty)))
       | While { condition; body; _ } ->
           (* The condition's temporaries are dropped before the body and
              before the exit. The names it binds live until the body ends. *)
-          let test = block st.b and inside = block st.b and failed = block st.b in
-          let after = block st.b in
+          let test = block st.builder and inside = block st.builder and failed = block st.builder in
+          let after = block st.builder in
           let depth = List.length st.scopes in
-          finish st.b (Goto test);
-          start st.b test;
+          finish st.builder (Goto test);
+          start st.builder test;
           let names = open_scope st Bindings in
           let tested = open_scope st Statement in
           branch st condition ~yes:inside ~no:failed;
           pop_scope st tested;
-          start st.b failed;
+          start st.builder failed;
           drop_scope st tested;
           drop_scope st names;
-          finish st.b (Goto after);
-          start st.b inside;
+          finish st.builder (Goto after);
+          start st.builder inside;
           drop_scope st tested;
           looping st ~continue_:test ~break_:after ~depth (fun () -> block_into st body None);
           close_scope st names;
-          finish st.b (Goto test);
-          start st.b after
+          finish st.builder (Goto test);
+          start st.builder after
       | For { pattern; iteration; body; mode; _ } ->
           for_each st ~origin:node.origin
             ~schedule:(if mode = Parallel_loop then Chunked else Sequential)
             ~iteration
             ~each:(fun value ->
-              match_patterns st [ (pattern, value) ] ~failed:(block st.b);
+              match_patterns st [ (pattern, value) ] ~failed:(block st.builder);
               block_into st body None)
       | Yield { mode; part } -> (
-          let lends =
-            match part with
-            | Value ({ kind = Construct _; _ } as built) when Core_walk.lent_places part <> [] ->
-                Some built
-            | _ -> None
-          in
           match st.frame.on_yield with
           | Some on_yield ->
-              let place =
-                match (lends, part, st.frame.yield_into) with
-                | Some built, _, _ -> lending st mode built
+              let place, owned =
+                match (st.frame.lent_into, part, st.frame.yield_into) with
+                | Some (slot, lent), _, _ ->
+                    lend_into st lent part ~destination:slot;
+                    (slot, false)
                 | None, Value value, Some slot ->
                     into st value slot;
-                    slot
-                | None, _, _ -> operand_place st part
+                    (slot, true)
+                | None, Value _, None -> (operand_part st part, true)
+                | None, Place _, _ -> (operand_part st part, mode = Own)
               in
-              let owned =
-                mode = Own || (lends = None && match part with Value _ -> true | Place _ -> false)
-              in
-              let resume = block st.b and stop = block st.b in
+              let resume = block st.builder and stop = block st.builder in
               on_yield place ~owned ~resume ~stop;
               (* On the [stop] path the loop is leaving, so the method drops
                  what it owns and ends. *)
-              start st.b stop;
+              start st.builder stop;
               (match st.frame.exit with
               | Some (exit, depth) ->
                   leave_to st depth;
-                  finish st.b (Goto exit)
-              | None -> finish st.b Unreachable);
-              start st.b resume
+                  finish st.builder (Goto exit)
+              | None -> finish st.builder Unreachable);
+              start st.builder resume
           | None when st.pulling ->
               (* In the pulled version of a method a [yield] stays in the
                  code, and yield lowering makes it a state of the cursor.
                  [next] gives its caller a value of its own: a value the
                  method made, or a copy of a place it yields. *)
               let ty = yielded_type_of_frame st in
+              let lends = if lends_a_place part then Some part else None in
               let value =
                 match (lends, part) with
                 | Some _, _ when mode = Mut ->
                     unsupported ~at:(site_of st node.origin)
                       "a cursor over a method that lends places to be changed"
-                | Some built, _ -> copied st built
+                | Some _, Value built -> copied st built
+                | Some _, Place _ -> bug "a place that is a constructor"
                 | None, Value value -> value_place st value
                 | None, Place source when trivial st ty -> place st source
                 | None, Place source ->
                     let copy = temporary st ty in
-                    Glue.copy_into st.context.glue st.b ~destination:copy ~source:(place st source)
-                      ty;
+                    Glue.copy_into st.context.glue st.builder ~destination:copy
+                      ~source:(place st source) ty;
                     copy
               in
-              let resume = block st.b and stop = block st.b in
-              finish st.b (Yield { value = owned st value ty; resume; stop = Some stop });
+              let resume = block st.builder and stop = block st.builder in
+              finish st.builder (Yield { value = owned st value ty; resume; stop = Some stop });
               (* On the [stop] path the cursor is dropped before it ended, so
                  the method drops what it owns and returns. *)
-              start st.b stop;
+              start st.builder stop;
               leave_to st 0;
-              finish st.b (Return None);
-              start st.b resume
+              finish st.builder (Return None);
+              start st.builder resume
           | None -> bug "a yield outside a yielding method"))
 
 (* Falls through where the value at a place matches a pattern, and goes to
    [failed] where it does not. Binds nothing and moves nothing. *)
 and test_pattern st (pattern : Core.pattern) (place : Lir.place) ~failed =
   let require (condition : Lir.rvalue) =
-    let holds = local st.b (Raw Bool) and matched = block st.b in
-    emit st.b (Assign (at holds, condition));
-    Lir_builder.branch st.b (Copy (at holds)) ~yes:matched ~no:failed;
-    start st.b matched
+    let holds = local st.builder (Raw Bool) and matched = block st.builder in
+    emit st.builder (Assign (at holds, condition));
+    Lir_builder.branch st.builder (Copy (at holds)) ~yes:matched ~no:failed;
+    start st.builder matched
   in
   match pattern.kind with
   | Wildcard | Bind _ -> ()
@@ -1696,32 +1903,34 @@ and test_pattern st (pattern : Core.pattern) (place : Lir.place) ~failed =
       require (Binary ((if inclusive then Less_equal else Less), Copy place, operand st high))
   | Equal_to { value; equal } ->
       let result = temporary st st.context.bool in
-      call_with_places st equal [ place; value_place st value ] ~destination:result;
+      call_with_places st equal [ whole st place; value_place st value ] ~destination:result;
       require (Use (Copy result))
   | Alternatives alternatives ->
-      let matched = block st.b in
+      let matched = block st.builder in
       let rec test = function
-        | [] -> finish st.b (Goto failed)
+        | [] -> finish st.builder (Goto failed)
         | [ last ] ->
             test_pattern st last place ~failed;
-            finish st.b (Goto matched)
+            finish st.builder (Goto matched)
         | alternative :: rest ->
-            let next = block st.b in
+            let next = block st.builder in
             test_pattern st alternative place ~failed:next;
-            finish st.b (Goto matched);
-            start st.b next;
+            finish st.builder (Goto matched);
+            start st.builder next;
             test rest
       in
       test alternatives;
-      start st.b matched
+      start st.builder matched
   | Variant { variant; fields } ->
       require (Is_variant (place, variant));
       List.iter
         (fun (field, inner) ->
-          test_pattern st inner (place / Variant_field { variant; field }) ~failed)
+          test_pattern st inner (project st place (Variant_field { variant; field })) ~failed)
         fields
   | Record fields ->
-      List.iter (fun (field, inner) -> test_pattern st inner (place / Field field) ~failed) fields
+      List.iter
+        (fun (field, inner) -> test_pattern st inner (project st place (Field field)) ~failed)
+        fields
 
 (* Tests values against patterns, none of which has an alternative that
    binds a name, and then the guard. Goes to [failed] where a pattern or the
@@ -1737,9 +1946,9 @@ and test_row st (row : (Core.pattern * Lir.place) list) ~guard ~failed : bound_n
         (fun bound ->
           bind_name st { bound with mode = (if bound.mode = Own then Read else bound.mode) })
         names;
-      let passed = block st.b in
+      let passed = block st.builder in
       branch st guard ~yes:passed ~no:failed;
-      start st.b passed)
+      start st.builder passed)
     guard;
   names
 
@@ -1756,7 +1965,7 @@ and match_patterns st ?guard (patterns : (Core.pattern * Lir.place) list) ~faile
   in
   match rows with
   | [ row ] -> List.iter (bind_name st) (test_row st row ~guard ~failed)
-  | [] -> finish st.b (Goto failed)
+  | [] -> finish st.builder (Goto failed)
   | first :: _ ->
       (* Each row binds the same names from different parts, and the code
          that follows is emitted once, so each name is kept in a slot that
@@ -1769,30 +1978,31 @@ and match_patterns st ?guard (patterns : (Core.pattern * Lir.place) list) ~faile
               if has_own_local st bound then Value_slot (binding st ~name:bound.name bound.ty)
               else
                 Pointer_slot
-                  (local st.b ~name:bound.name
+                  (local st.builder ~name:bound.name
                      (Pointer { target = Value bound.ty; writable = bound.mode = Mut })) ))
       in
       let fill (bound : bound_name) =
+        let part = whole st bound.part in
         match List.assoc_opt bound.local slots with
         | Some (Value_slot variable) ->
-            emit st.b (Assign (variable, Use (owned st bound.part bound.ty)))
+            emit st.builder (Assign (variable, Use (owned st part bound.ty)))
         | Some (Pointer_slot pointer) ->
-            emit st.b
-              (Assign (at pointer, Use (Address { place = bound.part; writable = bound.mode = Mut })))
+            emit st.builder
+              (Assign (at pointer, Use (Address { place = part; writable = bound.mode = Mut })))
         | None -> bug "an alternative binds `%s`, which the first alternative does not" bound.name
       in
-      let matched = block st.b in
+      let matched = block st.builder in
       let rec test = function
         | [] -> ()
         | row :: rest ->
-            let next = if rest = [] then failed else block st.b in
+            let next = if rest = [] then failed else block st.builder in
             List.iter fill (test_row st row ~guard ~failed:next);
-            finish st.b (Goto matched);
-            if rest <> [] then start st.b next;
+            finish st.builder (Goto matched);
+            if rest <> [] then start st.builder next;
             test rest
       in
       test rows;
-      start st.b matched;
+      start st.builder matched;
       List.iter
         (fun (local, slot) ->
           bind_local st local
@@ -1804,31 +2014,31 @@ and match_patterns st ?guard (patterns : (Core.pattern * Lir.place) list) ~faile
 (* Tests the arms in order. Each arm has its own scope for its names and
    the guard's temporaries, which is dropped where the arm does not match. *)
 and match_ st ~(scrutinees : Core.operand list) ~(arms : Core.arm list) destination =
-  let places = List.map (operand_place st) scrutinees in
-  let after = block st.b in
+  let places = List.map (operand_part st) scrutinees in
+  let after = block st.builder in
   List.iter
     (fun (arm : Core.arm) ->
       let scope = open_scope st Bindings in
-      let unmatched = block st.b in
+      let unmatched = block st.builder in
       match_patterns st ?guard:arm.guard (List.combine arm.patterns places) ~failed:unmatched;
       block_into st arm.body (Some destination);
       close_scope st scope;
-      finish st.b (Goto after);
-      start st.b unmatched;
+      finish st.builder (Goto after);
+      start st.builder unmatched;
       drop_scope st scope)
     arms;
-  finish st.b Unreachable;
-  start st.b after
+  finish st.builder Unreachable;
+  start st.builder after
 
 (* Inlines a lending or yielding method with its parameters bound to
    [arguments], each by its parameter's index. Each [yield] in the method
    calls [on_yield]. A parameter with no argument takes its default,
    evaluated here. *)
-and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
+and inline ?(several = false) st path type_arguments ~arguments ~call_site ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
     unsupported ~at:call_site "%s, which lends through a call to itself" (Path.show path);
   let parameters, body = body_of st.context path in
-  let exit = block st.b in
+  let exit = block st.builder in
   let caller = st.frame in
   st.frame <-
     {
@@ -1837,7 +2047,8 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
       synthetic = Hashtbl.create 4;
       self_place = None;
       on_yield = Some on_yield;
-      yield_into;
+      yield_into = None;
+      lent_into = None;
       inlined = path :: caller.inlined;
       reported =
         (if Path.package path = Path.standard_package then
@@ -1845,11 +2056,25 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
          else None);
       exit = Some (exit, List.length st.scopes);
     };
+  let lent_into =
+    Option.map
+      (fun lent -> (at (local st.builder ~borrowed:true (Value (Lent lent))), lent))
+      (lent_type st body)
+  in
+  (* A value the method makes to lend is the caller's statement's to drop,
+     after the method has gone on, whichever [yield] made it. *)
+  let yield_into =
+    if several && lent_into = None then Some (temporary st (yielded_type_of_frame st)) else None
+  in
+  st.frame <- { st.frame with lent_into; yield_into };
   in_scope st (fun () ->
       List.iteri
         (fun index (parameter : Core.parameter) ->
           let place =
-            match (List.find_opt (fun (i, _, _, _) -> i = index) arguments, parameter.default) with
+            match
+              ( List.find_opt (fun (position, _, _, _) -> position = index) arguments,
+                parameter.default )
+            with
             | Some (_, _, _, place), _ -> place
             | None, Some default ->
                 (* The method owns a default's value and drops it, whatever
@@ -1862,8 +2087,8 @@ and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
           bind_local st parameter.local place)
         parameters;
       block_into st body None);
-  finish st.b (Goto exit);
-  start st.b exit;
+  finish st.builder (Goto exit);
+  start st.builder exit;
   st.frame <- caller
 
 (* Inlines a lending method up to its [yield] and returns the place it
@@ -1875,7 +2100,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
   let _, body = body_of st.context path in
   let several = Method_yields.count body > 1 in
   let depth = List.length st.scopes in
-  let goes_on = block st.b in
+  let goes_on = block st.builder in
   (* A method with a [yield] on each of several paths lends whichever it
      reaches, so the caller reads through the address of what was lent,
      and the method goes on from the [yield] it reached. *)
@@ -1885,28 +2110,27 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
       let writable =
         match (signature_of st.context path).output with Lends (Mut, _) -> true | _ -> false
       in
-      Some (local st.b (Pointer { target = Value ty; writable }), writable)
+      Some (local st.builder (Pointer { target = Value ty; writable }), writable)
     else None
   in
-  let reached = local st.b (Raw (Integer UInt32)) in
+  let reached = local st.builder (Raw (Integer UInt32)) in
   let lent = ref None and waiting = ref [] in
   (* What the method's own scopes owned at a [yield] that the caller went
      on from. *)
   let owned_at_a_yield = ref [] in
-  (* A value the method makes to lend is the caller's statement's to drop,
-     after the method has gone on, whichever [yield] made it. *)
-  let yield_into = if several then Some (temporary st ty) else None in
-  inline ?yield_into st path type_arguments ~arguments ~call_site
+  inline ~several st path type_arguments ~arguments ~call_site
     ~on_yield:(fun place ~owned:_ ~resume ~stop:_ ->
       (match through with
-      | Some (pointer, writable) ->
-          emit st.b (Assign (at pointer, Use (Address { place; writable })));
+      | Some (pointer, writable) when st.frame.lent_into = None ->
+          emit st.builder (Assign (at pointer, Use (Address { place = whole st place; writable })));
           lent := Some (at pointer / Deref)
-      | None -> lent := Some place);
-      let scopes = List.filteri (fun i _ -> List.length st.scopes - i > depth) st.scopes in
+      | _ -> lent := Some place);
+      let scopes =
+        List.filteri (fun position _ -> List.length st.scopes - position > depth) st.scopes
+      in
       let owns_nothing = List.for_all (fun (scope : scope) -> scope.owned = []) scopes in
       if (not several) && Method_yields.each_is_last body && owns_nothing then
-        finish st.b (Goto resume)
+        finish st.builder (Goto resume)
       else begin
         List.iter
           (fun (scope : scope) ->
@@ -1917,10 +2141,10 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
                 | _ -> ())
               scope.owned)
           scopes;
-        emit st.b
+        emit st.builder
           (Assign (at reached, Use (Constant (Integer (UInt32, Z.of_int (List.length !waiting))))));
         waiting := resume :: !waiting;
-        finish st.b (Goto goes_on)
+        finish st.builder (Goto goes_on)
       end);
   (match List.rev !waiting with
   | [] -> ()
@@ -1929,9 +2153,9 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
         match resumes with
         | [ only ] -> only
         | _ ->
-            let chosen = block st.b in
-            in_block st.b chosen (fun () ->
-                finish st.b
+            let chosen = block st.builder in
+            in_block st.builder chosen (fun () ->
+                finish st.builder
                   (Switch
                      {
                        value = Copy (at reached);
@@ -1945,13 +2169,13 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
         Finish_lend
           {
             resume;
-            finished = current st.b;
-            selector = local st.b (Raw (Integer UInt32));
+            finished = current st.builder;
+            selector = local st.builder (Raw (Integer UInt32));
             ways = [];
             owned = !owned_at_a_yield;
           }
         :: scope.owned;
-      start st.b goes_on);
+      start st.builder goes_on);
   match !lent with
   | Some place -> place
   | None when Method_yields.count body = 0 ->
@@ -1969,7 +2193,7 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
    at the default's value, or given its bits, and the function owns that
    value. *)
 and fill_defaults st mask (parameters : Core.parameter list) =
-  let b = st.b in
+  let builder = st.builder in
   let defaulted =
     List.filter_map
       (fun (parameter : Core.parameter) ->
@@ -1979,16 +2203,18 @@ and fill_defaults st mask (parameters : Core.parameter list) =
   List.iteri
     (fun bit ((parameter : Core.parameter), (default : Core.expression)) ->
       let ty = ground st parameter.type_ in
-      let passed = local b (Raw (Integer UInt64)) and is_passed = local b (Raw Bool) in
-      emit b
+      let passed = local builder (Raw (Integer UInt64)) and is_passed = local builder (Raw Bool) in
+      emit builder
         (Assign
            ( at passed,
              Binary (Bit_and, Copy (at mask), constant_int UInt64 (Z.shift_left Z.one bit)) ));
-      emit b
+      emit builder
         (Assign (at is_passed, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
       let arrived = local_place st parameter.local in
-      let fill = block b and after = block b in
-      let unless_passed other = Lir_builder.branch b (Copy (at is_passed)) ~yes:other ~no:fill in
+      let fill = block builder and after = block builder in
+      let unless_passed other =
+        Lir_builder.branch builder (Copy (at is_passed)) ~yes:other ~no:fill
+      in
       let pulled what =
         if st.pulling then
           unsupported ~at:(site_of st default.origin)
@@ -1997,31 +2223,31 @@ and fill_defaults st mask (parameters : Core.parameter list) =
       if parameter.mode = Own && not (trivial st ty) then begin
         let owned_here = binding st ~name:parameter.name ty in
         bind_local st parameter.local owned_here;
-        let passed_block = block b in
+        let passed_block = block builder in
         unless_passed passed_block;
-        start b passed_block;
-        emit b (Assign (owned_here, Use (Move arrived)));
-        finish b (Goto after);
-        start b fill;
+        start builder passed_block;
+        emit builder (Assign (owned_here, Use (Move arrived)));
+        finish builder (Goto after);
+        start builder fill;
         in_statement st (fun () -> into st default owned_here)
       end
       else begin
         unless_passed after;
-        start b fill;
+        start builder fill;
         in_statement st (fun () ->
             match arrived with
             | { projections = [ Deref ]; root = Local pointer } ->
                 pulled "which is passed by address";
                 let value = binding st ty in
                 into st default value;
-                emit b (Assign (at pointer, Use (Address { place = value; writable = true })))
+                emit builder (Assign (at pointer, Use (Address { place = value; writable = true })))
             | place when not (trivial st ty) ->
                 pulled "which is a view";
                 let value = binding st ty in
                 into st default value;
-                emit b (Assign (place, Use (Copy value)))
+                emit builder (Assign (place, Use (Copy value)))
             | place -> into st default place)
       end;
-      finish b (Goto after);
-      start b after)
+      finish builder (Goto after);
+      start builder after)
     defaulted

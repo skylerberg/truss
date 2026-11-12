@@ -1,12 +1,11 @@
 open Syntax
 open State
-module T = Types
 
 (* Records that a call is a call of a lending method, with the mode it
    lends with. The result of such a call is a part of the receiver, lent
    for the rest of the caller's statement. It is not a temporary: it is
    never moved. *)
-let note_lending state (value : expression) (output : T.result) =
+let note_lending state (value : expression) (output : Types.result) =
   match output with
   | Lends (mode, _) -> state.tables.lend_modes.(value.id) <- Some mode
   | Returns _ | Yields _ -> ()
@@ -14,7 +13,7 @@ let note_lending state (value : expression) (output : T.result) =
 (* The mode with which an expression is lent, if it is the result of a
    lending call, or a field or an element of one. A mark before the
    expression belongs to the receiver of the lending call. *)
-let rec lent state (value : expression) : T.mode option =
+let rec lent state (value : expression) : Types.mode option =
   match value.kind with
   | Call _ -> state.tables.lend_modes.(value.id)
   | Member (base, _) | Parenthesized base -> lent state base
@@ -43,7 +42,7 @@ let borrowed state (value : expression) =
    other scrutinee is a value that the match consumes, so the bindings are
    [Own]. A mark that belongs to the receiver of a method call, as in [mut
    cursor.next()], is not a mark on the scrutinee. *)
-let scrutinee_mode state (scrutinee : expression) : T.mode =
+let scrutinee_mode state (scrutinee : expression) : Types.mode =
   match scrutinee.kind with
   | Mode (Own, inner) when Option.is_none (marked_call state inner) -> Own
   | Mode (Mut, inner) when Option.is_none (marked_call state inner) && not (is_slice inner) -> Mut
@@ -81,13 +80,13 @@ let rec immutable state env (value : expression) : immutable option =
       | _ -> None)
   | Self_value ->
       if state.lambdas <> [] then Some (Captured "self")
-      else if env.self_mode = T.Mut then None
+      else if env.self_mode = Types.Mut then None
       else Some (Read_only "self")
   | Member (base, _) | Bracket (base, _) | Parenthesized base -> immutable state env base
   | Mode (Mut, inner) when Option.is_some (marked_call state inner) -> immutable state env inner
   | Call _ -> (
       match lent state value with
-      | Some T.Mut -> None
+      | Some Types.Mut -> None
       | Some _ -> Some Lent_read_only
       | None -> Some Not_a_place)
   | _ -> Some Not_a_place
@@ -107,8 +106,8 @@ let rec use_mutable_indexes state (value : expression) =
                 callee = Trait_method { method_ with receiver = Mut };
                 arguments =
                   List.map
-                    (fun (argument : C.argument) ->
-                      if argument.parameter_index = 0 then { argument with mode = T.Mut }
+                    (fun (argument : Tables.argument) ->
+                      if argument.parameter_index = 0 then { argument with mode = Types.Mut }
                       else argument)
                     arguments;
               }
@@ -161,7 +160,7 @@ let rec is_part_of_constant state (value : expression) =
   | Bracket (base, _) | Parenthesized base -> is_part_of_constant state base
   | _ -> false
 
-type argument_form = Marked of T.mode * expression | Place | Lent of T.mode | Temporary
+type argument_form = Marked of Types.mode * expression | Place | Lent of Types.mode | Temporary
 
 let argument_form state (value : expression) =
   match value.kind with
@@ -178,7 +177,7 @@ let argument_form state (value : expression) =
    method that yields read-only lends every place read-only, except a
    [Plain] place, which is copied. A method that yields [mut] lends the
    places that are marked [mut]. A slice is a value, so it is taken. *)
-let lent_field state (value : expression) type_ : T.mode option =
+let lent_field state (value : expression) type_ : Types.mode option =
   match (Hashtbl.find_opt state.yielded value.id, argument_form state value) with
   | _ when is_slice value -> None
   | Some Read, Marked (Mut, _) -> Some Read
@@ -189,7 +188,7 @@ let lent_field state (value : expression) type_ : T.mode option =
 let mark_span (value : expression) (inner : expression) =
   Span.make value.span.start inner.span.start
 
-let check_mode state env (value : expression) (parameter : T.parameter_info) type_ =
+let check_mode state env (value : expression) (parameter : Types.parameter_info) type_ =
   let name = parameter.name in
   match (parameter.mode, argument_form state value) with
   | Read, (Place | Temporary | Lent _) -> ()
@@ -278,37 +277,57 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
 (* A yielded constructor that lends a place owns nothing, so nothing drops
    it when the lend ends. Each of its other fields must then have nothing
    to drop: the field is a constructor too, or its type is [Plain].
+
+   A place lent [mut] is not inside a variant's constructor at any depth.
+   The caller could change the variant, as [mut pair.maybe() = None] does,
+   and the place would be left without a value: a use after free.
    [operand] is the operand of the [yield]. *)
 let check_lent_value state env (operand : expression) =
   let has_lent_field = ref false and owned_values = ref [] in
-  let rec fields (value : expression) =
+  let rec fields ~variant (value : expression) =
     match (value.kind, state.tables.calls.(value.id)) with
-    | Call (_, arguments), Some { callee = Constructor _; arguments = checked; _ } ->
+    | ( Call (_, arguments),
+        Some { callee = Constructor { variant = constructed; _ }; arguments = checked; _ } ) ->
+        let variant = if Option.is_some constructed then constructed else variant in
         List.iter
           (fun (argument : argument) ->
             match
               List.find_opt
-                (fun (checked_argument : C.argument) ->
+                (fun (checked_argument : Tables.argument) ->
                   checked_argument.expression = argument.value.id)
                 checked
             with
-            | Some { mode = Read | Mut; _ } -> has_lent_field := true
-            | _ -> fields argument.value)
+            | Some { mode = Read; _ } -> has_lent_field := true
+            | Some { mode = Mut; _ } -> (
+                has_lent_field := true;
+                match variant with
+                | Some variant when runs env ->
+                    state.diagnostics <-
+                      Diagnostic.make ~code:(Ownership Lent_mut_in_variant) argument.value.span
+                        (Printf.sprintf
+                           "This place is lent `mut` inside the variant `%s`. The caller could \
+                            change the variant, and the place would be left without a value. Lend \
+                            a local of the whole type instead, and store it back after the \
+                            `yield`."
+                           variant)
+                      :: state.diagnostics
+                | _ -> ())
+            | _ -> fields ~variant argument.value)
           arguments
     | _ -> owned_values := value :: !owned_values
   in
-  fields operand;
+  fields ~variant:None operand;
   if !has_lent_field && runs env then
     List.iter
       (fun (value : expression) ->
         defer state (fun () ->
             match Option.map (normalize state) state.tables.types.(value.id) with
             | None -> true
-            | Some type_ when T.contains_unsolved type_ -> false
+            | Some type_ when Types.contains_unsolved type_ -> false
             | Some type_ ->
                 let fieldless_variant =
                   match (state.tables.resolutions.(value.id), type_) with
-                  | Some (Variant_value _), T.Function _ -> false
+                  | Some (Variant_value _), Types.Function _ -> false
                   | Some (Variant_value _), _ -> true
                   | _ -> false
                 in
@@ -331,7 +350,7 @@ let check_owned state env (value : expression) type_ =
   if runs env then
     defer state (fun () ->
         let type_ = normalize state type_ in
-        if T.contains_unsolved type_ then false
+        if Types.contains_unsolved type_ then false
         else begin
           (match argument_form state value with
           | Place when not (plain state type_) ->

@@ -1,0 +1,643 @@
+use standard::core
+use standard::intrinsic
+use standard::numbers::integer_text
+
+public trait FixedWidthInteger:
+  Ordered
+  + Hash
+  + Plain
+  + Add[Self, Output = Self]
+  + Subtract[Self, Output = Self]
+  + Multiply[Self, Output = Self]
+  + Divide[Self, Output = Self]
+  + Remainder[Self, Output = Self]
+{
+  fn minimum_value() -> Self
+    cost time O(1)
+
+  fn maximum_value() -> Self
+    cost time O(1)
+
+  fn bit_width() -> USize
+    cost time O(1)
+
+  fn checked_power(self, exponent: UInt32) -> Option[Self]
+    cost time O(log(exponent))
+  {
+    var result: Self = 1
+    var base = self
+    var remaining = exponent
+    while remaining > 1
+      decreases remaining
+      cost time O(log(exponent) - log(remaining))
+    {
+      if remaining % 2 == 1 {
+        result = result.checked_multiply(base)?
+      }
+      base = base.checked_multiply(base)?
+      remaining = remaining / 2
+    }
+    if remaining == 1 { result.checked_multiply(base) } else { Some(result) }
+  }
+
+  fn wrapping_power(self, exponent: UInt32) -> Self
+    cost time O(log(exponent))
+  {
+    var result: Self = 1
+    var base = self
+    var remaining = exponent
+    while remaining > 0
+      decreases remaining
+      cost time O(log(exponent) - log(remaining))
+    {
+      if remaining % 2 == 1 {
+        result = result.wrapping_multiply(base)
+      }
+      base = base.wrapping_multiply(base)
+      remaining = remaining / 2
+    }
+    result
+  }
+
+  fn to_float64(self) -> Float64
+    cost time O(1)
+  {
+    intrinsic::convert(self)
+  }
+
+  fn to_float32(self) -> Float32
+    cost time O(1)
+  {
+    intrinsic::convert(self)
+  }
+
+  fn saturating_from(value: Float64) -> Self
+    cost time O(1)
+  {
+    if intrinsic::fits[Float64, Self](value) {
+      intrinsic::convert(value)
+    } else if intrinsic::is_nan(value) {
+      0
+    } else if value < 0.0 {
+      Self.minimum_value()
+    } else {
+      Self.maximum_value()
+    }
+  }
+
+  fn exact_sum(items: Slice[Self]) -> Integer
+    cost time finite
+  {
+    items.model().sum(fn(item) { item })
+  }
+
+  fn sum(items: Slice[Self]) -> Self
+    requires Self.minimum_value() <= Self.exact_sum(items) && Self.exact_sum(items) <= Self.maximum_value()
+    ensures result == Self.exact_sum(items)
+    cost time O(items.length())
+  {
+    Self.wrapping_sum(items)
+  }
+
+  fn checked_sum(items: Slice[Self]) -> Option[Self]
+    cost time O(items.length())
+  {
+    var total: Self = 0
+    for item in items {
+      total = total.checked_add(item)?
+    }
+    Some(total)
+  }
+
+  fn saturating_sum(items: Slice[Self]) -> Self
+    cost time O(items.length())
+  {
+    var total: Self = 0
+    for item in items {
+      total = total.saturating_add(item)
+    }
+    total
+  }
+
+  fn wrapping_sum(items: Slice[Self]) -> Self
+    ensures (Self.exact_sum(items) - result) % (Self.maximum_value() - Self.minimum_value() + 1) == 0
+    cost time O(items.length())
+  {
+    var total: Self = 0
+    for item in items
+      invariant (yielded.sum(fn(value) { value }) - total) % (Self.maximum_value() - Self.minimum_value() + 1) == 0
+    {
+      total = total.wrapping_add(item)
+    }
+    total
+  }
+
+  fn count_ones(self) -> USize
+    ensures result <= Self.bit_width()
+    cost time O(1)
+  {
+    intrinsic::count_ones(self)
+  }
+
+  fn count_zeros(self) -> USize
+    ensures result <= Self.bit_width()
+    cost time O(1)
+  {
+    Self.bit_width() - intrinsic::count_ones(self)
+  }
+
+  fn leading_zeros(self) -> USize
+    ensures result <= Self.bit_width()
+    cost time O(1)
+  {
+    intrinsic::leading_zeros(self)
+  }
+
+  fn trailing_zeros(self) -> USize
+    ensures result <= Self.bit_width()
+    cost time O(1)
+  {
+    intrinsic::trailing_zeros(self)
+  }
+
+  fn rotate_left(self, amount: USize) -> Self
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::rotate_left(self, amount: amount)
+  }
+
+  fn rotate_right(self, amount: USize) -> Self
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::rotate_right(self, amount: amount)
+  }
+
+  fn swap_bytes(self) -> Self
+    cost time O(1)
+  {
+    intrinsic::swap_bytes(self)
+  }
+
+  fn checked_shift_left(self, amount: USize) -> Option[Self]
+    ensures (result is None) == (amount >= Self.bit_width())
+    cost time O(1)
+  {
+    if amount >= Self.bit_width() { None } else { Some(self << amount) }
+  }
+
+  fn checked_shift_right(self, amount: USize) -> Option[Self]
+    ensures (result is None) == (amount >= Self.bit_width())
+    cost time O(1)
+  {
+    if amount >= Self.bit_width() { None } else { Some(self >> amount) }
+  }
+
+  fn wrapping_shift_left(self, amount: USize) -> Self
+    cost time O(1)
+  {
+    self << (amount % Self.bit_width())
+  }
+
+  fn wrapping_shift_right(self, amount: USize) -> Self
+    cost time O(1)
+  {
+    self >> (amount % Self.bit_width())
+  }
+
+  fn checked_add(self, other: Self) -> Option[Self]
+    cost time O(1)
+  {
+    if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
+  }
+
+  fn checked_subtract(self, other: Self) -> Option[Self]
+    cost time O(1)
+  {
+    if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
+  }
+
+  fn checked_multiply(self, other: Self) -> Option[Self]
+    cost time O(1)
+  {
+    if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
+  }
+
+  fn wrapping_add(self, other: Self) -> Self
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::wrapping_add(self, right: other)
+  }
+
+  fn wrapping_subtract(self, other: Self) -> Self
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::wrapping_subtract(self, right: other)
+  }
+
+  fn wrapping_multiply(self, other: Self) -> Self
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::wrapping_multiply(self, right: other)
+  }
+
+  fn saturating_add(self, other: Self) -> Self
+    cost time O(1)
+  {
+    if intrinsic::add_overflows(self, right: other) {
+      if other < 0 { Self.minimum_value() } else { Self.maximum_value() }
+    } else {
+      intrinsic::add(self, right: other)
+    }
+  }
+}
+
+public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
+  type Unsigned: UnsignedInteger[Signed = Self]
+
+  fn checked_divide(self, other: Self) -> Option[Self]
+    ensures (result is None) == (other == 0 || (self == Self.minimum_value() && other == -1))
+    ensures !(result is Some(quotient) && quotient != self / other)
+    cost time O(1)
+  {
+    if other == 0 || (self == Self.minimum_value() && other == -1) { None } else { Some(self / other) }
+  }
+
+  fn checked_remainder(self, other: Self) -> Option[Self]
+    ensures (result is None) == (other == 0 || (self == Self.minimum_value() && other == -1))
+    ensures !(result is Some(remainder) && remainder != self % other)
+    cost time O(1)
+  {
+    if other == 0 || (self == Self.minimum_value() && other == -1) { None } else { Some(self % other) }
+  }
+
+  fn saturating_power(self, exponent: UInt32) -> Self
+    cost time O(log(exponent))
+  {
+    match self.checked_power(exponent) {
+      Some(power) => power
+      None => if self < 0 && exponent % 2 == 1 { Self.minimum_value() } else { Self.maximum_value() }
+    }
+  }
+
+  fn saturating_subtract(self, other: Self) -> Self
+    ensures self - other < Self.minimum_value() ==> result == Self.minimum_value()
+    ensures self - other > Self.maximum_value() ==> result == Self.maximum_value()
+    ensures Self.minimum_value() <= self - other && self - other <= Self.maximum_value() ==> result == self - other
+    cost time O(1)
+  {
+    if intrinsic::subtract_overflows(self, right: other) {
+      if other > 0 { Self.minimum_value() } else { Self.maximum_value() }
+    } else {
+      intrinsic::subtract(self, right: other)
+    }
+  }
+
+  fn saturating_multiply(self, other: Self) -> Self
+    ensures self * other < Self.minimum_value() ==> result == Self.minimum_value()
+    ensures self * other > Self.maximum_value() ==> result == Self.maximum_value()
+    ensures Self.minimum_value() <= self * other && self * other <= Self.maximum_value() ==> result == self * other
+    cost time O(1)
+  {
+    if intrinsic::multiply_overflows(self, right: other) {
+      if (self < 0) != (other < 0) { Self.minimum_value() } else { Self.maximum_value() }
+    } else {
+      intrinsic::multiply(self, right: other)
+    }
+  }
+
+  fn floor_divide(self, divisor: Self) -> Self
+    requires divisor != 0
+    requires self != Self.minimum_value() || divisor != -1
+    ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
+    ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
+    cost time O(1)
+  {
+    let quotient = self / divisor
+    if self % divisor != 0 && (self < 0) != (divisor < 0) { quotient - 1 } else { quotient }
+  }
+
+  fn floor_modulo(self, divisor: Self) -> Self
+    requires divisor != 0
+    requires self != Self.minimum_value() || divisor != -1
+    ensures divisor > 0 ==> 0 <= result && result < divisor
+    ensures divisor < 0 ==> divisor < result && result <= 0
+    ensures result == self - self.floor_divide(divisor) * divisor
+    cost time O(1)
+  {
+    let remainder = self % divisor
+    if remainder != 0 && (remainder < 0) != (divisor < 0) { remainder + divisor } else { remainder }
+  }
+
+  fn absolute_difference(self, other: Self) -> Self.Unsigned
+    ensures result == self - other || result == other - self
+    ensures result >= 0
+    cost time O(1)
+  {
+    let high = if self >= other { self } else { other }
+    let low = if self >= other { other } else { self }
+    if low >= 0 || high < 0 {
+      intrinsic::convert(high - low)
+    } else {
+      let above: Self.Unsigned = intrinsic::convert(high)
+      above + low.unsigned_absolute()
+    }
+  }
+
+  fn absolute(self) -> Self
+    requires self != Self.minimum_value()
+    ensures result >= 0
+    ensures result == self || result == -self
+    cost time O(1)
+  {
+    if self < 0 { -self } else { self }
+  }
+
+  fn checked_absolute(self) -> Option[Self]
+    ensures (result is None) == (self == Self.minimum_value())
+    ensures !(result is Some(magnitude) && (magnitude < 0 || (magnitude != self && magnitude != -self)))
+    cost time O(1)
+  {
+    if self == Self.minimum_value() { None } else { Some(self.absolute()) }
+  }
+
+  fn unsigned_absolute(self) -> Self.Unsigned
+    ensures result == self || result == -self
+    cost time O(1)
+  {
+    if self >= 0 {
+      intrinsic::convert(self)
+    } else {
+      let below: Self.Unsigned = intrinsic::convert(-(self + 1))
+      below + 1
+    }
+  }
+
+  fn checked_negate(self) -> Option[Self]
+    ensures (result is None) == (self == Self.minimum_value())
+    ensures !(result is Some(negated) && negated != -self)
+    cost time O(1)
+  {
+    if self == Self.minimum_value() { None } else { Some(-self) }
+  }
+
+  fn wrapping_negate(self) -> Self
+    ensures self == Self.minimum_value() ==> result == Self.minimum_value()
+    ensures self != Self.minimum_value() ==> result == -self
+    cost time O(1)
+  {
+    intrinsic::wrapping_subtract(0, right: self)
+  }
+
+  fn sign(self) -> Self
+    ensures -1 <= result && result <= 1
+    ensures (result == 0) == (self == 0)
+    ensures (result == 1) == (self > 0)
+    cost time O(1)
+  {
+    if self < 0 { -1 } else if self > 0 { 1 } else { 0 }
+  }
+
+  fn is_negative(self) -> Bool
+    cost time O(1)
+  {
+    self < 0
+  }
+
+  fn is_positive(self) -> Bool
+    cost time O(1)
+  {
+    self > 0
+  }
+
+  fn reverse_bits(self) -> Self
+    cost time O(1)
+  {
+    self.to_unsigned_bits().reverse_bits().to_signed_bits()
+  }
+
+  fn to_unsigned_bits(self) -> Self.Unsigned
+    ensures self >= 0 ==> result == self
+    ensures self < 0 ==> result == self + (Self.maximum_value() - Self.minimum_value() + 1)
+    cost time O(1)
+  {
+    if self >= 0 {
+      intrinsic::convert(self)
+    } else {
+      let below: Self.Unsigned = intrinsic::convert(-(self + 1))
+      let half: Self.Unsigned = intrinsic::convert(Self.maximum_value())
+      half - below + half + 1
+    }
+  }
+
+  fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core::ParseIntegerError]
+    requires 2 <= radix && radix <= 36
+    cost time O(text.length())
+  {
+    let most: UInt64 = intrinsic::convert(Self.maximum_value())
+    if text.length() > 0 && text.byte(0) == 45 {
+      let magnitude = integer_text::parse_magnitude(text, start: 1, radix: radix, limit: most + 1)?
+      if magnitude == 0 {
+        Ok(0)
+      } else {
+        let below: Self = intrinsic::convert(magnitude - 1)
+        Ok(-below - 1)
+      }
+    } else {
+      let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
+      let magnitude = integer_text::parse_magnitude(text, start: start, radix: radix, limit: most)?
+      Ok(intrinsic::convert(magnitude))
+    }
+  }
+
+  fn format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+    requires 2 <= radix && radix <= 36
+    cost time O(minimum_digits + Self.bit_width())
+  {
+    integer_text::format_magnitude(
+      intrinsic::convert(self.unsigned_absolute()),
+      negative: self < 0,
+      radix: radix,
+      minimum_digits: minimum_digits,
+      uppercase: uppercase,
+    )
+  }
+}
+
+public trait UnsignedInteger: FixedWidthInteger {
+  type Signed: SignedInteger[Unsigned = Self]
+
+  fn checked_divide(self, other: Self) -> Option[Self]
+    ensures (result is None) == (other == 0)
+    ensures !(result is Some(quotient) && quotient != self / other)
+    cost time O(1)
+  {
+    if other == 0 { None } else { Some(self / other) }
+  }
+
+  fn checked_remainder(self, other: Self) -> Option[Self]
+    ensures (result is None) == (other == 0)
+    ensures !(result is Some(remainder) && remainder != self % other)
+    cost time O(1)
+  {
+    if other == 0 { None } else { Some(self % other) }
+  }
+
+  fn saturating_power(self, exponent: UInt32) -> Self
+    cost time O(log(exponent))
+  {
+    match self.checked_power(exponent) {
+      Some(power) => power
+      None => Self.maximum_value()
+    }
+  }
+
+  fn saturating_subtract(self, other: Self) -> Self
+    ensures self < other ==> result == 0
+    ensures self >= other ==> result == self - other
+    cost time O(1)
+  {
+    if self < other { 0 } else { self - other }
+  }
+
+  fn saturating_multiply(self, other: Self) -> Self
+    ensures self * other > Self.maximum_value() ==> result == Self.maximum_value()
+    ensures self * other <= Self.maximum_value() ==> result == self * other
+    cost time O(1)
+  {
+    if intrinsic::multiply_overflows(self, right: other) {
+      Self.maximum_value()
+    } else {
+      intrinsic::multiply(self, right: other)
+    }
+  }
+
+  fn floor_divide(self, divisor: Self) -> Self
+    requires divisor != 0
+    ensures result == self / divisor
+    cost time O(1)
+  {
+    self / divisor
+  }
+
+  fn floor_modulo(self, divisor: Self) -> Self
+    requires divisor != 0
+    ensures result == self % divisor
+    cost time O(1)
+  {
+    self % divisor
+  }
+
+  fn absolute_difference(self, other: Self) -> Self
+    ensures result == self - other || result == other - self
+    cost time O(1)
+  {
+    if self >= other { self - other } else { other - self }
+  }
+
+  fn is_power_of_two(self) -> Bool
+    ensures result ==> self > 0
+    cost time O(1)
+  {
+    self != 0 && (self & (self - 1)) == 0
+  }
+
+  fn next_power_of_two(self) -> Option[Self]
+    cost time O(1)
+  {
+    if self <= 1 {
+      return Some(1)
+    }
+    let used = Self.bit_width().saturating_subtract(intrinsic::leading_zeros(self - 1))
+    if used >= Self.bit_width() {
+      None
+    } else {
+      let one: Self = 1
+      Some(one << used)
+    }
+  }
+
+  fn greatest_common_divisor(self, other: Self) -> Self
+    ensures (result == 0) == (self == 0 && other == 0)
+    cost time O(log(self) + log(other))
+  {
+    var first = if self >= other { self } else { other }
+    var second = if self >= other { other } else { self }
+    while second != 0
+      invariant second <= first
+      invariant (first == 0) == (self == 0 && other == 0)
+      decreases second
+      cost time O(log(self) + log(other) - log(first) - log(second))
+    {
+      let remainder = first % second
+      proof {
+        assert second > first / 2 ==> remainder == first - second
+      }
+      first = second
+      second = remainder
+    }
+    first
+  }
+
+  fn least_common_multiple(self, other: Self) -> Option[Self]
+    cost time O(log(self) + log(other))
+  {
+    if self == 0 || other == 0 {
+      Some(0)
+    } else {
+      (self / self.greatest_common_divisor(other)).checked_multiply(other)
+    }
+  }
+
+  fn reverse_bits(self) -> Self
+    cost time O(1)
+  {
+    let nibbles = Self.maximum_value() / 17
+    let twos = Self.maximum_value() / 5
+    let ones = Self.maximum_value() / 3
+    let halves = ((self & (nibbles << 4)) >> 4) | ((self & nibbles) << 4)
+    let quarters = ((halves & (twos << 2)) >> 2) | ((halves & twos) << 2)
+    let pairs = ((quarters & (ones << 1)) >> 1) | ((quarters & ones) << 1)
+    intrinsic::swap_bytes(pairs)
+  }
+
+  fn to_signed_bits(self) -> Self.Signed
+    ensures self <= Self.maximum_value() / 2 ==> result == self
+    ensures self > Self.maximum_value() / 2 ==> result == self - (Self.maximum_value() + 1)
+    cost time O(1)
+  {
+    let limit = Self.maximum_value() / 2
+    if self <= limit {
+      intrinsic::convert(self)
+    } else {
+      let below: Self.Signed = intrinsic::convert(Self.maximum_value() - self)
+      -below - 1
+    }
+  }
+
+  fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core::ParseIntegerError]
+    requires 2 <= radix && radix <= 36
+    cost time O(text.length())
+  {
+    let start: USize = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
+    let magnitude = integer_text::parse_magnitude(text, start: start, radix: radix, limit: intrinsic::convert(Self.maximum_value()))?
+    Ok(intrinsic::convert(magnitude))
+  }
+
+  fn format(self, radix: UInt32 = 10, minimum_digits: USize = 1, uppercase: Bool = false) -> String
+    requires 2 <= radix && radix <= 36
+    cost time O(minimum_digits + Self.bit_width())
+  {
+    integer_text::format_magnitude(
+      intrinsic::convert(self),
+      negative: false,
+      radix: radix,
+      minimum_digits: minimum_digits,
+      uppercase: uppercase,
+    )
+  }
+}

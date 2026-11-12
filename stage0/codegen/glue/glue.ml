@@ -19,62 +19,66 @@ type t = {
 let create env ~representation ~usize ?(debug_form = fun _ -> Structure) () =
   { env; representation; usize; debug_form; trivial_types = Types.empty }
 
-let rec trivial t ty =
-  match Types.find_opt ty t.trivial_types with
+let rec trivial glue ty =
+  match Types.find_opt ty glue.trivial_types with
   | Some answer -> answer
   | None ->
       (* A type that contains itself does so through an [indirect] variant
          or storage, so it is not trivial, which is the answer a cycle
          gets. *)
-      t.trivial_types <- Types.add ty false t.trivial_types;
+      glue.trivial_types <- Types.add ty false glue.trivial_types;
       (* An [any] value and a cursor always have a drop function, which a
          cursor's shape, made from its method's body, need not be looked at
          to know. *)
       let any = match ty with Ground.Any _ | Cursor _ -> true | _ -> false in
       let member : Memory_layout.member -> bool = function
-        | Typed ty -> trivial t ty
+        | Typed ty -> trivial glue ty
         | Raw _ -> true
       in
       let answer =
         if any then false
         else
-          match t.representation ty with
+          match glue.representation ty with
           | Storage _ | Handle | Shared _ -> false
           | Shape (Scalar _) -> true
-          | Shape (Record fields) -> List.for_all (fun (_, m) -> member m) fields
-          | Shape (Array (element, _)) -> trivial t element
+          | Shape (Record fields) ->
+              List.for_all (fun (_, field_member) -> member field_member) fields
+          | Shape (Array (element, _)) -> trivial glue element
           | Shape (Sum variants) ->
               List.for_all
-                (fun (v : Memory_layout.variant_shape) ->
-                  (not v.indirect) && List.for_all (fun (_, m) -> member m) v.fields)
+                (fun (variant_shape : Memory_layout.variant_shape) ->
+                  (not variant_shape.indirect)
+                  && List.for_all
+                       (fun (_, field_member) -> member field_member)
+                       variant_shape.fields)
                 variants
       in
-      t.trivial_types <- Types.add ty answer t.trivial_types;
+      glue.trivial_types <- Types.add ty answer glue.trivial_types;
       answer
 
 open Lir_builder
 
-let loop t b ~count body = loop b ~index_type:(Value t.usize) ~count body
+let loop glue builder ~count body = loop builder ~index_type:(Value glue.usize) ~count body
 let instance key main : Lir.t = { key; main; nested = [||] }
 
-let variant_shapes t ty =
-  match t.representation ty with
+let variant_shapes glue ty =
+  match glue.representation ty with
   | Shape (Sum variants) -> variants
   | _ -> bug "%s is not a sum type" (Ground.to_string ty)
 
-let droppable t : Memory_layout.member -> bool = function
-  | Typed ty -> not (trivial t ty)
+let droppable glue : Memory_layout.member -> bool = function
+  | Typed ty -> not (trivial glue ty)
   | Raw _ -> false
 
-let drop t ty =
-  let b = create () in
-  let pointer = local b ~name:"value" (Pointer { target = Value ty; writable = true }) in
+let drop glue ty =
+  let builder = create () in
+  let pointer = local builder ~name:"value" (Pointer { target = Value ty; writable = true }) in
   let value : Lir.place = { root = Local pointer; projections = [ Deref ] } in
-  start b (block b);
-  (match (ty, t.representation ty) with
+  start builder (block builder);
+  (match (ty, glue.representation ty) with
   | Any _, _ ->
       (* The value's own drop, from slot 0 of its table, then its block. *)
-      emit b
+      emit builder
         (Call
            {
              target =
@@ -89,7 +93,7 @@ let drop t ty =
              arguments = [];
              result = Discarded;
            });
-      emit b
+      emit builder
         (Call
            {
              target = Intrinsic Free;
@@ -97,10 +101,10 @@ let drop t ty =
              result = Discarded;
            })
   | _, Handle ->
-      emit b
+      emit builder
         (Call
            {
-             target = Foreign (Libc.declaration (Memory_layout.target t.env).system Close);
+             target = Foreign (Libc.declaration (Memory_layout.target glue.env).system Close);
              arguments = [ Copy (value / Field "descriptor") ];
              result = Discarded;
            })
@@ -109,21 +113,21 @@ let drop t ty =
          is dropped by a call of its type's drop function: drop elaboration
          would remove a [Drop] of a place behind a local pointer. *)
       let pointer = Lir.Copy (value / Field "value") in
-      let last = local b (Raw Bool) in
-      emit b
+      let last = local builder (Raw Bool) in
+      emit builder
         (Call
            {
              target = Intrinsic Shared_release;
              arguments = [ pointer ];
              result = Returned (at last);
            });
-      when_ b
+      when_ builder
         (Copy (at last))
         (fun () ->
-          if not (trivial t inner) then begin
-            let typed = local b (Pointer { target = Value inner; writable = true }) in
-            emit b (Assign (at typed, Use pointer));
-            emit b
+          if not (trivial glue inner) then begin
+            let typed = local builder (Pointer { target = Value inner; writable = true }) in
+            emit builder (Assign (at typed, Use pointer));
+            emit builder
               (Call
                  {
                    target =
@@ -136,15 +140,15 @@ let drop t ty =
                    result = Discarded;
                  })
           end;
-          emit b
+          emit builder
             (Call { target = Intrinsic Shared_free; arguments = [ pointer ]; result = Discarded }))
   | _, Storage element ->
-      if not (trivial t element) then
-        loop t b
+      if not (trivial glue element) then
+        loop glue builder
           ~count:(Copy (Storage.length value))
-          (fun index -> emit b (Drop (Storage.at value (Copy (at index)))));
-      when_ b (Storage.owns_buffer b value) (fun () ->
-          emit b
+          (fun index -> emit builder (Drop (Storage.at value (Copy (at index)))));
+      when_ builder (Storage.owns_buffer builder value) (fun () ->
+          emit builder
             (Call
                {
                  target = Intrinsic Free;
@@ -153,49 +157,58 @@ let drop t ty =
                }))
   | _, Shape (Record fields) ->
       List.iter
-        (fun (name, member) -> if droppable t member then emit b (Drop (value / Field name)))
+        (fun (name, member) ->
+          if droppable glue member then emit builder (Drop (value / Field name)))
         fields
   | _, Shape (Array (element, count)) ->
-      if not (trivial t element) then
-        loop t b ~count:(usize count) (fun index -> emit b (Drop (value / Index (Copy (at index)))))
+      if not (trivial glue element) then
+        loop glue builder ~count:(usize count) (fun index ->
+            emit builder (Drop (value / Index (Copy (at index)))))
   | _, Shape (Sum variants) ->
-      let after = block b in
+      let after = block builder in
       let cases =
         List.filter_map
-          (fun (v : Memory_layout.variant_shape) ->
-            if v.indirect || List.exists (fun (_, m) -> droppable t m) v.fields then begin
-              let block = block b in
-              in_block b block (fun () ->
+          (fun (variant_shape : Memory_layout.variant_shape) ->
+            if
+              variant_shape.indirect
+              || List.exists
+                   (fun (_, field_member) -> droppable glue field_member)
+                   variant_shape.fields
+            then begin
+              let block = block builder in
+              in_block builder block (fun () ->
                   List.iter
                     (fun (field, member) ->
-                      if droppable t member then
-                        emit b (Drop (value / Variant_field { variant = v.name; field })))
-                    v.fields;
-                  if v.indirect then emit b (Free_block { place = value; variant = v.name });
-                  finish b (Goto after));
-              Some (v.name, block)
+                      if droppable glue member then
+                        emit builder
+                          (Drop (value / Variant_field { variant = variant_shape.name; field })))
+                    variant_shape.fields;
+                  if variant_shape.indirect then
+                    emit builder (Free_block { place = value; variant = variant_shape.name });
+                  finish builder (Goto after));
+              Some (variant_shape.name, block)
             end
             else None)
           variants
       in
-      finish b (Switch_variant { place = value; cases; default = Some after });
-      start b after
+      finish builder (Switch_variant { place = value; cases; default = Some after });
+      start builder after
   | _, Shape (Scalar _) -> ());
-  finish b (Return None);
-  instance (Drop ty) (build b ~parameters:[ pointer ] ~result:None)
+  finish builder (Return None);
+  instance (Drop ty) (build builder ~parameters:[ pointer ] ~result:None)
 
 (* The drop in slot 0 of an [any] table, which takes the value's pointer
    untyped, as the slot is called. It calls the type's drop function. A
    [Drop] statement would be removed: drop elaboration treats a place
    behind a pointer that is not a parameter as uninitialized. *)
-let any_drop t ty =
-  let b = create () in
-  let untyped = local b ~name:"value" (Raw (Pointer Opaque)) in
-  start b (block b);
-  if not (trivial t ty) then begin
-    let typed = local b (Pointer { target = Value ty; writable = true }) in
-    emit b (Assign (at typed, Use (Copy (at untyped))));
-    emit b
+let any_drop glue ty =
+  let builder = create () in
+  let untyped = local builder ~name:"value" (Raw (Pointer Opaque)) in
+  start builder (block builder);
+  if not (trivial glue ty) then begin
+    let typed = local builder (Pointer { target = Value ty; writable = true }) in
+    emit builder (Assign (at typed, Use (Copy (at untyped))));
+    emit builder
       (Call
          {
            target =
@@ -204,54 +217,54 @@ let any_drop t ty =
            result = Discarded;
          })
   end;
-  finish b (Return None);
-  instance (Any_drop ty) (build b ~parameters:[ untyped ] ~result:None)
+  finish builder (Return None);
+  instance (Any_drop ty) (build builder ~parameters:[ untyped ] ~result:None)
 
-let copy_signature t ty : Lir.signature =
+let copy_signature glue ty : Lir.signature =
   Convention.signature
-    (Option.to_list (Convention.parameter t.env Read ty))
-    (Convention.result t.env ty)
+    (Option.to_list (Convention.parameter glue.env Read ty))
+    (Convention.result glue.env ty)
 
-let copy_into t b ~destination ~source ty =
-  if trivial t ty then emit b (Assign (destination, Use (Copy source)))
+let copy_into glue builder ~destination ~source ty =
+  if trivial glue ty then emit builder (Assign (destination, Use (Copy source)))
   else
-    let signature = copy_signature t ty in
+    let signature = copy_signature glue ty in
     let argument =
-      match Convention.parameter t.env Read ty with
+      match Convention.parameter glue.env Read ty with
       | Some (Pointer _) -> [ Lir.Address { place = source; writable = false } ]
       | Some _ -> [ Lir.Copy source ]
       | None -> []
     in
     let target = Lir.Direct { function_ = Instance (Copy ty); signature } in
-    emit b
+    emit builder
       (Call
          {
            target;
            arguments = argument;
-           result = Convention.(destination (result t.env ty)) destination;
+           result = Convention.(destination (result glue.env ty)) destination;
          })
 
 (* The operand for a copy of a field, through a temporary when the field's
    type is not trivial. *)
-let copied_field t b ~source (name, member) =
+let copied_field glue builder ~source (name, member) =
   match member with
   | Memory_layout.Raw _ -> (name, Lir.Copy source)
-  | Typed ty when trivial t ty -> (name, Lir.Copy source)
+  | Typed ty when trivial glue ty -> (name, Lir.Copy source)
   | Typed ty ->
-      let temporary = local b (Value ty) in
-      copy_into t b ~destination:(at temporary) ~source ty;
+      let temporary = local builder (Value ty) in
+      copy_into glue builder ~destination:(at temporary) ~source ty;
       (name, Lir.Move (at temporary))
 
-let copy t ty =
-  let b = create () in
-  let convention = Convention.result t.env ty in
+let copy glue ty =
+  let builder = create () in
+  let convention = Convention.result glue.env ty in
   let result_pointer =
     match convention with
-    | Through_pointer pointer -> Some (local b ~name:"result" pointer)
+    | Through_pointer pointer -> Some (local builder ~name:"result" pointer)
     | Returned _ | Nothing -> None
   in
-  let parameter = Convention.parameter t.env Read ty in
-  let self_local = Option.map (fun ty -> local b ~name:"self" ~borrowed:true ty) parameter in
+  let parameter = Convention.parameter glue.env Read ty in
+  let self_local = Option.map (fun ty -> local builder ~name:"self" ~borrowed:true ty) parameter in
   let self : Lir.place =
     match (parameter, self_local) with
     | Some (Pointer _), Some local -> { root = Local local; projections = [ Deref ] }
@@ -259,7 +272,9 @@ let copy t ty =
     | _ -> at 0
   in
   let result_local =
-    match result_pointer with None -> Some (local b ~name:"copy" (Value ty)) | Some _ -> None
+    match result_pointer with
+    | None -> Some (local builder ~name:"copy" (Value ty))
+    | Some _ -> None
   in
   let result : Lir.place =
     match (result_pointer, result_local) with
@@ -267,54 +282,54 @@ let copy t ty =
     | None, Some local -> at local
     | None, None -> bug "no place for the copy"
   in
-  start b (block b);
-  (if trivial t ty then emit b (Assign (result, Use (Copy self)))
+  start builder (block builder);
+  (if trivial glue ty then emit builder (Assign (result, Use (Copy self)))
    else
-     match t.representation ty with
+     match glue.representation ty with
      | Handle -> bug "a copy of a handle, which is not Copyable"
      | Shared _ ->
          (* A copy is another reference to the same block. *)
-         emit b
+         emit builder
            (Call
               {
                 target = Intrinsic Shared_retain;
                 arguments = [ Copy (self / Field "value") ];
                 result = Discarded;
               });
-         emit b (Assign (result, Use (Copy self)))
+         emit builder (Assign (result, Use (Copy self)))
      | Storage element ->
          (* A storage that owns no buffer, empty or static, is shared. One
             that owns a buffer is never shared, or two would free it: with
             no elements its copy is empty, and otherwise its copy gets a
             buffer of exactly its length. *)
-         let layout = Memory_layout.of_type t.env element in
-         let share = block b and owning = block b and hollow = block b in
-         let allocate = block b and after = block b in
-         let owns = Storage.owns_buffer b self in
-         branch b owns ~yes:owning ~no:share;
-         start b share;
-         emit b (Assign (result, Use (Copy self)));
-         finish b (Goto after);
-         start b owning;
-         let empty = Storage.is_empty b self in
-         branch b empty ~yes:hollow ~no:allocate;
-         start b hollow;
-         emit b (Assign (result, Storage.empty ty));
-         finish b (Goto after);
-         start b allocate;
-         let bytes = local b (Value t.usize) in
-         let buffer = local b ~name:"buffer" (Raw (Pointer (Data element))) in
-         emit b
+         let layout = Memory_layout.of_type glue.env element in
+         let share = block builder and owning = block builder and hollow = block builder in
+         let allocate = block builder and after = block builder in
+         let owns = Storage.owns_buffer builder self in
+         branch builder owns ~yes:owning ~no:share;
+         start builder share;
+         emit builder (Assign (result, Use (Copy self)));
+         finish builder (Goto after);
+         start builder owning;
+         let empty = Storage.is_empty builder self in
+         branch builder empty ~yes:hollow ~no:allocate;
+         start builder hollow;
+         emit builder (Assign (result, Storage.empty ty));
+         finish builder (Goto after);
+         start builder allocate;
+         let bytes = local builder (Value glue.usize) in
+         let buffer = local builder ~name:"buffer" (Raw (Pointer (Data element))) in
+         emit builder
            (Assign (at bytes, Binary (Multiply, Copy (Storage.length self), usize layout.size)));
-         emit b
+         emit builder
            (Call
               {
                 target = Intrinsic Allocate;
                 arguments = [ Copy (at bytes); usize layout.alignment ];
                 result = Returned (at buffer);
               });
-         if trivial t element then
-           emit b
+         if trivial glue element then
+           emit builder
              (Call
                 {
                   target = Intrinsic Copy_bytes;
@@ -322,64 +337,67 @@ let copy t ty =
                   result = Discarded;
                 })
          else
-           loop t b
+           loop glue builder
              ~count:(Copy (Storage.length self))
              (fun index ->
-               copy_into t b
+               copy_into glue builder
                  ~destination:(at buffer / Index (Copy (at index)))
                  ~source:(Storage.at self (Copy (at index)))
                  element);
-         emit b
+         emit builder
            (Assign
               ( result,
                 Storage.owning ty
                   ~buffer:(Copy (at buffer))
                   ~length:(Copy (Storage.length self))
                   ~capacity:(Copy (Storage.length self)) ));
-         finish b (Goto after);
-         start b after
+         finish builder (Goto after);
+         start builder after
      | Shape (Record fields) ->
          let fields =
            List.map
-             (fun (name, member) -> copied_field t b ~source:(self / Field name) (name, member))
+             (fun (name, member) ->
+               copied_field glue builder ~source:(self / Field name) (name, member))
              fields
          in
-         emit b (Assign (result, Build { ty; variant = None; fields }))
+         emit builder (Assign (result, Build { ty; variant = None; fields }))
      | Shape (Array (element, count)) ->
-         loop t b ~count:(usize count) (fun index ->
-             copy_into t b
+         loop glue builder ~count:(usize count) (fun index ->
+             copy_into glue builder
                ~destination:(result / Index (Copy (at index)))
                ~source:(self / Index (Copy (at index)))
                element)
      | Shape (Sum _) ->
-         let after = block b in
+         let after = block builder in
          let cases =
            List.map
-             (fun (v : Memory_layout.variant_shape) ->
-               let block = block b in
-               in_block b block (fun () ->
+             (fun (variant_shape : Memory_layout.variant_shape) ->
+               let block = block builder in
+               in_block builder block (fun () ->
                    let fields =
                      List.map
                        (fun (name, member) ->
-                         copied_field t b
-                           ~source:(self / Variant_field { variant = v.name; field = name })
+                         copied_field glue builder
+                           ~source:
+                             (self / Variant_field { variant = variant_shape.name; field = name })
                            (name, member))
-                       v.fields
+                       variant_shape.fields
                    in
-                   emit b (Assign (result, Build { ty; variant = Some v.name; fields }));
-                   finish b (Goto after));
-               (v.name, block))
-             (variant_shapes t ty)
+                   emit builder
+                     (Assign (result, Build { ty; variant = Some variant_shape.name; fields }));
+                   finish builder (Goto after));
+               (variant_shape.name, block))
+             (variant_shapes glue ty)
          in
-         finish b (Switch_variant { place = self; cases; default = None });
-         start b after
-     | Shape (Scalar _) -> emit b (Assign (result, Use (Copy self))));
+         finish builder (Switch_variant { place = self; cases; default = None });
+         start builder after
+     | Shape (Scalar _) -> emit builder (Assign (result, Use (Copy self))));
   (match result_local with
-  | Some local -> finish b (Return (Some (Move (at local))))
-  | None -> finish b (Return None));
+  | Some local -> finish builder (Return (Some (Move (at local))))
+  | None -> finish builder (Return None));
   let parameters = Option.to_list result_pointer @ Option.to_list self_local in
   instance (Copy ty)
-    (build ?written_result:result_pointer b ~parameters
+    (build ?written_result:result_pointer builder ~parameters
        ~result:
          (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None))
 
@@ -387,17 +405,17 @@ let builtin builtin : Ground.ty = Named { path = Intrinsic.builtin_path builtin;
 let output_ty = Storage.of_elements (builtin UInt8)
 let bytes_ty = Storage.view_of_elements (builtin UInt8)
 
-let output_parameter t =
-  match Convention.parameter t.env Mut output_ty with
+let output_parameter glue =
+  match Convention.parameter glue.env Mut output_ty with
   | Some parameter -> parameter
   | None -> bug "storage of no size"
 
-let debug_signature t ty : Lir.signature =
+let debug_signature glue ty : Lir.signature =
   {
     parameters =
-      (if Memory_layout.has_zero_size t.env ty then []
+      (if Memory_layout.has_zero_size glue.env ty then []
        else [ Lir.Pointer { target = Value ty; writable = false } ])
-      @ [ output_parameter t ];
+      @ [ output_parameter glue ];
     result = None;
     returns = true;
   }
@@ -405,88 +423,91 @@ let debug_signature t ty : Lir.signature =
 (* A call of one of the standard library's functions that append to the
    output, each in [standard::writing]: it takes the output, and a value of
    [ty] to write, which is at [place]. *)
-let write t b ~output name ty (place : Lir.place) =
+let write glue builder ~output name ty (place : Lir.place) =
   let key = Instance.Code { path = Path.standard [ "writing" ] name; type_arguments = [] } in
   let parameter, written =
-    match Convention.parameter t.env Read ty with
+    match Convention.parameter glue.env Read ty with
     | Some (Pointer _ as parameter) -> (parameter, Lir.Address { place; writable = false })
     | Some parameter -> (parameter, Copy place)
     | None -> bug "%s is written, and has no size" (Ground.to_string ty)
   in
-  emit b
+  emit builder
     (Call
        {
          target =
            Direct
              {
                function_ = Instance key;
-               signature = Convention.signature [ output_parameter t; parameter ] Nothing;
+               signature = Convention.signature [ output_parameter glue; parameter ] Nothing;
              };
          arguments = [ output; written ];
          result = Discarded;
        })
 
 (* A view of bytes, in a local. *)
-let bytes b ~elements ~length =
-  let view = local b (Value bytes_ty) in
-  emit b (Assign (at view, Storage.view bytes_ty ~elements ~length));
+let bytes builder ~elements ~length =
+  let view = local builder (Value bytes_ty) in
+  emit builder (Assign (at view, Storage.view bytes_ty ~elements ~length));
   at view
 
-let text t b ~output value =
+let text glue builder ~output value =
   if value <> "" then
-    write t b ~output "append" bytes_ty
-      (bytes b ~elements:(Constant (Bytes value)) ~length:(usize (String.length value)))
+    write glue builder ~output "append" bytes_ty
+      (bytes builder ~elements:(Constant (Bytes value)) ~length:(usize (String.length value)))
 
-let debug_call t b ~output ty (place : Lir.place) =
+let debug_call glue builder ~output ty (place : Lir.place) =
   let arguments =
-    if Memory_layout.has_zero_size t.env ty then [] else [ Lir.Address { place; writable = false } ]
+    if Memory_layout.has_zero_size glue.env ty then []
+    else [ Lir.Address { place; writable = false } ]
   in
-  emit b
+  emit builder
     (Call
        {
-         target = Direct { function_ = Instance (Debug ty); signature = debug_signature t ty };
+         target = Direct { function_ = Instance (Debug ty); signature = debug_signature glue ty };
          arguments = arguments @ [ output ];
          result = Discarded;
        })
 
-let scalar_debug t b ~output (scalar : Memory_layout.scalar) (place : Lir.place) =
+let scalar_debug glue builder ~output (scalar : Memory_layout.scalar) (place : Lir.place) =
   let widened name wide =
-    let value = local b (Value (builtin wide)) in
-    emit b
+    let value = local builder (Value (builtin wide)) in
+    emit builder
       (Assign
          ( at value,
            Convert (Copy place, Integer (match wide with Intrinsic.Int64 -> Int64 | _ -> UInt64)) ));
-    write t b ~output name (builtin wide) (at value)
+    write glue builder ~output name (builtin wide) (at value)
   in
   match scalar with
   | Integer (Int8 | Int16 | Int32 | Int64 | ISize) -> widened "signed" Int64
   | Integer (UInt8 | UInt16 | UInt32 | UInt64 | USize) -> widened "unsigned" UInt64
-  | Float32 -> write t b ~output "float32" (builtin Float32) place
-  | Float64 -> write t b ~output "float64" (builtin Float64) place
-  | Bool -> write t b ~output "boolean" (builtin Bool) place
-  | Character -> write t b ~output "quoted_character" (builtin Character) place
-  | Pointer _ | Nullable_pointer _ -> text t b ~output "pointer"
+  | Float32 -> write glue builder ~output "float32" (builtin Float32) place
+  | Float64 -> write glue builder ~output "float64" (builtin Float64) place
+  | Bool -> write glue builder ~output "boolean" (builtin Bool) place
+  | Character -> write glue builder ~output "quoted_character" (builtin Character) place
+  | Pointer _ | Nullable_pointer _ -> text glue builder ~output "pointer"
 
-let debug t ty =
-  let b = create () in
+let debug glue ty =
+  let builder = create () in
   let parameter =
-    if Memory_layout.has_zero_size t.env ty then None
-    else Some (local b ~name:"value" (Pointer { target = Value ty; writable = false }))
+    if Memory_layout.has_zero_size glue.env ty then None
+    else Some (local builder ~name:"value" (Pointer { target = Value ty; writable = false }))
   in
   let value : Lir.place =
-    match parameter with Some p -> { root = Local p; projections = [ Deref ] } | None -> at 0
+    match parameter with
+    | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
+    | None -> at 0
   in
-  let out = local b ~name:"output" (output_parameter t) in
+  let out = local builder ~name:"output" (output_parameter glue) in
   let output = Lir.Copy (at out) in
-  let text = text t b ~output in
-  let debug_call = debug_call t b ~output in
-  start b (block b);
+  let text = text glue builder ~output in
+  let debug_call = debug_call glue builder ~output in
+  start builder (block builder);
   let rec list_of element ~element_at ~count =
     text "[";
-    loop t b ~count (fun index ->
-        let later = local b (Raw Bool) in
-        emit b (Assign (at later, Binary (Not_equal, Copy (at index), usize 0)));
-        when_ b (Copy (at later)) (fun () -> text ", ");
+    loop glue builder ~count (fun index ->
+        let later = local builder (Raw Bool) in
+        emit builder (Assign (at later, Binary (Not_equal, Copy (at index), usize 0)));
+        when_ builder (Copy (at later)) (fun () -> text ", ");
         debug_call element (element_at (Lir.Copy (at index))));
     text "]"
   and storage_or_view field_ty (place : Lir.place) ~as_text =
@@ -497,9 +518,9 @@ let debug t ty =
       | None, None -> bug "%s is not storage or a view" (Ground.to_string field_ty)
     in
     if as_text then
-      write t b ~output "quoted_text" bytes_ty
-        (bytes b ~elements:(Copy buffer) ~length:(Copy count))
-    else list_of element ~element_at:(fun i -> buffer / Index i) ~count:(Copy count)
+      write glue builder ~output "quoted_text" bytes_ty
+        (bytes builder ~elements:(Copy buffer) ~length:(Copy count))
+    else list_of element ~element_at:(fun index -> buffer / Index index) ~count:(Copy count)
   and fields_debug name (fields : (string * Memory_layout.member) list) field_place =
     text name;
     match fields with
@@ -511,18 +532,18 @@ let debug t ty =
     | fields ->
         text "(";
         List.iteri
-          (fun i (field, member) ->
+          (fun index (field, member) ->
             match member with
             | Memory_layout.Typed field_ty ->
-                text ((if i > 0 then ", " else "") ^ field ^ ": ");
+                text ((if index > 0 then ", " else "") ^ field ^ ": ");
                 debug_call field_ty (field_place field)
             | Raw _ -> ())
           fields;
         text ")"
   in
-  (match (t.debug_form ty, t.representation ty) with
+  (match (glue.debug_form ty, glue.representation ty) with
   | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
-      storage_or_view field_ty (value / Field field) ~as_text:(t.debug_form ty = Text)
+      storage_or_view field_ty (value / Field field) ~as_text:(glue.debug_form ty = Text)
   | _, Handle -> text "Handle"
   | _, Shared _ -> text "Shared"
   | _, Storage element ->
@@ -533,30 +554,32 @@ let debug t ty =
       | Function _, _ -> text "fn"
       | Any _, _ -> text "any"
       | Cursor _, _ -> text "cursor"
-      | _, Scalar scalar -> scalar_debug t b ~output scalar value
+      | Lent _, _ ->
+          bug "debug glue for %s, which a lent value is copied into first" (Ground.to_string ty)
+      | _, Scalar scalar -> scalar_debug glue builder ~output scalar value
       | Named { path; _ }, Record [] ->
           text (if Ground.path_name path = "Unit" then "Unit" else Ground.path_name path ^ "()")
       | Named { path; _ }, Record fields ->
           fields_debug (Ground.path_name path) fields (fun field -> value / Field field)
       | _, Array (element, count) ->
-          list_of element ~element_at:(fun i -> value / Index i) ~count:(usize count)
+          list_of element ~element_at:(fun index -> value / Index index) ~count:(usize count)
       | _, Sum variants ->
-          let after = block b in
+          let after = block builder in
           let cases =
             List.map
-              (fun (v : Memory_layout.variant_shape) ->
-                let case = block b in
-                in_block b case (fun () ->
-                    fields_debug v.name v.fields (fun field ->
-                        value / Variant_field { variant = v.name; field });
-                    finish b (Goto after));
-                (v.name, case))
+              (fun (variant_shape : Memory_layout.variant_shape) ->
+                let case = block builder in
+                in_block builder case (fun () ->
+                    fields_debug variant_shape.name variant_shape.fields (fun field ->
+                        value / Variant_field { variant = variant_shape.name; field });
+                    finish builder (Goto after));
+                (variant_shape.name, case))
               variants
           in
-          finish b (Switch_variant { place = value; cases; default = None });
-          start b after));
-  finish b (Return None);
-  instance (Debug ty) (build b ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
+          finish builder (Switch_variant { place = value; cases; default = None });
+          start builder after));
+  finish builder (Return None);
+  instance (Debug ty) (build builder ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
 
 (* A value's binary form, which code run while compiling writes its result
    in and the compiler reads back as static data: a scalar as its bytes, a
@@ -565,38 +588,42 @@ let debug t ty =
    then its elements. A value of zero size writes nothing. Each part of
    another type is written by that type's own function, so a recursive type
    needs nothing more. *)
-let encode_signature t ty = debug_signature t ty
+let encode_signature glue ty = debug_signature glue ty
 
-let encode_call t b ~output ty (place : Lir.place) =
-  if not (Memory_layout.has_zero_size t.env ty) then
-    emit b
+let encode_call glue builder ~output ty (place : Lir.place) =
+  if not (Memory_layout.has_zero_size glue.env ty) then
+    emit builder
       (Call
          {
-           target = Direct { function_ = Instance (Encode ty); signature = encode_signature t ty };
+           target =
+             Direct { function_ = Instance (Encode ty); signature = encode_signature glue ty };
            arguments = [ Lir.Address { place; writable = false }; output ];
            result = Discarded;
          })
 
-let encode t ty =
-  let b = create () in
+let encode glue ty =
+  let builder = create () in
   let parameter =
-    if Memory_layout.has_zero_size t.env ty then None
-    else Some (local b ~name:"value" (Pointer { target = Value ty; writable = false }))
+    if Memory_layout.has_zero_size glue.env ty then None
+    else Some (local builder ~name:"value" (Pointer { target = Value ty; writable = false }))
   in
   let value : Lir.place =
-    match parameter with Some p -> { root = Local p; projections = [ Deref ] } | None -> at 0
+    match parameter with
+    | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
+    | None -> at 0
   in
-  let out = local b ~name:"output" (output_parameter t) in
+  let out = local builder ~name:"output" (output_parameter glue) in
   let output = Lir.Copy (at out) in
-  let encode_call = encode_call t b ~output in
-  start b (block b);
+  let encode_call = encode_call glue builder ~output in
+  start builder (block builder);
   (* The value's own bytes, read as bytes whatever it is. *)
   let bytes (place : Lir.place) size =
-    let first = local b (Raw (Pointer (Data (builtin UInt8)))) in
-    emit b
+    let first = local builder (Raw (Pointer (Data (builtin UInt8)))) in
+    emit builder
       (Assign
          (at first, Convert (Address { place; writable = false }, Pointer (Data (builtin UInt8)))));
-    write t b ~output "append" bytes_ty (bytes b ~elements:(Copy (at first)) ~length:(usize size))
+    write glue builder ~output "append" bytes_ty
+      (bytes builder ~elements:(Copy (at first)) ~length:(usize size))
   in
   let fields place variant (fields : (string * Memory_layout.member) list) =
     List.iter
@@ -611,35 +638,36 @@ let encode t ty =
       fields
   in
   (if parameter <> None then
-     match t.representation ty with
+     match glue.representation ty with
      | Handle -> bug "a handle cannot be worked out while compiling"
      | Shared _ -> bug "a shared value cannot be worked out while compiling"
      | Storage element ->
-         bytes (Storage.length value) (Memory_layout.of_type t.env t.usize).size;
-         loop t b
+         bytes (Storage.length value) (Memory_layout.of_type glue.env glue.usize).size;
+         loop glue builder
            ~count:(Copy (Storage.length value))
            (fun index -> encode_call element (Storage.at value (Copy (at index))))
-     | Shape (Scalar _) -> bytes value (Memory_layout.of_type t.env ty).size
+     | Shape (Scalar _) -> bytes value (Memory_layout.of_type glue.env ty).size
      | Shape (Record members) -> fields value None members
      | Shape (Array (element, count)) ->
-         loop t b ~count:(usize count) (fun index ->
+         loop glue builder ~count:(usize count) (fun index ->
              encode_call element (value / Index (Copy (at index))))
      | Shape (Sum variants) ->
-         let after = block b in
+         let after = block builder in
          let cases =
            List.mapi
-             (fun i (v : Memory_layout.variant_shape) ->
-               let case = block b in
-               in_block b case (fun () ->
-                   let index = local b (Raw (Integer UInt32)) in
-                   emit b (Assign (at index, Use (Constant (Integer (UInt32, Z.of_int i)))));
+             (fun variant_index (variant_shape : Memory_layout.variant_shape) ->
+               let case = block builder in
+               in_block builder case (fun () ->
+                   let index = local builder (Raw (Integer UInt32)) in
+                   emit builder
+                     (Assign (at index, Use (Constant (Integer (UInt32, Z.of_int variant_index)))));
                    bytes (at index) 4;
-                   fields value (Some v.name) v.fields;
-                   finish b (Goto after));
-               (v.name, case))
+                   fields value (Some variant_shape.name) variant_shape.fields;
+                   finish builder (Goto after));
+               (variant_shape.name, case))
              variants
          in
-         finish b (Switch_variant { place = value; cases; default = None });
-         start b after);
-  finish b (Return None);
-  instance (Encode ty) (build b ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
+         finish builder (Switch_variant { place = value; cases; default = None });
+         start builder after);
+  finish builder (Return None);
+  instance (Encode ty) (build builder ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)

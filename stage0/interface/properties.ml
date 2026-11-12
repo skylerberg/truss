@@ -1,47 +1,47 @@
-module T = Types
-
 let copyable_trait = Well_known.path Copyable
 let plain_trait = Well_known.path Plain
 let storable_trait = Well_known.path Storable
 
-let trait_substitution (interface : T.trait_interface) ~self (reference : T.trait_reference) :
-    T.substitution =
-  (({ owner = reference.trait; name = "Self" } : T.parameter), T.Type self)
-  :: Option.value ~default:[] (T.substitution_of interface.trait_generics reference.trait_arguments)
+let trait_substitution (interface : Types.trait_interface) ~self (reference : Types.trait_reference)
+    : Types.substitution =
+  (({ owner = reference.trait; name = "Self" } : Types.parameter), Types.Type self)
+  :: Option.value ~default:[]
+       (Types.substitution_of interface.trait_generics reference.trait_arguments)
 
-let rec bound_closure database ?(seen = []) ~self (bound : T.trait_reference) =
-  if List.exists (fun (other : T.trait_reference) -> Path.equal other.trait bound.trait) seen then
-    []
+let rec bound_closure database ?(seen = []) ~self (bound : Types.trait_reference) =
+  if List.exists (fun (other : Types.trait_reference) -> Path.equal other.trait bound.trait) seen
+  then []
   else
     let required =
       match Query.demand database Environment.trait_interface bound.trait with
       | Some trait ->
-          List.map (T.substitute_trait (trait_substitution trait ~self bound)) trait.requires
+          List.map (Types.substitute_trait (trait_substitution trait ~self bound)) trait.requires
       | None -> []
     in
     bound :: List.concat_map (bound_closure database ~seen:(bound :: seen) ~self) required
 
 (* The declared bounds of an associated type, for a base type: the [Key:
    Hash] in [trait Keyed { type Key: Hash }]. *)
-let associated_bounds database ~base (trait : T.trait_reference) name =
+let associated_bounds database ~base (trait : Types.trait_reference) name =
   match Query.demand database Environment.trait_interface trait.trait with
   | Some interface -> (
       match
         List.find_opt
-          (fun (associated : T.associated_type) -> associated.associated_name = name)
+          (fun (associated : Types.associated_type) -> associated.associated_name = name)
           interface.associated_types
       with
       | Some associated ->
           List.map
-            (T.substitute_trait (trait_substitution interface ~self:base trait))
+            (Types.substitute_trait (trait_substitution interface ~self:base trait))
             associated.associated_bounds
       | None -> [])
   | None -> []
 
-let known_bounds database ~bounds (type_ : T.ty) =
+let known_bounds database ~bounds (type_ : Types.ty) =
   match type_ with
-  | T.Parameter parameter -> List.concat_map (bound_closure database ~self:type_) (bounds parameter)
-  | T.Projection { base; trait; name } ->
+  | Types.Parameter parameter ->
+      List.concat_map (bound_closure database ~self:type_) (bounds parameter)
+  | Types.Projection { base; trait; name } ->
       List.concat_map
         (bound_closure database ~self:type_)
         (associated_bounds database ~base trait name)
@@ -49,7 +49,7 @@ let known_bounds database ~bounds (type_ : T.ty) =
 
 let has_bound database ~bounds type_ trait =
   List.exists
-    (fun (bound : T.trait_reference) -> Path.equal bound.trait trait)
+    (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
     (known_bounds database ~bounds type_)
 
 type property = Copyable | Plain | View | Holds_function
@@ -68,15 +68,15 @@ let through outer inner =
    type nested in itself cannot be mistaken for a recursive type. A
    condition is a parameter or an associated type, and it is decided where
    the parameter's instantiation is known. *)
-type requirement = Never | Requires of T.ty list  (** Each of the types has the property. *)
-type exposure = Always | If_any of T.ty list  (** One of the types has the property. *)
+type requirement = Never | Requires of Types.ty list  (** Each of the types has the property. *)
+type exposure = Always | If_any of Types.ty list  (** One of the types has the property. *)
 
 type facts = {
   copyable : requirement;
   plain : requirement;
   view : exposure;
   holds_function : exposure;
-  contains : (T.ty * occurrence) list;  (** The types that a value contains. *)
+  contains : (Types.ty * occurrence) list;  (** The types that a value contains. *)
 }
 
 (* The facts of a type with no fields. *)
@@ -101,15 +101,15 @@ let conditions_of facts = function
   | Holds_function -> of_exposure facts.holds_function
 
 let type_arguments arguments =
-  List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
+  List.filter_map (function Types.Type type_ -> Some type_ | _ -> None) arguments
 
 (* A definition's conditions, instantiated with the given type arguments and
    normalized by [resolve]. *)
-let instantiate ~resolve (interface : T.type_interface) arguments conditions =
+let instantiate ~resolve (interface : Types.type_interface) arguments conditions =
   let substitution =
-    Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
+    Option.value ~default:[] (Types.substitution_of interface.type_generics arguments)
   in
-  List.map (fun condition -> resolve (T.substitute substitution condition)) conditions
+  List.map (fun condition -> resolve (Types.substitute substitution condition)) conditions
 
 (* The conditions of all of some types. [None] if any of them gives [None]. *)
 let all conditions types =
@@ -138,20 +138,22 @@ let limit = 64
    progress. A type that is reached again adds no condition: a recursive
    type has a property unless another part of it prevents that, and is a
    view only if another part of it is. *)
-let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) property (type_ : T.ty) =
+let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) property (type_ : Types.ty)
+    =
   let each = all (conditions database ~facts_of ~resolve ~leaf ~in_progress property) in
   match type_ with
-  | T.Error _ | T.Hole | T.Variable _ | T.Never | T.Literal _ | T.Integer -> Some []
+  | Types.Error _ | Types.Hole | Types.Variable _ | Types.Never | Types.Literal _ | Types.Integer ->
+      Some []
   (* A function value may be a capturing lambda, which views its captures.
      The type does not state whether the function captures, so every
      function type is a view type. *)
-  | T.Function _ -> (
+  | Types.Function _ -> (
       match property with View | Holds_function -> None | Copyable | Plain -> Some [])
-  | T.Parameter _ | T.Projection _ -> leaf type_
-  | T.Any trait -> (
+  | Types.Parameter _ | Types.Projection _ -> leaf type_
+  | Types.Any trait -> (
       let requires traits =
         List.exists
-          (fun (bound : T.trait_reference) -> List.exists (Path.equal bound.trait) traits)
+          (fun (bound : Types.trait_reference) -> List.exists (Path.equal bound.trait) traits)
           (bound_closure database ~self:type_ trait)
       in
       match property with
@@ -163,10 +165,10 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) propert
       | Holds_function -> None)
   (* A cursor from an [own self] method owns the collection that it iterates
      over. A cursor from a [self] method views it. *)
-  | T.Cursor { method_ = Method { receiver = Own; _ }; arguments } when property = View ->
+  | Types.Cursor { method_ = Method { receiver = Own; _ }; arguments } when property = View ->
       each (type_arguments arguments)
-  | T.Cursor _ -> None
-  | T.Named { path; arguments } -> (
+  | Types.Cursor _ -> None
+  | Types.Named { path; arguments } -> (
       match (Intrinsic.builtin_of_path path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
       (* Every copy of a [Shared] refers to one value, so copying it copies
@@ -180,7 +182,7 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) propert
           match Query.demand database Environment.type_interface path with
           | None -> (
               match property with View | Holds_function -> Some [] | Copyable | Plain -> None)
-          | Some _ when List.exists (T.equal type_) in_progress -> Some []
+          | Some _ when List.exists (Types.equal type_) in_progress -> Some []
           | Some _ when List.length in_progress > limit -> None
           | Some interface ->
               Option.bind
@@ -192,21 +194,21 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) propert
                     (instantiate ~resolve interface arguments arguments_conditions))))
 
 type recursion = {
-  recursive : T.ty;
+  recursive : Types.ty;
   occurrence : occurrence;  (** How the type occurs in itself. *)
   defining : Path.t list;
 }
 
-type contents = { contained : (T.ty * occurrence) list; recursions : recursion list }
+type contents = { contained : (Types.ty * occurrence) list; recursions : recursion list }
 
 (* [resolve] normalizes a type and gives the [impl]s whose definitions
    replaced its associated types. *)
-let contents database ~facts_of ~resolve (type_ : T.ty) =
+let contents database ~facts_of ~resolve (type_ : Types.ty) =
   let contained = ref [] and recursions = ref [] in
   (* [enclosing] has each named type whose arguments are being read, with
      the occurrence in it of the type being visited and the [impl]s whose
      definitions were read on the way. *)
-  let rec visit ~enclosing occurrence (type_ : T.ty) =
+  let rec visit ~enclosing occurrence (type_ : Types.ty) =
     let inside ?named ?(defining = []) step =
       visit
         ~enclosing:
@@ -218,24 +220,24 @@ let contents database ~facts_of ~resolve (type_ : T.ty) =
         (through occurrence step)
     in
     match type_ with
-    | T.Parameter _ | T.Projection _ -> contained := (type_, occurrence) :: !contained
-    | T.Function ({ inputs; output; _ } as function_) ->
+    | Types.Parameter _ | Types.Projection _ -> contained := (type_, occurrence) :: !contained
+    | Types.Function ({ inputs; output; _ } as function_) ->
         List.iter
           (fun (_, input) ->
-            inside (if T.terminates function_ then Function_input else Indirect) input)
+            inside (if Types.terminates function_ then Function_input else Indirect) input)
           inputs;
-        inside Indirect (T.result_type output)
-    | T.Any { trait_arguments; associated; _ } ->
+        inside Indirect (Types.result_type output)
+    | Types.Any { trait_arguments; associated; _ } ->
         List.iter (inside Indirect) (type_arguments trait_arguments @ List.map snd associated)
-    | T.Cursor { arguments; _ } -> List.iter (inside Indirect) (type_arguments arguments)
-    | T.Named { path; arguments } -> (
+    | Types.Cursor { arguments; _ } -> List.iter (inside Indirect) (type_arguments arguments)
+    | Types.Named { path; arguments } -> (
         match Intrinsic.builtin_of_path path with
         | Some Array -> List.iter (inside In_place) (type_arguments arguments)
         | Some _ -> List.iter (inside Indirect) (type_arguments arguments)
         | None -> (
             contained := (type_, occurrence) :: !contained;
             match
-              ( List.find_opt (fun (named, _, _) -> T.equal named type_) enclosing,
+              ( List.find_opt (fun (named, _, _) -> Types.equal named type_) enclosing,
                 Query.demand database Environment.type_interface path )
             with
             | Some (_, occurrence, defining), _ ->
@@ -243,11 +245,11 @@ let contents database ~facts_of ~resolve (type_ : T.ty) =
             | None, Some ({ shape = Record _ | Sum _; _ } as interface)
               when List.length enclosing <= limit ->
                 let substitution =
-                  Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
+                  Option.value ~default:[] (Types.substitution_of interface.type_generics arguments)
                 in
                 List.iter
                   (fun (condition, step) ->
-                    let condition, defining = resolve (T.substitute substitution condition) in
+                    let condition, defining = resolve (Types.substitute substitution condition) in
                     inside ~named:type_ ~defining step condition)
                   (facts_of path).contains
             (* A type without fields can hold its arguments: the specification
@@ -263,7 +265,7 @@ let contents database ~facts_of ~resolve (type_ : T.ty) =
 let size type_ =
   let count = ref 0 in
   ignore
-    (T.map
+    (Types.map
        (fun _ ->
          incr count;
          None)
@@ -274,7 +276,7 @@ let size type_ =
    field types. The definition's parameters are uninstantiated here, so each
    parameter that a fact depends on is a condition, and so is each
    associated type. *)
-let facts_from database ~facts_of (interface : T.type_interface) =
+let facts_from database ~facts_of (interface : Types.type_interface) =
   let small type_ = size type_ <= limit in
   let conditions property types =
     Option.map (List.sort_uniq compare)
@@ -286,13 +288,13 @@ let facts_from database ~facts_of (interface : T.type_interface) =
   in
   let fields =
     let of_variant indirect fields =
-      List.map (fun (field : T.field) -> (indirect, field.field_type)) fields
+      List.map (fun (field : Types.field) -> (indirect, field.field_type)) fields
     in
     match interface.shape with
     | Record fields -> of_variant false fields
     | Sum variants ->
         List.concat_map
-          (fun (variant : T.variant) ->
+          (fun (variant : Types.variant) ->
             of_variant variant.indirect (Option.value ~default:[] variant.fields))
           variants
     | Todo_type | Builtin_type _ | Error_shape _ -> []
@@ -301,7 +303,7 @@ let facts_from database ~facts_of (interface : T.type_interface) =
   let declared trait = List.exists (Path.equal trait) interface.derives in
   let allocates =
     match interface.shape with
-    | Sum variants -> List.exists (fun (variant : T.variant) -> variant.indirect) variants
+    | Sum variants -> List.exists (fun (variant : Types.variant) -> variant.indirect) variants
     | _ -> false
   in
   let undeclared property =
@@ -327,7 +329,7 @@ let facts_from database ~facts_of (interface : T.type_interface) =
                (fun (indirect, type_) ->
                  List.filter_map
                    (function
-                     | ((T.Parameter _ | T.Projection _) as condition), occurrence
+                     | ((Types.Parameter _ | Types.Projection _) as condition), occurrence
                        when small condition ->
                          Some
                            (condition, through (if indirect then Indirect else In_place) occurrence)
@@ -354,9 +356,9 @@ let groups =
       let named type_ =
         let named_types = ref [] in
         ignore
-          (T.map
+          (Types.map
              (function
-               | T.Named { path; _ } when Path.Set.mem path known ->
+               | Types.Named { path; _ } when Path.Set.mem path known ->
                    named_types := path :: !named_types;
                    None
                | _ -> None)
@@ -366,12 +368,12 @@ let groups =
       let successors path =
         match Query.demand database Environment.type_interface path with
         | Some { shape = Record fields; _ } ->
-            List.concat_map (fun (field : T.field) -> named field.field_type) fields
+            List.concat_map (fun (field : Types.field) -> named field.field_type) fields
         | Some { shape = Sum variants; _ } ->
             List.concat_map
-              (fun (variant : T.variant) ->
+              (fun (variant : Types.variant) ->
                 List.concat_map
-                  (fun (field : T.field) -> named field.field_type)
+                  (fun (field : Types.field) -> named field.field_type)
                   (Option.value ~default:[] variant.fields))
               variants
         | _ -> []
@@ -439,8 +441,8 @@ let facts = Query.query ~name:"type_facts" ~phase:Phases.interfaces ~show:Path.s
    that is not inferred yet, so that the projection cannot be normalized
    here. *)
 let rec is_open = function
-  | T.Parameter _ | T.Variable _ | T.Hole | T.Error _ -> true
-  | T.Projection { base; _ } -> is_open base
+  | Types.Parameter _ | Types.Variable _ | Types.Hole | Types.Error _ -> true
+  | Types.Projection { base; _ } -> is_open base
   | _ -> false
 
 let has database ~bounds ~normalize property type_ =

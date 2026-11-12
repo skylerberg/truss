@@ -1083,6 +1083,90 @@ test "values built around lent places" {
 
 let () =
   passes
+    "a lent value holds the addresses of its places: read through them, changed in them, and \
+     copied where it is used whole"
+    {|use standard::list
+
+type Big(label: String, numbers: Array[Int64, 64])
+
+type Tagged(tag: Int64, value: String)
+
+type Holder(bigs: List[Big], name: String)
+
+fn Holder.tagged(mut self) lends mut Tagged {
+  yield Tagged(tag: 7, value: mut self.name)
+}
+
+fn Holder.split(self) lends Option[list::SplitFirst[Big]] {
+  yield self.bigs.split_first()
+}
+
+type Expression =
+  | Number(value: Int64)
+  | indirect Sum(left: Expression, right: Expression)
+
+type Terms(left: Expression, right: Expression)
+
+fn Terms.sum(self) lends Expression {
+  yield Expression.Sum(left: self.left, right: self.right)
+}
+
+fn evaluate(expression: Expression) -> Int64 {
+  match expression {
+    Number(value) => value
+    Sum(left, right) => evaluate(left) + evaluate(right)
+  }
+}
+
+fn length_of(lookup: Option[Big]) -> USize {
+  match lookup {
+    Some(big) => big.label.length()
+    None => 0
+  }
+}
+
+fn rename(tagged: mut Tagged) {
+  tagged.value = "${tagged.tag} renamed"
+}
+
+test "lent values" {
+  var holder = Holder(
+    bigs: [Big(label: "${1}st", numbers: Array[Int64, 64].filled(3))],
+    name: "${2}nd",
+  )
+  var total: Int64 = 0
+  for index in 0..holder.bigs.length() + 1 {
+    match holder.bigs.get(index) {
+      Some(big) => total += big.numbers[63]
+      None => total += 100
+    }
+  }
+  assert total == 103
+  assert length_of(holder.bigs.first()) == 3
+  assert length_of(holder.bigs.get(5)) == 0
+  if holder.split() is Some(split) {
+    assert split.first.label.length() == 3
+    assert split.rest.length() == 0
+  }
+  mut holder.tagged().value = "${3}rd"
+  assert holder.name.length() == 3
+  rename(mut holder.tagged())
+  assert holder.name.length() == 9
+  mut holder.tagged() = Tagged(tag: 1, value: "${4}th")
+  assert holder.name.length() == 3
+  let terms = Terms(
+    left: Expression.Number(value: 2),
+    right: Expression.Sum(left: Expression.Number(value: 3), right: Expression.Number(value: 4)),
+  )
+  assert evaluate(terms.sum()) == 9
+  if terms.sum() is Sum(left, right: _) {
+    assert evaluate(left) == 2
+  }
+}
+|}
+
+let () =
+  passes
     "a lending method that yields on several paths: places, a value it makes, and one built around \
      places"
     {|type Names(first: String, second: String, others: List[String])

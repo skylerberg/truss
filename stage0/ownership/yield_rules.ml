@@ -1,8 +1,6 @@
 (* The rules on [yield], checked on the core form: a lending method yields
    exactly once on every path, and only some yielding methods can be pulled
    as cursors. *)
-
-module T = Types
 open Context
 
 (* How many times a path has yielded. *)
@@ -28,7 +26,7 @@ let yield_counts (body : Core.block) : count list =
     | Todo -> List.map (fun _ -> One) counts
     | _ ->
         let after = expression counts value in
-        if value.type_ = T.Never then [] else after
+        if value.type_ = Types.Never then [] else after
   and statement counts (node : Core.statement) =
     match node.kind with
     | Yield _ -> List.map (fun count -> add count One) counts
@@ -171,7 +169,7 @@ let pullable =
       in
       match
         Option.map
-          (fun (signature : T.signature) -> signature.output)
+          (fun (signature : Types.signature) -> signature.output)
           (Query.demand database Interface.Environment.signature path)
       with
       | Some (Yields (Mut, _)) -> Yields_mut
@@ -204,7 +202,7 @@ let check_cursor context (at : Syntax.span) method_ element =
              "`%s` yields views of its elements, and a cursor returns each element by value, which \
               would copy a `%s` implicitly. Loop over it with `for`, or create the cursor from a \
               method that yields owned values."
-             (Path.show method_) (T.show element))
+             (Path.show method_) (Types.show element))
 
 (* Checks every cursor that a definition creates: each call of a yielding
    method that is not the iteration of a [for] loop or of a quantifier. *)
@@ -231,7 +229,7 @@ let check_cursors context (definition : Core.definition) =
       expression =
         (fun (node : Core.expression) ->
           match (node.kind, node.type_) with
-          | Call _, T.Cursor { method_; arguments } when not (Hashtbl.mem driving node.id) ->
+          | Call _, Types.Cursor { method_; arguments } when not (Hashtbl.mem driving node.id) ->
               Option.iter
                 (check_cursor context (span context node.origin) method_)
                 (Interface.Impls.cursor_element context.database method_ arguments)
@@ -240,18 +238,18 @@ let check_cursors context (definition : Core.definition) =
     definition
 
 (* How a callee yields: the mode of its [yields] clause, if it has one. *)
-let yield_mode context (callee : Core.callee) : T.mode option =
-  let of_output : T.result -> T.mode option = function
+let yield_mode context (callee : Core.callee) : Types.mode option =
+  let of_output : Types.result -> Types.mode option = function
     | Yields (mode, _) -> Some mode
     | Returns _ | Lends _ -> None
   in
   match callee with
   | Function { path; _ } ->
       Option.bind (Interface.Impls.signature context.database path)
-        (fun (signature : T.signature) -> of_output signature.output)
+        (fun (signature : Types.signature) -> of_output signature.output)
   | Trait_method { trait; name; receiver; _ } ->
       Option.bind (Infer.Members.trait_method context.database trait.trait name receiver)
-        (fun (method_ : T.trait_method) -> of_output method_.method_signature.output)
+        (fun (method_ : Types.trait_method) -> of_output method_.method_signature.output)
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
 (* Use after free in a [concurrent for]. Each iteration runs as a task, and
@@ -304,7 +302,7 @@ let check_concurrent_loops context ~(task_hazard : Path.t -> Views.task_hazard o
                     (Printf.sprintf
                        "The element type `%s` is a view, and the method could invalidate what it \
                         views when it resumes, which would leave the task with a dangling view."
-                       (T.show element))
+                       (Types.show element))
               in
               match iteration with
               | Integer_range _ -> ()
@@ -330,7 +328,7 @@ let check_concurrent_loops context ~(task_hazard : Path.t -> Views.task_hazard o
                             (Printf.sprintf
                                "This method yields borrowed elements of type `%s`, and its body is \
                                 not known here, so it could mutate or drop them when it resumes."
-                               (T.show element))
+                               (Types.show element))
                       | _ -> view origin))
               | Yielding_call _ -> ()
               | Cursor { cursor; _ } -> view (Core_walk.place_origin cursor))

@@ -10,7 +10,6 @@
    not the spelling of the expression. *)
 
 open Syntax
-module T = Types
 open State
 open Pattern_typing
 
@@ -20,8 +19,8 @@ let rec offending state (value : expression) : expression option =
   let built_in (operand : expression) =
     match state.tables.types.(operand.id) with
     | Some type_ ->
-        T.is_integer_type type_ || T.is_float_type type_ || T.is_builtin Bool type_
-        || T.is_error type_
+        Types.is_integer_type type_ || Types.is_float_type type_ || Types.is_builtin Bool type_
+        || Types.is_error type_
     | None -> true
   in
   match value.kind with
@@ -60,7 +59,7 @@ let rec check_arithmetic state (value : expression) =
       | Some (low, high), Some constant, _ when Z.lt constant low || Z.gt constant high ->
           report state Constant_overflow value.span
             (Printf.sprintf "This is %s, which does not fit in `%s`, which holds %s to %s."
-               (Z.to_string constant) (T.show type_) (Z.to_string low) (Z.to_string high))
+               (Z.to_string constant) (Types.show type_) (Z.to_string low) (Z.to_string high))
       | Some _, None, Binary { operator = Divide | Remainder; right; _ }
         when worked_out right = Some Z.zero ->
           report state Constant_overflow right.span "This divides by zero."

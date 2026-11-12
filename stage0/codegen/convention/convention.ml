@@ -61,21 +61,24 @@ let destination result place : Lir.destination =
 
 let evidence = Lir.Raw (Pointer Opaque)
 
-let function_value env (f : Ground.function_type) : Lir.signature =
+let function_value env (function_type : Ground.function_type) : Lir.signature =
   let result_ty, returns =
-    match f.result with
+    match function_type.result with
     | Returns Never -> (Nothing, false)
     | Returns ty -> (result env ty, true)
     | Yields _ | Lends _ -> Compiler_bug.bug ~stage:"Convention" "a function type that yields"
   in
-  let written = List.filter_map (fun (mode, ty) -> parameter env mode ty) f.parameters in
-  let evidence = List.map (fun _ -> evidence) f.uses in
+  let written =
+    List.filter_map (fun (mode, ty) -> parameter env mode ty) function_type.parameters
+  in
+  let evidence = List.map (fun _ -> evidence) function_type.uses in
   let environment = Lir.Raw (Nullable_pointer Opaque) in
   let signature = signature ~returns (written @ evidence) result_ty in
   { signature with parameters = environment :: signature.parameters }
 
-let function_value_shape f : Memory_layout.shape =
-  Record [ ("code", Raw (Pointer (Code f))); ("environment", Raw (Nullable_pointer Opaque)) ]
+let function_value_shape function_type : Memory_layout.shape =
+  Record
+    [ ("code", Raw (Pointer (Code function_type))); ("environment", Raw (Nullable_pointer Opaque)) ]
 
 let drop_signature ty : Lir.signature =
   { parameters = [ Pointer { target = Value ty; writable = true } ]; result = None; returns = true }

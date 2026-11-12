@@ -16,7 +16,18 @@ type ty =
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
       (** [any Cursor[Element = Int64]], with every associated type fixed, sorted by name *)
   | Cursor of yielding  (** The nameless type of a pulled yielding method *)
+  | Lent of lent
+      (** A value that a lending or yielding method builds around the places it lends. It owns
+          nothing. *)
   | Never
+
+(* A value of type [base] in which each of [fields] holds the address of a
+   place of the field's type, or a lent value of its own. Every other field
+   holds a value of a [Plain] type. The places are lent to be changed where
+   [writable]. *)
+and lent = { base : ty; writable : bool; fields : lent_field list }
+and lent_field = { variant : string option; field : string; holds : holds }
+and holds = Address | Nested of lent
 
 (* A [USize] generic argument is a value, as in [Array[UInt8, 32]], and a
    capability parameter's is the set of capabilities it stands for, sorted. *)

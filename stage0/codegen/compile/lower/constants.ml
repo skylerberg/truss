@@ -37,72 +37,81 @@ let truth value = Some (Lir.Static_scalar (Bool value))
 let arithmetic st ty (operation : Intrinsic.operation) (left : Lir.static_value)
     (right : Lir.static_value) =
   match (left, right) with
-  | Static_scalar (Integer (kind, x)), Static_scalar (Integer (_, y)) -> (
+  | Static_scalar (Integer (kind, left_value)), Static_scalar (Integer (_, right_value)) -> (
       let bits = 8 * Memory_layout.integer_size (Memory_layout.target st.context.env) kind in
       let number value =
         let* kind = integer_kind st ty in
         integer st kind value
       in
       let shift by =
-        if Z.sign y >= 0 && Z.lt y (Z.of_int bits) then number (by x (Z.to_int y)) else None
+        if Z.sign right_value >= 0 && Z.lt right_value (Z.of_int bits) then
+          number (by left_value (Z.to_int right_value))
+        else None
       in
       match operation with
-      | Add -> number (Z.add x y)
-      | Subtract -> number (Z.sub x y)
-      | Multiply -> number (Z.mul x y)
-      | Divide -> if Z.equal y Z.zero then None else number (Z.div x y)
-      | Remainder -> if Z.equal y Z.zero then None else number (Z.rem x y)
-      | Bit_and -> number (Z.logand x y)
-      | Bit_or -> number (Z.logor x y)
-      | Bit_xor -> number (Z.logxor x y)
+      | Add -> number (Z.add left_value right_value)
+      | Subtract -> number (Z.sub left_value right_value)
+      | Multiply -> number (Z.mul left_value right_value)
+      | Divide -> if Z.equal right_value Z.zero then None else number (Z.div left_value right_value)
+      | Remainder ->
+          if Z.equal right_value Z.zero then None else number (Z.rem left_value right_value)
+      | Bit_and -> number (Z.logand left_value right_value)
+      | Bit_or -> number (Z.logor left_value right_value)
+      | Bit_xor -> number (Z.logxor left_value right_value)
       | Shift_left -> shift Z.shift_left
       | Shift_right -> shift Z.shift_right
       | _ -> None)
-  | Static_scalar (Float64 x), Static_scalar (Float64 y) -> (
+  | Static_scalar (Float64 left_value), Static_scalar (Float64 right_value) -> (
       let number value = Some (Lir.Static_scalar (Float64 (Int64.bits_of_float value))) in
-      let x = Int64.float_of_bits x and y = Int64.float_of_bits y in
+      let left_value = Int64.float_of_bits left_value
+      and right_value = Int64.float_of_bits right_value in
       match operation with
-      | Add -> number (x +. y)
-      | Subtract -> number (x -. y)
-      | Multiply -> number (x *. y)
-      | Divide -> number (x /. y)
+      | Add -> number (left_value +. right_value)
+      | Subtract -> number (left_value -. right_value)
+      | Multiply -> number (left_value *. right_value)
+      | Divide -> number (left_value /. right_value)
       | _ -> None)
-  | Static_scalar (Float32 x), Static_scalar (Float32 y) -> (
+  | Static_scalar (Float32 left_value), Static_scalar (Float32 right_value) -> (
       let number value = Some (Lir.Static_scalar (Float32 (Int32.bits_of_float value))) in
-      let x = Int32.float_of_bits x and y = Int32.float_of_bits y in
+      let left_value = Int32.float_of_bits left_value
+      and right_value = Int32.float_of_bits right_value in
       match operation with
-      | Add -> number (x +. y)
-      | Subtract -> number (x -. y)
-      | Multiply -> number (x *. y)
-      | Divide -> number (x /. y)
+      | Add -> number (left_value +. right_value)
+      | Subtract -> number (left_value -. right_value)
+      | Multiply -> number (left_value *. right_value)
+      | Divide -> number (left_value /. right_value)
       | _ -> None)
   | _ -> None
 
 let negated st (value : Lir.static_value) =
   match value with
-  | Static_scalar (Integer (kind, x)) -> integer st kind (Z.neg x)
-  | Static_scalar (Float64 x) ->
-      Some (Lir.Static_scalar (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits x)))))
-  | Static_scalar (Float32 x) ->
-      Some (Lir.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
+  | Static_scalar (Integer (kind, left_value)) -> integer st kind (Z.neg left_value)
+  | Static_scalar (Float64 left_value) ->
+      Some
+        (Lir.Static_scalar
+           (Float64 (Int64.bits_of_float (Float.neg (Int64.float_of_bits left_value)))))
+  | Static_scalar (Float32 left_value) ->
+      Some
+        (Lir.Static_scalar
+           (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits left_value)))))
   | _ -> None
 
 (* A comparison of two folded integers or two folded [Bool]s. *)
 let compared (comparison : Core.comparison) (left : Lir.static_value) (right : Lir.static_value) =
   match (left, right) with
-  | Static_scalar (Integer (_, x)), Static_scalar (Integer (_, y)) ->
+  | Static_scalar (Integer (_, left_value)), Static_scalar (Integer (_, right_value)) ->
       truth
         (match comparison with
-        | Equal -> Z.equal x y
-        | Not_equal -> not (Z.equal x y)
-        | Less -> Z.lt x y
-        | Less_equal -> Z.leq x y
-        | Greater -> Z.gt x y
-        | Greater_equal -> Z.geq x y)
-  | Static_scalar (Bool x), Static_scalar (Bool y) -> (
+        | Equal -> Z.equal left_value right_value
+        | Not_equal -> not (Z.equal left_value right_value)
+        | Less -> Z.lt left_value right_value
+        | Less_equal -> Z.leq left_value right_value
+        | Greater -> Z.gt left_value right_value
+        | Greater_equal -> Z.geq left_value right_value)
+  | Static_scalar (Bool left_value), Static_scalar (Bool right_value) -> (
       match comparison with
-      | Equal -> truth (x = y)
-      | Not_equal -> truth (x <> y)
+      | Equal -> truth (left_value = right_value)
+      | Not_equal -> truth (left_value <> right_value)
       | Less | Less_equal | Greater | Greater_equal -> None)
   | _ -> None
 
@@ -127,7 +136,9 @@ let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value re
   let ty = ground st value.type_ in
   let fold_here = fold ~depth st locals in
   let number literal =
-    match constant_of st ty literal with Constant c -> Some (Lir.Static_scalar c) | _ -> None
+    match constant_of st ty literal with
+    | Constant scalar -> Some (Lir.Static_scalar scalar)
+    | _ -> None
   in
   match value.kind with
   | Integer integer -> number (Integer_value integer)
@@ -137,8 +148,8 @@ let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value re
       match Monomorphic.shape st.context.monomorphic ty with
       | Record [ (field, Typed _) ] ->
           let bytes =
-            List.init (String.length text) (fun i ->
-                Lir.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[i]))))
+            List.init (String.length text) (fun index ->
+                Lir.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
           in
           Some
             (Lir.Static_record
@@ -181,13 +192,15 @@ let rec fold ?(depth = call_depth) st (locals : (Core.local, Lir.static_value re
       compared comparison left right
   | Not inner -> (
       let* inner = fold_here inner in
-      match inner with Static_scalar (Bool x) -> truth (not x) | _ -> None)
+      match inner with Static_scalar (Bool left_value) -> truth (not left_value) | _ -> None)
   | And (left, right) | Or (left, right) -> (
       let* left = fold_here left in
       let* right = fold_here right in
       match (value.kind, left, right) with
-      | And _, Static_scalar (Bool x), Static_scalar (Bool y) -> truth (x && y)
-      | Or _, Static_scalar (Bool x), Static_scalar (Bool y) -> truth (x || y)
+      | And _, Static_scalar (Bool left_value), Static_scalar (Bool right_value) ->
+          truth (left_value && right_value)
+      | Or _, Static_scalar (Bool left_value), Static_scalar (Bool right_value) ->
+          truth (left_value || right_value)
       | _ -> None)
   | Block { statements; value = Some result; _ } ->
       let* _ = all (List.map (fold_statement ~depth st locals) statements) in
@@ -294,7 +307,7 @@ let constant_state context path =
   in
   let code =
     {
-      (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns T.unit)) with
+      (unwritten ~definition_key:key ~anchor:path ~substitution:[] ~result:(Returns Types.unit)) with
       text = text_of context key;
     }
   in
@@ -316,18 +329,18 @@ let constant context path =
    the standard library's function that writes every byte. *)
 let begin_output st =
   let output = temporary st Glue.output_ty in
-  emit st.b (Assign (output, Storage.empty Glue.output_ty));
+  emit st.builder (Assign (output, Storage.empty Glue.output_ty));
   output
 
 let write_fully = Well_known.path Write_fully
 
 let write_output st output =
-  let b = st.b in
+  let builder = st.builder in
   let int32 = Monomorphic.builtin Int32 in
   let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
   let descriptor = temporary st int32 and view = temporary st view_ty in
-  emit b (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
-  emit b
+  emit builder (Assign (descriptor, Use (Constant (Integer (Int32, Z.one)))));
+  emit builder
     (Assign
        ( view,
          Storage.view view_ty
@@ -349,12 +362,12 @@ let write_output st output =
    binary form to standard output. *)
 let evaluator context path : Lir.t =
   let st, value, ty = constant_state context path in
-  start st.b (block st.b);
+  start st.builder (block st.builder);
   in_scope st (fun () ->
       let place = temporary st ty in
       Core_form.into st value place;
       let output = begin_output st in
-      Glue.encode_call context.glue st.b
+      Glue.encode_call context.glue st.builder
         ~output:(Address { place = output; writable = true })
         ty place;
       write_output st output);

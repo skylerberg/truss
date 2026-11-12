@@ -1,12 +1,3 @@
-(* The LIR as C. The library's modules, each building on the ones before it:
-
-   - [C_runtime]: the runtime's declarations, and the helpers a file uses
-   - [C_types]: a file's context, and the C types of what it names
-   - [C_values]: places, operands, constants, operators, and built values
-   - [C_code]: intrinsics, calls, statements, terminators, and functions
-   - [C_data]: static data and tables
-   - this module: a whole file *)
-
 open C_runtime
 open C_types
 open C_values
@@ -40,22 +31,22 @@ let file env build ?(data = []) ?(tables = []) (instances : (Lir.t * linkage) li
     (fun ((instance : Lir.t), _) ->
       let symbol = Instance.symbol instance.key in
       Array.iteri
-        (fun n (f : Lir.function_) ->
+        (fun position (function_ : Lir.function_) ->
           context.environments <-
-            Keys.add (Environment (symbol, n)) f.environment context.environments)
+            Keys.add (Environment (symbol, position)) function_.environment context.environments)
         instance.nested)
     instances;
-  let nested_name symbol n = Printf.sprintf "%s_Nested_%d" symbol n in
+  let nested_name symbol position = Printf.sprintf "%s_Nested_%d" symbol position in
   (* Every function of the file is declared before any body, so that a call
      of a copy sees the copy's declaration, not one made for the call. *)
   List.iter
     (fun ((instance : Lir.t), linkage) ->
       let symbol = Instance.symbol instance.key in
       Array.iteri
-        (fun n f ->
-          let name = nested_name symbol n in
+        (fun position function_ ->
+          let name = nested_name symbol position in
           declare_prototype context name
-            (prototype context symbol name ~linkage:Internal (Lir.signature f) ^ ";\n"))
+            (prototype context symbol name ~linkage:Internal (Lir.signature function_) ^ ";\n"))
         instance.nested;
       declare_prototype context symbol
         (prototype context symbol symbol ~linkage (Lir.signature instance.main) ^ ";\n"))
@@ -65,7 +56,9 @@ let file env build ?(data = []) ?(tables = []) (instances : (Lir.t * linkage) li
       (fun ((instance : Lir.t), linkage) ->
         let symbol = Instance.symbol instance.key in
         List.mapi
-          (fun n f -> function_c context instance.key (nested_name symbol n) ~linkage:Internal f)
+          (fun position function_ ->
+            function_c context instance.key (nested_name symbol position) ~linkage:Internal
+              function_)
           (Array.to_list instance.nested)
         @ [ function_c context instance.key symbol ~linkage instance.main ])
       instances
@@ -112,7 +105,7 @@ let file env build ?(data = []) ?(tables = []) (instances : (Lir.t * linkage) li
           List.iter emit_typedef (defined key).references;
           Buffer.add_string buffer
             (match definition with
-            | Typedef c -> Printf.sprintf "typedef %s %s;\n" c (key_name key)
+            | Typedef c_type -> Printf.sprintf "typedef %s %s;\n" c_type (key_name key)
             | Code_typedef text -> text
             | Struct _ -> "")
   in
@@ -147,7 +140,9 @@ let file env build ?(data = []) ?(tables = []) (instances : (Lir.t * linkage) li
     keys;
   List.iter
     (fun (text, name) ->
-      let bytes = List.init (String.length text) (fun i -> string_of_int (Char.code text.[i])) in
+      let bytes =
+        List.init (String.length text) (fun index -> string_of_int (Char.code text.[index]))
+      in
       Buffer.add_string buffer
         (Printf.sprintf "static const uint8_t %s[%d] = { %s };\n" name
            (max 1 (String.length text))
