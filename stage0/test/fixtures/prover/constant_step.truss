@@ -1,0 +1,6 @@
+fn step(value: UInt32) -> UInt32
+  cost time O(1)
+{
+  value
+}
+

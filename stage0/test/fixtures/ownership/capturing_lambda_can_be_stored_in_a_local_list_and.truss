@@ -1,0 +1,12 @@
+fn same[Value](value: own Value) -> Value {
+  value
+}
+
+fn local(amount: Int64) -> Int64 {
+  let add: fn(Int64) -> Int64 = fn(value) { value + amount }
+  var handlers = [add]
+  mut handlers.push(add)
+  let again = same(add)
+  let first = handlers[0]
+  again(first(amount))
+}

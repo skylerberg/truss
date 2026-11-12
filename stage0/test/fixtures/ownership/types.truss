@@ -1,0 +1,22 @@
+type Labeled(view: Slice[Int64], name: String)
+
+trait Runner {
+  fn run(self) -> USize
+}
+
+type Window(view: Slice[Int64])
+
+impl Runner for Window {
+  fn run(self) -> USize {
+    self.view.length()
+  }
+}
+
+type Owner(items: List[Int64])
+
+impl Runner for Owner {
+  fn run(self) -> USize {
+    self.items.length()
+  }
+}
+

@@ -1,0 +1,16 @@
+fn tick() -> Instant
+  uses Clock
+{
+  Clock.now()
+}
+
+fn still() -> Instant {
+  todo
+}
+
+fn each_time[capability Granted](action: (fn() -> Instant uses Granted)) -> Instant
+  uses Granted
+{
+  action()
+}
+

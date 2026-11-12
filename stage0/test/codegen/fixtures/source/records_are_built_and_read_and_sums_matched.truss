@@ -1,0 +1,22 @@
+type Point(x: Int64, y: Int64)
+
+type Shape =
+  | Circle(radius: Int64)
+  | Rectangle(width: Int64, height: Int64)
+  | Empty
+
+fn area(shape: Shape) -> Int64 {
+  match shape {
+    Circle(radius) => 3 * radius * radius
+    Rectangle(width, height) => width * height
+    Empty => 0
+  }
+}
+
+test "areas" {
+  let origin = Point(x: 1, y: 2)
+  assert origin.x + origin.y == 3
+  assert area(Shape.Rectangle(width: 2, height: 5)) == 10
+  assert area(Shape.Circle(radius: 2)) == 12
+  assert area(Shape.Empty) == 0
+}

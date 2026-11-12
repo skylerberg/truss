@@ -1,0 +1,8 @@
+fn f(go: Bool) -> UInt8
+  ensures go ==> result == 1
+  ensures !go ==> result == 0
+{
+  var count: UInt8 = 0
+  let _ = go && bump(mut count)
+  count
+}

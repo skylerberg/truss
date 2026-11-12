@@ -1,0 +1,16 @@
+type Counter(count: Int64)
+
+capability Tally {
+  fn add()
+}
+
+impl Tally for Counter {
+  fn add(mut self) { self.count += 1 }
+}
+
+fn f() {
+  var counter = Counter(count: 0)
+  provide counter {
+  }
+  let _ = counter
+}

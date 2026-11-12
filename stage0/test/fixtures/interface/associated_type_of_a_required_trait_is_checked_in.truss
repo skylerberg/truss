@@ -1,0 +1,17 @@
+trait Base {
+  type Key
+}
+
+trait Sub: Base {
+  fn get(self) -> Self.Key
+}
+
+type P(x: Int64)
+
+impl Base for P {
+  type Key = Int64
+}
+
+impl Sub for P {
+  fn get(self) -> String { todo }
+}

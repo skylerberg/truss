@@ -1,0 +1,6 @@
+public transparent fn now() -> Instant
+  uses Clock
+  cost time O(1)
+{
+  Clock.now()
+}

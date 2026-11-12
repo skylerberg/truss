@@ -1,0 +1,7 @@
+type Fixed()
+
+impl Clock for Fixed {
+  fn now(own self) -> Instant { todo }
+  fn monotonic(self) -> Duration { todo }
+  fn sleep(self, duration: Duration) {}
+}

@@ -15,7 +15,7 @@ type signature = {
   path : Path.t;
   before : string option;
   after : string option;
-  read_by : Path.t list;
+  dependents : Path.t list;
 }
 
 val report :

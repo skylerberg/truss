@@ -1,0 +1,3 @@
+fn f(flags: UInt32) -> UInt32 {
+  flags << 3
+}

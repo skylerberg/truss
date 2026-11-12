@@ -1,5 +1,5 @@
-(** The module [standard::intrinsic], which exists in no source file. The compiler declares what is
-    in it: the built-in types, whose rules no definition could state, and the operations the
+(** The module [standard::intrinsic], which exists in no source file. The compiler declares its
+    contents: the built-in types, whose rules no definition could state, and the operations the
     standard library is written on top of. Only the [standard] package can import it. *)
 
 val module_ : Path.module_

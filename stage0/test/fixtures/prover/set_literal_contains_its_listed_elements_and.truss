@@ -1,0 +1,6 @@
+fn f() -> Bool
+  ensures result
+{
+  let colors: Set[Int64] = [1, 2]
+  colors.contains(2) && !colors.contains(5)
+}

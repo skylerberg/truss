@@ -1,0 +1,11 @@
+fn checked() -> Bool
+  uses Panic
+  cost time finite
+{
+  todo
+}
+
+fn f()
+  requires checked()
+{
+}

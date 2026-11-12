@@ -1,0 +1,1264 @@
+use standard::intrinsic
+use standard::serialization
+use standard::time
+
+public type Value =
+  | String(value: String)
+  | Integer(value: Int64)
+  | Float(value: Float64)
+  | Boolean(value: Bool)
+  | OffsetDateTime(value: Instant)
+  | LocalDateTime(value: time::DateTime)
+  | LocalDate(value: time::Date)
+  | LocalTime(value: time::TimeOfDay)
+  | Array(items: List[Value])
+  | Table(entries: Map[String, Value])
+  derives Equal
+
+public type ParseError(message: String, line: USize, column: USize)
+  derives Equal
+
+impl Display for ParseError {
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write(self.message.slice())
+    mut output.write(" at line ")
+    self.line.display(mut output)
+    mut output.write(", column ")
+    self.column.display(mut output)
+  }
+}
+
+public type Error =
+  | Parse(error: ParseError)
+  | Deserialize(error: serialization::Error)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    match self {
+      Parse(error) => error.display(mut output)
+      Deserialize(error) => error.display(mut output)
+    }
+  }
+}
+
+public type EncodeError(message: String)
+  derives Equal
+
+impl Display for EncodeError {
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write(self.message.slice())
+  }
+}
+
+type Failure(message: String, offset: USize)
+
+fn failure_at(message: StringSlice, offset: USize) -> Failure {
+  Failure(message: message.to_string(), offset: offset)
+}
+
+fn with_position(text: StringSlice, failure: Failure) -> ParseError {
+  var line: USize = 1
+  var column: USize = 1
+  var index: USize = 0
+  while index < text.length() && index < failure.offset {
+    let byte = text.byte(index)
+    if byte == 10 {
+      line = line.saturating_add(1)
+      column = 1
+    } else if byte < 128 || byte >= 192 {
+      column = column.saturating_add(1)
+    }
+    index += 1
+  }
+  ParseError(message: failure.message.copy(), line: line, column: column)
+}
+
+fn peek(text: StringSlice, at: USize) -> Option[UInt8]
+  ensures (result is Some(_)) == (at < text.length())
+{
+  if at < text.length() { Some(text.byte(at)) } else { None }
+}
+
+fn is_bare_key_byte(byte: UInt8) -> Bool {
+  (65 <= byte && byte <= 90) || (97 <= byte && byte <= 122) || (48 <= byte && byte <= 57) || byte == 95 || byte == 45
+}
+
+fn is_digit(byte: UInt8) -> Bool {
+  48 <= byte && byte <= 57
+}
+
+fn skip_spaces(text: StringSlice, at: mut USize) {
+  while peek(text, at: at) is Some(byte) && (byte == 32 || byte == 9) {
+    at += 1
+  }
+}
+
+fn skip_comment(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
+  if peek(text, at: at) != Some(35) {
+    return Ok(Unit)
+  }
+  while peek(text, at: at) is Some(byte) && byte != 10 {
+    if (byte < 32 && byte != 9 && byte != 13) || byte == 127 {
+      return Err(failure_at("a control character in a comment", offset: at))
+    }
+    at += 1
+  }
+  Ok(Unit)
+}
+
+fn skip_newline(text: StringSlice, at: mut USize) -> Bool {
+  match peek(text, at: at) {
+    Some(byte) => {
+      if byte == 10 {
+        at += 1
+        return true
+      }
+      if byte == 13 && peek(text, at: at.saturating_add(1)) == Some(10) {
+        at += 2
+        return true
+      }
+      false
+    }
+    None => false
+  }
+}
+
+fn skip_blank(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
+  while true {
+    skip_spaces(text, at: mut at)
+    skip_comment(text, at: mut at)?
+    if !skip_newline(text, at: mut at) {
+      return Ok(Unit)
+    }
+  }
+}
+
+fn end_of_line(text: StringSlice, at: mut USize) -> Result[Unit, Failure] {
+  skip_spaces(text, at: mut at)
+  skip_comment(text, at: mut at)?
+  if peek(text, at: at) is None || skip_newline(text, at: mut at) {
+    Ok(Unit)
+  } else {
+    Err(failure_at("expected the end of the line", offset: at))
+  }
+}
+
+fn push_code(output: mut String, code: UInt32, at: USize) -> Result[Unit, Failure] {
+  match Character.try_from(code) {
+    Ok(character) => {
+      mut output.push_character(character)
+      Ok(Unit)
+    }
+    Err(_) => Err(failure_at("an escape that is not a Unicode scalar value", offset: at))
+  }
+}
+
+fn hex_digits(text: StringSlice, at: mut USize, count: USize) -> Result[UInt32, Failure] {
+  var code: UInt32 = 0
+  for _ in 0..count {
+    match peek(text, at: at) {
+      Some(byte) => {
+        let digit = byte.digit_value()
+        if digit >= 16 {
+          return Err(failure_at("expected a hexadecimal digit", offset: at))
+        }
+        code = code.wrapping_multiply(16).wrapping_add(intrinsic::convert(digit))
+        at += 1
+      }
+      None => return Err(failure_at("the text ends inside an escape", offset: at))
+    }
+  }
+  Ok(code)
+}
+
+fn escape(text: StringSlice, at: mut USize, output: mut String) -> Result[Unit, Failure] {
+  let start = at
+  at = at.saturating_add(1)
+  match peek(text, at: at) {
+    Some(byte) => {
+      at += 1
+      if byte == 98 {
+        mut output.push("\u{8}")
+      } else if byte == 116 {
+        mut output.push("\t")
+      } else if byte == 110 {
+        mut output.push("\n")
+      } else if byte == 102 {
+        mut output.push("\u{c}")
+      } else if byte == 114 {
+        mut output.push("\r")
+      } else if byte == 34 {
+        mut output.push("\"")
+      } else if byte == 92 {
+        mut output.push("\\")
+      } else if byte == 117 {
+        let code = hex_digits(text, at: mut at, count: 4)?
+        push_code(mut output, code: code, at: start)?
+      } else if byte == 85 {
+        let code = hex_digits(text, at: mut at, count: 8)?
+        push_code(mut output, code: code, at: start)?
+      } else {
+        return Err(failure_at("an escape that TOML does not have", offset: start))
+      }
+      Ok(Unit)
+    }
+    None => Err(failure_at("the text ends inside an escape", offset: start))
+  }
+}
+
+fn push_byte_run(output: mut String, text: StringSlice, from: USize, to: USize) {
+  if from < to && to <= text.length() {
+    mut output.push(text.part(from, to: to))
+  }
+}
+
+fn is_forbidden_in_string(byte: UInt8, multiline: Bool) -> Bool {
+  if byte == 9 {
+    return false
+  }
+  if multiline && (byte == 10 || byte == 13) {
+    return false
+  }
+  byte < 32 || byte == 127
+}
+
+fn basic_string(text: StringSlice, at: mut USize) -> Result[String, Failure] {
+  let start = at
+  at = at.saturating_add(1)
+  var output = ""
+  var run = at
+  while true {
+    match peek(text, at: at) {
+      Some(byte) => {
+        if byte == 34 {
+          push_byte_run(mut output, text: text, from: run, to: at)
+          at += 1
+          return Ok(own output)
+        }
+        if byte == 92 {
+          push_byte_run(mut output, text: text, from: run, to: at)
+          escape(text, at: mut at, output: mut output)?
+          run = at
+        } else if is_forbidden_in_string(byte, multiline: false) {
+          return Err(failure_at("a control character in a string", offset: at))
+        } else {
+          at += 1
+        }
+      }
+      None => return Err(failure_at("the text ends inside a string", offset: start))
+    }
+  }
+}
+
+fn literal_string(text: StringSlice, at: mut USize) -> Result[String, Failure] {
+  let start = at
+  at = at.saturating_add(1)
+  let from = at
+  while true {
+    match peek(text, at: at) {
+      Some(byte) => {
+        if byte == 39 {
+          var output = ""
+          push_byte_run(mut output, text: text, from: from, to: at)
+          at += 1
+          return Ok(own output)
+        }
+        if is_forbidden_in_string(byte, multiline: false) {
+          return Err(failure_at("a control character in a string", offset: at))
+        }
+        at += 1
+      }
+      None => return Err(failure_at("the text ends inside a string", offset: start))
+    }
+  }
+}
+
+fn starts_with_three(text: StringSlice, at: USize, byte: UInt8) -> Bool {
+  peek(text, at: at) == Some(byte) && peek(text, at: at.saturating_add(1)) == Some(byte) && peek(text, at: at.saturating_add(2)) == Some(byte)
+}
+
+fn multiline_string(text: StringSlice, at: mut USize, quote: UInt8) -> Result[String, Failure] {
+  let start = at
+  at = at.saturating_add(3)
+  let _ = skip_newline(text, at: mut at)
+  var output = ""
+  var run = at
+  while true {
+    match peek(text, at: at) {
+      Some(byte) => {
+        if byte == quote && starts_with_three(text, at: at, byte: quote) {
+          var end = at + 3
+          var extra: USize = 0
+          while extra < 2 && peek(text, at: end) == Some(quote) {
+            end += 1
+            extra += 1
+          }
+          push_byte_run(mut output, text: text, from: run, to: at.saturating_add(extra))
+          at = end
+          return Ok(own output)
+        }
+        if quote == 34 && byte == 92 {
+          push_byte_run(mut output, text: text, from: run, to: at)
+          var after = at + 1
+          skip_spaces(text, at: mut after)
+          if peek(text, at: after) == Some(10) || (peek(text, at: after) == Some(13) && peek(text, at: after.saturating_add(1)) == Some(10)) {
+            at = after
+            while true {
+              skip_spaces(text, at: mut at)
+              if !skip_newline(text, at: mut at) {
+                break
+              }
+            }
+          } else {
+            escape(text, at: mut at, output: mut output)?
+          }
+          run = at
+        } else if is_forbidden_in_string(byte, multiline: true) {
+          return Err(failure_at("a control character in a string", offset: at))
+        } else if byte == 13 && peek(text, at: at.saturating_add(1)) != Some(10) {
+          return Err(failure_at("a carriage return without a line feed", offset: at))
+        } else {
+          at += 1
+        }
+      }
+      None => return Err(failure_at("the text ends inside a string", offset: start))
+    }
+  }
+}
+
+fn simple_key(text: StringSlice, at: mut USize) -> Result[String, Failure] {
+  match peek(text, at: at) {
+    Some(byte) => {
+      if byte == 34 {
+        return basic_string(text, at: mut at)
+      }
+      if byte == 39 {
+        return literal_string(text, at: mut at)
+      }
+      let from = at
+      while peek(text, at: at) is Some(next) && is_bare_key_byte(next) {
+        at += 1
+      }
+      if at == from {
+        return Err(failure_at("expected a key", offset: at))
+      }
+      var key = ""
+      push_byte_run(mut key, text: text, from: from, to: at)
+      Ok(own key)
+    }
+    None => Err(failure_at("expected a key", offset: at))
+  }
+}
+
+fn dotted_key(text: StringSlice, at: mut USize) -> Result[List[String], Failure] {
+  var keys: List[String] = []
+  while true {
+    skip_spaces(text, at: mut at)
+    mut keys.push(simple_key(text, at: mut at)?)
+    skip_spaces(text, at: mut at)
+    if peek(text, at: at) != Some(46) {
+      return Ok(own keys)
+    }
+    at += 1
+  }
+}
+
+fn token_end(text: StringSlice, from: USize) -> USize
+  ensures result >= from
+{
+  var at = from
+  while peek(text, at: at) is Some(byte)
+    && byte != 32 && byte != 9 && byte != 10 && byte != 13 && byte != 44 && byte != 93 && byte != 125 && byte != 35
+    invariant at >= from
+  {
+    at += 1
+  }
+  at
+}
+
+fn is_date_at(text: StringSlice, at: USize) -> Bool {
+  var all = true
+  let width: USize = 4
+  for index in 0..width {
+    if !(peek(text, at: at.saturating_add(index)) is Some(byte) && is_digit(byte)) {
+      all = false
+    }
+  }
+  all && peek(text, at: at.saturating_add(4)) == Some(45)
+}
+
+fn is_time_at(text: StringSlice, at: USize) -> Bool {
+  peek(text, at: at) is Some(first) && is_digit(first) && peek(text, at: at.saturating_add(1)) is Some(second) && is_digit(second)
+    && peek(text, at: at.saturating_add(2)) == Some(58)
+}
+
+fn date_time_value(text: StringSlice, at: mut USize) -> Result[Value, Failure] {
+  let start = at
+  var end = token_end(text, from: at)
+  if is_date_at(text, at: start) && end == start.saturating_add(10) && peek(text, at: end) == Some(32)
+    && is_time_at(text, at: end.saturating_add(1))
+  {
+    end = token_end(text, from: end.saturating_add(1))
+  }
+  if end > text.length() {
+    return Err(failure_at("expected a date or a time", offset: start))
+  }
+  var normalized = ""
+  for index in start..end {
+    let byte = text.byte(index)
+    if byte == 32 || byte == 116 {
+      mut normalized.push("T")
+    } else if byte == 122 {
+      mut normalized.push("Z")
+    } else {
+      push_byte_run(mut normalized, text: text, from: index, to: index + 1)
+    }
+  }
+  at = end
+  let written = normalized.slice()
+  if !is_date_at(written, at: 0) {
+    return match time::TimeOfDay.parse(written) {
+      Ok(time) => Ok(Value.LocalTime(value: time))
+      Err(_) => Err(failure_at("a time that is not a time of day", offset: start))
+    }
+  }
+  if written.length() == 10 {
+    return match time::Date.parse(written) {
+      Ok(date) => Ok(Value.LocalDate(value: date))
+      Err(_) => Err(failure_at("a date that is not a date", offset: start))
+    }
+  }
+  if written.is_empty() {
+    return Err(failure_at("expected a date or a time", offset: start))
+  }
+  let last = written.byte(written.length() - 1)
+  var has_offset = last == 90
+  for index in 0..written.length() {
+    let byte = written.byte(index)
+    if index >= 19 && (byte == 43 || byte == 45) {
+      has_offset = true
+    }
+  }
+  if has_offset {
+    match Instant.parse(written) {
+      Ok(instant) => Ok(Value.OffsetDateTime(value: instant))
+      Err(_) => Err(failure_at("a date and time that is not one", offset: start))
+    }
+  } else {
+    match time::DateTime.parse(written) {
+      Ok(date_time) => Ok(Value.LocalDateTime(value: date_time))
+      Err(_) => Err(failure_at("a date and time that is not one", offset: start))
+    }
+  }
+}
+
+fn is_digit_of(byte: UInt8, hexadecimal: Bool) -> Bool {
+  if hexadecimal { byte.digit_value() < 16 } else { is_digit(byte) }
+}
+
+fn without_underscores(token: StringSlice, start: USize, hexadecimal: Bool) -> Result[String, Failure] {
+  var digits = ""
+  var previous: UInt8 = 0
+  for index in 0..token.length() {
+    let byte = token.byte(index)
+    if byte == 95 {
+      let next: UInt8 = if index + 1 < token.length() { token.byte(index + 1) } else { 0 }
+      if !(is_digit_of(previous, hexadecimal: hexadecimal) && is_digit_of(next, hexadecimal: hexadecimal)) {
+        return Err(failure_at("an underscore that is not between two digits", offset: start.saturating_add(index)))
+      }
+    } else {
+      push_byte_run(mut digits, text: token, from: index, to: index + 1)
+    }
+    previous = byte
+  }
+  Ok(own digits)
+}
+
+fn number_value(text: StringSlice, at: mut USize) -> Result[Value, Failure] {
+  let start = at
+  let end = token_end(text, from: at)
+  if end > text.length() || end <= start {
+    return Err(failure_at("expected a value", offset: start))
+  }
+  at = end
+  let token = text.part(start, to: end)
+  let signed = token.byte(0) == 43 || token.byte(0) == 45
+  let negative = token.byte(0) == 45
+  let body = if signed { text.part(start + 1, to: end) } else { token }
+  if body == "inf".slice() {
+    return Ok(Value.Float(value: if negative { Float64.negative_infinity } else { Float64.infinity }))
+  }
+  if body == "nan".slice() {
+    return Ok(Value.Float(value: Float64.not_a_number))
+  }
+  if body.length() >= 2 && (body.starts_with("0x") || body.starts_with("0o") || body.starts_with("0b")) {
+    if signed {
+      return Err(failure_at("a sign before a number that is not decimal", offset: start))
+    }
+    let radix: UInt32 = if body.starts_with("0x") { 16 } else if body.starts_with("0o") { 8 } else { 2 }
+    let digits = without_underscores(body.part(2, to: body.length()), start: start.saturating_add(2), hexadecimal: radix == 16)?
+    if digits.is_empty() || digits.slice().starts_with("+") || digits.slice().starts_with("-") {
+      return Err(failure_at("a number with no digits", offset: start))
+    }
+    return match Int64.parse_radix(digits.slice(), radix: radix) {
+      Ok(number) => Ok(Value.Integer(value: number))
+      Err(_) => Err(failure_at("a number that does not fit a 64-bit integer", offset: start))
+    }
+  }
+  let digits = without_underscores(body, start: start, hexadecimal: false)?
+  let unsigned = digits.slice()
+  var with_sign = if negative { "-" } else { "" }
+  mut with_sign.push(unsigned)
+  let written = with_sign.slice()
+  if unsigned.length() > 1 && unsigned.starts_with("0") && unsigned.byte(1) != 46 && unsigned.byte(1) != 101 && unsigned.byte(1) != 69 {
+    return Err(failure_at("a number with a leading zero", offset: start))
+  }
+  if unsigned.is_empty() || !is_digit(unsigned.byte(0)) {
+    return Err(failure_at("expected a value", offset: start))
+  }
+  if written.contains(".") || written.contains("e") || written.contains("E") {
+    if unsigned.starts_with(".") || unsigned.ends_with(".") || unsigned.contains(".e") || unsigned.contains(".E") {
+      return Err(failure_at("a float with no digit beside its point", offset: start))
+    }
+    return match Float64.parse(written) {
+      Ok(number) => Ok(Value.Float(value: number))
+      Err(_) => Err(failure_at("a float that is not written as TOML writes one", offset: start))
+    }
+  }
+  match Int64.parse(written) {
+    Ok(number) => Ok(Value.Integer(value: number))
+    Err(_) => Err(failure_at("a number that is not written as TOML writes one", offset: start))
+  }
+}
+
+fn after_element(text: StringSlice, at: mut USize, closing: UInt8, inside: StringSlice) -> Result[Bool, Failure] {
+  match peek(text, at: at) {
+    Some(byte) => {
+      if byte == 44 {
+        at += 1
+        Ok(true)
+      } else if byte == closing {
+        at += 1
+        Ok(false)
+      } else {
+        var message = "expected `,` or the end of "
+        mut message.push(inside)
+        Err(Failure(message: own message, offset: at))
+      }
+    }
+    None => {
+      var message = "the text ends inside "
+      mut message.push(inside)
+      Err(Failure(message: own message, offset: at))
+    }
+  }
+}
+
+fn array_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure]
+  requires depth <= 128
+{
+  at = at.saturating_add(1)
+  var items: List[Value] = []
+  var open = true
+  while open {
+    skip_blank(text, at: mut at)?
+    if peek(text, at: at) == Some(93) {
+      at += 1
+      open = false
+    } else {
+      mut items.push(parse_value(text, at: mut at, depth: depth + 1)?)
+      skip_blank(text, at: mut at)?
+      open = after_element(text, at: mut at, closing: 93, inside: "an array")?
+    }
+  }
+  Ok(Value.Array(items: own items))
+}
+
+
+fn parse_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure] {
+  if depth > 128 {
+    return Err(failure_at("values nested too deeply", offset: at))
+  }
+  match peek(text, at: at) {
+    Some(byte) => {
+      if byte == 34 {
+        if starts_with_three(text, at: at, byte: 34) {
+          return Ok(Value.String(value: multiline_string(text, at: mut at, quote: 34)?))
+        }
+        return Ok(Value.String(value: basic_string(text, at: mut at)?))
+      }
+      if byte == 39 {
+        if starts_with_three(text, at: at, byte: 39) {
+          return Ok(Value.String(value: multiline_string(text, at: mut at, quote: 39)?))
+        }
+        return Ok(Value.String(value: literal_string(text, at: mut at)?))
+      }
+      if byte == 91 {
+        return array_value(text, at: mut at, depth: depth)
+      }
+      if byte == 123 {
+        return inline_table_value(text, at: mut at, depth: depth)
+      }
+      let end = token_end(text, from: at)
+      if end <= text.length() {
+        let token = text.part(at, to: end)
+        if token == "true".slice() {
+          at = end
+          return Ok(Value.Boolean(value: true))
+        }
+        if token == "false".slice() {
+          at = end
+          return Ok(Value.Boolean(value: false))
+        }
+      }
+      if is_date_at(text, at: at) || is_time_at(text, at: at) {
+        return date_time_value(text, at: mut at)
+      }
+      number_value(text, at: mut at)
+    }
+    None => Err(failure_at("expected a value", offset: at))
+  }
+}
+
+type Kind = Branch | Tables | Leaf
+  derives Equal
+
+type Document(
+  kinds: List[Kind],
+  children: Map[String, USize],
+  names: List[List[String]],
+  items: List[List[USize]],
+  values: List[Option[Value]],
+  headers: List[Bool],
+  dotted: List[Bool],
+)
+
+fn Document.new() -> Document {
+  var document = Document(kinds: [], children: [:], names: [], items: [], values: [], headers: [], dotted: [])
+  let _ = add_node(mut document, kind: Kind.Branch, value: None, header: false, dotted: false)
+  document
+}
+
+fn add_node(document: mut Document, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> USize {
+  let index = document.kinds.length()
+  mut document.kinds.push(kind)
+  mut document.names.push([])
+  mut document.items.push([])
+  mut document.values.push(own value)
+  mut document.headers.push(header)
+  mut document.dotted.push(dotted)
+  index
+}
+
+fn Document.kind(self, index: USize) -> Option[Kind] {
+  if index < self.kinds.length() { Some(self.kinds[index]) } else { None }
+}
+
+fn Document.is_header(self, index: USize) -> Bool {
+  index < self.headers.length() && self.headers[index]
+}
+
+fn Document.is_dotted(self, index: USize) -> Bool {
+  index < self.dotted.length() && self.dotted[index]
+}
+
+fn child_key(parent: USize, key: StringSlice) -> String {
+  var joined = parent.format()
+  mut joined.push(":")
+  mut joined.push(key)
+  joined
+}
+
+fn Document.child(self, parent: USize, key: StringSlice) -> Option[USize] {
+  let joined = child_key(parent, key: key)
+  if self.children.contains(joined) {
+    return Some(self.children[joined])
+  }
+  None
+}
+
+fn add_child(document: mut Document, parent: USize, key: StringSlice, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> USize {
+  let index = add_node(mut document, kind: kind, value: own value, header: header, dotted: dotted)
+  let _ = mut document.children.replace(child_key(parent, key: key), value: index)
+  if parent < document.names.length() {
+    mut document.names[parent].push(key.to_string())
+  }
+  index
+}
+
+fn add_item(document: mut Document, tables: USize) -> USize {
+  let index = add_node(mut document, kind: Kind.Branch, value: None, header: true, dotted: false)
+  if tables < document.items.length() {
+    mut document.items[tables].push(index)
+  }
+  index
+}
+
+fn last_item(document: Document, tables: USize) -> Option[USize] {
+  if tables < document.items.length() {
+    match document.items[tables].last() {
+      Some(item) => Some(item)
+      None => None
+    }
+  } else {
+    None
+  }
+}
+
+fn already_defined(at: USize) -> Failure {
+  failure_at("a key or table that is already defined", offset: at)
+}
+
+fn insert_dotted(document: mut Document, table: USize, keys: Slice[String], value: own Value, at: USize) -> Result[Unit, Failure] {
+  if keys.is_empty() {
+    return Err(failure_at("expected a key", offset: at))
+  }
+  var current = table
+  let last = keys.length() - 1
+  for index in 0..last {
+    let key = keys[index].slice()
+    match document.child(current, key: key) {
+      None => current = add_child(mut document, parent: current, key: key, kind: Kind.Branch, value: None, header: false, dotted: true)
+      Some(child) => {
+        if document.kind(child) != Some(Kind.Branch) || document.is_header(child) {
+          return Err(already_defined(at))
+        }
+        if child < document.dotted.length() {
+          document.dotted[child] = true
+        }
+        current = child
+      }
+    }
+  }
+  let key = keys[last].slice()
+  if document.child(current, key: key) is Some(_) {
+    return Err(already_defined(at))
+  }
+  let _ = add_child(mut document, parent: current, key: key, kind: Kind.Leaf, value: Some(own value), header: false, dotted: false)
+  Ok(Unit)
+}
+
+fn open_header(document: mut Document, keys: Slice[String], array: Bool, at: USize) -> Result[USize, Failure] {
+  if keys.is_empty() {
+    return Err(failure_at("expected a key", offset: at))
+  }
+  var current: USize = 0
+  let last = keys.length() - 1
+  for index in 0..last {
+    let key = keys[index].slice()
+    match document.child(current, key: key) {
+      None => current = add_child(mut document, parent: current, key: key, kind: Kind.Branch, value: None, header: false, dotted: false)
+      Some(child) => match document.kind(child) {
+        Some(Branch) => current = child
+        Some(Tables) => match last_item(document, tables: child) {
+          Some(item) => current = item
+          None => return Err(already_defined(at))
+        }
+        _ => return Err(already_defined(at))
+      }
+    }
+  }
+  let key = keys[last].slice()
+  match document.child(current, key: key) {
+    None => {
+      if array {
+        let tables = add_child(mut document, parent: current, key: key, kind: Kind.Tables, value: None, header: false, dotted: false)
+        Ok(add_item(mut document, tables: tables))
+      } else {
+        Ok(add_child(mut document, parent: current, key: key, kind: Kind.Branch, value: None, header: true, dotted: false))
+      }
+    }
+    Some(child) => {
+      if array {
+        return if document.kind(child) == Some(Kind.Tables) { Ok(add_item(mut document, tables: child)) } else { Err(already_defined(at)) }
+      }
+      if document.kind(child) != Some(Kind.Branch) || document.is_header(child) || document.is_dotted(child) {
+        return Err(already_defined(at))
+      }
+      if child < document.headers.length() {
+        document.headers[child] = true
+      }
+      Ok(child)
+    }
+  }
+}
+
+fn build(document: Document, leaves: mut Map[USize, Value], index: USize) -> Value {
+  match document.kind(index) {
+    Some(Leaf) => match mut leaves.take(index) {
+      Some(value) => own value
+      None => Value.Table(entries: [:])
+    }
+    Some(Tables) => {
+      let items = if index < document.items.length() { document.items[index].copy() } else { [] }
+      var built: List[Value] = List.with_capacity(items.length())
+      for item in items {
+        mut built.push(build(document, leaves: mut leaves, index: item))
+      }
+      Value.Array(items: own built)
+    }
+    _ => {
+      let names = if index < document.names.length() { document.names[index].copy() } else { [] }
+      var entries: Map[String, Value] = Map.with_capacity(names.length())
+      for name in own names {
+        match document.child(index, key: name.slice()) {
+          Some(child) => {
+            let built = build(document, leaves: mut leaves, index: child)
+            let _ = mut entries.replace(own name, value: own built)
+          }
+          None => {}
+        }
+      }
+      Value.Table(entries: own entries)
+    }
+  }
+}
+
+fn Document.finish(own self) -> Map[String, Value] {
+  var document = own self
+  var leaves: Map[USize, Value] = [:]
+  var index: USize = 0
+  for value in own document.values {
+    match own value {
+      Some(leaf) => {
+        let _ = mut leaves.replace(index, value: own leaf)
+      }
+      None => {}
+    }
+    index = index.saturating_add(1)
+  }
+  document.values = []
+  match build(document, leaves: mut leaves, index: 0) {
+    Table(entries) => own entries
+    _ => [:]
+  }
+}
+
+fn inline_table_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure]
+  requires depth <= 128
+{
+  at = at.saturating_add(1)
+  var document = Document.new()
+  skip_spaces(text, at: mut at)
+  var open = peek(text, at: at) != Some(125)
+  if !open {
+    at = at.saturating_add(1)
+  }
+  while open {
+    skip_spaces(text, at: mut at)
+    let key_at = at
+    let keys = dotted_key(text, at: mut at)?
+    if peek(text, at: at) != Some(61) {
+      return Err(failure_at("expected `=` after a key", offset: at))
+    }
+    at += 1
+    skip_spaces(text, at: mut at)
+    let item = parse_value(text, at: mut at, depth: depth + 1)?
+    insert_dotted(mut document, table: 0, keys: keys.slice(), value: own item, at: key_at)?
+    skip_spaces(text, at: mut at)
+    open = after_element(text, at: mut at, closing: 125, inside: "an inline table")?
+  }
+  Ok(Value.Table(entries: own document.finish()))
+}
+
+public fn parse(text: StringSlice) -> Result[Map[String, Value], ParseError] {
+  match parse_document(text) {
+    Ok(document) => Ok(own document)
+    Err(problem) => Err(with_position(text, failure: problem))
+  }
+}
+
+fn header_line(text: StringSlice, at: mut USize, document: mut Document) -> Result[USize, Failure] {
+  let line_at = at
+  let array = peek(text, at: at.saturating_add(1)) == Some(91)
+  at = at.saturating_add(if array { 2 } else { 1 })
+  let keys = dotted_key(text, at: mut at)?
+  if peek(text, at: at) != Some(93) {
+    return Err(failure_at("expected `]` after a table's name", offset: at))
+  }
+  at += 1
+  if array {
+    if peek(text, at: at) != Some(93) {
+      return Err(failure_at("expected `]]` after an array of tables' name", offset: at))
+    }
+    at += 1
+  }
+  let table = open_header(mut document, keys: keys.slice(), array: array, at: line_at)?
+  end_of_line(text, at: mut at)?
+  Ok(table)
+}
+
+fn key_value_line(text: StringSlice, at: mut USize, document: mut Document, table: USize) -> Result[Unit, Failure] {
+  let line_at = at
+  let keys = dotted_key(text, at: mut at)?
+  if peek(text, at: at) != Some(61) {
+    return Err(failure_at("expected `=` after a key", offset: at))
+  }
+  at += 1
+  skip_spaces(text, at: mut at)
+  let item = parse_value(text, at: mut at, depth: 0)?
+  insert_dotted(mut document, table: table, keys: keys.slice(), value: own item, at: line_at)?
+  end_of_line(text, at: mut at)
+}
+
+fn parse_document(text: StringSlice) -> Result[Map[String, Value], Failure] {
+  var document = Document.new()
+  var table: USize = 0
+  var at: USize = 0
+  if text.starts_with("\u{feff}") {
+    at = 3
+  }
+  skip_blank(text, at: mut at)?
+  while peek(text, at: at) is Some(byte) {
+    if byte == 91 {
+      table = header_line(text, at: mut at, document: mut document)?
+    } else {
+      key_value_line(text, at: mut at, document: mut document, table: table)?
+    }
+    skip_blank(text, at: mut at)?
+  }
+  Ok(own document.finish())
+}
+
+impl serialization::Tree for Value {
+  fn kind(self) -> serialization::Kind {
+    match self {
+      String(_) => serialization::Kind.Text
+      Integer(_) => serialization::Kind.Integer
+      Float(_) => serialization::Kind.Float
+      Boolean(_) => serialization::Kind.Bool
+      OffsetDateTime(_) => serialization::Kind.Text
+      LocalDateTime(_) => serialization::Kind.Text
+      LocalDate(_) => serialization::Kind.Text
+      LocalTime(_) => serialization::Kind.Text
+      Array(_) => serialization::Kind.List
+      Table(_) => serialization::Kind.Record
+    }
+  }
+
+  fn boolean(self) -> Option[Bool] {
+    match self {
+      Boolean(value) => Some(value)
+      _ => None
+    }
+  }
+
+  fn integer(self) -> Option[Int64] {
+    match self {
+      Integer(value) => Some(value)
+      _ => None
+    }
+  }
+
+  fn float(self) -> Option[Float64] {
+    match self {
+      Float(value) => Some(value)
+      Integer(value) => Some(value.to_float64())
+      _ => None
+    }
+  }
+
+  fn into_text(own self) -> Option[String] {
+    match own self {
+      String(value) => Some(own value)
+      OffsetDateTime(value) => Some("${value}")
+      LocalDateTime(value) => Some("${value}")
+      LocalDate(value) => Some("${value}")
+      LocalTime(value) => Some("${value}")
+      _ => None
+    }
+  }
+
+  fn into_items(own self) -> Option[List[Value]] {
+    match own self {
+      Array(items) => Some(own items)
+      _ => None
+    }
+  }
+
+  fn into_members(own self) -> Option[Map[String, Value]] {
+    match own self {
+      Table(entries) => Some(own entries)
+      _ => None
+    }
+  }
+
+  fn null() -> Option[Value] {
+    None
+  }
+
+  fn from_bool(value: Bool) -> Value {
+    Value.Boolean(value: value)
+  }
+
+  fn from_integer(value: Int64) -> Value {
+    Value.Integer(value: value)
+  }
+
+  fn from_unsigned(value: UInt64) -> Option[Value] {
+    match Int64.try_from(value) {
+      Ok(integer) => Some(Value.Integer(value: integer))
+      Err(_) => None
+    }
+  }
+
+  fn from_float(value: Float64) -> Value {
+    Value.Float(value: value)
+  }
+
+  fn from_text(value: own String) -> Value {
+    Value.String(value: own value)
+  }
+
+  fn from_items(items: own List[Value]) -> Value {
+    Value.Array(items: own items)
+  }
+
+  fn from_members(members: own Map[String, Value]) -> Value {
+    Value.Table(entries: own members)
+  }
+}
+
+public fn to_table[Item: serialization::Serialize](
+  item: Item,
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> Result[Map[String, Value], serialization::Error] {
+  var writer: serialization::TreeWriter[Value] = serialization::TreeWriter.new(names: names)
+  item.serialize(mut writer)
+  match own writer.finish()? {
+    Table(entries) => Ok(own entries)
+    _ => Err(serialization::Error(path: "", message: "a TOML document is a table, so only a record can be written as one"))
+  }
+}
+
+public fn from_table[Item: serialization::Deserialize](
+  table: own Map[String, Value],
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> Result[Item, serialization::Error] {
+  var reader = serialization::TreeReader.new(Value.Table(entries: own table), names: names)
+  Item.deserialize(mut reader)
+}
+
+public fn decode[Item: serialization::Deserialize](
+  text: StringSlice,
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> Result[Item, Error] {
+  match parse(text) {
+    Ok(table) => match from_table[Item](own table, names: names) {
+      Ok(item) => Ok(own item)
+      Err(error) => Err(Error.Deserialize(error: own error))
+    }
+    Err(error) => Err(Error.Parse(error: own error))
+  }
+}
+
+public fn encode[Item: serialization::Serialize](
+  item: Item,
+  names: serialization::Names = serialization::Names.AsWritten,
+) -> Result[String, serialization::Error] {
+  Ok(to_text(to_table(item, names: names)?))
+}
+
+fn is_bare_key(key: StringSlice) -> Bool {
+  if key.is_empty() {
+    return false
+  }
+  for byte in key.bytes() {
+    if !is_bare_key_byte(byte) {
+      return false
+    }
+  }
+  true
+}
+
+fn write_key(output: mut TextBuilder, key: StringSlice) {
+  if is_bare_key(key) {
+    mut output.write(key)
+  } else {
+    write_string(mut output, text: key)
+  }
+}
+
+fn write_string(output: mut TextBuilder, text: StringSlice) {
+  mut output.write("\"")
+  for character in text.characters() {
+    let code = character.code()
+    if code == 34 {
+      mut output.write("\\\"")
+    } else if code == 92 {
+      mut output.write("\\\\")
+    } else if code == 10 {
+      mut output.write("\\n")
+    } else if code == 9 {
+      mut output.write("\\t")
+    } else if code == 13 {
+      mut output.write("\\r")
+    } else if code < 32 || code == 127 {
+      mut output.write("\\u00")
+      write_hex_digit(mut output, value: code / 16)
+      write_hex_digit(mut output, value: code % 16)
+    } else {
+      mut output.write_character(character)
+    }
+  }
+  mut output.write("\"")
+}
+
+fn write_hex_digit(output: mut TextBuilder, value: UInt32) {
+  let digit: UInt8 = intrinsic::convert(value % 16)
+  mut output.write_byte(if digit < 10 { 48 + digit } else { 87 + digit })
+}
+
+fn write_float(output: mut TextBuilder, value: Float64) {
+  if value.is_nan() {
+    mut output.write("nan")
+    return
+  }
+  if value == Float64.infinity {
+    mut output.write("inf")
+    return
+  }
+  if value == Float64.negative_infinity {
+    mut output.write("-inf")
+    return
+  }
+  let text = "${value}"
+  mut output.write(text.slice())
+  if !text.slice().contains(".") && !text.slice().contains("e") && !text.slice().contains("E") {
+    mut output.write(".0")
+  }
+}
+
+fn write_inline(output: mut TextBuilder, value: Value) {
+  match value {
+    String(text) => write_string(mut output, text: text.slice())
+    Integer(number) => number.display(mut output)
+    Float(number) => write_float(mut output, value: number)
+    Boolean(flag) => {
+      if flag {
+        mut output.write("true")
+      } else {
+        mut output.write("false")
+      }
+    }
+    OffsetDateTime(instant) => instant.display(mut output)
+    LocalDateTime(date_time) => date_time.display(mut output)
+    LocalDate(date) => date.display(mut output)
+    LocalTime(time) => time.display(mut output)
+    Array(items) => {
+      mut output.write("[")
+      var first = true
+      for item in items {
+        if !first {
+          mut output.write(", ")
+        }
+        first = false
+        write_inline(mut output, value: item)
+      }
+      mut output.write("]")
+    }
+    Table(entries) => {
+      if entries.is_empty() {
+        mut output.write("{}")
+        return
+      }
+      mut output.write("{ ")
+      var first = true
+      for entry in entries {
+        if !first {
+          mut output.write(", ")
+        }
+        first = false
+        write_key(mut output, key: entry.key.slice())
+        mut output.write(" = ")
+        write_inline(mut output, value: entry.value)
+      }
+      mut output.write(" }")
+    }
+  }
+}
+
+fn is_array_of_tables(value: Value) -> Bool {
+  match value {
+    Array(items) => {
+      if items.is_empty() {
+        return false
+      }
+      for item in items {
+        if !(item is Table(_)) {
+          return false
+        }
+      }
+      true
+    }
+    _ => false
+  }
+}
+
+fn write_header(output: mut TextBuilder, path: Slice[String], opening: StringSlice, closing: StringSlice) {
+  mut output.write("\n")
+  mut output.write(opening)
+  var first = true
+  for key in path {
+    if !first {
+      mut output.write(".")
+    }
+    first = false
+    write_key(mut output, key: key.slice())
+  }
+  mut output.write(closing)
+  mut output.write("\n")
+}
+
+fn write_table(output: mut TextBuilder, table: Map[String, Value], path: mut List[String]) {
+  for entry in table {
+    if !(entry.value is Table(_)) && !is_array_of_tables(entry.value) {
+      write_key(mut output, key: entry.key.slice())
+      mut output.write(" = ")
+      write_inline(mut output, value: entry.value)
+      mut output.write("\n")
+    }
+  }
+  for entry in table {
+    match entry.value {
+      Table(entries) => {
+        mut path.push(entry.key.copy())
+        write_header(mut output, path: path.slice(), opening: "[", closing: "]")
+        write_table(mut output, table: entries, path: mut path)
+        let _ = mut path.pop()
+      }
+      Array(items) => {
+        if is_array_of_tables(entry.value) {
+          mut path.push(entry.key.copy())
+          for item in items {
+            match item {
+              Table(entries) => {
+                write_header(mut output, path: path.slice(), opening: "[[", closing: "]]")
+                write_table(mut output, table: entries, path: mut path)
+              }
+              _ => {}
+            }
+          }
+          let _ = mut path.pop()
+        }
+      }
+      _ => {}
+    }
+  }
+}
+
+public fn to_text(table: Map[String, Value]) -> String {
+  var output = TextBuilder.new()
+  var path: List[String] = []
+  write_table(mut output, table: table, path: mut path)
+  let text = own output.finish()
+  if text.length() > 0 && text.slice().starts_with("\n") {
+    text.slice().part(1, to: text.length()).to_string()
+  } else {
+    text
+  }
+}

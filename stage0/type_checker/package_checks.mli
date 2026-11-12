@@ -6,7 +6,7 @@ type placed = { module_ : Path.module_; diagnostic : Diagnostic.t }
 val diagnostics : Query.context -> Path.module_ -> Diagnostic.t list
 (** The package's errors in one file, in order. *)
 
-(** What only a package's code shows to be wrong with its manifest. *)
+(** An error in a package's manifest that only its code shows. *)
 type manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }
       (** A grant's entry that names no capability *)

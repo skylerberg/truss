@@ -16,16 +16,21 @@ let weights =
     ("standard::collections::lru_cache", 273);
     ("standard::collections::sorted_map", 536);
     ("standard::collections::sorted_set", 506);
+    ("standard::compression", 933);
     ("standard::console", 41);
     ("standard::core", 23);
     ("standard::core::range", 5);
-    ("standard::cryptography", 2641);
+    ("standard::cryptography", 3298);
+    ("standard::cryptography::elliptic", 247);
+    ("standard::cryptography::modular", 201);
     ("standard::csv", 45);
     ("standard::cursors", 4);
     ("standard::environment", 68);
     ("standard::files", 893);
     ("standard::growth", 2);
     ("standard::hex", 21);
+    ("standard::html", 102);
+    ("standard::http", 524);
     ("standard::json", 1513);
     ("standard::list", 104);
     ("standard::list::array", 43);
@@ -82,10 +87,11 @@ let weights =
     ("standard::text::unicode_data", 184);
     ("standard::text::unicode_tables", 296);
     ("standard::time", 553);
+    ("standard::toml", 1453);
     ("standard::unicode", 18);
     ("standard::url", 102);
     ("standard::uuid", 31);
     ("standard::writing", 5);
   ]
 
-let letters_for_one = 48
+let letters_for_one = 43

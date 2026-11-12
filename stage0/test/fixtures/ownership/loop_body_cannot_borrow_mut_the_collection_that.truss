@@ -1,0 +1,6 @@
+fn f() {
+  var items: List[Int64] = [1, 2]
+  for item in items {
+    mut items.push(item)
+  }
+}

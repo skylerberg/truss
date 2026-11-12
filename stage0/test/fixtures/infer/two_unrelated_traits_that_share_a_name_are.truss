@@ -1,0 +1,21 @@
+trait First {
+  fn label(self) -> Int64
+}
+
+trait Second {
+  fn label(own self) -> Int64
+}
+
+type Counter(count: Int64)
+
+impl First for Counter {
+  fn label(self) -> Int64 { todo }
+}
+
+impl Second for Counter {
+  fn label(own self) -> Int64 { todo }
+}
+
+fn f() -> Int64 {
+  Counter(count: 3).label()
+}

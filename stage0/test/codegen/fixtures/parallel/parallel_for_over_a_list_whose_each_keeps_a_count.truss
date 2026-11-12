@@ -1,0 +1,24 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var items: List[Int64] = []
+  var next: Int64 = 1
+  while next <= 100 {
+    mut items.push(0)
+    next = next.wrapping_add(1)
+  }
+  var position: Int64 = 0
+  for item in mut items {
+    position = position.wrapping_add(1)
+    item = position
+  }
+  parallel for item in mut items {
+    item = item.wrapping_multiply(1)
+  }
+  var total: Int64 = 0
+  for item in items {
+    total = total.wrapping_add(item)
+  }
+  Console.print_line("${total}")
+  ExitCode.success
+}

@@ -1,15 +1,15 @@
 (* [truss rename]: renames a definition, a method, or a module, and every
-   reference to it in the package.
+   reference to it in the project.
 
-   The rename is made in memory first and the package checked: if it would
-   cause any diagnostic, such as a name already taken, one that breaks a
-   naming rule, or one that hides another, nothing is written. Each edit
-   replaces a name's tokens alone, so the files need no formatting
-   afterward. *)
+   The rename is made in a trial session and checked there first. If the
+   result has any diagnostic, such as a name that is taken, a name that
+   breaks a naming rule, or a name that shadows another, no file is
+   written. Each edit replaces only a name's tokens, so the files need no
+   formatting afterward. *)
 
 module Names = Resolve.Names
 
-type what =
+type target =
   | Definition of Path.t  (** A top-level definition, or every version of a method *)
   | Module of Path.module_
 
@@ -21,8 +21,8 @@ type plan = {
 let module_exists (project : Project.t) (module_ : Path.module_) =
   List.mem_assoc module_ project.files
 
-(* The project's package that [from_] starts with the name of, and the
-   names after it, as a module of it. *)
+(* The module of a project package that [from_] names, and the member
+   after it. [from_] must start with the package's name. *)
 let in_package (project : Project.t) from_ =
   let is_package package =
     List.exists (fun (candidate : Project.package) -> candidate.name = package) project.packages
@@ -36,8 +36,8 @@ let in_package (project : Project.t) from_ =
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
         from_
 
-(* What [from_] names. *)
-let what (project : Project.t) from_ =
+(* The definition or module that [from_] names. *)
+let target_of (project : Project.t) from_ =
   let { Path.package; modules = names }, member = in_package project from_ in
   let package_name = Path.show_package package in
   if member = None && module_exists project { package; modules = names } then
@@ -67,9 +67,9 @@ let what (project : Project.t) from_ =
         else Project.cannot_run "Nothing named `%s` is defined in %s." from_ package_name
     | _ -> Project.cannot_run "Nothing named `%s` is defined in %s." from_ package_name
 
-(* The new last name, from a full path or a bare name. A definition keeps
-   its module and a method its type, so a full path must say the same
-   ones. *)
+(* The new last segment, from a full path or a bare name. A definition
+   stays in its module and a method on its type, so a full path must name
+   the same module or type. *)
 let new_name ~from_ to_ =
   let written = Path_argument.parse to_ and old = Path_argument.parse from_ in
   (* A method's type and name, or a definition's name alone. *)
@@ -131,7 +131,7 @@ let plan_module (project : Project.t) (old_module : Path.module_) to_ =
       (fun (occurrence : References.occurrence) ->
         match occurrence.target with
         | Module edit_module when edit_module = old_module ->
-            (* Written through its import, one name, or as a full path. *)
+            (* Written as its import's name, one segment, or as a full path. *)
             let text = Source.text (Project.parsed project occurrence.module_).source in
             let written =
               String.sub text occurrence.span.start (occurrence.span.stop - occurrence.span.start)
@@ -161,7 +161,7 @@ let plan_module (project : Project.t) (old_module : Path.module_) to_ =
 
 let text_of (project : Project.t) module_ = Source.text (Project.parsed project module_).source
 
-(* Each module and its text after the plan, under its new path. *)
+(* Each module and its text after the rename, under its new path. *)
 let applied (project : Project.t) plan =
   List.map
     (fun module_ ->
@@ -176,11 +176,11 @@ let applied (project : Project.t) plan =
       (module_, text))
     (Project.modules project)
 
-(* A session of the worktree with the plan made, for checking it: a trial
-   that starts from the session's state, so only the rename's changes are
-   checked, and which is dropped after. Each module's text is given under
-   the file it has after the plan, and the file of a module that moves is
-   removed. *)
+(* A trial session of the worktree with the rename applied, for checking
+   it. It starts from the worktree's session, so only the edited modules
+   and their dependents are checked, and it is discarded afterward. Each
+   module's text is placed at its file path after the rename, and a moved
+   module's old file is removed. *)
 let trial (project : Project.t) after =
   let file module_ = Database.module_file project.session module_ in
   let written = List.map (fun (module_, text) -> (file module_, Some text)) after in
@@ -218,15 +218,15 @@ let edits_json (project : Project.t) plan =
         edits)
     plan.edits
 
-(* A rename reaches every package of the worktree, whichever directory it
-   is run from, since any of them may name what it renames. *)
+(* A rename edits every package of the worktree, regardless of the current
+   directory, since any of them may refer to the renamed definition. *)
 let run ~directory ~from_ ~to_ ~json =
   let here = Project.load directory in
   let project = Project.load (Database.root here.session) in
   let report = Report.gather project in
   if not (Report.clean report) then begin
-    (* References are found through checked code, which a package with
-       errors does not fully have. *)
+    (* References are found through type-checked code, which a package
+       with diagnostics lacks in part. *)
     if json then Json.print (Report.document report [])
     else begin
       Report.print report;
@@ -236,7 +236,7 @@ let run ~directory ~from_ ~to_ ~json =
   end
   else
     let plan =
-      match what project from_ with
+      match target_of project from_ with
       | Definition path -> plan_definition project path (new_name ~from_ to_)
       | Module module_ -> plan_module project module_ to_
     in

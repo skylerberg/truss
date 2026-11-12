@@ -1,0 +1,13 @@
+fn tally(measure: (fn(Int64) -> Int64 cost time finite)) -> Int64
+  cost time finite
+{
+  var total = 0
+  total = measure(1)
+  total
+}
+
+fn f() -> Bool
+  ensures result
+{
+  tally(fn(each) { each / 2 }) == tally(fn(other) { other / 2 })
+}

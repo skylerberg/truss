@@ -1,0 +1,9 @@
+trait Eater {
+  fn eat(self, items: List[Int64])
+}
+
+impl Eater for Bag {
+  fn eat(self, items: List[Int64]) {
+    keep(own items)
+  }
+}

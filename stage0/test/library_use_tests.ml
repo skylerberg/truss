@@ -16,130 +16,31 @@ let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
 
 let () =
   test "a map that was inserted into holds the key" (fun () ->
-      proven
-        "fn built(name: String) -> Map[String, Int64]\n\
-        \  ensures result.contains(name)\n\
-        \  ensures result.length() == 1\n\
-         {\n\
-        \  var table: Map[String, Int64] = [:]\n\
-        \  mut table.insert(name.copy(), value: 1)\n\
-        \  table\n\
-         }\n\n\
-         fn numbered() -> Map[Int64, Int64]\n\
-        \  ensures result.contains(7)\n\
-         {\n\
-        \  var table: Map[Int64, Int64] = [:]\n\
-        \  mut table.insert(7, value: 1)\n\
-        \  table\n\
-         }\n");
+      proven Fixtures.Library_use.map_that_was_inserted_into_holds_the_key);
   test "a password is hashed with the default cost and with a cost that meets its limits" (fun () ->
-      proven
-        "use standard::cryptography\n\n\
-         fn stored(password: Slice[UInt8], salt: Array[UInt8, 16]) -> Array[UInt8, 32] {\n\
-        \  cryptography::hash_password(password, salt: salt[..])\n\
-         }\n\n\
-         fn costly(password: Slice[UInt8], salt: Array[UInt8, 16]) -> Array[UInt8, 32] {\n\
-        \  let password_cost = cryptography::PasswordCost(memory_kibibytes: 65536, parallelism: 4)\n\
-        \  cryptography::hash_password(password, salt: salt[..], password_cost: password_cost)\n\
-         }\n");
+      proven Fixtures.Library_use.password_is_hashed_with_the_default_cost_and_with);
   test "a map literal has its keys and its length" (fun () ->
-      proven
-        "fn literal() -> Bool\n\
-        \  ensures result\n\
-         {\n\
-        \  let table: Map[Int64, Int64] = [1: 2, 3: 4]\n\
-        \  table.contains(3) && table.length() == 2\n\
-         }\n");
+      proven Fixtures.Library_use.map_literal_has_its_keys_and_its_length);
   test "a key that a map contains can be indexed" (fun () ->
-      proven
-        "fn looked_up(ports: Map[String, Int64], name: String) -> Int64 {\n\
-        \  if ports.contains(name) { ports[name] } else { 0 }\n\
-         }\n");
+      proven Fixtures.Library_use.key_that_a_map_contains_can_be_indexed);
   test "replace leaves the key in the map" (fun () ->
-      proven
-        "fn replaced(ports: mut Map[Int64, Int64]) -> Option[Int64]\n\
-        \  ensures ports.contains(80)\n\
-         {\n\
-        \  mut ports.replace(80, value: 8080)\n\
-         }\n");
+      proven Fixtures.Library_use.replace_leaves_the_key_in_the_map);
   test "take and clear leave a map without the key" (fun () ->
-      proven
-        "fn moved(ports: mut Map[String, Int64], name: String) -> Option[Int64]\n\
-        \  ensures !ports.contains(name)\n\
-         {\n\
-        \  mut ports.take(name)\n\
-         }\n\n\
-         fn emptied(ports: mut Map[String, Int64])\n\
-        \  ensures ports.is_empty()\n\
-         {\n\
-        \  mut ports.clear()\n\
-         }\n");
+      proven Fixtures.Library_use.take_and_clear_leave_a_map_without_the_key);
   test "maps and sets are compared" (fun () ->
-      proven
-        "fn same(first: Map[Int64, Int64], second: Map[Int64, Int64]) -> Bool {\n\
-        \  first == second\n\
-         }\n\n\
-         fn same_sets(first: Set[Int64], second: Set[Int64]) -> Bool {\n\
-        \  first == second && first.is_subset_of(second)\n\
-         }\n");
-  test "a set holds what was inserted and not what was removed" (fun () ->
-      proven
-        "fn added(seen: mut Set[Int64]) -> Bool\n\
-        \  ensures seen.contains(4)\n\
-         {\n\
-        \  mut seen.insert_new(4)\n\
-         }\n\n\
-         fn removed(seen: mut Set[Int64])\n\
-        \  ensures !seen.contains(4)\n\
-         {\n\
-        \  mut seen.remove(4)\n\
-         }\n");
-  test "a set literal contains what it lists and nothing else" (fun () ->
-      proven
-        "fn both() -> Bool\n\
-        \  ensures result\n\
-         {\n\
-        \  let colors: Set[Int64] = [1, 2]\n\
-        \  colors.contains(2) && !colors.contains(5) && colors.length() == 2\n\
-         }\n")
+      proven Fixtures.Library_use.maps_and_sets_are_compared);
+  test "a set holds inserted elements and not removed ones" (fun () ->
+      proven Fixtures.Library_use.set_holds_inserted_elements_and_not_removed_ones);
+  test "a set literal contains its listed elements and nothing else" (fun () ->
+      proven Fixtures.Library_use.set_literal_contains_its_listed_elements_and)
 
 let () =
   test "a display that ends is proven, and a function with a time clause calls it" (fun () ->
-      proven
-        "type Point(x: Int64, y: Int64)\n\n\
-         impl Display for Point {\n\
-        \  fn display(self, output: mut TextBuilder) {\n\
-        \    mut output.write(\"(\")\n\
-        \    self.x.display(mut output)\n\
-        \    mut output.write(\", \")\n\
-        \    self.y.display(mut output)\n\
-        \    mut output.write(\")\")\n\
-        \  }\n\
-         }\n\n\
-         fn shown(point: Point) -> String\n\
-        \  cost time finite\n\
-         {\n\
-        \  var output = TextBuilder.new()\n\
-        \  point.display(mut output)\n\
-        \  own output.finish()\n\
-         }\n");
+      proven Fixtures.Library_use.display_that_ends_is_proven_and_a_function_with_a);
   test "a display that may not end is rejected" (fun () ->
-      Support.one_diagnostic ~check
-        "type Stuck(value: Int64)\n\n\
-         impl Display for Stuck {\n\
-        \  fn display(self, output: mut TextBuilder) {\n\
-        \    while true {}\n\
-        \  }\n\
-         }\n"
+      Support.one_diagnostic ~check Fixtures.Library_use.display_that_may_not_end_is_rejected
         "prover.termination")
 
 let () =
   test "two strings with the same text are equal" (fun () ->
-      proven
-        "fn same() -> Bool\n\
-        \  ensures result\n\
-         {\n\
-        \  let first = \"a\"\n\
-        \  let second = \"a\"\n\
-        \  first == second\n\
-         }\n")
+      proven Fixtures.Library_use.two_strings_with_the_same_text_are_equal)

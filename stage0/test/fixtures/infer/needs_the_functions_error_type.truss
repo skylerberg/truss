@@ -1,0 +1,6 @@
+fn parse() -> Result[Int64, Bool] { todo }
+
+fn f() -> Result[Int64, String] {
+  let value = parse()?
+  Ok(value)
+}

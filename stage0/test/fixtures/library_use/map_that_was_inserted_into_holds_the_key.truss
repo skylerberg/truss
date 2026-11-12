@@ -1,0 +1,16 @@
+fn built(name: String) -> Map[String, Int64]
+  ensures result.contains(name)
+  ensures result.length() == 1
+{
+  var table: Map[String, Int64] = [:]
+  mut table.insert(name.copy(), value: 1)
+  table
+}
+
+fn numbered() -> Map[Int64, Int64]
+  ensures result.contains(7)
+{
+  var table: Map[Int64, Int64] = [:]
+  mut table.insert(7, value: 1)
+  table
+}

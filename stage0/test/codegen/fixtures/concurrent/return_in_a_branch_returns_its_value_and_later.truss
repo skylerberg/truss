@@ -1,0 +1,23 @@
+fn leaves(early: Bool) -> Int64
+  uses Tasks, Console
+{
+  concurrent {
+    {
+      if early {
+        return 7
+      }
+      Console.print_line("first ran")
+    }
+    Console.print_line("second ran")
+  }
+  Console.print_line("after the block")
+  1
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  Console.print_line("${leaves(early: false)}")
+  Console.print_line("${leaves(early: true)}")
+  ExitCode.success
+}

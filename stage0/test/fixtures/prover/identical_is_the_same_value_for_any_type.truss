@@ -1,0 +1,5 @@
+fn f[Item](value: Item) -> Bool
+  ensures identical(value, value)
+{
+  true
+}

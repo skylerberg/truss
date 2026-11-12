@@ -31,4 +31,3 @@ val parsed : t -> Path.module_ -> Workspace.file
 val source : t -> Path.module_ -> Source.t
 val shown_workspace_path : t -> string -> string
 val write_file : string -> string -> unit
-val reachable : Database.dependencies -> Path.t -> (Path.t, unit) Hashtbl.t

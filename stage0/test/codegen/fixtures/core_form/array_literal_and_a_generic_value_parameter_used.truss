@@ -1,0 +1,13 @@
+fn squares() -> Array[Int64, 3] {
+  [1, 4, 9]
+}
+
+fn capacity[count: USize](items: Array[Int64, count]) -> USize {
+  count
+}
+
+test "arrays" {
+  assert capacity(squares()) == 3
+  let four: Array[Int64, 4] = [0, 0, 0, 0]
+  assert capacity(four) == 4
+}

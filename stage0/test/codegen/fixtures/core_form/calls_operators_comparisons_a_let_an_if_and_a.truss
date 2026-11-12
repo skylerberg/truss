@@ -1,0 +1,21 @@
+fn double(value: Int64) -> Int64 {
+  value + value
+}
+
+fn larger(first: Int64, second: Int64) -> Int64 {
+  if first > second { first } else { second }
+}
+
+fn pick(first: Int64, second: Int64) -> Int64 {
+  let most = larger(first, second: second)
+  if most > 10 && first != second {
+    return most * 2
+  }
+  most + double(second)
+}
+
+test "picks" {
+  assert pick(3, second: 4) == 12
+  assert pick(20, second: 4) == 40
+  assert !(pick(1, second: 1) > 3) || pick(1, second: 1) == 3
+}

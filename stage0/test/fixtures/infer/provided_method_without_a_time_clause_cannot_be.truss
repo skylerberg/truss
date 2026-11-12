@@ -1,0 +1,13 @@
+trait Doubling {
+  fn doubled(self) -> Bool {
+    true
+  }
+}
+
+type Amount(cents: Int64)
+
+impl Doubling for Amount {
+  fn doubled(self) -> Bool {
+    false
+  }
+}

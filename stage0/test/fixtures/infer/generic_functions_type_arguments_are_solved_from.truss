@@ -1,0 +1,5 @@
+fn wrap[Value](value: own Value) -> Option[Value] { Some(value) }
+
+fn f() -> Option[Int64] {
+  wrap(5)
+}

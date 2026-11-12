@@ -1,0 +1,4 @@
+fn f[Element: Equal](item: Element)
+  cost time O(time(Element.compare))
+{
+}

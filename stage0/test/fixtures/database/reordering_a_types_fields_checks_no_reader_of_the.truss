@@ -1,0 +1,5 @@
+use app::point
+
+fn width(of: point::Point) -> Int64 {
+  of.x
+}

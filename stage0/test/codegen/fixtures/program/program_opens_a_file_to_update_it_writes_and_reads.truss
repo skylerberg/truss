@@ -1,0 +1,58 @@
+use standard::files
+use standard::streams
+
+fn report(label: String, outcome: Result[USize, SystemError]) uses Console {
+  match outcome {
+    Ok(count) => Console.print_line("${label} ${count}".slice())
+    Err(_) => Console.print_line("${label} failed".slice())
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead, FileWrite, Handles
+{
+  let path = Path.new(arguments[1].slice())
+  var file = match FileWrite.open(path, mode: files::WriteMode.Update) {
+    Ok(file) => own file
+    Err(_) => {
+      return ExitCode(1)
+    }
+  }
+  let hello_world: List[UInt8] = [104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100]
+  let there: List[UInt8] = [116, 104, 101, 114, 101]
+  report("wrote", outcome: mut file.write(hello_world.slice()))
+  report("wrote at", outcome: mut file.write_at(6, bytes: there.slice()))
+  var read: List[UInt8] = []
+  report("read at", outcome: mut file.read_at(0, buffer: mut read, limit: 5))
+  report("read at again", outcome: mut file.read_at(6, buffer: mut read, limit: 100))
+  Console.print_line("${read.length()} bytes read".slice())
+  if mut file.seek(streams::Position.FromEnd(offset: -5)) is Ok(position) {
+    Console.print_line("at ${position}".slice())
+  }
+  var tail: List[UInt8] = []
+  report("read", outcome: mut file.read(mut tail, limit: 100))
+  if mut file.set_length(4) is Ok(_) && mut file.synchronize() is Ok(_) {
+    Console.print_line("shortened".slice())
+  }
+  if own file.close() is Ok(_) {
+    Console.print_line("closed".slice())
+  }
+  if FileRead.read_text(path) is Ok(text) {
+    Console.print_line("now ${text}".slice())
+  }
+  if FileWrite.open(path, mode: files::WriteMode.CreateNew) is Err(AlreadyExists) {
+    Console.print_line("exists".slice())
+  }
+  match FileWrite.open(path, mode: files::WriteMode.Append) {
+    Ok(appended) => {
+      var appending = own appended
+      let mark: List[UInt8] = [33]
+      report("appended", outcome: mut appending.write(mark.slice()))
+    }
+    Err(_) => {}
+  }
+  if FileRead.read_text(path) is Ok(text) {
+    Console.print_line("then ${text}".slice())
+  }
+  ExitCode(0)
+}

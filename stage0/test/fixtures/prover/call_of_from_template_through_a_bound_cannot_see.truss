@@ -1,0 +1,3 @@
+fn make[Made: FromTemplate](template: Template[Made.Part]) -> Made {
+  Made.from_template(template)
+}

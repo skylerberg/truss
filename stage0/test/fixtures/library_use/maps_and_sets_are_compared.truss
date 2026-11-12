@@ -1,0 +1,7 @@
+fn same(first: Map[Int64, Int64], second: Map[Int64, Int64]) -> Bool {
+  first == second
+}
+
+fn same_sets(first: Set[Int64], second: Set[Int64]) -> Bool {
+  first == second && first.is_subset_of(second)
+}

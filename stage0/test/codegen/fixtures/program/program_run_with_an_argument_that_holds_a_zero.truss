@@ -1,0 +1,10 @@
+use standard::processes
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  if Processes.run(processes::Command.new("sh").argument("-c").argument("exit 3\0; exit 4")) is Err(_) {
+    Console.print_line("refused".slice())
+  }
+  ExitCode(0)
+}

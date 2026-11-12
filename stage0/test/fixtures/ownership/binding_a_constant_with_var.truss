@@ -1,0 +1,4 @@
+fn f() {
+  var mine = names
+  mut mine.push(1)
+}

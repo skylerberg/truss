@@ -120,7 +120,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
   | Old | Identical | Specification_function _ ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
       error state Not_a_value value.span
-        (Printf.sprintf "`%s` is applied to what it is about, as in `%s(...)`." text text)
+        (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." text text)
   | Yielded -> (
       (* The sequence of the parts yielded so far. *)
       state.tables.resolutions.(value.id) <- Some Specification_value;
@@ -160,7 +160,7 @@ and variant_value state (value : expression) type_path variant ~arguments =
             {
               inputs = [ (Types.Own, field.field_type) ];
               output = Returns type_;
-              uses = [];
+              uses = Types.no_capabilities;
               costs = [ { amortized = false; resource = Time; bound = Order_of } ];
             }
       | Some { fields = Some fields; _ } ->

@@ -217,7 +217,7 @@ let check context (graph : Graph.t) =
               Printf.sprintf
                 "`%s` is moved out in this branch and not reinitialized in it. If another branch \
                  exits the `concurrent` block early, the code after the block does not run, so \
-                 each branch must reinitialize what it moves out of a `mut` borrow."
+                 each branch must reinitialize each place it moves out of a `mut` borrow."
                 moved)
       | Yield_point _ ->
           if context.yields then

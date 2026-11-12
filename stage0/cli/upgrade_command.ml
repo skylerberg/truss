@@ -1,12 +1,12 @@
-(* [truss upgrade]: moves the project's registry packages to other versions,
-   and says what that changes before the lock file is written. [truss add]
-   shares what it reports. *)
+(* [truss upgrade]: changes the versions of the project's registry
+   packages, and reports the effect before writing the lock file. [truss
+   add] prints the same report. *)
 
 module Lock = Registry.Lock
 module Version = Registry.Version
 
-(* A package written as [acme::geometry], or with a version, as
-   [acme::geometry@1.4.2]. *)
+(* Parses a package argument, such as [acme::geometry], or with a version,
+   such as [acme::geometry@1.4.2]. *)
 let wanted text =
   let written, version =
     match String.index_opt text '@' with
@@ -33,13 +33,13 @@ let wanted text =
               version)
       version )
 
-(* What a new lock file changes of the old. *)
+(* The differences between the old lock file and the new one. *)
 type change =
   | Entered of Lock.entry
   | Left of Lock.entry
   | Moved of { name : Path.package; from : Version.t; to_ : Version.t }
   | Holds of { name : Path.package; gained : string list }
-      (** A package that would hold capabilities it did not *)
+      (** A package that would be granted capabilities it lacks now *)
 
 let lock_changes ~(before : Lock.t) ~(after : Lock.t) =
   List.concat_map
@@ -107,19 +107,19 @@ let change_json = function
           ("gained", Json.List (List.map (fun held -> Json.String held) gained));
         ]
 
-(* A signature of a registry package that the new versions change and the
-   project reads. *)
+(* A signature of a registry package that the project depends on and the
+   new versions change. *)
 type signature = {
   path : Path.t;
   before : string option;
   after : string option;
-  read_by : Path.t list;
+  dependents : Path.t list;
 }
 
-(* The changes in the new versions that the project's code depends on, found in a
-   session that has them, before any file is written: each changed signature
-   with the definitions that read it, and the diagnostics the project would
-   have that it does not have now. *)
+(* The effect of the new versions on the project's code, computed in a
+   trial session with those versions before any file is written: each
+   changed signature with its dependents in the project, and the
+   diagnostics that the project would have and does not have now. *)
 let consequences (project : Project.t) text =
   let trial = Database.trial project.session [ ("truss.lock", Some text) ] in
   let own = List.map snd (Database.packages project.session) in
@@ -135,24 +135,26 @@ let consequences (project : Project.t) text =
            | _ -> None)
          (Database.changes trial project.session))
   in
-  let readers = lazy (Database.dependencies trial) in
+  let edges = Database.dependents trial changed in
   let signatures =
     List.filter_map
       (fun path ->
         match
           List.sort_uniq Path.compare
             (List.filter_map
-               (fun (reader, _, _) -> if ours reader then Some reader else None)
-               (Database.readers (Lazy.force readers) path))
+               (fun (edge : Database.edge) ->
+                 if Path.equal edge.dependency path && ours edge.dependent then Some edge.dependent
+                 else None)
+               edges)
         with
         | [] -> None
-        | read_by ->
+        | dependents ->
             Some
               {
                 path;
                 before = Signatures.of_path project.context path;
                 after = Signatures.of_path (Database.context trial) path;
-                read_by;
+                dependents;
               })
       changed
   in
@@ -186,7 +188,8 @@ let report ~json ~lock ~signatures ~broken =
                         ("after", Json.option (fun text -> Json.String text) changed.after);
                         ( "read_by",
                           Json.List
-                            (List.map (fun path -> Json.String (Path.show path)) changed.read_by) );
+                            (List.map (fun path -> Json.String (Path.show path)) changed.dependents)
+                        );
                       ])
                   signatures) );
            ("breaks", Json.List (List.map (fun sentence -> Json.String sentence) broken));
@@ -204,7 +207,7 @@ let report ~json ~lock ~signatures ~broken =
             changed.before;
           Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) changed.after;
           Output.printf "    read by: %s\n"
-            (String.concat ", " (List.map Path.show changed.read_by)))
+            (String.concat ", " (List.map Path.show changed.dependents)))
         signatures
     end;
     if broken <> [] then begin

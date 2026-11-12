@@ -1,0 +1,8 @@
+fn window(items: List[Int64], start: USize) -> Slice[Int64] {
+  items[start..]
+}
+
+fn f(items: List[Int64]) -> Slice[Int64] {
+  let start: USize = 1
+  window(items, start)
+}

@@ -1,0 +1,4 @@
+fn Window.narrow(mut self) {
+  let local: List[Int64] = [1, 2, 3]
+  self.view = local[0..1]
+}

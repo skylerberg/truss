@@ -29,7 +29,7 @@ compiled, which is an unsound proof, and the ownership check accepts code
 whose compiled order is a use after move. The MIR makes each of these
 decisions once, in its builder, and every consumer reads the result.
 
-The MIR also takes from each consumer what it never needs. Code generation
+The MIR also spares each consumer the parts it never needs. Code generation
 and the ownership check read no specification, and the prover reads no
 drop. Each of them still matches on every core form today, with cases that
 can never be reached.
@@ -58,7 +58,7 @@ written. The MIR builder is its only other reader.
 PROVER.md explains why the prover has no proof program between Truss and
 the logic, as Boogie and Why3 have: a second representation of every body,
 read only by the prover, would cost more than it gives. The MIR is a
-second representation, but all three consumers read it, and it is what
+second representation, but all three consumers read it, and it
 makes them agree.
 
 ## Contents
@@ -193,7 +193,7 @@ These are its rules:
 
 1. **A call** evaluates an indirect callee, then its arguments in order.
    The `mut` borrows of its arguments start after the last argument is
-   evaluated, so a later argument cannot mutate what an earlier one
+   evaluated, so a later argument cannot mutate a place an earlier one
    borrowed.
 2. **An assignment** `target = value` evaluates `value`, then the index
    keys of `target`, then stores.
@@ -230,7 +230,7 @@ An operation means one thing however it is written. `a + b` on `Int64`,
   constant absorbs, however it is written.
 
 The core form keeps the two spellings, `Operator` and a call whose callee
-is `Intrinsic`, because the type checker records what was written. The
+is `Intrinsic`, because the type checker records the source spelling. The
 MIR builder maps both to `operation`, so no consumer can tell them apart.
 An intrinsic that is not a primitive operation, such as `storage_push` or a
 system call, stays a call.
@@ -305,8 +305,8 @@ writes it on the loop header, as an assumption that is ghost code.
 
 The check's graph of points is the MIR. Its dataflow analyses of moves and
 views run on the MIR's statements, and its loans are borrow locals and the
-borrows of call arguments, which end where the MIR says. The rules about
-what is moved, viewed, and borrowed do not change; the builder of the graph
+borrows of call arguments, which end where the MIR says. The rules for
+moves, views, and borrows do not change; the builder of the graph
 goes away.
 
 ### The prover
@@ -322,7 +322,7 @@ of loops where today it has five.
 
 A call is read by its contract, as now. An `each` is read by the yielding
 method's contract for each part. A `lend` and its `end_lend` are the
-lending method's contract for the part it lends and for what it hands
+lending method's contract for the part it lends and for the value it hands
 back. Ghost statements are its own.
 
 ### Code generation
@@ -330,7 +330,7 @@ back. Ghost statements are its own.
 Code generation instantiates a definition's MIR for each instance and
 lowers it to the LIR. Evaluation order, temporaries, short-circuits, and
 the flow of patterns are already in the MIR, so the lowering decides only
-what is the LIR's: pointers, layout, the calling convention, drop
+the LIR's concerns: pointers, layout, the calling convention, drop
 elaboration, the inlining of yielding and lending methods, and the
 outlining of regions.
 

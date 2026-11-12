@@ -1,0 +1,12 @@
+type Box(value: Int64)
+
+fn f(count: UInt32) -> Int64 {
+  var box = Box(value: 0)
+  for _ in 0..count {
+    box.value = 1
+  }
+  proof {
+    assert box.value == 0
+  }
+  box.value
+}

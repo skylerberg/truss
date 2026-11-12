@@ -1,5 +1,5 @@
 (* The tests of the engine: which queries are computed again after a change,
-   what a change reaches, phase by phase, and what an engine over a base
+   a change's reach, phase by phase, and the results an engine over a base
    holds. *)
 
 open Harness
@@ -17,7 +17,7 @@ type build = { files : (string, string) Query.input; total : (unit, int) Query.q
 
 (* A small build: two "files" as inputs, a length per file, and a total that
    reads the lengths' parities. The lengths are of an earlier phase than
-   what reads them. *)
+   their readers. *)
 let build () =
   let files = Query.input ~name:"file" ~show:Fun.id () in
   let length =
@@ -59,7 +59,7 @@ let () =
       Engine.clear_log engine;
       ignore (Engine.get engine total ());
       expect_log engine []);
-  test "a change runs only what read it" (fun () ->
+  test "a change runs only its readers" (fun () ->
       let engine, files, total = setup () in
       ignore (Engine.get engine total ());
       Engine.clear_log engine;
@@ -191,7 +191,7 @@ let () =
     (fun () ->
       let few = work (fan 10) and many = work (fan 1000) in
       if few <> many then fail "the work grew with the readers");
-  test "a result that changes marks what reads it in a later phase" (fun () ->
+  test "a result that changes marks its readers in a later phase" (fun () ->
       let engine, source = fan 10 in
       let before = Engine.counters engine in
       Engine.set engine source () 5000;
@@ -364,7 +364,7 @@ let () =
       match Engine.get engine (Lazy.force e_query) () with
       | _ -> fail "no cycle once it appeared"
       | exception Query.Cycle _ -> ());
-  test "a query that raises is computed again when what it read changes" (fun () ->
+  test "a query that raises is computed again when a dependency changes" (fun () ->
       let engine = Engine.create ~log:true () in
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
       let inner = unit_query "inner" (fun database () -> Query.get database value ()) in
@@ -384,7 +384,7 @@ let () =
       ignore (attempt ());
       ignore (attempt ());
       expect_log engine [ "inner()" ]);
-  test "checking what a result read stops at its first change" (fun () ->
+  test "checking a result's dependencies stops at the first change" (fun () ->
       let engine = Engine.create ~log:true () in
       let switch = Query.input ~name:"switch" ~show:(fun () -> "") () in
       let expensive = unit_query "expensive" (fun _ () -> 7) in
@@ -409,7 +409,7 @@ let () =
       if one <> 1 || two <> 2 then fail "read %d and %d" one two);
   test "an input cannot change while a query runs" (fun () ->
       let engine = Engine.create () in
-      (* The query changes an engine, so it is no function of what it reads. *)
+      (* The query changes an engine, so it is no function of its reads. *)
       Engine.skip_audit engine;
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
       let writer = unit_query "writer" (fun _ () -> Engine.set engine value () 1) in
@@ -435,13 +435,13 @@ let () =
       if Engine.get engine build.total () <> 2 then fail "another total";
       expect_log engine [];
       if Engine.count engine <> 0 then fail "holds %d nodes of its own" (Engine.count engine));
-  test "a change over a base computes only what read it, and leaves the base as it was" (fun () ->
+  test "a change over a base computes only its readers, and leaves the base unchanged" (fun () ->
       let base, engine, build = over_base () in
       Engine.set engine build.files "b" "four";
       if Engine.get engine build.total () <> 1 then fail "a stale total";
       expect_log engine [ "length(b)"; "parity(b)"; "total()" ];
       if Engine.get base build.total () <> 2 then fail "the base changed");
-  test "an engine over a base holds only what its change reached" (fun () ->
+  test "an engine over a base holds only the results its change reached" (fun () ->
       let _, engine, build = over_base () in
       Engine.set engine build.files "b" "four";
       ignore (Engine.get engine build.total ());
@@ -474,7 +474,7 @@ let () =
       if Engine.get engine build.total () <> 2 then fail "another total";
       Engine.set engine build.files "a" "four";
       if Engine.get engine build.total () <> 1 then fail "a stale total");
-  test "a new result over a base is told when what it read of the base changes" (fun () ->
+  test "a new result over a base is told when its dependency in the base changes" (fun () ->
       let _, engine, build = over_base () in
       let doubled =
         unit_query ~phase:Phases.bodies "doubled" (fun database () ->
@@ -678,7 +678,7 @@ let () =
       in
       Engine.set engine source "a" "one";
       ignore (Engine.get engine late "a");
-      (* The later result now differs from what a new engine computes. *)
+      (* The later result now differs from a new engine's. *)
       hidden := 2;
       if Engine.audit ~before:Phases.proofs engine <> [] then
         fail "the audit computed a result of a later phase";

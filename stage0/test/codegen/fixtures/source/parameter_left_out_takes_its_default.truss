@@ -1,0 +1,9 @@
+fn connect(port: Int64 = 443, secure: Bool = true) -> Int64 {
+  if secure { port } else { 0 }
+}
+
+test "parameter defaults" {
+  assert connect() == 443
+  assert connect(port: 80) == 80
+  assert connect(secure: false) == 0
+}

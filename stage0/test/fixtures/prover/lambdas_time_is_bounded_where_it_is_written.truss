@@ -1,0 +1,15 @@
+fn each(items: List[Int64], visit: (fn(Int64) cost time finite))
+  cost time O(items.length() * time(visit))
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn f(items: List[Int64])
+  cost time O(items.length())
+{
+  each(items, visit: fn(item) {
+    let _ = item
+  })
+}

@@ -1,0 +1,7 @@
+trait Shower {
+  fn show(self, items: List[Int64]) -> Slice[Int64]
+}
+
+impl Shower for Bag {
+  fn show(self, items: List[Int64]) -> Slice[Int64] { items[..] }
+}

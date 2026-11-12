@@ -1,0 +1,12 @@
+type Couple(first: Int64, second: Int64)
+
+fn Couple.each(self) yields Int64
+  ensures result == self.first || result == self.second
+  ensures yielded.length() <= 2
+  ensures finished ==> yielded.length() == 2
+  cost time finite
+{
+  yield self.first
+  yield self.second
+}
+

@@ -1,0 +1,5 @@
+fn f(value: Int64) -> Int64
+  cost allocations == 0
+{
+  value + 0
+}

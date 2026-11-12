@@ -1,0 +1,23 @@
+public trait Stamper {
+  fn stamp(self) -> Instant
+    uses Clock
+}
+
+public type Wall()
+
+impl Stamper for Wall {
+  fn stamp(self) -> Instant
+    uses Clock
+  {
+    Clock.now()
+  }
+}
+
+public type Fixed()
+
+impl Random for Fixed uses Clock {
+  fn next(self) -> UInt64 {
+    let _ = Clock.now()
+    4
+  }
+}

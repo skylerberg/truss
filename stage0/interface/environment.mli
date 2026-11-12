@@ -1,6 +1,6 @@
 (** The interfaces of definitions, as queries.
 
-    [lowered_interface] lowers a definition's outward-facing part and keeps what lowering reported.
+    [lowered_interface] lowers a definition's outward-facing part and keeps lowering's diagnostics.
     The other queries project one interface out of it by path, so a definition's diagnostics
     changing never re-checks a definition that reads its interface. *)
 
@@ -10,7 +10,7 @@ type interface =
   | Trait_interface of Types.trait_interface
   | Impl_interface of Types.impl_interface
   | Constant_interface of Types.constant_interface
-  | Test_interface of Types.capability list
+  | Test_interface of Types.capability_set
   | Theorem_interface of Types.signature
   | Law_proof_interface of {
       generics : Types.generic list;

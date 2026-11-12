@@ -1,0 +1,5 @@
+fn f(count: UInt8) -> UInt8
+  requires count < 255
+{
+  count + 1
+}

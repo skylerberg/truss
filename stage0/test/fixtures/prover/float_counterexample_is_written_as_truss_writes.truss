@@ -1,0 +1,5 @@
+fn f(value: Float32) -> Bool
+  ensures result
+{
+  value * 0.0 == 0.0
+}

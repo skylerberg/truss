@@ -1,0 +1,54 @@
+
+type InOrder(opened: UInt64, cancelled: List[UInt64])
+
+fn InOrder.is_cancelled(self, task_group: UInt64) -> Bool {
+  for other in self.cancelled {
+    if other == task_group {
+      return true
+    }
+  }
+  false
+}
+
+impl Tasks for InOrder {
+  fn open(mut self) -> UInt64 {
+    self.opened += 1
+    self.opened
+  }
+
+  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    if self.is_cancelled(task_group) {
+      return false
+    }
+    work(item)
+    true
+  }
+
+  fn join(self, task_group: UInt64) {}
+
+  fn cancel(mut self, task_group: UInt64) -> Bool {
+    if self.is_cancelled(task_group) {
+      return false
+    }
+    mut self.cancelled.push(task_group)
+    true
+  }
+
+  fn cancelled(self) -> Bool {
+    false
+  }
+
+  fn watch(self, key: UInt64) -> UInt64 {
+    0
+  }
+
+  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {}
+
+  fn wake(self, key: UInt64) {}
+
+  fn lock(self, mutex: UInt64) {}
+
+  fn unlock(self, mutex: UInt64) {}
+
+  fn yield_now(self) {}
+}

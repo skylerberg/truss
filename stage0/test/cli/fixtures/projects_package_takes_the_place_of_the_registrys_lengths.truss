@@ -1,0 +1,3 @@
+public fn meter() -> Int64 {
+  7
+}

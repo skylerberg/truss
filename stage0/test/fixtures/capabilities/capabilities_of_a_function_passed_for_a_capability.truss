@@ -1,0 +1,3 @@
+fn f() -> Instant {
+  each_time(tick)
+}

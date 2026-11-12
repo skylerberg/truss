@@ -1,0 +1,3 @@
+fn f(value: UInt32, divisor: UInt32) -> UInt32 {
+  value / divisor
+}

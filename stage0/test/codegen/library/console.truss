@@ -15,7 +15,7 @@ test "styles are stripped from text" {
   assert console::strip_styles("\u{1b}x").length() == 2
 }
 
-test "a captured console gives its lines in order and keeps what is printed" {
+test "a captured console gives its lines in order and keeps its printed output" {
   var captured = console::CapturedConsole.new(["first", "second"])
   provide mut captured {
     assert Console.read_line() == Some("first")

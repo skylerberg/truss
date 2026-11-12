@@ -1,0 +1,8 @@
+fn g(items: List[Int64]) -> Int64 {
+  var total = 0
+  for item in items {
+    if item < 0 { break }
+    total += item
+  }
+  total
+}

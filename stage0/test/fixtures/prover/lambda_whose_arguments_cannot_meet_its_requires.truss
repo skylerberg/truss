@@ -1,0 +1,12 @@
+fn each_index(count: USize, visit: (fn(index: USize) -> USize requires index < count)) -> USize {
+  if count > 0 { visit(count - 1) } else { 0 }
+}
+
+fn f(x: Int64) -> Int64
+  ensures result <= 0
+{
+  if x > 0 {
+    let _ = each_index(0, visit: fn(i) { i })
+  }
+  x
+}

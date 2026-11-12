@@ -1,0 +1,9 @@
+fn greetings() yields String {
+  yield "hello"
+  yield "hi"
+}
+
+fn f() -> Option[String] {
+  var each = greetings()
+  mut each.next()
+}

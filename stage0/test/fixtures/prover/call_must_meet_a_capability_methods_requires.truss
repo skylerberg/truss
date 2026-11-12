@@ -1,0 +1,8 @@
+capability Store {
+  fn put(slot: UInt8)
+    requires slot < 4
+}
+
+fn f() uses Store {
+  Store.put(9)
+}

@@ -1,0 +1,6 @@
+fn bump(counter: mut Int64, by: Int64)
+  requires by > 1
+  cost time O(1)
+{
+  counter += by
+}

@@ -1,0 +1,4 @@
+trait Named {
+  fn name(self) -> String
+    uses Self.Uses
+}

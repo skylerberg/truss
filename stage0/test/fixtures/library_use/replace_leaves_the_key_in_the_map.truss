@@ -1,0 +1,5 @@
+fn replaced(ports: mut Map[Int64, Int64]) -> Option[Int64]
+  ensures ports.contains(80)
+{
+  mut ports.replace(80, value: 8080)
+}

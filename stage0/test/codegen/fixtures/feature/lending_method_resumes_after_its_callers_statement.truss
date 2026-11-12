@@ -1,0 +1,13 @@
+type Counted(value: Int64, reads: Int64)
+
+fn Counted.current(mut self) lends Int64 {
+  yield self.value
+  self.value = 99
+}
+
+test "lent" {
+  var counted = Counted(value: 1, reads: 0)
+  let got = mut counted.current() + 0
+  assert got == 1
+  assert counted.value == 99
+}

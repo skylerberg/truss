@@ -1,0 +1,4 @@
+fn f(fast: Bool) -> Instant {
+  let action: fn() -> Instant = if fast { still } else { tick }
+  action()
+}

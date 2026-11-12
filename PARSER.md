@@ -178,7 +178,7 @@ limits bound it:
   as in `a.b.c`, and `else if` branches. The nesting limit does not count a
   chain's links, but each link nests the tree one level deeper.
 
-Both limits are far above what code written by a person or an agent reaches,
+Both limits are far above the nesting depth of code written by a person or an agent,
 as is the lexer's limit of 32 nested interpolations. Exceeding either is the
 error `parser.nesting_too_deep`.
 
@@ -561,7 +561,7 @@ of the fixed code and continues.
 | `List<String>`, `fn first<T>(...)` | `<` where type arguments or generic parameters go, closed by `>` on the same line | `List[String]`, `fn first[T](...)` |
 | `Shape::Circle`, `List::new()` | `::` after an `UPPER` name in an expression | `Shape.Circle`, `List.new()` |
 | `Shape.Circle(radius)`, `Shape::Circle(radius)` in a pattern | `.` or `::` and an `UPPER` name after an `UPPER` name | `Circle(radius)` |
-| `vec![1, 2]`, `println!(...)` | A name, `!`, and `(` or `[`, with no space between them | `[1, 2]` for `vec!`; none for the others, whose message says what to write |
+| `vec![1, 2]`, `println!(...)` | A name, `!`, and `(` or `[`, with no space between them | `[1, 2]` for `vec!`; none for the others, whose message gives the replacement |
 | `todo!()`, `unreachable!()` | `!` and `(` right after the keyword | `todo`, `unreachable`; none when the parentheses hold arguments |
 | `(a, b)`, `(Int64, String)`, `pair.0` | A comma directly inside the parentheses of an expression or a type; a number after `.` | None; the message says that Truss has no tuples and recommends a record |
 | `List<String>.new()` | `<` after an `UPPER` name in an expression, when a `.`, a `(`, or a `::` follows its closer; otherwise the `<` is a comparison | `List[String].new()` |

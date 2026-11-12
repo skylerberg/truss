@@ -2,9 +2,9 @@
 
 This document describes how Truss code is written. For semantics
 (capabilities, costs, memory, failure, and so on), see [DESIGN.md](DESIGN.md).
-It describes the language, not a compiler: what stage0 builds of it is in
-the documents of stage0's stages, which
-[IMPLEMENTATION.md](IMPLEMENTATION.md) lists.
+It describes the language, not a compiler. The documents of stage0's
+stages, which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists, say how much of
+it stage0 builds.
 
 ## Guiding ideas
 
@@ -101,7 +101,7 @@ or name resolution gives them their meaning where they appear:
 | `result` | Inside `ensures` and `cost`, where it names the return value |
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
 | `identical` | Inside specifications: `identical(a, b)`, whether two values of one type are the same value |
-| `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the clauses of a `for` loop, where they name what was yielded so far and whether the method ran to its end |
+| `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the clauses of a `for` loop, where they name the parts yielded so far and whether the method ran to its end |
 
 A parameter cannot be named `result`, and a function cannot be named `old`,
 because inside specifications those names mean the return value and a value as
@@ -194,7 +194,7 @@ rather than read as something else:
 | `List<String>`, `fn first<T>(...)` | Type arguments and generic parameters go in square brackets. The fix writes `List[String]` and `fn first[T](...)`. |
 | `Shape::Circle`, `List::new()` | `::` follows only a module's name. The fix writes `Shape.Circle` and `List.new()`. |
 | `Shape.Circle(radius)` in a pattern | A pattern names a variant without its type. The fix writes `Circle(radius)`. |
-| `vec![1, 2]`, `println!(...)`, `todo!()` | Truss has no macros. The fix writes `[1, 2]` and `todo`; for the others, the message says what to write. |
+| `vec![1, 2]`, `println!(...)`, `todo!()` | Truss has no macros. The fix writes `[1, 2]` and `todo`; for the others, the message gives the replacement. |
 | `(a, b)`, `pair.0` | Truss has no tuples. The message recommends a record. |
 | `f"Hello {name}"`, `r"\d+"`, `b'a'` | Strings have no prefixes. The fix writes `"Hello ${name}"`, `"""\d+"""`, and `UInt8"a"`. |
 | `"\x41"`, `"\u00E9"` | A character is written by its code point. The fix writes `"\u{41}"` and `"\u{E9}"`. |
@@ -221,7 +221,7 @@ directly.
 ## No comments
 
 Truss has no comment syntax. Names, signatures, contracts, invariants, laws,
-costs, and tests carry what comments would otherwise say. See
+costs, and tests carry the information comments would otherwise hold. See
 [DESIGN.md](DESIGN.md#no-comments) for the reasons. The code examples in this
 document are explained in the text around them.
 
@@ -708,8 +708,8 @@ public type Tree =
 - Functions called in an invariant must be pure and have a `time` clause.
 - A private method that takes `mut self` may be called while `self` is in
   the middle of a change. Its `self` is not assumed to meet the invariant,
-  and need not meet it when the method returns, so it states what it needs
-  and what it leaves with `requires` and `ensures`:
+  and need not meet it when the method returns, so it states its precondition
+  and postcondition with `requires` and `ensures`:
 
   ```truss
   fn SortedList[Element: Ordered].sift_into_place(mut self, index: USize)
@@ -956,7 +956,7 @@ A bound is an expression that can use:
 - `time(Element.equal)`, a bound on the time of any one call to a method of
   a trait that bounds a type parameter
 
-`time(visit)` cannot depend on what `visit` is called with, because a
+`time(visit)` cannot depend on `visit`'s arguments, because a
 function type's parameters have no names. If `visit` has the type
 `(fn(Item) cost time O(1))`, `time(visit)` is a constant. If it has
 `cost time finite`, `time(visit)` is a fixed bound that is not known. A
@@ -1162,7 +1162,7 @@ A *place* is a variable, `self`, or a constant, followed by any number of
 field accesses and indexes: `scores`, `config.servers`, `scores[0]`. A
 constant is a read-only place. When a place is passed
 to a `mut` or `own` parameter, the call site repeats the keyword. A reader can
-see what happens to each existing value without looking up the signature.
+see each change to an existing value without looking up the signature.
 
 A temporary value, such as a literal or the result of a call, is never marked.
 Nothing else can see it, so it is always handed over as owned. Copies that
@@ -1199,7 +1199,7 @@ After `own config.name`, the other fields of `config` can still be used, but
 
 A place that is lent `mut` can be moved out of in the same way, as long as it
 is given a new value before it goes back to its owner. This is how a function
-takes what a `mut` place holds and leaves something else there:
+takes a `mut` place's value and leaves another value there:
 
 ```truss
 fn Option[Value].take(mut self) -> Option[Value] {
@@ -1209,7 +1209,7 @@ fn Option[Value].take(mut self) -> Option[Value] {
 }
 ```
 
-- **What can be moved out** is the whole place or a field of it. The place
+- **The part moved out** is the whole place or a field of it. The place
   can be a `mut` parameter, `mut self`, the variable of a `mut` loop, a `mut`
   binding of a `match`, or a lambda's `mut` parameter.
 - **It must be assigned again on every path** before the function returns,
@@ -1242,8 +1242,8 @@ checks this within each function, with no annotations.
   an argument. It cannot be put where a stored value is needed, such as an
   `own` parameter of function type, and putting it into a record or a list
   makes that record or list a view too.
-- A function can return a view only of what its parameters view or of the
-  parameters themselves, never of its own locals, as `items[1..4]`,
+- A function can return a view only of the places its parameters view or of
+  the parameters themselves, never of its own locals, as `items[1..4]`,
   `split_at`, `split_first`, and `text.trim()` do. The caller treats the
   result as viewing everything its read-only and view arguments view: after
   `let chosen = cached.unwrap_or(default: backup[..])`, `backup` is frozen
@@ -1379,7 +1379,7 @@ mut grid.cell(position).visit()
   methods can.
 - **The part is lent for the rest of the caller's statement.** Then the
   method always continues after its `yield`, even if the statement leaves
-  early with `?` or `return`. So a type can update what depends on the part,
+  early with `?` or `return`. So a type can update values that depend on the part,
   such as a cached total, after the caller changes it.
 - **For that long, `grid` is lent whole.** The statement cannot use `grid`
   again when the part is lent `mut`, and cannot change it when the part is
@@ -1430,7 +1430,7 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
   value: a use after free. To lend an `Option` to be changed, the method
   yields a local `Option` with `yield mut`, and after the `yield` writes
   the local's value to the field, as Swift's `_modify` accessors do.
-- **The value owns none of what it was lent.** It holds each lent place's
+- **The value owns none of the places lent to it.** It holds each lent place's
   value for as long as it is lent, and `self` is lent whole for that time,
   as it is when one part is lent.
 
@@ -1475,11 +1475,11 @@ A yielding method gives out parts one after another:
   }
   ```
 
-  `next()` runs the method to its next `yield` and returns `Some` of what it
-  yields, and since pulling changes the cursor, the call is marked `mut`, or `None` when the method ends. A cursor that is never pulled
+  `next()` runs the method to its next `yield` and returns `Some` of the
+  yielded part, and since pulling changes the cursor, the call is marked `mut`, or `None` when the method ends. A cursor that is never pulled
   again is simply dropped, which ends the method at its last `yield`, as
-  `break` does. A cursor from an `own self` method owns what it iterates
-  over. A cursor from a `self` method is a view. Cursors are how `zip`,
+  `break` does. A cursor from an `own self` method owns the collection it
+  iterates over. A cursor from a `self` method is a view. Cursors are how `zip`,
   merging sorted sequences, and looking ahead with `peek` are written.
 - **A cursor's type has no name,** as with Rust's closures, but it implements
   the prelude trait `Cursor`:
@@ -1524,8 +1524,8 @@ A yielding method gives out parts one after another:
 
 #### Contracts of lending and yielding methods
 
-A lending or yielding method's `ensures` says what it yields and what it
-leaves behind:
+A lending or yielding method's `ensures` describes its yielded parts and its
+final state:
 
 ```truss
 fn List[Element].each(self) yields Element
@@ -1793,7 +1793,7 @@ fn sum[count: USize](values: Array[Int64, count]) -> Int64
   which you mean.
 - A type supports `[]` by implementing the prelude trait `Index`, whose
   lending methods give read and `mut` access to an element and state with
-  `requires` what an index must satisfy. See
+  `requires` an index's precondition. See
   [Lending and yielding methods](#lending-and-yielding-methods).
 - An assignment `collection[key] = value` inserts a missing key when the
   type also implements `IndexAssign`, whose one method `assign` takes the
@@ -2104,14 +2104,14 @@ Afterward, `disk` holds everything that was written.
 
 These capabilities are in the prelude:
 
-| Capability | What it allows |
+| Capability | Allows |
 |---|---|
 | `Console` | Reading standard input, writing standard output and standard error |
 | `FileRead` | Reading files and listing directories |
 | `FileWrite` | Creating, writing, renaming, and deleting files |
 | `NetworkClient` | Opening outgoing connections and looking up names |
 | `NetworkServer` | Listening for incoming connections |
-| `Handles` | Reading, writing, and closing what is already open: a file, a connection, a listener, a running program |
+| `Handles` | Reading, writing, and closing open handles: a file, a connection, a listener, a running program |
 | `Clock` | The current time, a monotonic clock, and sleeping |
 | `Random` | Random numbers from the operating system |
 | `Environment` | Environment variables, the current directory, and which operating system and processor the program runs on |
@@ -2122,7 +2122,7 @@ These capabilities are in the prelude:
 | `Panic` | Ending the program |
 
 Each capability's methods are the least an implementation has to give.
-What is built from them is an ordinary function in a module of the standard
+Each operation built from them is an ordinary function in a module of the standard
 library, such as `files::write_with` and `network::connect`, so it works
 with every implementation.
 
@@ -2152,7 +2152,7 @@ fn first_line(path: Path) -> Result[Option[String], SystemError]
 The file is closed when `first_line` returns, on every path, including the
 early returns from `?`.
 
-- Opening is one capability and using what is open is another. `open` is
+- Opening is one capability and using an open handle is another. `open` is
   `FileRead`'s, and `read_line` has `uses Handles`, as every method of a
   handle does. Code that is handed a file or a connection needs `Handles`
   alone, and can open nothing with it. Code that only holds a handle still
@@ -2164,7 +2164,7 @@ early returns from `?`.
   for closing a connection cleanly, and `wait` for a process's exit status.
 - A buffered writer is only lent, inside a scope, so its data can never be
   lost without anyone knowing. `files::write_with` lends the writer to a
-  function, then writes out what is left and returns the first error, from
+  function, then writes out the remaining buffered data and returns the first error, from
   the function or from writing:
 
   ```truss
@@ -2355,7 +2355,7 @@ own variables. `break` leaves the loop and cancels the iterations that are
 still running, and `continue` ends one iteration.
 
 An iteration keeps running after the loop has advanced to the next value,
-so what it is given must stay valid until the loop ends:
+so its inputs must stay valid until the loop ends:
 
 - A range, a cursor, and a method that `yields own` values give each task
   a value of its own.
@@ -2523,8 +2523,8 @@ test "two deposits both arrive" {
 ```
 
 - The seeded implementation switches tasks only at capability calls, which
-  are the only points where one task can see what another did.
-- A test that deadlocks fails, and reports what each task was
+  are the only points where one task can see another's effects.
+- A test that deadlocks fails, and reports the event each task was
   waiting for. The report is a panic, so a function that provides a
   `SeededTasks` or a `World` outside a test declares `uses Panic`.
 
@@ -2545,7 +2545,7 @@ test "a reply that never arrives ends at the time limit" {
 }
 ```
 
-- `simulation::Setup` holds what a world starts with, such as the lines of
+- `simulation::Setup` holds a world's initial state, such as the lines of
   its console's input, its environment's variables, and its files.
   `World.from(setup, seed: seed)` makes the world.
 - A world's file system is in memory. `Setup.with_file(path, contents)`
@@ -2554,7 +2554,7 @@ test "a reply that never arrives ends at the time limit" {
 - `world.fail_next(operation, error)` makes the next `Open`, `Read`, or
   `Write` of a file fail with `error`, once.
 - A `World` is a reference to its state, so it is provided without `mut`.
-  A test reads what happened, such as `world.output()` and
+  A test reads the world's record of events, such as `world.output()` and
   `world.records()`, inside the `provide`.
 - Each capability call into a `World` is a point where the seed may switch
   to another task.
@@ -2711,7 +2711,7 @@ whose one method is `from_template`. The trait's associated type `Part` is the
 type each interpolated value is converted to, and the method's parameter,
 `Template[Part]`, holds the literal text and the converted values.
 
-A tag states what makes its literal text valid with `requires`:
+A tag states the rules for valid literal text with `requires`:
 
 ```truss
 impl FromTemplate for Regex {
@@ -2749,8 +2749,8 @@ let newline = UInt8"\n"
 exactly one ASCII character. Both are checked when the code is compiled, and
 neither allows `${...}`.
 
-`text.characters()` gives the `Character`s of a string. What a reader sees as
-one character can be several scalar values, such as an emoji with a skin tone,
+`text.characters()` gives the `Character`s of a string. A character as a reader sees it
+can be several scalar values, such as an emoji with a skin tone,
 so `text.graphemes()` gives those as `StringSlice`s.
 
 ## Traits and laws
@@ -2777,7 +2777,7 @@ impl Monoid for Int64 {
 A `law` is a property every implementation must satisfy. A trait bound on a
 generic parameter is written `[Element: Ordered]`.
 
-A law is about what methods return, so the prover can use it only where
+A law is about methods' results, so the prover can use it only where
 those methods end and give the same result for the same arguments: methods
 with a `time` clause and no capabilities, as `cost time finite` gives here.
 An `impl`'s method keeps its trait's `time` clause.
@@ -2857,9 +2857,9 @@ impl Ordered for Int64 {
   gives. A provided method can be replaced only when the prover reads its
   body as its definition: it is pure, has a `time` clause, and its body is
   functional, with no `var`, assignment, or loop (see
-  [DESIGN.md](DESIGN.md#what-a-function-means-to-the-prover)).
+  [DESIGN.md](DESIGN.md#bodies-and-contracts-in-proofs)).
 - Code that calls the method reasons from the trait alone, so a replacement
-  never changes what a call means, only how fast it runs.
+  never changes a call's meaning, only how fast it runs.
 
 ### Implementing a trait for a generic type
 
@@ -3044,7 +3044,7 @@ type Option[Value] =
 fields, except for an opaque type, which has them only when it declares them,
 as in `public opaque type Token(bytes: Array[UInt8, 16]) derives Plain`. The
 compiler checks a declaration against the fields, and other packages rely only
-on what is declared. A generic opaque type that declares one has it under the
+on the declaration. A generic opaque type that declares one has it under the
 conditions its fields give: `Slice[Element]` is `Plain` for every `Element`,
 because the view it holds is. Generic code that copies says so with a bound,
 as in `[Element: Copyable]`.
@@ -3158,12 +3158,12 @@ test "writes the report"
 
 - A test without `uses` is deterministic, and its result is cached until its
   code changes. An external test runs every time the test suite runs.
-- An external test gets exactly what it declares, with no hidden isolation.
+- An external test gets exactly the capabilities it declares, with no hidden isolation.
   To keep it to a scratch directory, narrow the capability with `provide`, as
   above.
 - Failed tests are never retried automatically.
 - A failed `assert` ends the test as failed. After an `assert`, the rest of the
-  test can rely on what it asserted.
+  test can rely on the asserted fact.
 - Tests do not wait for proofs. A test build checks, as the code runs, every
   primitive operation that could fail, such as an index, a division, or
   an addition that could overflow, so a test runs safely even where a proof
@@ -3305,12 +3305,12 @@ cannot run, so they appear only in specifications and in the bodies of
 functions for specifications only. A quantifier's body is pure: it cannot use
 capabilities.
 
-The prover reads `is_sorted`'s body as what `is_sorted` means, because the
+The prover reads `is_sorted`'s body as its definition, because the
 function is pure, has a `time` clause, and its body is functional: `let`,
 `if`, `match`, `is`, calls, fields, building values, `with`, operators, and
 quantifiers, with no `var`, assignment, or loop. Any other function is known
 to the prover only by its contract. See
-[DESIGN.md](DESIGN.md#what-a-function-means-to-the-prover).
+[DESIGN.md](DESIGN.md#bodies-and-contracts-in-proofs).
 
 A function called in a specification must be pure, with no `uses` at all,
 and have a `time` clause. A function that is defined only for some inputs
@@ -3710,7 +3710,7 @@ A published package holds its `truss.toml`, its modules, the Markdown files
 beside them, and a `truss.lock` with a line for each registry package it
 was published with, without `holds`: those its code uses, its tests apart,
 and those that they use in turn. Only the lock file at a project's
-root decides a build's versions directly. The others are what
-[DESIGN.md](DESIGN.md#choosing-versions) calls a package's record: a build
+root decides a build's versions directly. The others are, in
+[DESIGN.md](DESIGN.md#choosing-versions)'s term, a package's record: a build
 uses the highest version that the project's lock file or any of its
 packages' records names.

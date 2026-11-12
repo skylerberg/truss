@@ -1,5 +1,5 @@
 (* The command line's tests. Each gives a small package or input and states
-   one fact about what a command makes of it. *)
+   one fact about the command's result. *)
 
 open Cli
 
@@ -22,7 +22,7 @@ let manifest = ("truss.toml", manifest_of "demo")
 let package files = directory (manifest :: files)
 let read root path = In_channel.with_open_bin (Filename.concat root path) In_channel.input_all
 
-(* Runs [f] as a command would, with what it writes kept, and returns its
+(* Runs [f] as a command would, with its output kept, and returns its
    result and its output, then saves the sessions it opened, as the command
    line does after each command. *)
 let captured work =
@@ -90,9 +90,9 @@ let () =
           [
             ("truss.toml", "[project]\n");
             ("one/truss.toml", manifest_of "one" ^ "[dependencies]\ntwo = []\n");
-            ("one/main.truss", "use two::numbers\n\nfn four() -> Int64 {\n  numbers::two() * 2\n}\n");
+            ("one/main.truss", Fixtures.package_under_a_projects_root_is_in_the_project);
             ("two/truss.toml", manifest_of "two");
-            ("two/numbers.truss", "public fn two() -> Int64 {\n  2\n}\n");
+            ("two/numbers.truss", Fixtures.package_under_a_projects_root_is_in_the_project_numbers);
           ]
       in
       let project = Project.load (Filename.concat root "one") in
@@ -104,9 +104,9 @@ let () =
           [
             ("truss.toml", "[project]\n");
             ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
-            ("app/main.truss", "use lib::arith\n\nfn two() -> UInt8 {\n  arith::bump(1)\n}\n");
+            ("app/main.truss", Fixtures.dependencys_failed_proof_is_the_programs);
             ("lib/truss.toml", manifest_of "lib");
-            ("lib/arith.truss", "public fn bump(count: UInt8) -> UInt8 {\n  count + 1\n}\n");
+            ("lib/arith.truss", Fixtures.dependencys_failed_proof_is_the_programs_arith);
           ]
       in
       let project = Project.load (Filename.concat root "app") in
@@ -118,6 +118,23 @@ let () =
                file.module_.package = { Path.owner = None; name = "lib" })
              (Report.files report))
       then fail "the dependency's overflow is not reported");
+  test "a dependency's type error is reported without proofs" (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
+            ("app/main.truss", Fixtures.dependencys_type_error_is_reported_without_proofs);
+            ("lib/truss.toml", manifest_of "lib");
+            ("lib/arith.truss", Fixtures.dependencys_type_error_is_reported_without_proofs_arith);
+          ]
+      in
+      let status, output =
+        captured (fun () ->
+            Program_command.run ~directory:(Filename.concat root "app") ~release:false
+              ~sanitize:false ~arguments:[])
+      in
+      if status <> Outcome.Exit 1 || not (contains output "lib/arith.truss") then fail "%s" output);
   test "a package with no [project] above it is a project by itself" (fun () ->
       let root =
         directory
@@ -181,7 +198,7 @@ let () =
       expect_string ~expected:"../weather/forecast.truss"
         (Project.relative ~from:"/code/app" "/code/weather/forecast.truss"))
 
-(* What is wrong between manifests *)
+(* Errors between manifests *)
 
 let problems files =
   let project = Project.load (directory files) in
@@ -248,11 +265,13 @@ let () =
             ("truss.toml", "[project]\n");
             ( "app/truss.toml",
               manifest_of "app" ^ "[dependencies]\nlibrary = []\nother = [\n  \"Clock\",\n]\n" );
-            ("app/main.truss", "use library::numbers\n\nfn one() -> Int64 {\n  numbers::one()\n}\n");
+            ("app/main.truss", Fixtures.dependency_nothing_uses_is_a_problem_which_check);
             ("library/truss.toml", manifest_of "library");
-            ("library/numbers.truss", "public fn one() -> Int64 {\n  1\n}\n");
+            ( "library/numbers.truss",
+              Fixtures.dependency_nothing_uses_is_a_problem_which_check_numbers );
             ("other/truss.toml", manifest_of "other");
-            ("other/nothing.truss", "public fn nothing() -> Int64 {\n  0\n}\n");
+            ( "other/nothing.truss",
+              Fixtures.dependency_nothing_uses_is_a_problem_which_check_nothing );
           ]
       in
       let app = Filename.concat root "app" in
@@ -278,23 +297,9 @@ let owned =
   [
     ("truss.toml", "[project]\n");
     ("geometry/truss.toml", manifest_of "acme::geometry");
-    ( "geometry/vector.truss",
-      "public type Vector(x: Int64)\n\n\
-       public fn Vector.length(self) -> Int64 {\n\
-      \  self.x\n\
-       }\n\n\
-       public fn double(value: Int64) -> Int64\n\
-      \  requires value < 1000 && value > -1000\n\
-       {\n\
-      \  value * 2\n\
-       }\n" );
+    ("geometry/vector.truss", Fixtures.owned_vector);
     ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
-    ( "app/main.truss",
-      "use acme::geometry::vector\n\n\
-       fn four() -> Int64 {\n\
-      \  let _ = vector::double(1)\n\
-      \  acme::geometry::vector::double(2)\n\
-       }\n" );
+    ("app/main.truss", Fixtures.owned);
   ]
 
 let () =
@@ -310,7 +315,7 @@ let () =
           if not (contains shown.text "public fn double(value: Int64) -> Int64") then
             fail "showed %s" shown.text
       | shown -> fail "found %d" (List.length shown));
-  test "show lists what a package with an owner makes public" (fun () ->
+  test "show lists the public definitions of a package with an owner" (fun () ->
       let project = Project.load (directory owned) in
       if List.length (Show_command.find project ~body:false "acme::geometry") < 3 then
         fail "found too few")
@@ -373,18 +378,7 @@ let () =
       in
       if Check_command.chosen [ choice ] <> [] then fail "chose one");
   test "check --fix writes the only fix and leaves no diagnostic" (fun () ->
-      let root =
-        package
-          [
-            ( "main.truss",
-              "fn twice(value: Int64) -> Int64\n\
-              \  requires value < 1000 && value > -1000\n\
-               {\n\
-              \  let unused = value\n\
-              \  value * 2\n\
-               }\n" );
-          ]
-      in
+      let root = package [ ("main.truss", Fixtures.check_fix_writes_the_only_fix_and_leaves_no) ] in
       let status =
         quietly (fun () -> Check_command.run ~directory:root ~fix:true ~proofs:true ~json:false)
       in
@@ -393,15 +387,17 @@ let () =
         fail "wrote %s" (read root "main.truss"))
 
 let () =
-  test "check proves, and reports what it cannot prove" (fun () ->
-      let root = package [ ("main.truss", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ] in
+  test "check proves, and reports each unproven obligation" (fun () ->
+      let root =
+        package [ ("main.truss", Fixtures.check_proves_and_reports_each_unproven_obligation) ]
+      in
       let status, output =
         captured (fun () -> Check_command.run ~directory:root ~fix:false ~proofs:true ~json:false)
       in
       if status <> 1 then fail "status %d" status;
       if not (contains output "prover.overflow") then fail "%s" output);
   test "check --no-proofs reports no obligation" (fun () ->
-      let root = package [ ("main.truss", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ] in
+      let root = package [ ("main.truss", Fixtures.check_no_proofs_reports_no_obligation) ] in
       let status, output =
         captured (fun () -> Check_command.run ~directory:root ~fix:false ~proofs:false ~json:false)
       in
@@ -410,8 +406,8 @@ let () =
       let root =
         package
           [
-            ("a.truss", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n");
-            ("b.truss", "fn wrong() -> Int64 {\n  true\n}\n");
+            ("a.truss", Fixtures.check_prints_type_errors_before_it_proves_text);
+            ("b.truss", Fixtures.check_prints_type_errors_before_it_proves_b);
           ]
       in
       let status, output =
@@ -423,16 +419,7 @@ let () =
       | _ -> fail "%s" output);
   test "build refuses a program that can reach a hole in a proof" (fun () ->
       let root =
-        package
-          [
-            ( "main.truss",
-              "fn main(arguments: List[String]) -> ExitCode {\n\
-              \  proof {\n\
-              \    todo\n\
-              \  }\n\
-              \  ExitCode.success\n\
-               }\n" );
-          ]
+        package [ ("main.truss", Fixtures.build_refuses_a_program_that_can_reach_a_hole_in_a) ]
       in
       let outcome, output =
         captured (fun () -> Program_command.build ~directory:root ~output:None ~json:false)
@@ -465,23 +452,7 @@ let () =
 
 (* Selecting tests *)
 
-let suite =
-  {|fn double(value: Int64) -> Int64 {
-  value * 2
-}
-
-test "doubles two" {
-  assert double(2) == 4
-}
-
-test "doubles three" {
-  assert double(3) == 6
-}
-
-test "halves" {
-  assert double(1) == 2
-}
-|}
+let suite = Fixtures.suite
 
 let () =
   test "--match keeps the tests whose names contain the text" (fun () ->
@@ -504,12 +475,7 @@ let () =
 let () =
   test "a function's signature is its text without its body" (fun () ->
       let root =
-        package
-          [
-            ( "main.truss",
-              "public fn double(value: Int64) -> Int64\n  requires value < 100\n{\n  value * 2\n}\n"
-            );
-          ]
+        package [ ("main.truss", Fixtures.functions_signature_is_its_text_without_its_body) ]
       in
       let project = Project.load root in
       match Show_command.find project ~body:false "demo::main::double" with
@@ -518,16 +484,7 @@ let () =
             shown.text
       | shown -> fail "found %d" (List.length shown));
   test "a type is shown with its methods" (fun () ->
-      let root =
-        package
-          [
-            ( "main.truss",
-              "public type Point(x: Int64, y: Int64)\n\n\
-               public fn Point.sum(self) -> Int64 {\n\
-              \  self.x + self.y\n\
-               }\n" );
-          ]
-      in
+      let root = package [ ("main.truss", Fixtures.type_is_shown_with_its_methods) ] in
       let project = Project.load root in
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
@@ -537,21 +494,7 @@ let () =
 
 (* Holes *)
 
-let unfinished =
-  {|fn render(title: String, count: Int64) -> String {
-  let header = "${title}: ${count}"
-  let _ = header
-  todo
-}
-
-test "renders" {
-  assert render("a", count: 1) == "a: 1"
-}
-
-test "counts" {
-  assert 1 + 1 == 2
-}
-|}
+let unfinished = Fixtures.unfinished
 
 let () =
   test "a hole has the type it must have and the names in scope with theirs" (fun () ->
@@ -572,7 +515,8 @@ let () =
       | _ -> fail "found %d holes" (List.length holes));
   test "a hole whose type nothing fixes, such as one interpolated, is not decided yet" (fun () ->
       let project =
-        Project.load (package [ ("main.truss", "fn show() -> String {\n  \"${todo}\"\n}\n") ])
+        Project.load
+          (package [ ("main.truss", Fixtures.hole_whose_type_nothing_fixes_such_as_one) ])
       in
       match Holes_command.gather project [] with
       | [ { type_ = Some "not decided yet"; _ } ] -> ()
@@ -597,16 +541,7 @@ let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
       let project =
         Project.load
-          (package
-             [
-               ( "main.truss",
-                 "fn main(arguments: List[String]) -> ExitCode {\n\
-                 \  helper()\n\
-                  }\n\n\
-                  fn helper() -> ExitCode {\n\
-                 \  todo\n\
-                  }\n" );
-             ])
+          (package [ ("main.truss", Fixtures.todo_main_can_reach_is_refused_with_the_way_from) ])
       in
       match
         Compile.unshippable (lowering project)
@@ -671,7 +606,7 @@ let () =
           | way -> fail "reached by %s" (String.concat ", " way))
       | unshippable -> fail "found %d" (List.length unshippable));
   test "a package's program is the main of its main module, and of no other" (fun () ->
-      let main_text = "fn main(arguments: List[String]) -> ExitCode {\n  ExitCode.success\n}\n" in
+      let main_text = Fixtures.main_text in
       let with_main = Project.load (package [ ("main.truss", main_text) ]) in
       expect_strings ~expected:[ "demo::main::main" ]
         (List.map Path.show (Program_command.mains with_main));
@@ -680,17 +615,14 @@ let () =
   test "a function named main outside the main module is an ordinary function" (fun () ->
       let project =
         Project.load
-          (package [ ("menu.truss", "fn main(course: Int64) -> Int64 {\n  course\n}\n") ])
+          (package
+             [ ("menu.truss", Fixtures.function_named_main_outside_the_main_module_is_an_menu) ])
       in
       if not (Report.clean (Report.gather project)) then fail "has diagnostics");
   test "an echo is refused only by a build that ships" (fun () ->
       let project =
         Project.load
-          (package
-             [
-               ( "main.truss",
-                 "fn main(arguments: List[String]) -> ExitCode {\n  echo ExitCode.success\n}\n" );
-             ])
+          (package [ ("main.truss", Fixtures.echo_is_refused_only_by_a_build_that_ships) ])
       in
       let main = List.hd (Program_command.mains project) in
       let compile = lowering project in
@@ -703,15 +635,7 @@ let () =
 (* Renaming *)
 
 let two_files =
-  [
-    ("weather.truss", "public fn total(values: List[Int64]) -> USize {\n  values.length()\n}\n");
-    ( "main.truss",
-      "use demo::weather\n\n\
-       fn main(arguments: List[String]) -> ExitCode {\n\
-      \  let _ = weather::total([1]) + demo::weather::total([2])\n\
-      \  ExitCode.success\n\
-       }\n" );
-  ]
+  [ ("weather.truss", Fixtures.two_files_weather); ("main.truss", Fixtures.two_files) ]
 
 let rename root from_ to_ =
   quietly (fun () -> Rename_command.run ~directory:root ~from_ ~to_ ~json:false)
@@ -727,11 +651,7 @@ let () =
       then fail "wrote %s" (read root "main.truss"));
   test "a rename that would cause a diagnostic changes nothing" (fun () ->
       let root =
-        package
-          [
-            ( "main.truss",
-              "fn first() -> Int64 {\n  1\n}\n\nfn second() -> Int64 {\n  first() + 1\n}\n" );
-          ]
+        package [ ("main.truss", Fixtures.rename_that_would_cause_a_diagnostic_changes) ]
       in
       let before = read root "main.truss" in
       if rename root "demo::main::first" "second" <> 1 then fail "not refused";
@@ -768,19 +688,7 @@ let () =
           && contains main "  acme::geometry::arrow::double(2)")
       then fail "wrote %s" main);
   test "renaming a method rewrites its calls" (fun () ->
-      let root =
-        package
-          [
-            ( "main.truss",
-              "type Point(x: Int64)\n\n\
-               fn Point.get(self) -> Int64 {\n\
-              \  self.x\n\
-               }\n\n\
-               fn read() -> Int64 {\n\
-              \  Point(x: 1).get()\n\
-               }\n" );
-          ]
-      in
+      let root = package [ ("main.truss", Fixtures.renaming_a_method_rewrites_its_calls) ] in
       if rename root "demo::main::Point.get" "value" <> 0 then fail "refused";
       let text = read root "main.truss" in
       if not (contains text "fn Point.value(self)" && contains text "Point(x: 1).value()") then
@@ -789,22 +697,7 @@ let () =
 (* Comparing with a commit, and other worktrees *)
 
 let git = Harness.git
-
-let doubling =
-  {|internal fn double(value: Int64) -> Int64
-  requires value < 1000 && value > -1000
-{
-  value * 2
-}
-
-fn four() -> Int64 {
-  double(2)
-}
-
-test "doubles" {
-  assert double(2) == 4
-}
-|}
+let doubling = Fixtures.doubling
 
 (* A repository whose one commit holds the package. *)
 let repository text =
@@ -852,7 +745,7 @@ let nested_repository text =
         ("services/demo/truss.toml", manifest_of "demo");
         ("services/demo/main.truss", text);
         ("tools/truss.toml", manifest_of "tools");
-        ("tools/main.truss", "fn broken() -> Int64 {\n  true\n}\n");
+        ("tools/main.truss", Fixtures.nested_repository);
       ]
   in
   git top [ "init"; "-q"; "-b"; "main" ];
@@ -875,7 +768,7 @@ let () =
       let root = repository doubling in
       rewrite root "main.truss" (replace doubling "value * 2" "value + value");
       match impact root with
-      | [ { status = `Changed parts; read_by = []; _ } ] when not (List.mem "signature" parts) ->
+      | [ { status = `Changed parts; dependents = []; _ } ] when not (List.mem "signature" parts) ->
           if not (List.mem "body" parts) then fail "parts [%s]" (String.concat "; " parts)
       | changes ->
           fail "found [%s]"
@@ -888,7 +781,7 @@ let () =
                     | `Changed parts -> String.concat "," parts
                     | _ -> "?")
                   changes)));
-  test "a changed signature is shown before and after, with what reads it" (fun () ->
+  test "a changed signature is shown before and after, with its readers" (fun () ->
       let root = repository doubling in
       rewrite root "main.truss"
         (replace doubling "fn double(value: Int64) -> Int64"
@@ -898,22 +791,26 @@ let () =
           (fun (change : Impact_command.change) -> Path.show change.path = "demo::main::double")
           (impact root)
       with
-      | Some { before = Some before; after = Some after; read_by; _ } ->
+      | Some { before = Some before; after = Some after; dependents; _ } ->
           if not (contains before "(value: Int64)" && contains after "by: Int64 = 2") then
             fail "signatures %s, %s" before after;
-          if not (List.exists (fun (reader, _, _) -> Path.show reader = "demo::main::four") read_by)
+          if
+            not
+              (List.exists
+                 (fun (edge : Database.edge) -> Path.show edge.dependent = "demo::main::four")
+                 dependents)
           then fail "four does not read it"
       | _ -> fail "double did not change its signature");
   test "moving a definition within its file changes nothing" (fun () ->
-      let one = "fn one() -> Int64 {\n  1\n}\n" and two = "fn two() -> Int64 {\n  2\n}\n" in
+      let one = Fixtures.one and two = Fixtures.moving_a_definition_within_its_file_changes in
       let root = repository (one ^ "\n" ^ two) in
       rewrite root "main.truss" (two ^ "\n" ^ one);
       match impact root with [] -> () | changes -> fail "found %d changes" (List.length changes))
 
-(* What reads what, and positions *)
+(* Dependencies, and positions *)
 
 let () =
-  test "references list what reads a definition, part by part" (fun () ->
+  test "references list a definition's readers, part by part" (fun () ->
       let root = package [ ("main.truss", doubling) ] in
       let status, output =
         captured (fun () ->
@@ -976,7 +873,7 @@ let registry () =
   registry
 
 (* Adds a version of a package to a registry: its modules, the packages it
-   depends on, each with what it grants, and the versions it was published
+   depends on, each with its grants, and the versions it was published
    with, which the registry must hold already. *)
 let publish registry name version ?(dependencies = []) ?(record = []) modules =
   let manifest =
@@ -1009,11 +906,7 @@ let publish registry name version ?(dependencies = []) ?(record = []) modules =
 let units text =
   [ ("lengths.truss", Printf.sprintf "public fn meter() -> Int64 {\n  %s\n}\n" text) ]
 
-let geometry =
-  [
-    ( "vector.truss",
-      "use acme::units::lengths\n\npublic fn length() -> Int64 {\n  lengths::meter()\n}\n" );
-  ]
+let geometry = [ ("vector.truss", Fixtures.geometry_vector) ]
 
 (* A registry with [acme::units] at 1.0.0 and 1.1.0, and [acme::geometry]
    1.0.0, published with the first. *)
@@ -1027,9 +920,7 @@ let stocked () =
     geometry;
   registry
 
-let uses_geometry =
-  ("main.truss", "use acme::geometry::vector\n\nfn length() -> Int64 {\n  vector::length()\n}\n")
-
+let uses_geometry = ("main.truss", Fixtures.uses_geometry)
 let add root names = quietly (fun () -> Add_command.run ~directory:root ~names ~json:false)
 let lock_lines root = String.split_on_char '\n' (String.trim (read root "truss.lock"))
 
@@ -1066,9 +957,9 @@ let () =
       publish registry "acme::shapes" (1, 0, 0)
         ~dependencies:[ ("acme::units", []) ]
         ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 1, 0)) ]
-        [ ("square.truss", "public fn sides() -> Int64 {\n  4\n}\n") ];
+        [ ("square.truss", Fixtures.package_is_added_at_the_version_it_was_published_square) ];
       rewrite root "main.truss"
-        (snd uses_geometry ^ "\nfn sides() -> Int64 {\n  acme::shapes::square::sides()\n}\n");
+        (snd uses_geometry ^ Fixtures.package_is_added_at_the_version_it_was_published);
       if add root [ "acme::shapes" ] <> 0 then fail "not added";
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::shapes", "1.0.0"); ("acme::units", "1.1.0") ];
@@ -1076,7 +967,7 @@ let () =
   test "a package is added at the version written after @" (fun () ->
       let _ = stocked () in
       let root =
-        package [ ("main.truss", "fn meter() -> Int64 {\n  acme::units::lengths::meter()\n}\n") ]
+        package [ ("main.truss", Fixtures.package_is_added_at_the_version_written_after) ]
       in
       if add root [ "acme::units@1.0.0" ] <> 0 then fail "not added";
       expect_versions root [ ("acme::units", "1.0.0") ]);
@@ -1101,7 +992,7 @@ let () =
       let _ = stocked () in
       let root = package [ uses_geometry ] in
       ignore (add root [ "acme::geometry" ]);
-      (* Granting a package a capability changes what it holds. *)
+      (* Granting a package a capability changes its holdings. *)
       rewrite root "truss.toml"
         (manifest_of "demo" ^ "[dependencies]\n\"acme::geometry\" = [\"Clock\"]\n");
       expect_problem_in root
@@ -1167,7 +1058,8 @@ let () =
             ("app/truss.toml", manifest_of "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
             ("app/main.truss", snd uses_geometry);
             ("units/truss.toml", manifest_of "acme::units");
-            ("units/lengths.truss", "public fn meter() -> Int64 {\n  7\n}\n");
+            ( "units/lengths.truss",
+              Fixtures.projects_package_takes_the_place_of_the_registrys_lengths );
           ]
       in
       let app = Filename.concat root "app" in
@@ -1203,14 +1095,14 @@ let () =
       if status <> 0 || not (contains output "Every package is at the version asked for") then
         fail "status %d: %s" status output;
       expect_string ~expected:before (read root "truss.lock"));
-  test "an upgrade says which signatures the project reads change, and what breaks" (fun () ->
+  test "an upgrade says which signatures the project reads change, and which code breaks" (fun () ->
       let registry = stocked () in
       let root =
-        package [ ("main.truss", "fn meter() -> Int64 {\n  acme::units::lengths::meter()\n}\n") ]
+        package [ ("main.truss", Fixtures.upgrade_says_which_signatures_the_project_reads) ]
       in
       ignore (add root [ "acme::units" ]);
       publish registry "acme::units" (1, 2, 0)
-        [ ("lengths.truss", "public fn meter(scale: Int64) -> Int64 {\n  scale\n}\n") ];
+        [ ("lengths.truss", Fixtures.upgrade_says_which_signatures_the_project_reads_lengths) ];
       let status, output = upgrade root [ "acme::units" ] in
       if status <> 1 then fail "status %d: %s" status output;
       List.iter
@@ -1245,7 +1137,7 @@ let publish_from root = captured (fun () -> Publish_command.run ~directory:root 
 
 (* A package of its own project, named [acme::angles], with one module. *)
 let angles text = directory [ ("truss.toml", manifest_of "acme::angles"); ("degrees.truss", text) ]
-let turn = "public fn turn() -> Int64 {\n  360\n}\n"
+let turn = Fixtures.turn
 
 let published registry name =
   List.map
@@ -1286,16 +1178,16 @@ let () =
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees.truss" "public fn turn() -> Int64 {\n  180 + 180\n}\n";
+      rewrite root "degrees.truss" Fixtures.release_that_changes_only_a_body_gets_the_next;
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
-  test "a release that adds a public definition gets the next minor number, and says what is new"
+  test "a release that adds a public definition gets the next minor number, and lists the additions"
     (fun () ->
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees.truss" (turn ^ "\npublic fn half() -> Int64 {\n  180\n}\n");
+      rewrite root "degrees.truss" (turn ^ Fixtures.release_that_adds_a_public_definition_gets_the);
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       if not (contains output "acme::angles::degrees::half is new") then fail "said %s" output;
@@ -1305,7 +1197,7 @@ let () =
       let root = angles turn in
       ignore (publish_from root);
       let status, output = publish_from root in
-      if status <> 0 || not (contains output "`acme::angles` 1.0.0 is these files already") then
+      if status <> 0 || not (contains output "`acme::angles` 1.0.0 already has these files") then
         fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
   test "a release that changes a public signature is refused, with the signature as it was and is"
@@ -1313,8 +1205,8 @@ let () =
       let registry = registry () in
       let root = angles turn in
       ignore (publish_from root);
-      rewrite root "degrees.truss" "public fn turn(times: Int64) -> Int64 {\n  times\n}\n";
-      expect_refused root "acme::angles::degrees::turn has other parameters or another result";
+      rewrite root "degrees.truss" Fixtures.release_that_changes_a_public_signature_is_refused;
+      expect_refused root "acme::angles::degrees::turn changed its parameters or its result";
       let _, output = publish_from root in
       List.iter
         (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
@@ -1326,15 +1218,15 @@ let () =
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
   test "a release that takes a public definition away is refused" (fun () ->
       let _ = registry () in
-      let root = angles (turn ^ "\npublic fn half() -> Int64 {\n  180\n}\n") in
+      let root = angles (turn ^ Fixtures.release_that_takes_a_public_definition_away_is) in
       ignore (publish_from root);
       rewrite root "degrees.truss" turn;
-      expect_refused root "acme::angles::degrees::half is gone, or is no longer public");
+      expect_refused root "acme::angles::degrees::half was removed or is no longer public");
   test "a private definition can change freely" (fun () ->
       let registry = registry () in
-      let root = angles (turn ^ "\nfn half() -> Int64 {\n  180\n}\n") in
+      let root = angles (turn ^ Fixtures.private_definition_can_change_freely) in
       ignore (publish_from root);
-      rewrite root "degrees.truss" (turn ^ "\nfn third(of: Int64) -> Int64 {\n  of\n}\n");
+      rewrite root "degrees.truss" (turn ^ Fixtures.private_definition_can_change_freely_2);
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0"; "1.0.1" ]);
@@ -1347,32 +1239,27 @@ let () =
   test "a package with an error is not published" (fun () ->
       let _ = registry () in
       expect_refused
-        (angles "public fn turn() -> Int64 {\n  true\n}\n")
+        (angles Fixtures.package_with_an_error_is_not_published)
         "A package is published only when it has no errors");
   test "a package with a todo or an echo is not published, and each is listed" (fun () ->
       let registry = registry () in
-      let root =
-        angles
-          "public fn turn() -> Int64 {\n  todo\n}\n\npublic fn half() -> Int64 {\n  echo 180\n}\n"
-      in
+      let root = angles Fixtures.package_with_a_todo_or_an_echo_is_not_published in
       expect_refused root "degrees.truss:2:3: `todo` is not finished code";
       expect_refused root "degrees.truss:6:3: `echo` is not finished code";
       expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
   test "a package whose test fails is not published" (fun () ->
       let registry = registry () in
-      let root =
-        angles (turn ^ "\ntest \"a turn is a right angle\" {\n  assert turn() == 90\n}\n")
-      in
+      let root = angles (turn ^ Fixtures.package_whose_test_fails_is_not_published) in
       expect_refused root "A package is published only when its tests pass";
       expect_published registry { Path.owner = Some "acme"; name = "angles" } []);
   test "a package whose tests pass is published" (fun () ->
       let registry = registry () in
-      let root = angles (turn ^ "\ntest \"a turn is whole\" {\n  assert turn() == 360\n}\n") in
+      let root = angles (turn ^ Fixtures.package_whose_tests_pass_is_published) in
       let status, output = publish_from root in
       if status <> 0 then fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ])
 
-(* What a package is published with *)
+(* A package's dependencies at publication *)
 
 let () =
   test "a package is published with the versions of the packages its code uses" (fun () ->
@@ -1381,9 +1268,7 @@ let () =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ( "height.truss",
-              "use acme::geometry::vector\n\npublic fn height() -> Int64 {\n  vector::length()\n}\n"
-            );
+            ("height.truss", Fixtures.package_is_published_with_the_versions_of_the_height);
           ]
       in
       ignore (add root [ "acme::geometry" ]);
@@ -1406,40 +1291,33 @@ let () =
       ] ->
           ()
       | _ -> fail "published with other versions");
-  test "a published package is used by another project, with what it was published with" (fun () ->
+  test "a published package is used by another project, with its dependencies at publication"
+    (fun () ->
       let _ = stocked () in
       let walls =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ( "height.truss",
-              "use acme::geometry::vector\n\npublic fn height() -> Int64 {\n  vector::length()\n}\n"
-            );
+            ("height.truss", Fixtures.published_package_is_used_by_another_project_with_height);
           ]
       in
       ignore (add walls [ "acme::geometry" ]);
       ignore (publish_from walls);
       let root =
-        package [ ("main.truss", "fn tall() -> Int64 {\n  acme::walls::height::height()\n}\n") ]
+        package [ ("main.truss", Fixtures.published_package_is_used_by_another_project_with) ]
       in
       if add root [ "acme::walls" ] <> 0 then fail "not added";
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0"); ("acme::walls", "1.0.0") ];
       if not (clean root) then fail "has diagnostics");
-  test "a dependency that only a package's tests use is not one of what it is published with"
+  test "a dependency that only a package's tests use is left out of its published lock file"
     (fun () ->
       let registry = stocked () in
       let root =
         directory
           [
             ("truss.toml", manifest_of "acme::walls");
-            ( "height.truss",
-              "public fn height() -> Int64 {\n\
-              \  3\n\
-               }\n\n\
-               test \"a wall is taller than a meter\" {\n\
-              \  assert height() > acme::units::lengths::meter()\n\
-               }\n" );
+            ("height.truss", Fixtures.dependency_that_only_a_packages_tests_use_is_not_height);
           ]
       in
       ignore (add root [ "acme::units@1.0.0" ]);
@@ -1454,11 +1332,12 @@ let () =
              "truss.lock")
       then fail "published with a package only its test uses";
       let user =
-        package [ ("main.truss", "fn tall() -> Int64 {\n  acme::walls::height::height()\n}\n") ]
+        package [ ("main.truss", Fixtures.dependency_that_only_a_packages_tests_use_is_not) ]
       in
       ignore (add user [ "acme::walls" ]);
       expect_versions user [ ("acme::walls", "1.0.0") ];
-      if not (clean user) then fail "has diagnostics");
+      if not (Report.clean (Report.gather ~proofs:true (Project.load user))) then
+        fail "has diagnostics");
   test "a package that depends on one of its project's that is not published is refused" (fun () ->
       let _ = registry () in
       let root =
@@ -1469,8 +1348,7 @@ let () =
             ("angles/degrees.truss", turn);
             ( "walls/truss.toml",
               manifest_of "acme::walls" ^ "[dependencies]\n\"acme::angles\" = []\n" );
-            ( "walls/corner.truss",
-              "public fn corner() -> Int64 {\n  acme::angles::degrees::turn()\n}\n" );
+            ("walls/corner.truss", Fixtures.package_that_depends_on_one_of_its_projects_that_corner);
           ]
       in
       let walls = Filename.concat root "walls" in
@@ -1490,6 +1368,49 @@ let () =
   test "an unknown command is a bad argument" (fun () ->
       let outcome, _ = captured (fun () -> Main.evaluate [ "bogus" ]) in
       if outcome <> Outcome.Exit 2 then fail "did not exit with 2")
+
+(* Tagged templates *)
+
+let () =
+  test "check accepts an HTML template that interpolates into text and quoted attributes" (fun () ->
+      let root =
+        package
+          [
+            ( "main.truss",
+              "use standard::html\n\n\
+               fn page(name: String, link: String) -> html::Html {\n\
+              \  html::Html\"<p title='${name.copy()}'><a href=\\\"${own link}\\\">${own \
+               name}</a></p>\"\n\
+               }\n" );
+          ]
+      in
+      let outcome, output = captured (fun () -> Main.evaluate [ "check"; "-C"; root ]) in
+      if outcome <> Outcome.Exit 0 then fail "did not succeed: %s" output);
+  test "check rejects an HTML template that interpolates into an event handler or a script"
+    (fun () ->
+      List.iter
+        (fun template ->
+          let root =
+            package
+              [
+                ( "main.truss",
+                  Printf.sprintf
+                    "use standard::html\n\n\
+                     fn page(code: String) -> html::Html {\n\
+                    \  html::Html\"%s\"\n\
+                     }\n"
+                    template );
+              ]
+          in
+          let outcome, output = captured (fun () -> Main.evaluate [ "check"; "-C"; root ]) in
+          if outcome = Outcome.Exit 0 || not (contains output "is_valid_template") then
+            fail "accepted %s: %s" template output)
+        [
+          "<a onclick=\\\"${own code}\\\">x</a>";
+          "<${own code}>x</p>";
+          "<script>${own code}</script>";
+          "<a href=${own code}>x</a>";
+        ])
 
 (* Making a package *)
 
@@ -1534,16 +1455,13 @@ let () =
       if Lsp_command.offset Utf_16 source ~line:1 ~column:2 <> offset then fail "not the inverse");
   test "an open file's text is checked in place of the file on disk" (fun () ->
       let root =
-        package
-          [
-            ("main.truss", "fn main(arguments: List[String]) -> ExitCode {\n  ExitCode.success\n}\n");
-          ]
+        package [ ("main.truss", Fixtures.open_files_text_is_checked_in_place_of_the_file_on) ]
       in
       let uri = "file://" ^ Filename.concat root "main.truss" in
       let answer =
         quietly (fun () ->
             Lsp_command.check ~root Utf_16
-              [ (uri, "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ])
+              [ (uri, Fixtures.open_files_text_is_checked_in_place_of_the_file_on_2) ])
       in
       match Json.field "files" answer with
       | Json.List [ file ] -> (

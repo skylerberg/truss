@@ -1,0 +1,3 @@
+fn tall() -> Int64 {
+  acme::walls::height::height()
+}

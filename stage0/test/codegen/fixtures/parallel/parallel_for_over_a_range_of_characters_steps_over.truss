@@ -1,0 +1,13 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Panic
+{
+  parallel for letter in Character"\u{D700}"..=Character"\u{E001}" {
+    if letter > Character"\u{D7FF}" && letter < Character"\u{E000}" {
+      Panic.crash("a surrogate")
+    }
+    if letter == Character"\u{E001}" {
+      Panic.crash("the last character ran")
+    }
+  }
+  ExitCode.success
+}

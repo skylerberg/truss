@@ -153,9 +153,9 @@ test "a field with a default may be missing, and names may be written in camel c
   let read: Result[Settings, json::Error] = json::decode("{\"user_name\":\"ada\"}")
   assert read == Ok(Settings(user_name: "ada"))
   let settings = Settings(user_name: "bo", retry_count: 5, shapes: [Shape.Point])
-  let text = json::encode(settings, names: json::Names.CamelCase)
+  let text = json::encode(settings, names: serialization::Names.CamelCase)
   assert text == "{\"userName\":\"bo\",\"retryCount\":5,\"shapes\":[\"Point\"]}"
-  let back: Result[Settings, json::Error] = json::decode(text, names: json::Names.CamelCase)
+  let back: Result[Settings, json::Error] = json::decode(text, names: serialization::Names.CamelCase)
   assert back == Ok(own settings)
   let snake: Result[Settings, json::Error] = json::decode(text)
   assert snake is Err(Deserialize(missing)) && missing.path == "/user_name"

@@ -1,0 +1,50 @@
+type Settings(name: String = "default", retries: Int64 = 2 + 1, verbose: Bool = false)
+
+type Shape =
+  | Circle(radius: Int64 = 7)
+  | Square(side: Int64)
+
+fn colors() -> Set[String] {
+  ["red", "green", "red"]
+}
+
+fn ages() -> Map[String, Int64] {
+  ["ada": 36, "alan": 41]
+}
+
+fn renamed(settings: own Settings) -> Settings {
+  settings with (name: "renamed", retries: 9)
+}
+
+fn defaults() -> Settings {
+  Settings(verbose: true)
+}
+
+fn circle() -> Shape {
+  Shape.Circle()
+}
+
+fn both(first: Int64, second: Int64) -> Int64 {
+  var left = 0
+  var right = 0
+  parallel {
+    left = first * 2
+    right = second * 3
+  }
+  left + right
+}
+
+test "values" {
+  assert colors().length() == 2
+  assert ages().length() == 2
+  let settings = defaults()
+  assert settings.name == "default"
+  assert settings.retries == 3
+  assert settings.verbose
+  let changed = renamed(own settings)
+  assert changed.name == "renamed"
+  assert changed.retries == 9
+  assert changed.verbose
+  assert circle() is Circle(radius: 7)
+  assert both(1, second: 2) == 8
+}

@@ -1,0 +1,12 @@
+fn count(items: Slice[Int64]) -> USize
+  ensures result == items.length()
+  cost time O(1)
+{
+  items.length()
+}
+
+fn f(items: List[Int64]) -> USize
+  ensures result == items.length()
+{
+  count(items)
+}

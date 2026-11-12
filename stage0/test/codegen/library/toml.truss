@@ -1,0 +1,112 @@
+use standard::serialization
+use standard::toml
+
+fn parsed(text: StringSlice) -> Map[String, toml::Value] {
+  match toml::parse(text) {
+    Ok(table) => own table
+    Err(_) => [:]
+  }
+}
+
+fn rejects(text: StringSlice) -> Bool {
+  toml::parse(text) is Err(_)
+}
+
+test "keys, strings, numbers, and booleans are read as TOML 1.0 writes them" {
+  let table = parsed(
+    "# a comment\ntitle = \"TOML \\\"example\\\" \\u00e9\"\nliteral = 'C:\\path'\nbare-key_1 = 1_000\n\"quoted key\" = -17\nhex = 0xDEAD_beef\noctal = 0o755\nbinary = 0b1101\npi = 3.14_15\nexponent = -2e-2\npositive = +inf\nmissing = nan\non = true\noff = false\n",
+  )
+  assert table["title"] == toml::Value.String(value: "TOML \"example\" é")
+  assert table["literal"] == toml::Value.String(value: "C:\\path")
+  assert table["bare-key_1"] == toml::Value.Integer(value: 1000)
+  assert table["quoted key"] == toml::Value.Integer(value: -17)
+  assert table["hex"] == toml::Value.Integer(value: 3735928559)
+  assert table["octal"] == toml::Value.Integer(value: 493)
+  assert table["binary"] == toml::Value.Integer(value: 13)
+  assert table["pi"] == toml::Value.Float(value: 3.1415)
+  assert table["exponent"] == toml::Value.Float(value: -0.02)
+  assert table["positive"] == toml::Value.Float(value: Float64.infinity)
+  assert table["missing"] is Float(number) && number.is_nan()
+  assert table["on"] == toml::Value.Boolean(value: true) && table["off"] == toml::Value.Boolean(value: false)
+}
+
+test "multi-line strings trim their first newline and the whitespace after a line-ending backslash" {
+  let table = parsed("basic = \"\"\"\nRoses \\\n    are red\"\"\"\nliteral = '''\nfirst\nsecond'''\nquotes = \"\"\"two \"\" quotes\"\"\"\"\n")
+  assert table["basic"] == toml::Value.String(value: "Roses are red")
+  assert table["literal"] == toml::Value.String(value: "first\nsecond")
+  assert table["quotes"] == toml::Value.String(value: "two \"\" quotes\"")
+}
+
+test "dates and times are read in each of TOML's four forms" {
+  let table = parsed(
+    "offset = 1979-05-27T07:32:00-07:00\nutc = 1979-05-27 07:32:00Z\nlocal = 1979-05-27T07:32:00.5\nday = 1979-05-27\nclock = 07:32:00\n",
+  )
+  assert table["offset"] is OffsetDateTime(offset) && "${offset}" == "1979-05-27T14:32:00Z"
+  assert table["utc"] is OffsetDateTime(utc) && "${utc}" == "1979-05-27T07:32:00Z"
+  assert table["local"] is LocalDateTime(local) && "${local}" == "1979-05-27T07:32:00.5"
+  assert table["day"] is LocalDate(day) && "${day}" == "1979-05-27"
+  assert table["clock"] is LocalTime(clock) && "${clock}" == "07:32:00"
+}
+
+test "tables, dotted keys, inline tables, and arrays of tables nest" {
+  let table = parsed(
+    "name.first = \"Ada\"\nname.last = \"Lovelace\"\npoint = { x = 1, y.z = 2 }\nlist = [\n  1, # one\n  2,\n]\n[server.alpha]\nip = \"10.0.0.1\"\n[[fruit]]\nname = \"apple\"\n[fruit.physical]\ncolor = \"red\"\n[[fruit]]\nname = \"banana\"\n",
+  )
+  assert table["name"] is Table(name) && name["first"] == toml::Value.String(value: "Ada") && name.length() == 2
+  assert table["point"] is Table(point) && point["y"] is Table(y) && y["z"] == toml::Value.Integer(value: 2)
+  assert table["list"] == toml::Value.Array(items: [toml::Value.Integer(value: 1), toml::Value.Integer(value: 2)])
+  assert table["server"] is Table(server) && server["alpha"] is Table(alpha) && alpha["ip"] == toml::Value.String(value: "10.0.0.1")
+  assert table["fruit"] is Array(fruits) && fruits.length() == 2
+    && fruits[0] is Table(apple) && apple["physical"] is Table(physical)
+    && physical["color"] == toml::Value.String(value: "red")
+    && fruits[1] is Table(banana) && banana["name"] == toml::Value.String(value: "banana")
+}
+
+test "a key or a table defined twice, or a table extended after it is inline, is rejected" {
+  assert rejects("a = 1\na = 2\n")
+  assert rejects("[a]\n[a]\n")
+  assert rejects("[a]\nb.c = 1\n[a.b]\n")
+  assert rejects("a = { b = 1 }\n[a.c]\n")
+  assert rejects("a = [1]\n[[a]]\n")
+  assert rejects("a = 1 b = 2\n")
+  assert rejects("a = 01\n")
+  assert rejects("a = 1__0\n")
+  assert rejects("a = \"unclosed\n")
+  assert rejects("a = .5\n")
+  assert !rejects("[a.b.c]\n[a]\nd = 1\n")
+  assert toml::parse("a = 1\nb = = 2\n") is Err(error) && error.line == 2
+}
+
+type Server(host: String, port: UInt16 = 8080, tags: List[String] = [])
+  derives Equal, serialization::Serialize, serialization::Deserialize
+
+type Settings(name: String, debug: Bool, servers: List[Server], limit: Option[Int64])
+  derives Equal, serialization::Serialize, serialization::Deserialize
+
+test "a type that derives Deserialize is read from TOML, and Serialize writes it back" {
+  let text = "name = \"site\"\ndebug = false\n\n[[servers]]\nhost = \"a\"\n\n[[servers]]\nhost = \"b\"\nport = 9000\ntags = [\"x\"]\n"
+  let read: Result[Settings, toml::Error] = toml::decode(text)
+  let expected = Settings(
+    name: "site",
+    debug: false,
+    servers: [Server(host: "a"), Server(host: "b", port: 9000, tags: ["x"])],
+    limit: None,
+  )
+  assert read == Ok(expected.copy())
+  assert toml::encode(expected) is Ok(written)
+    && written == "name = \"site\"\ndebug = false\n\n[[servers]]\nhost = \"a\"\nport = 8080\ntags = []\n\n[[servers]]\nhost = \"b\"\nport = 9000\ntags = [\"x\"]\n"
+  let wrong: Result[Settings, toml::Error] = toml::decode("name = 1\ndebug = false\nservers = []\n")
+  assert wrong is Err(Deserialize(error)) && error.path == "/name"
+}
+
+test "to_text writes keys that need quotes, and floats with a point" {
+  var table: Map[String, toml::Value] = [:]
+  table["a b"] = toml::Value.Float(value: 1.0)
+  table["plain"] = toml::Value.String(value: "line\nnext")
+  var inner: Map[String, toml::Value] = [:]
+  inner["x"] = toml::Value.Integer(value: 1)
+  table["inner"] = toml::Value.Table(entries: own inner)
+  let text = toml::to_text(table)
+  assert text == "\"a b\" = 1.0\nplain = \"line\\nnext\"\n\n[inner]\nx = 1\n"
+  assert toml::parse(text.slice()) == Ok(own table)
+}

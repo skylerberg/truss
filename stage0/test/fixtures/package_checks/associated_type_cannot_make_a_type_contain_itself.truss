@@ -1,0 +1,4 @@
+impl Shown for Marker {
+  type Part = Kept[Marker]
+}
+

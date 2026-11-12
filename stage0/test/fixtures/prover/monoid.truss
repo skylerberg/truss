@@ -1,0 +1,14 @@
+trait Monoid: Equal {
+  fn empty() -> Self
+    cost time finite
+  fn combine(self, other: Self) -> Self
+    cost time finite
+
+  law left_identity(value: Self) {
+    Self.empty().combine(value) == value
+  }
+}
+
+type Flag(on: Bool)
+  derives Equal
+

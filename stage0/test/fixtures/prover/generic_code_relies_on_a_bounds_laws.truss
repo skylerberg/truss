@@ -1,0 +1,6 @@
+
+fn f[Item: Monoid](value: Item) -> Bool
+  ensures result
+{
+  Item.empty().combine(value) == value
+}

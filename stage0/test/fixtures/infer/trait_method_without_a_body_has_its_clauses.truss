@@ -1,0 +1,4 @@
+trait Measured {
+  fn measure(self) -> Int64
+    ensures result + true
+}

@@ -1,6 +1,6 @@
 /* The grammar from GRAMMAR.md, written for Menhir so that it can be checked
    for conflicts with `menhir --explain truss.mly`. Semantic actions are
-   empty; this file checks the grammar's shape, not what it builds.
+   empty; this file checks the grammar's shape, not its output.
 
    The lexer is assumed to:
    - apply the line-break rule, emitting a single NEWLINE where the token

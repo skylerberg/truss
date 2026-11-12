@@ -1,0 +1,15 @@
+type Queue(items: List[Int64])
+
+fn Queue.take(mut self) -> Option[List[Int64]] {
+  todo
+}
+
+fn g(queue: mut Queue) -> USize {
+  if mut queue.take() is Some(first) {
+    return first.length()
+  }
+  match mut queue.take() {
+    Some(second) => second.length()
+    None => 0
+  }
+}

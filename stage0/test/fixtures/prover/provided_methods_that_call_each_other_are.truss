@@ -1,0 +1,17 @@
+trait Ping {
+  fn ping(self) -> Int64
+    cost time finite
+  {
+    self.pong()
+  }
+
+  fn pong(self) -> Int64
+    cost time finite
+  {
+    self.ping()
+  }
+}
+
+type Foo()
+
+impl Ping for Foo {}

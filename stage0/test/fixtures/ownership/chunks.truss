@@ -1,0 +1,6 @@
+fn Reader.chunks(mut self) yields Slice[Int64] {
+  yield self.buffer[..]
+  mut self.buffer.push(4)
+  yield self.buffer[..]
+}
+

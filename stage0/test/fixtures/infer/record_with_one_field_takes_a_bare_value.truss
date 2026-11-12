@@ -1,0 +1,5 @@
+type UserId(number: UInt64)
+
+fn f() -> UserId {
+  UserId(42)
+}

@@ -1,0 +1,11 @@
+capability Notes {
+  fn note(text: StringSlice)
+}
+
+type Loud()
+
+impl Notes for Loud {
+  fn note(self, text: StringSlice) {
+    Notes.note(text)
+  }
+}

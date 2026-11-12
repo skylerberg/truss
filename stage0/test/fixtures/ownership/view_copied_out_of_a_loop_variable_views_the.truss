@@ -1,0 +1,10 @@
+fn f(data: mut List[Int64], other: List[Int64]) -> USize {
+  var parts: List[Slice[Int64]] = []
+  mut parts.push(data[..])
+  var held: Slice[Int64] = other[..]
+  for part in parts {
+    held = part
+  }
+  mut data.push(1)
+  held.length()
+}

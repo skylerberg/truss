@@ -1,0 +1,31 @@
+fn fetch(item: Int64) -> Result[Int64, Int64]
+  uses Clock
+{
+  Ok(item)
+}
+
+fn g(items: List[Int64]) -> Result[Int64, Int64]
+  uses Tasks, Clock
+{
+  for item in items {
+    concurrent {
+      let first = fetch(item)?
+      if item > 3 {
+        break
+      }
+    }
+    let _ = first
+  }
+  concurrent for item in items {
+    if item > 5 {
+      break
+    }
+    if item > 4 {
+      continue
+    }
+    if item > 3 {
+      return Err(item)
+    }
+  }
+  Ok(0)
+}

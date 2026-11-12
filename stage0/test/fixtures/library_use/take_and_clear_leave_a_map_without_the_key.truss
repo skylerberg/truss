@@ -1,0 +1,11 @@
+fn moved(ports: mut Map[String, Int64], name: String) -> Option[Int64]
+  ensures !ports.contains(name)
+{
+  mut ports.take(name)
+}
+
+fn emptied(ports: mut Map[String, Int64])
+  ensures ports.is_empty()
+{
+  mut ports.clear()
+}

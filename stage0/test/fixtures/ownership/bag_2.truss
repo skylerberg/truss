@@ -1,0 +1,8 @@
+type Bag(items: List[String])
+
+fn Bag.each(self) yields String {
+  for item in self.items {
+    yield item
+  }
+}
+

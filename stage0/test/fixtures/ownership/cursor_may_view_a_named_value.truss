@@ -1,0 +1,5 @@
+fn f() -> Option[String] {
+  let prefix = "a${1}"
+  var each = same(prefix)
+  mut each.next()
+}

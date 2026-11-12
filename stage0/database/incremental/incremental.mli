@@ -1,5 +1,5 @@
 (** The code database's engine: one state's inputs and query results, kept current by pushing each
-    change, phase by phase, to the results that read what really changed.
+    change, phase by phase, to the readers of the values that really changed.
 
     Compiler stages see this module only through {!Query}, and the database only through {!Engine}.
     Nothing else should name it. *)
@@ -19,11 +19,11 @@ type subject = { path : Path.t; part : string option }
 (** The definition, and the part of it, that a result is about. *)
 
 type t
-(** An engine: one state. It holds what differs from its bases, and reads the rest from them. *)
+(** An engine: one state. It holds its differences from its bases, and reads the rest from them. *)
 
 type context
-(** What a running query reads through, or the engine itself for reads made outside any query, such
-    as a driver's. *)
+(** The context a running query reads through, or the engine itself for reads made outside any
+    query, such as a driver's. *)
 
 type node
 (** An input or a query result, in one engine. *)
@@ -57,7 +57,7 @@ val query :
     earlier ones, and reading a later one raises [Invalid_argument]. With [~saved:true] its results'
     bytes are kept in the store and each is a fact, which needs its keys and values to hold no
     functions. With [~portable:true] a saved result is also looked for as a fact in a state that has
-    never held one, for which the store keeps what such a result read, by name. [equal] decides
+    never held one, for which the store keeps such a result's dependencies, by name. [equal] decides
     whether a result came out the same, and defaults to structural equality. *)
 
 val seal : unit -> unit
@@ -78,25 +78,27 @@ val read : context -> ('key, 'value) input -> 'key -> 'value option
 val demand : context -> ('key, 'value) query -> 'key -> 'value
 (** A query's result, computed if it has none. Raises the exception the query raised, or {!Cycle}. A
     demand made outside any query first brings the state up to date through the query's phase; later
-    phases keep what is queued for them until something of theirs is read, or {!stabilize}. *)
+    phases keep their queued results until something of theirs is read, or {!stabilize}. *)
 
 val known : context -> ('key, 'value) query -> 'key -> 'value option
 (** The result the state holds for a query and key, if no change could have reached it: the phases
     before the query's are brought up to date, and nothing of the query's own phase is computed. No
     read is recorded and the result is not made a root. [None] for a result the state does not hold,
     one whose reads may have changed, and one that raised. Raises [Invalid_argument] while a query
-    runs, since a read that is not recorded would make the query's result depend on what is held. *)
+    runs, since a read that is not recorded would make the query's result depend on the engine's
+    contents. *)
 
 (** {1 Engines} *)
 
 val create : ?log:bool -> ?bases:t list -> unit -> t
 (** An engine over frozen bases: it reads every input and result they hold, and holds itself only
-    what it sets, computes, or finds changed. With [~log:true] it keeps the log of {!executed}. *)
+    the results it sets, computes, or finds changed. With [~log:true] it keeps the log of
+    {!executed}. *)
 
 val freeze : ?fixed:bool -> t -> unit
 (** Brings the engine up to date and makes it a base: nothing in it changes again. A [fixed] base's
     inputs are a package's whose sources never change, such as the standard library's; the others
-    are an earlier state of what is being worked on. *)
+    are an earlier state of the code being worked on. *)
 
 val context : t -> context
 
@@ -116,16 +118,16 @@ val remove : t -> ('key, 'value) input -> 'key -> unit
 (** Removes an input, as a change. *)
 
 type change = { computed : node list; changed : node list }
-(** What bringing an engine up to date did: each result computed, and each that came out different,
-    in the order they were computed. *)
+(** The work of bringing an engine up to date: each result computed, and each that came out
+    different, in the order they were computed. *)
 
 val stabilize : t -> change
-(** Brings every result the engine holds up to date, and returns what was computed since the last
+(** Brings every result the engine holds up to date, and returns the results computed since the last
     call. *)
 
 val unroot : t -> ('key, 'value) query -> 'key -> unit
-(** Makes a result no longer a root. One that is then unnecessary is collected, with what only it
-    read. *)
+(** Makes a result no longer a root. One that is then unnecessary is collected, with the nodes only
+    it read. *)
 
 val executed : t -> string list
 (** With [~log:true], the queries computed since the log was last cleared, as ["name(key)"], in the
@@ -171,20 +173,20 @@ val is_fixed : node -> bool
 (** Whether a node belongs to a fixed base. *)
 
 val reads : t -> node -> node list
-(** What a result read when it was last computed, in order, as the engine sees each. *)
+(** A result's dependencies when it was last computed, in order, as the engine sees each. *)
 
 val readers : t -> node -> node list
-(** What reads a node, as the engine sees it. *)
+(** A node's readers, as the engine sees it. *)
 
 val differing : t -> node list
-(** The nodes the engine itself holds: what differs from its bases, or may. *)
+(** The nodes the engine itself holds: those that differ from its bases, or may. *)
 
 val unshared : t -> t -> node list
 (** The nodes of an engine that may differ from another's: those it holds itself, and those of each
     base, apart from fixed ones, that the other does not also have. *)
 
 val identity : node -> string
-(** What names a node in every engine: a hash of its input or query and its key. *)
+(** A node's name in every engine: a hash of its input or query and its key. *)
 
 val current_in : node -> t -> node option
 (** The same, computed there if it is a result the other engine does not have; for an input, the
@@ -196,9 +198,9 @@ val same_outcome : t -> node -> t -> node -> bool
 (** {1 Facts and states in a store} *)
 
 type store = {
-  id : string;  (** What tells one store from another: its directory *)
+  id : string;  (** The store's identity: its directory *)
   version : string;
-      (** What computed the results: the compiler's identity. It is part of every key. *)
+      (** The compiler that computed the results: its identity. It is part of every key. *)
   put : string -> string;  (** Keeps bytes, and returns their name: their hash *)
   get : string -> string option;
   find : kind:string -> key:string -> string option;
@@ -209,8 +211,8 @@ type store = {
 val attach : t -> store -> unit
 
 val record_facts : t -> unit
-(** Keeps a fact for each saved result computed since the last call: its value under the key of what
-    it read. Another state whose reads have the same fingerprints finds it instead of computing.
+(** Keeps a fact for each saved result computed since the last call: its value under the key of its
+    reads. Another state whose reads have the same fingerprints finds it instead of computing.
     {!write} does this too. *)
 
 val write : ?full:bool -> t -> string
@@ -258,7 +260,7 @@ val audit : ?include_bases:bool -> ?before:int -> t -> string list
     inputs, and returns a line for each that differs. With [~include_bases:true] the new engine has
     no bases and is given their inputs too, which checks the bases' results as well as its own. With
     [before], only the results of the phases before that one are computed again. An empty list means
-    every result is what a fresh computation gives. *)
+    every result equals a fresh computation's. *)
 
 val auditing : bool ref
 (** When set, every engine made is remembered, weakly, for {!audit_all}. *)
@@ -267,5 +269,5 @@ val audit_all : unit -> string list
 (** Audits every remembered engine that did work since its last audit. *)
 
 val skip_audit : t -> unit
-(** Leaves an engine out of {!audit_all}: one whose queries are, for a test, not functions of what
-    they read. *)
+(** Leaves an engine out of {!audit_all}: one whose queries are, for a test, not functions of their
+    reads. *)

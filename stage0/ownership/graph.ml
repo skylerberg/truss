@@ -83,7 +83,7 @@ type action =
       (** A [let] binds a part that a lending call lent. The loan ends with the statement. *)
   | Pass_owned_function of view list
       (** A function value that has these views is passed to an [own] parameter. The callee may
-          store the function, so the function could outlive what it captures. *)
+          store the function, so the function could outlive its captures. *)
   | Write_through of Place.t
       (** A mutation writes through the slice that is stored in this place, so it mutates every
           place that the slice views. *)
@@ -367,7 +367,7 @@ let remove_loans builder (added : loan list) =
   builder.loans <- List.filter (fun loan -> not (List.memq loan added)) builder.loans
 
 (* Evaluates the operands of one operation in order. A later operand must
-   not mutate what an earlier operand evaluated to, so the places of each
+   not mutate an earlier operand's value, so the places of each
    evaluated operand stay borrowed read-only until the last operand is
    evaluated. *)
 let evaluate_in_order builder frontier operands ~evaluate ~borrows =

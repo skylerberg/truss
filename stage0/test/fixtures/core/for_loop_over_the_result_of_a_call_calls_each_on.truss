@@ -1,0 +1,9 @@
+fn make() -> List[Int64] {
+  todo
+}
+
+fn g() {
+  for item in make() {
+    let _ = item
+  }
+}

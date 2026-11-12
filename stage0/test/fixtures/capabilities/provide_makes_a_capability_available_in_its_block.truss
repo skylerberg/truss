@@ -1,0 +1,19 @@
+type FixedClock(time: Instant)
+
+impl Clock for FixedClock {
+  fn now(self) -> Instant { self.time }
+  fn monotonic(self) -> Duration { todo }
+  fn sleep(self, duration: Duration) {}
+}
+
+fn stamp() -> Instant
+  uses Clock
+{
+  Clock.now()
+}
+
+fn f() -> Instant {
+  provide FixedClock(time: Instant.epoch) {
+    stamp()
+  }
+}

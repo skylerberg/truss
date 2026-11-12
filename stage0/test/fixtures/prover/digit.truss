@@ -1,0 +1,9 @@
+fn digit(order: mut Int64, next: Int64) -> USize
+  requires order >= 0 && order < 1000 && next >= 0 && next < 10
+  ensures order == old(order) * 10 + next
+  ensures result == 0
+{
+  order = order * 10 + next
+  0
+}
+

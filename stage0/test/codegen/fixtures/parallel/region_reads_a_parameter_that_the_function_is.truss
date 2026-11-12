@@ -1,0 +1,14 @@
+fn doubled(items: mut List[Int64]) {
+  parallel for item in mut items {
+    item = item * 2
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var numbers: List[Int64] = [1, 2, 3, 4]
+  doubled(mut numbers)
+  Console.print_line("${numbers[0]} ${numbers[1]} ${numbers[2]} ${numbers[3]}")
+  ExitCode.success
+}

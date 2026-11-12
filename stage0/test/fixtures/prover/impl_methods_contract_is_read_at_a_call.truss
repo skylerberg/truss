@@ -1,0 +1,19 @@
+type Counter(count: Int64)
+
+trait Next {
+  fn next(self) -> Int64
+}
+
+impl Next for Counter {
+  fn next(self) -> Int64
+    ensures result == self.count
+  {
+    self.count
+  }
+}
+
+fn f() -> Int64
+  ensures result == 5
+{
+  Counter(count: 5).next()
+}

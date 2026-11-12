@@ -1,0 +1,6 @@
+fn f() -> Int64 {
+  while true {
+    break
+  }
+  1
+}

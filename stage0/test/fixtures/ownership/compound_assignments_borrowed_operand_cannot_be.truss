@@ -1,0 +1,8 @@
+fn spoil(others: mut List[Bag]) -> USize {
+  mut others.push(Bag(items: []))
+  0
+}
+
+fn f(bags: mut List[Bag], others: mut List[Bag]) {
+  bags[spoil(mut others)] += others[0]
+}

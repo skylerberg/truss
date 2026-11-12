@@ -1,0 +1,6 @@
+fn g(value: Option[Int64]) -> Int64 {
+  match value {
+    Some(x) if x > 0 => x
+    Some(_) | None => 0
+  }
+}

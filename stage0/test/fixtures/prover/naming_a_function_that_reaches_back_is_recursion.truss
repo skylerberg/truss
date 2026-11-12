@@ -1,0 +1,5 @@
+fn again(value: UInt32) -> UInt32
+  cost time O(1)
+{
+  run(again)
+}

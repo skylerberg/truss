@@ -16,12 +16,12 @@ let () =
    and computes the parts of other modules they use on demand. The modules
    are dealt out by weight, heaviest first, each to the share with the
    least so far, so that the shares take about as long as each other. A
-   module's weight is what proving it was measured to cost, which
-   [Proof_weights] lists. The letters of a module's source do not tell: a
-   module of loops with invariants costs several times what straight-line
-   code of the same length does. A module that was not measured weighs by
-   its letters, which leaves out tables of numbers: they are large and
-   have nothing to prove. *)
+   module's weight is its measured proof cost, which [Proof_weights]
+   lists. The letters of a module's source do not tell: a module of loops
+   with invariants costs several times as much as straight-line code of
+   the same length. A module that was not measured weighs by its letters,
+   which leaves out tables of numbers: they are large and have nothing to
+   prove. *)
 let share =
   match Sys.getenv_opt "TRUSS_PROOF_SHARE" with
   | None | Some "" -> None
@@ -131,7 +131,7 @@ let measure database ~record ~is_measured =
 
 (* A run prints how long each stage and each module took, and how many
    queries the solver ran and did not read from its kept answers, so the
-   log of a slow job names what was slow. *)
+   log of a slow job names the slow modules. *)
 let timed label work =
   let start = Unix.gettimeofday () in
   let solved = Solver.solved solver in

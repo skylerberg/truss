@@ -49,7 +49,7 @@ let granted =
            (fun (entry : Manifest.dependency) -> entry.package = dependency)
            (Query.demand database Workspace.dependencies package)))
 
-let missing database ~package ~of_ (uses : Types.capability list) =
+let missing database ~package ~of_ (uses : Types.capability_set) =
   if of_ = package || of_ = Path.standard_package then []
   else
     let granted =
@@ -61,14 +61,14 @@ let missing database ~package ~of_ (uses : Types.capability list) =
       (function
         | Types.Capability path when not (List.exists (Path.equal path) granted) -> Some path
         | _ -> None)
-      (List.sort_uniq compare uses)
+      (uses :> Types.capability list)
 
-let message ~what ~of_ capability =
+let message ~subject ~of_ capability =
   let of_ = Path.show_package of_ in
   Printf.sprintf
     "%s uses `%s`, which the manifest does not grant `%s`. To grant it, add \"%s\" to the entry \
      for `%s` in `truss.toml`."
-    what (written capability) of_ (written capability) of_
+    subject (written capability) of_ (written capability) of_
 
 let rec evidence_uses database ~bounds ?(depth = 0) (evidence : Impls.evidence) =
   match evidence with
@@ -78,11 +78,10 @@ let rec evidence_uses database ~bounds ?(depth = 0) (evidence : Impls.evidence) 
       | Some interface ->
           ( impl,
             interface,
-            List.sort_uniq compare
-              (interface.impl_uses
-              @ List.concat_map
-                  (fun (_, _, (signature : Types.signature)) -> signature.uses)
-                  interface.impl_methods) )
+            List.fold_left
+              (fun uses (_, _, (signature : Types.signature)) ->
+                Types.capability_union uses signature.uses)
+              interface.impl_uses interface.impl_methods )
           :: List.concat_map
                (fun (argument, bound) ->
                  match Impls.implements database ~bounds argument bound with
@@ -97,7 +96,7 @@ let messages database ~package impls =
       let of_ = Path.package impl in
       List.map
         (message
-           ~what:
+           ~subject:
              (Printf.sprintf "The `impl` of `%s` for `%s`"
                 (Types.show_trait interface.implements)
                 (Types.show interface.for_type))

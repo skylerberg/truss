@@ -1,0 +1,5 @@
+fn put(values: mut Map[Int64, Int64], key: Int64, value: Int64)
+  cost amortized time O(1 + values.length())
+{
+  mut values.insert(key, value: value)
+}

@@ -1,0 +1,3 @@
+fn Window.widen(mut self, data: List[Int64]) {
+  self.view = data[0..2]
+}

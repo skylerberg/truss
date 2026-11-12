@@ -1,0 +1,7 @@
+fn Url.user(self) -> Option[StringSlice] {
+  if self.user is Some(present) {
+    Some(present.slice())
+  } else {
+    None
+  }
+}

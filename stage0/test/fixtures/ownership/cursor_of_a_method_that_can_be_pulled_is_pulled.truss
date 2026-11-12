@@ -1,0 +1,4 @@
+fn f(items: List[Int64]) -> Option[Int64] {
+  var cursor = items.each()
+  mut cursor.next()
+}

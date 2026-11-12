@@ -1,6 +1,6 @@
 module Package_checks = Type_checker.For_testing.Package_checks
 
-(* The tests of capabilities: what code may call, lambdas' uses,
+(* The tests of capabilities: capability checking, lambdas' uses,
    capability parameters, provide, and dependency grants. *)
 
 open Harness
@@ -12,52 +12,17 @@ let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
 let () =
   test "a capability call needs its capability" (fun () ->
-      one_diagnostic "fn f() -> Instant {\n  Clock.now()\n}\n" "capabilities.not_available");
+      one_diagnostic Fixtures.Capabilities.capability_call_needs_its_capability
+        "capabilities.not_available");
   test "a function that declares a capability may call it" (fun () ->
-      fine "fn f() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n");
+      fine Fixtures.Capabilities.function_that_declares_a_capability_may_call_it);
   test "a call to a function with uses needs its capabilities" (fun () ->
-      one_diagnostic
-        "fn stamp() -> Instant\n\
-        \  uses Clock\n\
-         {\n\
-        \  Clock.now()\n\
-         }\n\n\
-         fn f() -> Instant {\n\
-        \  stamp()\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.call_to_a_function_with_uses_needs_its
         "capabilities.not_available");
   test "provide makes a capability available in its block" (fun () ->
-      fine
-        "type FixedClock(time: Instant)\n\n\
-         impl Clock for FixedClock {\n\
-        \  fn now(self) -> Instant { self.time }\n\
-        \  fn monotonic(self) -> Duration { todo }\n\
-        \  fn sleep(self, duration: Duration) {}\n\
-         }\n\n\
-         fn stamp() -> Instant\n\
-        \  uses Clock\n\
-         {\n\
-        \  Clock.now()\n\
-         }\n\n\
-         fn f() -> Instant {\n\
-        \  provide FixedClock(time: Instant.epoch) {\n\
-        \    stamp()\n\
-        \  }\n\
-         }\n");
+      fine Fixtures.Capabilities.provide_makes_a_capability_available_in_its_block);
   test "provide records each capability's impl with its generic arguments" (fun () ->
-      let text =
-        "type Fixed[Tag](time: Instant, tag: Tag)\n\n\
-         impl Clock for Fixed[Tag] {\n\
-        \  fn now(self) -> Instant { self.time }\n\
-        \  fn monotonic(self) -> Duration { todo }\n\
-        \  fn sleep(self, duration: Duration) {}\n\
-         }\n\n\
-         fn f() -> Instant {\n\
-        \  provide Fixed(time: Instant.epoch, tag: true) {\n\
-        \    Clock.now()\n\
-        \  }\n\
-         }\n"
-      in
+      let text = Fixtures.Capabilities.provide_records_each_capabilitys_impl_with_its in
       let database = setup [ ("app::main", text) ] in
       let key : Resolve.Names.key =
         {
@@ -83,196 +48,45 @@ let () =
           ()
       | _ -> fail "not recorded");
   test "a specification may not use Panic" (fun () ->
-      one_diagnostic
-        "fn checked() -> Bool\n\
-        \  uses Panic\n\
-        \  cost time finite\n\
-         {\n\
-        \  todo\n\
-         }\n\n\
-         fn f()\n\
-        \  requires checked()\n\
-         {\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.specification_may_not_use_panic
         "capabilities.not_available");
   test "a specification cannot use the function's capabilities" (fun () ->
-      one_diagnostic
-        "fn stamp() -> Bool\n\
-        \  uses Clock\n\
-        \  cost time finite\n\
-         {\n\
-        \  todo\n\
-         }\n\n\
-         fn f()\n\
-        \  uses Clock\n\
-        \  requires stamp()\n\
-         {\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.specification_cannot_use_the_functions
         "capabilities.not_available");
   test "a loop invariant cannot use the function's capabilities" (fun () ->
-      one_diagnostic
-        "fn stamp() -> Bool\n\
-        \  uses Clock\n\
-        \  cost time finite\n\
-         {\n\
-        \  todo\n\
-         }\n\n\
-         fn f()\n\
-        \  uses Clock\n\
-         {\n\
-        \  var count = 0\n\
-        \  while count < 3\n\
-        \    invariant stamp()\n\
-        \  {\n\
-        \    count += 1\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.loop_invariant_cannot_use_the_functions
         "capabilities.not_available");
   test "a type's invariant may use no capability" (fun () ->
-      one_diagnostic
-        "fn stamp() -> Bool\n\
-        \  uses Clock\n\
-        \  cost time finite\n\
-         {\n\
-        \  todo\n\
-         }\n\n\
-         type Counted(count: Int64)\n\
-        \  invariant stamp()\n"
+      one_diagnostic Fixtures.Capabilities.types_invariant_may_use_no_capability
         "capabilities.not_available");
   test "a law may use no capability" (fun () ->
-      one_diagnostic
-        "fn stamp() -> Bool\n\
-        \  uses Clock\n\
-        \  cost time finite\n\
-         {\n\
-        \  todo\n\
-         }\n\n\
-         trait Steady {\n\
-        \  fn value(self) -> Int64\n\n\
-        \  law timeless(first: Self) {\n\
-        \    stamp()\n\
-        \  }\n\
-         }\n"
-        "capabilities.not_available");
+      one_diagnostic Fixtures.Capabilities.law_may_use_no_capability "capabilities.not_available");
   test "a parallel branch has only Panic" (fun () ->
-      one_diagnostic
-        "fn f() -> Instant\n\
-        \  uses Clock\n\
-         {\n\
-        \  parallel {\n\
-        \    let now = Clock.now()\n\
-        \  }\n\
-        \  now\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.parallel_branch_has_only_panic
         "capabilities.not_available");
   test "a lambda's uses must fit the function type it is passed as" (fun () ->
-      one_diagnostic
-        "fn apply(visit: fn(Int64) -> Int64) {}\n\n\
-         fn f()\n\
-        \  uses Clock\n\
-         {\n\
-        \  apply(fn(value) {\n\
-        \    let _ = Clock.now()\n\
-        \    value\n\
-        \  })\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.lambdas_uses_must_fit_the_function_type_it_is
         "capabilities.lambda_uses");
   test "a loop over a value needs the capabilities that its `each` uses" (fun () ->
-      one_diagnostic
-        "type Ticker()\n\n\
-         fn Ticker.each(self) yields Instant\n\
-        \  uses Clock\n\
-         {\n\
-        \  yield Clock.now()\n\
-         }\n\n\
-         fn f(ticker: Ticker) {\n\
-        \  for tick in ticker {\n\
-        \    let _ = tick\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.loop_over_a_value_needs_the_capabilities_that_its
         "capabilities.not_available");
   test "a loop over a value can use the function's capabilities" (fun () ->
-      fine
-        "type Ticker()\n\n\
-         fn Ticker.each(self) yields Instant\n\
-        \  uses Clock\n\
-         {\n\
-        \  yield Clock.now()\n\
-         }\n\n\
-         fn f(ticker: Ticker)\n\
-        \  uses Clock\n\
-         {\n\
-        \  for tick in ticker {\n\
-        \    let _ = tick\n\
-        \  }\n\
-         }\n");
+      fine Fixtures.Capabilities.loop_over_a_value_can_use_the_functions);
   test "a capability parameter is instantiated with the capabilities of the lambdas passed for it"
-    (fun () ->
-      fine
-        "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\
-        \  uses Granted\n\
-         {\n\
-        \  todo\n\
-         }\n\n\
-         fn f()\n\
-        \  uses Clock\n\
-         {\n\
-        \  for_each(3, visit: fn(value) {\n\
-        \    let _ = Clock.now()\n\
-        \    let _ = value\n\
-        \  })\n\
-         }\n");
+    (fun () -> fine Fixtures.Capabilities.capability_parameter_is_instantiated_with_the);
   test "a trait's method solves its capability parameter as a function does" (fun () ->
-      let visitor =
-        "trait Visitor {\n\
-        \  fn visit_all[capability Granted](self, visit: (fn(Int64) uses Granted))\n\
-        \    uses Granted\n\
-         }\n\n\
-         type Numbers(items: List[Int64])\n\n\
-         impl Visitor for Numbers {\n\
-        \  fn visit_all[capability Granted](self, visit: (fn(Int64) uses Granted))\n\
-        \    uses Granted\n\
-        \  {\n\
-        \    todo\n\
-        \  }\n\
-         }\n\n"
-      in
+      let visitor = Fixtures.Capabilities.visitor in
       let call =
         "{\n  numbers.visit_all(fn(value) {\n    let _ = Clock.now()\n    let _ = value\n  })\n}\n"
       in
       fine (visitor ^ "fn f(numbers: Numbers)\n  uses Clock\n" ^ call);
       one_diagnostic (visitor ^ "fn f(numbers: Numbers)\n" ^ call) "capabilities.not_available");
   test "a capability parameter's set must be available at the call" (fun () ->
-      one_diagnostic
-        "fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))\n\
-        \  uses Granted\n\
-         {\n\
-        \  todo\n\
-         }\n\n\
-         fn f() {\n\
-        \  for_each(3, visit: fn(value) {\n\
-        \    let _ = Clock.now()\n\
-        \    let _ = value\n\
-        \  })\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.capability_parameters_set_must_be_available_at_the
         "capabilities.not_available");
-  test "a test has Panic" (fun () ->
-      fine "test \"crashes are allowed\" {\n  Panic.crash(\"no\")\n}\n");
+  test "a test has Panic" (fun () -> fine Fixtures.Capabilities.test_has_panic);
   test "a place whose implementation changes state is provided mut" (fun () ->
-      one_diagnostic
-        "type Counter(count: Int64)\n\n\
-         capability Tally {\n\
-        \  fn add()\n\
-         }\n\n\
-         impl Tally for Counter {\n\
-        \  fn add(mut self) { self.count += 1 }\n\
-         }\n\n\
-         fn f() {\n\
-        \  var counter = Counter(count: 0)\n\
-        \  provide counter {\n\
-        \  }\n\
-        \  let _ = counter\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.place_whose_implementation_changes_state_is
         "capabilities.provide_mark")
 
 let () =
@@ -280,11 +94,9 @@ let () =
       let database =
         setup
           [
-            ( "app::main",
-              "use clock_library::time\n\nfn f() -> Instant\n  uses Clock\n{\n  time::stamp()\n}\n"
-            );
+            ("app::main", Fixtures.Capabilities.dependency_can_use_only_the_capabilities_that_it);
             ( "clock_library::time",
-              "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n" );
+              Fixtures.Capabilities.dependency_can_use_only_the_capabilities_that_it_time );
           ]
       in
       Database.Testing.set_manifest (Engine.of_context database)
@@ -302,39 +114,12 @@ let () =
         [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ];
     codes (check database (module_of "app::main"))
   in
-  let library =
-    ( "clock_library::time",
-      "public trait Stamper {\n\
-      \  fn stamp(self) -> Instant\n\
-      \    uses Clock\n\
-       }\n\n\
-       public type Wall()\n\n\
-       impl Stamper for Wall {\n\
-      \  fn stamp(self) -> Instant\n\
-      \    uses Clock\n\
-      \  {\n\
-      \    Clock.now()\n\
-      \  }\n\
-       }\n\n\
-       public type Fixed()\n\n\
-       impl Random for Fixed uses Clock {\n\
-      \  fn next(self) -> UInt64 {\n\
-      \    let _ = Clock.now()\n\
-      \    4\n\
-      \  }\n\
-       }\n" )
-  in
+  let library = ("clock_library::time", Fixtures.Capabilities.library_time) in
   test "a dependency's trait method can use only the granted capabilities" (fun () ->
       match
         with_grant
           [
-            ( "app::main",
-              "use clock_library::time\n\n\
-               fn f(wall: time::Wall) -> Instant\n\
-              \  uses Clock\n\
-               {\n\
-              \  wall.stamp()\n\
-               }\n" );
+            ("app::main", Fixtures.Capabilities.dependencys_trait_method_can_use_only_the_granted);
             library;
           ]
           []
@@ -345,14 +130,7 @@ let () =
       match
         with_grant
           [
-            ( "app::main",
-              "use clock_library::time\n\n\
-               fn f(wall: time::Wall) -> Instant\n\
-              \  uses Clock\n\
-               {\n\
-              \  wall.stamp()\n\
-               }\n" );
-            library;
+            ("app::main", Fixtures.Capabilities.dependencys_trait_method_can_use_a_granted); library;
           ]
           [ "Clock" ]
       with
@@ -363,15 +141,7 @@ let () =
       match
         with_grant
           [
-            ( "app::main",
-              "use clock_library::time\n\n\
-               fn f() -> UInt64\n\
-              \  uses Clock\n\
-               {\n\
-              \  provide time::Fixed() {\n\
-              \    Random.next()\n\
-              \  }\n\
-               }\n" );
+            ("app::main", Fixtures.Capabilities.providing_a_dependencys_type_checks_the_grants_for);
             library;
           ]
           []
@@ -381,35 +151,15 @@ let () =
 
 let () =
   test "an implementation of a capability may not call the capability directly" (fun () ->
-      one_diagnostic
-        "capability Notes {\n\
-        \  fn note(text: StringSlice)\n\
-         }\n\n\
-         type Loud()\n\n\
-         impl Notes for Loud {\n\
-        \  fn note(self, text: StringSlice) {\n\
-        \    Notes.note(text)\n\
-        \  }\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.implementation_of_a_capability_may_not_call_the
         "capabilities.not_available");
   test "an implementation of a capability may hand the capability to a function value" (fun () ->
-      fine
-        "capability Notes {\n\
-        \  fn note(text: StringSlice)\n\
-        \  fn within(work: (fn() uses Notes))\n\
-         }\n\n\
-         type Quiet()\n\n\
-         impl Notes for Quiet {\n\
-        \  fn note(self, text: StringSlice) {}\n\
-        \  fn within(self, work: (fn() uses Notes)) {\n\
-        \    work()\n\
-        \  }\n\
-         }\n")
+      fine Fixtures.Capabilities.implementation_of_a_capability_may_hand_the)
 
 (* A grant wherever a dependency's code is named *)
 
 (* The codes of [app::main], whose manifest lists the dependencies given,
-   each with what it is granted. *)
+   each with its grants. *)
 let codes_with_grants files grants =
   let database = setup files in
   Database.Testing.set_manifest (Engine.of_context database) ~name:{ owner = None; name = "app" }
@@ -421,35 +171,12 @@ let expect_codes ~expected (_, actual) =
   if actual <> expected then
     fail "found [%s], expected [%s]" (String.concat "; " actual) (String.concat "; " expected)
 
-let time =
-  ("clock_library::time", "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n")
-
-let sources =
-  ("framework::sources", "public trait Source {\n  fn read(self) -> Instant\n    uses Clock\n}\n")
-
-let timers =
-  ( "plugins::timers",
-    "use framework::sources\n\n\
-     public type Timer()\n\n\
-     impl sources::Source for Timer {\n\
-    \  fn read(self) -> Instant\n\
-    \    uses Clock\n\
-    \  {\n\
-    \    Clock.now()\n\
-    \  }\n\
-     }\n" )
+let time = ("clock_library::time", Fixtures.Capabilities.time_time)
+let sources = ("framework::sources", Fixtures.Capabilities.sources_sources)
+let timers = ("plugins::timers", Fixtures.Capabilities.timers_timers)
 
 let () =
-  let value =
-    ( "app::main",
-      "use clock_library::time\n\n\
-       fn f() -> Instant\n\
-      \  uses Clock\n\
-       {\n\
-      \  let stamp = time::stamp\n\
-      \  stamp()\n\
-       }\n" )
-  in
+  let value = ("app::main", Fixtures.Capabilities.value) in
   test "a function value of a dependency's function can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
@@ -458,21 +185,7 @@ let () =
       expect_codes ~expected:[]
         (codes_with_grants [ value; time ]
            [ ({ owner = None; name = "clock_library" }, [ "Clock" ]) ]));
-  let bound =
-    ( "app::main",
-      "use framework::sources\n\
-       use plugins::timers\n\n\
-       fn first[Reader: sources::Source](reader: Reader) -> Instant\n\
-      \  uses Clock\n\
-       {\n\
-      \  reader.read()\n\
-       }\n\n\
-       fn f() -> Instant\n\
-      \  uses Clock\n\
-       {\n\
-      \  first(timers::Timer())\n\
-       }\n" )
-  in
+  let bound = ("app::main", Fixtures.Capabilities.bound) in
   test "an impl of a dependency that satisfies a bound can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
@@ -493,12 +206,7 @@ let () =
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (codes_with_grants
            [
-             ( "app::main",
-               "use framework::sources\n\
-                use plugins::timers\n\n\
-                fn f() -> any sources::Source {\n\
-               \  any timers::Timer()\n\
-                }\n" );
+             ("app::main", Fixtures.Capabilities.impl_of_a_dependency_behind_an_any_value_can_use);
              sources;
              timers;
            ]
@@ -507,21 +215,10 @@ let () =
              ({ owner = None; name = "plugins" }, []);
            ]))
 
-(* What a grant names *)
+(* Grant names *)
 
-let ledger =
-  ( "store::ledger",
-    "public capability Ledger {\n\
-    \  fn record(amount: Int64)\n\
-     }\n\n\
-     public fn pay(amount: Int64)\n\
-    \  uses Ledger\n\
-     {\n\
-    \  Ledger.record(amount)\n\
-     }\n" )
-
-let pays =
-  ("app::main", "use store::ledger\n\nfn f()\n  uses ledger::Ledger\n{\n  ledger::pay(1)\n}\n")
+let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
+let pays = ("app::main", Fixtures.Capabilities.pays)
 
 let problems database =
   Query.demand database Package_checks.manifest_problems { owner = None; name = "app" }
@@ -552,7 +249,10 @@ let () =
   test "a dependency that nothing in the package names is reported" (fun () ->
       let database, _ =
         codes_with_grants
-          [ ("app::main", "fn f() -> Int64 {\n  1\n}\n"); time ]
+          [
+            ("app::main", Fixtures.Capabilities.dependency_that_nothing_in_the_package_names_is);
+            time;
+          ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       match problems database with
@@ -568,16 +268,9 @@ let () =
       let database, actual =
         codes_with_grants
           [
-            ("app::main", "fn f(side: Int64) -> Int64 {\n  side.doubled()\n}\n");
+            ("app::main", Fixtures.Capabilities.dependency_whose_traits_method_is_called_with_a);
             ( "shapes::sizes",
-              "public trait Doubled {\n\
-              \  fn doubled(self) -> Int64\n\
-               }\n\n\
-               impl Doubled for Int64 {\n\
-              \  fn doubled(self) -> Int64 {\n\
-              \    self\n\
-              \  }\n\
-               }\n" );
+              Fixtures.Capabilities.dependency_whose_traits_method_is_called_with_a_sizes );
           ]
           [ ({ Path.owner = None; name = "shapes" }, []) ]
       in
@@ -587,30 +280,7 @@ let () =
       let database, actual =
         codes_with_grants
           [
-            ( "app::main",
-              "public type Square(side: Int64)\n\
-              \  derives Equal\n\n\
-               public trait Sided {\n\
-              \  fn sides(self) -> Int64\n\n\
-              \  fn corners(self) -> Int64 {\n\
-              \    self.sides()\n\
-              \  }\n\
-               }\n\n\
-               impl Sided for Square {\n\
-              \  fn sides(self) -> Int64 {\n\
-              \    4\n\
-              \  }\n\
-               }\n\n\
-               public capability Ledger {\n\
-              \  fn record(amount: Int64)\n\
-               }\n\n\
-               public let limit: Int64 = 10\n\n\
-               fn Square.width(self) -> Int64 {\n\
-              \  self.side\n\
-               }\n\n\
-               test \"a square has four sides\" {\n\
-              \  assert Square(1).sides() == 4\n\
-               }\n" );
+            ("app::main", Fixtures.Capabilities.unused_dependency_is_reported_for_every_kind_of);
             time;
           ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
@@ -622,158 +292,84 @@ let () =
   test "an unused dependency is not reported for a package with an error" (fun () ->
       let database, _ =
         codes_with_grants
-          [ ("app::main", "fn f() -> Int64 {\n  true\n}\n"); time ]
+          [
+            ("app::main", Fixtures.Capabilities.unused_dependency_is_not_reported_for_a_package);
+            time;
+          ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       if problems database <> [] then fail "reported")
 
 (* Function values and the capabilities their types list *)
 
-let ticks =
-  "fn tick() -> Instant\n\
-  \  uses Clock\n\
-   {\n\
-  \  Clock.now()\n\
-   }\n\n\
-   fn still() -> Instant {\n\
-  \  todo\n\
-   }\n\n\
-   fn each_time[capability Granted](action: (fn() -> Instant uses Granted)) -> Instant\n\
-  \  uses Granted\n\
-   {\n\
-  \  action()\n\
-   }\n\n"
+let ticks = Fixtures.Capabilities.ticks
 
 let () =
   test "a function that uses a capability is not passed as one that uses none" (fun () ->
       one_diagnostic
-        (ticks
-       ^ "fn apply(action: fn() -> Instant) -> Instant {\n\
-         \  action()\n\
-          }\n\n\
-          fn f() -> Instant {\n\
-         \  apply(tick)\n\
-          }\n")
+        (ticks ^ Fixtures.Capabilities.function_that_uses_a_capability_is_not_passed_as)
         "types.mismatch");
   test "a function that uses a capability is not bound as one that uses none" (fun () ->
       one_diagnostic
-        (ticks ^ "fn f() -> Instant {\n  let action: fn() -> Instant = tick\n  action()\n}\n")
+        (ticks ^ Fixtures.Capabilities.function_that_uses_a_capability_is_not_bound_as)
         "types.mismatch");
   test "a function that uses a capability is not returned as one that uses none" (fun () ->
-      one_diagnostic (ticks ^ "fn f() -> fn() -> Instant {\n  tick\n}\n") "types.mismatch");
+      one_diagnostic
+        (ticks ^ Fixtures.Capabilities.function_that_uses_a_capability_is_not_returned_as)
+        "types.mismatch");
   test "a function that uses a capability is not stored as one that uses none" (fun () ->
       one_diagnostic
-        (ticks ^ "type Job(action: fn() -> Instant)\n\nfn f() -> Job {\n  Job(tick)\n}\n")
+        (ticks ^ Fixtures.Capabilities.function_that_uses_a_capability_is_not_stored_as)
         "types.mismatch");
   test "a function that uses a capability is not assigned as one that uses none" (fun () ->
       one_diagnostic
-        (ticks
-       ^ "fn f() -> Instant {\n\
-         \  var action: fn() -> Instant = still\n\
-         \  action = tick\n\
-         \  action()\n\
-          }\n")
+        (ticks ^ Fixtures.Capabilities.function_that_uses_a_capability_is_not_assigned_as)
         "types.mismatch");
   test "function types inside a type must list the same capabilities" (fun () ->
       one_diagnostic
-        (ticks
-       ^ "fn f() -> USize\n\
-         \  uses Clock\n\
-          {\n\
-         \  let actions: List[(fn() -> Instant uses Clock)] = [tick]\n\
-         \  let plain: List[fn() -> Instant] = actions\n\
-         \  plain.length()\n\
-          }\n")
+        (ticks ^ Fixtures.Capabilities.function_types_inside_a_type_must_list_the_same)
         "types.mismatch");
   test "a function that uses nothing is passed as one that may use a capability" (fun () ->
-      fine
-        (ticks
-       ^ "fn f() -> Instant\n\
-         \  uses Clock\n\
-          {\n\
-         \  let action: (fn() -> Instant uses Clock) = still\n\
-         \  action()\n\
-          }\n"));
+      fine (ticks ^ Fixtures.Capabilities.function_that_uses_nothing_is_passed_as_one_that));
   test "a branch's function meets the function type expected of the branches" (fun () ->
-      fine
-        (ticks
-       ^ "fn f(fast: Bool) -> Instant\n\
-         \  uses Clock\n\
-          {\n\
-         \  let action: (fn() -> Instant uses Clock) = if fast { still } else { tick }\n\
-         \  action()\n\
-          }\n"));
+      fine (ticks ^ Fixtures.Capabilities.branchs_function_meets_the_function_type_expected));
   test "a branch's function that uses a capability is not bound as one that uses none" (fun () ->
       one_diagnostic
-        (ticks
-       ^ "fn f(fast: Bool) -> Instant {\n\
-         \  let action: fn() -> Instant = if fast { still } else { tick }\n\
-         \  action()\n\
-          }\n")
+        (ticks ^ Fixtures.Capabilities.branchs_function_that_uses_a_capability_is_not)
         "types.mismatch");
   test "a capability parameter is instantiated with the capabilities of the functions passed for it"
-    (fun () -> fine (ticks ^ "fn f() -> Instant\n  uses Clock\n{\n  each_time(tick)\n}\n"));
+    (fun () -> fine (ticks ^ Fixtures.Capabilities.capability_parameter_is_instantiated_with_the_2));
   test "the capabilities of a function passed for a capability parameter must be available"
     (fun () ->
       one_diagnostic
-        (ticks ^ "fn f() -> Instant {\n  each_time(tick)\n}\n")
+        (ticks ^ Fixtures.Capabilities.capabilities_of_a_function_passed_for_a_capability)
         "capabilities.not_available");
   test "a capability parameter is instantiated with the capabilities of a parenthesized lambda"
     (fun () ->
       one_diagnostic
-        (ticks ^ "fn f() -> Instant {\n  each_time((fn() { Clock.now() }))\n}\n")
+        (ticks ^ Fixtures.Capabilities.capability_parameter_is_instantiated_with_the_3)
         "capabilities.not_available");
   test "a capability parameter is instantiated with the capabilities of a function in a branch"
     (fun () ->
       one_diagnostic
-        (ticks ^ "fn f(fast: Bool) -> Instant {\n  each_time(if fast { still } else { tick })\n}\n")
+        (ticks ^ Fixtures.Capabilities.capability_parameter_is_instantiated_with_the_4)
         "capabilities.not_available");
   test "a capability parameter is instantiated with the capabilities of a lambda in a branch"
     (fun () ->
       one_diagnostic
-        (ticks
-       ^ "fn f(fast: Bool) -> Instant {\n\
-         \  each_time(if fast { still } else { fn() { Clock.now() } })\n\
-          }\n")
+        (ticks ^ Fixtures.Capabilities.capability_parameter_is_instantiated_with_the_5)
         "capabilities.not_available");
   test "a function passes its own capability parameter on" (fun () ->
-      fine
-        (ticks
-       ^ "fn passes_on[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
-         \  uses Mine\n\
-          {\n\
-         \  each_time(action)\n\
-          }\n"));
+      fine (ticks ^ Fixtures.Capabilities.function_passes_its_own_capability_parameter_on));
   test "a function's own capability parameter is rigid in a lambda's type" (fun () ->
-      one_diagnostic
-        "fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
-        \  uses Mine\n\
-         {\n\
-        \  let again: (fn() -> Instant uses Mine) = fn() { Clock.now() }\n\
-        \  again()\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.functions_own_capability_parameter_is_rigid_in_a
         "capabilities.lambda_uses");
   test "a function's own capability parameter is rigid in a binding's type" (fun () ->
       one_diagnostic
-        (ticks
-       ^ "fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant\n\
-         \  uses Mine\n\
-          {\n\
-         \  let again: (fn() -> Instant uses Mine) = tick\n\
-         \  again()\n\
-          }\n")
+        (ticks ^ Fixtures.Capabilities.functions_own_capability_parameter_is_rigid_in_a_2)
         "types.mismatch");
   test "a function calls itself with its own capability parameter" (fun () ->
-      fine
-        "fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant\n\
-        \  uses Mine\n\
-         {\n\
-        \  if again {\n\
-        \    repeat(action, again: false)\n\
-        \  } else {\n\
-        \    action()\n\
-        \  }\n\
-         }\n");
+      fine Fixtures.Capabilities.function_calls_itself_with_its_own_capability);
   test "a recursive call needs the capabilities that it passes for its capability parameter"
     (fun () ->
       let repeat uses =
@@ -785,53 +381,32 @@ let () =
       one_diagnostic (repeat "Mine") "capabilities.not_available";
       fine (repeat "Mine, Clock"))
 
-(* A capability parameter in what a call gives, and in a type *)
+(* A capability parameter in a call's arguments, and in a type *)
 
-let later =
-  ticks
-  ^ "fn later[capability Granted](action: (fn() -> Instant uses Granted)) -> (fn() -> Instant uses \
-     Granted) {\n\
-    \  action\n\
-     }\n\n"
+let later = ticks ^ Fixtures.Capabilities.later
 
 let () =
   test "a call's result has the capabilities that were passed for the capability parameter"
     (fun () ->
       one_diagnostic
-        (later ^ "fn f() -> Instant {\n  let held = later(tick)\n  held()\n}\n")
+        (later ^ Fixtures.Capabilities.calls_result_has_the_capabilities_that_were_passed)
         "capabilities.not_available";
-      fine (later ^ "fn f() -> Instant\n  uses Clock\n{\n  let held = later(tick)\n  held()\n}\n");
-      fine (later ^ "fn f() -> Instant {\n  let held = later(still)\n  held()\n}\n"));
+      fine (later ^ Fixtures.Capabilities.calls_result_has_the_capabilities_that_were_passed_2);
+      fine (later ^ Fixtures.Capabilities.calls_result_has_the_capabilities_that_were_passed_3));
   test "a call's result must fit the function type that it is checked against" (fun () ->
       one_diagnostic
-        (later
-       ^ "fn f()\n  uses Clock\n{\n  let held: fn() -> Instant = later(tick)\n  let _ = held\n}\n")
+        (later ^ Fixtures.Capabilities.calls_result_must_fit_the_function_type_that_it_is)
         "types.mismatch";
-      fine
-        (later
-       ^ "fn f()\n\
-         \  uses Clock\n\
-          {\n\
-         \  let held: (fn() -> Instant uses Clock) = later(tick)\n\
-         \  let _ = held\n\
-          }\n"));
+      fine (later ^ Fixtures.Capabilities.calls_result_must_fit_the_function_type_that_it_is_2));
   test "a variable that is assigned a second function has the capabilities of both" (fun () ->
       one_diagnostic
-        (later ^ "fn f() -> Instant {\n  var held = later(still)\n  held = tick\n  held()\n}\n")
+        (later ^ Fixtures.Capabilities.variable_that_is_assigned_a_second_function_has)
         "capabilities.not_available";
-      fine
-        (later
-       ^ "fn f() -> Instant\n\
-         \  uses Clock\n\
-          {\n\
-         \  var held = later(still)\n\
-         \  held = tick\n\
-         \  held()\n\
-          }\n"));
+      fine (later ^ Fixtures.Capabilities.variable_that_is_assigned_a_second_function_has_2));
   test "a type and a trait cannot take a capability parameter" (fun () ->
       one_diagnostic "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n"
         "types.misplaced_capability_parameter";
-      one_diagnostic "trait Runs[capability Granted] {\n  fn run(self)\n    uses Granted\n}\n"
+      one_diagnostic Fixtures.Capabilities.type_and_a_trait_cannot_take_a_capability
         "types.misplaced_capability_parameter";
       fine "type Holder(action: (fn() -> Instant uses Clock))\n")
 
@@ -849,526 +424,121 @@ let widenings text =
 
 let () =
   test "a function bound as a type that promises a cost leaves the cost to the prover" (fun () ->
-      match
-        widenings
-          "fn f() -> Int64 {\n\
-          \  let action: (fn() -> Int64 cost time finite) = forever\n\
-          \  action()\n\
-           }\n\n\
-           fn forever() -> Int64 {\n\
-          \  while true {}\n\
-           }\n"
-      with
+      match widenings Fixtures.Capabilities.function_bound_as_a_type_that_promises_a_cost with
       | 1 -> ()
       | actual -> fail "%d conversions" actual);
   test "a function that promises to end can be bound as one that does" (fun () ->
-      fine
-        "fn f() -> Int64 {\n\
-        \  let action: (fn() -> Int64 cost time finite) = quick\n\
-        \  action()\n\
-         }\n\n\
-         fn quick() -> Int64\n\
-        \  cost time O(1)\n\
-         {\n\
-        \  1\n\
-         }\n");
+      fine Fixtures.Capabilities.function_that_promises_to_end_can_be_bound_as_one);
   test "function types inside a type must promise the same costs" (fun () ->
-      one_diagnostic
-        "fn f(actions: List[fn() -> Int64]) -> USize {\n\
-        \  let bounded: List[(fn() -> Int64 cost time finite)] = actions\n\
-        \  bounded.length()\n\
-         }\n"
+      one_diagnostic Fixtures.Capabilities.function_types_inside_a_type_must_promise_the_same
         "types.mismatch")
 
 (* The cursor of a yielding method that uses a capability *)
 
-let readings =
-  "capability Meter {\n\
-  \  fn read() -> Int64\n\
-   }\n\n\
-   type Fixed(value: Int64)\n\n\
-   impl Meter for Fixed {\n\
-  \  fn read(self) -> Int64 {\n\
-  \    self.value\n\
-  \  }\n\
-   }\n\n\
-   fn readings(count: Int64) yields Int64\n\
-  \  uses Meter\n\
-   {\n\
-  \  var index = 0\n\
-  \  while index < count {\n\
-  \    yield Meter.read()\n\
-  \    index += 1\n\
-  \  }\n\
-   }\n\n"
+let readings = Fixtures.Capabilities.readings
 
 let () =
   test "the next of a cursor needs the capabilities of the cursor's method" (fun () ->
       one_diagnostic
-        (readings
-       ^ "fn first() -> Option[Int64] {\n\
-         \  var cursor = provide Fixed(value: 7) {\n\
-         \    readings(3)\n\
-         \  }\n\
-         \  mut cursor.next()\n\
-          }\n")
+        (readings ^ Fixtures.Capabilities.next_of_a_cursor_needs_the_capabilities_of_the)
         "capabilities.not_available");
   test "the next of a cursor is fine where the method's capabilities are available" (fun () ->
-      fine
-        (readings
-       ^ "fn first() -> Option[Int64]\n\
-         \  uses Meter\n\
-          {\n\
-         \  var cursor = readings(3)\n\
-         \  mut cursor.next()\n\
-          }\n"));
+      fine (readings ^ Fixtures.Capabilities.next_of_a_cursor_is_fine_where_the_methods));
   test "a for loop over a cursor needs the capabilities of the cursor's method" (fun () ->
       one_diagnostic
-        (readings
-       ^ "fn total() -> Int64 {\n\
-         \  var cursor = provide Fixed(value: 7) {\n\
-         \    readings(3)\n\
-         \  }\n\
-         \  var sum = 0\n\
-         \  for reading in mut cursor {\n\
-         \    sum += reading\n\
-         \  }\n\
-         \  sum\n\
-          }\n")
+        (readings ^ Fixtures.Capabilities.for_loop_over_a_cursor_needs_the_capabilities_of)
         "capabilities.not_available");
   test "a cursor whose method uses a capability meets a Cursor bound" (fun () ->
-      fine
-        (readings
-       ^ {|fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
-  uses Source.Uses
-{
-  mut source.next()
-}
-
-fn first() -> Option[Int64]
-  uses Meter
-{
-  var cursor = readings(3)
-  pull(mut cursor)
-}
-|}
-        ));
+      fine (readings ^ Fixtures.Capabilities.cursor_whose_method_uses_a_capability_meets_a));
   test "a generic function that advances a cursor needs the cursor's capabilities" (fun () ->
-      one_diagnostic
-        {|fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element] {
-  mut source.next()
-}
-|}
+      one_diagnostic Fixtures.Capabilities.generic_function_that_advances_a_cursor_needs_the
         "capabilities.not_available");
   test "a call that passes a cursor needs the capabilities of the cursor's method" (fun () ->
       one_diagnostic
-        (readings
-       ^ {|fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
-  uses Source.Uses
-{
-  mut source.next()
-}
-
-fn first() -> Option[Int64] {
-  var cursor = provide Fixed(value: 7) {
-    readings(3)
-  }
-  pull(mut cursor)
-}
-|}
-        )
+        (readings ^ Fixtures.Capabilities.call_that_passes_a_cursor_needs_the_capabilities)
         "capabilities.not_available");
   test "a method that Cursor provides needs the capabilities of the cursor's method" (fun () ->
       one_diagnostic
-        (readings
-       ^ {|fn length() -> USize {
-  var cursor = provide Fixed(value: 7) {
-    readings(3)
-  }
-  own cursor.count()
-}
-|}
-        )
+        (readings ^ Fixtures.Capabilities.method_that_cursor_provides_needs_the_capabilities)
         "capabilities.not_available");
   test "a method that Cursor provides runs where the cursor's capabilities are available" (fun () ->
-      fine
-        (readings
-       ^ {|fn length() -> USize
-  uses Meter
-{
-  var cursor = readings(3)
-  own cursor.count()
-}
-|}
-        ));
+      fine (readings ^ Fixtures.Capabilities.method_that_cursor_provides_runs_where_the_cursors));
   test "a cursor whose method uses no capability needs none" (fun () ->
-      fine
-        {|fn counted(count: Int64) yields Int64 {
-  var index = 0
-  while index < count {
-    yield index
-    index += 1
-  }
-}
-
-fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
-  uses Source.Uses
-{
-  mut source.next()
-}
-
-fn first() -> Option[Int64] {
-  var cursor = counted(3)
-  pull(mut cursor)
-}
-
-fn length() -> USize {
-  counted(3).count()
-}
-|});
+      fine Fixtures.Capabilities.cursor_whose_method_uses_no_capability_needs_none);
   test "a cursor whose method uses a capability cannot be an any value" (fun () ->
       one_diagnostic
-        (readings
-       ^ {|fn boxed() -> any Cursor[Element = Int64]
-  uses Meter
-{
-  any readings(3)
-}
-|})
+        (readings ^ Fixtures.Capabilities.cursor_whose_method_uses_a_capability_cannot_be_an)
         "types.no_impl")
 
 (* Associated capability sets *)
 
-let feed =
-  {|capability Meter {
-  fn read() -> Int64
-}
-
-trait Feed {
-  capability Uses
-
-  fn pull(mut self) -> Option[Int64]
-    uses Self.Uses
-
-  fn skip(mut self)
-    uses Self.Uses
-  {
-    let _ = mut self.pull()
-  }
-}
-
-type Counter(next: Int64)
-
-impl Feed for Counter {
-  fn pull(mut self) -> Option[Int64] {
-    self.next += 1
-    Some(self.next)
-  }
-}
-
-type Gauge(last: Int64)
-
-impl Feed for Gauge {
-  capability Uses = Meter
-
-  fn pull(mut self) -> Option[Int64]
-    uses Meter
-  {
-    self.last = Meter.read()
-    Some(self.last)
-  }
-}
-
-type Twice[Source](source: Source)
-
-impl Feed for Twice[Source: Feed] {
-  capability Uses = Source.Uses
-
-  fn pull(mut self) -> Option[Int64]
-    uses Self.Uses
-  {
-    let _ = mut self.source.pull()
-    mut self.source.pull()
-  }
-}
-
-fn drain[Source: Feed](source: mut Source) -> Int64
-  uses Source.Uses
-{
-  var total = 0
-  while mut source.pull() is Some(value) {
-    total += value
-  }
-  total
-}
-
-|}
+let feed = Fixtures.Capabilities.feed
 
 let () =
   test "an impl that leaves out an associated capability set has the empty set" (fun () ->
-      fine
-        (feed
-       ^ {|fn f() -> Int64 {
-  var counter = Counter(next: 0)
-  mut counter.skip()
-  drain(mut counter)
-}
-|}
-        ));
+      fine (feed ^ Fixtures.Capabilities.impl_that_leaves_out_an_associated_capability_set));
   test "a call needs the capabilities of the set that the impl defines" (fun () ->
       one_diagnostic
-        (feed ^ {|fn f() -> Int64 {
-  var gauge = Gauge(last: 0)
-  drain(mut gauge)
-}
-|})
+        (feed ^ Fixtures.Capabilities.call_needs_the_capabilities_of_the_set_that_the)
         "capabilities.not_available");
   test "a provided method needs the capabilities of the set that the impl defines" (fun () ->
       one_diagnostic
-        (feed ^ {|fn f() {
-  var gauge = Gauge(last: 0)
-  mut gauge.skip()
-}
-|})
+        (feed ^ Fixtures.Capabilities.provided_method_needs_the_capabilities_of_the_set)
         "capabilities.not_available");
   test "a set defined from a parameter's set is the argument's set" (fun () ->
-      fine
-        (feed
-       ^ {|fn metered() -> Int64
-  uses Meter
-{
-  var twice = Twice(source: Gauge(last: 0))
-  mut twice.skip()
-  drain(mut twice)
-}
-
-fn pure() -> Int64 {
-  var twice = Twice(source: Twice(source: Counter(next: 0)))
-  drain(mut twice)
-}
-|}
-        );
+      fine (feed ^ Fixtures.Capabilities.set_defined_from_a_parameters_set_is_the_arguments);
       one_diagnostic
-        (feed
-       ^ {|fn f() -> Int64 {
-  var twice = Twice(source: Twice(source: Gauge(last: 0)))
-  drain(mut twice)
-}
-|}
-        )
+        (feed ^ Fixtures.Capabilities.set_defined_from_a_parameters_set_is_the_arguments_2)
         "capabilities.not_available");
   test "a method of an impl can use only the set that the impl defines" (fun () ->
       one_diagnostic
-        (feed
-       ^ {|type Greedy(last: Int64)
-
-impl Feed for Greedy {
-  fn pull(mut self) -> Option[Int64]
-    uses Meter
-  {
-    Some(Meter.read())
-  }
-}
-|}
-        )
+        (feed ^ Fixtures.Capabilities.method_of_an_impl_can_use_only_the_set_that_the)
         "types.impl_uses");
   test "an impl defines only a set that its trait declares, and only once" (fun () ->
       one_diagnostic
-        (feed
-       ^ {|type Other(last: Int64)
-
-impl Feed for Other {
-  capability Grants = Meter
-
-  fn pull(mut self) -> Option[Int64] {
-    Some(self.last)
-  }
-}
-|}
-        )
+        (feed ^ Fixtures.Capabilities.impl_defines_only_a_set_that_its_trait_declares)
         "types.extra_member";
       one_diagnostic
-        (feed
-       ^ {|type Other(last: Int64)
-
-impl Feed for Other {
-  capability Uses = Meter
-  capability Uses = Clock
-
-  fn pull(mut self) -> Option[Int64] {
-    Some(self.last)
-  }
-}
-|}
-        )
+        (feed ^ Fixtures.Capabilities.impl_defines_only_a_set_that_its_trait_declares_2)
         "types.extra_member");
   test "a set cannot be defined from itself" (fun () ->
       one_diagnostic
-        (feed
-       ^ {|type Other(last: Int64)
-
-impl Feed for Other {
-  capability Uses = Self.Uses
-
-  fn pull(mut self) -> Option[Int64] {
-    Some(self.last)
-  }
-}
-|}
-        )
+        (feed ^ Fixtures.Capabilities.set_cannot_be_defined_from_itself)
         "types.unknown_associated_capability");
   test "an associated capability set is of a trait that declares it" (fun () ->
-      one_diagnostic "trait Named {\n  fn name(self) -> String\n    uses Self.Uses\n}\n"
+      one_diagnostic Fixtures.Capabilities.associated_capability_set_is_of_a_trait_that
         "types.unknown_associated_capability";
-      one_diagnostic "fn f[Source](source: Source)\n  uses Source.Uses\n{\n}\n"
+      one_diagnostic Fixtures.Capabilities.associated_capability_set_is_of_a_trait_that_2
         "types.unknown_associated_capability";
-      one_diagnostic "fn f()\n  uses Self.Uses\n{\n}\n" "types.misplaced_self_type";
-      one_diagnostic "fn f()\n  uses Source.Uses\n{\n}\n" "resolve.not_a_generic_parameter";
-      one_diagnostic "fn f[capability Granted]()\n  uses Granted.Uses\n{\n}\n"
+      one_diagnostic Fixtures.Capabilities.associated_capability_set_is_of_a_trait_that_3
+        "types.misplaced_self_type";
+      one_diagnostic Fixtures.Capabilities.associated_capability_set_is_of_a_trait_that_4
+        "resolve.not_a_generic_parameter";
+      one_diagnostic Fixtures.Capabilities.associated_capability_set_is_of_a_trait_that_5
         "types.unknown_associated_type");
   test "a trait's methods can use a set that a required trait declares" (fun () ->
-      let rewind =
-        {|trait Rewind: Feed {
-  fn back(mut self) -> Option[Int64]
-    uses Self.Uses
-
-  fn back_twice(mut self) -> Option[Int64]
-    uses Self.Uses
-  {
-    let _ = mut self.back()
-    mut self.back()
-  }
-}
-
-impl Rewind for Gauge {
-  fn back(mut self) -> Option[Int64]
-    uses Self.Uses
-  {
-    self.last = Meter.read()
-    Some(self.last)
-  }
-}
-
-fn rewind[Source: Rewind](source: mut Source) -> Option[Int64]
-  uses Source.Uses
-{
-  let _ = mut source.pull()
-  mut source.back_twice()
-}
-
-|}
-      in
-      fine
-        (feed ^ rewind
-       ^ {|fn f() -> Option[Int64]
-  uses Meter
-{
-  var gauge = Gauge(last: 0)
-  rewind(mut gauge)
-}
-|}
-        );
+      let rewind = Fixtures.Capabilities.rewind in
+      fine (feed ^ rewind ^ Fixtures.Capabilities.traits_methods_can_use_a_set_that_a_required_trait);
       one_diagnostic
-        (feed ^ rewind
-       ^ {|fn f() -> Option[Int64] {
-  var gauge = Gauge(last: 0)
-  mut gauge.back_twice()
-}
-|})
+        (feed ^ rewind ^ Fixtures.Capabilities.traits_methods_can_use_a_set_that_a_required_trait_2)
         "capabilities.not_available");
   test "a function type can use an associated capability set" (fun () ->
-      let apply =
-        {|fn apply[Source: Feed](
-  source: mut Source,
-  run: (fn(mut Source) -> Option[Int64] uses Source.Uses),
-) -> Option[Int64]
-  uses Source.Uses
-{
-  run(mut source)
-}
-
-|}
-      in
-      fine
-        (feed ^ apply
-       ^ {|fn metered() -> Option[Int64]
-  uses Meter
-{
-  var gauge = Gauge(last: 0)
-  apply(mut gauge, run: fn(feed) { mut feed.pull() })
-}
-
-fn pure() -> Option[Int64] {
-  var counter = Counter(next: 0)
-  apply(mut counter, run: fn(feed) { mut feed.pull() })
-}
-|}
-        );
+      let apply = Fixtures.Capabilities.apply in
+      fine (feed ^ apply ^ Fixtures.Capabilities.function_type_can_use_an_associated_capability_set);
       one_diagnostic
-        (feed ^ apply
-       ^ {|fn f() -> Option[Int64]
-  uses Meter
-{
-  var counter = Counter(next: 0)
-  apply(mut counter, run: fn(feed) {
-    let _ = Meter.read()
-    mut feed.pull()
-  })
-}
-|}
-        )
+        (feed ^ apply ^ Fixtures.Capabilities.function_type_can_use_an_associated_capability_set_2)
         "capabilities.lambda_uses");
   test "a capability parameter adds to an associated capability set" (fun () ->
-      let folded =
-        {|fn folded[Source: Feed, capability Granted](
-  source: mut Source,
-  step: (fn(Int64) -> Int64 uses Granted),
-) -> Int64
-  uses Source.Uses, Granted
-{
-  match mut source.pull() {
-    Some(value) => step(value)
-    None => 0
-  }
-}
-
-|}
-      in
-      fine
-        (feed ^ folded
-       ^ {|fn f() -> Int64
-  uses Meter
-{
-  var counter = Counter(next: 0)
-  folded(mut counter, step: fn(value) { value + Meter.read() })
-}
-|}
-        );
+      let folded = Fixtures.Capabilities.folded in
+      fine (feed ^ folded ^ Fixtures.Capabilities.capability_parameter_adds_to_an_associated);
       one_diagnostic
-        (feed ^ folded
-       ^ {|fn f() -> Int64 {
-  var gauge = Gauge(last: 0)
-  folded(mut gauge, step: fn(value) { value })
-}
-|}
-        )
+        (feed ^ folded ^ Fixtures.Capabilities.capability_parameter_adds_to_an_associated_2)
         "capabilities.not_available");
   test "an any value hides only a type whose associated capability sets are empty" (fun () ->
-      fine
-        (feed
-       ^ {|fn boxed() -> any Feed {
-  any Counter(next: 0)
-}
-
-fn through(feed: mut any Feed) -> Option[Int64] {
-  mut feed.pull()
-}
-|}
-        );
-      one_diagnostic (feed ^ "fn boxed() -> any Feed {\n  any Gauge(last: 0)\n}\n") "types.no_impl";
+      fine (feed ^ Fixtures.Capabilities.any_value_hides_only_a_type_whose_associated);
       one_diagnostic
-        (feed ^ {|fn boxed[Source: Feed](source: own Source) -> any Feed {
-  any source
-}
-|})
+        (feed ^ Fixtures.Capabilities.any_value_hides_only_a_type_whose_associated_2)
+        "types.no_impl";
+      one_diagnostic
+        (feed ^ Fixtures.Capabilities.any_value_hides_only_a_type_whose_associated_3)
         "types.no_impl")

@@ -1,0 +1,10 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Panic
+{
+  parallel for index in 0..=20 {
+    if index == 20 {
+      Panic.crash("the last one ran")
+    }
+  }
+  ExitCode.success
+}

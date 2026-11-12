@@ -1,0 +1,3 @@
+fn f[Number: FixedWidthInteger](value: Number) -> Bool {
+  value < 128
+}

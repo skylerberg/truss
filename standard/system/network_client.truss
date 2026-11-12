@@ -16,6 +16,10 @@ impl NetworkClient for SystemNetworkClient {
     sockets::connect(address, timeout: timeout)
   }
 
+  fn connect_local(self, path: Path) -> Result[network::LocalConnection, SystemError] {
+    sockets::connect_local(path)
+  }
+
   fn open_datagram(self) -> Result[network::DatagramSocket, SystemError] {
     sockets::open_datagram()
   }

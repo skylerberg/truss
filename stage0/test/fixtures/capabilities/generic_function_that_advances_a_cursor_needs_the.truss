@@ -1,0 +1,3 @@
+fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element] {
+  mut source.next()
+}

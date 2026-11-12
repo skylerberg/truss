@@ -1,0 +1,13 @@
+fn render(title: String, count: Int64) -> String {
+  let header = "${title}: ${count}"
+  let _ = header
+  todo
+}
+
+test "renders" {
+  assert render("a", count: 1) == "a: 1"
+}
+
+test "counts" {
+  assert 1 + 1 == 2
+}

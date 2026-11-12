@@ -1,0 +1,4 @@
+
+fn sides() -> Int64 {
+  acme::shapes::square::sides()
+}

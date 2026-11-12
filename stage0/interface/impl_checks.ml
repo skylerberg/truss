@@ -62,7 +62,7 @@ type view = {
   substitution : Types.substitution;
   impl_bounds : Types.parameter -> Types.trait_reference list;
   normalize : Types.ty -> Types.ty;
-  normalize_capabilities : Types.capability list -> Types.capability list;
+  normalize_capabilities : Types.capability_set -> Types.capability_set;
   missing_associated : (string * Syntax.diagnostic) list;
 }
 
@@ -120,16 +120,21 @@ let impl_view database ~bounds (impl : Types.impl_interface) (trait_path : path_
             (Types.substitute substitution type_)
         in
         let normalize_capabilities capabilities =
-          List.sort_uniq compare
-            (List.concat_map
-               (function
-                 | Types.Capability_projection { base; trait = projected; name }
-                   when Types.equal base impl.for_type
-                        && Path.equal projected.trait impl.implements.trait ->
-                     Option.value ~default:[] (List.assoc_opt name impl.capability_sets)
-                 | capability ->
-                     Impls.normalize_capabilities database ~bounds:impl_bounds [ capability ])
-               (Types.substitute_capabilities substitution capabilities))
+          Types.flat_map_capabilities
+            (fun capability ->
+              let set =
+                match capability with
+                | Types.Capability_projection { base; trait = projected; name }
+                  when Types.equal base impl.for_type
+                       && Path.equal projected.trait impl.implements.trait ->
+                    Option.value ~default:Types.no_capabilities
+                      (List.assoc_opt name impl.capability_sets)
+                | capability ->
+                    Impls.normalize_capabilities database ~bounds:impl_bounds
+                      (Types.capability_set [ capability ])
+              in
+              (set :> Types.capability list))
+            (Types.substitute_capabilities substitution capabilities)
         in
         {
           trait;
@@ -257,10 +262,10 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
                      (Types.show_trait required) (Types.show impl.for_type))
             | Some evidence -> check_evidence_grants trait_path.span evidence)
           trait.requires;
-        if (not trait.is_capability) && impl.impl_uses <> [] then
+        if (not trait.is_capability) && impl.impl_uses <> Types.no_capabilities then
           report state Impl_uses trait_path.span
-            "Only an `impl` of a capability can have `uses`. A trait's methods can use only what \
-             the trait declares."
+            "Only an `impl` of a capability can have `uses`. A trait's methods can use only the \
+             capabilities the trait declares."
 
 (* A method written inside an [impl], against the method its trait
    declares. *)
@@ -282,7 +287,8 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
             (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait name.text)
       | Some declared ->
           let replaceable (signature : Types.signature) =
-            signature.uses = [] && signature.terminates
+            signature.uses = Types.no_capabilities
+            && signature.terminates
             && List.for_all
                  (fun (info : Types.parameter_info) -> info.mode <> Types.Mut)
                  signature.parameters
@@ -293,7 +299,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
               (Printf.sprintf
                  "`%s` gives `%s` a body, which an `impl` can replace only by a version proven to \
                   give the same result, and so only when the provided one is pure, has a `time` \
-                  clause, and changes none of its arguments, so that its body is what it means."
+                  clause, and changes none of its arguments, so that its body is its definition."
                  shown_trait name.text);
           if trait.is_capability && not (receiver = Read || receiver = Mut) then
             report state Wrong_receiver name.span
@@ -309,10 +315,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
                   List.filteri
                     (fun index _ -> index >= List.length impl.impl_generics)
                     written.generics;
-                uses =
-                  List.filter
-                    (fun capability -> not (List.mem capability impl.impl_uses))
-                    written.uses;
+                uses = Types.capability_difference written.uses impl.impl_uses;
               }
             in
             (* The trait method's own generic parameters are substituted by
@@ -370,18 +373,13 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
               (* A caller of a capability holds only that capability, so the
                  implementation can use the capabilities that its [impl]
                  declares and no others. *)
-              let allowed = if trait.is_capability then [] else expected.uses in
-              if
-                not
-                  (List.for_all
-                     (fun capability -> List.mem capability allowed)
-                     (normalize_capabilities written.uses))
-              then
+              let allowed = if trait.is_capability then Types.no_capabilities else expected.uses in
+              if not (Types.capability_subset (normalize_capabilities written.uses) allowed) then
                 report state Impl_uses name.span
                   (if trait.is_capability then
                      Printf.sprintf
-                       "`%s` implements a capability, so it can use only what its `impl` declares \
-                        with `uses`."
+                       "`%s` implements a capability, so it can use only the capabilities its \
+                        `impl` declares with `uses`."
                        name.text
                    else
                      Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."

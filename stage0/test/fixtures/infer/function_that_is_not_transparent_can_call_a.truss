@@ -1,0 +1,5 @@
+public fn hidden(value: Int64) -> Int64
+  cost time O(1)
+{
+  half(value)
+}

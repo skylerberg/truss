@@ -43,13 +43,13 @@ type call = {
   callee : callee;
   arguments : argument list;  (** In the order written. *)
   omitted_defaults : string list;  (** The parameters with defaults that were not passed. *)
-  uses : Types.capability list;  (** The callee's [uses], with capability parameters substituted. *)
+  uses : Types.capability_set;  (** The callee's [uses], with capability parameters substituted. *)
   callee_result : Types.ty;
       (** For an operator that tests the result of its call, as [<] tests the [Ordering] of
           [compare], this is not the operator's own type. *)
 }
 
-(* What a name, member, or bracket expression resolves to, once types are
+(* The resolution of a name, member, or bracket expression, once types are
    known. *)
 type resolution =
   | Local_value of local
@@ -99,7 +99,7 @@ type template = {
   interpolated : bool;
 }
 
-(* What tools read of the tables. *)
+(* The tables tools read. *)
 type published = {
   types : Types.ty option array;
   local_types : Types.ty option array;

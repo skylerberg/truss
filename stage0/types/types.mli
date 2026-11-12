@@ -34,7 +34,8 @@ type ty =
 and argument =
   | Type of ty
   | Value of value
-  | Capabilities of capability list  (** What a [capability] parameter stands for, sorted. *)
+  | Capabilities of capability_set
+      (** The capabilities a [capability] parameter is instantiated with. *)
 
 and value =
   | Known of Z.t
@@ -50,7 +51,7 @@ and trait_reference = {
 and function_type = {
   inputs : (mode * ty) list;
   output : result;
-  uses : capability list;  (** Sorted. *)
+  uses : capability_set;
   costs : cost list;
 }
 
@@ -67,13 +68,17 @@ and capability =
           union of the capabilities the arguments for the parameter use, which is known once the
           whole definition is checked. No result that is given out holds one. *)
 
+and capability_set = private capability list
+(** A set of capabilities, kept sorted and without duplicates so that equal sets are equal values.
+    Only {!capability_set} builds one. *)
+
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
 (** A cost clause of a function type, which cannot mention parameters. Only the prover reads its
     bound; the checker reads whether there is a [time] clause. *)
 
-(** What a function type's cost clause counts. Its [calls] counts the calls of a capability's
-    methods, or of one of them: calls through a parameter are counted in a function's own clauses,
-    which can name it. *)
+(** The resource a function type's cost clause counts. Its [calls] counts the calls of a
+    capability's methods, or of one of them: calls through a parameter are counted in a function's
+    own clauses, which can name it. *)
 and resource =
   | Time
   | Allocations
@@ -107,6 +112,19 @@ val is_integer_type : ty -> bool
 val is_signed : ty -> bool
 val is_float_type : ty -> bool
 
+(** {1 Capability sets} *)
+
+val capability_set : capability list -> capability_set
+val no_capabilities : capability_set
+val capability_union : capability_set -> capability_set -> capability_set
+val capability_subset : capability_set -> capability_set -> bool
+
+val capability_difference : capability_set -> capability_set -> capability_set
+(** The capabilities of the first set that the second does not hold. *)
+
+val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
+(** The set of everything [f] gives for each capability of a set. *)
+
 (** {1 Substitution and equality} *)
 
 type substitution = (parameter * argument) list
@@ -115,15 +133,15 @@ val substitute : substitution -> ty -> ty
 val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
-val substitute_capabilities : substitution -> capability list -> capability list
+val substitute_capabilities : substitution -> capability_set -> capability_set
 
 val result_type : result -> ty
-(** The type of what a function returns, yields, or lends. *)
+(** The type of a function's result, yielded part, or lent part. *)
 
 val show_mode : mode -> string
 (** How a mode is written before a type: [""], ["mut "], or ["own "]. *)
 
-val map : ?capabilities:(capability list -> capability list) -> (ty -> ty option) -> ty -> ty
+val map : ?capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 (** Rewrites a type from the outside in: where [f] gives a replacement, it is used as it is, and
     elsewhere the type's parts are rewritten. Every part is visited: arguments, function inputs and
     outputs, [any] and projection traits. [capabilities] rewrites each set of capabilities among
@@ -133,10 +151,10 @@ val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 (** Whether [f] holds for a type or any of its parts, the parts {!map} visits. [resolve] is applied
     to each type before it is tested and taken apart, for a type with variables bound elsewhere. *)
 
-val has_capability_variable : capability list -> bool
+val has_capability_variable : capability_set -> bool
 
-val capabilities_unsolved : capability list -> bool
-(** Whether what a set holds is not known yet: it has a {!Capability_variable}, or an associated
+val capabilities_unsolved : capability_set -> bool
+(** Whether a set's members are not known yet: it has a {!Capability_variable}, or an associated
     capability set of a type that is not inferred yet. *)
 
 val equal : ty -> ty -> bool
@@ -155,7 +173,7 @@ val same_clauses : function_type -> function_type -> bool
 (** Whether two function types have the same [uses] and the same costs, in any order. *)
 
 val costs_imply : provided:cost list -> required:cost list -> bool
-(** Whether costs promise what others ask, by their constants alone: each cost asked has one given
+(** Whether costs imply the required ones, by their constants alone: each cost asked has one given
     for the same resource that is at least as strong, where an exact count is within any bound it
     does not exceed, a count is [O(...)], and every bound is [finite]. *)
 
@@ -174,7 +192,7 @@ val show_output : result -> string
 
 (** {1 Interfaces}
 
-    What other definitions may depend on: the checked outward-facing part of each definition. *)
+    The part other definitions may depend on: the checked outward-facing part of each definition. *)
 
 type generic_kind =
   | Type_generic of trait_reference list  (** Bounds. *)
@@ -190,8 +208,8 @@ val bounds_of : generic list -> parameter -> trait_reference list
 (** The bounds a list of generics gives one type parameter. *)
 
 val substitution_of : generic list -> argument list -> substitution option
-(** What stands for each of a definition's generic parameters, given its arguments in order, or
-    [None] when there is not one argument for each parameter. *)
+(** The substitution for a definition's generic parameters, given its arguments in order, or [None]
+    when there is not one argument for each parameter. *)
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 
@@ -201,7 +219,7 @@ type signature = {
       (** For a method: how it takes [self], and [self]'s type. *)
   parameters : parameter_info list;  (** Not counting [self]. *)
   output : result;
-  uses : capability list;
+  uses : capability_set;
   terminates : bool;  (** Whether it has a [time] clause. *)
   specification_only : bool;
       (** Whether it mentions [Integer], so it can be called only in specifications. *)
@@ -224,7 +242,7 @@ val substitute_signature : substitution -> signature -> signature
     parameters, and in its [uses]. *)
 
 val method_in_impl :
-  impl_generics:generic list -> impl_uses:capability list -> signature -> signature
+  impl_generics:generic list -> impl_uses:capability_set -> signature -> signature
 (** The full signature of a method defined in an [impl]: the [impl]'s generic parameters come before
     the method's own, and the [impl]'s [uses] are added to the method's. *)
 
@@ -275,8 +293,8 @@ type impl_interface = {
   impl_generics : generic list;
   implements : trait_reference;  (** Its associated types are in [associated]. *)
   for_type : ty;
-  impl_uses : capability list;
-  capability_sets : (string * capability list) list;
+  impl_uses : capability_set;
+  capability_sets : (string * capability_set) list;
       (** The associated capability sets the [impl] defines, sorted by name. A set that the trait
           declares and the [impl] leaves out is empty. *)
   impl_methods : (string * Path.receiver * signature) list;

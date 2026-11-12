@@ -1,0 +1,38 @@
+use standard::files
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead, FileWrite, Handles
+{
+  let path = Path.new(arguments[1].slice())
+  if FileWrite.write_text(path, contents: "first\nsecond line\nlast".slice()) is Err(_) {
+    return ExitCode(1)
+  }
+  if FileRead.read_text(path) is Ok(text) {
+    Console.print_line("${text.length()} bytes".slice())
+  }
+  let streamed = Path.new("${arguments[1]}.streamed".slice())
+  let wrote = files::write_with(streamed, write: fn(writer) {
+    mut writer.write("one ".slice())?
+    mut writer.write_line("two".slice())?
+    mut writer.write_bytes("three".slice().bytes())
+  })
+  if wrote is Ok(_) && FileRead.read_text(streamed) is Ok(text) {
+    Console.print_line("streamed ${text}".slice())
+  }
+  match FileRead.open(path) {
+    Ok(file) => {
+      var reader = own file
+      if mut reader.read_line() is Ok(Some(line)) {
+        Console.print_line("${line}".slice())
+      }
+      if mut reader.read_line() is Ok(Some(line)) {
+        Console.print_line("${line}".slice())
+      }
+    }
+    Err(_) => {}
+  }
+  if FileRead.read_text(Path.new("/nonexistent/truss".slice())) is Err(NotFound) {
+    Console.print_line("missing".slice())
+  }
+  ExitCode(0)
+}

@@ -1,0 +1,3 @@
+fn f[Element, count: USize](items: mut Array[Element, count]) {
+  mut items[1..].reverse()
+}

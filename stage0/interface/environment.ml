@@ -7,7 +7,7 @@ type interface =
   | Trait_interface of Types.trait_interface
   | Impl_interface of Types.impl_interface
   | Constant_interface of Types.constant_interface
-  | Test_interface of Types.capability list
+  | Test_interface of Types.capability_set
   | Theorem_interface of Types.signature
   | Law_proof_interface of {
       generics : Types.generic list;
@@ -92,8 +92,8 @@ type container =
       impl_generics : Types.generic list;
       implements : Types.trait_reference;
       for_type : Types.ty;
-      impl_uses : Types.capability list;
-      capability_sets : (string * Types.capability list) list;
+      impl_uses : Types.capability_set;
+      capability_sets : (string * Types.capability_set) list;
     }
   | Broken of Diagnostic.reported  (** An [impl] whose trait name does not resolve to a trait. *)
 
@@ -195,7 +195,7 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
                           Types.equal base for_type && Path.equal trait.trait implements.trait
                       | _ -> false
                     in
-                    if List.exists defined_by_this_impl set then begin
+                    if List.exists defined_by_this_impl (set :> Types.capability list) then begin
                       Lower.report context Unknown_associated_capability name.span
                         (Printf.sprintf
                            "`%s` is defined from itself, or from a set that this `impl` defines \
@@ -219,7 +219,9 @@ let lower_container (context : Lower.context) (path : Path.t) (definition : defi
               self_capabilities =
                 List.map
                   (fun name ->
-                    (name, Option.value ~default:[] (List.assoc_opt name capability_sets)))
+                    ( name,
+                      Option.value ~default:Types.no_capabilities
+                        (List.assoc_opt name capability_sets) ))
                   declared;
             }
           in
@@ -244,13 +246,12 @@ type header = {
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
-  self_capabilities : (string * Types.capability list) list;
+  self_capabilities : (string * Types.capability_set) list;
   header_bounds : (Types.parameter * Types.trait_reference list) list;
   header_generics : Types.generic list;
       (** The generic parameters of an [impl], which precede those of a method written inside it. A
           trait's parameters are supplied at each call of its method, with [Self]. *)
-  header_uses : Types.capability list;
-      (** An [impl]'s [uses], which are each of its methods' too. *)
+  header_uses : Types.capability_set;  (** An [impl]'s [uses], which are each of its methods' too. *)
 }
 
 let bounds_of (context : Lower.context) =
@@ -274,7 +275,7 @@ let header =
                   let header_generics, header_uses =
                     match parts with
                     | Impl_parts { impl_generics; impl_uses; _ } -> (impl_generics, impl_uses)
-                    | _ -> ([], [])
+                    | _ -> ([], Types.no_capabilities)
                   in
                   Some
                     (Ok
@@ -530,7 +531,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
     },
     context )
 
-(* The lowered interface of a definition, with what lowering reported. The
+(* The lowered interface of a definition, with lowering's diagnostics. The
    interface of a trait, an [impl], or a capability is assembled from its
    header and from the interface of each method written inside it. Each
    method's interface reads only the header, so neither query depends on
@@ -685,7 +686,7 @@ let impl_interface =
               Types.impl_generics = [];
               implements = { trait = path; trait_arguments = []; associated = [] };
               for_type = Types.Error report;
-              impl_uses = [];
+              impl_uses = Types.no_capabilities;
               capability_sets = [];
               impl_methods = [];
               impl_broken = true;

@@ -1,0 +1,9 @@
+type Tree(value: Int64, children: List[Tree])
+
+fn visit(tree: Tree)
+  cost time finite
+{
+  for child in tree.children {
+    visit(child)
+  }
+}

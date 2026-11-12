@@ -212,7 +212,7 @@ let () =
       if Engine.get engine doubled () <> 8 then fail "another result";
       if Engine.executed engine <> [] then
         fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
-  test "a change in an opened state computes what read it" (fun () ->
+  test "a change in an opened state computes its readers" (fun () ->
       let store, artifact = written () in
       let engine = opened store artifact in
       Engine.set engine value_input () 5;
@@ -235,7 +235,7 @@ let () =
       Engine.set first value_input () 5;
       if Engine.get first doubled () <> 10 then fail "the first is stale";
       if Engine.get second doubled () <> 8 then fail "the second saw the first's change");
-  test "writing again writes a difference holding only what changed" (fun () ->
+  test "writing again writes a difference holding only the changes" (fun () ->
       let store, artifact = written () in
       let engine = opened store artifact in
       Engine.set engine value_input () 7;
@@ -287,7 +287,7 @@ let () =
       if Engine.executed engine <> [] then
         fail "computed [%s]" (String.concat "; " (Engine.executed engine));
       if (Engine.counters engine).adopted <> 1 then fail "not found as a fact");
-  test "a result is computed when what it reads has another value" (fun () ->
+  test "a result is computed when a dependency has another value" (fun () ->
       let store, _ = written () in
       let engine = attached store in
       Engine.set engine value_input () 5;
@@ -316,7 +316,7 @@ let () =
       let value = Engine.get engine reads_through () in
       if value <> 100 then fail "result %d after the change" value)
 
-(* Fingerprints follow from what a value is, not from how it lies in memory *)
+(* Fingerprints follow from a value, not from its layout in memory *)
 
 let pair_input = Query.input ~name:"saved_pair" ~show:(fun () -> "") ()
 
@@ -369,8 +369,6 @@ let () =
       if counters.computed <> 1 then fail "computed %d results" counters.computed;
       if counters.changed <> 0 then fail "%d results changed" counters.changed;
       if counters.marked <> 0 then fail "marked %d results" counters.marked)
-
-(* What fuzzing the engine found *)
 
 let switch_input = Query.input ~name:"saved_switch" ~show:(fun () -> "") ()
 

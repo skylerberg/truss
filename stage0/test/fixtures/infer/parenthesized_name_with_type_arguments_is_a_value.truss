@@ -1,0 +1,4 @@
+fn f() -> Int64 {
+  let same = (identity)[Int64]
+  same(5)
+}

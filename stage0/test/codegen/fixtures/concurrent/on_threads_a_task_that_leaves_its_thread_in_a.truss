@@ -1,0 +1,41 @@
+use standard::tasks
+
+type Counter(count: Int64)
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+impl Tally for Counter
+  uses Tasks
+{
+  fn add(mut self, amount: Int64) {
+    let before = self.count
+    Tasks.yield_now()
+    self.count = before + amount
+  }
+
+  fn total(self) -> Int64 {
+    self.count
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console, Panic
+{
+  var counter = Counter(count: 0)
+  provide mut counter {
+    concurrent for _ in 0..32 {
+      provide tasks::SeededTasks.new(7) {
+        concurrent for _ in 0..30 {
+          Tally.add(1)
+          Tasks.yield_now()
+          Tally.add(1)
+        }
+      }
+    }
+    Console.print_line("total ${Tally.total()}")
+  }
+  ExitCode.success
+}

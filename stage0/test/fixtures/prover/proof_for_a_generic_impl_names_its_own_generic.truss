@@ -1,0 +1,45 @@
+fn triangle(n: Int64) -> Int64
+  requires n >= 0 && n <= 1000
+  ensures result <= n * 1000
+  decreases n
+  cost time finite
+{
+  if n == 0 { 0 } else { n + triangle(n - 1) }
+}
+
+theorem triangle_at_least(n: Int64)
+  requires n >= 0 && n <= 1000
+  ensures triangle(n) >= n
+  decreases n
+  cost time finite
+{
+  if n > 0 {
+    triangle_at_least(n - 1)
+  }
+}
+
+trait Bounded {
+  fn amount(self) -> Int64
+    ensures result >= 0 && result <= 1000
+    cost time finite
+
+  law covered(value: Self) {
+    triangle(value.amount()) >= value.amount()
+  }
+}
+
+type Box[Item](item: Item, amount: Int64)
+  invariant amount >= 0 && amount <= 1000
+
+impl Bounded for Box[Element] {
+  fn amount(self) -> Int64
+    ensures result >= 0 && result <= 1000
+    cost time finite
+  {
+    self.amount
+  }
+}
+
+proof Bounded.covered for Box[Item] {
+  triangle_at_least(value.amount())
+}

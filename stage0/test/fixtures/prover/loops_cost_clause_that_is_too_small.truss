@@ -1,0 +1,11 @@
+fn f(count: UInt32)
+  cost time O(count)
+{
+  var index: UInt32 = 0
+  while index < count
+    invariant index <= count
+    cost time O(1)
+  {
+    index = index + 1
+  }
+}

@@ -1,0 +1,19 @@
+type Holder(slot: Option[String], count: Int64)
+
+fn take(slot: mut Option[String]) -> Option[String] {
+  let moved = own slot
+  slot = None
+  moved
+}
+
+test "moved and reinitialized" {
+  var slot: Option[String] = Some("${40 + 2} is the answer")
+  let moved = take(mut slot)
+  assert slot is None
+  assert moved is Some(text) && text.length() == 16
+  assert take(mut slot) is None
+  var holder = Holder(slot: Some("${1}23456789 and more text"), count: 2)
+  let from_field = take(mut holder.slot)
+  assert holder.slot is None
+  assert from_field is Some(text) && text.length() == 23
+}

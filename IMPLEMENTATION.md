@@ -58,13 +58,13 @@ develop as well as make it easier to bootstrap the compiler in parts.
     come from a cache of the whole opam root, keyed by the opam and OCaml
     versions, the runner's image, and `truss.opam`
     (`.github/actions/opam`). A change to `truss.opam` starts from the newest
-    cache with the same opam, OCaml, and image, and installs only what
-    changed. Only a new opam, OCaml, or image builds the switch from nothing,
+    cache with the same opam, OCaml, and image, and installs only the changed
+    packages. Only a new opam, OCaml, or image builds the switch from nothing,
     with the opam binary downloaded from its release and checked against a
     pinned hash. Nothing comes from apt, so a slow package mirror cannot slow
     a run.
   - **Dune's cache carries over from `main`,** so a pull request builds only
-    what it changed. Only pushes to `main` save it, trimmed so that it stays
+    its changes. Only pushes to `main` save it, trimmed so that it stays
     quick to restore.
   - **The build, formatting, the opam file, and the compiler's tests are one
     dune run,** so they overlap. Four things run beside it, each on a
@@ -101,7 +101,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
   a squash onto it, and the squashed commit then carries the branch's older
   tree onto the newer `main`: every merge the tree lacks is undone, with no
   conflict. The check fails a pull request that changes every file one of
-  the last merges changed and puts one of them back to what it was before
+  the last merges changed and puts one of them back to its state before
   that merge. A pull request that means to do so has a title that starts
   with "Revert". To squash safely, read `origin/main` once into a variable,
   merge that commit, and squash onto that commit.
@@ -109,9 +109,9 @@ develop as well as make it easier to bootstrap the compiler in parts.
 ### Libraries
 
 - **A library is a contract with more than one consumer, or a unit that
-  must not see what its consumer sees.** Code that one library alone uses
+  must not see its consumer's dependencies.** Code that one library alone uses
   is a module of that library, so that nothing else can come to depend on
-  it. It stays a library of its own when its short dependency list is what
+  it. It stays a library of its own when its short dependency list
   keeps it apart from a layer, as `session` knows no compiler stage and the
   passes over LIR, such as `drops`, know nothing of the front end.
 - **A unit of several modules inside a library is a subdirectory.** The
@@ -129,31 +129,31 @@ develop as well as make it easier to bootstrap the compiler in parts.
 Each document has one job, and a fact is stated in one of them:
 
 - **[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
-  [GRAMMAR.md](GRAMMAR.md) say what Truss is:** what code means and why, how
-  it is written, and its exact grammar. They describe the language, whether
+  [GRAMMAR.md](GRAMMAR.md) define Truss:** its semantics and their reasons,
+  how it is written, and its exact grammar. They describe the language, whether
   or not stage0 builds all of it yet.
 - **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
   [TYPECHECKER.md](TYPECHECKER.md), [MIR.md](MIR.md), [PROVER.md](PROVER.md),
   [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and
-  [CLI.md](CLI.md) say what stage0 does,**
-  each for its own stage, and each ends with the one list of what that stage
-  does not build yet. How results are kept current and kept from being
-  computed twice is DATABASE.md's, and the other documents say only what
-  their own stage adds to it.
+  [CLI.md](CLI.md) describe stage0,**
+  each for its own stage, and each ends with the one list of the features
+  that stage does not build yet. How results are kept current and kept from being
+  computed twice is DATABASE.md's, and the other documents describe only
+  their own stage's additions to it.
 - **This document holds the rules for working on stage0.**
 
-A document does not restate the code: which module holds what, a signature,
-or what each test covers is read from the code, where it cannot go stale.
+A document does not restate the code: a module's contents, a signature, or a
+test's coverage is read from the code, where it cannot go stale.
 
 A design document describes the design as it is. How it got there belongs in
 version control, in commit messages and pull request descriptions. A
-document has no sections that list what changed, what an earlier version
-did, or which review settled what; when the design changes, the document is
+document has no sections that list changes, an earlier version's behavior,
+or the review that settled a question; when the design changes, the document is
 rewritten to describe the new design.
 
 A document records no measurement. A time or a size is true of one commit,
 and a document that states one gives every later change something to measure
-again. What was measured belongs in the commit message or the pull request
+again. A measurement belongs in the commit message or the pull request
 it explains.
 
 ### Comments
@@ -161,15 +161,15 @@ it explains.
 A comment holds information the code cannot express: a reason, an invariant, or a trap. One
 that restates the code, labels a section, or retells a document is left
 out. A comment never points at a document, a section of one, or another
-file, since such a pointer goes stale when what it names moves.
+file, since such a pointer goes stale when its target moves.
 
 ### Testing
 
 Every stage of stage0 is tested the same way:
 
-- **A test states what it checks.** Each test gives a small input and asserts
+- **A test states its claim.** Each test gives a small input and asserts
   exact facts about the result: the tokens, a diagnostic's code and
-  position, the text after applying a fix. Its name says what behavior it
+  position, the text after applying a fix. Its name names the behavior it
   covers.
 - **Tests are fast and deterministic.** No randomness, no large inputs, and
   no test cases generated by combining options, so the suite can run on
@@ -195,20 +195,29 @@ Every stage of stage0 is tested the same way:
   runs: the solver's answer to a query, and the object compiled from a
   file of generated C. `TRUSS_SOLVER_CACHE` and `TRUSS_OBJECT_CACHE` name
   the directories. CI restores both from `main`'s last run, so a run
-  solves and compiles only what changed.
+  solves and compiles only the changes.
 - **The standard library's own tests are written in Truss.** Each file of
   `stage0/test/codegen/library/` is a module of tests for one module of the
   library, named after it. `library_tests` builds every file's tests into
   one program and runs it, so a new test adds its own code to that build
-  and no build of its own. A test of what a library function returns goes
+  and no build of its own. A test of a library function's result goes
   there. A test of a panic goes in the module `panics`: each of its tests
   must panic with a message that contains the test's name. A test written
   in OCaml that compiles a program of its own is for the compiler: a
   diagnostic, generated code, or a whole program's output.
+- **A test's Truss source is a fixture file, not an OCaml string.** The
+  text a test checks lives in `fixtures/<suite>/<name>.truss` beside the
+  suite, where it can be read, edited, and renamed as Truss.
+  `embed_fixtures` compiles each directory of fixtures into the module
+  `Fixtures`, so the test names one as `Fixtures.Prover.overflow`, and a
+  fixture that is missing fails to compile. A fixture is named after its
+  test. Text that is not a whole module stays in OCaml: a template with a
+  hole that the test fills, a line given to the lexer or the parser, and a
+  snippet of one or two lines.
 - **Every test checks the code database too.** When a test ends, the harness
   computes every result the test's engines hold again, in a new engine with
   the same inputs, and fails the test if one differs. So a query that is not
-  a function of what it reads, or a result the database left stale, fails
+  a function of its reads, or a result the database left stale, fails
   whichever test met it.
 - **Checks against the documents are tests,** as long as each one states a
   single property, such as "GRAMMAR.md's keyword list matches the lexer's",

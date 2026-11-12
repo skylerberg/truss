@@ -1,0 +1,13 @@
+fn sum_to(limit: Int64) -> Int64 {
+  var total = 0
+  var i = 1
+  while i <= limit {
+    total += i
+    i += 1
+  }
+  total
+}
+
+test "sums" {
+  assert sum_to(10) == 55
+}

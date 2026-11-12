@@ -1,0 +1,9 @@
+test "to list" {
+  let names: Array[String, 2] = ["a${1}", "b${2}"]
+  var list = own names.to_list()
+  mut list.push("c${3}")
+  assert list.length() == 3
+  assert list[0] == "a1"
+  assert list[1] == "b2"
+  assert list[2] == "c3"
+}

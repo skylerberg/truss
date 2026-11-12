@@ -1,0 +1,7 @@
+fn sides() -> Int64 {
+  4
+}
+
+internal fn corners() -> Int64 {
+  4
+}

@@ -386,3 +386,589 @@ public fn deserialize_text[Item: text::Parse, Source: Deserializer](
     }
   }
 }
+
+public trait Tree: Storable {
+  fn kind(self) -> Kind
+  fn boolean(self) -> Option[Bool]
+  fn integer(self) -> Option[Int64]
+  fn float(self) -> Option[Float64]
+  fn into_text(own self) -> Option[String]
+  fn into_items(own self) -> Option[List[Self]]
+  fn into_members(own self) -> Option[Map[String, Self]]
+  fn null() -> Option[Self]
+  fn from_bool(value: Bool) -> Self
+  fn from_integer(value: Int64) -> Self
+  fn from_unsigned(value: UInt64) -> Option[Self]
+  fn from_float(value: Float64) -> Self
+  fn from_text(value: own String) -> Self
+  fn from_items(items: own List[Self]) -> Self
+  fn from_members(members: own Map[String, Self]) -> Self
+}
+
+public type Names = AsWritten | CamelCase
+  derives Equal
+
+public fn Names.apply(self, name: StringSlice) -> String {
+  match self {
+    AsWritten => name.to_string()
+    CamelCase => {
+      var text = String.with_capacity(name.length())
+      var upper = false
+      for character in name.characters() {
+        if character == Character"_" && text.length() > 0 {
+          upper = true
+        } else if upper {
+          mut text.push_character(character.to_ascii_uppercase())
+          upper = false
+        } else {
+          mut text.push_character(character)
+        }
+      }
+      text
+    }
+  }
+}
+
+type Open = Items | Members | Variant | UnitVariant
+  derives Equal
+
+public opaque type TreeWriter[Node: Tree](
+  names: Names,
+  open: List[Open],
+  items: List[List[Node]],
+  members: List[Map[String, Node]],
+  keys: List[Option[String]],
+  variants: List[String],
+  result: Option[Node],
+  failure: Option[String],
+)
+
+public fn TreeWriter[Node: Tree].new(names: Names = Names.AsWritten) -> TreeWriter[Node] {
+  TreeWriter(names: names, open: [], items: [], members: [], keys: [], variants: [], result: None, failure: None)
+}
+
+public fn TreeWriter[Node: Tree].finish(own self) -> Result[Node, Error] {
+  match own self.failure {
+    Some(message) => Err(Error(path: "", message: own message))
+    None => match own self.result {
+      Some(node) => Ok(own node)
+      None => Err(Error(path: "", message: "nothing was written"))
+    }
+  }
+}
+
+fn fail_writing[Node: Tree](writer: mut TreeWriter[Node], message: StringSlice) {
+  if writer.failure is None {
+    writer.failure = Some(message.to_string())
+  }
+}
+
+fn put[Node: Tree](writer: mut TreeWriter[Node], node: own Node) {
+  match mut writer.open.pop() {
+    None => writer.result = Some(own node)
+    Some(open) => {
+      mut writer.open.push(open)
+      if open == Open.Items {
+        match mut writer.items.pop() {
+          Some(items) => {
+            var list = own items
+            mut list.push(own node)
+            mut writer.items.push(own list)
+          }
+          None => {}
+        }
+      } else if open == Open.Members || open == Open.Variant {
+        match mut writer.members.pop() {
+          Some(members) => {
+            var map = own members
+            match mut writer.keys.pop() {
+              Some(key) => match own key {
+                Some(name) => mut map.insert(own name, value: own node)
+                None => {}
+              }
+              None => {}
+            }
+            mut writer.keys.push(None)
+            mut writer.members.push(own map)
+          }
+          None => {}
+        }
+      }
+    }
+  }
+}
+
+fn name_next[Node: Tree](writer: mut TreeWriter[Node], name: own String) {
+  let _ = mut writer.keys.pop()
+  mut writer.keys.push(Some(own name))
+}
+
+fn open_members[Node: Tree](writer: mut TreeWriter[Node], open: Open) {
+  mut writer.open.push(open)
+  mut writer.members.push([:])
+  mut writer.keys.push(None)
+}
+
+fn close_members[Node: Tree](writer: mut TreeWriter[Node]) -> Map[String, Node] {
+  let _ = mut writer.open.pop()
+  let _ = mut writer.keys.pop()
+  match mut writer.members.pop() {
+    Some(members) => own members
+    None => [:]
+  }
+}
+
+fn put_null[Node: Tree](writer: mut TreeWriter[Node]) {
+  match Node.null() {
+    Some(null) => put(mut writer, node: own null)
+    None => {
+      let in_members = match writer.open.last() {
+        Some(open) => open == Open.Members || open == Open.Variant
+        None => false
+      }
+      if in_members {
+        let _ = mut writer.keys.pop()
+        mut writer.keys.push(None)
+      } else {
+        fail_writing(mut writer, message: "this format has no null, so a missing value can only be left out of a record")
+      }
+    }
+  }
+}
+
+impl Serializer for TreeWriter[Node: Tree] {
+  fn null(mut self) {
+    put_null(mut self)
+  }
+
+  fn bool(mut self, value: Bool) {
+    put(mut self, node: Node.from_bool(value))
+  }
+
+  fn integer(mut self, value: Int64) {
+    put(mut self, node: Node.from_integer(value))
+  }
+
+  fn unsigned(mut self, value: UInt64) {
+    match Node.from_unsigned(value) {
+      Some(node) => put(mut self, node: own node)
+      None => fail_writing(mut self, message: "a number too large for this format")
+    }
+  }
+
+  fn float(mut self, value: Float64) {
+    put(mut self, node: Node.from_float(value))
+  }
+
+  fn text(mut self, value: StringSlice) {
+    put(mut self, node: Node.from_text(value.to_string()))
+  }
+
+  fn begin_list(mut self, length: USize) {
+    mut self.open.push(Open.Items)
+    mut self.items.push(List.with_capacity(length))
+  }
+
+  fn end_list(mut self) {
+    let _ = mut self.open.pop()
+    match mut self.items.pop() {
+      Some(items) => put(mut self, node: Node.from_items(own items))
+      None => {}
+    }
+  }
+
+  fn begin_record(mut self, length: USize) {
+    open_members(mut self, open: Open.Members)
+  }
+
+  fn field(mut self, name: StringSlice) {
+    name_next(mut self, name: self.names.apply(name))
+  }
+
+  fn end_record(mut self) {
+    let members = close_members(mut self)
+    put(mut self, node: Node.from_members(own members))
+  }
+
+  fn begin_map(mut self, length: USize) {
+    open_members(mut self, open: Open.Members)
+  }
+
+  fn key(mut self, key: StringSlice) {
+    name_next(mut self, name: key.to_string())
+  }
+
+  fn end_map(mut self) {
+    let members = close_members(mut self)
+    put(mut self, node: Node.from_members(own members))
+  }
+
+  fn begin_variant(mut self, name: StringSlice, length: USize) {
+    if length == 0 {
+      put(mut self, node: Node.from_text(name.to_string()))
+      mut self.open.push(Open.UnitVariant)
+    } else {
+      mut self.variants.push(name.to_string())
+      open_members(mut self, open: Open.Variant)
+    }
+  }
+
+  fn end_variant(mut self) {
+    match mut self.open.pop() {
+      Some(open) => {
+        if open == Open.Variant {
+          mut self.open.push(open)
+          let fields = close_members(mut self)
+          match mut self.variants.pop() {
+            Some(name) => {
+              var wrapper: Map[String, Node] = [:]
+              mut wrapper.insert(own name, value: Node.from_members(own fields))
+              put(mut self, node: Node.from_members(own wrapper))
+            }
+            None => {}
+          }
+        }
+      }
+      None => {}
+    }
+  }
+}
+
+type Reading[Node] =
+  | Items(items: List[Node], next: USize)
+  | Members(members: Map[String, Node])
+  | Entries(keys: List[String], values: List[Node])
+
+public opaque type TreeReader[Node: Tree](names: Names, current: Option[Node], frames: List[Reading[Node]], path: List[String])
+
+public fn TreeReader[Node: Tree].new(node: own Node, names: Names = Names.AsWritten) -> TreeReader[Node] {
+  TreeReader(names: names, current: Some(own node), frames: [], path: [])
+}
+
+fn name_top[Node: Tree](reader: mut TreeReader[Node], name: own String) {
+  let _ = mut reader.path.pop()
+  mut reader.path.push(own name)
+}
+
+fn expected_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
+  var message = "expected "
+  mut message.push(expected)
+  reader.error(message.slice())
+}
+
+fn mismatch_error[Node: Tree](reader: TreeReader[Node], expected: StringSlice) -> Error {
+  match reader.current {
+    None => reader.error("is missing")
+    Some(_) => expected_error(reader, expected: expected)
+  }
+}
+
+impl Deserializer for TreeReader[Node: Tree] {
+  fn kind(self) -> Kind {
+    match self.current {
+      None => Kind.Absent
+      Some(node) => node.kind()
+    }
+  }
+
+  fn skip(mut self) {
+    self.current = None
+  }
+
+  fn bool(mut self) -> Result[Bool, Error] {
+    let found = match self.current {
+      Some(node) => node.boolean()
+      None => None
+    }
+    match found {
+      Some(flag) => {
+        self.current = None
+        Ok(flag)
+      }
+      None => Err(mismatch_error(self, expected: "true or false"))
+    }
+  }
+
+  fn integer(mut self) -> Result[Int64, Error] {
+    let found = match self.current {
+      Some(node) => node.integer()
+      None => None
+    }
+    match found {
+      Some(integer) => {
+        self.current = None
+        Ok(integer)
+      }
+      None => Err(mismatch_error(self, expected: "a whole number"))
+    }
+  }
+
+  fn unsigned(mut self) -> Result[UInt64, Error] {
+    let found = match self.current {
+      Some(node) => node.integer()
+      None => None
+    }
+    match found {
+      Some(integer) => match UInt64.try_from(integer) {
+        Ok(unsigned) => {
+          self.current = None
+          Ok(unsigned)
+        }
+        Err(_) => Err(expected_error(self, expected: "a whole number that is not negative"))
+      }
+      None => Err(mismatch_error(self, expected: "a whole number that is not negative"))
+    }
+  }
+
+  fn float(mut self) -> Result[Float64, Error] {
+    let found = match self.current {
+      Some(node) => node.float()
+      None => None
+    }
+    match found {
+      Some(float) => {
+        self.current = None
+        Ok(float)
+      }
+      None => Err(mismatch_error(self, expected: "a number"))
+    }
+  }
+
+  fn text(mut self) -> Result[String, Error] {
+    if self.kind() != Kind.Text {
+      return Err(mismatch_error(self, expected: "a string"))
+    }
+    match mut self.current.take() {
+      Some(node) => match own node.into_text() {
+        Some(text) => Ok(own text)
+        None => Err(expected_error(self, expected: "a string"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn begin_list(mut self) -> Result[Unit, Error] {
+    if self.kind() != Kind.List {
+      return Err(mismatch_error(self, expected: "a list"))
+    }
+    match mut self.current.take() {
+      Some(node) => match own node.into_items() {
+        Some(items) => {
+          var reversed = own items
+          mut reversed.reverse()
+          mut self.frames.push(Reading.Items(items: own reversed, next: 0))
+          mut self.path.push("")
+          Ok(Unit)
+        }
+        None => Err(expected_error(self, expected: "a list"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn next_element(mut self) -> Bool {
+    match mut self.frames.pop() {
+      Some(frame) => match own frame {
+        Items(items, next) => {
+          var rest = own items
+          match mut rest.pop() {
+            Some(item) => {
+              self.current = Some(own item)
+              name_top(mut self, name: next.format())
+              mut self.frames.push(Reading.Items(items: own rest, next: next.saturating_add(1)))
+              true
+            }
+            None => {
+              self.current = None
+              mut self.frames.push(Reading.Items(items: own rest, next: next))
+              false
+            }
+          }
+        }
+        other => {
+          mut self.frames.push(own other)
+          false
+        }
+      }
+      None => false
+    }
+  }
+
+  fn end_list(mut self) {
+    let _ = mut self.frames.pop()
+    let _ = mut self.path.pop()
+    self.current = None
+  }
+
+  fn begin_record(mut self) -> Result[Unit, Error] {
+    if self.kind() != Kind.Record {
+      return Err(mismatch_error(self, expected: "a record"))
+    }
+    match mut self.current.take() {
+      Some(node) => match own node.into_members() {
+        Some(members) => {
+          mut self.frames.push(Reading.Members(members: own members))
+          mut self.path.push("")
+          Ok(Unit)
+        }
+        None => Err(expected_error(self, expected: "a record"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn field(mut self, name: StringSlice) -> Bool {
+    let key = self.names.apply(name)
+    match mut self.frames.pop() {
+      Some(frame) => match own frame {
+        Members(members) => {
+          var rest = own members
+          self.current = mut rest.take(key)
+          mut self.frames.push(Reading.Members(members: own rest))
+        }
+        other => {
+          self.current = None
+          mut self.frames.push(own other)
+        }
+      }
+      None => self.current = None
+    }
+    name_top(mut self, name: own key)
+    self.current.is_some()
+  }
+
+  fn end_record(mut self) {
+    let _ = mut self.frames.pop()
+    let _ = mut self.path.pop()
+    self.current = None
+  }
+
+  fn begin_map(mut self) -> Result[Unit, Error] {
+    if self.kind() != Kind.Record {
+      return Err(mismatch_error(self, expected: "a record"))
+    }
+    match mut self.current.take() {
+      Some(node) => match own node.into_members() {
+        Some(members) => {
+          var keys: List[String] = List.with_capacity(members.length())
+          var values: List[Node] = List.with_capacity(members.length())
+          for entry in own members {
+            mut keys.push(own entry.key)
+            mut values.push(own entry.value)
+          }
+          mut keys.reverse()
+          mut values.reverse()
+          mut self.frames.push(Reading.Entries(keys: own keys, values: own values))
+          mut self.path.push("")
+          Ok(Unit)
+        }
+        None => Err(expected_error(self, expected: "a record"))
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn next_key(mut self) -> Option[String] {
+    match mut self.frames.pop() {
+      Some(frame) => match own frame {
+        Entries(keys, values) => {
+          var rest_keys = own keys
+          var rest_values = own values
+          let key = mut rest_keys.pop()
+          self.current = mut rest_values.pop()
+          mut self.frames.push(Reading.Entries(keys: own rest_keys, values: own rest_values))
+          match own key {
+            Some(name) => {
+              name_top(mut self, name: name.copy())
+              Some(own name)
+            }
+            None => None
+          }
+        }
+        other => {
+          mut self.frames.push(own other)
+          None
+        }
+      }
+      None => None
+    }
+  }
+
+  fn end_map(mut self) {
+    let _ = mut self.frames.pop()
+    let _ = mut self.path.pop()
+    self.current = None
+  }
+
+  fn variant(mut self) -> Result[String, Error] {
+    let kind = self.kind()
+    if kind != Kind.Text && kind != Kind.Record {
+      return Err(mismatch_error(self, expected: "a variant's name, or a record with one member"))
+    }
+    match mut self.current.take() {
+      Some(node) => {
+        if kind == Kind.Text {
+          return match own node.into_text() {
+            Some(name) => {
+              mut self.frames.push(Reading.Members(members: [:]))
+              mut self.path.push("")
+              mut self.path.push("")
+              Ok(own name)
+            }
+            None => Err(expected_error(self, expected: "a variant"))
+          }
+        }
+        match own node.into_members() {
+          Some(members) => {
+            if members.length() != 1 {
+              return Err(expected_error(self, expected: "a record with one member"))
+            }
+            var found: Option[String] = None
+            var inner: Option[Node] = None
+            for entry in own members {
+              found = Some(own entry.key)
+              inner = Some(own entry.value)
+            }
+            match own found {
+              Some(name) => {
+                mut self.path.push(name.copy())
+                match own inner {
+                  Some(content) => match own content.into_members() {
+                    Some(record) => {
+                      mut self.frames.push(Reading.Members(members: own record))
+                      mut self.path.push("")
+                      Ok(own name)
+                    }
+                    None => Err(expected_error(self, expected: "a record"))
+                  }
+                  None => Err(expected_error(self, expected: "a record"))
+                }
+              }
+              None => Err(expected_error(self, expected: "a record with one member"))
+            }
+          }
+          None => Err(expected_error(self, expected: "a variant"))
+        }
+      }
+      None => Err(self.error("is missing"))
+    }
+  }
+
+  fn end_variant(mut self) {
+    let _ = mut self.frames.pop()
+    let _ = mut self.path.pop()
+    let _ = mut self.path.pop()
+    self.current = None
+  }
+
+  fn error(self, message: StringSlice) -> Error {
+    var path = ""
+    for segment in self.path {
+      if segment.length() > 0 {
+        mut path.push("/")
+        mut path.push(segment.slice())
+      }
+    }
+    Error(path: own path, message: message.to_string())
+  }
+}

@@ -1,0 +1,7 @@
+fn apply(action: fn() -> Instant) -> Instant {
+  action()
+}
+
+fn f() -> Instant {
+  apply(tick)
+}

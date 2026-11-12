@@ -1,7 +1,7 @@
 type local = int
 type block = int
 
-(** What a local holds. *)
+(** Whether a local is a source binding or a temporary. *)
 type local_kind =
   | Source of { local : Core.local; mode : Types.mode }
       (** A parameter, [self], or a local that a pattern or a lambda binds. With [Read] or [Mut], it
@@ -55,7 +55,7 @@ type argument =
 type call = {
   callee : callee;
   arguments : argument list;  (** One per parameter, in parameter order. *)
-  uses : Types.capability list;
+  uses : Types.capability_set;
   node : Core.id;  (** The core form's [Call]. *)
 }
 
@@ -165,7 +165,7 @@ type pending = {
   mutable heading : loop option;
 }
 
-(* What a jump out of scopes must end: the locals bound in each scope, and
+(* The scopes a jump out of scopes must end: the locals bound in each scope, and
    whether the scope is a [provide] block. *)
 type scope = { mutable bound : local list; provides : bool }
 type target = Jump of block | Next_iteration
@@ -825,7 +825,7 @@ and test b (pattern : Core.pattern) (scrutinee : place) ~fail =
                            };
                          Passed { mode = Read; value; mark = None };
                        ];
-                     uses = [];
+                     uses = Types.no_capabilities;
                      node = pattern.id;
                    };
                })
@@ -1003,7 +1003,7 @@ and statement b (node : Core.statement) =
           | Yielding_call ({ kind = Call called; _ } as call) ->
               each_loop b ~origin ~pattern ~called ~node:call.id ~loop ~each:(fun bind_part ->
                   each ~bind_part)
-          | Yielding_call _ -> bug "a loop over what is not a call"
+          | Yielding_call _ -> bug "a loop over an expression that is not a call"
           | Cursor { cursor; next } ->
               cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each:(fun bind_part ->
                   each ~bind_part))
@@ -1168,7 +1168,7 @@ and cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each =
                                  mark = None;
                                };
                            ];
-                         uses = [];
+                         uses = Types.no_capabilities;
                          node = origin;
                        };
                    })

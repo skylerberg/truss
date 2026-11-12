@@ -8,10 +8,12 @@ let mir_of database key = Query.demand database Mir.mir key
 
 (* Fails unless every jump of a body reaches one of its blocks and every
    local it names is one of its locals. *)
-let check_body what (body : Mir.body) =
+let check_body definition (body : Mir.body) =
   let blocks = Array.length body.blocks and locals = Array.length body.locals in
-  let block index = if index < 0 || index >= blocks then fail "%s: a jump to block %d" what index in
-  let local index = if index < 0 || index >= locals then fail "%s: local _%d" what index in
+  let block index =
+    if index < 0 || index >= blocks then fail "%s: a jump to block %d" definition index
+  in
+  let local index = if index < 0 || index >= locals then fail "%s: local _%d" definition index in
   let place (place : Mir.place) =
     match place.root with Local found -> local found | Constant _ -> ()
   in
@@ -62,17 +64,17 @@ let () =
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               let key = Resolve.Names.key_of declaration in
-              let what = Resolve.Names.show_key key in
+              let definition = Resolve.Names.show_key key in
               match
                 try mir_of database key
                 with Compiler_bug.Bug bug ->
-                  fail "%s: %s" what bug.message;
+                  fail "%s: %s" definition bug.message;
                   None
               with
               | Some mir ->
                   incr built;
-                  check_body what mir.body;
-                  Array.iter (check_body what) mir.lambdas
+                  check_body definition mir.body;
+                  Array.iter (check_body definition) mir.lambdas
               | None -> ())
             (Query.demand database Resolve.Names.declarations module_)))
     Standard_library.modules;
@@ -102,14 +104,7 @@ let () =
   expect
     "an assignment evaluates its value, then its target, and a compound assignment its operand \
      first"
-    "fn step(order: mut Int64, next: Int64) -> USize {\n\
-    \  order = order * 10 + next\n\
-    \  0\n\
-     }\n\n\
-     fn g(items: mut List[USize], order: mut Int64) {\n\
-    \  items[step(mut order, next: 1)] = step(mut order, next: 2)\n\
-    \  items[step(mut order, next: 3)] += step(mut order, next: 4)\n\
-     }\n"
+    Fixtures.Mir.assignment_evaluates_its_value_then_its_target_and
     "0:\n\
     \  _2 = app::main::step(mut _1, 2)\n\
     \  _3 = app::main::step(mut _1, 1)\n\
@@ -126,12 +121,7 @@ let () =
     \  dead _5, _6, _7, _8, _9\n\
     \  return ()";
   expect "a match tests its arms in order, and a guard that fails ends the arm's bindings"
-    "fn g(value: Option[Int64]) -> Int64 {\n\
-    \  match value {\n\
-    \    Some(x) if x > 0 => x\n\
-    \    Some(_) | None => 0\n\
-    \  }\n\
-     }\n"
+    Fixtures.Mir.match_tests_its_arms_in_order_and_a_guard_that
     "0:\n\
     \  _2 = _0 is Some\n\
     \  branch _2 1 5\n\
@@ -173,7 +163,7 @@ let () =
      13:\n\
     \  return _1";
   expect "a let with an else tests its pattern, and the else leaves the block"
-    "fn g(value: Option[Int64]) -> Int64 {\n  let Some(x) = value else { return 1 }\n  x\n}\n"
+    Fixtures.Mir.let_with_an_else_tests_its_pattern_and_the_else
     "0:\n\
     \  _1 = _0 is Some\n\
     \  branch _1 2 1\n\
@@ -187,7 +177,7 @@ let () =
     \  dead _1\n\
     \  return _2";
   expect "a short-circuit operator jumps past its right operand"
-    "fn g(a: Bool, b: Bool) -> Bool {\n  a && !b\n}\n"
+    Fixtures.Mir.short_circuit_operator_jumps_past_its_right
     "0:\n\
     \  branch _0 1 3\n\
      1:\n\
@@ -201,14 +191,7 @@ let () =
      4:\n\
     \  return _2";
   expect "a range loop copies its counter, steps it at continue, and ends at an inclusive stop"
-    "fn g(count: Int64) -> Int64 {\n\
-    \  var total = 0\n\
-    \  for i in 0..=count {\n\
-    \    if i == 3 { continue }\n\
-    \    total += i\n\
-    \  }\n\
-    \  total\n\
-     }\n"
+    Fixtures.Mir.range_loop_copies_its_counter_steps_it_at_continue
     "0:\n\
     \  _1 = 0\n\
     \  live _2\n\
@@ -256,14 +239,7 @@ let () =
     \  dead _3, _4, _5, _10\n\
     \  return _2";
   expect "a loop over a yielding call runs its body for each part"
-    "fn g(items: List[Int64]) -> Int64 {\n\
-    \  var total = 0\n\
-    \  for item in items {\n\
-    \    if item < 0 { break }\n\
-    \    total += item\n\
-    \  }\n\
-    \  total\n\
-     }\n"
+    Fixtures.Mir.loop_over_a_yielding_call_runs_its_body_for_each
     "0:\n\
     \  _1 = 0\n\
     \  live _2\n\
@@ -299,12 +275,7 @@ let () =
      8:\n\
     \  return _2";
   expect "a lambda's captures and parameters are its own locals"
-    "fn apply(transform: fn(Int64) -> Int64) -> Int64 {\n\
-    \  transform(1)\n\
-     }\n\n\
-     fn g(offset: Int64) -> Int64 {\n\
-    \  apply(fn(value) { value + offset })\n\
-     }\n"
+    Fixtures.Mir.lambdas_captures_and_parameters_are_its_own_locals
     "0:\n\
     \  _1 = lambda 0\n\
     \  _2 = app::main::apply(_1)\n\

@@ -1,0 +1,11 @@
+type Span2(length: Int64)
+
+impl Multiply[Int64] for Span2 {
+  type Output = Span2
+  fn multiply_is_defined(self, right: Int64) -> Bool { true }
+  fn multiply(self, right: Int64) -> Span2 { todo }
+}
+
+fn f(span: Span2) -> Int64 {
+  span * 3
+}

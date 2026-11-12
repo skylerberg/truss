@@ -4,7 +4,7 @@ type t = {
   types : (int, Types.ty) Hashtbl.t;  (** The solution of each solved type variable or literal. *)
   values : (int, Types.value) Hashtbl.t;  (** The solution of each solved value variable. *)
   mutable capability_variable_count : int;  (** The number of capability variables created. *)
-  mutable deferred_capability_equalities : (Types.capability list * Types.capability list) list;
+  mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
       (** Pairs of capability sets that unification found in the same position of two types, where
           at least one has a capability variable. They must be equal once the variables are solved.
       *)
@@ -42,15 +42,14 @@ let fresh_value unifier =
    constraint on it. *)
 let fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
-  [ Types.Capability_variable unifier.capability_variable_count ]
+  Types.capability_set [ Types.Capability_variable unifier.capability_variable_count ]
 
 (* Unifies two capability sets. Two sets that are both known unify only if
    they are equal. If either set has a capability variable, or an associated
    capability set of a type that is not inferred yet, the equality is
    deferred until the definition is checked, and unification succeeds for
    now. *)
-let unify_capabilities unifier left right =
-  let left = List.sort_uniq compare left and right = List.sort_uniq compare right in
+let unify_capabilities unifier (left : Types.capability_set) right =
   left = right
   || (Types.capabilities_unsolved left || Types.capabilities_unsolved right)
      && begin
@@ -97,12 +96,14 @@ and zonk_argument unifier = function
   | Types.Capabilities capabilities -> Types.Capabilities (zonk_capabilities unifier capabilities)
 
 and zonk_capabilities unifier capabilities =
-  List.map
+  Types.flat_map_capabilities
     (function
       | Types.Capability_projection { base; trait; name } ->
-          Types.Capability_projection
-            { base = zonk unifier base; trait = zonk_trait unifier trait; name }
-      | capability -> capability)
+          [
+            Types.Capability_projection
+              { base = zonk unifier base; trait = zonk_trait unifier trait; name };
+          ]
+      | capability -> [ capability ])
     capabilities
 
 and zonk_trait unifier (trait : Types.trait_reference) =

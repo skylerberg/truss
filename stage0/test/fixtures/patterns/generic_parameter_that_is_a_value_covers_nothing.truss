@@ -1,0 +1,5 @@
+fn f[limit: USize](count: USize) -> Bool {
+  match count {
+    limit => true
+  }
+}

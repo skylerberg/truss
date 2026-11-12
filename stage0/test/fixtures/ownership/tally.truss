@@ -1,0 +1,24 @@
+type Tally(cells: List[Int64])
+
+impl Index for Tally {
+  type Key = USize
+  type Output = Int64
+
+  fn contains_key(self, key: USize) -> Bool {
+    key < self.cells.length()
+  }
+
+  fn at(self, key: USize) lends Int64 {
+    yield self.cells[key]
+  }
+
+  fn at(mut self, key: USize) lends mut Int64 {
+    yield mut self.cells[key]
+  }
+}
+
+fn bump(first: mut Int64, second: mut Int64) {
+  first = 1
+  second = 2
+}
+

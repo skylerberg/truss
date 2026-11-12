@@ -392,7 +392,9 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
       let builder_type = Types.named (Well_known.path Text_builder) [] in
       let builder = fresh_synthetic_local state in
       let builder_place : Core.place = Local { local = builder; type_ = builder_type; origin } in
-      let call callee arguments : Core.kind = Call { callee; arguments; lends = None; uses = [] } in
+      let call callee arguments : Core.kind =
+        Call { callee; arguments; lends = None; uses = Types.no_capabilities }
+      in
       let let_builder =
         statement
           (Let
@@ -494,7 +496,7 @@ let list_literal state ~origin (element : Types.ty) (elements : Core.expression 
            callee = Intrinsic { operation; type_arguments = [ Types.Type element ] };
            arguments;
            lends = None;
-           uses = [];
+           uses = Types.no_capabilities;
          })
   in
   let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length elements))) in
@@ -567,7 +569,7 @@ let list_literal state ~origin (element : Types.ty) (elements : Core.expression 
                         };
                     ];
                   lends = None;
-                  uses = [];
+                  uses = Types.no_capabilities;
                 }));
     }
 
@@ -1093,7 +1095,7 @@ let slice state (value : expression) (base : Core.place) ~start ~stop ~inclusive
              Function { path = Method { owner = path; name; receiver = Read }; type_arguments };
            arguments;
            lends = None;
-           uses = [];
+           uses = Types.no_capabilities;
          })
   in
   let receiver : Core.argument = Passed { mode = Read; value = Place base; mark = None } in
@@ -1138,7 +1140,7 @@ let inserted_literal state ~origin (type_ : Types.ty) ~name ~insert
            callee = Function { path = Method { owner = path; name; receiver }; type_arguments };
            arguments;
            lends = None;
-           uses = [];
+           uses = Types.no_capabilities;
          })
   in
   let capacity = make (Types.builtin USize) (Integer (Z.of_int (List.length entries))) in

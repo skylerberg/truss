@@ -1,0 +1,7 @@
+fn take(name: own String) {}
+
+fn f(grid: Grid) {
+  match grid.cell(0) {
+    (name) => take(own name)
+  }
+}

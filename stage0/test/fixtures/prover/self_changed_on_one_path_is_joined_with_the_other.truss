@@ -1,0 +1,9 @@
+type Box(value: Int64)
+
+fn Box.set(mut self, flag: Bool)
+  ensures self.value == old(self.value)
+{
+  if flag {
+    self.value = 1
+  }
+}

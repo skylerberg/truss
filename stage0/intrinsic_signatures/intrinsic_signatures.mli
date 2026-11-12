@@ -23,5 +23,5 @@ type allocations =
 type cost = { time : time; allocations : allocations }
 
 val cost : Intrinsic.operation -> cost
-(** What an operation costs, which the prover trusts: how many steps it takes, and how many blocks
-    it allocates. An operation that does more is known by no bound. *)
+(** An operation's cost, which the prover trusts: how many steps it takes, and how many blocks it
+    allocates. An operation that does more is known by no bound. *)

@@ -1,0 +1,17 @@
+type Meters(value: Int64)
+
+impl Add[Meters] for Meters {
+  type Output = Meters
+  fn add_is_defined(self, right: Meters) -> Bool { true }
+  fn add(self, right: Meters) -> Meters { todo }
+}
+
+impl Add[Int64] for Meters {
+  type Output = Meters
+  fn add_is_defined(self, right: Int64) -> Bool { true }
+  fn add(self, right: Int64) -> Meters { todo }
+}
+
+fn f(length: Meters, extra: Int64) -> Meters {
+  length + extra
+}

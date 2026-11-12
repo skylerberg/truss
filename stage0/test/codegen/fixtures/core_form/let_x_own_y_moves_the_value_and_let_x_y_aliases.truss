@@ -1,0 +1,14 @@
+fn keep(items: own List[Int64]) -> List[Int64] {
+  let held = own items
+  held
+}
+
+fn count(items: List[Int64]) -> USize {
+  let seen = items
+  seen.length()
+}
+
+test "moves" {
+  let held = keep([1, 2, 3])
+  assert count(held) == 3
+}

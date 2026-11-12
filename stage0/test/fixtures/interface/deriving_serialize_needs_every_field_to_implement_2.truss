@@ -1,0 +1,4 @@
+use standard::serialization
+
+type Point(x: Int64, tags: List[String] = [])
+  derives serialization::Serialize, serialization::Deserialize

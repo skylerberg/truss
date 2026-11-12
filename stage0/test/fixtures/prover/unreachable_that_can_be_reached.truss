@@ -1,0 +1,3 @@
+fn f(flag: Bool) -> Int64 {
+  if flag { 1 } else { unreachable }
+}

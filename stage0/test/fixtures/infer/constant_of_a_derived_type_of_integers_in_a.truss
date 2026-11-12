@@ -1,0 +1,11 @@
+type Point(x: Int64)
+  derives Equal
+
+let origin: Point = Point(x: 0)
+
+fn f(point: Point) -> Bool {
+  match point {
+    origin => true
+    _ => false
+  }
+}

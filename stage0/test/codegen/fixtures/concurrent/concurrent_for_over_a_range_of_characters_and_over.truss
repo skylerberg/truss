@@ -1,0 +1,17 @@
+fn ranges(low: Int8, high: Int8)
+  uses Tasks, Console
+{
+  concurrent for letter in Character"a"..=Character"c" {
+    Console.print_line("letter ${letter}")
+  }
+  concurrent for small in low..high {
+    Console.print_line("small ${small}")
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  ranges(-2, high: 1)
+  ExitCode.success
+}

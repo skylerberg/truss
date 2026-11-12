@@ -1,0 +1,34 @@
+type Sum(pieces: USize, total: Int64)
+
+impl FromTemplate for Sum {
+  type Part = Int64
+
+  fn from_template(template: Template[Int64]) -> Sum {
+    var total = 0
+    for part in template.parts {
+      total += part
+    }
+    Sum(pieces: template.literals.length(), total: total)
+  }
+}
+
+fn describe(count: Int64, label: String) -> String {
+  "${count} ${label}s, ${count > 1}"
+}
+
+fn sum(first: Int64, second: Int64) -> Sum {
+  Sum"a ${first} b ${second} c"
+}
+
+fn twice(text: String) -> String {
+  let again = text.copy()
+  "${text}${again}"
+}
+
+test "strings" {
+  assert describe(2, label: "box") == "2 boxs, true"
+  let total = sum(2, second: 40)
+  assert total.pieces == 3
+  assert total.total == 42
+  assert twice("ab") == "abab"
+}

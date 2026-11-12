@@ -2,42 +2,42 @@
 
 This document describes stage0's code database: the part of the toolchain
 that holds every definition being worked on and everything computed from
-them, keeps those results current as files change, keeps what was computed
-so that no state computes it twice, and answers questions about what depends
-on what. It follows [GOALS.md](GOALS.md) and what [DESIGN.md](DESIGN.md)
-promises a change costs, and serves the stages described in
+them, keeps those results current as files change, keeps each computed
+result so that no state computes it twice, and answers dependency questions.
+It follows [GOALS.md](GOALS.md) and the cost of a change that
+[DESIGN.md](DESIGN.md) promises, and serves the stages described in
 [TYPECHECKER.md](TYPECHECKER.md) and [CODEGEN.md](CODEGEN.md). The `truss`
 command line, which [CLI.md](CLI.md) describes, is its client, and the only
 program it serves: the database is a library, and every command and report
 is the command line's.
 
 GOALS.md asks that a change cost O(change), not O(project), for building,
-testing, and verifying, and that agents can see exactly what their changes
-affect and where their work overlaps with other agents'. The database is what
-makes both possible. It:
+testing, and verifying, and that agents can see exactly the effects of their
+changes and where their work overlaps with other agents'. The database makes
+both possible. It:
 
 - holds the inputs of every project being worked on: its packages, their
   manifests, and the text of every module
 - maintains each result a driver demanded, and every result that one
   reads, as inputs change, by pushing each change, one phase of the
-  compiler at a time, to the results that read what really changed
+  compiler at a time, to the readers of the values that really changed
 - gives every result a fingerprint, and keeps each saved result as a fact
-  under the key of what it read, so that another worktree, a commit, a
+  under the key of its reads, so that another worktree, a commit, a
   branch gone back to, or a new process finds it instead of computing it
 - writes each state as a difference over an earlier one, and opens a state
   by sharing the whole state it started from, so that a worktree, a commit,
-  or a trial of a change costs what it changed
+  or a trial of a change costs only its changes
 - keeps the results of expensive steps, such as a test run or a C compile,
   under a key built from exactly the input each one consumed
-- answers questions about dependencies in terms of definitions: what reads
-  a definition, what a change affected, what each `todo` blocks, and where
-  two worktrees' changes overlap
+- answers questions about dependencies in terms of definitions: a
+  definition's readers, a change's effects, the work each `todo` blocks, and
+  where two worktrees' changes overlap
 - runs as a background process for each project being worked on, so
   commands in different worktrees are answered at once
 
 It does not:
 
-- decide what code means. The stages do, as queries the database runs.
+- decide the meaning of code. The stages do, as queries the database runs.
 - hold anything that cannot be rebuilt. Text files are the source of truth,
   as DESIGN.md says, so deleting the database loses only time.
 - keep history. Version control does that. The database knows the state of
@@ -76,12 +76,12 @@ The database is four layers, each behind one narrow interface:
                 ~/.cache/truss
 ```
 
-| Interface | Library | Used by | What it offers |
+| Interface | Library | Used by | Offers |
 |---|---|---|---|
 | `Query` | `query` | Compiler stages | Declaring phases, inputs, and queries, and reading them while a query runs |
 | `Engine` | `engine` | `Session`, `Database`, and tests | Setting inputs, keeping results current, bases, writing and opening states, and walking the graph |
 | `Store` | `store` | `Engine` and `Session` | Bytes by content hash, results by key, and pointers |
-| `Session` | `session` | `Database` | States by name in the store, trials, what a state's graph answers, and the background process |
+| `Session` | `session` | `Database` | States by name in the store, trials, graph questions about a state, and the background process |
 | `Database` | `database` | The command line, and the tools on it | A session for each project's files, and answers about it as data |
 
 `Query` and `Engine` are two views of one implementation, `Incremental`,
@@ -90,9 +90,9 @@ each layer can be replaced without touching the others:
 
 - **Stages see only `Query`.** A stage never sees the engine, the store, the
   file system, worktrees, git, or another session.
-- **`Session` knows no stage and no project.** It keeps states, and what a
-  client attaches to each. What a manifest, a package, or a commit is, is
-  the client's.
+- **`Session` knows no stage and no project.** It keeps states, and the data a
+  client attaches to each. Manifests, packages, and commits are the
+  client's concepts.
 - **`Database` knows the project, and no stage beyond it.** It reads
   manifests and module files, and sets the packages and their modules' text.
   It does not depend on code generation or the prover.
@@ -132,14 +132,14 @@ keeps every edge in both directions:
 
 - **Edges are learned, not declared.** A query reads through its context
   while it runs, and each read adds an edge. Truss's dependencies are not
-  known before a query runs: a body depends on what its name lookups found,
+  known before a query runs: a body depends on its name lookups' results,
   which depends on the names it uses.
 - **A read that found nothing is an edge too.** Asking for the constants
   named `count` in a file, and finding none, depends on that answer. Adding
   such a constant later changes the answer, and so reaches the reader, as
   DESIGN.md requires for patterns.
-- **The edges in from readers are what a change follows.** The edges out say
-  what to check when a result may have changed, and answer "why does this
+- **A change follows the edges in from readers.** The edges out name the
+  dependencies to check when a result may have changed, and answer "why does this
   depend on that?"
 
 ### Phases
@@ -150,23 +150,23 @@ database holds no list of phases: a phase is declared with the phases it
 may read, as a query is declared with its phase, and the compiler declares
 its own, in `Phases`, each after the one before:
 
-| Phase | What its queries compute |
+| Phase | Its queries compute |
 |---|---|
 | Syntax | A file's tokens and trees, the names it defines, its imports, and which modules exist |
-| Declarations | What each file and package declares, a definition by name, a type's members by name, and each definition's tree |
-| Resolution | What each name in a definition means |
+| Declarations | Each file's and package's declarations, a definition by name, a type's members by name, and each definition's tree |
+| Resolution | The meaning of each name in a definition |
 | Interfaces | Signatures, shapes, constants' values, and the `impl`s found for a type |
-| Bodies | Checked bodies, moves and loans, patterns, and what else is found in a body |
+| Bodies | Checked bodies, moves and loans, patterns, and the other facts found in a body |
 | Checks | The rules that span a package |
 | Proofs | Each package's call graph, and each definition's obligations as the solver's queries, which PROVER.md describes |
 | Verdicts | Whether each definition's obligations hold, from the solver's answers |
 | Diagnostics | Every stage's diagnostics for a file |
-| Lowering | What each instance compiles to |
-| Linking | Each instance's own hash, and what it refers to |
+| Lowering | Each instance's LIR |
+| Linking | Each instance's own hash, and its references |
 | Recursion | Which instances reach each other |
 | Keys | The key of everything an instance can reach |
 
-Phases are what let a change stop exactly where it stops mattering. When a
+Phases let a change stop exactly where it stops mattering. When a
 phase is brought up to date, every earlier phase is final, so the engine
 knows which of the phase's results read something that *really* changed,
 and touches no others.
@@ -177,28 +177,28 @@ A clock orders changes. Each change takes the next time, and each node
 records when its result last changed and when it was last found current.
 Setting an input to a value equal to its old one does nothing. Otherwise:
 
-1. The input takes its new value, and what reads it is queued, each reader
+1. The input takes its new value, and its readers are queued, each
    under its phase.
 2. The engine takes the first phase with anything queued, and *marks* each
-   queued result, and what reads those within the phase. Marking sets a
+   queued result, and their readers within the phase. Marking sets a
    flag and nothing more.
-3. Each marked result is then brought up to date. What it read is brought
-   up to date first, in the order it read them. If one of them changed after
+3. Each marked result is then brought up to date. Its dependencies are
+   brought up to date first, in the order it read them. If one of them changed after
    the result was last found current, the result is looked for as a fact
    and, failing that, computed again; the check stops at the first such
    read, since a later read may not be made at all once an earlier one gives
    a different answer. Otherwise the result is found current without being
    computed.
-4. A result that comes out different queues what reads it in later phases.
+4. A result that comes out different queues its readers in later phases.
    A result that comes out the same queues nothing. This is early cutoff.
 5. The engine continues to the next phase with anything queued, until none
    has.
 
-So a change costs the results that read something that really changed, plus,
-within one phase, what reads those. Editing a function's body computes its
+So a change costs the readers of the values that really changed, plus,
+within one phase, their readers. Editing a function's body computes its
 tree, its resolved form, its interface, and its checked body again. The
 interface comes out the same, so the callers' bodies, which are of a later
-phase, are not marked at all, however many there are. The engine counts what
+phase, are not marked at all, however many there are. The engine counts the results
 it marks, finds current, computes, finds as facts, and copies, and tests
 compare those counts for the same edit in a small package and a large one
 (see [Checking the engine](#checking-the-engine)).
@@ -210,7 +210,7 @@ compare those counts for the same edit in a small package and a large one
   Incremental uses. Every later change that reaches a necessary result
   brings it up to date, so demanding a root again costs nothing.
 - **An unnecessary result is not computed.** A result is computed when it
-  is first demanded, by running its query, which demands what it reads in
+  is first demanded, by running its query, which demands its dependencies in
   turn.
 - **A driver can observe a result without making it a root.** A read
   through `Engine.observer` computes the result if the state has none, and
@@ -218,8 +218,8 @@ compare those counts for the same edit in a small package and a large one
   Comparing two states, and finding a definition by name, observe: a
   question about a state does not change the results it maintains.
 - **A read made outside any query first brings the engine up to date
-  through the phase of what it reads,** so a driver never sees a result that
-  a change has not reached yet. Later phases keep what is queued for them
+  through the phase of its target,** so a driver never sees a result that
+  a change has not reached yet. Later phases keep their queued results
   until something of theirs is read, or the state is written.
 - **A driver can ask which results are still to be computed.** `Query.known`
   brings the phases before a query's up to date and gives the result the
@@ -230,9 +230,9 @@ compare those counts for the same edit in a small package and a large one
 - **A result whose query raised a fatal exception,** such as a stack
   overflow, stays queued, so it is computed again and never written as
   current.
-- **Results are recomputed, never patched.** A query is a function of what
-  it reads, so computing it again from the same reads gives the same value.
-  The engine needs no knowledge of what a query does.
+- **Results are recomputed, never patched.** A query is a function of its
+  reads, so computing it again from the same reads gives the same value.
+  The engine needs no knowledge of a query's semantics.
 
 Jane Street's Incremental pushes changes in the order of each node's height
 in the graph, and stops where a value is unchanged. Truss's phases are that
@@ -248,14 +248,14 @@ asked for.
 
 ### Bases
 
-An engine holds what differs from its *bases*, which are frozen engines: an
+An engine holds its differences from its *bases*, which are frozen engines: an
 input it sets, a result it computes, and a copy of each base result that a
 change reached. Everything else it reads from the bases.
 
-So a state costs what it changed. Ten worktrees of one project cost one
+So a state costs only its changes. Ten worktrees of one project cost one
 project and ten changes, starting a state costs nothing, and comparing two
 states costs their differences, since everything neither holds is the same
-in both. This is what turns fast inference into throughput: trying a change
+in both. This turns fast inference into throughput: trying a change
 is the basic thing an agent does, many agents try many changes at once, and
 each trial is a state, cheap to start and independent of the others.
 Roslyn's snapshots of a solution, Buck2's versioned graph, and git's trees
@@ -264,13 +264,13 @@ share structure between versions in the same way.
 - **A base never changes.** Freezing an engine brings it up to date and
   makes it a base. Several engines over one base share it.
 - **A base's result is copied when a change reaches it.** Setting an input a
-  base holds gives the engine its own input in its place, and what read the
-  base's input is copied into the engine, where it is marked and brought up
-  to date like any result. The copy holds the same result and reads what
-  the base's result read, as the engine sees each.
+  base holds gives the engine its own input in its place, and the base input's
+  readers are copied into the engine, where it is marked and brought up
+  to date like any result. The copy holds the same result and has the
+  base result's dependencies, as the engine sees each.
 - **A copy that comes out the same is the last one copied.** Only when a
   copy's result differs from the base's are the base's readers of it copied
-  in turn. So an engine holds what its changes really reached.
+  in turn. So an engine holds only the results its changes really reached.
 - **A base is fixed, or an earlier state.** A fixed base holds a package
   whose sources never change, such as the standard library, and no engine
   replaces its inputs. Any other base is the state the engine started from.
@@ -311,7 +311,7 @@ stages so that ordinary code makes no cycle: constants that refer to each
 other, the one real case, are found by the constant's own evaluation, which
 keeps the constants on its way.
 
-### What a query declares
+### Query declarations
 
 A stage declares each query with its name, the types of its key and its
 value, and the function that computes it, and says:
@@ -321,7 +321,7 @@ value, and the function that computes it, and says:
   other states find. See [Which results are stored](#which-results-are-stored).
 - **Whether a state that never held the result looks for it too.** See
   [Facts](#facts).
-- **What it is about:** a definition and a part of it, such as the interface
+- **Its subject:** a definition and a part of it, such as the interface
   or the body of `app::main::double`. Graph questions are asked and answered
   by definition, and a result about no definition, such as a lookup by name,
   is passed through when answering them.
@@ -335,11 +335,11 @@ store, declaring a query is an error.
 
 Nothing a stage can call changes an input or names a session.
 
-### What a query must be
+### Query requirements
 
 The engine relies on these, and its tests and its audit check them:
 
-- **A query is a pure function of what it reads through its context.** It
+- **A query is a pure function of the reads it makes through its context.** It
   reads no global state, no files, no clock, and no other session. Once the
   compiler is written in Truss, this is checked by the language: a query
   whose only capability is reading the database can do nothing else.
@@ -349,7 +349,7 @@ The engine relies on these, and its tests and its audit check them:
 - **Its value holds no functions,** unless the query gives its own equality.
   A value that holds a function has no bytes, so it is *opaque*: its
   fingerprint is a nonce, equal to no other computation's. It is never a
-  fact, and what reads it is computed again whenever it is.
+  fact, and its readers are computed again whenever it is.
 - **It answers for any key.** A query may be asked for a result that nothing
   will read once the state is up to date, so it must give an answer, such as
   `None`, for a key that no longer names anything.
@@ -364,8 +364,8 @@ The engine relies on these, and its tests and its audit check them:
 
 ## Inputs
 
-An input is a file's text, and little else. What a project's packages are,
-which module each file is, and what is wrong between its manifests are not
+An input is a file's text, and little else. A project's packages, the
+module of each file, and the errors between its manifests are not
 inputs: they are queries over the files, in `Project`, of the first phase.
 
 | Input | Key | Value |
@@ -373,7 +373,7 @@ inputs: they are queries over the files, in `Project`, of the first phase.
 | A file's text | Its root and its path in it | The text |
 | A root's files | The root | The paths of its manifests, lock file, and module files |
 | The roots | The session | The roots whose packages are in the build without being selected: the project's and the standard library's |
-| A file's stamp | Its path from the project's root | What says the file has not changed: for a file on disk, its size, modification time, and inode; for a commit's or a trial's, the hash of its text |
+| A file's stamp | Its path from the project's root | The evidence that the file has not changed: for a file on disk, its size, modification time, and inode; for a commit's or a trial's, the hash of its text |
 | An unavailable package | The hash of its files | Why a registry package's files could not be had |
 | The wanted keys | How instances are lowered | The tests and programs whose keys a driver is about to demand |
 | A solver answer | A request's key | The answer |
@@ -384,8 +384,8 @@ stage declares an input, and a driver sets it through its session.
 
 | Query | Result |
 |---|---|
-| `Project.layout`, of a root | The root's packages, each module file's module, and what is wrong with a manifest by itself |
-| `Project.selection` | The registry packages of the build, those whose files are not inputs yet, what is wrong with the lock file, and the lock file the manifests give |
+| `Project.layout`, of a root | The root's packages, each module file's module, and the errors in a manifest by itself |
+| `Project.selection` | The registry packages of the build, those whose files are not inputs yet, the errors in the lock file, and the lock file the manifests give |
 | `Project.build` | Where each package of the build is: its root and directory |
 | `Project.package`, of a name | A package's dependencies, grants, `usize_bits`, and modules |
 | `Project.module_text`, of a module | The text of the module's file |
@@ -407,8 +407,8 @@ stage declares an input, and a driver sets it through its session.
 
 ## Fingerprints and facts
 
-A query is a pure function of what it reads, so its result is a *fact*: the
-value, together with each thing it read and what that was. A fact is kept by
+A query is a pure function of its reads, so its result is a *fact*: the
+value, together with each dependency and its value at the time. A fact is kept by
 content, not by place, so a state that reads the same finds it, whichever
 worktree, branch, or process computed it. Bazel and Nix keep build steps
 this way, and Unison keeps definitions this way; Truss keeps every saved
@@ -464,7 +464,7 @@ from one that is.
 
 A saved result is kept as a *fact*: its fingerprint, under a key made of
 
-- what computed it, which in stage0 is the compiler's identity, the BLAKE3
+- the computation's author, which in stage0 is the compiler's identity, the BLAKE3
   hash of its executable
 - the query's name and the result's key
 - each node the result read, in the order they were first read, with its
@@ -475,23 +475,23 @@ give for it. A result that read an opaque result is none either, since that
 read's fingerprint will not be met again.
 
 - **A fact found is the result.** It was computed from reads with exactly
-  these fingerprints, and a query is a function of what it reads, so
+  these fingerprints, and a query is a function of its reads, so
   computing it now would make the same reads, in the same order, and give
   the same value. This holds whichever state the list of reads came from.
-- **A marked result is looked for as a fact before it is computed.** What it
-  read last time is brought up to date, and the key of those reads with the
-  fingerprints they have now is looked up. This is what makes going back
+- **A marked result is looked for as a fact before it is computed.** Its
+  dependencies from last time are brought up to date, and the key of those reads with the
+  fingerprints they have now is looked up. This makes going back
   free: a branch switched away from and back to, an edit that is undone, or
   a commit another worktree already checked finds each result done.
 - **A result the state never held is looked for too, where its query is
   portable.** A state has no list of reads for a result it never held. So
-  for a portable query the store keeps, once for each key, the names of what
-  the result read when it was first computed anywhere, and a new result is
+  for a portable query the store keeps, once for each key, the names of the
+  result's dependencies when it was first computed anywhere, and a new result is
   looked for under those reads, each brought up to date first. This is how a
   state that reaches an instance of the standard library, or a test's key,
-  finds what another state computed, without a state of its own to start
+  finds the results another state computed, without a state of its own to start
   from. Code generation's queries are portable: an instance's LIR, a pulled
-  method's version, an instance's own hash and what it refers to, its group,
+  method's version, an instance's own hash and its references, its group,
   its key, and a test's key. A type checker's result is found through the
   state its worktree starts from, so its reads are not kept a second time.
 - **Facts are kept when a state is written,** and by `Engine.record`.
@@ -510,14 +510,14 @@ changed code could not have made.
 ### Which results are stored
 
 A stage marks a query as saved where reading its result back is cheaper than
-computing it: what a lookup found, each definition's tree, resolved form,
-interface, and checked body, each stage's diagnostics, and what code
-generation makes of each instance, with its keys.
+computing it: each lookup's result, each definition's tree, resolved form,
+interface, and checked body, each stage's diagnostics, and each instance's
+code generation output, with its keys.
 
-What is not saved is cheap to make again from what is: a file's tokens and
+An unsaved result is cheap to compute again from the saved ones: a file's tokens and
 trees, the indexes over a package's declarations, and a definition's text.
-These are part of a state like any result, with their fingerprints and what
-they read, so a change stops at them in a state opened from the store as it
+These are part of a state like any result, with their fingerprints and
+dependencies, so a change stops at them in a state opened from the store as it
 does in a live one. Only their values are missing, and are computed again
 where something needs them. A value computed again has the fingerprint it
 had, so nothing that read it is touched; were one ever to come back
@@ -532,7 +532,7 @@ its hash like any other:
 
 - **A whole state** holds every node the state's roots and set inputs
   reach, apart from those of its fixed bases: each node's name and key, its
-  fingerprint, what it read, as places in a table of names, and whether it
+  fingerprint, its dependencies, as places in a table of names, and whether it
   is a root.
 - **A difference** names an earlier artifact and holds the engine's own
   nodes that changed since: the nodes it computed, found as facts, or
@@ -549,7 +549,7 @@ can be differences over one artifact.
   written,** since the base holds it. If an earlier difference of the chain
   holds another result for it, it is written, to take that one's place.
 - **A node is written with the first node that reads it.** A node that is
-  written must find what it read when the state is opened, so a node the
+  written must find its dependencies when the state is opened, so a node the
   chain does not hold yet goes with its first reader.
 - **Values are flushed before a pointer names an artifact,** so a pointer
   never names a value that a crash lost.
@@ -576,21 +576,21 @@ from:
   discards every open state with its pointer and runs the command once
   more, from the files. A state to start a new worktree from, and the
   standard library's, are used only if the store has every input's value.
-- **What cannot be checked is left out:** a node of a query this compiler
+- **A node that cannot be checked is left out:** a node of a query this compiler
   does not declare, a node that read a node that cannot be found, and
   everything that read those.
 
 So two worktrees opened from one artifact share everything, and each holds
-what it changed.
+only its changes.
 
 ### Folding
 
 A chain of differences is folded into one whole state when its differences
 hold more than half as many nodes as the whole state, and more than 256. The
-state is written whole, without what its roots no longer reach, and
-the session is opened again from it. So what a session holds itself, and
-what is read to open a state, stay within a constant of what changed, and
-the total written stays a constant multiple of what changed.
+state is written whole, without the nodes its roots no longer reach, and
+the session is opened again from it. So the nodes a session holds itself,
+and the data read to open a state, stay within a constant of the changes,
+and the total written stays a constant multiple of the changes.
 
 Folding costs the state's size, so no command should wait for it:
 
@@ -628,8 +628,8 @@ the library as a state of its own instead:
   from the sources built into the compiler. The text of a module that is
   gone from the sources is removed.
 - **Its facts are kept under the compiler's version,** not its identity. The
-  version is a digest of the compiler's source and of what it is built
-  with: the OCaml compiler, the build profile, the target, and the linked
+  version is a digest of the compiler's source and of its build
+  toolchain: the OCaml compiler, the build profile, the target, and the linked
   libraries. Tests, tools, and the library's text are left out. So an edit
   to the library keeps the version, and the state recomputes only the
   edit's dependents; a change to the compiler gives a new version.
@@ -650,7 +650,7 @@ the machine. It holds:
 | Kind | Named by | Where |
 |---|---|---|
 | Values, artifacts among them | The BLAKE3 hash of their bytes | `segments/` |
-| Facts, and what each result first read | Their kind and key, hashed as a store result | `segments/` |
+| Facts, and each result's first dependencies | Their kind and key, hashed as a store result | `segments/` |
 | Results of expensive steps | Their kind and exactly the input that made them, hashed as a store result (see [Exact keys](#exact-keys)) | `segments/` |
 | A package's artifact | The key of its sources | `segments/` |
 | Object files | Their key, as CODEGEN.md describes | `objects/`, one file each, since a linker reads them by path |
@@ -659,7 +659,7 @@ the machine. It holds:
 | Pointers | A worktree's session, or a named state of the standard library | `pointers/` |
 | The compiler's identity, the list of worktrees, and the background process's lock and log | | the top, and `servers/` |
 
-Everything but a pointer is named by what it holds or what made it, and
+Everything but a pointer is named by its content or by its inputs, and
 never changes.
 
 ### Segments
@@ -689,7 +689,7 @@ them, with sorted indexes like git's pack files:
   made or grew since, before saying the store has nothing, but not more
   often than every twenty milliseconds: a first check misses on every
   result, and a result another process added a moment ago is only computed
-  again. A read that must see what another process just wrote, such as a
+  again. A read that must see another process's latest write, such as a
   worktree's state, looks first.
 - **A damaged or cut-off record is missing.** Every read checks the
   checksum, and that the record is the key's own, so a crash or a damaged
@@ -720,7 +720,7 @@ a name, such as the name of a worktree's current artifact.
 - **It is written beside itself and renamed into place,** after every value
   it may name is flushed, and is framed with its length and a checksum, so a
   pointer cut short reads as nothing.
-- **What a session's pointer holds is text:** the version that wrote the
+- **A session's pointer holds text:** the version that wrote the
   state, its artifact's name, and each file's fingerprint. Any compiler can
   read any pointer, so collection reads them all, and keeps the states of
   the versions it can read.
@@ -735,7 +735,7 @@ The store is a cache, and the background process keeps it within a size
 budget, 20 GiB unless `TRUSS_CACHE_SIZE` gives one in bytes. Every ten
 minutes it checks, and when the segments take more:
 
-- **What a live state names is kept:** the artifacts of its chain, and every
+- **A live state's artifacts are kept:** the artifacts of its chain, and every
   value they name. A worktree's state is live while its directory exists.
   The pointer of a worktree whose directory is gone is removed every
   minute, whatever the store's size, since a new worktree looks through
@@ -786,10 +786,10 @@ that input:
 
 ## Sessions
 
-A *session* is one project's state, in one worktree, with what a command
-needs around it: its engine, the pointer that names its state in the store,
-and the problems its manifests have. A project is what SYNTAX.md's
-"Projects" says: the directory tree under a manifest with a `[project]`
+A *session* is one project's state, in one worktree, with the context a command
+needs: its engine, the pointer that names its state in the store,
+and the problems its manifests have. A project is as SYNTAX.md's
+"Projects" defines it: the directory tree under a manifest with a `[project]`
 table, or a single package with no such manifest above it. A session is a
 project's, and not a worktree's, because a state names every definition by
 its path, and a path means one thing only within one project: two projects
@@ -806,7 +806,7 @@ in one repository may each have a package called `tools`.
   with a manifest. Each module file belongs to the nearest package above
   it. Directories whose names start with `.`, and `_build` and
   `node_modules`, are passed over.
-- **A dependency is the project's package of that name.** What is wrong
+- **A dependency is the project's package of that name.** An error
   between manifests, such as a dependency that names no package or a cycle
   of packages, is a problem of the session, which CLI.md lists.
 - **The same project in two worktrees is two sessions,** which are compared
@@ -833,12 +833,12 @@ chooses a version itself.
   They are set once, since they never change, and removed when the build no
   longer selects the package.
 - **A registry package is a package like any other to the stages.** Its
-  results are computed when something reads them, so a project pays for
-  what it uses of a package.
+  results are computed when something reads them, so a project pays only for
+  the parts of a package it uses.
 - **A project's package of the same name takes its place,** as DESIGN.md's
   "Projects" decides: the name is then the project's package, and no line
   of the lock file is for it.
-- **What is wrong is a problem of the session:** a lock file that cannot be
+- **Each error is a problem of the session:** a lock file that cannot be
   read, a dependency no lock file or record gives a version, files that
   cannot be had, and a lock file that is not the one the manifests give,
   with that one, which `truss check --fix` writes.
@@ -862,14 +862,14 @@ built again, since the new compiler's clients start processes of their own.
 
 - **Commands in different projects are answered at once,** and so are
   commands in different worktrees of one project, since each worktree's
-  copy of the project has a process of its own. This is what lets many
+  copy of the project has a process of its own. This lets many
   agents, each in a worktree, work at the same time: none waits for
   another's test run. Commands in one worktree are answered one at a time.
 - **The processes share the store, and nothing in memory.** Two worktrees
   whose states start from one whole state share its values on disk, and
-  each process holds its own nodes for it. A process finds as a fact what
+  each process holds its own nodes for it. A process finds as facts the results
   another computed.
-- **It holds nothing that is not in the store.** What a session computed is
+- **It holds nothing that is not in the store.** A session's results are
   written when its command is done. The process keeps its session's engine
   in memory so that the next command finds it there.
 - **Clients connect through a Unix socket** in `servers/`, named by the
@@ -878,7 +878,7 @@ built again, since the new compiler's clients start processes of their own.
   every process. A socket's path has a limit of about 100 bytes, so a
   store with a long path puts the socket in `/tmp/truss-UID`, named by a
   hash of where it would have been. Both directories are the user's alone,
-  and the one in `/tmp` is used only if it is: what travels over the socket
+  and the one in `/tmp` is used only if it is: the data on the socket
   is marshaled, so another user who could put a socket there could run code
   as this one. A lock beside it in the store keeps to one process per
   project and compiler.
@@ -929,8 +929,8 @@ built again, since the new compiler's clients start processes of their own.
   state that differs from them in the fewest files. The new session opens
   that state's artifact, forgets its file stamps, sets the files that
   differ, and brings the state up to date. Its first write is a difference
-  over the other worktree's artifact, so the two share everything but what
-  differs, in the store and, in one process, in memory. An agent that
+  over the other worktree's artifact, so the two share everything but their
+  differences, in the store and, in one process, in memory. An agent that
   creates a worktree from `main` gets a warm session at once, whether or not
   any process has `main`'s session open.
 - **A worktree with no state near it** is checked from the files, over the
@@ -953,7 +953,7 @@ that has no worktree, and checks a merge.
 
 `Database.trial` gives a session that starts from another's state, with
 some of its files replaced, added, or removed: the session's state is
-written, and opened again. The trial holds what its files change and shares
+written, and opened again. The trial holds its files' changes and shares
 the rest with the session, and is never saved. A rename checks its plan in
 a trial before it writes a file, a merge is checked in one, whose files are
 the merged tree's, and an upgrade is tried in one, whose lock file is the
@@ -961,18 +961,20 @@ new one.
 
 ## Questions
 
-These are what tools can ask a session. Every answer names definitions by
+Tools can ask a session these questions. Every answer names definitions by
 path and part, and files relative to the worktree's root, never nodes.
 
 | Question | Asked by | Answer |
 |---|---|---|
 | A session and its diagnostics | `truss check` and every command that reads code | The session for a directory's worktree, current with its files; the packages the directory is about; each file's diagnostics; and the manifests that could not be read |
-| What reads what | `truss references`, `truss dependencies`, `truss holes`, `truss impact` | For every definition, what each of its parts reads of other definitions' parts |
-| What a name means | `truss references`, `truss dependencies` | The definitions a name means: a full path, or the end of one |
-| What changed since a commit | `truss impact` | A session at a commit, and every part a change between two sessions can reach, with whether it changed |
+| Dependencies | `truss dependencies` | For each part of the given definitions, the parts of other definitions it read |
+| Dependents | `truss references`, `truss impact`, `truss upgrade` | The parts of other definitions that read a part of the given definitions |
+| Reachable definitions | `truss holes`, `truss build`, `truss run` | For each root, every definition it reaches through dependencies |
+| Name meaning | `truss references`, `truss dependencies` | The definitions a name means: a full path, or the end of one |
+| Changes since a commit | `truss impact` | A session at a commit, and every part a change between two sessions can reach, with whether it changed |
 | Where two worktrees meet | `truss overlap`, `truss check` | Where two sessions' changes meet, and the diagnostics a merge of the two would have that neither has |
 | A trial | `truss rename` | An engine to try a change in |
-| What a build keeps | `truss test`, `truss run`, `truss build` | Where test results, object files, and programs to run are kept, in the store, and saying which tests' keys are wanted |
+| Build storage | `truss test`, `truss run`, `truss build` | Where test results, object files, and programs to run are kept, in the store, and saying which tests' keys are wanted |
 | The background process | `truss status`, `truss stop` | The background process's sessions, and ending it |
 
 A result a command demands is a root from then on, and the command line
@@ -988,20 +990,20 @@ everything they read.
 
 ### Comparing two states
 
-`changes` compares one state with another. A state holds only what differs
-from its bases, or may, so where the two share a base, the nodes that can
+`changes` compares one state with another. A state holds only its differences
+from its bases, or possible ones, so where the two share a base, the nodes that can
 differ are those either holds itself; a base that only one of them has is
 compared whole. Each such node is found in the other state by its query and
 key, computed there if the other has none, and compared by fingerprint, and
 by value where fingerprints differ.
 
-### Holes and what can ship
+### Holes and shipping
 
 A hole's type and the names in scope come from the definition's type checker
 tables and resolution: name resolution records the names in
 scope at each `todo` as it walks the definition, so there is one account of
-scope, and the tables give their types. What a hole blocks is every
-test and `main` that reaches its definition through what each definition
+scope, and the tables give their types. A hole blocks every
+test and `main` that reaches its definition through the definitions'
 reads.
 
 ## Parallel work
@@ -1009,7 +1011,7 @@ reads.
 GOALS.md names sorting out conflicts with other agents as one of the things
 that will dominate development time, and asks that agents can find exactly
 where and how their work overlaps. Git sees only lines. The database sees
-what each change affects, so it can find overlaps that merge without a
+each change's effects, so it can find overlaps that merge without a
 textual conflict and break once merged:
 
 - Agent A changes `parse` to return a `Result`, and agent B, in another
@@ -1019,7 +1021,7 @@ textual conflict and break once merged:
 - Agent A strengthens a type's invariant that agent B's new function relies
   on.
 
-### What counts as an overlap
+### Overlaps
 
 For two worktrees, the database finds the merge base of their commits and
 compares each worktree with it, as `impact` does: each node that differs
@@ -1070,15 +1072,15 @@ with the same inputs.
   given their inputs too, so the bases' results are checked as well. The new
   engine finds no facts, since a fact the engine recorded would only be its
   own result again. With `~before:PHASE` only the results of the phases
-  before that one are computed again: the library's proof run audits what
-  the type checker computed, and not the proofs, which the state is there
+  before that one are computed again: the library's proof run audits the
+  type checker's results, and not the proofs, which the state is there
   to save computing.
 - **Every test audits.** The test harness audits every engine a test made,
   when the test ends. So each test of each stage also tests that the
   database kept every result current, and that the stage's queries are
   pure functions of their reads: a query that read something it did not go
   through its context for would come out different in the new engine.
-- **Counts of work.** The engine counts what it marks, finds current,
+- **Counts of work.** The engine counts the results it marks, finds current,
   computes, finds as facts, copies, and collects. Tests make the same edit in a
   package of four modules and in one of forty, and assert that the counts
   are equal: for a body, a local, a signature's layout, and a new
@@ -1096,22 +1098,22 @@ with the same inputs.
   in a store of its own and times a first check, writing the state, opening
   it as a new process does, and three edits, each with the counts of
   results computed and found as facts. It is a tool, run by hand, for work the counts do not
-  show, such as what is done for each reader of a result. No document
-  records what it prints.
+  show, such as the work for each reader of a result. No document
+  records its output.
 
 ## Not built
 
 - **Sharing between machines.** The store is local. Its keys are made so
   that sharing can be added without changing any of them: a fact, a test's
   outcome, a proof, an object, and a package's artifact are each named by
-  what made them, on any machine. Sharing matters most where sessions are
+  their inputs, on any machine. Sharing matters most where sessions are
   short: an agent in a fresh container, or CI, starts with no store, and
   without one must compute everything before it can find a single kept test
   or proof, since their keys are made from the compiler's own results. With
   a shared store it finds the nearest state and its facts, and does only the
   work its change needs.
 
-  It is left out because of what a result claims. DESIGN.md lets reviewers
+  It is left out because of the claims a result makes. DESIGN.md lets reviewers
   trust proofs instead of reading them, so a forged "proven" or "passed" in
   a shared store would skip exactly the checks Truss exists to make, and an
   object file is code that will run. That is the supply-chain attack
@@ -1127,7 +1129,7 @@ with the same inputs.
 - **Test results as facts with the code that ran.** A test's key covers
   everything its code can reach. Tests are deterministic, so a result also
   stays good while the code the test actually ran is unchanged, which is far
-  less. Recording what ran, as a query's reads are recorded, would run fewer
+  less. Recording the code a test ran, as a query's reads are recorded, would run fewer
   tests after an edit.
 - **Every deterministic outcome of a test kept.** A test that failed an
   `assert`, panicked, or reached a `todo` gives the same outcome on every
@@ -1139,7 +1141,7 @@ with the same inputs.
   of the code that ran, its input, and the target. Code generation runs a
   constant's evaluator in each run of the compiler.
 - **A solver's answers in segments.** Each is a file of its own, which costs
-  what [Segments](#segments) says a file for each small value costs.
+  as much as [Segments](#segments) says a file for each small value costs.
 - **A package being worked on as an artifact of its own,** keyed by its
   sources and the interfaces it reads of others, so that an unchanged
   package is found in one lookup from any worktree.
@@ -1191,10 +1193,10 @@ with the same inputs.
   added or removed and when any of those changes, and its cost follows the
   package. Splitting it into a result for each definition and one for each
   lookup would make it follow the change.
-- **Questions answered from an index.** A graph question walks the state to
-  find what reads what, which costs the state's size each time it is asked.
-  An index kept current like any result would answer in the size of the
-  answer.
+- **Questions answered from an index.** A question about dependents
+  computes every definition's dependencies, which costs the state's size
+  each time it is asked. An index kept current like any result would answer
+  in the size of the answer.
 - **Running affected tests unasked** is not decided. Test keys stay current
   once a test run has asked for them, so the background process could run
   the tests whose keys changed while the machine is idle, and have their

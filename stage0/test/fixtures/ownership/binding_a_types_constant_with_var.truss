@@ -1,0 +1,4 @@
+fn f() {
+  var mine = Config.ports
+  mut mine.push(1)
+}

@@ -65,12 +65,12 @@ let standard_base () =
   Engine.freeze ~fixed:true engine;
   engine
 
-(* Each file's stamp, by its path: what says, without reading the file,
+(* Each file's stamp, by its path: the evidence, without reading the file,
    that it has not changed. A restart reads only the files whose stamps
    changed. *)
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
-(* What a session's files are, for what is asked of git. *)
+(* The source of a session's files, for the questions asked of git. *)
 type kind =
   | Worktree of string  (** A project's root *)
   | Commit of { repository : string; commit : string }
@@ -145,7 +145,8 @@ let fetch name version ~hash =
     | Some registry -> Registry.Index.fetch registry ~into:packages name version ~hash
     | None ->
         Error
-          (Printf.sprintf "no registry is set: `%s` names its directory" Registry.Index.variable)
+          (Printf.sprintf "no registry is set; set `%s` to the registry's directory"
+             Registry.Index.variable)
 
 (* A published package's manifest and record, for planning a lock file. *)
 let load_published name version ~hash =
@@ -384,7 +385,7 @@ let context session = Session.context session
 let set = Session.set
 let problems session = demand session Project.problems ()
 
-(* What only a package's code shows to be wrong with its manifest, which
+(* The errors in a package's manifest that only its code shows, which
    checks the package. *)
 let manifest_problems session names =
   List.concat_map
@@ -465,14 +466,20 @@ let sessions = Session.sessions
 
 let check_all session = ignore (diagnostics_of session (packages session))
 
-type dependencies = Session.Graph.dependencies
+type edge = Session.Graph.edge = {
+  dependent : Path.t;
+  dependent_part : string;
+  dependency : Path.t;
+  dependency_part : string;
+}
 
-let dependencies session =
+let after_checking question session paths =
   check_all session;
-  Session.Graph.dependencies (Session.engine session)
+  question (Session.engine session) paths
 
-let reads = Session.Graph.reads
-let readers = Session.Graph.readers
+let dependencies = after_checking Session.Graph.dependencies
+let dependents = after_checking Session.Graph.dependents
+let reachable = after_checking Session.Graph.reachable
 
 let all_declarations session =
   List.concat_map
@@ -668,7 +675,9 @@ let project_manifests session =
 let plan_lock session ~set ~all =
   match Registry.Index.current () with
   | None ->
-      Error (Printf.sprintf "No registry is set: `%s` names its directory." Registry.Index.variable)
+      Error
+        (Printf.sprintf "No registry is set. Set `%s` to the registry's directory."
+           Registry.Index.variable)
   | Some registry -> (
       let before =
         try
@@ -849,7 +858,7 @@ let standard_artifacts () =
        (fun artifact -> (identity, artifact))
        (Session.find_result ~kind:"package" ~key:(standard_key identity)))
 
-(* What names the background process for a directory: its project's root.
+(* The name of the background process for a directory: its project's root.
    A directory in no project is served by a process of its own. *)
 let server_key directory = Option.value (root_of directory) ~default:""
 

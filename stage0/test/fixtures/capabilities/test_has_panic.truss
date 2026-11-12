@@ -1,0 +1,3 @@
+test "crashes are allowed" {
+  Panic.crash("no")
+}

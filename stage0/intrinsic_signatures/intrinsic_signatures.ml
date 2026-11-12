@@ -25,7 +25,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       receiver = None;
       parameters;
       output;
-      uses = [];
+      uses = Types.no_capabilities;
       terminates = true;
       specification_only = false;
       stores_functions = [];
@@ -57,7 +57,12 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   let work_item = Types.builtin UInt64 in
   let work =
     Types.Function
-      { inputs = [ (Read, work_item) ]; output = Returns Types.unit; uses = []; costs = [] }
+      {
+        inputs = [ (Read, work_item) ];
+        output = Returns Types.unit;
+        uses = Types.no_capabilities;
+        costs = [];
+      }
   in
   let with_storage ?(mode = Types.Read) ?(output = Types.Returns Types.unit) rest =
     make ~generics:[ "Element" ] ~output (input ~mode "storage" (storage element) :: rest)
@@ -229,7 +234,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
             {
               inputs = [ (Mut, value); (Own, parameter_type "Input") ];
               output = Returns (parameter_type "Result");
-              uses = [];
+              uses = Types.no_capabilities;
               costs = [];
             }
           in
@@ -287,7 +292,7 @@ type amount = Argument of int | Generic of string
 type allocations = No_allocations | One_if_positive of amount | Unknown_allocations
 type cost = { time : time; allocations : allocations }
 
-(* What each operation costs, as the prover trusts it. Arithmetic, and
+(* Each operation's cost, as the prover trusts it. Arithmetic, and
    reading or swapping in place, take a fixed number of steps and allocate
    nothing. Making a storage with room for some elements takes a fixed
    number of steps and allocates one block, unless the room is for none. Moving or comparing the elements of a storage or a view, as

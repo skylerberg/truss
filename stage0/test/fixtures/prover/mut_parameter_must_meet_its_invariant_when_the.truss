@@ -1,0 +1,5 @@
+fn f(range: mut Span)
+  requires range.low > 0
+{
+  range.high = range.low - 1
+}

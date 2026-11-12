@@ -1,0 +1,8 @@
+fn f(ready: Bool) {
+  while ready {
+    let Some(text) = make() else {
+      return
+    }
+    keep(own text)
+  }
+}
