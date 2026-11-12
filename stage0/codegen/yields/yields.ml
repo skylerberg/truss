@@ -1,5 +1,5 @@
 let bug format = Compiler_bug.bug ~stage:"Yields" format
-let local_place local : Lir.place = { root = Local local; projections = [] }
+let local_place = Lir.local_place
 
 (* The loop form *)
 

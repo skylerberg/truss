@@ -33,7 +33,7 @@ let parameter env (mode : Ground.mode) ty =
 
 let held env (mode : Ground.mode) ty =
   match mode with
-  | Own -> if (Memory_layout.of_type env ty).size = 0 then None else Some (Lir.Value ty)
+  | Own -> if Memory_layout.has_zero_size env ty then None else Some (Lir.Value ty)
   | Read | Mut -> parameter env mode ty
 
 let cursor_state = "state"

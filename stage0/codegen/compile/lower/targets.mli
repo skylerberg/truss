@@ -115,6 +115,9 @@ val constant_of : Lowering.state -> Ground.ty -> literal -> Lir.operand
 val string_literal : Lowering.state -> Ground.ty -> string -> destination:Lir.place -> unit
 val static_constant : Lowering.state -> Path.t -> Lir.place
 
+val list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * Ground.ty
+(** A [List]'s storage field, the storage's type, and the element type. *)
+
 val template_value :
   Lowering.state ->
   Ground.ty ->

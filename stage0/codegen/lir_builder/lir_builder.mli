@@ -31,11 +31,23 @@ val finish : t -> Lir.terminator -> unit
 val aside : t -> Lir.block -> (unit -> unit) -> unit
 
 (* Runs [then_] when [condition] is true, then goes on in a new block. *)
+val branch : t -> Lir.operand -> yes:Lir.block -> no:Lir.block -> unit
+(** Ends the current block with a jump to [yes] where a Boolean is true, and to [no] where it is
+    false. *)
+
 val when_ : t -> Lir.operand -> (unit -> unit) -> unit
 
 (* A counted loop over [0, count), running [body] with the index, a local of
    type [usize]. *)
-val loop : t -> usize:Ground.ty -> count:Lir.operand -> (Lir.local -> unit) -> unit
+val loop :
+  t ->
+  ?integer:Memory_layout.integer ->
+  index_type:Lir.ty ->
+  count:Lir.operand ->
+  (Lir.local -> unit) ->
+  unit
+(** Runs [body] for each index from 0 to before [count]. The index is a local of [index_type], an
+    integer of the kind [integer], [USize] by default. *)
 
 (* The function built: [written_result] is the parameter pointing to where
    a large result is written, if any. *)

@@ -350,7 +350,7 @@ let decode t ty text : Lir.static_value =
     | _ -> value
   in
   let rec value ty : Lir.static_value =
-    if (Memory_layout.of_type env ty).size = 0 then empty ty
+    if Memory_layout.has_zero_size env ty then empty ty
     else
       match Monomorphic.representation monomorphic ty with
       | Handle -> bug "a handle worked out while compiling"

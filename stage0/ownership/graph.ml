@@ -282,7 +282,8 @@ and viewable_arguments builder (call : Core.call) : Core.operand list =
   List.filter_map
     (fun (argument : Core.argument) ->
       match argument with
-      | Passed { mode; value } when result_may_view builder mode (operand_type value) -> Some value
+      | Passed { mode; value; _ } when result_may_view builder mode (operand_type value) ->
+          Some value
       | _ -> None)
     call.arguments
 
@@ -304,7 +305,7 @@ let rec viewed_temporaries builder (value : Core.expression) : Core.expression l
       List.concat_map
         (fun (argument : Core.argument) ->
           match argument with
-          | Passed { mode = Read; value } -> owned_temporary builder value
+          | Passed { mode = Read; value; _ } -> owned_temporary builder value
           | Passed { value = Value value; _ } -> of_part value
           | _ -> [])
         call.arguments
@@ -611,7 +612,7 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
              match argument with
              | Passed { value = Place found; _ } ->
                  (Place.of_core found, Core_walk.place_origin found)
-             | Passed { mode = Mut; value = Value ({ kind = Slice _; _ } as slice) } ->
+             | Passed { mode = Mut; value = Value ({ kind = Slice _; _ } as slice); _ } ->
                  (Place.of_slice slice, slice.origin)
              | Passed { value = Value value; _ } -> (None, value.origin)
              | Default -> (None, node.origin)
@@ -662,7 +663,7 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
     List.fold_left
       (fun frontier (argument : Core.argument) ->
         match argument with
-        | Passed { mode = Mut; value = Place found as target }
+        | Passed { mode = Mut; value = Place found as target; _ }
           when builder.is_view (Core_walk.place_type found) -> (
             match Place.of_core found with
             | Some place ->
@@ -691,7 +692,7 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
     List.fold_left
       (fun frontier (position, (argument : Core.argument)) ->
         match argument with
-        | Passed { mode = Own; value = Value ({ type_ = T.Function _; _ } as value) }
+        | Passed { mode = Own; value = Value ({ type_ = T.Function _; _ } as value); _ }
           when builder.stores_function call.callee position ->
             emit builder frontier (Pass_owned_function (views_of builder value)) value.origin
         | _ -> frontier)
@@ -701,7 +702,7 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
   (* A call of a lending method borrows its receiver until the statement
      ends. *)
   (match (call.lends, call.arguments) with
-  | Some _, Passed { mode; value = Place receiver } :: _ -> (
+  | Some _, Passed { mode; value = Place receiver; _ } :: _ -> (
       match Place.of_core receiver with
       | Some borrowed ->
           builder.loans <-
@@ -728,7 +729,7 @@ and store_views builder frontier (place : Place.t) origin ~views ~temporaries =
 and arguments builder frontier (given : Core.argument list) =
   let passed =
     List.filter_map
-      (function Core.Passed { mode; value } -> Some (mode, value) | Default -> None)
+      (function Core.Passed { mode; value; _ } -> Some (mode, value) | Default -> None)
       given
   in
   let frontier =
@@ -924,8 +925,8 @@ and statement_actions builder frontier (node : Core.statement) =
         | Integer_range { start; stop; _ } ->
             (expression builder (expression builder frontier start) stop, None)
         | Yielding_call
-            ({ kind = Call { arguments = Passed { mode; value = Place found } :: _; _ }; _ } as call)
-          ->
+            ({ kind = Call { arguments = Passed { mode; value = Place found; _ } :: _; _ }; _ } as
+             call) ->
             ( expression builder frontier call,
               Option.map
                 (fun borrowed : loan ->

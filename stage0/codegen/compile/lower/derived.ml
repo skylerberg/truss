@@ -89,7 +89,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
       let differ = block b and done_ = block b in
       let unless_equal value =
         let go_on = block b in
-        finish b (Switch { value; cases = [ (Z.one, go_on) ]; default = Some differ });
+        branch b value ~yes:go_on ~no:differ;
         start b go_on
       in
       each_variant st ty self (fun variant _ ->
@@ -166,8 +166,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
       let differ = local b (Raw Bool) in
       emit b (Assign (at differ, Binary (Bit_or, Copy (at less), Copy (at greater))));
       let same = block b in
-      finish b
-        (Switch { value = Copy (at differ); cases = [ (Z.one, done_) ]; default = Some same });
+      branch b (Copy (at differ)) ~yes:done_ ~no:same;
       start b same;
       each_variant st ty self (fun variant _ ->
           List.iter

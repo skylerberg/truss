@@ -186,7 +186,7 @@ let load published name version ~hash =
              truss = Some "0.1";
              dependencies =
                List.map
-                 (fun (name, capabilities) -> { Workspace.package = package name; capabilities })
+                 (fun (name, capabilities) -> { Manifest.package = package name; capabilities })
                  dependencies;
              usize_bits = 32;
            }
@@ -320,14 +320,14 @@ let () =
           truss = Some "0.1";
           dependencies =
             List.map
-              (fun (package, capabilities) -> { Workspace.package; capabilities })
+              (fun (package, capabilities) -> { Manifest.package; capabilities })
               dependencies;
           usize_bits = 32;
         };
       record = [];
     }
   in
-  let grant package capabilities = { Workspace.package; capabilities } in
+  let grant package capabilities = { Manifest.package; capabilities } in
   test "a package holds what the project grants it" (fun () ->
       let held =
         Selection.holds

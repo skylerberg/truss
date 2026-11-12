@@ -197,7 +197,7 @@ let reachable_packages database package =
     if not (Hashtbl.mem seen package) then begin
       Hashtbl.replace seen package ();
       List.iter
-        (fun (dependency : Workspace.dependency) -> visit dependency.package)
+        (fun (dependency : Manifest.dependency) -> visit dependency.package)
         (Query.demand database Workspace.dependencies package)
     end
   in

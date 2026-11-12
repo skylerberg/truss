@@ -21,13 +21,7 @@ let all values =
 
 (* An integer of a kind, if the kind holds it. *)
 let integer st (kind : Memory_layout.integer) value =
-  let bits = 8 * Memory_layout.integer_size (Memory_layout.target st.context.env) kind in
-  let low, high =
-    match kind with
-    | Int8 | Int16 | Int32 | Int64 | ISize ->
-        (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
-    | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
-  in
+  let low, high = Memory_layout.integer_range (Memory_layout.target st.context.env) kind in
   if Z.leq low value && Z.leq value high then Some (Lir.Static_scalar (Integer (kind, value)))
   else None
 

@@ -190,7 +190,7 @@ let new_early_exits st =
 
 let ground st ty = Monomorphic.ground st.context.monomorphic st.frame.code.substitution ty
 let trivial st ty = Glue.trivial st.context.glue ty
-let zero_size st ty = (Memory_layout.of_type st.context.env ty).size = 0
+let zero_size st = Memory_layout.has_zero_size st.context.env
 
 let site st (span : S.span) : Lir.site =
   let text = st.frame.code.text in

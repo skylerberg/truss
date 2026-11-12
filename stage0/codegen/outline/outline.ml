@@ -3,7 +3,7 @@ let bug format = Compiler_bug.bug ~stage:"Outline" format
 module Locals = Set.Make (Int)
 module Blocks = Set.Make (Int)
 
-let at local : Lir.place = { root = Local local; projections = [] }
+let at = Lir.local_place
 
 (* The fork of the first region that running the function reaches, which
    lies in no other fork's region. *)

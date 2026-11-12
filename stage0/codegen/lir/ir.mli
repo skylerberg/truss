@@ -188,6 +188,7 @@ type table = Ir_types.table = {
 
 type compiled = Ir_types.compiled = Code of t | Data of data | Table of table
 
+val local_place : local -> place
 val signature : function_ -> signature
 val erased : Memory_layout.env -> ty -> bool
 

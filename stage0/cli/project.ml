@@ -122,7 +122,7 @@ let dependency_packages t =
   let seen = Hashtbl.create 8 in
   let rec visit name =
     List.iter
-      (fun (dependency : Workspace.dependency) ->
+      (fun (dependency : Manifest.dependency) ->
         if dependency.package <> Path.standard_package && not (Hashtbl.mem seen dependency.package)
         then begin
           Hashtbl.replace seen dependency.package ();

@@ -1,6 +1,7 @@
 (library
  (name resolve)
  (libraries
+  manifest
   zarith
   query
   phases

@@ -19,6 +19,12 @@ let arguments_alone state env (arguments : argument list) (type_ : T.ty) =
   List.iter (fun (argument : argument) -> ignore (expression state env argument.value)) arguments;
   type_
 
+(* The [mut] or [own] an argument is written with, if any. *)
+let mark_of (value : expression) : Core.mark option =
+  match value.kind with
+  | Mode (_, marked) -> Some { written = value.id; marked = marked.id }
+  | _ -> None
+
 (* An indirect call, through a function value. Arguments are positional,
    with no labels. *)
 let rec function_value_call state env (value : expression) (callee : expression) arguments =
@@ -52,7 +58,12 @@ let rec function_value_call state env (value : expression) (callee : expression)
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
             let mode = argument_value state env argument.value parameter in
-            { C.expression = argument.value.id; parameter_index = index; mode })
+            {
+              C.expression = argument.value.id;
+              parameter_index = index;
+              mode;
+              mark = mark_of argument.value;
+            })
           pairs
       in
       let result = T.result_type function_type.output in
@@ -285,7 +296,12 @@ and check_arguments state env (parameters : T.parameter_info list) matched ~offs
   let check ((argument : argument), index) =
     let parameter = List.nth parameters index in
     let mode = argument_value state env argument.value parameter in
-    { C.expression = argument.value.id; parameter_index = index + offset; mode }
+    {
+      C.expression = argument.value.id;
+      parameter_index = index + offset;
+      mode;
+      mark = mark_of argument.value;
+    }
   in
   let first = List.map check (List.filter (fun pair -> not (is_lambda pair)) matched) in
   let lambdas = List.map check (List.filter is_lambda matched) in

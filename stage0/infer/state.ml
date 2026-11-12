@@ -922,6 +922,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
                                        (match inner.kind with
                                        | Use place -> Place place
                                        | _ -> Value inner);
+                                     mark = None;
                                    };
                                ];
                              lends = None;

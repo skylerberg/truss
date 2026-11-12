@@ -24,17 +24,16 @@ let inputs database (key : Resolve.Names.key) =
   match
     ( Query.demand database Infer.core key,
       Query.demand database Resolve.Names.spans key,
-      Query.demand database Resolve.Names.marks key,
       Query.demand database Interface.Environment.lowered_interface key )
   with
-  | Some form, Some spans, Some marks, Some lowered ->
+  | Some form, Some spans, Some lowered ->
       let context : Context.context =
         {
           database;
           bounds =
             (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds));
           spans;
-          marks;
+          marks = Hashtbl.create 8;
           names = Hashtbl.create 32;
           kinds = Hashtbl.create 32;
           types = Hashtbl.create 32;

@@ -51,36 +51,40 @@ let aside b block f =
   b.current <- current;
   b.statements <- statements
 
-let at local : Lir.place = { root = Local local; projections = [] }
+let at = Lir.local_place
 
 let ( / ) (place : Lir.place) projection : Lir.place =
   { place with projections = place.projections @ [ projection ] }
 
 let usize n = Lir.Constant (Integer (USize, Z.of_int n))
 
+let branch b value ~yes ~no =
+  finish b (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
+
 let when_ b condition then_ =
   let inside = block b in
   let after = block b in
-  finish b (Switch { value = condition; cases = [ (Z.one, inside) ]; default = Some after });
+  branch b condition ~yes:inside ~no:after;
   start b inside;
   then_ ();
   finish b (Goto after);
   start b after
 
-let loop b ~usize:usize_ty ~count body =
-  let index = local b ~name:"index" (Value usize_ty) in
+let loop b ?(integer = Memory_layout.USize) ~index_type ~count body =
+  let constant n = Lir.Constant (Integer (integer, Z.of_int n)) in
+  let index = local b ~name:"index" index_type in
   let going = local b (Raw Bool) in
   let test = block b in
   let inside = block b in
   let after = block b in
-  emit b (Assign (at index, Use (usize 0)));
+  emit b (Assign (at index, Use (constant 0)));
   finish b (Goto test);
   start b test;
   emit b (Assign (at going, Binary (Less, Copy (at index), count)));
-  finish b (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
+  branch b (Copy (at going)) ~yes:inside ~no:after;
   start b inside;
   body index;
-  emit b (Assign (at index, Binary (Add, Copy (at index), usize 1)));
+  emit b (Assign (at index, Binary (Add, Copy (at index), constant 1)));
   finish b (Goto test);
   start b after
 
