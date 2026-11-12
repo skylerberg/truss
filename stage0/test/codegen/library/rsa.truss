@@ -1,0 +1,68 @@
+use standard::cryptography
+use standard::hex
+use standard::random
+
+fn bytes_of(text: StringSlice) -> List[UInt8] {
+  match hex::decode(text) {
+    Ok(bytes) => own bytes
+    Err(_) => []
+  }
+}
+
+let modulus: String = "d32b18c100440d129ecc9ee9e338639bccf36b987546fca12098f1c5642105de73912855a65dea875d08ba47dc42d00f1ec8a1968a799c8e9e0cfe221fa570a45fb15c542ecaa280075c59dc6546c02d35f28c47052f4b5be3b849b967011f648c047ff53c8bdf657ffb0c17dbd709844c00d9ff273268abebc78dbedcdcd801974c51f93b2acde350ef99309f3104643acf2087f70314c555b157eda3aa2d1077c739c7748e26a89f3d076cbf1a28066a6c0984dc1ae81c0df06bbf6f718a581b55c0364d9fbe06257f1034307be534db5b826dc261046c8af3ef75d2d196af2d1b7274b8c71a0671c2e85e197d69af519d35d1fb780829e44cc230fa682c39"
+
+let pkcs1_signature: String = "c8b42d39bcf4a704562be15873c8f96ec0516f0eaf7819bfac987376706aea0d92e12ec03a37c10a26698332670b98f129714621b1867f0249111133bf2bbf77ac332b19ce6d3d3f1ce68ba93e8615439f54a9e4dee1960dcbbe05642ad953a511947d22f6340c2499052ea2dba460a0cf71b811dc39e54a6d65bb1d2d39a2c8c163e67c50e6ff0f62c03bdc1209f1fb560a97e1d1a5e13cd341bf32f0a2d797bf70fda2ccbbdae7e32177c6e75652aa56500f9982ff29d0dbd1eccb5ece710163dc42a021caf98420f22d54ed50eea30ee136d744e6856330a2829d8e7acbe6b198972d22c36b2ca7d26fbaa4e38cfc2b410ccd9d173b33ad2a7d379fc08f7a"
+
+let pss_signature: String = "35616005c4d478d08bb0f12f226d768bafa9ffa49166b667562f171ca8964af11922ea3690d1815d180616c88ed5a846bc86ffb8b5a9a80bd4afc9e23aa8461e110c32e1421573b5740ae427f1cb1ee48495774de4dae0331b01ba267ff416961cdd75e0b06c1b4f5e2167f3517db60289e2e58eddf1207bcea482a5edd31639af7ac7edbabeb69c9b154151a03aaf2fb92f28f7c9a1f67bdeb697ae1b5ebf29c6bf2329a8642c19e1187e7fac4fbe8ef80243548260167f35707c6b76de64cdc50313ef80420569c55ff9ef01b40f46ceab6c12db3ee155b88aa62be57051d2b123f4fe5b47806eafcbdf684b8a50cfd1b32e15f116608e97e45728d4403451"
+
+fn public_key() -> cryptography::RsaPublicKey
+  uses Panic
+{
+  cryptography::RsaPublicKey.new(bytes_of(modulus.slice()), exponent: bytes_of("010001")).expect("a 2048-bit key")
+}
+
+fn private_key() -> cryptography::RsaPrivateKey
+  uses Panic
+{
+  cryptography::RsaPrivateKey.new(
+    public_key(),
+    exponent: bytes_of("0e0df3e07195f5e847bb2ef6fa656804c839e9cefc7c40677179d87a96a8d781082050c6cd9339df2f471bcdd958358c921410a42a3c8099e1e553bb3defb70ceba50c73fa66c874bcb8adeeec2b2eb27ba1146acc2aab0977412e5ff97df2c2d08a62a155f9a9c151c8a9d40330df5c67aa155844f9b70b7d3e7b7dc8e9a6732aa7f09ded9c99a83278a469cbb0f8ba935aec4d49d53c81f57c45eb77e39badd8ee7e113266a1f4048e92bdfd70d7ea3da3441e62e18d73df4d2bb54026911f516ba46639dcaf025d05990a34fcd42ddb9a9b2ec6c16fbc66cb23df46dc7fab52dc772d6a69d51bad2ed5e87e25a586a8e07cd03142f7e39ea4581eb9b1ccf1"),
+    first_prime: bytes_of("f67eca3dbbe266f0e373ea2b23dd011f26b5a7a56dd16184e78ebd75c4e2fa84a93e562f5bd6bf066cf82405a033a6382f9f42432402eef7b8fb90964dc24306f7bd0a954373f3ea507397432f42bcab46fb481dc95fb323a4e4191757a386aa3f5c3df1630c97af837938934deeb4ffebc56261d056d860fb26f30dc96c4251"),
+    second_prime: bytes_of("db4f963151c08a4a5c3cd3641d22f009e44636e1ed2a146e7381a2cf63861cf90223e98fe57d603e9383802cfc089031c7b52d56f34b365a60cb73121316bdb1df7778d38525b71ade8c2f20b42925ea2cb5756d85017e7c602fcc9a1c8e0e62e7a40b3d19651d083b625e335d0aebce880b27770062e395bb1d53e235c22969"),
+    first_exponent: bytes_of("bc4a9216a24509b98d25e884d7ba64b6f50ce2691e00496c0aae20cfab7c6f3d9342c8f718426c5d6e3406e03d45f6fd0873b15c345001573df8fcb3b3e666e915a954423cea8032470e6547aefc5dbec05406fca9ecee9c95c29fe012d41974473e211b193c6f4a6535de1fb7f2565500372135f2bdc44020d9d9e4782eb861"),
+    second_exponent: bytes_of("6b77f59e9774259048e0d9a9fe89275d818a52cca57e7062aba18419e2a84ebc4b2b3401fab054a075830425871fdf2135bef7c7db132940629c6ff81478995e77a641044e03ec557366f8952b13daeb851b2abf0f656b0921cd6a92be99723d4f4bd8e208f6bea2510f642001611faaa689e8bdece788a4cffb902692b761b9"),
+    coefficient: bytes_of("953889e63796d31ac65641d10a72a05f11019b259d8bcef6363429815fa722a5a32474a1d506fc25906fb9d493f4c8908dc997effc169e57df1064d08e04821cb52010666af16bd512508c7f20b789df316499fea9a25eb2c29549ccaeefccbce419c91d6cca61709c142108e800d9d356dbf2cad31e92e8b75b1786827d02e2"),
+  ).expect("the parts of one key")
+}
+
+test "RSA signatures OpenSSL made verify with PKCS #1 v1.5 and PSS, and changed ones do not" {
+  let key = public_key()
+  let message = "hello truss".bytes()
+  assert key.bits() == 2048
+  assert key.verify_pkcs1(cryptography::HashFunction.Sha256, message: message, signature: bytes_of(pkcs1_signature.slice()))
+  assert !key.verify_pkcs1(cryptography::HashFunction.Sha256, message: "hello trust".bytes(), signature: bytes_of(pkcs1_signature.slice()))
+  assert key.verify_pss(cryptography::HashFunction.Sha256, message: message, signature: bytes_of(pss_signature.slice()))
+  var changed = bytes_of(pss_signature.slice())
+  changed[100] = changed[100] ^ 4
+  assert !key.verify_pss(cryptography::HashFunction.Sha256, message: message, signature: changed)
+  assert !key.verify_pkcs1(cryptography::HashFunction.Sha256, message: message, signature: bytes_of(pss_signature.slice()))
+}
+
+test "an RSA private key signs with PKCS #1 v1.5 as OpenSSL does, and with PSS that verifies" {
+  let key = private_key()
+  let message = "hello truss".bytes()
+  assert hex::encode(key.sign_pkcs1(cryptography::HashFunction.Sha256, message: message)) == pkcs1_signature
+  provide random::SeededRandom.new(9) {
+    let signed = key.sign_pss(cryptography::HashFunction.Sha384, message: message)
+    assert key.public_key().verify_pss(cryptography::HashFunction.Sha384, message: message, signature: signed)
+  }
+  assert cryptography::RsaPrivateKey.new(
+    public_key(),
+    exponent: bytes_of("0e0df3e07195f5e847bb2ef6fa656804c839e9cefc7c40677179d87a96a8d781082050c6cd9339df2f471bcdd958358c921410a42a3c8099e1e553bb3defb70ceba50c73fa66c874bcb8adeeec2b2eb27ba1146acc2aab0977412e5ff97df2c2d08a62a155f9a9c151c8a9d40330df5c67aa155844f9b70b7d3e7b7dc8e9a6732aa7f09ded9c99a83278a469cbb0f8ba935aec4d49d53c81f57c45eb77e39badd8ee7e113266a1f4048e92bdfd70d7ea3da3441e62e18d73df4d2bb54026911f516ba46639dcaf025d05990a34fcd42ddb9a9b2ec6c16fbc66cb23df46dc7fab52dc772d6a69d51bad2ed5e87e25a586a8e07cd03142f7e39ea4581eb9b1ccf1"),
+    first_prime: bytes_of("db4f963151c08a4a5c3cd3641d22f009e44636e1ed2a146e7381a2cf63861cf90223e98fe57d603e9383802cfc089031c7b52d56f34b365a60cb73121316bdb1df7778d38525b71ade8c2f20b42925ea2cb5756d85017e7c602fcc9a1c8e0e62e7a40b3d19651d083b625e335d0aebce880b27770062e395bb1d53e235c22969"),
+    second_prime: bytes_of("f67eca3dbbe266f0e373ea2b23dd011f26b5a7a56dd16184e78ebd75c4e2fa84a93e562f5bd6bf066cf82405a033a6382f9f42432402eef7b8fb90964dc24306f7bd0a954373f3ea507397432f42bcab46fb481dc95fb323a4e4191757a386aa3f5c3df1630c97af837938934deeb4ffebc56261d056d860fb26f30dc96c4251"),
+    first_exponent: bytes_of("bc4a9216a24509b98d25e884d7ba64b6f50ce2691e00496c0aae20cfab7c6f3d9342c8f718426c5d6e3406e03d45f6fd0873b15c345001573df8fcb3b3e666e915a954423cea8032470e6547aefc5dbec05406fca9ecee9c95c29fe012d41974473e211b193c6f4a6535de1fb7f2565500372135f2bdc44020d9d9e4782eb861"),
+    second_exponent: bytes_of("6b77f59e9774259048e0d9a9fe89275d818a52cca57e7062aba18419e2a84ebc4b2b3401fab054a075830425871fdf2135bef7c7db132940629c6ff81478995e77a641044e03ec557366f8952b13daeb851b2abf0f656b0921cd6a92be99723d4f4bd8e208f6bea2510f642001611faaa689e8bdece788a4cffb902692b761b9"),
+    coefficient: bytes_of("953889e63796d31ac65641d10a72a05f11019b259d8bcef6363429815fa722a5a32474a1d506fc25906fb9d493f4c8908dc997effc169e57df1064d08e04821cb52010666af16bd512508c7f20b789df316499fea9a25eb2c29549ccaeefccbce419c91d6cca61709c142108e800d9d356dbf2cad31e92e8b75b1786827d02e2"),
+  ) is None
+}
