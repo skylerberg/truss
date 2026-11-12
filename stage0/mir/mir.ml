@@ -273,9 +273,9 @@ let bind_source b (local : Core.local) mode type_ origin =
       found
 
 (* Runs [f] in a new scope, and ends the scope's bindings where control
-   leaves it normally. *)
-let in_scope ?(provides = false) b origin f =
-  let scope = { bound = []; provides } in
+   leaves it normally. The scope also ends [held], locals made before it. *)
+let in_scope ?(provides = false) ?(held = []) b origin f =
+  let scope = { bound = List.rev held; provides } in
   b.scopes <- scope :: b.scopes;
   let result = f () in
   b.scopes <- List.tl b.scopes;
@@ -404,12 +404,12 @@ let rec expression b (node : Core.expression) : operand option =
       | To_any { value; trait; evidence } ->
           let* value = expression b value in
           hold (To_any { value; trait; evidence })
-      | If { condition = tested; then_; else_ } ->
+      | If { condition = tested; then_; else_; binds_lent_part } ->
           let result = value_local b node in
           let yes = new_block b and no = new_block b and joined = new_block b in
-          scoped_condition b tested ~yes ~no;
+          let held = scoped_condition ~binds_lent_part b tested ~yes ~no in
           start b yes;
-          branch_into b result then_ joined origin;
+          branch_into ~held b result then_ joined origin;
           start b no;
           (match else_ with
           | Some else_ -> branch_into b result else_ joined origin
@@ -692,8 +692,10 @@ and condition b (node : Core.expression) ~yes ~no =
       | Some value -> terminate b (Branch { condition = value; yes; no }) node.origin
       | None -> ())
 
-(* A condition whose temporaries end before either way out. *)
-and scoped_condition b (node : Core.expression) ~yes ~no =
+(* A condition whose temporaries end before either way out, except that
+   with [binds_lent_part] they live on where the condition is true, and the
+   result is them, for the guarded block's scope to end. *)
+and scoped_condition ?(binds_lent_part = false) b (node : Core.expression) ~yes ~no =
   let outer = b.temporaries in
   b.temporaries <- [];
   let yes' = new_block b and no' = new_block b in
@@ -701,11 +703,12 @@ and scoped_condition b (node : Core.expression) ~yes ~no =
   let made = List.rev b.temporaries in
   b.temporaries <- outer;
   List.iter
-    (fun (entry, target) ->
+    (fun (entry, target, ends) ->
       start b entry;
-      if made <> [] then emit b (Dead made) node.origin;
+      if ends && made <> [] then emit b (Dead made) node.origin;
       goto b target node.origin)
-    [ (yes', yes); (no', no) ]
+    [ (yes', yes, not binds_lent_part); (no', no, true) ];
+  if binds_lent_part then made else []
 
 (* The local an [if] or a [match] writes its value to, if it has one. *)
 and value_local b (node : Core.expression) =
@@ -720,8 +723,8 @@ and result_of b (node : Core.expression) result =
 
 (* A branch of an [if] or a [match]: its block, its value written to
    [result], then a jump to [joined]. *)
-and branch_into b result (body : Core.block) joined origin =
-  in_scope b origin (fun () ->
+and branch_into ?held b result (body : Core.block) joined origin =
+  in_scope ?held b origin (fun () ->
       match (block b body, result) with
       | Some value, Some local -> assign b (at local) (Operand value) origin
       | _ -> ());
@@ -927,7 +930,7 @@ and match_ b scrutinees (arms : Core.arm list) ~origin ~arm ~joined =
               | None -> arm current
               | Some guard ->
                   let passed = new_block b and rejected = new_block b in
-                  scoped_condition b guard ~yes:passed ~no:rejected;
+                  ignore (scoped_condition b guard ~yes:passed ~no:rejected);
                   start b rejected;
                   (match b.scopes with
                   | scope :: _ when scope.bound <> [] ->
@@ -1007,16 +1010,16 @@ and statement b (node : Core.statement) =
           | Cursor { cursor; next } ->
               cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each:(fun bind_part ->
                   each ~bind_part))
-      | While { condition = tested; clauses; body } ->
+      | While { condition = tested; clauses; body; binds_lent_part } ->
           let header = new_block b and inside = new_block b and after = new_block b in
           goto b header origin;
           (Hashtbl.find b.pending header).heading <-
             Some { clauses; schedule = Sequential; counter = None; origin };
           start b header;
-          scoped_condition b tested ~yes:inside ~no:after;
+          let held = scoped_condition ~binds_lent_part b tested ~yes:inside ~no:after in
           start b inside;
           looping b ~break_:after ~continue_:(Jump header) (fun () ->
-              ignore (in_scope b origin (fun () -> block b body)));
+              ignore (in_scope ~held b origin (fun () -> block b body)));
           goto b header origin;
           start b after
       | Parallel branches | Concurrent branches ->

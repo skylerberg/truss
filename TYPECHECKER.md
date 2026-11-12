@@ -1365,7 +1365,7 @@ borrow is live. A loan is shared or `mut`:
 | A `mut` argument or receiver | `mut` | the call |
 | A `let` of a place | shared | the liveness of the binding |
 | A value of a view type, such as a slice, a cursor, or a capturing lambda | shared | the liveness of the value |
-| The receiver of a lending call | shared, or `mut` when the method takes `mut self` | the rest of the statement |
+| The receiver of a lending call | shared, or `mut` when the method takes `mut self` | the rest of the statement, or in an `if` or `while` condition, the condition or the guarded block |
 | A `for` loop's variable | shared or `mut` | the iteration |
 | A `provide` of a place | shared or `mut` | the `provide` block |
 | An evaluated operand | shared | until its operation runs |
@@ -1598,8 +1598,16 @@ fixes.
   created. A `lends` method cannot drive a `for` loop or be pulled.
 - **A lending call borrows its whole receiver,** for the rest of the caller's
   statement, read-only or `mut` according to how the method takes `self`. The
-  condition of a `while` loop counts as a statement of its own, so a loan that
-  the condition starts ends before the body runs. While the loan is live, using
+  condition of an `if` or a `while` counts as a statement of its own, so a
+  loan that the condition starts ends before the then-block or the body runs,
+  unless the condition binds a name that may alias the lent part: a name bound
+  `mut`, or whose type is a view or is not `Plain`. Such a loan lasts until the
+  then-block or the body ends, which prevents a dangling name, since the method
+  may drop a part it made when it resumes. It never lasts into the `else`
+  block. The core form records the choice as the `binds_lent_part` of the `If`
+  or `While`, so that the check and the code generator agree. A `Plain` name
+  that is not a view holds a copy, so it views nothing. While the loan is
+  live, using
   a `mut`-borrowed place or mutating a place that is borrowed read-only is an
   error. So is passing a place to a call together with a part that it lends,
   when either is `mut`. An index of a collection other than a `List`, a

@@ -516,6 +516,7 @@ let implements state type_ trait =
 
 let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) (zonk state type_)
 let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk state type_)
+let is_view state type_ = Impls.is_view state.database ~bounds:(bounds state) (zonk state type_)
 
 (* The associated type [name] of a trait for a type. If the [impl] does
    not define it, the [impl] already has a diagnostic, and this returns an

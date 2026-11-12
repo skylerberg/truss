@@ -687,6 +687,14 @@ Hylo also keep accessors apart from sequences, and Python's
   one that is lent read-only. `mut grid[a].swap(mut grid[b])` is an error
   for a user's `Grid`, as it is for every collection in Swift, Hylo, and
   Rust, which offer `swapAt` and `split_at_mut` for it.
+- **A lend in a condition ends with the condition, unless a name aliases
+  the part.** The condition of an `if` or a `while` is a statement of its
+  own when each name it binds is a copy, so `if counts.get(word) is
+  Some(count) { counts[word] = count + 1 }`, the common counting idiom,
+  compiles, as it does in Rust, whose borrow ends at the last use of the
+  reference. A name that aliases the part keeps the part lent until the
+  guarded block ends, because the method may drop a part it made when it
+  resumes, and the name would dangle.
 - **`List`, `Slice`, and `Array` lend two parts side by side.** Their
   elements are places the compiler knows, and their `at` has nothing left to
   do after its `yield`, so nothing is waiting to resume that two parts could

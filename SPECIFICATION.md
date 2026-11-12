@@ -1457,6 +1457,20 @@ mut grid.cell(position).visit()
 - **The part is lent for the rest of the caller's statement.** Then the
   method continues after its `yield`, even if the statement leaves early
   with `?` or `return`.
+- **In the condition of an `if` or a `while`, the part is lent for the
+  condition alone** when each name the condition binds is a copy: a `Plain`
+  name that is not a view and is not bound `mut`. The then-block or the loop
+  body can then change the receiver:
+
+  ```truss
+  if counts.get(word) is Some(count) {
+    counts[word] = count + 1
+  }
+  ```
+
+  A name that is not a copy aliases the part, so the part stays lent until
+  the then-block or the body ends, and the name cannot dangle. The part is
+  never lent into the `else` block.
 - **For that long, the receiver is lent whole:** the statement makes no other
   use of a receiver lent `mut`, and does not change one lent read-only.
   `mut grid[a].swap(mut grid[b])` is an error for a user's `Grid`.

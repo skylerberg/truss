@@ -59,6 +59,9 @@ val comparison :
 
 val is_executable : State.state -> Core.expression -> bool
 
+val binds_lent_part : State.state -> Core.expression -> bool
+(** The [binds_lent_part] of an [if] or a [while] with this condition. *)
+
 val compound_assign :
   State.state ->
   Syntax.statement ->

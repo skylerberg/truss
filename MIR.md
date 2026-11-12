@@ -117,7 +117,9 @@ A local is one of:
 A lending call, such as `items[index]` (a call of `Index.at`), makes a lent
 local with a `lend` statement. The core form's `Lent` place lends for the
 rest of its statement, so the builder makes the lent local dead where the
-statement ends.
+statement ends. In the condition of an `if` or a `while`, it is dead where
+the condition ends, or, if the core form's `binds_lent_part` says that a name
+the condition binds aliases the part, where the then-block or the body ends.
 
 An operand is one of:
 

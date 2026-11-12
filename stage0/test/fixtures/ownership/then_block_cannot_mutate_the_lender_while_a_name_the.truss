@@ -1,0 +1,8 @@
+fn show(text: String) {}
+
+fn f(names: mut Map[Int64, String], id: Int64) {
+  if names.get(id) is Some(name) {
+    mut names.insert(id, value: "seen")
+    show(name)
+  }
+}

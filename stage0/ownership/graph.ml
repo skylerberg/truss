@@ -175,6 +175,20 @@ let rec pattern_locals (pattern : Core.pattern) : Core.local list =
   | Alternatives (first :: _) -> pattern_locals first
   | Alternatives [] | Wildcard | Literal _ | Range _ | Equal_to _ -> []
 
+(* The locals that a pattern binds and that may view the scrutinee: each
+   bound [mut], or whose type is a view or is not [Plain]. A [Plain] local
+   that is not a view holds a copy, so it views nothing. *)
+let rec viewing_locals builder (pattern : Core.pattern) : Core.local list =
+  match pattern.kind with
+  | Bind { local; mode; _ } ->
+      if mode = Mut || builder.is_view pattern.type_ || not (builder.plain pattern.type_) then
+        [ local ]
+      else []
+  | Variant { fields; _ } | Record fields ->
+      List.concat_map (fun (_, inner) -> viewing_locals builder inner) fields
+  | Alternatives (first :: _) -> viewing_locals builder first
+  | Alternatives [] | Wildcard | Literal _ | Range _ | Equal_to _ -> []
+
 let operand_type : Core.operand -> Types.ty = function
   | Place core_place -> Core_walk.place_type core_place
   | Value value -> value.type_
@@ -450,13 +464,14 @@ let rec expression builder frontier (node : Core.expression) : int list =
       expression builder frontier inner
   | Matches { value; pattern } ->
       let frontier = operand builder frontier Read value in
-      bind_pattern builder frontier (pattern_locals pattern) [ value ] node.origin
+      bind_pattern builder frontier ~bound:(pattern_locals pattern)
+        ~viewing:(viewing_locals builder pattern) [ value ] node.origin
   | Cursor_next cursor -> operand builder frontier Mut (Place cursor)
-  | If { condition; then_; else_ } ->
-      let after = expression builder frontier condition in
-      let then_end = block builder after then_ in
-      let else_end = match else_ with Some else_ -> block builder after else_ | None -> after in
-      then_end @ else_end
+  | If { condition = tested; then_; else_; binds_lent_part } ->
+      if_ builder frontier tested ~binds_lent_part
+        ~then_:(fun on_true -> block builder on_true then_)
+        ~else_:(fun on_false ->
+          match else_ with Some else_ -> block builder on_false else_ | None -> on_false)
   | Match { scrutinees; arms; _ } ->
       arms_ builder (scrutinized frontier scrutinees) scrutinees arms ~body:(block builder)
   | Block body -> block builder frontier body
@@ -510,11 +525,25 @@ and construct builder frontier (mode : Types.mode) fields =
     ~borrows:(fun field ->
       operand_borrows builder field @ List.filter_map Place.of_core (Core_walk.lent_places field))
 
-(* Binds a pattern's locals. If the scrutinee is a place, the bindings alias
-   parts of the place, so they view it. If the scrutinee is a value, the
-   bindings have the value's views. *)
-and bind_pattern builder frontier (bound : Core.local list) (scrutinees : Core.operand list) origin
-    =
+(* An [if]: the then-block runs where the condition is true, and the
+   else-block where it is false. The condition's lends last until the
+   then-block ends if a name that the condition binds may alias a lent part,
+   and otherwise end with the condition. They never last into the
+   else-block. *)
+and if_ builder frontier tested ~binds_lent_part ~then_ ~else_ =
+  let loans = builder.loans in
+  let on_true, on_false = condition builder frontier tested in
+  if not binds_lent_part then builder.loans <- loans;
+  let then_end = then_ on_true in
+  builder.loans <- loans;
+  let else_end = else_ on_false in
+  then_end @ else_end
+
+(* Binds a pattern's locals, [bound]. If the scrutinee is a place, the
+   bindings alias parts of the place, so they view it. If the scrutinee is a
+   value, the bindings have the value's views. Only the bindings in
+   [viewing] get views: the others hold copies. *)
+and bind_pattern builder frontier ~bound ~viewing (scrutinees : Core.operand list) origin =
   let frontier = emit builder frontier (Bind bound) origin in
   let views =
     List.concat_map
@@ -527,8 +556,8 @@ and bind_pattern builder frontier (bound : Core.local list) (scrutinees : Core.o
         | Value value -> if builder.is_view value.type_ then views_of builder value else [])
       scrutinees
   in
-  if bound = [] || views = [] then frontier
-  else emit builder frontier (Bind_views { locals = bound; views }) origin
+  if viewing = [] || views = [] then frontier
+  else emit builder frontier (Bind_views { locals = viewing; views }) origin
 
 (* An executable quantifier is a loop that stops at the first counterexample
    or witness: it evaluates its range or collection, then its body once per
@@ -568,7 +597,11 @@ and arms_ builder frontier scrutinees (arms : Core.arm list) ~body =
   List.concat_map
     (fun (arm : Core.arm) ->
       let bound = List.concat_map pattern_locals arm.patterns in
-      let frontier = bind_pattern builder frontier bound scrutinees arm.origin in
+      let frontier =
+        bind_pattern builder frontier ~bound
+          ~viewing:(List.concat_map (viewing_locals builder) arm.patterns)
+          scrutinees arm.origin
+      in
       (* If a guard is false, the later arms are matched against the same
          scrutinees. So the scrutinees stay borrowed read-only while a guard
          is evaluated, and a guard cannot mutate them. *)
@@ -821,9 +854,10 @@ and use builder frontier (node : Core.expression) (core_place : Core.place) ~ret
 and returned_value builder frontier (value : Core.expression) =
   match value.kind with
   | Block body -> returned_block builder frontier body
-  | If { condition; then_; else_ = Some else_ } ->
-      let after = expression builder frontier condition in
-      returned_block builder after then_ @ returned_block builder after else_
+  | If { condition = tested; then_; else_ = Some else_; binds_lent_part } ->
+      if_ builder frontier tested ~binds_lent_part
+        ~then_:(fun on_true -> returned_block builder on_true then_)
+        ~else_:(fun on_false -> returned_block builder on_false else_)
   | Match { scrutinees; arms; _ } ->
       let after =
         evaluate_in_order builder frontier scrutinees
@@ -904,7 +938,9 @@ and statement_actions builder frontier (node : Core.statement) =
       | None -> frontier)
   | Compound_assign { target; operand = right; bound; value } -> (
       let frontier = evaluate_operand builder frontier Read right in
-      let frontier = bind_pattern builder frontier [ bound ] [ right ] node.origin in
+      let frontier =
+        bind_pattern builder frontier ~bound:[ bound ] ~viewing:[ bound ] [ right ] node.origin
+      in
       let added = add_operand_loans builder (operand_borrows builder right) in
       let frontier = place_subexpressions builder frontier target in
       remove_loans builder added;
@@ -960,9 +996,10 @@ and statement_actions builder frontier (node : Core.statement) =
           | For { mode = Parallel_loop; _ } -> Some "parallel"
           | For { mode = Concurrent_loop; _ } -> Some "concurrent"
           | _ -> None)
-  | While { condition; body; _ } ->
-      loop builder frontier ~bound:[] ~views:[] ~loan:None ~condition:(Some condition) body
-        node.origin ~fork_join:None
+  | While { condition; body; binds_lent_part; _ } ->
+      loop builder frontier ~bound:[] ~views:[] ~loan:None
+        ~condition:(Some (condition, binds_lent_part))
+        body node.origin ~fork_join:None
   | Parallel branches | Concurrent branches ->
       let concurrent = match node.kind with Concurrent _ -> true | _ -> false in
       let frontier, ranges =
@@ -1077,10 +1114,13 @@ and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (valu
   else frontier
 
 (* A loop. Every iteration passes through the head point. A [while] loop
-   evaluates its condition after the head. Control leaves the loop from the
-   head, from the condition, and from each [break]. A loop over a place
-   borrows the place for the body. *)
-and loop builder frontier ~bound ~views ~loan ~condition ~fork_join (body : Core.block) origin =
+   evaluates its condition after the head, and runs its body where the
+   condition is true. Control leaves the loop from the head, where the
+   condition is false, and from each [break]. A loop over a place borrows the
+   place for the body. The condition's lends last until the body ends if a
+   name that the condition binds may alias a lent part, as for an [if]. *)
+and loop builder frontier ~bound ~views ~loan ~condition:tested ~fork_join (body : Core.block)
+    origin =
   match frontier with
   | [] -> []
   | _ ->
@@ -1096,18 +1136,18 @@ and loop builder frontier ~bound ~views ~loan ~condition ~fork_join (body : Core
       let breaks = ref [] and continues = ref [] in
       builder.loops <- (breaks, continues) :: builder.loops;
       let loans = builder.loans in
-      let tested =
-        match condition with
-        | Some condition ->
-            let tested = expression builder stepped condition in
-            builder.loans <- loans;
-            tested
-        | None -> stepped
+      let on_true, on_false =
+        match tested with
+        | Some (tested, binds_lent_part) ->
+            let on_true, on_false = condition builder stepped tested in
+            if not binds_lent_part then builder.loans <- loans;
+            (on_true, on_false)
+        | None -> (stepped, stepped)
       in
-      builder.loans <- Option.to_list loan @ loans;
+      builder.loans <- Option.to_list loan @ builder.loans;
       let entered =
-        if bound = [] || views = [] then tested
-        else emit builder tested (Bind_views { locals = bound; views }) origin
+        if bound = [] || views = [] then on_true
+        else emit builder on_true (Bind_views { locals = bound; views }) origin
       in
       let first = builder.count in
       let body_end = block builder entered body in
@@ -1119,7 +1159,7 @@ and loop builder frontier ~bound ~views ~loan ~condition ~fork_join (body : Core
       builder.loans <- loans;
       builder.loops <- List.tl builder.loops;
       link builder (body_end @ !continues) head;
-      let ended = tested @ !breaks in
+      let ended = on_false @ !breaks in
       if bound = [] then ended else emit builder ended (Scope_end bound) origin
 
 (* The graph of a definition, or [None] if the definition has no body to

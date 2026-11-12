@@ -985,7 +985,9 @@ the caller into continuation-passing style. The caller then reads the
 method's body, and depends on it.
 
 A lending method resumes after the caller's statement, as SPECIFICATION.md has
-it, and its own values live until then, so it may lend one it made. The
+it, and in the condition of an `if` or a `while`, after the condition, or
+after the then-block or the body when the core form's `binds_lent_part` is
+set. Its own values live until then, so it may lend one it made. The
 LIR is a graph of blocks, so this needs no function for the rest of the
 statement:
 
