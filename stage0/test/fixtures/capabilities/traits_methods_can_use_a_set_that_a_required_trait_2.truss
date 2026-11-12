@@ -1,4 +1,4 @@
-fn f() -> Option[Int64] {
+fn run_example() -> Option[Int64] {
   var gauge = Gauge(last: 0)
   mut gauge.back_twice()
 }

@@ -1,14 +1,14 @@
-type Positive(n: Int64)
-  invariant n > 0
+type Positive(limit_count: Int64)
+  invariant limit_count > 0
 
 fn take(item: Positive) -> Int64 {
-  item.n
+  item.limit_count
 }
 
-fn f(count: USize) -> Int64 {
-  var item = Positive(n: 2)
+fn run_example(count: USize) -> Int64 {
+  var item = Positive(limit_count: 2)
   for _ in 0..count {
-    item.n = 0
+    item.limit_count = 0
   }
   1
 }

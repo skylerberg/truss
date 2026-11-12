@@ -1,4 +1,4 @@
-fn f(value: UInt8) -> UInt8
+fn run_example(value: UInt8) -> UInt8
   ensures result == value * 16
 {
   value << 4

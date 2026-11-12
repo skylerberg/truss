@@ -1,4 +1,4 @@
-fn f(done: Bool) -> UInt8
+fn run_example(done: Bool) -> UInt8
   ensures result == 1
 {
   var count: UInt8 = 0

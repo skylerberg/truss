@@ -1,4 +1,4 @@
-fn g() -> Int64 {
+fn second_example() -> Int64 {
   let numbers = [1, 2, 3]
   let _ = numbers[1..]
   numbers[0]

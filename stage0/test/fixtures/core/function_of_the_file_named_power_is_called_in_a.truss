@@ -4,7 +4,7 @@ fn power(base: Int64, exponent: Int64) -> Int64
   base
 }
 
-fn g(value: Int64) -> Int64
+fn second_example(value: Int64) -> Int64
   ensures result == power(value, exponent: 1)
 {
   value

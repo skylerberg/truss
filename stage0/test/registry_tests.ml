@@ -38,14 +38,22 @@ let () =
 
 let () =
   test "a package's hash does not depend on the order its files are given in" (fun () ->
-      let files = [ ("truss.toml", "a"); ("vector.truss", "b"); ("guide/start.md", "c") ] in
+      let files =
+        [
+          ("truss.toml", "first_value");
+          ("vector.truss", "second_value");
+          ("guide/start.md", "third_value");
+        ]
+      in
       if Content.hash files <> Content.hash (List.rev files) then fail "the hashes differ";
       if not (Content.is_hash (Content.hash files)) then fail "not 64 hexadecimal digits");
   test "a package's hash changes with a file's bytes, and with its path" (fun () ->
-      let hash = Content.hash [ ("a.truss", "one"); ("b.truss", "two") ] in
-      if hash = Content.hash [ ("a.truss", "one"); ("b.truss", "too") ] then fail "bytes";
-      if hash = Content.hash [ ("a.truss", "one"); ("c.truss", "two") ] then fail "path";
-      if hash = Content.hash [ ("a.truss", "onetwo") ] then fail "one file for two")
+      let hash = Content.hash [ ("first_value.truss", "one"); ("second_value.truss", "two") ] in
+      if hash = Content.hash [ ("first_value.truss", "one"); ("second_value.truss", "too") ] then
+        fail "bytes";
+      if hash = Content.hash [ ("first_value.truss", "one"); ("third_value.truss", "two") ] then
+        fail "path";
+      if hash = Content.hash [ ("first_value.truss", "onetwo") ] then fail "one file for two")
 
 (* The lock file *)
 

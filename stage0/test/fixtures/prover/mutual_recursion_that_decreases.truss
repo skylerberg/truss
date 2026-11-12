@@ -1,13 +1,13 @@
-fn even(n: UInt32) -> Bool
-  decreases n
+fn even(limit_count: UInt32) -> Bool
+  decreases limit_count
   cost time finite
 {
-  if n == 0 { true } else { odd(n - 1) }
+  if limit_count == 0 { true } else { odd(limit_count - 1) }
 }
 
-fn odd(n: UInt32) -> Bool
-  decreases n
+fn odd(limit_count: UInt32) -> Bool
+  decreases limit_count
   cost time finite
 {
-  if n == 0 { false } else { even(n - 1) }
+  if limit_count == 0 { false } else { even(limit_count - 1) }
 }

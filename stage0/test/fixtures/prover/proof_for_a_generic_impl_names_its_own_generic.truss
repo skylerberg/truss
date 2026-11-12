@@ -1,20 +1,20 @@
-fn triangle(n: Int64) -> Int64
-  requires n >= 0 && n <= 1000
-  ensures result <= n * 1000
-  decreases n
+fn triangle(limit_count: Int64) -> Int64
+  requires limit_count >= 0 && limit_count <= 1000
+  ensures result <= limit_count * 1000
+  decreases limit_count
   cost time finite
 {
-  if n == 0 { 0 } else { n + triangle(n - 1) }
+  if limit_count == 0 { 0 } else { limit_count + triangle(limit_count - 1) }
 }
 
-theorem triangle_at_least(n: Int64)
-  requires n >= 0 && n <= 1000
-  ensures triangle(n) >= n
-  decreases n
+theorem triangle_at_least(limit_count: Int64)
+  requires limit_count >= 0 && limit_count <= 1000
+  ensures triangle(limit_count) >= limit_count
+  decreases limit_count
   cost time finite
 {
-  if n > 0 {
-    triangle_at_least(n - 1)
+  if limit_count > 0 {
+    triangle_at_least(limit_count - 1)
   }
 }
 

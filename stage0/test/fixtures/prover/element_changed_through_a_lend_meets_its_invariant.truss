@@ -1,7 +1,7 @@
 type Span(low: Int64, high: Int64)
   invariant low <= high
 
-fn f() -> Int64
+fn run_example() -> Int64
   ensures result == 1
 {
   var spans: List[Span] = [Span(low: 0, high: 0)]

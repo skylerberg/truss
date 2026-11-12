@@ -1,5 +1,5 @@
 fn pick[First, Second](first: First) -> Second { todo }
 
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   pick[Int64](3)
 }

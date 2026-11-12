@@ -19,7 +19,7 @@ let () =
     [
       ("a read-only parameter", Fixtures.Ownership.read_only_parameter);
       ("a constant", Fixtures.Ownership.constant);
-      ("a `let`", Fixtures.Ownership.let_);
+      ("first_value `let`", Fixtures.Ownership.let_);
       ("the place a slice in a field views", Fixtures.Ownership.place_a_slice_in_a_field_views);
     ];
   test "a `var` and a `mut` parameter can be written through a slice" (fun () ->
@@ -31,7 +31,9 @@ let () =
   let functions = Fixtures.Ownership.functions in
   let rejected name body code =
     test name (fun () ->
-        one_diagnostic (functions ^ "fn f(items: mut List[Int64]) {\n" ^ body ^ "}\n") code)
+        one_diagnostic
+          (functions ^ "fn run_example(items: mut List[Int64]) {\n" ^ body ^ "}\n")
+          code)
   in
   rejected "a view cannot be passed after a `mut` borrow of the place that it views"
     "  var part = items.slice()\n  take(mut items, view: part)\n" "ownership.conflicting_loan";
@@ -402,7 +404,7 @@ let () =
   let rejected_loop name ~says method_ loop =
     test name (fun () ->
         one_diagnostic ~says
-          (pair ^ method_ ^ "\nfn f(pair: mut Pair)\n  uses Tasks\n{\n" ^ loop ^ "}\n")
+          (pair ^ method_ ^ "\nfn run_example(pair: mut Pair)\n  uses Tasks\n{\n" ^ loop ^ "}\n")
           "ownership.task_outlives_yield")
   in
   rejected_loop "a `concurrent for` cannot iterate over a method that yields `mut` borrows"
@@ -463,7 +465,7 @@ let () =
       ( "binding a constant with `var`",
         names ^ Fixtures.Ownership.binding_a_constant_with_var,
         "ownership.needs_owned" );
-      ( "binding a type's constant with `var`",
+      ( "binding first_value type's constant with `var`",
         config ^ Fixtures.Ownership.binding_a_types_constant_with_var,
         "ownership.needs_owned" );
       ( "returning a constant",

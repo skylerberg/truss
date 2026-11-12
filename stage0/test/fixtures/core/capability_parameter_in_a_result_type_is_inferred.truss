@@ -2,7 +2,7 @@ fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {
   run
 }
 
-fn g()
+fn second_example()
   uses Console, Clock
 {
   let first = later(fn() { Console.print_line("x") })

@@ -1,6 +1,6 @@
 fn apply(visit: fn(Int64) -> Int64) {}
 
-fn f()
+fn run_example()
   uses Clock
 {
   apply(fn(value) {

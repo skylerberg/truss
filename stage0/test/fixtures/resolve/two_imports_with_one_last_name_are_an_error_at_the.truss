@@ -1,6 +1,6 @@
 use app::shapes
 use other::shapes
 
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   shapes::area()
 }

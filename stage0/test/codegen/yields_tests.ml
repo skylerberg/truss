@@ -8,7 +8,7 @@ open Codegen_support
 (* [count_to(limit)] yields 1, 2, and so on up to [limit]. *)
 let count_to =
   function_ ~parameters:[ 0 ]
-    [ local ~name:"limit" (value int32); local ~name:"i" (value int32); local (Raw Bool) ]
+    [ local ~name:"limit" (value int32); local ~name:"step_index" (value int32); local (Raw Bool) ]
     [
       block [ Assign (at 1, Use (constant_int32 1)) ] (Goto 1);
       block

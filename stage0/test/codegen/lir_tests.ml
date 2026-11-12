@@ -14,7 +14,11 @@ let () =
       expect_status 55
         [
           entry
-            [ local ~name:"total" (value int32); local ~name:"i" (value int32); local (Raw Bool) ]
+            [
+              local ~name:"total" (value int32);
+              local ~name:"step_index" (value int32);
+              local (Raw Bool);
+            ]
             [
               block
                 [ Assign (at 0, Use (constant_int32 0)); Assign (at 1, Use (constant_int32 1)) ]
@@ -32,7 +36,7 @@ let () =
             ];
         ]);
   let point = named "Point" in
-  let point_shape = ("Point", Record [ field "x" int32; field "y" int32 ]) in
+  let point_shape = ("Point", Record [ field "first_number" int32; field "second_number" int32 ]) in
   test "a record is built and its fields read" (fun () ->
       expect_status ~extra:[ point_shape ] 5
         [
@@ -47,13 +51,17 @@ let () =
                         {
                           ty = point;
                           variant = None;
-                          fields = [ ("x", constant_int32 2); ("y", constant_int32 3) ];
+                          fields =
+                            [
+                              ("first_number", constant_int32 2); ("second_number", constant_int32 3);
+                            ];
                         } );
                   Assign
                     ( at 1,
                       Binary
-                        (Add, copy ~projections:[ Field "x" ] 0, copy ~projections:[ Field "y" ] 0)
-                    );
+                        ( Add,
+                          copy ~projections:[ Field "first_number" ] 0,
+                          copy ~projections:[ Field "second_number" ] 0 ) );
                 ]
                 (Return (Some (copy 1)));
             ];
@@ -442,7 +450,7 @@ let () =
       ]
   in
   test "two lowerings that differ only in numbering hash the same" (fun () ->
-      let hash function_ = Lir.For_testing.hash (instance "f" function_) in
+      let hash function_ = Lir.For_testing.hash (instance "run_example" function_) in
       let left = numbered 0 1 and right = numbered 1 0 in
       if hash left <> hash right then fail "the hashes differ");
   test "a change to an instance's code changes its hash" (fun () ->
@@ -452,8 +460,8 @@ let () =
           [ block [ Assign (at 0, Use (constant_int32 2)) ] (Return (Some (copy 0))) ]
       in
       if
-        Lir.For_testing.hash (instance "f" (numbered 0 1))
-        = Lir.For_testing.hash (instance "f" changed)
+        Lir.For_testing.hash (instance "run_example" (numbered 0 1))
+        = Lir.For_testing.hash (instance "run_example" changed)
       then fail "the hashes are equal");
   test "a symbol names the path and the type arguments" (fun () ->
       let key =

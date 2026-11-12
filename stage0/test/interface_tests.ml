@@ -55,9 +55,9 @@ let () =
           if Types.show self <> "Box[Value]" then fail "self: %s" (Types.show self)
       | _ -> fail "no receiver");
   test "a type with the wrong number of arguments is an error" (fun () ->
-      one_diagnostic "fn f(value: Option[Int64, Int64]) {}\n" "types.arity");
+      one_diagnostic "fn run_example(value: Option[Int64, Int64]) {}\n" "types.arity");
   test "a trait in a type position is an error" (fun () ->
-      one_diagnostic "fn f(value: Equal) {}\n" "types.not_a_type");
+      one_diagnostic "fn run_example(value: Equal) {}\n" "types.not_a_type");
   test "a type argument must meet the type's bounds" (fun () ->
       one_diagnostic Fixtures.Interface.type_argument_must_meet_the_types_bounds
         "types.unsatisfied_bound");
@@ -76,7 +76,7 @@ let () =
   test "a default may build a record from constants" (fun () ->
       no_diagnostics [ ("app::main", Fixtures.Interface.default_may_build_a_record_from_constants) ]);
   test "an associated type no bound declares is an error" (fun () ->
-      one_diagnostic "fn f[Items: Iterable](items: Items) -> Items.Key { todo }\n"
+      one_diagnostic "fn run_example[Items: Iterable](items: Items) -> Items.Key { todo }\n"
         "types.unknown_associated_type");
   test "an associated type of a bound is a projection" (fun () ->
       let database =
@@ -95,26 +95,30 @@ let () =
 
 let () =
   test "two fields with one name are an error" (fun () ->
-      one_diagnostic "type Point(x: Int64, x: Int64)\n" "types.duplicate_field");
+      one_diagnostic "type Point(first_number: Int64, first_number: Int64)\n"
+        "types.duplicate_field");
   test "deriving needs every field to implement the trait" (fun () ->
       one_diagnostic Fixtures.Interface.deriving_needs_every_field_to_implement_the_trait
         "types.cannot_derive");
   test "only a record derives Default" (fun () ->
       one_diagnostic Fixtures.Interface.only_a_record_derives_default "types.cannot_derive";
-      no_diagnostics [ ("app::main", "type Point(x: Int64, y: Int64)\n  derives Default\n") ]);
+      no_diagnostics
+        [
+          ("app::main", "type Point(first_number: Int64, second_number: Int64)\n  derives Default\n");
+        ]);
   test "deriving Serialize needs every field to implement it" (fun () ->
       one_diagnostic Fixtures.Interface.deriving_serialize_needs_every_field_to_implement
         "types.cannot_derive";
       no_diagnostics
         [ ("app::main", Fixtures.Interface.deriving_serialize_needs_every_field_to_implement_2) ]);
   test "deriving Ordered needs Equal derived too" (fun () ->
-      one_diagnostic "type Point(x: Int64)\n  derives Ordered\n" "types.cannot_derive");
+      one_diagnostic "type Point(first_number: Int64)\n  derives Ordered\n" "types.cannot_derive");
   test "a generic type derives under conditions on its parameters" (fun () ->
       no_diagnostics [ ("app::main", "type Box[Value](value: Value)\n  derives Equal\n") ]);
   test "declaring Copyable on a type that is not opaque is an error with a fix that removes it"
     (fun () ->
-      one_diagnostic "type Point(x: Int64)\n  derives Copyable\n" "types.derives_inferred"
-        ~fixed:"type Point(x: Int64)\n  \n")
+      one_diagnostic "type Point(first_number: Int64)\n  derives Copyable\n"
+        "types.derives_inferred" ~fixed:"type Point(first_number: Int64)\n  \n")
 
 (* Traits and impls *)
 
@@ -199,14 +203,15 @@ let () =
     (fun _ -> option (slice int64))
     Interface.Impls.is_view;
   property "a List of integers is not a view" false "" (fun _ -> list int64) Interface.Impls.is_view;
-  property "a record of plain fields is Plain" true "type Point(x: Int64, y: Int64)\n"
+  property "a record of plain fields is Plain" true
+    "type Point(first_number: Int64, second_number: Int64)\n"
     (fun _ -> Types.named (app "Point") [])
     Interface.Impls.plain;
   property "a variant held indirectly is not Plain" false
     Fixtures.Interface.variant_held_indirectly_is_not_plain
     (fun _ -> Types.named (app "Tree") [])
     Interface.Impls.plain;
-  property "a recursive type is still Copyable" true
+  property "first_value recursive type is still Copyable" true
     Fixtures.Interface.recursive_type_is_still_copyable
     (fun _ -> Types.named (app "Tree") [])
     Interface.Impls.copyable;
@@ -229,7 +234,7 @@ let () =
   property "a Slice is Plain whatever its elements are" true ""
     (fun _ -> slice string)
     Interface.Impls.plain;
-  property "a type defined as todo is not Copyable" false "type Session = todo\n"
+  property "first_value type defined as todo is not Copyable" false "type Session = todo\n"
     (fun _ -> Types.named (app "Session") [])
     Interface.Impls.copyable
 
@@ -247,13 +252,13 @@ let () =
   property "an Option of an Option of plain data is Plain" true ""
     (fun _ -> option (option int64))
     Interface.Impls.plain;
-  property "a type nested in itself around a Slice is a view" true holder
+  property "first_value type nested in itself around a Slice is a view" true holder
     (fun _ -> held (held (slice int64)))
     Interface.Impls.is_view;
   property "a type nested in itself around a List is not a view" false holder
     (fun _ -> held (held (list int64)))
     Interface.Impls.is_view;
-  property "a type nested in itself around a List is not Plain" false holder
+  property "first_value type nested in itself around a List is not Plain" false holder
     (fun _ -> held (held (list int64)))
     Interface.Impls.plain;
   property "a type that contains itself is a view when its argument is" true chain
@@ -337,7 +342,7 @@ let () =
              (option int64) (trait "Equal" []))
       then fail "no impl");
   test "a derived impl does not hold when its conditions do not" (fun () ->
-      let database = setup [ ("app::main", "type Opaque(x: Int64)\n") ] in
+      let database = setup [ ("app::main", "type Opaque(first_number: Int64)\n") ] in
       let opaque = Types.named (app "Opaque") [] in
       if
         Option.is_some
@@ -509,7 +514,7 @@ let () =
              (Types.named (app "Box") [ int64 ]))
       then fail "not Copyable");
   test "only some traits can be derived" (fun () ->
-      one_diagnostic "type P()\n  derives Iterable\n" "types.not_derivable");
+      one_diagnostic "type Probe()\n  derives Iterable\n" "types.not_derivable");
   test "a capability's impl must give every method" (fun () ->
       one_diagnostic Fixtures.Interface.capabilitys_impl_must_give_every_method
         "types.missing_member");
@@ -520,7 +525,7 @@ let () =
       one_diagnostic Fixtures.Interface.methods_head_names_every_generic_parameter_of_its
         "types.arity");
   test "a type argument must be of its parameter's kind" (fun () ->
-      one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
+      one_diagnostic "fn run_example(items: List[3]) {}\n" "types.argument_kind");
   test "a constant in a type argument must have a value" (fun () ->
       let database =
         setup [ ("app::main", Fixtures.Interface.constant_in_a_type_argument_must_have_a_value) ]
@@ -530,7 +535,7 @@ let () =
           (List.mem "types.arity" (codes (Interface.diagnostics database (module_of "app::main"))))
       then fail "accepted");
   test "any must fix every associated type" (fun () ->
-      one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
+      one_diagnostic "fn run_example(items: any Iterable) {}\n" "types.associated_type_not_fixed");
   test "nothing can implement Copyable" (fun () ->
       one_diagnostic Fixtures.Interface.nothing_can_implement_copyable "types.implements_built_in");
   test "a public constant cannot have a private type" (fun () ->
@@ -568,11 +573,11 @@ let () =
   test "`Self` in a capability is an error" (fun () ->
       one_diagnostic Fixtures.Interface.self_in_a_capability_is_an_error "types.misplaced_self_type");
   test "`Self` in a function that is not a method is an error" (fun () ->
-      one_diagnostic "fn f(value: Self) {}\n" "types.misplaced_self_type");
+      one_diagnostic "fn run_example(value: Self) {}\n" "types.misplaced_self_type");
   test "a trait is not the head of a method" (fun () ->
       one_diagnostic Fixtures.Interface.trait_is_not_the_head_of_a_method "types.not_a_type");
   test "a capability parameter is not a type" (fun () ->
-      one_diagnostic "fn f[capability Granted](value: Granted) {}\n" "types.not_a_type");
+      one_diagnostic "fn run_example[capability Granted](value: Granted) {}\n" "types.not_a_type");
   test "a method of an unknown type keeps its head's generic parameters" (fun () ->
       one_diagnostic Fixtures.Interface.method_of_an_unknown_type_keeps_its_heads_generic
         "resolve.unknown_name")

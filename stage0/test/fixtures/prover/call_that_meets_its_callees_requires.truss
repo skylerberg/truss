@@ -1,9 +1,9 @@
-fn g(count: UInt8) -> UInt8
+fn second_example(count: UInt8) -> UInt8
   requires count < 10
 {
   count
 }
 
-fn f() -> UInt8 {
-  g(9)
+fn run_example() -> UInt8 {
+  second_example(9)
 }

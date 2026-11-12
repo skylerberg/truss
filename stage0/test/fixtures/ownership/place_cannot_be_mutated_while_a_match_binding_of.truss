@@ -1,4 +1,4 @@
-fn f() -> USize {
+fn run_example() -> USize {
   var slot: Option[String] = Some("a".copy())
   match slot {
     Some(inner) => {

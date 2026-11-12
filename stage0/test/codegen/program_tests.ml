@@ -646,7 +646,9 @@ let () =
       (match run_main source with
       | 0, output, _ -> expect_string ~expected:"counted 1\ndone 3\n" output
       | status, _, errors -> fail "ended with status %d: %s" status errors);
-      match run_main ~arguments:[ "a"; "b"; "c"; "d" ] source with
+      match
+        run_main ~arguments:[ "first_value"; "second_value"; "third_value"; "fourth_value" ] source
+      with
       | 101, output, errors ->
           expect_string ~expected:"counted 5\n" output;
           if not (contains errors "many arguments") then fail "panicked with %S" errors

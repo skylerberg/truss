@@ -1,4 +1,4 @@
-theorem t(word: UInt64)
+theorem term_value(word: UInt64)
   requires word == 0
   ensures word.count_ones() == 0
 {

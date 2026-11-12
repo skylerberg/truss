@@ -1,4 +1,4 @@
-fn g[Element: Equal](items: List[Element], item: Element) -> Bool
+fn second_example[Element: Equal](items: List[Element], item: Element) -> Bool
   cost time O(items.length() * time(Element.equal))
 {
   todo

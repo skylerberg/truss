@@ -1,5 +1,5 @@
 fn take(cell: own Cell) {}
 
-fn f(grid: Grid) {
+fn run_example(grid: Grid) {
   take(grid.cell(0))
 }

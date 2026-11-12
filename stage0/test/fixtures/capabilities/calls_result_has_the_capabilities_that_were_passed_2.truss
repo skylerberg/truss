@@ -1,4 +1,4 @@
-fn f() -> Instant
+fn run_example() -> Instant
   uses Clock
 {
   let held = later(tick)

@@ -1,4 +1,4 @@
-fn f() {
+fn run_example() {
   var table = Table(sessions: [])
   provide mut table {
     serve(1)

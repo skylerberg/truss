@@ -1,4 +1,4 @@
-fn f(first: Character, last: Character) {
+fn run_example(first: Character, last: Character) {
   for letter in first..last {
     let _ = letter
   }

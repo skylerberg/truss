@@ -29,7 +29,7 @@ fn first_with_a_long(shelves: List[Shelf]) -> Int64 {
   var looked: Int64 = 0
   for shelf in shelves {
     looked += 1
-    if exists title in shelf => exists i in 0..title.length() => i >= 5 {
+    if exists title in shelf => exists step_index in 0..title.length() => step_index >= 5 {
       return looked
     }
   }

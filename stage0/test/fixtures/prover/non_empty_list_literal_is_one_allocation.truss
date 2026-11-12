@@ -1,4 +1,4 @@
-fn f() -> List[Int64]
+fn run_example() -> List[Int64]
   cost allocations == 1
 {
   [1, 2, 3]

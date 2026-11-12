@@ -1,4 +1,4 @@
-fn f(names: List[String]) {
+fn run_example(names: List[String]) {
   var each = names.each()
   for name in mut each {
     let _ = name

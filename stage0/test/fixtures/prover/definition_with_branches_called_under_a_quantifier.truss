@@ -6,8 +6,8 @@ fn used_bits(length: USize) -> UInt64
 
 theorem the_unused_words_hold_five(words: List[UInt64], length: USize)
   requires length % 64 == 1
-  requires forall i in 0..words.length() =>
-    words[i] == (if i < length { 1 } else { used_bits(length) })
-  ensures forall i in 0..words.length() => i >= length ==> words[i] == 5
+  requires forall step_index in 0..words.length() =>
+    words[step_index] == (if step_index < length { 1 } else { used_bits(length) })
+  ensures forall step_index in 0..words.length() => step_index >= length ==> words[step_index] == 5
 {
 }

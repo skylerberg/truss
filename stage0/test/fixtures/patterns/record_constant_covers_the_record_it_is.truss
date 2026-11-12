@@ -1,12 +1,12 @@
-type Point(x: Int64, y: Bool)
+type Point(first_number: Int64, second_number: Bool)
   derives Equal
 
-let origin: Point = Point(x: 0, y: false)
+let origin: Point = Point(first_number: 0, second_number: false)
 
-fn f(point: Point) -> Bool {
+fn run_example(point: Point) -> Bool {
   match point {
     origin => true
-    (x: 0, y: false) => false
+    (first_number: 0, second_number: false) => false
     _ => false
   }
 }

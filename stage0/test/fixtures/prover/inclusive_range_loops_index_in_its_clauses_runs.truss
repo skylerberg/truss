@@ -1,4 +1,4 @@
-fn f(last: UInt32) -> UInt64
+fn run_example(last: UInt32) -> UInt64
   requires last < 1000
   ensures result == last + 1
 {

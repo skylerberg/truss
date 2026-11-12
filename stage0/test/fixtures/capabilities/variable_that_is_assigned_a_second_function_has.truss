@@ -1,4 +1,4 @@
-fn f() -> Instant {
+fn run_example() -> Instant {
   var held = later(still)
   held = tick
   held()

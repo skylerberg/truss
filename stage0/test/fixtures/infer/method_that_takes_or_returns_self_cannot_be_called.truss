@@ -2,6 +2,6 @@ trait Joined {
   fn join(self, other: Self) -> Int64
 }
 
-fn f(first: any Joined, second: any Joined) -> Int64 {
+fn run_example(first: any Joined, second: any Joined) -> Int64 {
   first.join(second)
 }

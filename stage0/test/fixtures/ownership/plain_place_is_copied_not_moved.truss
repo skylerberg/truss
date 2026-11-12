@@ -1,6 +1,6 @@
 fn take(count: own Int64) {}
 
-fn f(count: Int64) {
+fn run_example(count: Int64) {
   take(count)
   take(count)
 }

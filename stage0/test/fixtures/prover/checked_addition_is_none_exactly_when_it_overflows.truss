@@ -1,4 +1,4 @@
-fn f(value: UInt8) -> Bool
+fn run_example(value: UInt8) -> Bool
   ensures result == (value > 0)
 {
   value.checked_add(255).is_none()

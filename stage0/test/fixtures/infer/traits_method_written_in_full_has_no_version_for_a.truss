@@ -2,6 +2,6 @@ trait Shown {
   fn label(self) -> Int64
 }
 
-fn f[Value: Shown](value: mut Value) -> Int64 {
+fn run_example[Value: Shown](value: mut Value) -> Int64 {
   Shown.label(mut value)
 }

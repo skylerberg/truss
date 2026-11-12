@@ -1,4 +1,4 @@
-fn f(items: List[Int64]) -> Bool
+fn run_example(items: List[Int64]) -> Bool
   requires forall item in items => item > 0
   ensures result
 {

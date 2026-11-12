@@ -2,7 +2,7 @@ fn forever() -> Int64 {
   forever()
 }
 
-fn f() -> Int64
+fn run_example() -> Int64
   cost time finite
 {
   forever()

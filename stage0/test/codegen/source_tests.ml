@@ -17,7 +17,7 @@ let () =
     Fixtures.Source.counted_for_loop_runs_once_per_value;
   passes "records are built and read, and sums matched"
     Fixtures.Source.records_are_built_and_read_and_sums_matched;
-  passes "an if is a value, and a return leaves early"
+  passes "an if is a value, and first_value return leaves early"
     Fixtures.Source.if_is_a_value_and_a_return_leaves_early;
   passes "the standard library's Option methods run"
     Fixtures.Source.standard_librarys_option_methods_run

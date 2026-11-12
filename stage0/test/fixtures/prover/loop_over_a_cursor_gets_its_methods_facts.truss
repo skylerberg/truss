@@ -1,4 +1,4 @@
-fn f(couple: Couple) -> USize
+fn run_example(couple: Couple) -> USize
   ensures result <= 2
 {
   var cursor = couple.each()

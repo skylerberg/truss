@@ -3,7 +3,7 @@ fn Reader.windows(self) yields Slice[Int64] {
   yield self.buffer[1..]
 }
 
-fn f(reader: Reader, other: List[Int64]) -> USize {
+fn run_example(reader: Reader, other: List[Int64]) -> USize {
   var held: Slice[Int64] = other[..]
   for window in reader.windows() {
     held = window

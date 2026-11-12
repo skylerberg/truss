@@ -1,4 +1,4 @@
-fn f(items: List[Int64]) -> USize {
+fn run_example(items: List[Int64]) -> USize {
   var part = items.slice()
   bump(mut part)
   items.length()

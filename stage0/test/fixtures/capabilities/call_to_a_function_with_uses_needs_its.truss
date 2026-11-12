@@ -4,6 +4,6 @@ fn stamp() -> Instant
   Clock.now()
 }
 
-fn f() -> Instant {
+fn run_example() -> Instant {
   stamp()
 }

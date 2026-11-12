@@ -2,10 +2,10 @@ trait Keyed {
   type Key: Hash
 }
 
-type Opaque(x: Int64)
+type Opaque(first_number: Int64)
 
-type P(x: Int64)
+type Probe(first_number: Int64)
 
-impl Keyed for P {
+impl Keyed for Probe {
   type Key = Opaque
 }

@@ -1,6 +1,6 @@
 use standard::core
 
-fn f(data: List[UInt8]) -> USize {
+fn run_example(data: List[UInt8]) -> USize {
   var total = 0
   for (index, element): core::Indexed[UInt8] in data.enumerate() {
     total += index

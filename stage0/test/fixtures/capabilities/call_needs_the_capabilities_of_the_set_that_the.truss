@@ -1,4 +1,4 @@
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   var gauge = Gauge(last: 0)
   drain(mut gauge)
 }

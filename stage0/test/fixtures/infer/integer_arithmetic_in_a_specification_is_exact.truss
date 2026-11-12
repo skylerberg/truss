@@ -1,5 +1,5 @@
-fn f(a: Int64, b: Int64) -> Int64
-  ensures result == a + b
+fn run_example(first_value: Int64, second_value: Int64) -> Int64
+  ensures result == first_value + second_value
 {
   todo
 }
