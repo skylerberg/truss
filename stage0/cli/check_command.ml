@@ -113,10 +113,10 @@ let fix (project : Project.t) =
 (* A check also lists where this worktree's changes meet those of other
    open worktrees of the repository. Overlaps are not diagnostics: nothing is wrong with either worktree's
    code, so they do not change the exit status. *)
-let run ~directory ~fix:fixing ~json =
+let run ~directory ~fix:fixing ~proofs ~json =
   let project = Project.load directory in
   let fixed = if fixing then fix project else [] in
-  let report = Report.gather ~proofs:true project in
+  let report = Report.gather ~proofs project in
   let overlaps = Overlap_command.with_other_worktrees project.session in
   if json then
     Json.print
