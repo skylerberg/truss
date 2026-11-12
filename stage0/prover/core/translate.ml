@@ -8039,7 +8039,7 @@ and statement context frame (node : statement) : frame option =
   else statement_kind context frame node
 
 (* A proof is ghost code, which a build leaves out: what it shows is known
-   after it, but the program goes on from where it was, with nothing the
+   after it, but the program continues from where it was, with nothing the
    proof changed, whichever way the proof ends, or if it never ends. A
    [todo] in it stands for the proof still to write, so what follows is not
    shown on the paths that reach one, which are what this gives. *)
@@ -8210,8 +8210,8 @@ and yield_part context frame (node : statement) (mode : Types.mode) (part : oper
       show each ~at:frame ~result:(Some handed) ~yielded:before ~finished:None
         ~when_:"for the part yielded here";
       check_valid context frame span part_type handed ~deep:true ~when_:"for the part yielded here";
-      (* What the caller leaves in a part lent [mut] is stored back in each
-         place it lends. *)
+      (* The caller's changes to a part lent [mut] are written to each lent
+         place. *)
       let frame, part_after =
         if mode = Types.Mut && Core_walk.lent_places part <> [] then (
           let part_after = arrive context frame "lent" part_type in
@@ -9306,7 +9306,7 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
        (fun (exit_frame : frame) -> { exit_frame with yielded = frame.yielded })
        (exit_ :: left))
 
-(* Whether a loop's body hands out parts of the method it is in. *)
+(* Whether a loop's body yields. *)
 and contains_yield body =
   Core_walk.block_exists
     ~statement:(fun (node : statement) -> match node.kind with Yield _ -> true | _ -> false)

@@ -621,7 +621,7 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
     | Some Timed_out -> Run_timed_out
     | Some Not_run | None -> (
         (* Each question is asked only once what it depends on is
-           answered: a pending response stops the search, which goes on
+           answered: a pending response stops the search, which continues
            once it is answered, rather than asking what the answer may make
            unneeded. *)
         let ask variant ~with_locals = oracles.solve ~index ~choice ~variant ~with_locals in

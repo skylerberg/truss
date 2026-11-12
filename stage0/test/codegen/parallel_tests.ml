@@ -72,7 +72,9 @@ fn main(arguments: List[String]) -> ExitCode
   ExitCode.success
 }
 |});
-  test "a branch takes a value out of its own part, and another gives its part a new one" (fun () ->
+  test
+    "one branch moves a field out and another changes a second field, and the first is \
+     reinitialized after" (fun () ->
       same_with_any_workers ~expected:"first taken second!\n"
         {|type Pair(first: String, second: String)
 

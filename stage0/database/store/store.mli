@@ -61,7 +61,7 @@ val lock : pointer -> bool
 (** Takes the pointer for this process alone, while it lives; [false] if another process has it. *)
 
 val unlock : pointer -> unit
-(** Gives up a pointer taken with {!lock}. *)
+(** Releases a pointer taken with {!lock}. *)
 
 val read : pointer -> string option
 (** What the pointer holds, or [None] if it was never written, or is cut short or damaged. *)

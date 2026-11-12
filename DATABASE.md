@@ -193,7 +193,7 @@ Setting an input to a value equal to its old one does nothing. Otherwise:
    computed.
 4. A result that comes out different queues what reads it in later phases.
    A result that comes out the same queues nothing. This is early cutoff.
-5. The engine goes on to the next phase with anything queued, until none
+5. The engine continues to the next phase with anything queued, until none
    has.
 
 So a change costs the results that read something that really changed, plus,
