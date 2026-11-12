@@ -196,8 +196,8 @@ let require_available checking scope (origin : Core.origin) ?(for_implementation
 
    A method of an [impl] of a capability is exempt. Its callers reach it
    only through a capability call, which is an effect that their signatures
-   declare, so no code without capabilities can observe what the intrinsic
-   does. A capability is not a trait, so the method cannot be called on the
+   declare, so no code without capabilities can observe the intrinsic's
+   effects. A capability is not a trait, so the method cannot be called on the
    value, through a bound, or through [any]. A lambda, a [parallel] branch,
    and a specification inside the method are not exempt, and neither is a
    helper function that the method calls. *)

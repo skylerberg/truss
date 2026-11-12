@@ -1,0 +1,12 @@
+type Box(value: Int64)
+
+fn Box.fill(mut self, count: UInt32)
+  requires self.value == 0
+{
+  for _ in 0..count {
+    self.value = 1
+  }
+  proof {
+    assert self.value == 0
+  }
+}

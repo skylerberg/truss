@@ -1,0 +1,9 @@
+fn apply[Source: Feed](
+  source: mut Source,
+  run: (fn(mut Source) -> Option[Int64] uses Source.Uses),
+) -> Option[Int64]
+  uses Source.Uses
+{
+  run(mut source)
+}
+

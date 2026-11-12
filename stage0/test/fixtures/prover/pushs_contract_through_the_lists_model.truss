@@ -1,0 +1,6 @@
+fn f(items: mut List[Int64])
+  ensures items.length() == old(items.length()) + 1
+  ensures items[old(items.length())] == 5
+{
+  mut items.push(5)
+}

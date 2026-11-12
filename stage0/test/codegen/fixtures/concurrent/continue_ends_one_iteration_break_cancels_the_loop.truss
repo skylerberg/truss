@@ -1,0 +1,44 @@
+fn skips(count: Int64)
+  uses Tasks, Console
+{
+  concurrent for index in 0..count {
+    if index == 2 {
+      continue
+    }
+    Console.print_line("iteration ${index}")
+  }
+}
+
+fn stops(count: Int64)
+  uses Tasks, Console
+{
+  concurrent for index in 0..count {
+    if index == 1 {
+      break
+    }
+    Console.print_line("before the break ${index}")
+  }
+  Console.print_line("after the loop")
+}
+
+fn find(count: Int64, wanted: Int64) -> Int64
+  uses Tasks, Console
+{
+  concurrent for index in 0..count {
+    if index == wanted {
+      return index * 10
+    }
+    Console.print_line("looked at ${index}")
+  }
+  -1
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  skips(4)
+  stops(4)
+  Console.print_line("${find(5, wanted: 2)}")
+  Console.print_line("${find(3, wanted: 9)}")
+  ExitCode.success
+}

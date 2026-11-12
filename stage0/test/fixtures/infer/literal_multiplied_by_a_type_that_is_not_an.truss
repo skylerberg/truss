@@ -1,0 +1,11 @@
+type Duration2(nanoseconds: Int64)
+
+impl Multiply[Int64] for Duration2 {
+  type Output = Duration2
+  fn multiply_is_defined(self, right: Int64) -> Bool { true }
+  fn multiply(self, right: Int64) -> Duration2 { todo }
+}
+
+fn f(duration: Duration2) -> Duration2 {
+  duration * 2
+}

@@ -210,7 +210,7 @@ let inserted_closer (token : Token.t) =
   match token.kind with Punctuation (Close _) -> token.span.start = token.span.stop | _ -> false
 
 (* Whether a diagnostic means the parser recovered: that the source is not
-   valid Truss, so the tree there is what the parser inferred, as opposed
+   valid Truss, so the tree there is the parser's recovery, as opposed
    to valid syntax that breaks a rule checked after parsing. *)
 let recovers : Diagnostic.Code.parser -> bool = function
   | Unexpected_token | Needs_parentheses | Reserved_word | Statement_at_top_level | Missing_body

@@ -1,0 +1,3 @@
+fn each_index(count: USize, visit: (fn(index: USize) -> Int64 requires index < count)) -> Int64 {
+  if count > 0 { visit(count - 1) } else { 0 }
+}

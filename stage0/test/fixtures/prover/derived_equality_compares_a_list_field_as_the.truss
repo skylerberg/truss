@@ -1,0 +1,8 @@
+type Limbs(limbs: List[UInt64])
+  derives Equal
+
+theorem the_same_limbs(first: Limbs, second: Limbs)
+  requires first.limbs == second.limbs
+  ensures first == second
+{
+}

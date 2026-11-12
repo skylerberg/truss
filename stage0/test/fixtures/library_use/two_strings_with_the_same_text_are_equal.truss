@@ -1,0 +1,7 @@
+fn same() -> Bool
+  ensures result
+{
+  let first = "a"
+  let second = "a"
+  first == second
+}

@@ -1,0 +1,7 @@
+fn f(items: mut List[Int64])
+  requires items.length() > 0
+  ensures identical(items.model(), old(items.model()))
+{
+  let first = items[0]
+  items[0] = first
+}

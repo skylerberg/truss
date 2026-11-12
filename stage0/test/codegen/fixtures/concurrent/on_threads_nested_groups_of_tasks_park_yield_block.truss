@@ -1,0 +1,21 @@
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console
+{
+  var counter = Counter(count: 0)
+  provide mut counter {
+    concurrent for outer in 0..40 {
+      concurrent for inner in 0..50 {
+        if (outer + inner) % 10 == 0 {
+          Clock.sleep(Duration.nanoseconds(1000000))
+        }
+        if inner % 7 == 0 {
+          Tasks.yield_now()
+        }
+        Tally.add(1)
+      }
+    }
+    Console.print_line("total ${Tally.total()}")
+  }
+  ExitCode.success
+}

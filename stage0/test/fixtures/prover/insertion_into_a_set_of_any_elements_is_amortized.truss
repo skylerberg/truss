@@ -1,0 +1,5 @@
+fn add[Element: Hash + Ordered](names: mut Set[Element], name: own Element)
+  cost amortized time O(1 + names.length() * (1 + time(Element.equal)))
+{
+  mut names.insert(own name)
+}

@@ -86,7 +86,7 @@ let write ?(full = false) engine =
   let full = full || engine.chain = None in
   let candidates =
     if full then begin
-      (* What the roots and the set inputs reach, apart from the
+      (* The nodes the roots and the set inputs reach, apart from the
          fixed bases. *)
       let reached = Hashtbl.create 1024 in
       let rec reach (node : node) =

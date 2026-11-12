@@ -1,0 +1,17 @@
+fn set(items: mut Slice[Int64])
+  requires items.length() >= 1
+  ensures items[0] == 7
+{
+  items[0] = 7
+}
+
+fn f(items: mut List[Int64])
+  requires items.length() >= 4
+  ensures items[1] == old(items[1])
+{
+  var k: USize = 0
+  set(mut items[{
+    k += 1
+    k
+  }..3])
+}

@@ -1,0 +1,12 @@
+fn apply[capability Granted](run: (fn() uses Granted))
+  uses Granted
+{
+  run()
+}
+
+fn shout()
+  uses Console
+{
+  Console.print_line("named")
+}
+

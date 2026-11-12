@@ -236,8 +236,8 @@ let check_derives state (interface : Types.type_interface) (clauses : type_claus
                               [ remove_derived clause traits written ];
                           ]
                         (Printf.sprintf
-                           "Whether `%s` holds for this type is worked out from its fields, which \
-                            are visible. Only an opaque type declares it."
+                           "Whether `%s` holds for this type is derived from its fields, which are \
+                            visible. Only an opaque type declares it."
                            shown)
                     else
                       let property_holds =
@@ -368,7 +368,7 @@ let check_redeclared state (name : name) (receiver : Path.receiver) ~(trait_path
 
 (* The prover checks a law once, for every instantiation of the [impl]'s
    generic parameters, and reads the proof for all of them. So the proof
-   can assume of a parameter only what the [impl] requires of it: with a
+   can assume of a parameter only the [impl]'s bounds on it: with a
    bound that the [impl] lacks, the law would be taken as proven for types
    that the proof's reasoning does not cover. The proof's parameters are
    the [impl]'s by position. *)

@@ -1,0 +1,8 @@
+fn guarded(flag: Bool, count: Int64) -> Int64 {
+  if flag {
+    proof {
+      assert count > 0
+    }
+  }
+  0
+}

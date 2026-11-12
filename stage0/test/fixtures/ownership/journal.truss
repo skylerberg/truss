@@ -1,0 +1,5 @@
+capability Journal {
+  fn write(text: StringSlice)
+  fn last() -> StringSlice
+}
+

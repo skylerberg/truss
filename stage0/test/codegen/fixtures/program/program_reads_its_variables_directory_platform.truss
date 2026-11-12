@@ -1,0 +1,54 @@
+use standard::environment
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn shown(path: Option[Path]) -> String {
+  if path is Some(present) && present.text() is Some(text) { "${text}" } else { "none".copy() }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Environment, FileRead
+{
+  var marked = 0
+  for variable in Environment.variables() {
+    if variable.name == "TRUSS_TEST_MARK" {
+      say("${variable.name} is ${variable.value}")
+      marked += 1
+    }
+  }
+  say("marked ${marked}")
+  if Environment.variable("TRUSS_TEST_MARK".slice()) is Some(value) {
+    say("read ${value}")
+  }
+  if Environment.current_directory() is Ok(directory) {
+    say("in ${shown(Some(directory.copy()))}")
+  }
+  let platform = Environment.platform()
+  let known = platform.operating_system == environment::OperatingSystem.Linux
+    || platform.operating_system == environment::OperatingSystem.MacOs
+  say("system known ${known}, processors ${platform.processor_count > 0}")
+  say("host named ${!platform.host_name.is_empty()}, process ${platform.process_identifier > 1}")
+  say("home ${shown(Environment.location(environment::Location.Home))}")
+  say("temporary ${shown(Environment.location(environment::Location.Temporary))}")
+  if Environment.location(environment::Location.Executable) is Some(program)
+    && FileRead.metadata(program) is Ok(metadata)
+  {
+    say("executable is a file ${metadata.is_file()}")
+  }
+  if platform.operating_system == environment::OperatingSystem.Linux {
+    say("cache ${shown(Environment.location(environment::Location.Cache))}")
+  } else {
+    say("cache /caches")
+  }
+  say("data set ${Environment.location(environment::Location.Data) is Some(_)}")
+  if Environment.local_zone() is Some(zone) {
+    say("zone ${zone}")
+  }
+  if Environment.zone_rules("UTC".slice()) is Some(rules) && rules.length() > 4 {
+    say("rules start ${rules[0]} ${rules[1]} ${rules[2]} ${rules[3]}")
+  }
+  say("outside ${Environment.zone_rules("../../../etc/hosts".slice()) is Some(_)}")
+  ExitCode(0)
+}

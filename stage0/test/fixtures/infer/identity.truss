@@ -1,0 +1,4 @@
+fn identity[Value](value: own Value) -> Value {
+  value
+}
+

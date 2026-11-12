@@ -1,0 +1,14 @@
+fn hang() -> Int64
+  ensures false
+{
+  while true {}
+}
+
+fn f(x: Int64) -> Int64
+  ensures result <= 0
+{
+  if x > 0 {
+    let _: fn() -> Int64 = fn() { hang() }
+  }
+  x
+}

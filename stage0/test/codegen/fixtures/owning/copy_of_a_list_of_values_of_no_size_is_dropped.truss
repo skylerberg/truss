@@ -1,0 +1,7 @@
+type Quiet()
+
+test "copied" {
+  var first: List[Quiet] = [Quiet(), Quiet()]
+  let second = first.copy()
+  assert second.length() == 2
+}

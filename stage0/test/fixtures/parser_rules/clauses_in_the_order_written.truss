@@ -1,0 +1,8 @@
+fn f(x: Int64) -> Int64
+  ensures result > x
+  requires x > 0
+  decreases x, 1
+  uses Clock
+{
+  x
+}

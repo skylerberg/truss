@@ -1,0 +1,3 @@
+fn f(name: own String) -> Shout {
+  Shout"hey ${own name}"
+}

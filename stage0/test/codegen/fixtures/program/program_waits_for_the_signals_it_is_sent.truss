@@ -1,0 +1,29 @@
+use standard::processes
+
+fn name_of(arrived: Option[processes::Signal]) -> String {
+  if arrived is Some(signal) && signal == processes::Signal.User1 {
+    "user 1".copy()
+  } else if arrived is Some(signal) && signal == processes::Signal.Terminate {
+    "terminate".copy()
+  } else {
+    "another".copy()
+  }
+}
+
+fn send(signal: String) -> Bool
+  uses Processes
+{
+  let sender = processes::Command.new("sh").argument("-c").argument("kill -${signal} $PPID")
+  Processes.run(sender) is Ok(output) && output.status.is_success()
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes, Signals
+{
+  let either = [processes::Signal.User1, processes::Signal.Terminate]
+  Console.print_line("sent ${send("USR1")}")
+  Console.print_line("first ${name_of(Signals.wait(either.slice()))}")
+  Console.print_line("sent ${send("TERM")}")
+  Console.print_line("second ${name_of(Signals.wait(either.slice()))}")
+  ExitCode(0)
+}

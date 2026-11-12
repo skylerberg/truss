@@ -1,0 +1,26 @@
+fn longest(words: own List[String], limit: USize) -> String
+  uses Tasks
+{
+  concurrent for word in own words {
+    if word.length() > limit {
+      return own word
+    }
+  }
+  "none"
+}
+
+test "a task returns the item it was given" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let present = provide mut tasks {
+    longest(["a", "abcdef", "abc", "abcdefgh"], limit: 4)
+  }
+  assert present == "abcdef"
+}
+
+test "every item is taken when no task leaves" {
+  var tasks = InOrder(opened: 0, cancelled: [])
+  let present = provide mut tasks {
+    longest(["a", "ab", "abc"], limit: 4)
+  }
+  assert present == "none"
+}

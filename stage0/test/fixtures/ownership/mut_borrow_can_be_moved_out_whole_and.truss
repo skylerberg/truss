@@ -1,0 +1,11 @@
+fn take[Value](slot: mut Option[Value]) -> Option[Value] {
+  let moved = own slot
+  slot = None
+  moved
+}
+
+fn replace[Value](slot: mut Option[Value], value: own Value) -> Option[Value] {
+  let previous = own slot
+  slot = Some(own value)
+  previous
+}

@@ -1,0 +1,18 @@
+trait Shape {
+  fn area(self) -> Int64
+}
+
+type Square(side: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 {
+    self.side
+  }
+}
+
+type Holder[Value: Shape](value: Value)
+
+fn Holder[Value: Shape].area(self) -> Int64 {
+  self.value.area()
+}
+

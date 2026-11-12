@@ -1,0 +1,12 @@
+fn f(holder: mut Holder) -> Result[USize, USize]
+  uses Tasks, Clock
+{
+  concurrent {
+    {
+      keep(own holder.items)
+      holder.items = []
+    }
+    let waited = wait(1)?
+  }
+  Ok(waited)
+}

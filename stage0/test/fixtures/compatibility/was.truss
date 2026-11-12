@@ -1,0 +1,3 @@
+public trait Sided {
+  fn sides(self) -> Int64
+}

@@ -1,0 +1,13 @@
+type Ticker()
+
+fn Ticker.each(self) yields Instant
+  uses Clock
+{
+  yield Clock.now()
+}
+
+fn f(ticker: Ticker) {
+  for tick in ticker {
+    let _ = tick
+  }
+}

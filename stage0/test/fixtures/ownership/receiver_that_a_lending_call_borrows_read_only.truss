@@ -1,0 +1,3 @@
+fn f(tally: mut Tally) {
+  tally[0] = tally[1]
+}

@@ -1,0 +1,3 @@
+type Debt(owed: Int64)
+  invariant owed >= 0
+  cost potential owed

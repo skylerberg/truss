@@ -1,0 +1,6 @@
+fn bump(items: mut Slice[Int64])
+  requires items.length() > 0
+{
+  items[0] = 9
+}
+

@@ -1,0 +1,26 @@
+fn nested(count: Int64, wanted: Int64) -> String
+  uses Tasks, Console
+{
+  concurrent for index in 0..count {
+    let label = "item ${index}"
+    concurrent {
+      {
+        if index == wanted {
+          return "found ${label}"
+        }
+        Console.print_line("checked ${label}")
+      }
+      Console.print_line("beside ${label}")
+    }
+    Console.print_line("done ${label}")
+  }
+  "none"
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  Console.print_line(nested(3, wanted: 1))
+  Console.print_line(nested(2, wanted: 5))
+  ExitCode.success
+}

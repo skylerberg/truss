@@ -1,0 +1,5 @@
+fn total() -> Int64 { 0 }
+
+fn f() {
+  let total = 2
+}

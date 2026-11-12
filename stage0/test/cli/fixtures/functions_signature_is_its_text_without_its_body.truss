@@ -1,0 +1,5 @@
+public fn double(value: Int64) -> Int64
+  requires value < 100
+{
+  value * 2
+}

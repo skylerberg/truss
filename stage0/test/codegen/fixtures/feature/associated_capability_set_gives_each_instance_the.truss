@@ -1,0 +1,226 @@
+capability Meter {
+  fn read() -> Int64
+}
+
+type Table(values: List[Int64])
+
+impl Meter for Table {
+  fn read(self) -> Int64 {
+    var total = 0
+    for value in self.values {
+      total += value
+    }
+    total
+  }
+}
+
+trait Feed {
+  capability Uses
+
+  fn pull(mut self) -> Option[Int64]
+    uses Self.Uses
+
+  fn skip(mut self)
+    uses Self.Uses
+  {
+    let _ = mut self.pull()
+  }
+}
+
+type Counter(next: Int64)
+
+impl Feed for Counter {
+  fn pull(mut self) -> Option[Int64] {
+    if self.next >= 3 {
+      return None
+    }
+    self.next += 1
+    Some(self.next)
+  }
+}
+
+type Gauge(left: Int64)
+
+impl Feed for Gauge {
+  capability Uses = Meter
+
+  fn pull(mut self) -> Option[Int64]
+    uses Meter
+  {
+    if self.left == 0 {
+      return None
+    }
+    self.left -= 1
+    Some(Meter.read())
+  }
+}
+
+type Twice[Source](source: Source)
+
+impl Feed for Twice[Source: Feed] {
+  capability Uses = Source.Uses
+
+  fn pull(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    let _ = mut self.source.pull()
+    mut self.source.pull()
+  }
+}
+
+fn drain[Source: Feed](source: mut Source) -> Int64
+  uses Source.Uses
+{
+  var total = 0
+  while mut source.pull() is Some(value) {
+    total += value
+  }
+  total
+}
+
+fn apply[Source: Feed](
+  source: mut Source,
+  run: (fn(mut Source) -> Option[Int64] uses Source.Uses),
+) -> Option[Int64]
+  uses Source.Uses
+{
+  run(mut source)
+}
+
+fn through(feed: mut any Feed) -> Option[Int64] {
+  mut feed.skip()
+  mut feed.pull()
+}
+
+fn readings(count: Int64) yields Int64
+  uses Meter
+{
+  var index = 0
+  while index < count {
+    yield Meter.read() + index
+    index += 1
+  }
+}
+
+fn plain(count: Int64) yields Int64 {
+  var index = 0
+  while index < count {
+    yield index
+    index += 1
+  }
+}
+
+fn doubled[Source: Cursor[Element = Int64]](source: own Source) yields Int64
+  uses Source.Uses
+{
+  var cursor = own source
+  while mut cursor.next() is Some(value) {
+    yield value * 2
+  }
+}
+
+fn added[Source: Cursor[Element = Int64]](source: own Source) -> Int64
+  uses Source.Uses
+{
+  var total = 0
+  for value in own source {
+    total += value
+  }
+  total
+}
+
+fn first[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+{
+  mut source.next()
+}
+
+test "a generic function takes the evidence that its instance's type needs" {
+  var counter = Counter(next: 0)
+  assert drain(mut counter) == 6
+  provide Table(values: [3, 4]) {
+    var gauge = Gauge(left: 3)
+    assert drain(mut gauge) == 21
+  }
+}
+
+test "a method that a trait gives a body takes the evidence of its impl's set" {
+  var counter = Counter(next: 0)
+  mut counter.skip()
+  assert mut counter.pull() == Some(2)
+  provide Table(values: [5]) {
+    var gauge = Gauge(left: 2)
+    mut gauge.skip()
+    assert mut gauge.pull() == Some(5)
+    assert mut gauge.pull() == None
+  }
+}
+
+test "a set that an impl defines from a parameter's set" {
+  var pure = Twice(source: Twice(source: Counter(next: 0)))
+  assert drain(mut pure) == 0
+  provide Table(values: [7]) {
+    var twice = Twice(source: Gauge(left: 5))
+    mut twice.skip()
+    assert drain(mut twice) == 7
+    var nested = Twice(source: Twice(source: Gauge(left: 4)))
+    assert drain(mut nested) == 7
+  }
+}
+
+test "a function value whose type uses a set" {
+  var counter = Counter(next: 0)
+  assert apply(mut counter, run: fn(feed) { mut feed.pull() }) == Some(1)
+  provide Table(values: [9]) {
+    var gauge = Gauge(left: 1)
+    assert apply(mut gauge, run: fn(feed) { mut feed.pull() }) == Some(9)
+  }
+}
+
+test "a call through any passes no evidence for a set" {
+  var boxed: any Feed = any Counter(next: 0)
+  assert through(mut boxed) == Some(2)
+  var cursor: any Cursor[Element = Int64] = any plain(3)
+  assert mut cursor.next() == Some(0)
+  assert own cursor.last() == Some(2)
+}
+
+test "the methods of Cursor on a cursor that uses a capability" {
+  provide Table(values: [10]) {
+    assert readings(3).count() == 3
+    assert readings(3).to_list() == [10, 11, 12]
+    assert readings(3).last() == Some(12)
+    assert readings(3).fold(0, combine: fn(total, value) { total + value }) == 33
+    var cursor = readings(4)
+    assert mut cursor.find(fn(value) { value > 10 }) == Some(11)
+    assert mut cursor.next() == Some(12)
+  }
+  assert plain(3).count() == 3
+}
+
+test "a generic function over a cursor passes the evidence where it calls next" {
+  assert added(plain(4)) == 6
+  provide Table(values: [1, 1]) {
+    assert added(readings(3)) == 9
+    var cursor = readings(2)
+    assert first(mut cursor) == Some(2)
+    provide Table(values: [5]) {
+      assert first(mut cursor) == Some(6)
+    }
+    assert first(mut cursor) == None
+  }
+}
+
+test "a yielding function that uses its source's set" {
+  assert doubled(plain(3)).to_list() == [0, 2, 4]
+  assert added(doubled(doubled(plain(3)))) == 12
+  provide Table(values: [10]) {
+    assert doubled(readings(3)).to_list() == [20, 22, 24]
+    assert added(doubled(doubled(readings(2)))) == 84
+    var total = 0
+    for value in doubled(readings(2)) {
+      total += value
+    }
+    assert total == 42
+  }
+}

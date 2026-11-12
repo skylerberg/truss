@@ -1,0 +1,30 @@
+fn total(part: Slice[Int64]) -> Int64 {
+  var sum = 0
+  for item in part {
+    sum += item
+  }
+  sum
+}
+
+fn churn(depth: Int64) -> Int64 {
+  if depth == 0 { 0 } else { depth + churn(depth - 1) }
+}
+
+type Pair(cells: Array[Int64, 2])
+
+fn Pair.all(self) -> Slice[Int64] {
+  self.cells.slice()
+}
+
+test "a slice of a small array reads the array after other calls have used the stack" {
+  let fixed: Array[Int64, 2] = [4, 5]
+  let part = fixed.slice()
+  assert churn(40) == 820
+  assert part[0] == 4
+  assert part[1] == 5
+  assert total(part) == 9
+  let pair = Pair(cells: [6, 7])
+  let inside = pair.all()
+  assert churn(40) == 820
+  assert total(inside) == 13
+}

@@ -1,0 +1,21 @@
+trait Shown {
+  type Part
+  fn part(self) -> Self.Part
+}
+
+type Numbers(items: List[Int64])
+
+impl Shown for Numbers {
+  type Part = Slice[Int64]
+
+  fn part(self) -> Slice[Int64] {
+    self.items[0..2]
+  }
+}
+
+type Kept[Source: Shown](part: Source.Part)
+
+fn f() -> Kept[Numbers] {
+  let numbers = Numbers([1, 2, 3])
+  Kept(numbers.part())
+}

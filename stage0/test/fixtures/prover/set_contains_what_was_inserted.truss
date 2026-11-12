@@ -1,0 +1,6 @@
+fn f(items: mut Set[Int64]) -> Bool
+  ensures result
+{
+  mut items.insert(5)
+  items.contains(5)
+}

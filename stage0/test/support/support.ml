@@ -25,10 +25,11 @@ let setup files =
 
 let parse_errors database module_ =
   List.map
-    (fun (d : Diagnostic.t) -> d.message)
+    (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
     (Query.demand database Workspace.file module_).diagnostics
 
-let codes diagnostics = List.map (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code) diagnostics
+let codes diagnostics =
+  List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
 
 let checked ~check database name =
   let module_ = module_of name in
@@ -432,7 +433,8 @@ let no_diagnostics ~check files =
           fail "%s: %s" name
             (String.concat "; "
                (List.map
-                  (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code ^ " " ^ d.message)
+                  (fun (diagnostic : Diagnostic.t) ->
+                    Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
                   reported)));
       ignore (check_module_core_invariants database (module_of name)))
     files
@@ -463,7 +465,8 @@ let one_diagnostic ~check ?(setup = setup) ?(others = []) ?fixed ?says text code
       fail "expected one %s, got [%s]" code
         (String.concat "; "
            (List.map
-              (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code ^ " " ^ d.message)
+              (fun (diagnostic : Diagnostic.t) ->
+                Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
               reported))
 
 let record database responses =

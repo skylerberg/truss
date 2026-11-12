@@ -1,0 +1,21 @@
+fn nap(seconds: Int64) -> Int64
+  uses Tasks, Clock
+{
+  concurrent {
+    Clock.sleep(Duration.nanoseconds(seconds * 1000000000))
+    {
+      Clock.sleep(Duration.nanoseconds(50000000))
+      return 1
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console
+{
+  let before = Clock.monotonic()
+  let result = nap(60)
+  let after = Clock.monotonic()
+  Console.print_line("${result} early ${after.total_seconds() - before.total_seconds() < 20}")
+  ExitCode.success
+}

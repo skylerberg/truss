@@ -18,6 +18,18 @@ public opaque type SortedSet[Element: Ordered](elements: List[Element])
     first < second ==> elements.model()[first] < elements.model()[second]
   derives Copyable
 
+public opaque type LruCache[Key: Hash + Ordered + Copyable, Value](
+  capacity: USize,
+  entries: Map[Key, LruSlot[Value]],
+  recency: Deque[LruUse[Key]],
+  clock: UInt64,
+)
+  invariant capacity > 0
+
+internal type LruSlot[Value](value: Value, stamp: UInt64)
+
+internal type LruUse[Key](key: Key, stamp: UInt64)
+
 public opaque type BitSet(words: List[UInt64], length: USize)
   invariant words.length() == length / 64 + (if length % 64 == 0 { 0 } else { 1 })
   invariant length % 64 == 0 || words[words.length() - 1] < power(2, length % 64)

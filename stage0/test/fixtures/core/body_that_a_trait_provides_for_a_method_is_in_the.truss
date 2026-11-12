@@ -1,0 +1,6 @@
+trait Counted {
+  fn count(self) -> Int64
+  fn bump(mut self) -> Int64 {
+    self.count() + 1
+  }
+}

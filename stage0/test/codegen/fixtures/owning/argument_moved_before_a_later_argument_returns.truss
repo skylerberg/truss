@@ -1,0 +1,13 @@
+fn pair(first: own String, second: Int64) -> Int64 {
+  second
+}
+
+fn build(value: Option[Int64]) -> Option[Int64] {
+  var text = "a${1}"
+  Some(pair(own text, second: value?))
+}
+
+test "left early" {
+  assert build(None) == None
+  assert build(Some(2)) == Some(2)
+}

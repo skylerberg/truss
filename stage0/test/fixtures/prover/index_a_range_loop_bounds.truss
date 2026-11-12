@@ -1,0 +1,7 @@
+fn f(items: List[Int64]) -> Int64 {
+  var total: Int64 = 0
+  for i in 0..items.length() {
+    total = total.saturating_add(items[i])
+  }
+  total
+}

@@ -1,0 +1,8 @@
+let table: Map[String, Int64] = ["a": 1]
+let tables: List[Map[String, Int64]] = [table]
+
+test "nested" {
+  assert tables.length() == 1
+  assert tables[0].contains("a")
+  assert table.contains("a")
+}

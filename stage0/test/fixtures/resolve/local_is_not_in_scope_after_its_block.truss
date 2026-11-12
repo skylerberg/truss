@@ -1,0 +1,6 @@
+fn f() -> Int64 {
+  {
+    let inner = 1
+  }
+  inner
+}

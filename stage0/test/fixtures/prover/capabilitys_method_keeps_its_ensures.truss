@@ -1,0 +1,6 @@
+fn f() -> UInt8
+  uses Dice
+  ensures result <= 6
+{
+  Dice.roll()
+}

@@ -63,9 +63,9 @@ and capability =
       (** An associated capability set of a type that is not known yet: [Source.Uses]. Its trait
           reference fixes no associated type, so that two projections of one set are equal. *)
   | Capability_variable of int
-      (** The set a call's capability parameter stands for, while a definition is checked: it is
-          what the functions passed for the parameter use, which is known once the whole definition
-          is. No result that is given out holds one. *)
+      (** The set a call's capability parameter stands for, while a definition is checked: it is the
+          union of the capabilities the arguments for the parameter use, which is known once the
+          whole definition is checked. No result that is given out holds one. *)
 
 and capability_set = private capability list
 (** A set of capabilities, kept sorted and without duplicates so that equal sets are equal values.

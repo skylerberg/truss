@@ -1,0 +1,12 @@
+fn step(count: mut Int64) -> Bool {
+  count = count.saturating_add(1)
+  count < 3
+}
+
+fn f() -> Int64
+  ensures result == 0
+{
+  var value: Int64 = 0
+  while step(mut value) {}
+  value
+}

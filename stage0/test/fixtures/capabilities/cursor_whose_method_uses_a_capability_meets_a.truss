@@ -1,0 +1,12 @@
+fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+{
+  mut source.next()
+}
+
+fn first() -> Option[Int64]
+  uses Meter
+{
+  var cursor = readings(3)
+  pull(mut cursor)
+}

@@ -6,8 +6,8 @@
    projection, and nothing the checker left undecided. A type that is not
    ground here is a compiler bug. *)
 
-(* What the conversion reads about other definitions, each one of the type
-   checker's queries. *)
+(* The type checker's queries that the conversion reads about other
+   definitions. *)
 type context = {
   type_interface : Path.t -> Types.type_interface option;
   normalize : Types.ty -> Types.ty;

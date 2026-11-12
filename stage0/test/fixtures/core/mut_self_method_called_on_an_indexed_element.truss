@@ -1,0 +1,9 @@
+type Worker(count: Int64)
+
+fn Worker.reset(mut self) {
+  self.count = 0
+}
+
+fn g(workers: mut List[Worker], index: USize) {
+  mut workers[index].reset()
+}

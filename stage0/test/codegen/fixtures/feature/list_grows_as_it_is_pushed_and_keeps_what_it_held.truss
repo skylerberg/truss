@@ -1,0 +1,14 @@
+test "grown" {
+  var numbers: List[Int64] = []
+  var next = 0
+  while next < 1000 {
+    mut numbers.push(next)
+    next += 1
+  }
+  var total = 0
+  for number in numbers {
+    total += number
+  }
+  assert numbers.length() == 1000
+  assert total == 499500
+}

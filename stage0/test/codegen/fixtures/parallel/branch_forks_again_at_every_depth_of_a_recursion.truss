@@ -1,0 +1,17 @@
+fn fib(n: UInt64) -> UInt64 {
+  if n < 2 {
+    return n
+  }
+  parallel {
+    let left = fib(n - 1)
+    let right = fib(n - 2)
+  }
+  left.wrapping_add(right)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  Console.print_line("${fib(30)}")
+  ExitCode.success
+}

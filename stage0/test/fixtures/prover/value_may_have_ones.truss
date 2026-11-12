@@ -1,0 +1,4 @@
+theorem t(word: UInt64)
+  ensures word.count_ones() == 0
+{
+}

@@ -1,0 +1,16 @@
+fn total(items: List[Int64]) -> Int64 {
+  var sum = 0
+  for item in items {
+    sum += item
+  }
+  sum
+}
+
+test "lists" {
+  var items: List[Int64] = [1, 2, 3]
+  mut items.push(4)
+  assert items.length() == 4
+  assert items[0] == 1
+  assert items[3] == 4
+  assert total(items) == 10
+}

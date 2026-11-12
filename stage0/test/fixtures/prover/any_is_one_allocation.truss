@@ -1,0 +1,5 @@
+fn f(value: Int64) -> any Display
+  cost allocations == 1
+{
+  any value
+}

@@ -1,0 +1,8 @@
+fn need[Value: Ordered](value: Value) -> Bool {
+  true
+}
+
+fn f() {
+  let check = need[Point]
+  let _ = check
+}

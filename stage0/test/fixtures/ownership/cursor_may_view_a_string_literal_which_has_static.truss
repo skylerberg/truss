@@ -1,0 +1,4 @@
+fn f() -> Option[String] {
+  var each = same("a")
+  mut each.next()
+}

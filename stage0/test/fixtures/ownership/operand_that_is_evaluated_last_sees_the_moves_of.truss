@@ -1,0 +1,3 @@
+fn f(flag: Bool, box: own Box) -> Bool {
+  flag && take(own box) && take(own box)
+}

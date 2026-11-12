@@ -1,0 +1,3 @@
+fn f(grid: Grid) -> Cell {
+  grid.cell(0)
+}

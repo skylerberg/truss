@@ -1,0 +1,3 @@
+fn f(side: Int64) -> Int64 {
+  side.doubled()
+}

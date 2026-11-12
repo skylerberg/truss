@@ -1,0 +1,11 @@
+fn metered() -> Option[Int64]
+  uses Meter
+{
+  var gauge = Gauge(last: 0)
+  apply(mut gauge, run: fn(feed) { mut feed.pull() })
+}
+
+fn pure() -> Option[Int64] {
+  var counter = Counter(next: 0)
+  apply(mut counter, run: fn(feed) { mut feed.pull() })
+}

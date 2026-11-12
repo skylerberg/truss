@@ -1,0 +1,7 @@
+fn call(visit: (fn(index: Int64) -> Int64 requires index < 2)) -> Int64 {
+  visit(1)
+}
+
+fn forward(visit: (fn(index: Int64) -> Int64 requires index < 1)) -> Int64 {
+  call(visit: visit)
+}

@@ -1,0 +1,19 @@
+type Point(x: Int64, y: Int64)
+
+impl Display for Point {
+  fn display(self, output: mut TextBuilder) {
+    mut output.write("(")
+    self.x.display(mut output)
+    mut output.write(", ")
+    self.y.display(mut output)
+    mut output.write(")")
+  }
+}
+
+fn shown(point: Point) -> String
+  cost time finite
+{
+  var output = TextBuilder.new()
+  point.display(mut output)
+  own output.finish()
+}

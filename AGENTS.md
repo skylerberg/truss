@@ -29,6 +29,14 @@ It does not mean everyday vocabulary.
    | worked out from | derived from, inferred from |
    | whatever its type parameters stand for | for every instantiation |
    | code that does not run | unreachable code |
+   | what the loop has spent so far | the loop's cost so far |
+   | what the callee promises | the callee's postcondition |
+   | what they read, what the change reaches | their dependencies, the change's dependents |
+   | what the method yields | the yield type, the yielded values |
+   | what the code means | the code's semantics |
+
+   "What the X does" in place of a noun is the commonest form of this
+   failure. When a sentence needs one, find the term it stands for.
 
 2. **Keep Truss's own terms.** `view`, `own`, `mut`, `lends`, `yields`,
    `uses`, `provide`, capability, and cursor mean what DESIGN.md and

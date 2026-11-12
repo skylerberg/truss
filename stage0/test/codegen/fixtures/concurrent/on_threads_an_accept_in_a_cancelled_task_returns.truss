@@ -1,0 +1,30 @@
+use standard::network
+
+fn accept_or_time_out() -> String
+  uses Tasks, Clock, Console, NetworkServer, Handles
+{
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  if NetworkServer.listen(loopback) is Ok(opened) {
+    var listener = own opened
+    concurrent {
+      {
+        match mut listener.accept() {
+          Ok(_) => Console.print_line("accept: a connection")
+          Err(error) => Console.print_line("accept: ${error}")
+        }
+      }
+      {
+        Clock.sleep(Duration.nanoseconds(50000000))
+        return "timed out"
+      }
+    }
+  }
+  "could not listen"
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console, NetworkServer, Handles
+{
+  Console.print_line(accept_or_time_out())
+  ExitCode.success
+}

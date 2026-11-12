@@ -1,0 +1,6 @@
+fn sneaky[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant
+  uses Mine
+{
+  let again: (fn() -> Instant uses Mine) = fn() { Clock.now() }
+  again()
+}

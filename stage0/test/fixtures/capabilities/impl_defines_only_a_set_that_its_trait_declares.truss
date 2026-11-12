@@ -1,0 +1,9 @@
+type Other(last: Int64)
+
+impl Feed for Other {
+  capability Grants = Meter
+
+  fn pull(mut self) -> Option[Int64] {
+    Some(self.last)
+  }
+}

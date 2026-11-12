@@ -3,7 +3,7 @@
 
    It runs after drops are elaborated, while a region is still code of the
    function around it, run in place and in order. So what a region owns,
-   takes, and drops is already worked out, and moving it out changes only
+   takes, and drops is already known, and moving it out changes only
    how it reaches the locals it shares with the code around it: through an
    environment that holds the address of each. *)
 

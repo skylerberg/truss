@@ -1,0 +1,11 @@
+fn f()
+  uses Tasks
+{
+  var table = Table(sessions: [])
+  provide mut table {
+    concurrent {
+      serve(1)
+      serve(2)
+    }
+  }
+}

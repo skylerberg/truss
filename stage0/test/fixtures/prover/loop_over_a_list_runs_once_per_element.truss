@@ -1,0 +1,12 @@
+fn f(items: List[Int64]) -> USize
+  ensures result == items.length()
+{
+  var seen: USize = 0
+  for item in items
+    invariant seen == yielded.length()
+  {
+    let _ = item
+    seen += 1
+  }
+  seen
+}

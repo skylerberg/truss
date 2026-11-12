@@ -1,0 +1,3 @@
+fn keep(handlers: mut Handlers, amount: Int64) {
+  handlers.first = fn(value) { value + amount }
+}

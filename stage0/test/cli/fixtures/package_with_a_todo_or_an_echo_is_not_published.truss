@@ -1,0 +1,7 @@
+public fn turn() -> Int64 {
+  todo
+}
+
+public fn half() -> Int64 {
+  echo 180
+}

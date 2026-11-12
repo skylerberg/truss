@@ -1,0 +1,32 @@
+trait Named {
+  fn name(self) -> String
+}
+
+type Square(side: Int64)
+
+impl Named for Square {
+  fn name(self) -> String {
+    "square"
+  }
+}
+
+impl Named for Int64 {
+  fn name(self) -> String {
+    "integer"
+  }
+}
+
+fn boxed(side: Int64) -> any Named {
+  any Square(side: side)
+}
+
+fn boxed_from[Value: Named](value: own Value) -> any Named {
+  any value
+}
+
+test "boxes" {
+  let first = boxed(2)
+  let second = boxed_from(7)
+  assert first.name() == "square"
+  assert second.name() == "integer"
+}

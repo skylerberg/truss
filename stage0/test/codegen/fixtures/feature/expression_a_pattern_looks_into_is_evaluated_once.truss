@@ -1,0 +1,18 @@
+fn next_index(counter: mut USize) -> USize {
+  counter += 1
+  counter - 1
+}
+
+test "once" {
+  var counter: USize = 0
+  let items = [Some(10), Some(20), None]
+  let Some(first) = items[next_index(mut counter)] else {
+    return
+  }
+  assert first == 10
+  assert counter == 1
+  if items[next_index(mut counter)] is Some(second) {
+    assert second == 20
+  }
+  assert counter == 2
+}

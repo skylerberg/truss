@@ -1,0 +1,27 @@
+capability Counter {
+  fn next() -> USize
+}
+
+type Tally(counts: List[USize])
+
+impl Counter for Tally {
+  fn next(mut self) -> USize {
+    mut self.counts.push(1)
+    self.counts.length()
+  }
+}
+
+type Fixed(value: USize)
+
+impl Counter for Fixed {
+  fn next(self) -> USize {
+    self.value
+  }
+}
+
+fn count() -> USize
+  uses Counter
+{
+  Counter.next()
+}
+

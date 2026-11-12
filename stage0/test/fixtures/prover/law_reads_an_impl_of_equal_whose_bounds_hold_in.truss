@@ -1,0 +1,24 @@
+trait Named: Equal {
+  fn name(self) -> List[UInt64]
+    cost time finite
+
+  law named_by_its_name(first: Self, second: Self) {
+    (first.name() == second.name()) == (first == second)
+  }
+}
+
+type Wrapped[Item](items: List[Item], name: List[UInt64])
+
+impl Equal for Wrapped[Item: Equal] {
+  fn equal(self, other: Wrapped[Item]) -> Bool {
+    self.name == other.name
+  }
+}
+
+impl Named for Wrapped[Item: Equal] {
+  fn name(self) -> List[UInt64]
+    cost time finite
+  {
+    self.name.copy()
+  }
+}

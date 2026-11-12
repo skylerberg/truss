@@ -1,7 +1,7 @@
 module Compatibility = Cli.Compatibility
 
-(* The tests of whether a release keeps what the one before it offered.
-   Each gives a module as it was and as it is, and states what changed. *)
+(* Each test gives a module before and after a release, and states the
+   compatibility changes. *)
 
 open Harness
 open Support
@@ -36,8 +36,8 @@ let area body = Printf.sprintf "public fn area(side: Int64) -> Int64\n%s{\n  sid
 
 let () =
   test "a body that changes is no change" (fun () ->
-      expect "public fn sides() -> Int64 {\n  4\n}\n" "public fn sides() -> Int64 {\n  2 + 2\n}\n"
-        []);
+      expect Fixtures.Compatibility.body_that_changes_is_no_change
+        Fixtures.Compatibility.body_that_changes_is_no_change_2 []);
   test "a transparent function's body that changes breaks" (fun () ->
       let sides body =
         Printf.sprintf "public transparent fn sides() -> Int64\n  cost time O(1)\n{\n  %s\n}\n" body
@@ -56,14 +56,15 @@ let () =
         ];
       expect (sides "") (sides " transparent") [ "grows: lib::shapes::sides is `transparent`" ]);
   test "a private or internal definition that changes is no change" (fun () ->
-      expect "fn sides() -> Int64 {\n  4\n}\n\ninternal fn corners() -> Int64 {\n  4\n}\n"
-        "fn sides(of: Int64) -> Int64 {\n  of\n}\n" []);
+      expect Fixtures.Compatibility.private_or_internal_definition_that_changes_is_no
+        Fixtures.Compatibility.private_or_internal_definition_that_changes_is_no_2 []);
   test "a public definition that is added grows the package" (fun () ->
-      expect "" "public fn sides() -> Int64 {\n  4\n}\n" [ "grows: lib::shapes::sides is new" ]);
+      expect "" Fixtures.Compatibility.public_definition_that_is_added_grows_the_package
+        [ "grows: lib::shapes::sides is new" ]);
   test "a public definition that is taken away, or made private, breaks" (fun () ->
-      let sides = "public fn sides() -> Int64 {\n  4\n}\n" in
+      let sides = Fixtures.Compatibility.sides in
       expect sides "" [ "breaks: lib::shapes::sides is gone, or is no longer public" ];
-      expect sides "fn sides() -> Int64 {\n  4\n}\n"
+      expect sides Fixtures.Compatibility.public_definition_that_is_taken_away_or_made
         [ "breaks: lib::shapes::sides is gone, or is no longer public" ]);
   test "another parameter type, parameter name, or result breaks" (fun () ->
       let was = area "" in
@@ -71,19 +72,19 @@ let () =
         (fun now ->
           expect was now [ "breaks: lib::shapes::area has other parameters or another result" ])
         [
-          "public fn area(side: Int32) -> Int64 {\n  1\n}\n";
-          "public fn area(edge: Int64) -> Int64 {\n  edge\n}\n";
-          "public fn area(side: Int64) -> Int32 {\n  1\n}\n";
-          "public fn area(side: Int64, depth: Int64) -> Int64 {\n  side\n}\n";
+          Fixtures.Compatibility.another_parameter_type_parameter_name_or_result;
+          Fixtures.Compatibility.another_parameter_type_parameter_name_or_result_2;
+          Fixtures.Compatibility.another_parameter_type_parameter_name_or_result_3;
+          Fixtures.Compatibility.another_parameter_type_parameter_name_or_result_4;
         ]);
   test "a parameter that gains a default grows, and one that loses it breaks" (fun () ->
-      let with_default = "public fn area(side: Int64 = 1) -> Int64 {\n  side\n}\n" in
+      let with_default = Fixtures.Compatibility.with_default in
       expect (area "") with_default [ "grows: lib::shapes::area has a default it did not" ];
       expect with_default (area "")
         [ "breaks: lib::shapes::area has other parameters or another result" ]);
   test "a capability more in uses breaks, and one fewer grows" (fun () ->
-      let pure = "public fn stamp() -> Int64 {\n  1\n}\n"
-      and timed = "public fn stamp() -> Int64\n  uses Clock\n{\n  1\n}\n" in
+      let pure = Fixtures.Compatibility.pure
+      and timed = Fixtures.Compatibility.capability_more_in_uses_breaks_and_one_fewer_grows in
       expect pure timed
         [ "breaks: lib::shapes::stamp uses `standard::capabilities::Clock`, which it did not" ];
       expect timed pure [ "grows: lib::shapes::stamp uses fewer capabilities" ]);
@@ -149,29 +150,23 @@ let () =
       expect equal plain [ "breaks: lib::shapes::Square no longer derives a trait it did" ];
       expect plain equal [ "grows: lib::shapes::Square derives a trait more" ]);
   test "a trait gains only methods that have bodies" (fun () ->
-      let was = "public trait Sided {\n  fn sides(self) -> Int64\n}\n" in
-      expect was
-        "public trait Sided {\n\
-        \  fn sides(self) -> Int64\n\n\
-        \  fn corners(self) -> Int64 {\n\
-        \    self.sides()\n\
-        \  }\n\
-         }\n"
+      let was = Fixtures.Compatibility.was in
+      expect was Fixtures.Compatibility.trait_gains_only_methods_that_have_bodies
         [ "grows: lib::shapes::Sided has the method `corners`" ];
-      expect was "public trait Sided {\n  fn sides(self) -> Int64\n  fn corners(self) -> Int64\n}\n"
+      expect was Fixtures.Compatibility.trait_gains_only_methods_that_have_bodies_2
         [
           "breaks: lib::shapes::Sided has the method `corners` without a body, which every `impl` \
            of it would have to add";
         ];
-      expect was "public trait Sided {\n  fn corners(self) -> Int64\n}\n"
+      expect was Fixtures.Compatibility.trait_gains_only_methods_that_have_bodies_3
         [
           "breaks: lib::shapes::Sided no longer has the method `sides`";
           "breaks: lib::shapes::Sided has the method `corners` without a body, which every `impl` \
            of it would have to add";
         ]);
   test "a capability's method that changes breaks" (fun () ->
-      expect "public capability Ledger {\n  fn record(amount: Int64)\n}\n"
-        "public capability Ledger {\n  fn record(amount: Int32)\n}\n"
+      expect Fixtures.Compatibility.capabilitys_method_that_changes_breaks
+        Fixtures.Compatibility.capabilitys_method_that_changes_breaks_2
         [ "breaks: lib::shapes::Ledger its method `record` has other parameters or another result" ]);
   test "a constant keeps its type and its value" (fun () ->
       let sides = "public let sides: Int64 = 4\n" in
@@ -182,7 +177,7 @@ let () =
   test "an impl that is taken away breaks, and one that is added grows" (fun () ->
       let square = "public type Square(side: Int64)\n" in
       let with_impl =
-        square ^ "\nimpl Default for Square {\n  fn default() -> Square {\n    Square(1)\n  }\n}\n"
+        square ^ Fixtures.Compatibility.impl_that_is_taken_away_breaks_and_one_that_is
       in
       (match show (changes with_impl square) with
       | [ actual ] when Substring.contains actual "is gone: the `impl` of" -> ()

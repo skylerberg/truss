@@ -6,340 +6,46 @@ open Codegen_support
 
 let () =
   passes "an assignment to an element drops the element it replaces"
-    {|test "replaced" {
-  var names: List[String] = ["a${1}", "b${2}"]
-  names[0] = "c${3}"
-  assert names[0] == "c3"
-}
-|};
+    Fixtures.Owning.assignment_to_an_element_drops_the_element_it;
   passes "an early return inside an interpolation drops the text built so far"
-    {|fn label(value: Option[Int64]) -> Option[String] {
-  Some("number ${value?}")
-}
-
-test "left early" {
-  assert label(None) == None
-  assert label(Some(4)) == Some("number 4")
-}
-|};
+    Fixtures.Owning.early_return_inside_an_interpolation_drops_the;
   passes "an argument moved before a later argument returns early is dropped"
-    {|fn pair(first: own String, second: Int64) -> Int64 {
-  second
-}
-
-fn build(value: Option[Int64]) -> Option[Int64] {
-  var text = "a${1}"
-  Some(pair(own text, second: value?))
-}
-
-test "left early" {
-  assert build(None) == None
-  assert build(Some(2)) == Some(2)
-}
-|};
+    Fixtures.Owning.argument_moved_before_a_later_argument_returns;
   passes "an early return while an any value is being made leaves no block"
-    {|trait Shown {
-  fn show(self) -> Int64
-}
-
-type Box(value: Int64)
-
-impl Shown for Box {
-  fn show(self) -> Int64 {
-    self.value
-  }
-}
-
-fn boxed(value: Option[Int64]) -> Option[any Shown] {
-  Some(any Box(value: value?))
-}
-
-test "left early" {
-  assert boxed(None) is None
-  assert boxed(Some(3)) is Some(_)
-}
-|};
+    Fixtures.Owning.early_return_while_an_any_value_is_being_made;
   passes "an any value drops what its value owns, also when it is made in a loop"
-    {|trait Named {
-  fn size(self) -> USize
-}
-
-type Dog(tag: String)
-
-impl Named for Dog {
-  fn size(self) -> USize {
-    self.tag.length()
-  }
-}
-
-test "made once and made in a loop" {
-  let count: USize = 1
-  let pet: any Named = any Dog(tag: "number ${count}")
-  assert pet.size() == 8
-  var total: USize = 0
-  for index in 0..3 {
-    let other: any Named = any Dog(tag: "number ${index}")
-    total += other.size()
-  }
-  assert total == 24
-}
-|};
+    Fixtures.Owning.any_value_drops_what_its_value_owns_also_when_it;
   passes "a pulled loop left without taking its value drops the value"
-    {|fn words() yields own String {
-  yield "a${1}"
-  yield "b${2}"
-}
-
-test "left early" {
-  var each = words()
-  for _ in each {
-    break
-  }
-}
-|};
+    Fixtures.Owning.pulled_loop_left_without_taking_its_value_drops;
   passes "a loop that uses up a list takes its elements in order"
-    {|fn join(names: own List[String]) -> String {
-  var text = ""
-  for name in own names {
-    text = "${text}${name}"
-  }
-  text
-}
-
-test "used up" {
-  assert join(["a${1}", "b${2}", "c${3}", "d${4}"]) == "a1b2c3d4"
-  assert join(["a${1}", "b${2}", "c${3}"]) == "a1b2c3"
-  assert join(["a${1}"]) == "a1"
-  assert join([]) == ""
-}
-|};
+    Fixtures.Owning.loop_that_uses_up_a_list_takes_its_elements_in;
   passes "a loop that uses up a list and is left early drops the elements it did not reach"
-    {|test "left early" {
-  let names = ["a${1}", "b${2}", "c${3}"]
-  var first = ""
-  for name in own names {
-    first = own name
-    break
-  }
-  assert first == "a1"
-}
-|};
+    Fixtures.Owning.loop_that_uses_up_a_list_and_is_left_early_drops;
   passes "a loop that uses up an array takes its elements in order"
-    {|fn join(names: own Array[String, 3]) -> String {
-  var text = ""
-  for name in own names {
-    text = "${text}${name}"
-  }
-  text
-}
-
-test "used up" {
-  assert join(["a${1}", "b${2}", "c${3}"]) == "a1b2c3"
-}
-|};
+    Fixtures.Owning.loop_that_uses_up_an_array_takes_its_elements_in;
   passes "a loop that uses up an array and is left early drops the elements it did not reach"
-    {|test "left early" {
-  let names: Array[String, 3] = ["a${1}", "b${2}", "c${3}"]
-  var first = ""
-  for name in own names {
-    first = own name
-    break
-  }
-  assert first == "a1"
-}
-|};
+    Fixtures.Owning.loop_that_uses_up_an_array_and_is_left_early_drops;
   passes "an array moved into a list keeps its elements in order"
-    {|test "to list" {
-  let names: Array[String, 2] = ["a${1}", "b${2}"]
-  var list = own names.to_list()
-  mut list.push("c${3}")
-  assert list.length() == 3
-  assert list[0] == "a1"
-  assert list[1] == "b2"
-  assert list[2] == "c3"
-}
-|};
+    Fixtures.Owning.array_moved_into_a_list_keeps_its_elements_in;
   passes "continue keeps a list a loop is over, when the list is a call's result"
-    {|fn make() -> List[String] {
-  ["a${1}", "bb${2}", "c${3}"]
-}
-
-test "skipped" {
-  var count = 0
-  for name in make() {
-    if name.length() == 3 {
-      continue
-    }
-    count += 1
-  }
-  assert count == 2
-}
-|};
+    Fixtures.Owning.continue_keeps_a_list_a_loop_is_over_when_the_list;
   passes "a loop over a yielding function that takes nothing"
-    {|fn ticks() yields Int64 {
-  yield 1
-  yield 2
-}
-
-test "looped" {
-  var total = 0
-  for tick in ticks() {
-    total += tick
-  }
-  assert total == 3
-}
-|};
+    Fixtures.Owning.loop_over_a_yielding_function_that_takes_nothing;
   passes "an own parameter left to its default is dropped once"
-    {|fn total(items: own List[Int64] = [1, 2, 3]) -> Int64 {
-  var sum = 0
-  for item in items {
-    sum += item
-  }
-  sum
-}
-
-test "defaulted" {
-  assert total() == 6
-  assert total(items: [4, 5]) == 9
-}
-|};
+    Fixtures.Owning.own_parameter_left_to_its_default_is_dropped_once;
   passes "a lambda that ignores an own parameter drops it"
-    {|fn apply(text: own String, using: fn(own String) -> Int64) -> Int64 {
-  using(own text)
-}
-
-test "ignored" {
-  assert apply("a${1}", using: fn(_) { 7 }) == 7
-}
-|};
+    Fixtures.Owning.lambda_that_ignores_an_own_parameter_drops_it;
   passes "a copy of a list with room and no elements has a buffer of its own"
-    {|test "copied" {
-  var first: List[Int64] = List.with_capacity(8)
-  var second = first.copy()
-  mut second.push(1)
-  mut first.push(2)
-  assert first[0] == 2
-  assert second[0] == 1
-}
-|};
+    Fixtures.Owning.copy_of_a_list_with_room_and_no_elements_has_a;
   passes "a copy of a list of values of no size is dropped once"
-    {|type Quiet()
-
-test "copied" {
-  var first: List[Quiet] = [Quiet(), Quiet()]
-  let second = first.copy()
-  assert second.length() == 2
-}
-|};
+    Fixtures.Owning.copy_of_a_list_of_values_of_no_size_is_dropped;
   passes "a compound assignment evaluates its target once"
-    {|fn next_index(calls: mut Int64) -> USize {
-  calls += 1
-  0
-}
-
-test "once" {
-  var items: List[Int64] = [10, 20]
-  var calls = 0
-  items[next_index(mut calls)] += 5
-  assert calls == 1
-  assert items[0] == 15
-}
-|};
+    Fixtures.Owning.compound_assignment_evaluates_its_target_once;
   passes "an assignment evaluates its value, then its target's index keys"
-    {|fn digit(order: mut Int64, next: Int64) -> USize {
-  order = order * 10 + next
-  0
-}
-
-test "ordered" {
-  var items: List[USize] = [10]
-  var order = 0
-  items[digit(mut order, next: 1)] = digit(mut order, next: 2)
-  assert order == 21
-  items[digit(mut order, next: 3)] += digit(mut order, next: 4)
-  assert order == 2143
-}
-|};
+    Fixtures.Owning.assignment_evaluates_its_value_then_its_targets;
   passes "a compound assignment to an element frees the replaced value once"
-    {|type Bag(items: List[Int64])
-
-impl Add[Bag] for Bag {
-  type Output = Bag
-
-  fn add_is_defined(self, right: Bag) -> Bool {
-    true
-  }
-
-  fn add(self, right: Bag) -> Bag {
-    var items = self.items.copy()
-    for item in right.items {
-      mut items.push(item)
-    }
-    Bag(items: own items)
-  }
-}
-
-test "element" {
-  var bags: List[Bag] = [Bag(items: [1]), Bag(items: [2])]
-  let others: List[Bag] = [Bag(items: [3]), Bag(items: [4, 5])]
-  bags[0] += others[1]
-  bags[1] += Bag(items: [6])
-  assert bags[0].items.length() == 3
-  assert bags[1].items.length() == 2
-}
-|};
+    Fixtures.Owning.compound_assignment_to_an_element_frees_the;
   passes "a compound assignment's operand runs before the operator takes the target"
-    {|type Bag(items: List[Int64])
-
-impl Add[Int64] for Bag {
-  type Output = Bag
-
-  fn add_is_defined(self, right: Int64) -> Bool {
-    true
-  }
-
-  fn add(self, right: Int64) -> Bag {
-    var items = self.items.copy()
-    mut items.push(right)
-    Bag(items: own items)
-  }
-}
-
-fn parse(text: String) -> Result[Int64, String] {
-  if text == "bad" { Err("bad") } else { Ok(1) }
-}
-
-fn bump(bag: mut Bag, text: String) -> Result[Int64, String] {
-  bag += parse(text)?
-  Ok(0)
-}
-
-fn grow(bag: mut Bag) -> Int64 {
-  mut bag.items.push(7)
-  mut bag.items.push(8)
-  1
-}
-
-test "operand first" {
-  var bag = Bag(items: [5])
-  let _ = bump(mut bag, text: "bad")
-  let _ = bump(mut bag, text: "good")
-  assert bag.items.length() == 2
-  bag += grow(mut bag)
-  assert bag.items.length() == 5
-}
-|};
+    Fixtures.Owning.compound_assignments_operand_runs_before_the;
   passes "a result assigned over its own argument reads the argument as it was"
-    {|type Quad(a: Int64, b: Int64, c: Int64, d: Int64)
-
-fn swapped(q: Quad) -> Quad {
-  q with (a: q.b, b: q.a)
-}
-
-test "swapped" {
-  var q = Quad(a: 1, b: 2, c: 3, d: 4)
-  q = swapped(q)
-  assert q.a == 2
-  assert q.b == 1
-}
-|}
+    Fixtures.Owning.result_assigned_over_its_own_argument_reads_the

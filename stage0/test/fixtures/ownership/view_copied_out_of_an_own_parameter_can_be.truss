@@ -1,0 +1,3 @@
+fn f(labeled: own Labeled) -> Slice[Int64] {
+  labeled.view
+}

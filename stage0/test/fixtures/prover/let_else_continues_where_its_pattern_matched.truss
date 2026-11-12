@@ -1,0 +1,6 @@
+fn f(present: Option[UInt8]) -> UInt8 {
+  let Some(value) = present else {
+    return 0
+  }
+  if value < 255 { value + 1 } else { value }
+}

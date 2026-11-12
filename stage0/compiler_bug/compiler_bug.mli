@@ -6,8 +6,8 @@
    precondition, which [while_doing] turns into a bug of the stage that called
    it. *)
 
-(* The stage that found the broken invariant, what it found, and what the
-   compiler was doing, innermost first. *)
+(* The stage that found the broken invariant, what it found, and the
+   compiler's context, innermost first. *)
 type t = { stage : string; message : string; doing : string list }
 
 exception Bug of t
@@ -15,7 +15,7 @@ exception Bug of t
 val bug : stage:string -> ('a, unit, string, 'b) format4 -> 'a
 
 (* Runs [f]. A bug raised inside it is raised again with [doing] added to
-   what the compiler was doing, and an exception the standard library
+   its context, and an exception the standard library
    raises for a broken invariant, such as [Not_found], [Invalid_argument],
    or a failed [assert], becomes a bug of [stage]. *)
 val while_doing : stage:string -> string -> (unit -> 'a) -> 'a

@@ -1,0 +1,9 @@
+type Box[Inner](inner: Inner)
+
+impl Shown for Box[Inner: Shown] {
+  type Part = Inner.Part
+}
+
+impl Shown for Marker {
+  type Part = (fn(Kept[Box[Marker]]) -> Bool cost time finite)
+}

@@ -1,0 +1,18 @@
+fn work(size: UInt32)
+  cost time O(size)
+{
+  for _ in 0..size {
+  }
+}
+
+fn f(items: List[UInt32], size: UInt32)
+  cost time O(items.length() * (size + 1))
+{
+  for item in items {
+    if item > 3 {
+      work(size)
+    } else {
+      work(1)
+    }
+  }
+}

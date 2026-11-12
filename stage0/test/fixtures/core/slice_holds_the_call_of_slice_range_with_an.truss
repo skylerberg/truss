@@ -1,0 +1,3 @@
+fn g(items: List[Int64], last: USize) -> Slice[Int64] {
+  items[..=last]
+}

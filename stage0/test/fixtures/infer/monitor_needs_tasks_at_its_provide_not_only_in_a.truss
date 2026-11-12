@@ -1,0 +1,12 @@
+fn f() {
+  var tally = Tally(count: 0)
+  let scheduler = Scheduler(turn: 0)
+  provide mut tally {
+    provide scheduler {
+      concurrent {
+        count_once()
+        count_once()
+      }
+    }
+  }
+}

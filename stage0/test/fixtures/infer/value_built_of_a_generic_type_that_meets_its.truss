@@ -1,0 +1,3 @@
+fn f() {
+  let _ = Holder(Square(2))
+}

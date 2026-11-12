@@ -1,0 +1,8 @@
+type Box(size: Int64)
+
+trait Measured {
+  fn measure(self) -> Int64
+    requires true
+    ensures result >= 0
+}
+

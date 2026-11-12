@@ -1,0 +1,7 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  Console.print_line("hello")
+  Console.print_line("${arguments.length()} arguments, then ${arguments[1]}")
+  ExitCode(3)
+}

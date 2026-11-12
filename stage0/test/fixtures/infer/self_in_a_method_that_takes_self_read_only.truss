@@ -1,0 +1,5 @@
+type Counter(counts: List[Int64])
+
+fn Counter.add(self) {
+  mut self.counts.push(1)
+}

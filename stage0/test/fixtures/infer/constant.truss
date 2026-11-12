@@ -1,0 +1,5 @@
+let names: List[Int64] = [1, 2]
+
+fn f() {
+  mut names.push(3)
+}

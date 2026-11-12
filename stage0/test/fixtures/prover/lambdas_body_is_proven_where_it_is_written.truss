@@ -1,0 +1,7 @@
+fn apply(transform: fn(UInt8) -> UInt8) -> UInt8 {
+  todo
+}
+
+fn f() -> UInt8 {
+  apply(fn(value) { value + 1 })
+}

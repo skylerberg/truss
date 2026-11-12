@@ -1,0 +1,5 @@
+fn Encoder.uint8(mut self, value: UInt8)
+  cost amortized time O(1)
+{
+  mut self.bytes.push(value)
+}

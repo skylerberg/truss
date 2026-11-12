@@ -1,0 +1,21 @@
+type Big(first: Int64, second: Int64, third: Int64, fourth: Int64, name: String)
+
+fn big(early: Bool) -> Big
+  uses Tasks
+{
+  concurrent {
+    if early {
+      return Big(first: 1, second: 2, third: 3, fourth: 4, name: "early")
+    }
+  }
+  Big(first: 5, second: 6, third: 7, fourth: 8, name: "late")
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  let early = big(early: true)
+  let late = big(early: false)
+  Console.print_line("${early.name} ${early.fourth} ${late.name} ${late.first}")
+  ExitCode.success
+}

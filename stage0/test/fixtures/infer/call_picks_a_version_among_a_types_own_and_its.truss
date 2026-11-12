@@ -1,0 +1,28 @@
+trait Shown {
+  fn label(self) -> Int64
+}
+
+trait Cleared: Shown {
+  fn label(mut self) -> Int64
+}
+
+type Counter(count: Int64)
+
+impl Shown for Counter {
+  fn label(self) -> Int64 { todo }
+}
+
+impl Cleared for Counter {
+  fn label(mut self) -> Int64 { todo }
+}
+
+fn Counter.label(own self) -> Int64 { todo }
+
+fn f(counter: mut Counter) -> Int64 {
+  let read = counter.label()
+  let cleared = mut counter.label()
+  let built = Counter(count: 3).label()
+  let in_full = Counter.label(mut counter)
+  let through_trait = Shown.label(counter)
+  read.max(cleared).max(built).max(in_full).max(through_trait)
+}

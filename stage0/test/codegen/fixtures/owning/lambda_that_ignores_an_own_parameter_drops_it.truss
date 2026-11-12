@@ -1,0 +1,7 @@
+fn apply(text: own String, using: fn(own String) -> Int64) -> Int64 {
+  using(own text)
+}
+
+test "ignored" {
+  assert apply("a${1}", using: fn(_) { 7 }) == 7
+}

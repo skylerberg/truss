@@ -1,0 +1,20 @@
+fn plain() -> fn(Int64) -> Int64 {
+  fn(value) { double(value) }
+}
+
+fn named() -> fn(Int64) -> Int64 {
+  double
+}
+
+fn keep(handlers: mut Handlers) {
+  handlers.first = double
+}
+
+fn give() {
+  take(double)
+  take(fn(value) { double(value) })
+}
+
+fn relay(handler: own fn(Int64) -> Int64) {
+  take(handler)
+}

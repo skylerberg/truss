@@ -1,0 +1,4 @@
+fn f() {
+  var text = "a"
+  text ^= "b"
+}

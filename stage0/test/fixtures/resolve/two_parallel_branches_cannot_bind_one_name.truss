@@ -1,0 +1,7 @@
+fn f() -> Int64 {
+  parallel {
+    let a = 1
+    let a = 2
+  }
+  a
+}

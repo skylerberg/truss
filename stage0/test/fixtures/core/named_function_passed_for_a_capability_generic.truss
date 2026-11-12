@@ -1,0 +1,5 @@
+fn g()
+  uses Console
+{
+  apply(shout)
+}

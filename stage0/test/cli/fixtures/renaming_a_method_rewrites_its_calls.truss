@@ -1,0 +1,9 @@
+type Point(x: Int64)
+
+fn Point.get(self) -> Int64 {
+  self.x
+}
+
+fn read() -> Int64 {
+  Point(x: 1).get()
+}

@@ -1,0 +1,5 @@
+fn change(items: mut List[Int64]) {}
+
+fn f(items: List[Int64]) {
+  change(mut items)
+}

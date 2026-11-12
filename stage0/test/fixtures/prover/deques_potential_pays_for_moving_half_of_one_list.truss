@@ -1,0 +1,17 @@
+type Deque[Element](front: List[Element], back: List[Element])
+  invariant front.length() <= USize.maximum - back.length()
+  cost potential if front.length() > back.length() { 8 * (front.length() - back.length()) } else { 8 * (back.length() - front.length()) }
+
+fn Deque[Element].pop_front(mut self) -> Option[Element]
+  cost amortized time O(1)
+{
+  if self.front.is_empty() && !self.back.is_empty() {
+    let half = self.back.length() - self.back.length() / 2
+    var later = mut self.back.split_off(half)
+    mut self.back.reverse()
+    let earlier = mut self.back.split_off(0)
+    mut self.front.append(own earlier)
+    mut self.back.append(own later)
+  }
+  mut self.front.pop()
+}

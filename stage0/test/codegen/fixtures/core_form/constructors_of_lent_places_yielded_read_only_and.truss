@@ -1,0 +1,54 @@
+type Bag(items: List[String])
+
+type Numbered(index: USize, value: String)
+
+fn Bag.first(self) lends Option[String] {
+  if self.items.length() > 0 {
+    yield Some(self.items[0])
+  } else {
+    yield None
+  }
+}
+
+fn Bag.numbered(self) yields Numbered {
+  for index in 0..self.items.length() {
+    yield Numbered(index: index, value: self.items[index])
+  }
+}
+
+type Counters(counts: List[Int64], names: List[String])
+
+type Slot(index: USize, count: Int64, name: String)
+
+fn Counters.slots(mut self) yields mut Slot {
+  for index in 0..self.counts.length() {
+    yield Slot(index: index, count: mut self.counts[index], name: mut self.names[index])
+  }
+}
+
+test "constructors of lent places" {
+  let bag = Bag(items: ["${1}st", "${2}nd"])
+  if bag.first() is Some(name) {
+    assert name.length() == 3
+  }
+  var lengths: USize = 0
+  for entry in bag.numbered() {
+    lengths += entry.index + entry.value.length()
+  }
+  assert lengths == 7
+  assert bag.items[1].length() == 3
+
+  var counters = Counters(counts: [1, 2, 3], names: ["${1}a", "${2}b", "${3}c"])
+  for slot in mut counters.slots() {
+    slot.count += 10
+    if slot.index == 1 {
+      slot.name = "${slot.index} changed"
+      break
+    }
+  }
+  assert counters.counts[0] == 11
+  assert counters.counts[1] == 12
+  assert counters.counts[2] == 3
+  assert counters.names[1].length() == 9
+  assert counters.names[0].length() == 2
+}

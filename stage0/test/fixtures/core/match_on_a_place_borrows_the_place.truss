@@ -1,0 +1,7 @@
+fn g(shape: Shape) -> Int64 {
+  match shape {
+    Circle(radius) => radius
+    Square(side, ..) if side > 2 => side
+    _ => 0
+  }
+}

@@ -1,0 +1,11 @@
+fn f() -> USize {
+  var user: Option[String] = Some("a".copy())
+  match user {
+    Some(present) => {
+      let name = present.slice()
+      user = None
+      name.length()
+    }
+    None => 0
+  }
+}

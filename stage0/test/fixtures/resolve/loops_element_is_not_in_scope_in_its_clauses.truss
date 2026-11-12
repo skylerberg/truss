@@ -1,0 +1,6 @@
+fn f(items: List[Int64]) {
+  for item in items
+    invariant item > 0
+  {
+  }
+}

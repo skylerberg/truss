@@ -1,4 +1,4 @@
-(* Whether a release of a package keeps what the release before it offered,
+(* Whether a release of a package is compatible with the release before it,
    read from the two releases' public definitions. The types of a signature
    are compared as the checker worked them out, and a contract as it is
    written: a `requires` may lose clauses, an `ensures` and a cost may gain
@@ -102,7 +102,7 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
 
 (* How far a yielding method can be pulled as a cursor: for every element,
    for one that copies implicitly, or not at all. A user that pulls it
-   relies on that, though it is worked out from the method's body. *)
+   relies on that, though it is inferred from the method's body. *)
 let pulled database path (signature : Types.signature) =
   match (Query.demand database Ownership.pullable path, signature.output) with
   | Pullable, _ -> 2

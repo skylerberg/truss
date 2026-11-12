@@ -1,0 +1,12 @@
+type Shout(text: String)
+
+impl FromTemplate for Shout {
+  type Part = String
+
+  fn from_template(template: Template[String]) -> Shout
+    requires template.literals.length() == 1
+  {
+    todo
+  }
+}
+

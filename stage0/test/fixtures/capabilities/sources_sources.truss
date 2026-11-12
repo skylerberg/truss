@@ -1,0 +1,4 @@
+public trait Source {
+  fn read(self) -> Instant
+    uses Clock
+}

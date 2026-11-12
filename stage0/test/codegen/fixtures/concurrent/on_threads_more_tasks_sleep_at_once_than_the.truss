@@ -1,0 +1,21 @@
+fn first_to_wake(sleepers: Int64) -> Int64
+  uses Tasks, Clock
+{
+  concurrent for sleeper in 0..=sleepers {
+    if sleeper == sleepers {
+      return sleeper
+    }
+    Clock.sleep(Duration.nanoseconds(60000000000))
+  }
+  -1
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console
+{
+  let before = Clock.monotonic()
+  let first = first_to_wake(600)
+  let after = Clock.monotonic()
+  Console.print_line("${first} woke first, before a sleep ended ${after.total_seconds() - before.total_seconds() < 30}")
+  ExitCode.success
+}

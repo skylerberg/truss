@@ -1,0 +1,15 @@
+type Count(total: USize)
+
+impl FromTemplate for Count {
+  type Part = String
+
+  fn from_template(template: Template[String]) -> Count
+    requires template.parts.length() == 0
+  {
+    Count(total: 0)
+  }
+}
+
+fn f() -> Count {
+  Count"none"
+}

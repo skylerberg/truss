@@ -1,0 +1,14 @@
+fn make() -> List[String] {
+  ["a${1}", "bb${2}", "c${3}"]
+}
+
+test "skipped" {
+  var count = 0
+  for name in make() {
+    if name.length() == 3 {
+      continue
+    }
+    count += 1
+  }
+  assert count == 2
+}

@@ -1,0 +1,11 @@
+fn power(base: Int64, exponent: Int64) -> Int64
+  cost time finite
+{
+  base
+}
+
+fn g(value: Int64) -> Int64
+  ensures result == power(value, exponent: 1)
+{
+  value
+}

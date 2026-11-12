@@ -1,0 +1,9 @@
+type Keeper(held: StringSlice, text: String)
+
+fn Keeper.keep(mut self, text: StringSlice) {
+  self.held = text
+}
+
+fn Keeper.all(self) -> StringSlice {
+  self.text.slice()
+}

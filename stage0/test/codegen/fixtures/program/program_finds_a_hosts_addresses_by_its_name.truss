@@ -1,0 +1,37 @@
+use standard::network
+
+fn say(text: String) uses Console {
+  Console.print_line(text.slice())
+}
+
+fn loops_back(address: network::IpAddress) -> Bool {
+  address == network::IpAddress.loopback
+    || address == network::IpAddress.Version6([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, NetworkClient
+{
+  if NetworkClient.resolve("127.0.0.1") is Ok(addresses) {
+    say("an address is itself ${addresses.length() == 1 && addresses[0] == network::IpAddress.loopback}")
+  }
+  if NetworkClient.resolve("::1") is Ok(addresses) {
+    say("so is an IPv6 address ${addresses.length() == 1 && loops_back(addresses[0])}")
+  }
+  if NetworkClient.resolve("localhost") is Ok(addresses) {
+    var all = addresses.length() > 0
+    for address in addresses {
+      if !loops_back(address) {
+        all = false
+      }
+    }
+    say("localhost loops back ${all}")
+  }
+  if NetworkClient.resolve("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx") is Err(error) {
+    say("an unknown host is an error ${error == SystemError.HostNotFound || error == SystemError.Unreachable}")
+  }
+  if NetworkClient.resolve("with a\0zero") is Err(error) {
+    say("a name with a zero byte ${error == SystemError.InvalidInput}")
+  }
+  ExitCode(0)
+}

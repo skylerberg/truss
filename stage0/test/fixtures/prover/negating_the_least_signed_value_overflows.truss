@@ -1,0 +1,3 @@
+fn f(value: Int8) -> Int8 {
+  -value
+}

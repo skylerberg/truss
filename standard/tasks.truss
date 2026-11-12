@@ -195,6 +195,51 @@ public fn with_timeout[Output, capability Granted](limit: Duration, work: (fn() 
   }
 }
 
+public opaque type Cell[Value: Storable](state: intrinsic::Shared[Value])
+  derives Copyable
+
+public fn Cell[Value: Storable].new(value: own Value) -> Cell[Value] {
+  Cell(state: intrinsic::shared_new(own value))
+}
+
+public fn Cell[Value: Storable].update[Output: Storable](self, change: fn(mut Value) -> Output) -> Output
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: 0, change: fn(value, _) {
+    change(mut value)
+  })
+}
+
+public fn Cell[Value: Storable].read[Output: Storable](self, view: fn(Value) -> Output) -> Output
+  uses Tasks
+{
+  intrinsic::shared_update(self.state, input: 0, change: fn(value, _) {
+    view(value)
+  })
+}
+
+public opaque type Counter(count: Cell[Int64])
+  derives Copyable
+
+public fn Counter.new(start: Int64 = 0) -> Counter {
+  Counter(count: Cell.new(start))
+}
+
+public fn Counter.add(self, amount: Int64 = 1) -> Int64
+  uses Tasks
+{
+  self.count.update(fn(count) {
+    count = count.wrapping_add(amount)
+    count
+  })
+}
+
+public fn Counter.value(self) -> Int64
+  uses Tasks
+{
+  self.count.read(fn(count) { count })
+}
+
 type Permit()
 
 public opaque type Limiter(permits: Channel[Permit])

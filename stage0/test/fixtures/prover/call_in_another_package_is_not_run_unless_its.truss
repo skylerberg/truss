@@ -1,0 +1,5 @@
+fn eight() -> Int64
+  ensures result == 8
+{
+  numbers::double(4)
+}

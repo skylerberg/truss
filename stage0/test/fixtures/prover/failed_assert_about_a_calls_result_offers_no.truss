@@ -1,0 +1,6 @@
+fn first(items: List[Int64]) -> Int64 {
+  proof {
+    assert items.length() > 0
+  }
+  0
+}

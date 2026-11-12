@@ -1,0 +1,6 @@
+type Box(value: Int64)
+
+fn Box.built() -> Box {
+  let built: Self = Box(value: 1)
+  built
+}

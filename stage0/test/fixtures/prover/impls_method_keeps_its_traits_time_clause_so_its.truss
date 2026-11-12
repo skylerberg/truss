@@ -1,0 +1,9 @@
+impl Monoid for Int64 {
+  fn empty() -> Int64 {
+    0
+  }
+
+  fn combine(self, other: Int64) -> Int64 {
+    self.wrapping_add(other)
+  }
+}

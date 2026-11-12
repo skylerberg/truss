@@ -1,0 +1,22 @@
+trait Rows {
+  fn rows(mut self) yields mut List[Int64]
+}
+
+type Grid(cells: List[List[Int64]])
+
+impl Rows for Grid {
+  fn rows(mut self) yields mut List[Int64] {
+    for row in mut self.cells {
+      yield mut row
+    }
+  }
+}
+
+fn f[Source: Rows](grid: mut Grid, source: mut Source) {
+  for row in mut grid.rows() {
+    mut row.push(1)
+  }
+  for row in mut source.rows() {
+    mut row.push(2)
+  }
+}

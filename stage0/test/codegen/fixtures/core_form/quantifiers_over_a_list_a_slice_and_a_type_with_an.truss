@@ -1,0 +1,54 @@
+type Shelf(titles: List[String])
+
+impl Iterable for Shelf {
+  type Element = String
+
+  fn each(self) yields String {
+    let label = "${self.titles.length()} titles on the shelf"
+    for title in self.titles {
+      if label.length() > 0 {
+        yield title
+      }
+    }
+  }
+}
+
+fn any_negative(items: List[Int64]) -> Bool {
+  exists item in items => item < 0
+}
+
+fn all_short(names: Slice[String], under: USize) -> Bool {
+  forall name in names => name.length() < under
+}
+
+fn has_long(shelf: Shelf) -> Bool {
+  exists title in shelf => title.length() > 3
+}
+
+fn first_with_a_long(shelves: List[Shelf]) -> Int64 {
+  var looked: Int64 = 0
+  for shelf in shelves {
+    looked += 1
+    if exists title in shelf => exists i in 0..title.length() => i >= 5 {
+      return looked
+    }
+  }
+  0
+}
+
+test "quantifiers over collections run as loops that stop at the first answer" {
+  assert any_negative([1, -1, 2])
+  assert !any_negative([1, 2])
+  assert !any_negative([])
+  let names = ["${1}a", "${2}bcdefgh", "${3}c"]
+  assert all_short(names, under: 20)
+  assert !all_short(names, under: 5)
+  assert all_short(names[0..1], under: 5)
+  let shelf = Shelf(titles: ["${1}ab", "${2}abcdef", "${3}a"])
+  assert has_long(shelf)
+  assert !has_long(Shelf(titles: ["${1}"]))
+  assert !has_long(Shelf(titles: []))
+  let shelves = [Shelf(titles: ["${1}"]), Shelf(titles: ["${2}", "${3}abcdef"]), Shelf(titles: [])]
+  assert first_with_a_long(shelves) == 2
+  assert (forall item in [1, 2, 3] => exists other in [3, 2, 1] => item + other == 4)
+}

@@ -1,0 +1,7 @@
+public trait Sided {
+  fn sides(self) -> Int64
+
+  fn corners(self) -> Int64 {
+    self.sides()
+  }
+}

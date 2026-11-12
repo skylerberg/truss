@@ -1,0 +1,6 @@
+fn f(items: own List[Int64], count: USize) {
+  for i in 0..count {
+    let _ = i
+    keep(own items)
+  }
+}

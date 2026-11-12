@@ -3,7 +3,7 @@
 
    Lowering writes [drop(place)] wherever an owned local goes out of scope,
    on every path out of that scope, including [return] and [?]: it means
-   "drop whatever this place still owns here". This pass works out, by a
+   "drop whatever this place still owns here". This pass computes, by a
    dataflow analysis over the function's moves, what that is:
 
    - nothing, where the place was moved out on every path, and the drop is
@@ -28,7 +28,7 @@
    A [borrowed] local holds a value something else owns, and is left
    alone. Drops of types with nothing to drop are removed. A [yield]'s
    [stop] edge is an edge like any other, so a loop that stops at a
-   [yield] drops what the method owns there. *)
+   [yield] drops the method's owned values there. *)
 
 val elaborate :
   Memory_layout.env ->

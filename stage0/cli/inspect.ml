@@ -1,6 +1,6 @@
-(* What the tools ask about one definition: its holes, with the type each
-   must have and the names in scope there, and what is at a position. These
-   read the type checker's results, and decide nothing of their own. *)
+(* Queries about one definition from the type checker's results: its
+   holes, with the type each must have and the names in scope there, and
+   the entity at a position. *)
 
 open Syntax
 

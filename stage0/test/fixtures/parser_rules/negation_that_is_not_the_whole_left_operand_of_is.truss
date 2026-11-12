@@ -1,0 +1,3 @@
+let a = (!flag) is true
+let b = !(value is Some(_))
+let c = -count is 0

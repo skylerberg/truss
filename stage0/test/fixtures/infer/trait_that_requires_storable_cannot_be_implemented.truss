@@ -1,0 +1,5 @@
+impl Job for Labeled {
+  fn run(self) -> Int64 {
+    0
+  }
+}

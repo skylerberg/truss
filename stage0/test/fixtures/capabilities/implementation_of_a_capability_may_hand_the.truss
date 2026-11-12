@@ -1,0 +1,13 @@
+capability Notes {
+  fn note(text: StringSlice)
+  fn within(work: (fn() uses Notes))
+}
+
+type Quiet()
+
+impl Notes for Quiet {
+  fn note(self, text: StringSlice) {}
+  fn within(self, work: (fn() uses Notes)) {
+    work()
+  }
+}

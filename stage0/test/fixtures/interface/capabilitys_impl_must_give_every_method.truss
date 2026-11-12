@@ -1,0 +1,10 @@
+capability Journal {
+  fn write(text: StringSlice)
+  fn flush()
+}
+
+type Silent()
+
+impl Journal for Silent {
+  fn write(self, text: StringSlice) {}
+}

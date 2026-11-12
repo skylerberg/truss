@@ -1,0 +1,6 @@
+fn ordered(low: Int64, high: Int64) -> Int64 {
+  proof {
+    assert low < high
+  }
+  0
+}

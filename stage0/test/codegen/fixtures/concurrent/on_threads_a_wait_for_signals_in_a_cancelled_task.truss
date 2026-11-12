@@ -1,0 +1,27 @@
+use standard::processes
+
+fn signal_or_time_out() -> String
+  uses Tasks, Clock, Console, Signals
+{
+  let wanted = [processes::Signal.User2]
+  concurrent {
+    {
+      if Signals.wait(wanted.slice()) is Some(_) {
+        Console.print_line("a signal")
+      } else {
+        Console.print_line("no signal")
+      }
+    }
+    {
+      Clock.sleep(Duration.nanoseconds(50000000))
+      return "timed out"
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console, Signals
+{
+  Console.print_line(signal_or_time_out())
+  ExitCode.success
+}

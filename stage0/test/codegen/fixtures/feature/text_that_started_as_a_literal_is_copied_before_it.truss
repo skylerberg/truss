@@ -1,0 +1,7 @@
+test "added to" {
+  var first = "abc"
+  mut first.push("def")
+  let second = "abc"
+  assert first == "abcdef"
+  assert second == "abc"
+}

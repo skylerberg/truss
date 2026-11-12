@@ -1,0 +1,4 @@
+fn f(count: USize)
+  cost time O(log(count))
+{
+}
