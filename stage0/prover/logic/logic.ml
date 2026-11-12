@@ -162,7 +162,10 @@ and show_term term =
     in
     Printf.sprintf "(%s (%s) %s)" word
       (String.concat " "
-         (List.map (fun (name, s) -> Printf.sprintf "(%s %s)" (show_symbol name) (sort s)) bound))
+         (List.map
+            (fun (name, bound_sort) ->
+              Printf.sprintf "(%s %s)" (show_symbol name) (sort bound_sort))
+            bound))
       (show body)
   in
   show term
@@ -172,10 +175,10 @@ let arguments = function
   | Is (_, argument) -> [ argument ]
   | Symbol _ | Integer _ | Boolean _ | Bits _ | Forall _ | Exists _ -> []
 
-let map_arguments f = function
-  | Apply (name, arguments) -> Apply (name, List.map f arguments)
-  | Operation (name, arguments) -> Operation (name, List.map f arguments)
-  | Is (constructor, argument) -> Is (constructor, f argument)
+let map_arguments transform = function
+  | Apply (name, arguments) -> Apply (name, List.map transform arguments)
+  | Operation (name, arguments) -> Operation (name, List.map transform arguments)
+  | Is (constructor, argument) -> Is (constructor, transform argument)
   | (Symbol _ | Integer _ | Boolean _ | Bits _ | Forall _ | Exists _) as term -> term
 
 let int value = Integer (Z.of_int value)
@@ -221,7 +224,7 @@ let negate value = Operation ("-", [ value ])
    operands are at or above zero, so each sign is handled by negating. *)
 let truncated_divide left right =
   let ge0 value = Operation (">=", [ value; zero ]) in
-  let div a b = Operation ("div", [ a; b ]) in
+  let div dividend divisor = Operation ("div", [ dividend; divisor ]) in
   ite (ge0 left)
     (ite (ge0 right) (div left right) (negate (div left (negate right))))
     (ite (ge0 right) (negate (div (negate left) right)) (div (negate left) (negate right)))
