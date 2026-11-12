@@ -349,9 +349,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
       | cursor_ty -> bug "next on %s, which is not a cursor" (Ground.to_string cursor_ty))
   | Lambda { parameters; captures; body; _ } ->
       if st.pulling then
-        Compiler_bug.unsupported
-          ~at:(at_site (site_of st value.origin))
-          "a lambda in a yielding method that is pulled";
+        unsupported ~at:(site_of st value.origin) "a lambda in a yielding method that is pulled";
       let function_type =
         match ty with Function f -> f | _ -> bug "a lambda of %s" (Ground.to_string ty)
       in
@@ -451,8 +449,7 @@ and evaluate_arguments st (signature : T.signature) substitution (arguments : Co
             (mode, ty, operand_place st value))
       (List.combine parameters arguments)
   in
-  if !defaulted > 62 then
-    Compiler_bug.unsupported "a function with more than 62 parameters that have defaults";
+  if !defaulted > 62 then unsupported "a function with more than 62 parameters that have defaults";
   (evaluated, !mask)
 
 (* The function or method that a callee resolves to in this instance, with
@@ -1215,9 +1212,7 @@ and tasks_bool st name places : Lir.operand =
    them until then. *)
 and with_group st ~origin (f : Lir.place -> unit) =
   if st.pulling then
-    Compiler_bug.unsupported
-      ~at:(at_site (site_of st origin))
-      "`concurrent` code in a yielding method that is pulled";
+    unsupported ~at:(site_of st origin) "`concurrent` code in a yielding method that is pulled";
   let scope = open_scope st Statement in
   let group = at (local st.b ~name:"group" (Value (Monomorphic.builtin UInt64))) in
   emit st.b (tasks_call st "open" ~result:group []);
@@ -1666,8 +1661,7 @@ and statement st (node : Core.statement) =
               let value =
                 match (lends, part) with
                 | Some _, _ when mode = Mut ->
-                    Compiler_bug.unsupported
-                      ~at:(at_site (site_of st node.origin))
+                    unsupported ~at:(site_of st node.origin)
                       "a cursor over a method that lends places to be changed"
                 | Some built, _ -> copied st built
                 | None, Value value -> value_place st value
@@ -1836,8 +1830,7 @@ and match_ st ~(scrutinees : Core.operand list) ~(arms : Core.arm list) destinat
    evaluated here. *)
 and inline ?yield_into st path type_arguments ~arguments ~call_site ~on_yield =
   if List.exists (Path.equal path) st.frame.inlined then
-    Compiler_bug.unsupported ~at:(at_site call_site) "%s, which lends through a call to itself"
-      (Path.show path);
+    unsupported ~at:call_site "%s, which lends through a call to itself" (Path.show path);
   let parameters, body = body_of st.context path in
   let exit = block st.b in
   let caller = st.frame in
@@ -2004,8 +1997,7 @@ and fill_defaults st mask (parameters : Core.parameter list) =
       in
       let pulled what =
         if st.pulling then
-          Compiler_bug.unsupported
-            ~at:(at_site (site_of st default.origin))
+          unsupported ~at:(site_of st default.origin)
             "a default for %s, %s, in a yielding method that is pulled" parameter.name what
       in
       if parameter.mode = Own && not (trivial st ty) then begin

@@ -206,10 +206,11 @@ let site st (span : S.span) : Lir.site =
     text;
   { definition = st.frame.code.anchor; line = !line; column = !column }
 
-(* A valid program stage0 cannot lower yet, at a place in the code being
-   lowered. *)
-let at_site ({ definition; line; column } : Lir.site) : Compiler_bug.site =
-  { definition; line; column }
+type unsupported = { what : string; at : Lir.site option }
+
+exception Unsupported of unsupported
+
+let unsupported ?at format = Printf.ksprintf (fun what -> raise (Unsupported { what; at })) format
 
 let source st (span : S.span) =
   let text = st.frame.code.text in

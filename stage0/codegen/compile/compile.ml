@@ -210,7 +210,7 @@ let recursion =
       let edges key =
         match Query.demand database references (lowering, key) with
         | found -> found
-        | exception (Compiler_bug.Bug _ | Compiler_bug.Unsupported _) -> []
+        | exception (Compiler_bug.Bug _ | Lower.Unsupported _) -> []
       in
       Reachable.groups ~edges wanted)
 
@@ -546,7 +546,7 @@ and compiled t key =
 
 (* A valid program stage0 cannot build yet, as a message with the file and
    line it is at. *)
-let unsupported_message t (unsupported : Compiler_bug.unsupported) =
+let unsupported_message t (unsupported : Lower.unsupported) =
   let where =
     match unsupported.at with
     | None -> ""
@@ -564,7 +564,7 @@ let reporting t f =
   match f () with
   | result -> Ok result
   | exception Cannot_build message -> Error message
-  | exception Compiler_bug.Unsupported unsupported -> Error (unsupported_message t unsupported)
+  | exception Lower.Unsupported unsupported -> Error (unsupported_message t unsupported)
 
 type outcome = Passed | Failed | Panicked | Incomplete | Timed_out | Crashed
 
@@ -878,7 +878,7 @@ let test_keys t tests =
     (fun path ->
       match test_key t path with
       | key -> Some (path, key)
-      | exception (Compiler_bug.Bug _ | Compiler_bug.Unsupported _) -> None)
+      | exception (Compiler_bug.Bug _ | Lower.Unsupported _) -> None)
     tests
 
 let run_program ?input ?(in_order = false) t ~main ~arguments =

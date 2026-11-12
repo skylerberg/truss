@@ -39,6 +39,8 @@ exception Foreign_unsupported of string
 let unsupported span format =
   Printf.ksprintf (fun message -> raise (Unsupported (span, message))) format
 
+let bug format = Compiler_bug.bug ~stage:"Prover" format
+
 (* A clause that running compiled code can decide: one of a tag's
    [from_template]'s, by its position, for a template of these literal
    texts. *)
@@ -97,6 +99,10 @@ type source = {
           callee's text only where it says something about it. *)
   text : string Lazy.t;
 }
+
+(* The definition being proven from [source]. *)
+let home source =
+  match source.key with Some key -> key | None -> bug "%s has no definition key" source.name
 
 (* One form's clauses about a callee: its own, or, for a method of an
    [impl], its trait's. Its parameters are in the order a call's arguments
@@ -8916,7 +8922,9 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
         unsupported span "a loop over `%s`, whose `Cursor` the prover cannot find"
           (T.show cursor_type)
   in
-  let impl = match evidence with Impl { impl; _ } -> impl | _ -> assert false in
+  let impl =
+    match evidence with Impl { impl; _ } -> impl | _ -> bug "a cursor's evidence is not an impl"
+  in
   let contract =
     match method_contract ?reader:(reader context) context.database trait "next" Mut evidence with
     | Some contract -> contract
@@ -9299,7 +9307,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
     proof
     || match signature with Some (signature : T.signature) -> signature.terminates | None -> false
   in
-  let home = match source.key with Some key -> key | None -> invalid_arg "Translate.function_" in
+  let home = home source in
   let context =
     new_context ?reveal database ~home ~current:path ~terminates ~measures:contract.decreases
   in
@@ -9655,7 +9663,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
    values of its parameters, after the bodies of the [proof]s written for
    it. *)
 let laws ?reveal database (source : source) ~impl ~trait ~for_type ~proofs ~at =
-  let home = match source.key with Some key -> key | None -> invalid_arg "Translate.laws" in
+  let home = home source in
   let context = new_context ?reveal database ~home ~current:impl ~terminates:false ~measures:[] in
   let start = empty_frame source in
   let substitution = trait_substitution database trait for_type in
@@ -9731,7 +9739,7 @@ let laws ?reveal database (source : source) ~impl ~trait ~for_type ~proofs ~at =
    for a value that meets its invariants, which is what makes each
    potential a fact about every valid value. *)
 let type_ ?reveal database (source : source) ~path =
-  let home = match source.key with Some key -> key | None -> invalid_arg "Translate.type_" in
+  let home = home source in
   let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Type { invariants; potential; _ } ->
@@ -9764,7 +9772,7 @@ let type_ ?reveal database (source : source) ~path =
   outcome context
 
 let test ?reveal database (source : source) ~path =
-  let home = match source.key with Some key -> key | None -> invalid_arg "Translate.test" in
+  let home = home source in
   let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Test body -> ignore (block_value context (empty_frame source) body)
@@ -9774,7 +9782,7 @@ let test ?reveal database (source : source) ~path =
 (* A constant's value is well defined, as any expression is: its
    arithmetic stays in range, and its shifts and divisions are valid. *)
 let constant ?reveal database (source : source) ~path =
-  let home = match source.key with Some key -> key | None -> invalid_arg "Translate.constant" in
+  let home = home source in
   let context = new_context ?reveal database ~home ~current:path ~terminates:false ~measures:[] in
   (match source.core.definition with
   | Constant defined -> ignore (value context (empty_frame source) defined)

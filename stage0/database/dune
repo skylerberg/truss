@@ -2,6 +2,7 @@
  (name database)
  (libraries
   unix
+  compiler_bug
   blake3
   cbor
   engine

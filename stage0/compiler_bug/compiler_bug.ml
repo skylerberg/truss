@@ -5,13 +5,6 @@ exception Bug of t
 let bug ~stage format =
   Printf.ksprintf (fun message -> raise (Bug { stage; message; doing = [] })) format
 
-type site = { definition : Path.t; line : int; column : int }
-type unsupported = { what : string; at : site option }
-
-exception Unsupported of unsupported
-
-let unsupported ?at format = Printf.ksprintf (fun what -> raise (Unsupported { what; at })) format
-
 let within ~stage doing f =
   let broken message = raise (Bug { stage; message; doing = [ doing ] }) in
   try f () with
@@ -20,6 +13,8 @@ let within ~stage doing f =
   | Failure message -> broken ("Failure: " ^ message)
   | Not_found -> broken "Not_found"
   | Division_by_zero -> broken "Division_by_zero"
+  | Assert_failure (file, line, column) ->
+      broken (Printf.sprintf "Assert_failure at %s:%d:%d" file line column)
 
 let to_string bug =
   String.concat ""
