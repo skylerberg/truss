@@ -1,14 +1,3 @@
-type dependency = Manifest.dependency = { package : Path.package; capabilities : string list }
-
-type package = Project.package = {
-  name : Path.package;
-  dependencies : dependency list;
-  modules : Path.module_ list;
-  usize_bits : int;
-      (** 64 when the manifest says the package runs only on 64-bit targets, and 32 otherwise, so
-          that its code holds for both widths of [USize] *)
-}
-
 let file_path (module_ : Path.module_) = String.concat "/" (Path.module_parts module_) ^ ".truss"
 
 type file = {

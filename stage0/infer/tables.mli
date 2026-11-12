@@ -22,7 +22,12 @@ type callee =
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
   | Built_in_operator
 
-type argument = { expression : Syntax.id; parameter_index : int; mode : Types.mode }
+type argument = {
+  expression : Syntax.id;
+  mark : Core.mark option;  (** The argument's [mut] or [own], where it is written with one. *)
+  parameter_index : int;
+  mode : Types.mode;
+}
 
 type call = {
   callee : callee;

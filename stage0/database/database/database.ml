@@ -15,7 +15,7 @@ let add_root engine root =
   if not (List.mem root given) then Engine.set engine Project.roots () (given @ [ root ])
 
 (* A manifest of one package, as [Manifest.parse] reads it. *)
-let manifest_text ~usize_bits ~name ~(dependencies : Workspace.dependency list) =
+let manifest_text ~usize_bits ~name ~(dependencies : Manifest.dependency list) =
   String.concat ""
     ([
        Printf.sprintf "[package]\nname = %S\ntruss = %S\n" (Path.show_package name)
@@ -24,7 +24,7 @@ let manifest_text ~usize_bits ~name ~(dependencies : Workspace.dependency list) 
        (if dependencies = [] then "" else "\n[dependencies]\n");
      ]
     @ List.map
-        (fun (dependency : Workspace.dependency) ->
+        (fun (dependency : Manifest.dependency) ->
           Printf.sprintf "%S = [%s]\n"
             (Path.show_package dependency.package)
             (String.concat ", " (List.map (Printf.sprintf "%S") dependency.capabilities)))
@@ -367,7 +367,7 @@ let target_packages session within =
   | found -> found
 
 let package_modules session name =
-  match Workspace.package (Session.context session) name with
+  match Query.demand (Session.context session) Project.package name with
   | Some package -> package.modules
   | None -> []
 
@@ -658,7 +658,7 @@ type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Loc
 
 let project_manifests session =
   List.filter_map
-    (fun (_, name) -> Workspace.package (Session.context session) name)
+    (fun (_, name) -> Query.demand (Session.context session) Project.package name)
     (packages session)
 
 (* The lock file a project would have with some packages at other versions:
@@ -721,15 +721,15 @@ let plan_lock session ~set ~all =
           in
           let manifests = project_manifests session in
           let local name =
-            List.exists (fun (package : Workspace.package) -> package.name = name) manifests
+            List.exists (fun (package : Project.package) -> package.name = name) manifests
           in
           let selected, problems =
             Registry.Selection.choose ~lock
               ~roots:
                 (List.concat_map
-                   (fun (package : Workspace.package) ->
+                   (fun (package : Project.package) ->
                      List.filter_map
-                       (fun (dependency : Workspace.dependency) ->
+                       (fun (dependency : Manifest.dependency) ->
                          match Path.package_parts dependency.package with
                          | [ _; _ ] -> Some (package.name, dependency.package)
                          | _ -> None)
@@ -744,7 +744,7 @@ let plan_lock session ~set ~all =
               Registry.Selection.lock
                 ~project:
                   (List.concat_map
-                     (fun (package : Workspace.package) -> package.dependencies)
+                     (fun (package : Project.package) -> package.dependencies)
                      manifests)
                 selected
             in

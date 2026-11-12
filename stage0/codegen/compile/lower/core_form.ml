@@ -608,7 +608,7 @@ and capability_defaults st ~capability ~name (arguments : Core.argument list) ev
    signature to read the parameter's type from. *)
 and argument_place st (argument : Core.argument) =
   match argument with
-  | Passed { mode; value } -> (mode, ground st (operand_type value), operand_place st value)
+  | Passed { mode; value; _ } -> (mode, ground st (operand_type value), operand_place st value)
   | Default -> bug "an omitted argument in a call that has no defaults"
 
 (* Lowers a loop over [iteration]. [each] lowers the loop body for the
@@ -1056,7 +1056,7 @@ and intrinsic_operation st operation ~type_arguments (arguments : Core.argument 
       (fun (argument : Core.argument) ->
         match argument with
         | Passed { value = Place source; _ } -> Intrinsics.Place (place st source)
-        | Passed { mode; value = Value value } ->
+        | Passed { mode; value = Value value; _ } ->
             let ty = ground st value.type_ in
             let evaluated = value_place st value in
             (* An intrinsic takes storage and views by place. *)

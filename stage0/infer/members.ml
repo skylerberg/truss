@@ -11,7 +11,7 @@ let visible_packages database (package : Path.package) =
   List.sort_uniq compare
     (Path.standard_package :: package
     :: List.map
-         (fun (dependency : Workspace.dependency) -> dependency.package)
+         (fun (dependency : Manifest.dependency) -> dependency.package)
          (Query.demand database Workspace.dependencies package))
 
 (* The methods of a type with the given name: one for each receiver mode. *)

@@ -164,12 +164,15 @@ let truss_value members text =
   in
   (* A constructor's name as Truss writes it: its variant, or for a record
      its type's own name. *)
-  let constructor : S.t -> string = function
+  let constructor : L.symbol -> string = function
     | Constructor { variant = Some variant; _ } -> variant
     | Constructor { type_name; variant = None; _ } -> type_name
-    | other -> S.show other
+    | other -> L.show_symbol other
   in
-  let field : S.t -> string = function Field { field; _ } -> field | other -> S.show other in
+  let field : L.symbol -> string = function
+    | Field { field; _ } -> field
+    | other -> L.show_symbol other
+  in
   let opaque atom =
     (* The solver's name for a value of a sort it knows nothing about. *)
     match String.index_opt atom '!' with
@@ -324,7 +327,7 @@ let bitwise_operations =
     "swap_bytes";
   ]
 
-let bitwise_of : S.t -> _ = function
+let bitwise_of : L.symbol -> _ = function
   | Opaque_operation { operation; integer = Some (bits, signed); _ }
     when List.mem operation bitwise_operations ->
       Some (operation, bits, signed)
@@ -425,7 +428,7 @@ type variant = Made | Exact | Alone | Alone_exact | Revealed
 type oracles = {
   solve :
     index:int ->
-    choice:(S.t * (Z.t * Z.t)) list ->
+    choice:(L.symbol * (Z.t * Z.t)) list ->
     variant:variant ->
     with_locals:bool ->
     solver_response;
@@ -747,7 +750,7 @@ let runs =
 type question = {
   definition : Names.key;
   index : int;
-  choice : (S.t * (Z.t * Z.t)) list;
+  choice : (L.symbol * (Z.t * Z.t)) list;
   variant : variant;
   with_locals : bool;
 }

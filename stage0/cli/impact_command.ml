@@ -20,15 +20,12 @@ type change = {
 let declarations context packages =
   List.concat_map
     (fun (_, name) ->
-      match Workspace.package context name with
-      | Some package ->
-          List.concat_map
-            (fun module_ ->
-              List.filter
-                (fun (d : Names.declaration) -> d.ordinal = 0)
-                (try Query.demand context Names.declarations module_ with Not_found -> []))
-            package.modules
-      | None -> [])
+      List.concat_map
+        (fun module_ ->
+          List.filter
+            (fun (d : Names.declaration) -> d.ordinal = 0)
+            (try Query.demand context Names.declarations module_ with Not_found -> []))
+        (Query.demand context Workspace.modules name))
     packages
 
 (* Each definition that changed, was added, or was removed, in order. *)

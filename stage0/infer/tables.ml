@@ -34,6 +34,7 @@ type callee =
 
 type argument = {
   expression : Syntax.id;
+  mark : Core.mark option;  (** The argument's [mut] or [own], where it is written with one. *)
   parameter_index : int;  (** Counting a method's receiver as 0 and the rest after it. *)
   mode : Types.mode;
 }

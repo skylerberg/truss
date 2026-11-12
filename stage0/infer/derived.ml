@@ -123,7 +123,9 @@ let form database (path : Path.t) : Core.t option =
                    uses = [];
                  })
           in
-          let read place : Core.argument = Passed { mode = Read; value = Place place } in
+          let read place : Core.argument =
+            Passed { mode = Read; value = Place place; mark = None }
+          in
           let variants =
             match shape with
             | Sum variants ->
@@ -260,7 +262,9 @@ let form database (path : Path.t) : Core.t option =
                   | Named { path; _ } -> path
                   | _ -> bug "a hasher that is not a named type"
                 in
-                let changed : Core.argument = Passed { mode = Mut; value = Place hasher } in
+                let changed : Core.argument =
+                  Passed { mode = Mut; value = Place hasher; mark = None }
+                in
                 let write number =
                   statement
                     (Evaluate
@@ -283,6 +287,7 @@ let form database (path : Path.t) : Core.t option =
                                        mode = Read;
                                        value =
                                          Value (node (T.builtin UInt64) (Integer (Z.of_int number)));
+                                       mark = None;
                                      };
                                  ];
                                lends = None;

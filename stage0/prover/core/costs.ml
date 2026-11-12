@@ -27,23 +27,6 @@ type counting = Units | At_most | Exactly
    clause of its kind. *)
 type counter = { resource : resource; counting : counting; amortized : bool }
 
-let target_key = function
-  | Through term -> L.show_term term
-  | Capability path -> Path.show path
-  | Capability_method (path, name) -> Path.show path ^ "." ^ name
-
-let key counter =
-  (match counter.resource with
-    | Time -> "time"
-    | Allocations -> "allocations"
-    | Allocated_bytes -> "allocated_bytes"
-    | Calls target -> "calls(" ^ target_key target ^ ")")
-  ^ (match counter.counting with
-    | Units -> ".units"
-    | At_most -> ".at_most"
-    | Exactly -> ".exactly")
-  ^ if counter.amortized then ".amortized" else ""
-
 (* Whether a [calls] clause about [clause] bounds the calls a counter about
    [counter] counts: the same target, or a whole capability for one of its
    methods, which bounds it from above. *)
@@ -58,8 +41,8 @@ let covers ~clause ~counter =
 (* The constants of one [O(...)] bound: two symbols, which each query that
    mentions them pins to one pair from the list, tried in order. *)
 type constants = {
-  factor : S.t;
-  addend : S.t;
+  factor : L.symbol;
+  addend : L.symbol;
   mutable pairs : (Z.t * Z.t) list;
       (** Cut to the first when the bound is assumed of another function in a cycle, which is proven
           with that pair. *)

@@ -1,6 +1,7 @@
 (library
  (name type_checker)
  (libraries
+  manifest
   query
   phases
   path
