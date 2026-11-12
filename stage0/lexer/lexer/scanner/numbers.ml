@@ -19,9 +19,18 @@ type checked = {
   fixes : (string * string) list; (* title, replacement for the whole literal *)
 }
 
-let is_digit c = c >= '0' && c <= '9'
-let is_ascii_word c = is_digit c || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
-let is_hexadecimal_digit c = is_digit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+let is_digit character = character >= '0' && character <= '9'
+
+let is_ascii_word character =
+  is_digit character
+  || (character >= 'a' && character <= 'z')
+  || (character >= 'A' && character <= 'Z')
+  || character = '_'
+
+let is_hexadecimal_digit character =
+  is_digit character
+  || (character >= 'a' && character <= 'f')
+  || (character >= 'A' && character <= 'F')
 
 let is_radix_prefix text start =
   start + 1 < String.length text
@@ -80,7 +89,9 @@ let scan_end text start =
     then run (stop + 1)
     else stop
   in
-  let exponent_marker c = if hexadecimal then c = 'p' || c = 'P' else c = 'e' || c = 'E' in
+  let exponent_marker character =
+    if hexadecimal then character = 'p' || character = 'P' else character = 'e' || character = 'E'
+  in
   if
     ((not (is_radix_prefix text start)) || hexadecimal)
     && exponent_marker text.[stop - 1]
@@ -158,11 +169,11 @@ let issue ?(fixable = true) code message start stop =
 
 let base_name = function 16 -> "hexadecimal" | 2 -> "binary" | _ -> "octal"
 
-let is_digit_of_base base c =
+let is_digit_of_base base character =
   match base with
-  | 16 -> is_hexadecimal_digit c
-  | 2 -> c = '0' || c = '1'
-  | _ -> c >= '0' && c <= '7'
+  | 16 -> is_hexadecimal_digit character
+  | 2 -> character = '0' || character = '1'
+  | _ -> character >= '0' && character <= '7'
 
 (* The length of the character at [offset], for pointing at it. *)
 let character_length text offset =
@@ -205,7 +216,7 @@ let choose_problem value issues fixes =
   in
   match List.filter (fun issue -> not issue.fixable) issues with
   | _ :: _ as unfixable ->
-      { value; problem = Option.map (fun i -> i.problem) (leftmost unfixable); fixes = [] }
+      { value; problem = Option.map (fun issue -> issue.problem) (leftmost unfixable); fixes = [] }
   | [] -> (
       match leftmost issues with
       | None -> { value; problem = None; fixes = [] }
@@ -368,7 +379,7 @@ let check_decimal text =
   in
   let octal_possible =
     leading_zero && (not is_float) && (not has_float_suffix)
-    && String.for_all (fun c -> c >= '0' && c <= '7') whole_digits
+    && String.for_all (fun character -> character >= '0' && character <= '7') whole_digits
   in
   let fixed = assemble (if leading_zero then without_zeros else cleaned parts.whole) in
   let underscore group =
@@ -451,7 +462,7 @@ let check_decimal text =
 (* A decimal literal whose digits are grouped with `'`, as in C++: the fix
    groups them with `_`, and corrects whatever else is wrong with it. *)
 let check_quoted text =
-  let grouped = String.map (fun c -> if c = '\'' then '_' else c) text in
+  let grouped = String.map (fun character -> if character = '\'' then '_' else character) text in
   let checked = check_decimal grouped in
   let offset = String.index text '\'' in
   {

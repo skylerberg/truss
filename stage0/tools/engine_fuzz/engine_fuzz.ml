@@ -34,12 +34,12 @@ let value_input : (int, int) Query.input = Query.input ~name:"fuzz_input" ~show:
 
 (* A fixed mixing of integers, so that a node's reads are a function of its
    index and of what it has read, and of nothing else. *)
-let mix a b c =
-  let h = ref (a * 0x9E3779B1 lxor (b * 0x85EBCA77) lxor (c * 0xC2B2AE3D)) in
-  h := !h lxor (!h lsr 15);
-  h := !h * 0x2C1B3C6D;
-  h := !h lxor (!h lsr 12);
-  abs !h
+let mix left right third =
+  let hash = ref (left * 0x9E3779B1 lxor (right * 0x85EBCA77) lxor (third * 0xC2B2AE3D)) in
+  hash := !hash lxor (!hash lsr 15);
+  hash := !hash * 0x2C1B3C6D;
+  hash := !hash lxor (!hash lsr 12);
+  abs !hash
 
 (* One query for each phase, keyed by a node's index. A node reads inputs
    and nodes of lower index, which are of its phase or an earlier one. *)

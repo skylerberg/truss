@@ -29,8 +29,8 @@ let read_streaming channel on_output =
   let rec loop () =
     match input channel piece 0 (Bytes.length piece) with
     | 0 -> ()
-    | n ->
-        let text = Bytes.sub_string piece 0 n in
+    | read_count ->
+        let text = Bytes.sub_string piece 0 read_count in
         Buffer.add_string buffer text;
         on_output text;
         loop ()

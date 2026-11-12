@@ -94,7 +94,7 @@ let tree ~file ~json =
   let tree, parser_diagnostics = Parser.parse source tokens in
   let diagnostics =
     List.stable_sort
-      (fun (a : Diagnostic.t) (b : Diagnostic.t) -> compare a.span.start b.span.start)
+      (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
       (lexer_diagnostics @ parser_diagnostics)
   in
   if not json then print_endline (Syntax_print.file tree);

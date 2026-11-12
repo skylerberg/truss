@@ -1,51 +1,57 @@
 open Syntax
 
-let rec type_expression f (type_ : type_expression) =
+let rec type_expression on_expression (type_ : type_expression) =
   match type_.kind with
-  | Path_type path -> path_type f path
-  | Any_type path -> path_type f path
+  | Path_type path -> path_type on_expression path
+  | Any_type path -> path_type on_expression path
   | Function_type { inputs; output; clauses; _ } ->
-      List.iter (fun (_, input) -> type_expression f input) inputs;
-      Option.iter (type_expression f) output;
-      List.iter (clause f) clauses
+      List.iter (fun (_, input) -> type_expression on_expression input) inputs;
+      Option.iter (type_expression on_expression) output;
+      List.iter (clause on_expression) clauses
   | Self_type _ | Associated _ | Type_error -> ()
 
-and path_type f (path : path_type) = List.iter (type_argument f) path.arguments
+and path_type on_expression (path : path_type) =
+  List.iter (type_argument on_expression) path.arguments
 
-and type_argument f = function
-  | Type_argument type_ | Constraint (_, type_) -> type_expression f type_
+and type_argument on_expression = function
+  | Type_argument type_ | Constraint (_, type_) -> type_expression on_expression type_
   | Count _ | Count_name _ -> ()
 
-and capability_reference f (reference : capability_reference) =
+and capability_reference on_expression (reference : capability_reference) =
   match reference.kind with
-  | Capability_path path -> path_type f path
+  | Capability_path path -> path_type on_expression path
   | Self_capabilities _ | Associated_capabilities _ -> ()
 
-and clause f (clause : clause) =
+and clause on_expression (clause : clause) =
   match clause.kind with
-  | Uses capabilities -> List.iter (capability_reference f) capabilities
-  | Requires value | Ensures value -> f value
-  | Decreases measures -> List.iter f measures
+  | Uses capabilities -> List.iter (capability_reference on_expression) capabilities
+  | Requires value | Ensures value -> on_expression value
+  | Decreases measures -> List.iter on_expression measures
   | Cost cost -> (
-      match cost.bound with Big_o value | At_most value | Exactly value -> f value | Finite -> ())
+      match cost.bound with
+      | Big_o value | At_most value | Exactly value -> on_expression value
+      | Finite -> ())
   | Clause_error -> ()
 
-and loop_clause f (clause : loop_clause) =
+and loop_clause on_expression (clause : loop_clause) =
   match clause.kind with
-  | Invariant value -> f value
-  | Loop_decreases measures -> List.iter f measures
+  | Invariant value -> on_expression value
+  | Loop_decreases measures -> List.iter on_expression measures
   | Loop_cost cost -> (
-      match cost.bound with Big_o value | At_most value | Exactly value -> f value | Finite -> ())
+      match cost.bound with
+      | Big_o value | At_most value | Exactly value -> on_expression value
+      | Finite -> ())
 
-and string_literal f (literal : string_literal) = List.iter (fun (value, _) -> f value) literal.rest
+and string_literal on_expression (literal : string_literal) =
+  List.iter (fun (value, _) -> on_expression value) literal.rest
 
-let expression_parts ~expression:f ~statement (value : expression) =
+let expression_parts ~expression:on_expression ~statement (value : expression) =
   let block (block : block) = List.iter statement block.statements in
   match value.kind with
   | Integer _ | Float _ | True | False | Todo | Unreachable | Break | Continue | Self_value
   | Self_type_value | Name _ | Expression_error ->
       ()
-  | String literal -> string_literal f literal
+  | String literal -> string_literal on_expression literal
   | Member (inner, _)
   | Try inner
   | Prefix (_, inner)
@@ -53,86 +59,94 @@ let expression_parts ~expression:f ~statement (value : expression) =
   | Any inner
   | Echo inner
   | Parenthesized inner ->
-      f inner
-  | Is { value = inner; _ } -> f inner
+      on_expression inner
+  | Is { value = inner; _ } -> on_expression inner
   | Bracket (inner, items) ->
-      f inner;
+      on_expression inner;
       List.iter
-        (function Item item -> f item | Item_constraint (_, type_) -> type_expression f type_)
+        (function
+          | Item item -> on_expression item
+          | Item_constraint (_, type_) -> type_expression on_expression type_)
         items
   | Call (callee, arguments) ->
-      f callee;
-      List.iter (fun (argument : argument) -> f argument.value) arguments
+      on_expression callee;
+      List.iter (fun (argument : argument) -> on_expression argument.value) arguments
   | With (base, updates) ->
-      f base;
+      on_expression base;
       List.iter
         (fun (update : update) ->
-          match update.kind with Update { value; _ } -> Option.iter f value | Update_error -> ())
+          match update.kind with
+          | Update { value; _ } -> Option.iter on_expression value
+          | Update_error -> ())
         updates
   | Binary { left; right; _ } ->
-      f left;
-      f right
+      on_expression left;
+      on_expression right
   | Range { start; stop; _ } ->
-      Option.iter f start;
-      Option.iter f stop
+      Option.iter on_expression start;
+      Option.iter on_expression stop
   | Quantified { binder; body; _ } ->
       (match binder with
-      | Binder_in (_, collection) -> f collection
-      | Binder_type (_, type_) -> type_expression f type_);
-      f body
-  | Return value -> Option.iter f value
-  | List items -> List.iter f items
+      | Binder_in (_, collection) -> on_expression collection
+      | Binder_type (_, type_) -> type_expression on_expression type_);
+      on_expression body
+  | Return value -> Option.iter on_expression value
+  | List items -> List.iter on_expression items
   | Map entries ->
       List.iter
         (fun (key, value) ->
-          f key;
-          f value)
+          on_expression key;
+          on_expression value)
         entries
   | Lambda { body; _ } -> block body
   | If { condition; then_; else_ } -> (
-      f condition;
+      on_expression condition;
       block then_;
       match else_ with
       | Some (Else body) -> block body
-      | Some (Else_if value) -> f value
+      | Some (Else_if value) -> on_expression value
       | None -> ())
   | Match { scrutinees; arms } ->
-      List.iter f scrutinees;
+      List.iter on_expression scrutinees;
       List.iter
         (fun (arm : arm) ->
-          Option.iter f arm.guard;
+          Option.iter on_expression arm.guard;
           statement arm.body)
         arms
   | Provide { implementations; body } ->
-      List.iter f implementations;
+      List.iter on_expression implementations;
       block body
   | Block body -> block body
 
-let statement_parts ~expression:f ~statement (written : statement) =
+let statement_parts ~expression:on_expression ~statement (written : statement) =
   let block (block : block) = List.iter statement block.statements in
   match written.kind with
   | Let { annotation; value; else_; _ } ->
-      Option.iter (type_expression f) annotation;
-      f value;
+      Option.iter (type_expression on_expression) annotation;
+      on_expression value;
       Option.iter block else_
-  | Expression value | Assert value | Yield value -> f value
+  | Expression value | Assert value | Yield value -> on_expression value
   | Assignment { target; value; _ } ->
-      f target;
-      f value
+      on_expression target;
+      on_expression value
   | For { iterable; clauses; body; _ } ->
-      f iterable;
-      List.iter (loop_clause f) clauses;
+      on_expression iterable;
+      List.iter (loop_clause on_expression) clauses;
       block body
   | While { condition; clauses; body } ->
-      f condition;
-      List.iter (loop_clause f) clauses;
+      on_expression condition;
+      List.iter (loop_clause on_expression) clauses;
       block body
   | Parallel body | Concurrent body | Proof body -> block body
   | Statement_error -> ()
 
-let rec statement f written = statement_parts ~expression:f ~statement:(statement f) written
-let block f (block : block) = List.iter (statement f) block.statements
-let children f value = expression_parts ~expression:f ~statement:(statement f) value
+let rec statement on_expression written =
+  statement_parts ~expression:on_expression ~statement:(statement on_expression) written
+
+let block on_expression (block : block) = List.iter (statement on_expression) block.statements
+
+let children on_expression value =
+  expression_parts ~expression:on_expression ~statement:(statement on_expression) value
 
 let contains_break (body : block) =
   let has_break = ref false in
@@ -149,107 +163,115 @@ let contains_break (body : block) =
   List.iter statement body.statements;
   !has_break
 
-let generic_parameter f (parameter : generic_parameter) =
+let generic_parameter on_expression (parameter : generic_parameter) =
   match parameter.kind with
-  | Type_parameter (_, bounds) -> List.iter (path_type f) bounds
-  | Value_parameter (_, type_) -> type_expression f type_
+  | Type_parameter (_, bounds) -> List.iter (path_type on_expression) bounds
+  | Value_parameter (_, type_) -> type_expression on_expression type_
   | Capability_parameter _ | Generic_error -> ()
 
-let type_head f (head : type_head) = List.iter (generic_parameter f) head.generics
-let definition_name f = function Plain_name _ -> () | Member_name (head, _) -> type_head f head
+let type_head on_expression (head : type_head) =
+  List.iter (generic_parameter on_expression) head.generics
 
-let parameter f (parameter : parameter) =
+let definition_name on_expression = function
+  | Plain_name _ -> ()
+  | Member_name (head, _) -> type_head on_expression head
+
+let parameter on_expression (parameter : parameter) =
   match parameter.kind with
   | Named_parameter { type_; default; _ } ->
-      type_expression f type_;
-      Option.iter f default
+      type_expression on_expression type_;
+      Option.iter on_expression default
   | Self_parameter _ | Parameter_error -> ()
 
-let signature f (signature : signature) =
-  definition_name f signature.name;
-  List.iter (generic_parameter f) signature.generics;
-  List.iter (parameter f) signature.parameters;
+let signature on_expression (signature : signature) =
+  definition_name on_expression signature.name;
+  List.iter (generic_parameter on_expression) signature.generics;
+  List.iter (parameter on_expression) signature.parameters;
   (match signature.result with
-  | Some (Returns type_ | Yields (_, type_) | Lends (_, type_)) -> type_expression f type_
+  | Some (Returns type_ | Yields (_, type_) | Lends (_, type_)) ->
+      type_expression on_expression type_
   | None -> ());
-  List.iter (clause f) signature.clauses
+  List.iter (clause on_expression) signature.clauses
 
-let function_definition ?statement:visit f (definition : function_definition) =
-  signature f definition.signature;
+let function_definition ?statement:visit on_expression (definition : function_definition) =
+  signature on_expression definition.signature;
   match visit with
   | Some visit -> List.iter visit definition.body.statements
-  | None -> block f definition.body
+  | None -> block on_expression definition.body
 
-let field f (field : field) =
+let field on_expression (field : field) =
   match field.kind with
   | Field_declaration { type_; default; _ } ->
-      type_expression f type_;
-      Option.iter f default
+      type_expression on_expression type_;
+      Option.iter on_expression default
   | Field_error -> ()
 
-let definition ?statement:visit f (definition : definition) =
+let definition ?statement:visit on_expression (definition : definition) =
   let block (written : block) =
-    match visit with Some visit -> List.iter visit written.statements | None -> block f written
+    match visit with
+    | Some visit -> List.iter visit written.statements
+    | None -> block on_expression written
   in
   match definition.kind with
-  | Function function_ -> function_definition ?statement:visit f function_
-  | Method_declaration declared -> signature f declared
+  | Function function_ -> function_definition ?statement:visit on_expression function_
+  | Method_declaration declared -> signature on_expression declared
   | Type_definition { generics; body; clauses; _ } ->
-      List.iter (generic_parameter f) generics;
+      List.iter (generic_parameter on_expression) generics;
       (match body with
-      | Fields fields -> List.iter (field f) fields
+      | Fields fields -> List.iter (field on_expression) fields
       | Variants variants ->
           List.iter
-            (fun (variant : variant) -> Option.iter (List.iter (field f)) variant.fields)
+            (fun (variant : variant) ->
+              Option.iter (List.iter (field on_expression)) variant.fields)
             variants
       | Type_todo -> ());
       List.iter
         (fun (clause : type_clause) ->
           match clause.kind with
-          | Type_invariant value | Potential value -> f value
-          | Derives traits -> List.iter (path_type f) traits)
+          | Type_invariant value | Potential value -> on_expression value
+          | Derives traits -> List.iter (path_type on_expression) traits)
         clauses
   | Trait { generics; requires; members; _ } ->
-      List.iter (generic_parameter f) generics;
-      List.iter (path_type f) requires;
+      List.iter (generic_parameter on_expression) generics;
+      List.iter (path_type on_expression) requires;
       List.iter
         (fun (member : trait_member line) ->
           match member.kind with
-          | Associated_type (_, bounds) -> List.iter (path_type f) bounds
+          | Associated_type (_, bounds) -> List.iter (path_type on_expression) bounds
           | Law law ->
-              List.iter (parameter f) law.parameters;
-              List.iter f law.requires;
+              List.iter (parameter on_expression) law.parameters;
+              List.iter on_expression law.requires;
               block law.body
           | Associated_capability _ | Trait_member_error -> ())
         members
   | Impl { trait_; type_; uses; members } ->
-      path_type f trait_;
-      type_head f type_;
-      List.iter (capability_reference f) uses;
+      path_type on_expression trait_;
+      type_head on_expression type_;
+      List.iter (capability_reference on_expression) uses;
       List.iter
         (fun (member : impl_member line) ->
           match member.kind with
-          | Associated_definition (_, type_) -> type_expression f type_
+          | Associated_definition (_, type_) -> type_expression on_expression type_
           | Capability_definition (_, capabilities) ->
-              List.iter (capability_reference f) capabilities
+              List.iter (capability_reference on_expression) capabilities
           | Impl_member_error -> ())
         members
   | Capability _ -> ()
   | Constant { name; type_; value } ->
-      definition_name f name;
-      type_expression f type_;
-      f value
+      definition_name on_expression name;
+      type_expression on_expression type_;
+      on_expression value
   | Test { uses; body; _ } ->
-      List.iter (capability_reference f) uses;
+      List.iter (capability_reference on_expression) uses;
       block body
   | Theorem { generics; parameters; clauses; body; _ } ->
-      List.iter (generic_parameter f) generics;
-      List.iter (parameter f) parameters;
-      List.iter (clause f) clauses;
+      List.iter (generic_parameter on_expression) generics;
+      List.iter (parameter on_expression) parameters;
+      List.iter (clause on_expression) clauses;
       block body
   | Law_proof { trait_; type_; body; _ } ->
-      path_type f trait_;
-      type_head f type_;
+      path_type on_expression trait_;
+      type_head on_expression type_;
       block body
   | Definition_error _ -> ()
 

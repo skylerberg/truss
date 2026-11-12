@@ -77,14 +77,14 @@ let to_json hole =
       ("line", Json.Int hole.line);
       ("column", Json.Int hole.column);
       ("kind", Json.String (if hole.type_ = None then "type" else "value"));
-      ("type", Json.option (fun t -> Json.String t) hole.type_);
+      ("type", Json.option (fun type_text -> Json.String type_text) hole.type_);
       ( "in_scope",
         Json.List
           (List.map
              (fun (name, ty) ->
                Json.Object [ ("name", Json.String name); ("type", Json.String ty) ])
              hole.in_scope) );
-      ("blocks", Json.List (List.map (fun b -> Json.String b) hole.blocks));
+      ("blocks", Json.List (List.map (fun blocked -> Json.String blocked) hole.blocks));
     ]
 
 let print hole =

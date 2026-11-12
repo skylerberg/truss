@@ -137,7 +137,7 @@ let problem parent child ~right (operand : expression) =
       None
   | _, Lowest -> Some Lowest_operand
   | Arithmetic, Arithmetic | Shift, Shift | And_group, And_group | Or_group, Or_group -> None
-  | Bitwise a, Bitwise b when a = b -> None
+  | Bitwise left_item, Bitwise right_item when left_item = right_item -> None
   | (Range_group | Comparison | And_group | Or_group | Implies_group), Arithmetic -> None
   | (Comparison | And_group | Or_group | Implies_group), Range_group -> None
   | (And_group | Or_group | Implies_group), Comparison -> None
@@ -155,12 +155,12 @@ let problem parent child ~right (operand : expression) =
    may make the root an operator that the enclosing operator, [context],
    cannot take as an operand. The fix then puts the whole expression in
    parentheses too. *)
-let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression) (x, y, z) ~parsed
-    grouping =
+let grouping_fix cursor ?context ~(whole : expression) ~(operand : expression)
+    (first_operator, second_operator, third_operator) ~parsed grouping =
   let edits =
     match grouping with
-    | Left_first -> parentheses cursor x y
-    | Right_first -> parentheses cursor y z
+    | Left_first -> parentheses cursor first_operator second_operator
+    | Right_first -> parentheses cursor second_operator third_operator
   in
   let last = if grouping = parsed then group whole else group operand in
   let wrap =
@@ -185,9 +185,12 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
   in
   let pieces =
     match (operands whole, operands operand) with
-    | Some (_, z), Some (x, y) when not right -> Some (x, y, z)
-    | Some (x, _), Some (_, z) when right ->
-        Option.map (fun y -> (x, y, z)) (first_of_chain operand)
+    | Some (_, third_operator), Some (first_operator, second_operator) when not right ->
+        Some (first_operator, second_operator, third_operator)
+    | Some (first_operator, _), Some (_, third_operator) when right ->
+        Option.map
+          (fun second_operator -> (first_operator, second_operator, third_operator))
+          (first_of_chain operand)
     | _ -> None
   in
   (* The parser's grouping, and the other one. *)

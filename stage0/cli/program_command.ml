@@ -38,14 +38,14 @@ let stop_at_diagnostics ?proofs ~json project =
 
 let what = function `Todo -> "`todo`" | `Echo -> "`echo`"
 
-let unshippable_json project (u : Compile.unshippable) =
+let unshippable_json project (unshippable : Compile.unshippable) =
   Json.Object
     [
-      ("kind", Json.String (match u.failure with `Todo -> "todo" | `Echo -> "echo"));
-      ("file", Json.String (Project.shown_workspace_path project u.file));
-      ("line", Json.Int u.line);
-      ("column", Json.Int u.column);
-      ("way", Json.List (List.map (fun p -> Json.String (Path.show p)) u.way));
+      ("kind", Json.String (match unshippable.failure with `Todo -> "todo" | `Echo -> "echo"));
+      ("file", Json.String (Project.shown_workspace_path project unshippable.file));
+      ("line", Json.Int unshippable.line);
+      ("column", Json.Int unshippable.column);
+      ("way", Json.List (List.map (fun path -> Json.String (Path.show path)) unshippable.way));
     ]
 
 (* Refuses a program whose [main] can reach a [todo], or with [echo], an
@@ -61,12 +61,12 @@ let refuse_unshippable ~json ~echo (project : Project.t) compile main =
              [ ("unshippable", Json.List (List.map (unshippable_json project) unshippable)) ])
       else
         List.iter
-          (fun (u : Compile.unshippable) ->
+          (fun (unshippable : Compile.unshippable) ->
             Output.eprintf
               "%s:%d:%d: %s can be reached from `main`, so the program cannot be built.\n    %s\n"
-              (Project.shown_workspace_path project u.file)
-              u.line u.column (what u.failure)
-              (String.concat " -> " (List.map Path.show u.way)))
+              (Project.shown_workspace_path project unshippable.file)
+              unshippable.line unshippable.column (what unshippable.failure)
+              (String.concat " -> " (List.map Path.show unshippable.way)))
           unshippable;
       raise (Stop 1)
 
@@ -101,7 +101,7 @@ let refuse_holes ~json (project : Project.t) main =
           holes;
       raise (Stop 1)
 
-let catching f = try f () with Stop status -> Outcome.Exit status
+let catching work = try work () with Stop status -> Outcome.Exit status
 
 (* [truss run]: a development build, unless [release], of the one package
    the directory is about, which the client runs on its own terminal with
