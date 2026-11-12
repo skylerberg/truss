@@ -9,23 +9,27 @@ let weights =
     ("standard::binary", 427);
     ("standard::capabilities", 9);
     ("standard::checksum", 62);
-    ("standard::collections", 12);
+    ("standard::collections", 61);
     ("standard::collections::bit_set", 2405);
     ("standard::collections::deque", 756);
     ("standard::collections::heap", 252);
+    ("standard::collections::lru_cache", 307);
     ("standard::collections::sorted_map", 1526);
     ("standard::collections::sorted_set", 1317);
+    ("standard::compression", 1171);
     ("standard::console", 108);
     ("standard::core", 32);
     ("standard::core::range", 30);
-    ("standard::cryptography", 9142);
+    ("standard::cryptography", 9004);
     ("standard::csv", 271);
     ("standard::cursors", 11);
     ("standard::environment", 134);
     ("standard::files", 2748);
     ("standard::growth", 18);
     ("standard::hex", 163);
-    ("standard::json", 2400);
+    ("standard::html", 103);
+    ("standard::http", 883);
+    ("standard::json", 2708);
     ("standard::list", 1021);
     ("standard::list::array", 328);
     ("standard::list::array_views", 587);
@@ -34,12 +38,13 @@ let weights =
     ("standard::log", 19);
     ("standard::map", 1465);
     ("standard::math", 5899);
-    ("standard::network", 942);
+    ("standard::network", 987);
     ("standard::numbers::float_math", 942);
     ("standard::numbers::floats", 64);
     ("standard::numbers::integer_arithmetic", 2244);
     ("standard::numbers::integer_bits", 350);
     ("standard::numbers::integer_text", 313);
+    ("standard::numbers::integers", 872);
     ("standard::numbers::signed", 486);
     ("standard::numbers::unsigned", 380);
     ("standard::option", 54);
@@ -47,10 +52,11 @@ let weights =
     ("standard::random", 365);
     ("standard::regex", 1135);
     ("standard::result", 34);
+    ("standard::serialization", 397);
     ("standard::set", 997);
-    ("standard::simulation", 887);
+    ("standard::simulation", 4907);
     ("standard::specification", 1);
-    ("standard::streams", 264);
+    ("standard::streams", 257);
     ("standard::system::calls", 208);
     ("standard::system::clock", 10);
     ("standard::system::console", 4);
@@ -66,11 +72,11 @@ let weights =
     ("standard::system::processes", 161);
     ("standard::system::random", 1);
     ("standard::system::signals", 11);
-    ("standard::system::sockets", 196);
+    ("standard::system::sockets", 174);
     ("standard::system::tasks", 1);
     ("standard::system::terminals", 41);
     ("standard::system::test_runner", 257);
-    ("standard::tasks", 476);
+    ("standard::tasks", 325);
     ("standard::text", 1051);
     ("standard::text::character", 359);
     ("standard::text::grapheme_breaks", 30);
@@ -78,11 +84,12 @@ let weights =
     ("standard::text::string_views", 340);
     ("standard::text::unicode_data", 339);
     ("standard::text::unicode_tables", 926);
-    ("standard::time", 4116);
+    ("standard::time", 4013);
+    ("standard::toml", 1481);
     ("standard::unicode", 186);
-    ("standard::url", 1112);
-    ("standard::uuid", 139);
+    ("standard::url", 939);
+    ("standard::uuid", 138);
     ("standard::writing", 122);
   ]
 
-let letters_for_one = 12
+let letters_for_one = 11

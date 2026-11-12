@@ -578,33 +578,6 @@ fn array_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, 
   Ok(Value.Array(items: own items))
 }
 
-fn inline_table_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure]
-  requires depth <= 128
-{
-  at = at.saturating_add(1)
-  var entries: Map[String, Value] = [:]
-  var marks = Marks.new()
-  skip_spaces(text, at: mut at)
-  var open = peek(text, at: at) != Some(125)
-  if !open {
-    at = at.saturating_add(1)
-  }
-  while open {
-    skip_spaces(text, at: mut at)
-    let key_at = at
-    let keys = dotted_key(text, at: mut at)?
-    if peek(text, at: at) != Some(61) {
-      return Err(failure_at("expected `=` after a key", offset: at))
-    }
-    at += 1
-    skip_spaces(text, at: mut at)
-    let item = parse_value(text, at: mut at, depth: depth + 1)?
-    insert_dotted(mut entries, marks: mut marks, base: "", keys: keys.slice(), value: own item, at: key_at)?
-    skip_spaces(text, at: mut at)
-    open = after_element(text, at: mut at, closing: 125, inside: "an inline table")?
-  }
-  Ok(Value.Table(entries: own entries))
-}
 
 fn parse_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure] {
   if depth > 128 {
@@ -651,223 +624,245 @@ fn parse_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, 
   }
 }
 
-type Marks(headers: Set[String], dotted: Set[String], frozen: Set[String])
+type Kind = Branch | Tables | Leaf
+  derives Equal
 
-fn Marks.new() -> Marks {
-  Marks(headers: [], dotted: [], frozen: [])
+type Document(
+  kinds: List[Kind],
+  children: Map[String, USize],
+  names: List[List[String]],
+  items: List[List[USize]],
+  values: List[Option[Value]],
+  headers: List[Bool],
+  dotted: List[Bool],
+)
+
+fn Document.new() -> Document {
+  var document = Document(kinds: [], children: [:], names: [], items: [], values: [], headers: [], dotted: [])
+  let _ = add_node(mut document, kind: Kind.Branch, value: None, header: false, dotted: false)
+  document
 }
 
-fn segment(path: StringSlice, key: StringSlice) -> String {
-  var joined = path.to_string()
-  mut joined.push(key.length().format().slice())
+fn add_node(document: mut Document, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> USize {
+  let index = document.kinds.length()
+  mut document.kinds.push(kind)
+  mut document.names.push([])
+  mut document.items.push([])
+  mut document.values.push(own value)
+  mut document.headers.push(header)
+  mut document.dotted.push(dotted)
+  index
+}
+
+fn Document.kind(self, index: USize) -> Option[Kind] {
+  if index < self.kinds.length() { Some(self.kinds[index]) } else { None }
+}
+
+fn Document.is_header(self, index: USize) -> Bool {
+  index < self.headers.length() && self.headers[index]
+}
+
+fn Document.is_dotted(self, index: USize) -> Bool {
+  index < self.dotted.length() && self.dotted[index]
+}
+
+fn child_key(parent: USize, key: StringSlice) -> String {
+  var joined = parent.format()
   mut joined.push(":")
   mut joined.push(key)
   joined
 }
 
-fn indexed(path: StringSlice, index: USize) -> String {
-  var joined = path.to_string()
-  mut joined.push("[")
-  mut joined.push(index.format().slice())
-  mut joined.push("]")
-  joined
+fn Document.child(self, parent: USize, key: StringSlice) -> Option[USize] {
+  let joined = child_key(parent, key: key)
+  if self.children.contains(joined) {
+    return Some(self.children[joined])
+  }
+  None
 }
 
-fn insert_dotted(
-  table: mut Map[String, Value],
-  marks: mut Marks,
-  base: StringSlice,
-  keys: Slice[String],
-  value: own Value,
-  at: USize,
-) -> Result[Unit, Failure] {
-  match keys.split_first() {
-    Some(parts) => {
-      let path = segment(base, key: parts.first.slice())
-      if parts.rest.is_empty() {
-        if table.contains(parts.first) {
-          return Err(failure_at("a key that is already defined", offset: at))
-        }
-        if value is Table(_) || value is Array(_) {
-          mut marks.frozen.insert(path.copy())
-        }
-        mut table.insert(parts.first.copy(), value: own value)
-        return Ok(Unit)
-      }
-      if marks.frozen.contains(path) || marks.headers.contains(path) {
-        return Err(failure_at("a key that is already defined", offset: at))
-      }
-      if !table.contains(parts.first) {
-        mut table.insert(parts.first.copy(), value: Value.Table(entries: [:]))
-      }
-      mut marks.dotted.insert(path.copy())
-      match mut table.replace(parts.first.copy(), value: Value.Boolean(value: false)) {
-        Some(child) => match own child {
-          Table(entries) => {
-            var inner = own entries
-            let outcome = insert_dotted(mut inner, marks: mut marks, base: path.slice(), keys: parts.rest, value: own value, at: at)
-            let _ = mut table.replace(parts.first.copy(), value: Value.Table(entries: own inner))
-            outcome
-          }
-          other => {
-            let _ = mut table.replace(parts.first.copy(), value: own other)
-            Err(failure_at("a key that is already defined", offset: at))
-          }
-        }
-        None => Err(failure_at("a key that is already defined", offset: at))
-      }
+fn add_child(document: mut Document, parent: USize, key: StringSlice, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> USize {
+  let index = add_node(mut document, kind: kind, value: own value, header: header, dotted: dotted)
+  let _ = mut document.children.replace(child_key(parent, key: key), value: index)
+  if parent < document.names.length() {
+    mut document.names[parent].push(key.to_string())
+  }
+  index
+}
+
+fn add_item(document: mut Document, tables: USize) -> USize {
+  let index = add_node(mut document, kind: Kind.Branch, value: None, header: true, dotted: false)
+  if tables < document.items.length() {
+    mut document.items[tables].push(index)
+  }
+  index
+}
+
+fn last_item(document: Document, tables: USize) -> Option[USize] {
+  if tables < document.items.length() {
+    match document.items[tables].last() {
+      Some(item) => Some(item)
+      None => None
     }
-    None => Err(failure_at("expected a key", offset: at))
+  } else {
+    None
   }
 }
 
-type Header = Table | ArrayOfTables
-  derives Equal
+fn already_defined(at: USize) -> Failure {
+  failure_at("a key or table that is already defined", offset: at)
+}
 
-fn open_header(
-  table: mut Map[String, Value],
-  marks: mut Marks,
-  base: StringSlice,
-  keys: Slice[String],
-  header: Header,
-  at: USize,
-) -> Result[String, Failure] {
-  match keys.split_first() {
-    Some(parts) => {
-      let path = segment(base, key: parts.first.slice())
-      if marks.frozen.contains(path) {
-        return Err(failure_at("a table that is defined inline cannot be extended", offset: at))
-      }
-      if parts.rest.is_empty() {
-        if header == Header.Table {
-          let present = table.contains(parts.first)
-          let is_table = present && table[parts.first] is Table(_)
-          if present {
-            if marks.headers.contains(path) || marks.dotted.contains(path) || !is_table {
-              return Err(failure_at("a table that is already defined", offset: at))
-            }
-          } else {
-            mut table.insert(parts.first.copy(), value: Value.Table(entries: [:]))
-          }
-          mut marks.headers.insert(path.copy())
-          return Ok(own path)
+fn insert_dotted(document: mut Document, table: USize, keys: Slice[String], value: own Value, at: USize) -> Result[Unit, Failure] {
+  if keys.is_empty() {
+    return Err(failure_at("expected a key", offset: at))
+  }
+  var current = table
+  let last = keys.length() - 1
+  for index in 0..last {
+    let key = keys[index].slice()
+    match document.child(current, key: key) {
+      None => current = add_child(mut document, parent: current, key: key, kind: Kind.Branch, value: None, header: false, dotted: true)
+      Some(child) => {
+        if document.kind(child) != Some(Kind.Branch) || document.is_header(child) {
+          return Err(already_defined(at))
         }
-        if !table.contains(parts.first) {
-          mut table.insert(parts.first.copy(), value: Value.Array(items: [Value.Table(entries: [:])]))
-          return Ok(indexed(path.slice(), index: 0))
+        if child < document.dotted.length() {
+          document.dotted[child] = true
         }
-        return match mut table.replace(parts.first.copy(), value: Value.Boolean(value: false)) {
-          Some(child) => match own child {
-            Array(items) => {
-              var all = own items
-              mut all.push(Value.Table(entries: [:]))
-              let last = all.length() - 1
-              let _ = mut table.replace(parts.first.copy(), value: Value.Array(items: own all))
-              Ok(indexed(path.slice(), index: last))
-            }
-            other => {
-              let _ = mut table.replace(parts.first.copy(), value: own other)
-              Err(failure_at("an array of tables whose name is already defined", offset: at))
-            }
-          }
-          None => Err(failure_at("an array of tables whose name is already defined", offset: at))
-        }
-      }
-      if !table.contains(parts.first) {
-        mut table.insert(parts.first.copy(), value: Value.Table(entries: [:]))
-      }
-      match mut table.replace(parts.first.copy(), value: Value.Boolean(value: false)) {
-        Some(child) => match own child {
-          Table(entries) => {
-            var inner = own entries
-            let outcome = open_header(mut inner, marks: mut marks, base: path.slice(), keys: parts.rest, header: header, at: at)
-            let _ = mut table.replace(parts.first.copy(), value: Value.Table(entries: own inner))
-            outcome
-          }
-          Array(items) => {
-            var all = own items
-            let outcome = match mut all.pop() {
-              Some(last) => match own last {
-                Table(entries) => {
-                  var inner = own entries
-                  let position = indexed(path.slice(), index: all.length())
-                  let opened = open_header(mut inner, marks: mut marks, base: position.slice(), keys: parts.rest, header: header, at: at)
-                  mut all.push(Value.Table(entries: own inner))
-                  opened
-                }
-                other => {
-                  mut all.push(own other)
-                  Err(failure_at("a key that is already defined", offset: at))
-                }
-              }
-              None => Err(failure_at("a key that is already defined", offset: at))
-            }
-            let _ = mut table.replace(parts.first.copy(), value: Value.Array(items: own all))
-            outcome
-          }
-          other => {
-            let _ = mut table.replace(parts.first.copy(), value: own other)
-            Err(failure_at("a key that is already defined", offset: at))
-          }
-        }
-        None => Err(failure_at("a key that is already defined", offset: at))
+        current = child
       }
     }
-    None => Err(failure_at("expected a key", offset: at))
+  }
+  let key = keys[last].slice()
+  if document.child(current, key: key) is Some(_) {
+    return Err(already_defined(at))
+  }
+  let _ = add_child(mut document, parent: current, key: key, kind: Kind.Leaf, value: Some(own value), header: false, dotted: false)
+  Ok(Unit)
+}
+
+fn open_header(document: mut Document, keys: Slice[String], array: Bool, at: USize) -> Result[USize, Failure] {
+  if keys.is_empty() {
+    return Err(failure_at("expected a key", offset: at))
+  }
+  var current: USize = 0
+  let last = keys.length() - 1
+  for index in 0..last {
+    let key = keys[index].slice()
+    match document.child(current, key: key) {
+      None => current = add_child(mut document, parent: current, key: key, kind: Kind.Branch, value: None, header: false, dotted: false)
+      Some(child) => match document.kind(child) {
+        Some(Branch) => current = child
+        Some(Tables) => match last_item(document, tables: child) {
+          Some(item) => current = item
+          None => return Err(already_defined(at))
+        }
+        _ => return Err(already_defined(at))
+      }
+    }
+  }
+  let key = keys[last].slice()
+  match document.child(current, key: key) {
+    None => {
+      if array {
+        let tables = add_child(mut document, parent: current, key: key, kind: Kind.Tables, value: None, header: false, dotted: false)
+        Ok(add_item(mut document, tables: tables))
+      } else {
+        Ok(add_child(mut document, parent: current, key: key, kind: Kind.Branch, value: None, header: true, dotted: false))
+      }
+    }
+    Some(child) => {
+      if array {
+        return if document.kind(child) == Some(Kind.Tables) { Ok(add_item(mut document, tables: child)) } else { Err(already_defined(at)) }
+      }
+      if document.kind(child) != Some(Kind.Branch) || document.is_header(child) || document.is_dotted(child) {
+        return Err(already_defined(at))
+      }
+      if child < document.headers.length() {
+        document.headers[child] = true
+      }
+      Ok(child)
+    }
   }
 }
 
-fn insert_in_section(
-  table: mut Map[String, Value],
-  marks: mut Marks,
-  base: StringSlice,
-  section: Slice[String],
-  keys: Slice[String],
-  value: own Value,
-  at: USize,
-) -> Result[Unit, Failure] {
-  match section.split_first() {
-    Some(parts) => {
-      let path = segment(base, key: parts.first.slice())
-      match mut table.replace(parts.first.copy(), value: Value.Boolean(value: false)) {
-        Some(child) => match own child {
-          Table(entries) => {
-            var inner = own entries
-            let outcome = insert_in_section(mut inner, marks: mut marks, base: path.slice(), section: parts.rest, keys: keys, value: own value, at: at)
-            let _ = mut table.replace(parts.first.copy(), value: Value.Table(entries: own inner))
-            outcome
-          }
-          Array(items) => {
-            var all = own items
-            let outcome = match mut all.pop() {
-              Some(last) => match own last {
-                Table(entries) => {
-                  var inner = own entries
-                  let position = indexed(path.slice(), index: all.length())
-                  let inserted = insert_in_section(mut inner, marks: mut marks, base: position.slice(), section: parts.rest, keys: keys, value: own value, at: at)
-                  mut all.push(Value.Table(entries: own inner))
-                  inserted
-                }
-                other => {
-                  mut all.push(own other)
-                  Err(failure_at("a key that is already defined", offset: at))
-                }
-              }
-              None => Err(failure_at("a key that is already defined", offset: at))
-            }
-            let _ = mut table.replace(parts.first.copy(), value: Value.Array(items: own all))
-            outcome
-          }
-          other => {
-            let _ = mut table.replace(parts.first.copy(), value: own other)
-            Err(failure_at("a key that is already defined", offset: at))
-          }
-        }
-        None => Err(failure_at("a key that is already defined", offset: at))
-      }
+fn build(document: Document, leaves: mut Map[USize, Value], index: USize) -> Value {
+  match document.kind(index) {
+    Some(Leaf) => match mut leaves.take(index) {
+      Some(value) => own value
+      None => Value.Table(entries: [:])
     }
-    None => insert_dotted(mut table, marks: mut marks, base: base, keys: keys, value: own value, at: at)
+    Some(Tables) => {
+      let items = if index < document.items.length() { document.items[index].copy() } else { [] }
+      var built: List[Value] = List.with_capacity(items.length())
+      for item in items {
+        mut built.push(build(document, leaves: mut leaves, index: item))
+      }
+      Value.Array(items: own built)
+    }
+    _ => {
+      let names = if index < document.names.length() { document.names[index].copy() } else { [] }
+      var entries: Map[String, Value] = Map.with_capacity(names.length())
+      for name in own names {
+        match document.child(index, key: name.slice()) {
+          Some(child) => {
+            let built = build(document, leaves: mut leaves, index: child)
+            let _ = mut entries.replace(own name, value: own built)
+          }
+          None => {}
+        }
+      }
+      Value.Table(entries: own entries)
+    }
   }
+}
+
+fn Document.finish(own self) -> Map[String, Value] {
+  var document = own self
+  var leaves: Map[USize, Value] = [:]
+  var index: USize = 0
+  for value in own document.values {
+    match own value {
+      Some(leaf) => {
+        let _ = mut leaves.replace(index, value: own leaf)
+      }
+      None => {}
+    }
+    index = index.saturating_add(1)
+  }
+  document.values = []
+  match build(document, leaves: mut leaves, index: 0) {
+    Table(entries) => own entries
+    _ => [:]
+  }
+}
+
+fn inline_table_value(text: StringSlice, at: mut USize, depth: USize) -> Result[Value, Failure]
+  requires depth <= 128
+{
+  at = at.saturating_add(1)
+  var document = Document.new()
+  skip_spaces(text, at: mut at)
+  var open = peek(text, at: at) != Some(125)
+  if !open {
+    at = at.saturating_add(1)
+  }
+  while open {
+    skip_spaces(text, at: mut at)
+    let key_at = at
+    let keys = dotted_key(text, at: mut at)?
+    if peek(text, at: at) != Some(61) {
+      return Err(failure_at("expected `=` after a key", offset: at))
+    }
+    at += 1
+    skip_spaces(text, at: mut at)
+    let item = parse_value(text, at: mut at, depth: depth + 1)?
+    insert_dotted(mut document, table: 0, keys: keys.slice(), value: own item, at: key_at)?
+    skip_spaces(text, at: mut at)
+    open = after_element(text, at: mut at, closing: 125, inside: "an inline table")?
+  }
+  Ok(Value.Table(entries: own document.finish()))
 }
 
 public fn parse(text: StringSlice) -> Result[Map[String, Value], ParseError] {
@@ -877,38 +872,27 @@ public fn parse(text: StringSlice) -> Result[Map[String, Value], ParseError] {
   }
 }
 
-fn header_line(
-  text: StringSlice,
-  at: mut USize,
-  root: mut Map[String, Value],
-  marks: mut Marks,
-) -> Result[List[String], Failure] {
+fn header_line(text: StringSlice, at: mut USize, document: mut Document) -> Result[USize, Failure] {
   let line_at = at
-  let header = if peek(text, at: at.saturating_add(1)) == Some(91) { Header.ArrayOfTables } else { Header.Table }
-  at = at.saturating_add(if header == Header.ArrayOfTables { 2 } else { 1 })
+  let array = peek(text, at: at.saturating_add(1)) == Some(91)
+  at = at.saturating_add(if array { 2 } else { 1 })
   let keys = dotted_key(text, at: mut at)?
   if peek(text, at: at) != Some(93) {
     return Err(failure_at("expected `]` after a table's name", offset: at))
   }
   at += 1
-  if header == Header.ArrayOfTables {
+  if array {
     if peek(text, at: at) != Some(93) {
       return Err(failure_at("expected `]]` after an array of tables' name", offset: at))
     }
     at += 1
   }
-  let _ = open_header(mut root, marks: mut marks, base: "", keys: keys.slice(), header: header, at: line_at)?
+  let table = open_header(mut document, keys: keys.slice(), array: array, at: line_at)?
   end_of_line(text, at: mut at)?
-  Ok(own keys)
+  Ok(table)
 }
 
-fn key_value_line(
-  text: StringSlice,
-  at: mut USize,
-  root: mut Map[String, Value],
-  marks: mut Marks,
-  section: Slice[String],
-) -> Result[Unit, Failure] {
+fn key_value_line(text: StringSlice, at: mut USize, document: mut Document, table: USize) -> Result[Unit, Failure] {
   let line_at = at
   let keys = dotted_key(text, at: mut at)?
   if peek(text, at: at) != Some(61) {
@@ -917,14 +901,13 @@ fn key_value_line(
   at += 1
   skip_spaces(text, at: mut at)
   let item = parse_value(text, at: mut at, depth: 0)?
-  insert_in_section(mut root, marks: mut marks, base: "", section: section, keys: keys.slice(), value: own item, at: line_at)?
+  insert_dotted(mut document, table: table, keys: keys.slice(), value: own item, at: line_at)?
   end_of_line(text, at: mut at)
 }
 
 fn parse_document(text: StringSlice) -> Result[Map[String, Value], Failure] {
-  var root: Map[String, Value] = [:]
-  var marks = Marks.new()
-  var section: List[String] = []
+  var document = Document.new()
+  var table: USize = 0
   var at: USize = 0
   if text.starts_with("\u{feff}") {
     at = 3
@@ -932,13 +915,13 @@ fn parse_document(text: StringSlice) -> Result[Map[String, Value], Failure] {
   skip_blank(text, at: mut at)?
   while peek(text, at: at) is Some(byte) {
     if byte == 91 {
-      section = header_line(text, at: mut at, root: mut root, marks: mut marks)?
+      table = header_line(text, at: mut at, document: mut document)?
     } else {
-      key_value_line(text, at: mut at, root: mut root, marks: mut marks, section: section.slice())?
+      key_value_line(text, at: mut at, document: mut document, table: table)?
     }
     skip_blank(text, at: mut at)?
   }
-  Ok(own root)
+  Ok(own document.finish())
 }
 
 impl serialization::Tree for Value {
