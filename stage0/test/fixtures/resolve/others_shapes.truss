@@ -1,0 +1,3 @@
+public fn area() -> Int64 { 0 }
+
+fn hidden() -> Int64 { 0 }

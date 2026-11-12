@@ -1,0 +1,12 @@
+capability Meter {
+  fn tick()
+}
+
+fn f(items: List[Int64])
+  uses Meter
+  cost calls(Meter.tick) == items.length()
+{
+  for _ in items {
+    Meter.tick()
+  }
+}

@@ -1,0 +1,12 @@
+fn total(items: own List[Int64] = [1, 2, 3]) -> Int64 {
+  var sum = 0
+  for item in items {
+    sum += item
+  }
+  sum
+}
+
+test "defaulted" {
+  assert total() == 6
+  assert total(items: [4, 5]) == 9
+}

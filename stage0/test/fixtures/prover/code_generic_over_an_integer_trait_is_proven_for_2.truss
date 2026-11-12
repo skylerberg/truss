@@ -1,0 +1,5 @@
+fn twice[Number: UnsignedInteger](value: Number) -> Number
+  requires value <= 200
+{
+  value + value
+}

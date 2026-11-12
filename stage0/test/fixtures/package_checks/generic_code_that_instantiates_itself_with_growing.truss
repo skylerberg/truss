@@ -1,0 +1,3 @@
+fn grow[Element](value: own Element) -> Int64 {
+  grow(Some(own value))
+}

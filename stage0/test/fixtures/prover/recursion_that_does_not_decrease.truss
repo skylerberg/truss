@@ -1,0 +1,6 @@
+fn f(steps: UInt32) -> UInt32
+  decreases steps
+  cost time finite
+{
+  f(steps)
+}

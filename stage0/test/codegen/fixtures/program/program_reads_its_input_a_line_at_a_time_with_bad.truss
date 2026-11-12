@@ -1,0 +1,10 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var count: UInt8 = 0
+  while Console.read_line() is Some(line) {
+    Console.print_line("${count}: ${line}")
+    count += 1
+  }
+  ExitCode(count)
+}

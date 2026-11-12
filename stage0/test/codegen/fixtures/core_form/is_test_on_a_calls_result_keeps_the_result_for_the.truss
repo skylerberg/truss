@@ -1,0 +1,31 @@
+fn label(count: Int64) -> Option[String] {
+  if count > 0 {
+    return Some("label ${count}")
+  }
+  None
+}
+
+fn total_length(count: Int64) -> USize {
+  var total: USize = 0
+  var left = count
+  while label(left) is Some(text) {
+    if text != "label 0" {
+      total += text.length()
+    }
+    left -= 1
+  }
+  total
+}
+
+fn first_length(count: Int64) -> USize {
+  if label(count) is Some(text) && text == "label 12" {
+    return text.length()
+  }
+  0
+}
+
+test "keeps" {
+  assert total_length(3) == 21
+  assert first_length(12) == 8
+  assert first_length(0) == 0
+}

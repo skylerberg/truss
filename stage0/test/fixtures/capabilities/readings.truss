@@ -1,0 +1,22 @@
+capability Meter {
+  fn read() -> Int64
+}
+
+type Fixed(value: Int64)
+
+impl Meter for Fixed {
+  fn read(self) -> Int64 {
+    self.value
+  }
+}
+
+fn readings(count: Int64) yields Int64
+  uses Meter
+{
+  var index = 0
+  while index < count {
+    yield Meter.read()
+    index += 1
+  }
+}
+

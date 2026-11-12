@@ -1,0 +1,7 @@
+fn f(table: mut Map[Int64, Int64])
+  requires table.model().contains_key(3)
+  ensures table.model().contains_key(3)
+  ensures table.model().get(3) == old(table.model().get(3))
+{
+  mut table.insert(1, value: 2)
+}

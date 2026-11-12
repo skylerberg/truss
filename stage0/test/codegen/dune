@@ -20,6 +20,7 @@
   library_tests)
  (modules
   codegen_support
+  fixtures
   layout_tests
   lir_tests
   drops_tests
@@ -88,3 +89,12 @@
  (deps
   (glob_files %{workspace_root}/*.md)
   (glob_files library/*.truss)))
+
+(rule
+ (target fixtures.ml)
+ (deps
+  (glob_files_rec fixtures/**.truss))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:../embed_fixtures/embed_fixtures.exe} %{deps}))))

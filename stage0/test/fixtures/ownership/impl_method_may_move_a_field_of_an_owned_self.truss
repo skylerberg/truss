@@ -1,0 +1,7 @@
+trait Taker {
+  fn take(own self) -> List[Int64]
+}
+
+impl Taker for Bag {
+  fn take(own self) -> List[Int64] { own self.items }
+}

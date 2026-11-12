@@ -1,0 +1,7 @@
+fn f(items: List[UInt32])
+  cost time O(items.length())
+{
+  for item in items {
+    let _ = step(item)
+  }
+}

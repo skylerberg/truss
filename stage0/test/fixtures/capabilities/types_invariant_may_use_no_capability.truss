@@ -1,0 +1,9 @@
+fn stamp() -> Bool
+  uses Clock
+  cost time finite
+{
+  todo
+}
+
+type Counted(count: Int64)
+  invariant stamp()

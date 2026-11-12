@@ -1,0 +1,3 @@
+public trait Sided {
+  fn corners(self) -> Int64
+}

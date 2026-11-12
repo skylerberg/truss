@@ -1,0 +1,5 @@
+fn spent(bag: mut Bag[Meter])
+  cost amortized time O(1)
+{
+  mut bag.first().credit = 0
+}

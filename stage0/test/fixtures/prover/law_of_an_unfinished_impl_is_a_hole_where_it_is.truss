@@ -1,0 +1,30 @@
+trait Sized {
+  fn measure(self) -> Int64
+    cost time finite
+  fn label(self) -> Int64
+    cost time finite
+
+  law positive(value: Self) { value.measure() > 0 }
+}
+
+type Box(size: Int64)
+
+impl Sized for Box {
+  fn measure(self) -> Int64
+    cost time finite
+  {
+    self.size
+  }
+
+  fn label(self) -> Int64
+    cost time finite
+  {
+    todo
+  }
+}
+
+fn f() -> Int64
+  ensures result > 0
+{
+  Box(size: 0).measure()
+}

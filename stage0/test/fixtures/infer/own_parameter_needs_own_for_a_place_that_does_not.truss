@@ -1,0 +1,5 @@
+fn keep(items: own List[Int64]) {}
+
+fn f(items: own List[Int64]) {
+  keep(items)
+}

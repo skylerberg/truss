@@ -10,8 +10,6 @@ reads what [TYPECHECKER.md](TYPECHECKER.md) produces, and states what
 as [CLI.md](CLI.md) describes, and its queries run on the code database,
 which [DATABASE.md](DATABASE.md) describes.
 
-## What the prover does
-
 The prover takes the core form of each definition, the interfaces and
 contracts of its callees, and the bodies it reads as definitions. For each
 definition it finds every *obligation*, a fact that must hold for the
@@ -41,7 +39,7 @@ It does not:
   operation it means, sugar is desugared, and every type is solved. It
   reads no syntax tree.
 - infer specifications. Loop invariants, measures, and contracts are
-  written; the few loops whose facts are worked out alone get them from the
+  written; the few loops without written invariants get their facts from the
   contracts of the methods they call (see [Loops](#loops)).
 - decide whether a test may run. Tests run as soon as the code
   type-checks, with run-time checks of every operation that could fail (see
@@ -206,8 +204,8 @@ and `reads` clauses):
 - **Integers are mathematical integers.** Each value of a built-in integer
   type comes with its range as a fact, and each operation on one becomes
   an exact operation and an obligation that the result is in range, as in
-  Dafny and Verus. The intrinsic module's integer operations mean what the
-  compiler makes them do: arithmetic gives the exact result, with its
+  Dafny and Verus. The intrinsic module's integer operations have the
+  semantics the compiler gives them: arithmetic gives the exact result, with its
   operator's obligation that the result is in range and the divisor is not
   zero, since a build without run-time checks does not stop there; wrapping
   arithmetic gives the exact result brought into range by a remainder,
@@ -262,10 +260,10 @@ and `reads` clauses):
   it reads up to a zero, a last element that is zero. A result that is not
   negative is at most the parameter the row names, and each number of the
   system, such as `PATH_MAX`, is one constant. An operation that stops
-  the program on a bad index says what holds when it returns. A part
-  `storage_at_mut` lends changes nothing until the lend ends, where the
-  storage takes back what the caller left in it, and so for `view_at_mut`
-  and a view. `storage_view_mut` is a view of the storage's elements to
+  the program on a bad index assumes on return that the index was valid.
+  A part that `storage_at_mut` lends changes nothing until the lend ends,
+  when the borrower's final value is written back to the storage, and so
+  for `view_at_mut` and a view. `storage_view_mut` is a view of the storage's elements to
   change them through, and `storage_take_view`, `view_take_view`, and
   `array_take_view` say the owner's elements from `start` are now the
   view's: the run must lie within the owner, which keeps its length (and a
@@ -296,7 +294,7 @@ and `reads` clauses):
   bit-blasting. Verus asks for this by hand with `by (bit_vector)`; Truss
   tries both, always in the same order, and caches both answers. Only the
   bitwise operations change, not the integers, so arithmetic stays exact
-  and the second query means exactly what the first does: an integer that
+  and the second query is equivalent to the first: an integer that
   is never in its type's range, which recoding every integer as a
   bit-vector would wrap, cannot make it prove something false.
 - **Floats follow IEEE 754 exactly,** as DESIGN.md requires, through the
@@ -315,7 +313,7 @@ and `reads` clauses):
   `String` with those bytes, which costs nothing. One with interpolations
   is the calls that the core form has for it, of the text builder's methods
   and of each value's `display`, so it is known by their contracts and
-  costs what they cost. A string pattern matches text by its bytes.
+  costs the sum of their costs. A string pattern matches text by its bytes.
 
 ### Mathematical collections
 
@@ -369,9 +367,9 @@ unstable proofs.
   everywhere.
 - **Every other `==`, and each ordering, is a function of its operands,**
   with the laws of `Equal` and `Ordered` as facts. `Equal` and `Ordered`
-  use no capabilities, so a comparison always gives the same answer, which
-  is what their laws are about. From `a == b` the prover concludes only
-  what those laws and the type's contracts give. An arithmetic operator on
+  use no capabilities, so a comparison always gives the same answer, as
+  their laws assume. From `a == b` the prover concludes only the
+  consequences of those laws and the type's contracts. An arithmetic operator on
   a type that is not built in is a call of its trait's method.
 - **A derived `Equal` that is not structural** is defined field by field
   with each field's own `==`, unfolded once for each two values compared,
@@ -381,7 +379,7 @@ unstable proofs.
   `==` on the field, so the `impl`'s contract applies to it.
 - **Every other derived method is its derived body.** A derived `compare`
   orders by variant and then field by field, and a derived `hash` or
-  `default` is what the derivation writes, so each is pure and functional,
+  `default` is the body the derivation generates, so each is pure and functional,
   and its body is its definition, as any such function's is.
 
 ### Generic code is proven once
@@ -419,7 +417,7 @@ decides when a body is a definition. In the solver:
   function terminates, and is defined, wherever the `requires` holds.
 - **A functional body is a definition,** unfolded at each call: where the
   `requires` holds, the call's result is the body's value. A body that
-  reads what the prover cannot, such as an opaque type's fields from
+  reads something the prover cannot see, such as an opaque type's fields from
   another package, is not unfolded, and the function is known by its
   contract alone.
 - **A body is read across packages only where it is exported.** A caller
@@ -484,9 +482,9 @@ decides when a body is a definition. In the solver:
   same captured values are the same value, so a bound and a loop's bound
   that both write `fn(row) { row.length() }` mean the same sum. A lambda
   is proven where it is written, with fresh arguments, and must end
-  exactly when its function type has a `time` clause. Its body runs only
-  where it is called, which may be nowhere, so what the body assumes, of
-  its arguments or from what it calls, is known only inside it: a lambda
+  exactly when its function type has a `time` clause. Its body may run any
+  number of times, including none, so its assumptions about its arguments
+  and its callees hold only inside it: a lambda
   that calls a function that never returns, or whose type's `requires` no
   argument meets, shows nothing of the path it is written on. The range of
   its result is known for arguments in the ranges of their types.
@@ -514,9 +512,9 @@ decides when a body is a definition. In the solver:
   anywhere but in a call or passed straight to a parameter, such as bound
   to a local or stored in a field, must accept every argument of its type.
 - **A callback's `requires` names the callee's parameters as the caller
-  passed them.** A call through the callback, in the callee, shows it with
-  the parameters' values on entry, which is what the caller showed it
-  with, even where a `mut` parameter has changed since.
+  passed them.** A call through the callback, in the callee, proves it with
+  the parameters' values on entry, as the caller did, even where a `mut`
+  parameter has changed since.
 
 Callers' proofs depend on whether a body is a definition, and on the body
 itself when it is. Both are in the trace of every proof that used the
@@ -616,8 +614,8 @@ call uses the capability method's contract.
 - **A tagged template is a call** of its tag's `from_template` with the
   template: its literal texts, each a `Literal` whose model is its bytes,
   and its parts, each turned into the tag's `Part` by its `From`. The
-  tag's `requires` is shown of that template, from what the prover knows
-  of its text, or by [running it](#running-code-while-proving).
+  tag's `requires` is proven of that template, from the facts about its
+  text, or by [running it](#running-code-while-proving).
 - **A call whose callee's contract cannot be read,** such as one with
   errors, gives a value known only by its type's range. So does a call of
   an intrinsic, and building a type whose fields the package cannot see:
@@ -639,17 +637,16 @@ call uses the capability method's contract.
   invariant and restore it before the iteration ends. A value that is not
   valid on entry, such as `self` in a private method that updates it, is
   not held to it.
-- **A `for` loop** is the same, with what the `each` it calls promises. A
-  ghost sequence, `yielded`, holds what the earlier iterations received.
+- **A `for` loop** is the same, with the contract of the `each` it calls. A
+  ghost sequence, `yielded`, holds the parts the earlier iterations received.
   At the head, the loop's invariants and the method's clauses that hold
   where it may end are assumed of `yielded`. Each iteration either takes a
   fresh value meeting the method's clauses for each `yield`, runs the body,
   and appends the value, as the body left it, to `yielded`, or leaves with
   `finished` true. A `break` leaves with `finished` false.
-- **`yielded` in a loop's clauses** names what the nearest loop or method
-  yields: a `for` loop's own parts, which for a range are its indexes so
-  far, or else, in a lending or yielding method, what the method has
-  yielded.
+- **`yielded` in a loop's clauses** names the parts the innermost `for`
+  loop has received, which for a range are its indexes so far, or else, in
+  a lending or yielding method, the parts the method has yielded.
 - **A range of integers is the one loop the prover knows itself.** In
   `for i in 0..count`, `i` starts at the range's start, each iteration has
   the next index, and `i < count`. In the loop's clauses, `i` is the next
@@ -747,7 +744,7 @@ the invariants before it. Inside a quantifier, these are checked for each
 value its range admits, so `forall i in 0..items.length() => items[i] > 0`
 is well defined and `forall i in 0..items.length() + 1 => items[i] > 0` is
 not. A quantifier's body runs only for the values its range admits, which
-may be none, so what the body assumes holds only for them. A pure call's
+may be none, so the body's assumptions hold only for them. A pure call's
 `ensures` and definition are facts of mathematics, which hold either way.
 
 - **Arithmetic is exact** on `Integer`, and an `Integer` passed where a
@@ -757,7 +754,7 @@ may be none, so what the body assumes holds only for them. A pure call's
 - **A quantifier over a range or a collection** is a quantifier whose bound
   name is limited to it: `forall i in 0..count => p` is "for every integer
   `i` with `0 <= i < count`, `p`". Over a list or a sequence it ranges over
-  the indexes of the model, and over a set, over what the set contains.
+  the indexes of the model, and over a set, over its elements.
 - **A quantifier over every value of a type** has each value in its type's
   range and meeting its type's invariants.
 - **A quantifier in code** is read as one in a specification is.
@@ -863,8 +860,8 @@ prover chooses them, as Dafny does, and states them in the query:
 
 When no trigger is found, the query states none and the solver chooses its
 own. A query with such a fact that runs out of steps says so in its
-diagnostic, since naming the term the fact is needed for, in an `assert`,
-can be what the solver lacks.
+diagnostic, since an `assert` that names the term the fact applies to can
+supply the trigger the solver lacks.
 
 A value made inside a quantifier, such as a call's result, is a function of
 the quantifier's bound names in the logic, since it can differ for each of
@@ -1014,10 +1011,10 @@ The prover adds a ghost counter for each resource that has a cost clause:
   value's validity counts nothing either.
 - **A counter is an `Integer` on each path,** increased at each call and
   each iteration, so costs are proven by the same verification conditions
-  as everything else. Where paths join, a counter is what the path taken
-  spent.
-- **A callee's cost is what its cost clause promises,** never what its body
-  does, as DESIGN.md requires, read with its parameters as they were passed
+  as everything else. Where paths join, a counter is the cost of the path
+  taken.
+- **A callee's cost is the bound of its cost clause,** never its body's
+  cost, as DESIGN.md requires, read with its parameters as they were passed
   and with `result`. A callee with no clause about a resource may spend any
   amount of it, so a bound that depends on it cannot be proven.
 - **The steps between calls and iterations are not counted one by one.**
@@ -1126,12 +1123,12 @@ plus what happens before and after:
 - **The prover adds the invariant** that the counter is at most its value
   on entry plus the iterations so far times that bound, or, for an exact
   bound, exactly that.
-- **The bound on one iteration is worked out, and then shown.** From what
-  the iterations that ended, or were left by `break`, spent, each value the
-  loop changes or makes is replaced by a bound on it from the facts at the
+- **The bound on one iteration is inferred, and then proven.** In the
+  costs of the iterations that completed or exited by `break`, each value
+  the loop changes or makes is replaced by a bound on it from the facts at the
   head and in the body: an upper bound where the cost grows with it, and a
   lower bound where it shrinks, and a choice between paths by the larger
-  of them. The result is a guess, and every iteration is shown to spend no
+  of them. The result is a guess, and every iteration is proven to cost no
   more than it, so a wrong guess fails a proof but never makes one. When no
   bound is found, the error says to give the loop a `cost` clause.
 - **The iterations are bounded where the loop is left.** A ghost count of
@@ -1207,17 +1204,17 @@ plus what happens before and after:
   amortized clause; a plain counter counts the plain one, which the
   potential the call takes does not raise. So a definition can state both,
   and each is proven, its recursive calls included, by its own counting.
-- **A loop that spends or saves potential** is bounded by what it has spent
-  plus the potential the values it changes hold, which is what telescopes:
-  each iteration's bound is on what it spends plus the growth of that
-  potential, so potential saved by one iteration pays for the next one's
-  work, and where the loop is left, what was spent is within the bound
-  plus the potential on entry, less what is left. Where no such bound is
-  found, as where a copy's potential is spent on a push, what an iteration
-  spends alone is bounded instead. Where an iteration's paths
-  join, what each spent is a choice, not a fresh symbol, when it names a
-  potential, written with the values the paths joined into, so the
-  potential each path changed cancels against what the loop holds.
+- **A loop that spends or saves potential** bounds its cost so far plus
+  the potential of the values it changes, a sum that telescopes. Each
+  iteration's bound is on its cost plus the change in that potential, so
+  potential saved by one iteration pays for the next one's work, and on
+  exit the loop's cost is within the bound plus the potential on entry,
+  less the potential remaining. Where no such bound is found, as where a
+  copy's potential is spent on a push, an iteration's cost alone is
+  bounded instead. Where an iteration's paths join, each path's cost that
+  names a potential is joined as an `ite`, not a fresh symbol, written
+  with the joined values, so the potential each path changed cancels
+  against the potential the loop holds.
 - **Potentials never go below zero,** which is proven for each type with
   one, from its invariants, and is a fact about every value that meets its
   type's invariants. A type parameter may hold potential, which is not
@@ -1228,7 +1225,7 @@ plus what happens before and after:
 - **A lambda counts on its own.** Its type's cost clauses, which can only
   be constants since a function type's inputs have no names, are shown of
   its body like a function's.
-- **`time(f)` for a lambda** is a bound on one call of it, worked out as a
+- **`time(f)` for a lambda** is a bound on one call of it, inferred as a
   loop's iteration is, from the values around the lambda, and shown of
   each way its body ends only when a cost the prover is showing uses it.
 - **A function type with an `O(...)` time bound** is one unit per call, to
@@ -1271,12 +1268,12 @@ It also decides a tagged template's checks by running them, as
   `template.literals`** is decided by running it, for an `impl` that is not
   generic. A template's parts are values known only at run time, and such
   a clause cannot see them, so it is run on a template of the same literal
-  texts and no parts, which gives what it gives for every parts. Any other
-  clause is proven by the solver from what the prover knows of the
+  texts and no parts, and its answer holds for every choice of parts. Any
+  other clause is proven by the solver from the facts about the
   template.
 - **Code generation runs it**, as a `Template_check` instance (see
   CODEGEN.md, "Code run while compiling"): each clause that can run is
-  worked out and written out. A clause that cannot run, such as one that
+  evaluated and written out. A clause that cannot run, such as one that
   calls a function for specifications only, is left to the solver.
 - **The prover does not depend on code generation,** and code generation
   does not depend on the prover. The evaluator is an oracle, as the solver
@@ -1330,7 +1327,7 @@ regardless, with their run-time checks.
   before it checked, and skips the ones after it on that path. It is not
   recorded as a hole, because `truss holes` already lists every `todo`.
 - **An `impl`'s laws are skipped while the `impl` is unfinished.** A law
-  constrains what the `impl`'s methods return. If a method the `impl`
+  constrains the results of the `impl`'s methods. If a method the `impl`
   defines contains a `todo`, the laws of that `impl` are not obligations.
 - **A law that is not shown is a hole where it is used.** A law of an
   unfinished `impl`, or one whose `proof` holds a `todo`, is still a fact
@@ -1389,7 +1386,7 @@ Each obligation the prover could not prove is an error, with the shared
   `requires (flag) ==> (low < high)`, and `count + other` on a `UInt8`
   gives `requires count + other <= 255`. A specification's arithmetic is
   exact, so the clause states the goal as the solver has it.
-- **Fixes that change what the code means.** An overflow, a divisor that
+- **Fixes that change the code's semantics.** An overflow, a divisor that
   may be zero, or a shift amount that may be too large is named, not
   fixed, as one to check first with an `if`, do with the checked
   operation, or allow to stop the program with `uses Panic`.
@@ -1444,9 +1441,9 @@ A proof is as trustworthy as:
 - the facts the prover states itself: that the mathematical collections
   are extensional, what `log` and `power` are, the few facts about bitwise
   operations, and what a derived `Equal` means
-- the contracts of `standard::specification`, which say what the
-  mathematical collections are, so its definitions are not proven
-- what the prover knows of the intrinsic module's integer operations, its
+- the contracts of `standard::specification`, which define the
+  mathematical collections, so its definitions are not proven
+- the prover's facts about the intrinsic module's integer operations, its
   storage and views, and reading and writing bytes, and the costs the
   compiler declares for each intrinsic
 - two facts about the system a program runs on: each of `system_is_linux`,
@@ -1488,8 +1485,8 @@ test the prover itself:
 ## Interfaces to other stages
 
 - **The type checker** gives the core form of each definition and its
-  interface, as TYPECHECKER.md describes. What the checker leaves the
-  prover to show is in the form's nodes: a `From_integer` conversion must
+  interface, as TYPECHECKER.md describes. The form's nodes carry the
+  obligations the checker leaves to the prover: a `From_integer` conversion must
   fit its type, a widened function value's costs must imply the expected
   ones, and a `match` whose guards must be exhaustive ends in an
   `unreachable` arm. A node's origin finds the source text a diagnostic

@@ -1,0 +1,6 @@
+fn f() -> Int64
+  uses Meter
+{
+  var counter = Counter(next: 0)
+  folded(mut counter, step: fn(value) { value + Meter.read() })
+}

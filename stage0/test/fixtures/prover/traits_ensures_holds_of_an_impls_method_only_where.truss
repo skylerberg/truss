@@ -1,0 +1,21 @@
+trait Scaled {
+  fn scale(self, n: Int64) -> Int64
+    requires n > 0
+    ensures result > 0
+}
+
+type Box()
+
+impl Scaled for Box {
+  fn scale(self, n: Int64) -> Int64
+    requires n >= 0
+  {
+    n
+  }
+}
+
+fn f() -> Int64
+  ensures result > 0
+{
+  Box().scale(0)
+}

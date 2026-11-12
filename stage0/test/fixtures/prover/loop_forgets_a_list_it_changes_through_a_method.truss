@@ -1,0 +1,10 @@
+fn f(count: UInt32) -> USize {
+  var items: List[UInt32] = List.with_capacity(0)
+  for index in 0..count {
+    mut items.push(index)
+  }
+  proof {
+    assert items.length() == 0
+  }
+  items.length()
+}

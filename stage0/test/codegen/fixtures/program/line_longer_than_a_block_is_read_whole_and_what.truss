@@ -1,0 +1,8 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  while Console.read_line() is Some(line) {
+    Console.print_line("${line.length()}")
+  }
+  ExitCode(0)
+}

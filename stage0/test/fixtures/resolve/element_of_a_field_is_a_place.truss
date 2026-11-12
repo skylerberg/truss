@@ -1,0 +1,7 @@
+type Box(items: List[Int64])
+
+fn g(item: mut Int64) {}
+
+fn f(box: mut Box) {
+  g(mut box.items[0])
+}

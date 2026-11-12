@@ -1,0 +1,11 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, FileRead
+{
+  if FileRead.read_text(Path.new(arguments[1].slice())) is Ok(text) {
+    Console.print_line("${text}".slice())
+  }
+  if FileRead.read_text(Path.new("${arguments[1]}\0.hidden".slice())) is Err(_) {
+    Console.print_line("refused".slice())
+  }
+  ExitCode(0)
+}

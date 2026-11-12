@@ -1,0 +1,11 @@
+type Lines(text: String)
+
+impl Journal for Lines {
+  fn write(mut self, text: StringSlice) {
+    self.text = text.to_string()
+  }
+
+  fn last(self) -> StringSlice {
+    self.text.slice()
+  }
+}

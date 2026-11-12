@@ -1,0 +1,4 @@
+fn f(items: List[Int64]) -> Window {
+  let built = Window(items[0..2])
+  built
+}

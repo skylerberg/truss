@@ -1,0 +1,21 @@
+type Pair(first: Int64, second: Int64)
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var pair = Pair(first: 0, second: 0)
+  concurrent {
+    {
+      Console.print_line("first")
+      pair.first = 20
+    }
+    {
+      Console.print_line("second")
+      pair.second = 22
+    }
+    let built = "made"
+    let lengths = ["a", "bb", "ccc"].map(fn(text) { text.length() })
+  }
+  Console.print_line("${pair.first} ${pair.second} ${built} ${lengths[2]}")
+  ExitCode.success
+}

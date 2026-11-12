@@ -1,0 +1,6 @@
+fn first() -> Option[Int64]
+  uses Meter
+{
+  var cursor = readings(3)
+  mut cursor.next()
+}

@@ -1,0 +1,5 @@
+fn f(items: mut Set[Int64])
+  ensures identical(items.model(), old(items.model()))
+{
+  mut items.insert(5)
+}

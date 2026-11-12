@@ -1,0 +1,9 @@
+type Point(x: Float64, y: Float64)
+  derives Equal
+
+fn f(a: Point, b: Point) -> Bool
+  requires a == b
+  ensures result
+{
+  a.x == b.x
+}

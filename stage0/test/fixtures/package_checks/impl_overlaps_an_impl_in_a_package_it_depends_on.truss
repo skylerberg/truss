@@ -1,0 +1,7 @@
+public type Vector[Element](items: List[Element])
+
+impl Add[Element] for Vector[Element] {
+  type Output = Vector[Element]
+  fn add_is_defined(self, right: Element) -> Bool { true }
+  fn add(self, right: Element) -> Vector[Element] { todo }
+}

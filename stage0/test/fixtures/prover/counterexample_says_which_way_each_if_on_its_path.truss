@@ -1,0 +1,11 @@
+fn step(count: UInt8, up: Bool) -> UInt8 {
+  if up {
+    if count > 100 {
+      count + 200
+    } else {
+      count + 1
+    }
+  } else {
+    0
+  }
+}

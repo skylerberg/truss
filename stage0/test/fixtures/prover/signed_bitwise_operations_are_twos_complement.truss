@@ -1,0 +1,5 @@
+fn f(value: Int8) -> Int8
+  ensures result == -1
+{
+  value | -1
+}

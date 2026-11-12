@@ -1,0 +1,5 @@
+fn f(items: mut List[Int64], first: USize, second: USize)
+  requires first < items.length() && second < items.length()
+{
+  exchange(mut items[first], second: mut items[second])
+}

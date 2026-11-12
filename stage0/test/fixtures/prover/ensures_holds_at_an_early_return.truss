@@ -1,0 +1,6 @@
+fn f(value: Int64) -> Int64
+  ensures result >= 0
+{
+  if value < 0 { return value }
+  value
+}

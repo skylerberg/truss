@@ -1,0 +1,5 @@
+fn f[Element, count: USize](items: mut Array[Element, count])
+  ensures items.length() == old(items.length())
+{
+  mut items[..].reverse()
+}

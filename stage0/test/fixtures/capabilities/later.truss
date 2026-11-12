@@ -1,0 +1,4 @@
+fn later[capability Granted](action: (fn() -> Instant uses Granted)) -> (fn() -> Instant uses Granted) {
+  action
+}
+

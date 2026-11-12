@@ -1,0 +1,5 @@
+fn add(names: mut Set[Int64], name: Int64)
+  cost amortized time O(1 + names.length())
+{
+  mut names.insert(name)
+}

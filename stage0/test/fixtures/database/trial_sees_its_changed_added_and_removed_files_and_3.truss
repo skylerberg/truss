@@ -1,0 +1,3 @@
+internal fn two() -> Int64 {
+  2
+}

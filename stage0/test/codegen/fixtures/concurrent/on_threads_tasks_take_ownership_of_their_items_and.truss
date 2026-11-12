@@ -1,0 +1,37 @@
+type Sum(total: USize)
+
+capability Lengths {
+  fn add(length: USize)
+  fn total() -> USize
+}
+
+impl Lengths for Sum {
+  fn add(mut self, length: USize) {
+    self.total += length
+  }
+
+  fn total(self) -> USize {
+    self.total
+  }
+}
+
+fn labels(count: Int64) yields own String {
+  var index: Int64 = 0
+  while index < count {
+    yield "label number ${index % 10}"
+    index += 1
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var sum = Sum(total: 0)
+  provide mut sum {
+    concurrent for label in labels(100) {
+      Lengths.add(label.length())
+    }
+    Console.print_line("total ${Lengths.total()}")
+  }
+  ExitCode.success
+}

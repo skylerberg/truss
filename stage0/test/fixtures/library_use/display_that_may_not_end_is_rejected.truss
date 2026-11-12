@@ -1,0 +1,7 @@
+type Stuck(value: Int64)
+
+impl Display for Stuck {
+  fn display(self, output: mut TextBuilder) {
+    while true {}
+  }
+}

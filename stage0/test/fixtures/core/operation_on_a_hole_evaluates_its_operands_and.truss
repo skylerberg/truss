@@ -1,0 +1,4 @@
+fn g(count: Int64) -> Int64 {
+  let value = todo
+  value.method(count) + 1
+}

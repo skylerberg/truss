@@ -1,0 +1,6 @@
+use standard::serialization
+
+type Opaque(x: Int64)
+
+type Point(inner: Opaque)
+  derives serialization::Serialize

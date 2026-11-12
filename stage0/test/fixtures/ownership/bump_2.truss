@@ -1,0 +1,5 @@
+fn bump(count: mut Int64) -> Bool {
+  count = 1
+  false
+}
+

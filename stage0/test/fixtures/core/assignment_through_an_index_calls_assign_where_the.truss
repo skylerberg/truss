@@ -1,0 +1,6 @@
+fn g(name: own String) {
+  var ports: Map[String, Int64] = ["http": 80]
+  var scores: List[Int64] = [1]
+  ports[own name] = 8080
+  scores[0] = 5
+}

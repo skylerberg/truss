@@ -1,0 +1,7 @@
+fn each(count: USize, visit: fn(USize) -> Int64) -> Int64 {
+  todo
+}
+
+fn f(items: List[Int64]) -> Int64 {
+  each(items.length(), visit: fn(i) { items[i] })
+}

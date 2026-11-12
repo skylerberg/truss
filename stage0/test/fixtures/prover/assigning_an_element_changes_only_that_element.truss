@@ -1,0 +1,8 @@
+fn f(items: mut List[Int64])
+  requires items.length() > 1
+  ensures items.length() == old(items.length())
+  ensures items[0] == 0
+  ensures items[1] == old(items[1])
+{
+  items[0] = 0
+}

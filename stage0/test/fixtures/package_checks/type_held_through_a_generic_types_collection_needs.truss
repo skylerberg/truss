@@ -1,0 +1,5 @@
+type Wrapper[Element](items: List[Element])
+
+type Tree =
+  | Leaf
+  | Node(children: Wrapper[Tree])

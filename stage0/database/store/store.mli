@@ -64,10 +64,10 @@ val unlock : pointer -> unit
 (** Releases a pointer taken with {!lock}. *)
 
 val read : pointer -> string option
-(** What the pointer holds, or [None] if it was never written, or is cut short or damaged. *)
+(** The pointer's value, or [None] if it was never written, or is truncated or corrupt. *)
 
 val write_pointer : pointer -> string -> unit
-(** Replaces what the pointer holds, after making every value and result added so far durable. *)
+(** Replaces the pointer's value, after making every value and result added so far durable. *)
 
 val remove_pointer : pointer -> unit
 val pointers : t -> string list

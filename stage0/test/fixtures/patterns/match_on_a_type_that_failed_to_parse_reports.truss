@@ -1,0 +1,10 @@
+type Broken =
+  | A
+  | B(x: )
+
+fn f(e: Broken) -> Int64 {
+  match e {
+    A => 1
+    B(..) => 2
+  }
+}

@@ -30,7 +30,7 @@ val refresh : session -> unit
 (** Reads the files that changed since the session last looked, after a command changed some. *)
 
 val save_session : session -> unit
-(** Saves what the session computed to the store. *)
+(** Saves the session's results to the store. *)
 
 val root : session -> string
 (** The project's root, absolute; empty for a session whose files are in no directory. *)
@@ -39,9 +39,9 @@ val context : session -> Query.context
 (** What a driver reads a session's results through. *)
 
 val set : session -> ('key, 'value) Query.input -> 'key -> 'value -> unit
-(** Sets an input that a stage declares and a driver gives, such as the roots code generation
-    searches from, or what the solver said. This is the one way a driver sets an input: the
-    project's own inputs, its packages and their modules' text, follow from the session's files. *)
+(** Sets an input that a stage declares and a driver gives, such as the roots of code generation, or
+    the solver's answers. This is the one way a driver sets an input: the project's own inputs, its
+    packages and their modules' text, follow from the session's files. *)
 
 val problems : session -> string list
 (** What reading the project's manifests shows to be wrong, each as its file and sentences: one that
@@ -86,7 +86,7 @@ val sessions : unit -> (string * int) list
 val trial : session -> (string * string option) list -> session
 (** A session that starts from another's state, with some of its files replaced, added, or, with
     [None], removed: each by its path from the project's root. It shares with the session everything
-    but what the change reaches and is never saved, so a change, such as a rename or another lock
+    but the change's dependents and is never saved, so a change, such as a rename or another lock
     file, is checked before any file is written. *)
 
 val base_commit : session -> string option -> string option
@@ -121,7 +121,7 @@ val results : kind:string -> (string -> string option) * (string -> string -> un
     key of exactly the input that made it. *)
 
 val flush_store : unit -> unit
-(** Writes what the store holds in memory. *)
+(** Writes the store's in-memory contents to disk. *)
 
 val prepare_store : unit -> unit
 (** Checks the standard library and keeps its state in the store, unless the store has it, as the
@@ -163,7 +163,7 @@ type place = { path : Path.t option; part : string option; label : string }
 type overlap =
   | Both_change of place
   | Reads of { this_worktree : bool; change : place; reads : place }
-      (** One worktree's change reads what the other changes *)
+      (** One worktree's change depends on a change of the other *)
 
 val other_worktrees : session -> session list
 (** The sessions of the same project in the other worktrees of its repository: those open in this

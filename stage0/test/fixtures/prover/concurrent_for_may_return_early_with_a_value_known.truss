@@ -1,0 +1,10 @@
+fn any_negative(numbers: List[Int64]) -> Bool
+  uses Tasks
+{
+  concurrent for number in numbers {
+    if number < 0 {
+      return true
+    }
+  }
+  false
+}

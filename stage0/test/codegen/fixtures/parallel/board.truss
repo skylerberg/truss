@@ -1,0 +1,31 @@
+type Board(cells: List[Int64])
+
+fn Board.each(mut self) yields mut Int64 {
+  for index in 0..self.cells.length() {
+    yield mut self.cells[index]
+  }
+}
+
+fn collatz(start: Int64) -> Int64 {
+  var value = start
+  var steps: Int64 = 0
+  while value > 1 {
+    if value % 2 == 0 {
+      value = value / 2
+    } else {
+      value = value.wrapping_multiply(3).wrapping_add(1)
+    }
+    steps = steps.wrapping_add(1)
+  }
+  steps
+}
+
+fn filled(count: Int64) -> List[Int64] {
+  var cells: List[Int64] = []
+  var next: Int64 = 1
+  while next <= count {
+    mut cells.push(next)
+    next = next.wrapping_add(1)
+  }
+  cells
+}

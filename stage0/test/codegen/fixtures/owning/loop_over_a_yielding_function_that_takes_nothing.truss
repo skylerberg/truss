@@ -1,0 +1,12 @@
+fn ticks() yields Int64 {
+  yield 1
+  yield 2
+}
+
+test "looped" {
+  var total = 0
+  for tick in ticks() {
+    total += tick
+  }
+  assert total == 3
+}

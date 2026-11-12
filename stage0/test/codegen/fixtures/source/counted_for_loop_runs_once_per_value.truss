@@ -1,0 +1,11 @@
+fn sum_below(limit: Int64) -> Int64 {
+  var total = 0
+  for i in 0..limit {
+    total += i
+  }
+  total
+}
+
+test "sums" {
+  assert sum_below(5) == 10
+}

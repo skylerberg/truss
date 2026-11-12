@@ -1,0 +1,5 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  ExitCode(0)
+}

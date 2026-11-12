@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) {
+  var count = 0
+  let _ = items.map(fn(item) { count = item })
+  let _ = count
+}

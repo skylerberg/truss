@@ -1,0 +1,3 @@
+fn f(names: List[String]) -> List[String] {
+  names.each().to_list()
+}

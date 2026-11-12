@@ -1,0 +1,8 @@
+fn f(x: Int64) -> Int64
+  ensures result == 0
+{
+  proof {
+    while true {}
+  }
+  x
+}

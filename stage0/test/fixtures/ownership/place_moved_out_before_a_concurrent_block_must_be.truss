@@ -1,0 +1,11 @@
+fn f(holder: mut Holder) -> Result[USize, USize]
+  uses Tasks, Clock
+{
+  let moved = own holder.items
+  concurrent {
+    let first = wait(1)?
+    let second = wait(2)?
+  }
+  holder.items = own moved
+  Ok(first + second)
+}

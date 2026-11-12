@@ -1,0 +1,14 @@
+fn f(count: UInt32) -> UInt64
+  requires count <= 1000
+{
+  var total: UInt64 = 0
+  var i: UInt32 = 0
+  while i < count
+    invariant i <= count
+    invariant total <= 1000 * i
+  {
+    total += 1000
+    i += 1
+  }
+  total
+}

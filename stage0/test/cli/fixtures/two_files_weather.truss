@@ -1,0 +1,3 @@
+public fn total(values: List[Int64]) -> USize {
+  values.length()
+}

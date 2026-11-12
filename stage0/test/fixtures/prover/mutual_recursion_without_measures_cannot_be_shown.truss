@@ -1,0 +1,11 @@
+fn even(n: UInt32) -> Bool
+  cost time finite
+{
+  if n == 0 { true } else { odd(n - 1) }
+}
+
+fn odd(n: UInt32) -> Bool
+  cost time finite
+{
+  if n == 0 { false } else { even(n - 1) }
+}

@@ -1,0 +1,5 @@
+public fn stamp() -> Instant
+  uses Clock
+{
+  Clock.now()
+}

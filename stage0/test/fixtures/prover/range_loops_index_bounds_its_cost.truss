@@ -1,0 +1,8 @@
+fn f(count: UInt32)
+  cost time O(count)
+{
+  for index in 0..count
+    cost time O(index)
+  {
+  }
+}

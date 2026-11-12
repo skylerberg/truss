@@ -1,0 +1,4 @@
+type Pair(first: List[Int64], second: List[Int64], text: String)
+
+fn look[Value](value: Value) {}
+

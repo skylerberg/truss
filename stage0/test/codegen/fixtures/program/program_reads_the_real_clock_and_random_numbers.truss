@@ -1,0 +1,10 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Clock, Random
+{
+  let now = Clock.now()
+  let first = Random.next()
+  let second = Random.next()
+  let late = now.unix_nanoseconds() > 1600000000000000000
+  Console.print_line("${late} ${first != second}".slice())
+  ExitCode(0)
+}

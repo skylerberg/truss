@@ -1,0 +1,6 @@
+fn Url.user(self) -> Option[StringSlice] {
+  match self.user {
+    Some(present) => Some(present.slice())
+    None => None
+  }
+}

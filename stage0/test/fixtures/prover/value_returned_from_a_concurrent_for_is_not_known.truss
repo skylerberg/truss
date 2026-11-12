@@ -1,0 +1,11 @@
+fn claimed(numbers: List[Int64]) -> Bool
+  uses Tasks
+  ensures !result
+{
+  concurrent for number in numbers {
+    if number < 0 {
+      return true
+    }
+  }
+  false
+}

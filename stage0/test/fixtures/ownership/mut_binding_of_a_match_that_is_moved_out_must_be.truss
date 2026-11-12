@@ -1,0 +1,9 @@
+fn f(slot: mut Option[Holder]) -> USize {
+  match mut slot {
+    Some(holder) => {
+      let items = own holder.items
+      items.length()
+    }
+    None => 0
+  }
+}

@@ -1,0 +1,9 @@
+fn g(count: UInt8) -> UInt8
+  requires count < 10
+{
+  count
+}
+
+fn f() -> UInt8 {
+  g(10)
+}

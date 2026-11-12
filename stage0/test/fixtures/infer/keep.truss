@@ -1,0 +1,32 @@
+type Labeled(view: Slice[Int64], name: String)
+
+type Boxed[Value](value: Value)
+
+fn keep[Value: Storable](value: own Value) {}
+
+fn double(value: Int64) -> Int64 {
+  value
+}
+
+trait Job: Storable {
+  fn run(self) -> Int64
+}
+
+trait Task {
+  fn run(self) -> Int64
+}
+
+type Count(value: Int64)
+
+impl Job for Count {
+  fn run(self) -> Int64 {
+    self.value
+  }
+}
+
+impl Task for Count {
+  fn run(self) -> Int64 {
+    self.value
+  }
+}
+

@@ -1,0 +1,16 @@
+trait Joined {
+  fn join(self, other: Self) -> Self
+
+  law associative(first: Self, second: Self, third: Self) {
+    true
+  }
+}
+
+type Meters(value: Int64)
+
+type Feet(value: Int64)
+
+impl Joined for Meters {
+  fn join(self, other: Meters) -> Meters { todo }
+}
+

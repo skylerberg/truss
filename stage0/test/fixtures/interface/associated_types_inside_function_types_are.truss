@@ -1,0 +1,11 @@
+trait Visits {
+  type Element
+  fn visit(self, each: fn(Self.Element) -> Bool)
+}
+
+type Bag(count: Int64)
+
+impl Visits for Bag {
+  type Element = Int64
+  fn visit(self, each: fn(Int64) -> Bool) {}
+}

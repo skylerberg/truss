@@ -1,6 +1,6 @@
 # Truss Syntax
 
-This document describes how Truss code is written. For what the code means
+This document describes how Truss code is written. For semantics
 (capabilities, costs, memory, failure, and so on), see [DESIGN.md](DESIGN.md).
 It describes the language, not a compiler: what stage0 builds of it is in
 the documents of stage0's stages, which
@@ -937,14 +937,14 @@ The target of `calls` is a function parameter (`calls(visit)`), a capability
 method (`calls(FileRead.read)`), or a whole capability (`calls(FileRead)`).
 `O(f)` means that the cost is at most `c * f + d` for every input, for some
 constants `c` and `d` that the prover finds. So `O(rows * columns)` and
-`O(text.length() + pattern.length())` mean exactly what they say, and small
-inputs need no special case.
+`O(text.length() + pattern.length())` hold for every input size, small inputs
+included.
 
 A bound is an expression that can use:
 
 - the parameters, `self`, their fields, and pure methods with a `time` clause,
   such as `items.length()`
-- `result`, for bounds that depend on what the function returns, as in
+- `result`, for bounds that depend on the return value, as in
   `cost time O(text.length() + result.length())`
 - `+`, `*`, and `/` and `-` where the result stays at or above zero, all on
   exact integers
@@ -1077,8 +1077,8 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
   A function that returns a function type with clauses puts it in
   parentheses: `fn make_counter() -> (fn(Int64) -> Int64 uses Clock)`.
 
-The type of a function-typed parameter can say what the function passes it,
-with a `requires`. Its inputs are then named, so the `requires` can mention
+The type of a function-typed parameter can constrain, with a `requires`, the
+arguments the callback is called with. Its inputs are then named, so the `requires` can mention
 them, and it can also mention the parameters before it:
 
 ```truss
@@ -1652,9 +1652,9 @@ mut scores.update_each(fn(score) { score = score / 2 })
 - A lambda's parameter types, modes, and result type are never written. They
   come from the function type the lambda is passed as. In `update_each`,
   which takes `fn(mut Element)`, `score` can be changed.
-- Types are worked out from the outside in: the receiver and the other
+- Types are inferred from the outside in: the receiver and the other
   arguments decide the function type first, and then the lambda's body is
-  checked. A parameter's type is never worked out from how the body uses it.
+  checked. A parameter's type is never inferred from how the body uses it.
 - When nothing gives the lambda a function type, give one to the `let`, or
   type arguments to the call:
 
@@ -1854,7 +1854,7 @@ for index in 1..count
 }
 ```
 
-A `cost` clause on a loop states what the loop has spent so far, at the
+A `cost` clause on a loop bounds the loop's cost so far, at the
 start of every iteration and when it ends. A loop needs one only when its
 iterations cost different amounts, as when each one handles a row of its own
 length:
@@ -2118,7 +2118,7 @@ These capabilities are in the prelude:
 | `Processes` | Running other programs |
 | `Signals` | Waiting for a signal sent to the program |
 | `Tasks` | Running `concurrent` code and using channels |
-| `Log` | Recording what the program did |
+| `Log` | Writing to the program's log |
 | `Panic` | Ending the program |
 
 Each capability's methods are the least an implementation has to give.
@@ -2817,7 +2817,7 @@ impl Loggable for Event {}
 
 - A type must implement the required traits before it can implement the
   trait: `impl Ordered for Point` needs `Point` to implement `Equal`.
-- A bound includes what the trait requires, so with `[Element: Ordered]`,
+- A bound includes the required traits, so with `[Element: Ordered]`,
   `==` works on `Element`.
 - Laws can use the methods of required traits.
 - A trait cannot redeclare a method of a trait it requires. It can add a
@@ -2901,7 +2901,7 @@ impl From[UInt32] for Int64 {
 let total = Int64.from(count)
 ```
 
-- The `impl` is chosen by the types of the arguments, which are worked out
+- The `impl` is chosen by the types of the arguments, which are inferred
   first, without looking at which `impl`s exist. A literal argument has its
   default type. So adding an `impl` never changes which one an existing call
   uses.
@@ -2948,7 +2948,7 @@ fn first[Items: Iterable](items: Items) -> Option[Items.Element]
   implementation decides, as in `Index`'s `Output`.
 - A trait states its methods' preconditions through its own methods, as
   `Index` does with `contains_key`, so generic code can show them, and an
-  implementation says what they mean for its type: a `List`'s keys are the
+  implementation defines them for its type: a `List`'s keys are the
   indexes below its length.
 
 ### Associated capability sets
@@ -3021,7 +3021,7 @@ type Option[Value] =
   derives Equal, Hash, Ordered
 ```
 
-| Trait | What the compiler writes |
+| Trait | Derived implementation |
 |---|---|
 | `Equal` | Two values are equal when all their fields are equal. |
 | `Hash` | Combines the hashes of all fields. |

@@ -1,0 +1,7 @@
+fn f() -> USize {
+  var tally = Tally(counts: [])
+  let first = provide mut tally {
+    count()
+  }
+  first + tally.counts.length()
+}

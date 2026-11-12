@@ -8,8 +8,6 @@ Its input is the trees described in [PARSER.md](PARSER.md). Its output is the
 core form that [CODEGEN.md](CODEGEN.md) and [PROVER.md](PROVER.md) consume. Its
 queries run on the code database, which [DATABASE.md](DATABASE.md) describes.
 
-## What the type checker does
-
 The type checker's inputs are the syntax tree of each definition, the package's
 manifest, and the manifests of the package's dependencies. For each definition
 it produces four results:
@@ -275,7 +273,7 @@ becomes `Shape.Circle`.
 
 A definition that has a parse error is still registered and checked as far as
 possible. Its error is then reported once, by the parser, and no use of the
-definition reports a second error. PARSER.md states what the parser keeps:
+definition reports a second error. The parser keeps:
 
 - **A definition whose header did not parse** keeps only its keyword and name,
   if the parser could read them.
@@ -378,7 +376,7 @@ the change invalidates nothing beyond the definition:
 
 - **Type checking a caller reads only the callee's signature.** A change to a
   body, a default, or an `ensures` re-checks that definition and no caller.
-  PROVER.md states what the prover reads of a callee.
+  PROVER.md lists the parts of a callee that the prover reads.
 - **A function's specification is separate from its body.** The specification
   is the core form of the parameters and the contract. It has the body only
   when a caller's proof can read the body: the body of a function in the
@@ -1422,7 +1420,7 @@ uses one definition of the places that a value views, `Graph.views_of`.
   it has only the element's own views. After `for part in parts { kept = part
   }`, where `parts` stores slices of `data`, `kept` views `data`.
 - **A function can return a view only of its parameters.** A returned value of
-  a view type can hold loans only of the function's parameters and of what they
+  a view type can hold loans only of the function's parameters and of the places they
   view. It cannot hold a loan of a place that is dropped when the function
   returns: a local, or a parameter or `self` taken `own`. Such a view would
   dangle. A view that is copied out of an `own` parameter, such as a slice that
@@ -1745,7 +1743,7 @@ the error is fixed.
   method of an `impl` of a capability is exempt: it can call an intrinsic
   without those capabilities. Its callers reach it only through a capability
   call, which their signatures declare, so no code without capabilities can
-  observe what the intrinsic does. A capability is not a trait, so the method
+  observe the intrinsic's effects. A capability is not a trait, so the method
   cannot be called on the value, through a bound, or through `any`. A lambda, a
   `parallel` branch, and a helper function inside the method are not exempt.
 - **A lambda's body can use the capabilities in the `uses` of the lambda's
@@ -2043,7 +2041,7 @@ calls that the checker records, not from how it is spelled:
 So a constant uses no capability and always ends, and every build works it
 out alike.
 
-The checker works out a constant's value only where it needs the value: a
+The checker evaluates a constant only where it needs the value: a
 `USize` in a type argument, as in `Array[UInt8, digest_size]`, and a constant
 used as a pattern, for exhaustiveness. It does so exactly, and needs no code
 to run: integers are Zarith's, and float operations are the exact IEEE ones,

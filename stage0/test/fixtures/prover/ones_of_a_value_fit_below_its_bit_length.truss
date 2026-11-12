@@ -1,0 +1,6 @@
+theorem t(word: UInt64, bits: USize)
+  requires bits < 64
+  requires word < power(2, bits)
+  ensures word.count_ones() <= bits
+{
+}

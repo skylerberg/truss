@@ -1,0 +1,7 @@
+fn f() -> Option[StringSlice] {
+  let user: Option[String] = Some("a".copy())
+  match user {
+    Some(present) => Some(present.slice())
+    None => None
+  }
+}

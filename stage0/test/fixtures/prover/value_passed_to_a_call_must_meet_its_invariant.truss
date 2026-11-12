@@ -1,0 +1,9 @@
+fn use_span(range: Span) {}
+
+fn f(range: mut Span)
+  requires range.high < 1000
+{
+  range.low = range.high + 1
+  use_span(range)
+  range.low = range.high
+}

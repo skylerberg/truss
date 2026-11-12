@@ -1,0 +1,20 @@
+trait Shown {
+  fn show(self) -> Int64
+}
+
+type Box(value: Int64)
+
+impl Shown for Box {
+  fn show(self) -> Int64 {
+    self.value
+  }
+}
+
+fn boxed(value: Option[Int64]) -> Option[any Shown] {
+  Some(any Box(value: value?))
+}
+
+test "left early" {
+  assert boxed(None) is None
+  assert boxed(Some(3)) is Some(_)
+}

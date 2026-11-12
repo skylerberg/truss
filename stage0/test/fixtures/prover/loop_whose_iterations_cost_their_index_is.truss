@@ -1,0 +1,14 @@
+fn work(size: UInt32)
+  cost time O(size)
+{
+  for _ in 0..size {
+  }
+}
+
+fn f(count: UInt32)
+  cost time O(count * count)
+{
+  for index in 0..count {
+    work(index)
+  }
+}

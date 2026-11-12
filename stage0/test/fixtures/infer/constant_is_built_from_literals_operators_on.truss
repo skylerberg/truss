@@ -1,0 +1,5 @@
+let small: UInt8 = 200 + 55
+
+let lowest: Int8 = -128
+
+let is_small: Bool = small < 10 && !(small == 4)

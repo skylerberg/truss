@@ -1,0 +1,5 @@
+fn f(value: UInt8) -> UInt8
+  ensures result > value
+{
+  value.wrapping_add(1)
+}

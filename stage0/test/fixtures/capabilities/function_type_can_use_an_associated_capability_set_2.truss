@@ -1,0 +1,9 @@
+fn f() -> Option[Int64]
+  uses Meter
+{
+  var counter = Counter(next: 0)
+  apply(mut counter, run: fn(feed) {
+    let _ = Meter.read()
+    mut feed.pull()
+  })
+}

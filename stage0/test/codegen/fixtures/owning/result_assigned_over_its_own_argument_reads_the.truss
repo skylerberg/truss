@@ -1,0 +1,12 @@
+type Quad(a: Int64, b: Int64, c: Int64, d: Int64)
+
+fn swapped(q: Quad) -> Quad {
+  q with (a: q.b, b: q.a)
+}
+
+test "swapped" {
+  var q = Quad(a: 1, b: 2, c: 3, d: 4)
+  q = swapped(q)
+  assert q.a == 2
+  assert q.b == 1
+}

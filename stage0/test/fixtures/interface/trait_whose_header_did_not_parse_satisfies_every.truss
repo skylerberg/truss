@@ -1,0 +1,8 @@
+trait Shape[ {
+}
+
+type Holder[Value: Shape](value: Value)
+
+type P(x: Int64)
+
+fn f(holder: Holder[P]) {}

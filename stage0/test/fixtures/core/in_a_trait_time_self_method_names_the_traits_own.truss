@@ -1,0 +1,9 @@
+trait Sized {
+  fn size(self) -> USize
+
+  fn double(self) -> USize
+    cost time O(time(Self.size))
+  {
+    self.size() + self.size()
+  }
+}

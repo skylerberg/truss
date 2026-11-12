@@ -1,0 +1,3 @@
+fn Grid.cell(mut self, position: Position) lends mut Cell {
+  yield mut self.cells[0]
+}

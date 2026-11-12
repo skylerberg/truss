@@ -1,0 +1,23 @@
+type Sum(pieces: USize, total: Int64)
+
+impl FromTemplate for Sum {
+  type Part = Int64
+
+  fn from_template(template: Template[Int64]) -> Sum {
+    var total = 0
+    for part in template.parts {
+      total += part
+    }
+    Sum(pieces: template.literals.length(), total: total)
+  }
+}
+
+test "templates" {
+  let small: Int8 = 2
+  let large: Int64 = 40
+  let sum = Sum"a ${small} b ${large} c"
+  assert sum.pieces == 3
+  assert sum.total == 42
+  let plain = Sum"none"
+  assert plain.pieces == 1 && plain.total == 0
+}

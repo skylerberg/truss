@@ -1,0 +1,4 @@
+capability Clock {
+  fn now() -> Instant
+  fn sleep(duration: Duration)
+}

@@ -1,0 +1,10 @@
+fn width(span: Range[Int64]) -> Int64 {
+  if span.inclusive { span.stop - span.start + 1 } else { span.stop - span.start }
+}
+
+test "ranges" {
+  assert width(2..5) == 3
+  assert width(2..=5) == 4
+  let words = "${1}"..="${2}"
+  assert words.start == "1"
+}

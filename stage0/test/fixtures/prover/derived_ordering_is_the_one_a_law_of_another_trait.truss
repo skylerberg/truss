@@ -1,0 +1,42 @@
+use standard::core
+
+type Day(count: Int32)
+  derives Equal, Ordered
+
+impl core::Countable for Day {
+  fn successor(self) -> Option[Day]
+    cost time O(1)
+  {
+    self.advanced(1)
+  }
+
+  fn predecessor(self) -> Option[Day]
+    cost time O(1)
+  {
+    self.retreated(1)
+  }
+
+  fn advanced(self, by: USize) -> Option[Day]
+    cost time O(1)
+  {
+    match self.count.advanced(by: by) {
+      Some(count) => Some(Day(count: count))
+      None => None
+    }
+  }
+
+  fn retreated(self, by: USize) -> Option[Day]
+    cost time O(1)
+  {
+    match self.count.retreated(by: by) {
+      Some(count) => Some(Day(count: count))
+      None => None
+    }
+  }
+
+  fn steps_to(self, other: Day) -> Option[USize]
+    cost time O(1)
+  {
+    self.count.steps_to(other.count)
+  }
+}

@@ -1,0 +1,4 @@
+fn keep(meters: mut List[Meter])
+  cost amortized time O(1)
+{
+}

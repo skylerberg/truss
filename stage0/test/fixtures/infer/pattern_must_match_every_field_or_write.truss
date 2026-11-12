@@ -1,0 +1,6 @@
+type Pair2(first: Int64, second: Int64)
+
+fn f(pair: Pair2) -> Int64 {
+  let (first) = pair
+  first
+}

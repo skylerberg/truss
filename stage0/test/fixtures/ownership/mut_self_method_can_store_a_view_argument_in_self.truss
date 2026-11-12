@@ -1,0 +1,3 @@
+fn Window.widen(mut self, data: Slice[Int64]) {
+  self.view = data[0..2]
+}

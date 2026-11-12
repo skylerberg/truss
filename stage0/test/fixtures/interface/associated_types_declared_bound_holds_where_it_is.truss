@@ -1,0 +1,4 @@
+trait Keyed {
+  type Key: Hash + Ordered
+  fn keys(self) -> Set[Self.Key]
+}

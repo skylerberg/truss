@@ -1,0 +1,7 @@
+public fn height() -> Int64 {
+  3
+}
+
+test "a wall is taller than a meter" {
+  assert height() > acme::units::lengths::meter()
+}

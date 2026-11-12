@@ -1,0 +1,31 @@
+fn doubled(items: mut List[Int64])
+  uses Tasks
+{
+  concurrent for item in mut items {
+    item = item * 2
+  }
+}
+
+fn doubled_until(items: mut List[Int64], stop: Int64) -> Int64
+  uses Tasks
+{
+  concurrent for item in mut items {
+    if item == stop {
+      return item
+    }
+    item = item * 2
+  }
+  0
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var numbers: List[Int64] = [1, 2, 3]
+  doubled(mut numbers)
+  Console.print_line("${numbers[0]} ${numbers[1]} ${numbers[2]}")
+  var others: List[Int64] = [1, 2, 3, 4]
+  let stopped = doubled_until(mut others, stop: 3)
+  Console.print_line("${others[0]} ${others[1]} ${others[2]} at ${stopped}")
+  ExitCode.success
+}

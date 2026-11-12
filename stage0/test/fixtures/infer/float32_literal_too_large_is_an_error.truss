@@ -1,0 +1,3 @@
+fn f() {
+  let large: Float32 = 3.5e38
+}

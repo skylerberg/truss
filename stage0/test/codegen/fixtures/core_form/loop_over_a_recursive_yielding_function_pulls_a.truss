@@ -1,0 +1,21 @@
+fn descend(from: Int64) yields Int64 {
+  if from > 0 {
+    yield from
+    for below in descend(from - 1) {
+      yield below
+    }
+  }
+}
+
+fn total(from: Int64) -> Int64 {
+  var sum = 0
+  for value in descend(from) {
+    sum += value
+  }
+  sum
+}
+
+test "descends" {
+  assert total(4) == 10
+  assert total(0) == 0
+}

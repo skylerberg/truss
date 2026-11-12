@@ -1,0 +1,16 @@
+type Pair(first: String, second: String)
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var pair = Pair(first: "first", second: "second")
+  parallel {
+    let moved = own pair.first
+    {
+      mut pair.second.push("!")
+    }
+  }
+  pair.first = "taken"
+  Console.print_line("${moved} ${pair.first} ${pair.second}")
+  ExitCode.success
+}

@@ -1,0 +1,4 @@
+fn f() -> Int64 {
+  var twice = Twice(source: Twice(source: Gauge(last: 0)))
+  drain(mut twice)
+}

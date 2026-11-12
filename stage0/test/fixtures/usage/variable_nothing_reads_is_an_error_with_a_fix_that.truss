@@ -1,0 +1,3 @@
+fn f() {
+  let count = 1
+}

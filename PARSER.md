@@ -6,8 +6,6 @@ tokens described in [LEXER.md](LEXER.md), and follows the rules in
 [SYNTAX.md](SYNTAX.md) and [DESIGN.md](DESIGN.md). Each departure from those
 documents is stated here.
 
-## What the parser does
-
 The parser takes one file's token array from the lexer and returns a syntax
 tree for each definition and a list of diagnostics. Like the lexer, it always
 returns a tree, even for a file with errors, so that later stages can check
@@ -33,7 +31,7 @@ It does not:
   or a binding, and an expression such as `List[String]` before a `.` is one
   node whether it names a type or a value. Name resolution decides, without
   changing the tree's shape (see
-  [GRAMMAR.md](GRAMMAR.md#what-the-grammar-leaves-to-later-stages)).
+  [GRAMMAR.md](GRAMMAR.md#constructs-resolved-after-parsing)).
 - check that a bare argument after the first names a parameter, which needs
   the callee's signature, or that the expression after `mut` or `own` starts
   with a place, which needs name resolution (see
@@ -620,8 +618,8 @@ report them (see [TYPECHECKER.md](TYPECHECKER.md)).
   `Cursor`, so a new code cannot be added without deciding. TYPECHECKER.md
   decides how resolution registers a definition with a syntax error and
   which of its parts it checks.
-- **The formatter and the language server,** which are not built, need only
-  what the tree records: a literal is printed from the definition's source
+- **The formatter and the language server,** which are not built, need nothing
+  beyond the tree: a literal is printed from the definition's source
   text, a blank line is preserved, and a position maps to a node through
   the spans, after adding each definition's base.
 - **The code database** lexes and parses a whole file when its text changes,

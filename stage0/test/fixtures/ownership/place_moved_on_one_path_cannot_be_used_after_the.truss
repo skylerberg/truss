@@ -1,0 +1,6 @@
+fn f(items: own List[Int64], ready: Bool) {
+  if ready {
+    keep(own items)
+  }
+  look(items)
+}

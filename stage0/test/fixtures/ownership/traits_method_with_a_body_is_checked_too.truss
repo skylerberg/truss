@@ -1,0 +1,5 @@
+trait Eater {
+  fn eat(self, items: List[Int64]) {
+    keep(own items)
+  }
+}

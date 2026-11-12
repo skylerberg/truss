@@ -1,0 +1,3 @@
+fn f() {
+  let value: UInt8 = -1
+}

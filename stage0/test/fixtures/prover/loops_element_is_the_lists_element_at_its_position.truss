@@ -1,0 +1,10 @@
+fn f(items: List[Int64]) -> Bool
+  ensures result ==> (forall i in 0..items.length() => items[i] > 0)
+{
+  for item in items
+    invariant forall i in 0..yielded.length() => items[i] > 0
+  {
+    if item <= 0 { return false }
+  }
+  true
+}

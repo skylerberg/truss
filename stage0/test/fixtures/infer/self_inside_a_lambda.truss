@@ -1,0 +1,8 @@
+type Counter(counts: List[Int64])
+
+fn Counter.add_all(mut self, items: List[Int64]) {
+  let _ = items.map(fn(item) {
+    mut self.counts.push(item)
+    item
+  })
+}

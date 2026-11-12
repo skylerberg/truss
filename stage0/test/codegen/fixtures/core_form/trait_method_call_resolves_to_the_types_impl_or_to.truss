@@ -1,0 +1,15 @@
+type Meters(value: Int64)
+  derives Equal
+
+fn same[Value: Equal](first: Value, second: Value) -> Bool {
+  first.equal(second)
+}
+
+fn equal_lengths(first: Meters, second: Meters) -> Bool {
+  first.equal(second)
+}
+
+test "equal" {
+  assert same(4, second: 4)
+  assert equal_lengths(Meters(value: 2), second: Meters(value: 2))
+}

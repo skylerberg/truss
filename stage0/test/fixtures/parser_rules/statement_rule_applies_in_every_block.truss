@@ -1,0 +1,3 @@
+let x = provide Fixed() {
+  assert true
+}

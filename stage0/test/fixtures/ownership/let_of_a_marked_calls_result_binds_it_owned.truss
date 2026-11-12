@@ -1,0 +1,6 @@
+fn keep(present: own Option[List[Int64]]) {}
+
+fn f(source: mut List[List[Int64]]) {
+  let last = mut source.pop()
+  keep(own last)
+}

@@ -1,0 +1,7 @@
+fn f() -> Int64
+  ensures result == 4
+{
+  apply(fn(each) { var next = each
+    if next < 100 { next += 1 }
+    next }, value: 3)
+}

@@ -1,0 +1,7 @@
+
+fn f(pair: mut Pair)
+  requires pair.first == 1
+  ensures pair.first == 1
+{
+  mut pair.tagged().value = 2
+}

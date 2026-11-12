@@ -1,0 +1,15 @@
+fn double(value: Int64) -> Int64 {
+  value * 2
+}
+
+test "doubles two" {
+  assert double(2) == 4
+}
+
+test "doubles three" {
+  assert double(3) == 6
+}
+
+test "halves" {
+  assert double(1) == 2
+}

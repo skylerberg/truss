@@ -1,0 +1,6 @@
+let small: Int64 = 3
+let is_small: Bool = small < 10 && !(small == 4)
+
+test "compared" {
+  assert is_small
+}

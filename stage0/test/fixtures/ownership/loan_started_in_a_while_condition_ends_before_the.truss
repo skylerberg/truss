@@ -1,0 +1,5 @@
+fn f(counter: mut Counter) {
+  while counter.current() < 3 {
+    mut counter.step()
+  }
+}

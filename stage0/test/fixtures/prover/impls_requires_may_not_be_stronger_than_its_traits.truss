@@ -1,0 +1,7 @@
+impl Measured for Box {
+  fn measure(self) -> Int64
+    requires self.size >= 0
+  {
+    self.size
+  }
+}

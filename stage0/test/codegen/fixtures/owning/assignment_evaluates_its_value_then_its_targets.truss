@@ -1,0 +1,13 @@
+fn digit(order: mut Int64, next: Int64) -> USize {
+  order = order * 10 + next
+  0
+}
+
+test "ordered" {
+  var items: List[USize] = [10]
+  var order = 0
+  items[digit(mut order, next: 1)] = digit(mut order, next: 2)
+  assert order == 21
+  items[digit(mut order, next: 3)] += digit(mut order, next: 4)
+  assert order == 2143
+}
