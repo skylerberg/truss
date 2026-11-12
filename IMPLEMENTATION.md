@@ -45,6 +45,12 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **`dune build`** builds everything, **`dune test`** runs the tests, and
   **`dune fmt`** formats the code with the ocamlformat version that
   `.ocamlformat` pins.
+- **`stage0/tools/docs/build.sh`** builds the odoc documentation of every
+  library into `_build/docs` and prints the index's path. The index links to
+  a page of the library dependency graph, colored by directory under
+  `stage0`, where each library links to its documentation. It needs odoc and
+  dune-deps from opam and Graphviz from Homebrew, which `dune-project` does
+  not list because CI never builds the documentation.
 - **CI** (`.github/workflows/ci.yml`) builds, checks formatting, checks that
   `truss.opam` matches `dune-project`, and runs the tests, on every pull
   request and every push to `main`. It must stay fast, so:
