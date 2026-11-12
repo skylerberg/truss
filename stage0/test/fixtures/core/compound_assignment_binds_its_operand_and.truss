@@ -1,0 +1,3 @@
+fn g(items: mut List[Int64]) {
+  items[0] += 2
+}

@@ -1,0 +1,13 @@
+fn classify(present: Option[String]) -> String {
+  match present {
+    Some(text) if text.length() > 3 => text.copy()
+    Some(text) => "short ${text}"
+    None => "none"
+  }
+}
+
+test "guards" {
+  assert classify(Some("lengthy")) == "lengthy"
+  assert classify(Some("ab")) == "short ab"
+  assert classify(None) == "none"
+}

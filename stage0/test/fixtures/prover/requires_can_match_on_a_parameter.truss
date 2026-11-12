@@ -1,0 +1,11 @@
+fn f(shape: Shape) -> Int64
+  requires match shape {
+    Circle(radius) => radius < 100
+    _ => true
+  }
+{
+  match shape {
+    Circle(radius) => radius + 1
+    _ => 0
+  }
+}

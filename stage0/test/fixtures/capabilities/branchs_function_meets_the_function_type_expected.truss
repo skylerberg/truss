@@ -1,0 +1,6 @@
+fn f(fast: Bool) -> Instant
+  uses Clock
+{
+  let action: (fn() -> Instant uses Clock) = if fast { still } else { tick }
+  action()
+}

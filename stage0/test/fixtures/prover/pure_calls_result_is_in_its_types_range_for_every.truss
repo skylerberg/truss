@@ -1,0 +1,4 @@
+theorem each_in_range(items: List[Int64])
+  ensures forall i in 0..items.length() => items[i] <= Int64.maximum
+{
+}

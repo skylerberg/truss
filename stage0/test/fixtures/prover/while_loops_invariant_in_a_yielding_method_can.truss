@@ -1,0 +1,15 @@
+type Counter(limit: UInt32)
+
+fn Counter.each(self) yields UInt32
+  ensures yielded.length() <= self.limit
+  cost time finite
+{
+  var next: UInt32 = 0
+  while next < self.limit
+    invariant next <= self.limit
+    invariant next == yielded.length()
+  {
+    yield next
+    next += 1
+  }
+}

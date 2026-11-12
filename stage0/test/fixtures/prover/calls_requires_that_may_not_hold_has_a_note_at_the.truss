@@ -1,0 +1,10 @@
+fn halved(count: Int64) -> Int64
+  requires count > 0
+  cost time O(1)
+{
+  count / 2
+}
+
+fn f(value: Int64) -> Int64 {
+  halved(value)
+}

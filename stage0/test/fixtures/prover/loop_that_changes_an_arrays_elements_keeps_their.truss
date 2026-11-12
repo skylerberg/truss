@@ -1,0 +1,13 @@
+fn reversed[Element, count: USize](items: mut Array[Element, count]) yields mut Element
+  cost time O(items.length())
+{
+  var index = items.length()
+  while index > 0
+    invariant items.length() == old(items.length())
+    invariant index <= items.length()
+    decreases index
+  {
+    index -= 1
+    yield mut items[index]
+  }
+}

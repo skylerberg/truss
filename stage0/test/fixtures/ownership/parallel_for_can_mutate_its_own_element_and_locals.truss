@@ -1,0 +1,7 @@
+fn f(items: mut List[Int64]) {
+  parallel for item in mut items {
+    var doubled = item * 2
+    doubled = doubled + 1
+    item = doubled
+  }
+}

@@ -1,0 +1,12 @@
+fn same(item: Int64) -> Int64
+  ensures result == item
+{
+  item
+}
+
+fn f(items: List[Int64]) -> Bool
+  requires items.length() == 2 && items[0] == 1 && items[1] == 2
+  ensures !result
+{
+  forall i in 0..items.length() => same(items[i]) == items[i]
+}

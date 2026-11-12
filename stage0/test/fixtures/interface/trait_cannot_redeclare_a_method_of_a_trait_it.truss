@@ -1,0 +1,3 @@
+trait Sorted: Ordered {
+  fn compare(self, other: Self) -> Ordering
+}

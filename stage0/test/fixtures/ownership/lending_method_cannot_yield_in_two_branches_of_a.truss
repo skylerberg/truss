@@ -1,0 +1,6 @@
+fn Grid.cell(self) lends Int64 {
+  parallel {
+    yield self.cells[0]
+    yield self.cells[1]
+  }
+}

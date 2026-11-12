@@ -1,0 +1,4 @@
+let text = read(path)?
+let both = first? == second?
+let less = nested?? - 1
+let table = [key?: 1]

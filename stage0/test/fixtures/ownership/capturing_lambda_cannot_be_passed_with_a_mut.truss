@@ -1,0 +1,7 @@
+fn set(handlers: mut Handlers, first: fn(Int64) -> Int64) {
+  handlers.first = first
+}
+
+fn keep(handlers: mut Handlers, amount: Int64) {
+  set(mut handlers, first: fn(value) { value + amount })
+}

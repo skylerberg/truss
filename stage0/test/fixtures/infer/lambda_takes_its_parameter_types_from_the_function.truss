@@ -1,0 +1,3 @@
+fn f(items: List[Int64]) -> List[Int64] {
+  items.map(fn(item) { item + 1 })
+}

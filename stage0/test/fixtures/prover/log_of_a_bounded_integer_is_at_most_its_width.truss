@@ -1,0 +1,11 @@
+fn digits(value: UInt64) -> USize
+  cost time O(log(value))
+{
+  todo
+}
+
+fn f(value: UInt64) -> USize
+  cost time O(1)
+{
+  digits(value)
+}

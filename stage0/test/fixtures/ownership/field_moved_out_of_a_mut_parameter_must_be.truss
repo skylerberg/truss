@@ -1,0 +1,7 @@
+type Config(name: String, port: UInt16)
+
+fn take(name: own String) {}
+
+fn f(config: mut Config) {
+  take(own config.name)
+}

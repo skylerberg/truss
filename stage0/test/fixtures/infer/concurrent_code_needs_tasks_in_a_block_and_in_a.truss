@@ -1,0 +1,8 @@
+fn g() {}
+
+fn f() {
+  concurrent {
+    g()
+    g()
+  }
+}

@@ -1,0 +1,4 @@
+fn f(items: mut List[Int64])
+  ensures old(items) == items
+{
+}

@@ -1,0 +1,9 @@
+type Greedy(last: Int64)
+
+impl Feed for Greedy {
+  fn pull(mut self) -> Option[Int64]
+    uses Meter
+  {
+    Some(Meter.read())
+  }
+}

@@ -1,0 +1,28 @@
+trait Rewind: Feed {
+  fn back(mut self) -> Option[Int64]
+    uses Self.Uses
+
+  fn back_twice(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    let _ = mut self.back()
+    mut self.back()
+  }
+}
+
+impl Rewind for Gauge {
+  fn back(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    self.last = Meter.read()
+    Some(self.last)
+  }
+}
+
+fn rewind[Source: Rewind](source: mut Source) -> Option[Int64]
+  uses Source.Uses
+{
+  let _ = mut source.pull()
+  mut source.back_twice()
+}
+

@@ -1,0 +1,13 @@
+type Color =
+  | Red
+  | Green
+  derives Equal
+
+let favorite: Color = Color.Red
+
+fn f(color: Color) -> Int64 {
+  match color {
+    favorite => 1
+    Green => 2
+  }
+}

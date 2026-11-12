@@ -1,0 +1,7 @@
+type Box[Element](value: Element)
+
+trait Mark[Other] {}
+
+impl Mark[Box[Element]] for Box[Element] {}
+
+impl Mark[Element] for Box[Element] {}

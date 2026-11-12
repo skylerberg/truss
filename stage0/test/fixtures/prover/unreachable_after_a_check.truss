@@ -1,0 +1,5 @@
+fn f(value: Int64) -> Int64
+  requires value > 0
+{
+  if value > 0 { 1 } else { unreachable }
+}

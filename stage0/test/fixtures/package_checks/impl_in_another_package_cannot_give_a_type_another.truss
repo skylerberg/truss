@@ -1,0 +1,3 @@
+public type Counter(count: Int64)
+
+public fn Counter.label(self) -> Int64 { todo }

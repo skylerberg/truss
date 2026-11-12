@@ -1,0 +1,8 @@
+fn bump(first: mut Int64, second: mut Int64) {
+  first = 1
+  second = 2
+}
+
+fn f(items: mut List[Int64]) {
+  bump(mut items[0], second: mut items[1])
+}

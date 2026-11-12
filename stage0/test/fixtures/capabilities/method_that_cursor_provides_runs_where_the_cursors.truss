@@ -1,0 +1,6 @@
+fn length() -> USize
+  uses Meter
+{
+  var cursor = readings(3)
+  own cursor.count()
+}

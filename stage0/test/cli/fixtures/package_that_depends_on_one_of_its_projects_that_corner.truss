@@ -1,0 +1,3 @@
+public fn corner() -> Int64 {
+  acme::angles::degrees::turn()
+}

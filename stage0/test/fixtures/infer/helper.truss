@@ -1,0 +1,6 @@
+internal fn small(value: Int64) -> Bool
+  cost time O(1)
+{
+  value < 10
+}
+

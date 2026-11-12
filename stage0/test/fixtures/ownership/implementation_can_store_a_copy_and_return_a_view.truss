@@ -1,0 +1,11 @@
+type Labelled(text: String, label: StringSlice)
+
+impl Journal for Labelled {
+  fn write(mut self, text: StringSlice) {
+    self.text = text.to_string()
+  }
+
+  fn last(self) -> StringSlice {
+    self.label
+  }
+}

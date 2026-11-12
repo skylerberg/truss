@@ -1,0 +1,5 @@
+let first: USize = second
+
+let second: USize = first
+
+fn f(values: Array[Int64, first]) {}

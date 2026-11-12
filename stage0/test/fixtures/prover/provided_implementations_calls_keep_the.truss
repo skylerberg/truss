@@ -1,0 +1,15 @@
+type Fixed()
+
+impl Dice for Fixed {
+  fn roll(self) -> UInt8 {
+    4
+  }
+}
+
+fn f() -> UInt8
+  ensures result <= 6
+{
+  provide Fixed() {
+    Dice.roll()
+  }
+}

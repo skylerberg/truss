@@ -1,0 +1,5 @@
+type Couple[First, Second](first: First, second: Second)
+
+type Tree =
+  | Leaf
+  | Node(children: Couple[Tree, Int64])

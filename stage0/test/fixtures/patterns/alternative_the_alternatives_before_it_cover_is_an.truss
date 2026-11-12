@@ -1,0 +1,6 @@
+fn f(present: Option[Int64]) -> Int64 {
+  match present {
+    None | None => 0
+    Some(value) => value
+  }
+}

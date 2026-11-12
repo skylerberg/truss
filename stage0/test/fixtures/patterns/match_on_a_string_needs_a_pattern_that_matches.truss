@@ -1,0 +1,5 @@
+fn f(text: String) -> Int64 {
+  match text {
+    "a" => 1
+  }
+}

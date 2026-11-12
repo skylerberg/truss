@@ -1,0 +1,4 @@
+impl Shown for Marker {
+  type Part = (fn(Kept[Marker]) -> Bool cost time finite)
+}
+

@@ -1,0 +1,5 @@
+fn compute() -> Int64 {
+  1
+}
+
+fn f(count: Int64 = compute()) {}

@@ -1,0 +1,17 @@
+fn run(count: UInt32, transform: (fn(UInt32) -> UInt32 cost time O(1))) -> UInt32 {
+  transform(count)
+}
+
+fn spin(size: UInt32)
+  cost time O(size)
+{
+  for _ in 0..size {
+  }
+}
+
+fn f(count: UInt32) -> UInt32 {
+  run(count, transform: fn(value) {
+    spin(value)
+    value
+  })
+}

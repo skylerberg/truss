@@ -1,0 +1,7 @@
+fn f(rows: mut List[List[Int64]])
+  uses Tasks
+{
+  concurrent for row in mut rows {
+    look(row)
+  }
+}

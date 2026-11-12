@@ -1,0 +1,5 @@
+fn f(count: UInt32) {
+  for i in 0..count {
+    let _ = i + 1
+  }
+}

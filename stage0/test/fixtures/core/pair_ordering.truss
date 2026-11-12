@@ -1,0 +1,15 @@
+type Pair(first: UInt8, second: UInt8)
+  derives Equal
+
+theorem only_equal(first: Pair, second: Pair)
+  ensures (first.compare(second) == Ordering.Equal) == (first == second)
+{
+}
+
+impl Ordered for Pair {
+  fn compare(self, other: Pair) -> Ordering {
+    let order = self.first.compare(other.first)
+    if order != Ordering.Equal { order } else { self.second.compare(other.second) }
+  }
+}
+

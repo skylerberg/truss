@@ -1,0 +1,8 @@
+fn first_of[Input: Source[Item = Output], Output](input: Input) -> Output {
+  input.first()
+}
+
+fn f(numbers: Numbers) -> Int64 {
+  let first = first_of(numbers)
+  first
+}

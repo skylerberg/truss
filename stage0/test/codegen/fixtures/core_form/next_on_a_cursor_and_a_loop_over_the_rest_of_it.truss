@@ -1,0 +1,25 @@
+fn numbers(limit: Int64) yields Int64 {
+  var next = 1
+  while next <= limit {
+    yield next
+    next += 1
+  }
+}
+
+fn first_and_rest(limit: Int64) -> Int64 {
+  var cursor = numbers(limit)
+  let first = match mut cursor.next() {
+    Some(number) => number
+    None => 0
+  }
+  var rest = 0
+  for number in mut cursor {
+    rest += number
+  }
+  first * 100 + rest
+}
+
+test "cursors" {
+  assert first_and_rest(4) == 109
+  assert first_and_rest(0) == 0
+}

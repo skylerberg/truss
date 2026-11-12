@@ -1,0 +1,12 @@
+fn stamp() -> Bool
+  uses Clock
+  cost time finite
+{
+  todo
+}
+
+fn f()
+  uses Clock
+  requires stamp()
+{
+}

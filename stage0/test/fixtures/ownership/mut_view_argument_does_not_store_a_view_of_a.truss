@@ -1,0 +1,7 @@
+fn f(bytes: List[UInt8]) -> USize {
+  var reader = Reader(bytes: bytes[..], position: 0)
+  var buffer: List[UInt8] = []
+  let first = mut reader.read(mut buffer, limit: 1)
+  let second = mut reader.read(mut buffer, limit: 1)
+  first + second + buffer.length()
+}

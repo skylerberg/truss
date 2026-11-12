@@ -1,0 +1,5 @@
+fn f(count: Int64) -> USize
+  ensures result == 1
+{
+  "${count}".length()
+}

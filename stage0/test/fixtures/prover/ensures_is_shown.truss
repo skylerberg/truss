@@ -1,0 +1,6 @@
+fn absolute(value: Int64) -> Int64
+  requires value > -1000
+  ensures result >= 0
+{
+  if value < 0 { -value } else { value }
+}

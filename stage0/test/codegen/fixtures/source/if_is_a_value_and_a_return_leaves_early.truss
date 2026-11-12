@@ -1,0 +1,12 @@
+fn sign(value: Int64) -> Int64 {
+  if value < 0 {
+    return -1
+  }
+  if value == 0 { 0 } else { 1 }
+}
+
+test "signs" {
+  assert sign(-5) == -1
+  assert sign(0) == 0
+  assert sign(7) == 1
+}

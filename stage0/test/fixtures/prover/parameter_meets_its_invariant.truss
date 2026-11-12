@@ -1,0 +1,4 @@
+fn f(range: Span)
+  ensures range.low <= range.high
+{
+}

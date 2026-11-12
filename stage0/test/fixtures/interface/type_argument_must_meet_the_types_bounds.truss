@@ -1,0 +1,5 @@
+type Sorted[Element: Ordered](items: List[Element])
+
+type Point(x: Int64)
+
+fn f(points: Sorted[Point]) {}

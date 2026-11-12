@@ -1,0 +1,8 @@
+fn f(items: mut List[Int64]) -> USize {
+  let part = {
+    let all = items[..]
+    all
+  }
+  mut items.push(1)
+  part.length()
+}

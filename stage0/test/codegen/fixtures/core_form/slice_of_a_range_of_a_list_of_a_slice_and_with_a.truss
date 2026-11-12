@@ -1,0 +1,24 @@
+fn total(items: Slice[Int64]) -> Int64 {
+  var sum = 0
+  for item in items {
+    sum += item
+  }
+  sum
+}
+
+test "ranges" {
+  let items = [1, 2, 4, 8, 16]
+  assert total(items[1..3]) == 6
+  assert total(items[1..=3]) == 14
+  assert total(items[..2]) == 3
+  assert total(items[3..]) == 24
+  assert total(items[..]) == 31
+  let middle = items[1..4]
+  assert middle.length() == 3
+  assert total(middle[1..]) == 12
+  assert middle[2..3][0] == 8
+  var from: USize = 2
+  from += 1
+  assert total(items[from - 1..from + 1]) == 12
+  assert items[5..].length() == 0
+}

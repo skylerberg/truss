@@ -1,0 +1,25 @@
+fn apply[capability Granted](run: (fn() uses Granted))
+  uses Granted
+{
+  run()
+}
+
+fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {
+  run
+}
+
+fn shout()
+  uses Console
+{
+  Console.print_line("named")
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  apply(fn() { Console.print_line("inside") })
+  apply(shout)
+  let held = later(fn() { Console.print_line("kept") })
+  held()
+  ExitCode(0)
+}

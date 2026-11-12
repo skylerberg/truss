@@ -1,0 +1,10 @@
+type Code(number: Int64)
+
+public let Code.teapot: Int64 = 418
+
+fn f(n: Int64) -> Int64 {
+  match n {
+    Code.teapot => 1
+    5 => 2
+  }
+}

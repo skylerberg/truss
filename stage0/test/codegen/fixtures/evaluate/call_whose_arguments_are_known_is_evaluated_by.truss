@@ -1,0 +1,6 @@
+
+fn f() -> UInt8
+  ensures result == 7
+{
+  count_up(7)
+}

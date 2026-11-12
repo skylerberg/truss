@@ -1,0 +1,17 @@
+fn stamp() -> Bool
+  uses Clock
+  cost time finite
+{
+  todo
+}
+
+fn f()
+  uses Clock
+{
+  var count = 0
+  while count < 3
+    invariant stamp()
+  {
+    count += 1
+  }
+}

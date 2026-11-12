@@ -1,0 +1,3 @@
+fn negate[Number: Negate](value: Number) -> Number.Output {
+  -value
+}

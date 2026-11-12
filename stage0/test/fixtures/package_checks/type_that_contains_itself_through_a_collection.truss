@@ -1,0 +1,3 @@
+type Expression =
+  | Number(value: Int64)
+  | Call(arguments: List[Expression])

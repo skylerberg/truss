@@ -1,0 +1,12 @@
+fn for_each[capability Granted](count: Int64, visit: (fn(Int64) uses Granted))
+  uses Granted
+{
+  todo
+}
+
+fn f() {
+  for_each(3, visit: fn(value) {
+    let _ = Clock.now()
+    let _ = value
+  })
+}

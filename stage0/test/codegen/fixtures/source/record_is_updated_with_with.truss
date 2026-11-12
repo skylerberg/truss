@@ -1,0 +1,8 @@
+type Point(x: Int64, y: Int64)
+  derives Equal
+
+test "updates" {
+  let origin = Point(x: 0, y: 0)
+  let moved = origin with (x: 5)
+  assert moved == Point(x: 5, y: 0)
+}

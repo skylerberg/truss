@@ -1,0 +1,7 @@
+internal fn double(value: Int64, times: Int64) -> Int64 {
+  value * times
+}
+
+test "doubling" {
+  assert double(2, times: 2) == 4
+}

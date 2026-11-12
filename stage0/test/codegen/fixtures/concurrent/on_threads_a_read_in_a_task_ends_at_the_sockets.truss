@@ -1,0 +1,33 @@
+use standard::network
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console, NetworkServer, NetworkClient, Handles
+{
+  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  if NetworkServer.listen(loopback) is Ok(opened) {
+    var listener = own opened
+    let at = listener.local_address()
+    concurrent {
+      {
+        if NetworkClient.connect(at, timeout: Some(Duration.nanoseconds(2000000000))) is Ok(built) {
+          var client = own built
+          let _ = mut client.set_read_timeout(Some(Duration.nanoseconds(50000000)))
+          var heard: List[UInt8] = []
+          if mut client.read(mut heard, limit: 10) is Err(error) {
+            Console.print_line("timed out ${error == SystemError.TimedOut}")
+          }
+        }
+      }
+      {
+        if mut listener.accept() is Ok(moved) {
+          var server = own moved
+          var heard: List[UInt8] = []
+          if mut server.read(mut heard, limit: 10) is Ok(count) {
+            Console.print_line("the peer closed ${count == 0}")
+          }
+        }
+      }
+    }
+  }
+  ExitCode.success
+}

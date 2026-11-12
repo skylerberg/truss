@@ -1,0 +1,11 @@
+fn run(task: (fn() cost time finite))
+  cost time finite
+{
+  task()
+}
+
+fn f(quick: (fn() cost time O(1)))
+  cost time finite
+{
+  run(quick)
+}

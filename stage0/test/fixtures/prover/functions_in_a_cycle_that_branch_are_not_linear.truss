@@ -1,0 +1,16 @@
+fn ping(count: UInt32) -> UInt32
+  decreases count
+  cost time O(count)
+{
+  if count == 0 { 0 } else {
+    let _ = pong(count - 1)
+    pong(count - 1)
+  }
+}
+
+fn pong(count: UInt32) -> UInt32
+  decreases count
+  cost time O(count)
+{
+  if count == 0 { 0 } else { ping(count - 1) }
+}

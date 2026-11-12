@@ -1,0 +1,14 @@
+fn hang() -> Bool
+  ensures false
+{
+  while true {}
+}
+
+fn f(x: Int64) -> Int64
+  ensures result <= 0
+{
+  if x > 0 {
+    let _ = exists _ in 0..0 => hang()
+  }
+  x
+}

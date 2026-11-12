@@ -1,0 +1,7 @@
+fn built() -> Map[String, Int64]
+  ensures result.contains("a")
+{
+  var table: Map[String, Int64] = [:]
+  mut table.insert("a", value: 1)
+  table
+}

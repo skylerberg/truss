@@ -1,0 +1,14 @@
+fn swap_each[Element](part: mut Slice[Element])
+  requires part.length() >= 1
+  cost time O(part.length())
+{
+  var index: USize = 0
+  while index < part.length()
+    invariant index <= part.length()
+    invariant part.length() == old(part.length())
+    decreases part.length() - index
+  {
+    mut part.swap(0, second: index)
+    index += 1
+  }
+}

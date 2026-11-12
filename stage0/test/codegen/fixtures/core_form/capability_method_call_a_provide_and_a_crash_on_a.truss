@@ -1,0 +1,46 @@
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+type Counter(sum: Int64)
+
+impl Tally for Counter {
+  fn add(mut self, amount: Int64) {
+    self.sum += amount
+  }
+
+  fn total(self) -> Int64 {
+    self.sum
+  }
+}
+
+fn record(amount: Int64) -> Int64
+  uses Tally
+{
+  Tally.add(amount)
+  Tally.total()
+}
+
+fn counted() -> Int64 {
+  var counter = Counter(sum: 1)
+  let last = provide mut counter {
+    let first = record(2)
+    first + record(3)
+  }
+  last + counter.sum
+}
+
+fn checked(value: Int64) -> Int64
+  uses Panic
+{
+  if value < 0 {
+    Panic.crash("negative")
+  }
+  value
+}
+
+test "counts" {
+  assert counted() == 15
+  assert checked(3) == 3
+}

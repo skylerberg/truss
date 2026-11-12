@@ -1,0 +1,7 @@
+use standard::intrinsic
+
+fn low(value: UInt64, mask: UInt64) -> UInt64
+  ensures result <= mask
+{
+  intrinsic::bit_and(value, right: mask)
+}

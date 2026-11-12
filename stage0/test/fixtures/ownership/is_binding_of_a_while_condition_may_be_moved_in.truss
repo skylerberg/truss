@@ -1,0 +1,5 @@
+fn f() {
+  while make() is Some(text) {
+    keep(own text)
+  }
+}

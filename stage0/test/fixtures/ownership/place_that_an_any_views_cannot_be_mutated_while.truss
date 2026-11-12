@@ -1,0 +1,5 @@
+fn f(items: mut List[Int64]) -> USize {
+  let runner: any Runner = any Window(view: items[..])
+  mut items.push(4)
+  runner.run()
+}

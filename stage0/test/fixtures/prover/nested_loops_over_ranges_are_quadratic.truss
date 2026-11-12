@@ -1,0 +1,9 @@
+fn f(count: UInt32)
+  cost time O(count * count)
+{
+  for row in 0..count {
+    for _ in 0..count {
+      let _ = step(row)
+    }
+  }
+}

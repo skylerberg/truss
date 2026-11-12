@@ -1,0 +1,7 @@
+type Meters(value: Int64)
+
+impl Equal for Meters {
+  fn equal(self, other: Meters) -> Bool {
+    todo
+  }
+}

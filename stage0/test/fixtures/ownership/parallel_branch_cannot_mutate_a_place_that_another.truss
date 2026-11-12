@@ -1,0 +1,10 @@
+fn bump(count: mut Int64) {}
+
+fn f() -> Int64 {
+  var count = 0
+  parallel {
+    bump(mut count)
+    let seen = count
+  }
+  seen
+}

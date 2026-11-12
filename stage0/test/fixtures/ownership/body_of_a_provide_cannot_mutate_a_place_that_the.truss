@@ -1,0 +1,7 @@
+fn f() -> USize {
+  var fixed = Fixed(value: 1)
+  provide fixed {
+    fixed = Fixed(value: 2)
+    count()
+  }
+}

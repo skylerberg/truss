@@ -1,0 +1,10 @@
+fn f() -> Int64 {
+  let action: (fn() -> Int64 cost time finite) = quick
+  action()
+}
+
+fn quick() -> Int64
+  cost time O(1)
+{
+  1
+}

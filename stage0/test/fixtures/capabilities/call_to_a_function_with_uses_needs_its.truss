@@ -1,0 +1,9 @@
+fn stamp() -> Instant
+  uses Clock
+{
+  Clock.now()
+}
+
+fn f() -> Instant {
+  stamp()
+}

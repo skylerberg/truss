@@ -1,0 +1,8 @@
+fn grow(bag: mut Bag) -> Bag {
+  mut bag.items.push(1)
+  Bag(items: [])
+}
+
+fn f(bag: mut Bag) {
+  bag += grow(mut bag)
+}

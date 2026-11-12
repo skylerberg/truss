@@ -1,0 +1,20 @@
+type Box(width: Int64, height: Int64)
+
+fn step(start: Int64, by: Int64 = 1) -> Int64 {
+  start + by
+}
+
+fn twice(start: Int64) -> Int64 {
+  var total = step(start)
+  total = step(total, by: 5)
+  total
+}
+
+fn width(box: Box) -> Int64 {
+  box.width
+}
+
+test "steps" {
+  assert twice(1) == 7
+  assert width(Box(width: 3, height: 4)) == 3
+}

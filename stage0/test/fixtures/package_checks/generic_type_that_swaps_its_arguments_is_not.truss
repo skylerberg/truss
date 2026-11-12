@@ -1,0 +1,3 @@
+type Swap[First, Second] =
+  | Stop
+  | indirect Next(next: Swap[Second, First])

@@ -1,0 +1,7 @@
+fn f(ready: Bool) {
+  while ready {
+    if make() is Some(text) {
+      keep(own text)
+    }
+  }
+}

@@ -1,0 +1,3 @@
+fn f() {
+  let small: Int8 = -128
+}

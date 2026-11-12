@@ -1,0 +1,5 @@
+fn g()
+  uses Console
+{
+  apply(fn() { Console.print_line("inside") })
+}

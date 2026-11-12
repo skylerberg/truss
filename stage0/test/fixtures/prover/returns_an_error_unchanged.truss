@@ -1,0 +1,9 @@
+fn f(value: Result[Int64, Bool]) -> Result[Int64, Bool]
+  ensures match value {
+    Err(error) => result == Err(error)
+    Ok(_) => true
+  }
+{
+  let inner = value?
+  Ok(inner)
+}

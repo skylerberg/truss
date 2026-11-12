@@ -1,0 +1,20 @@
+fn counted_up(count: USize) -> USize
+  requires count < 1000
+  ensures result == count
+  cost time O(count)
+{
+  var reached: USize = 0
+  while reached < count
+    invariant reached <= count
+    decreases count - reached
+  {
+    reached += 1
+  }
+  reached
+}
+
+theorem each_counted(items: List[USize])
+  requires forall i in 0..items.length() => items[i] < 1000
+  ensures forall i in 0..items.length() => counted_up(items[i]) == items[i]
+{
+}

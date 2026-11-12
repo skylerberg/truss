@@ -1,0 +1,3 @@
+fn f(low: Int64) -> Span {
+  Span(low, high: 0)
+}

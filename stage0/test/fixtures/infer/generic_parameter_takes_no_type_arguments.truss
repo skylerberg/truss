@@ -1,0 +1,3 @@
+fn f[Element: Default]() -> Element {
+  Element[Int64].default()
+}

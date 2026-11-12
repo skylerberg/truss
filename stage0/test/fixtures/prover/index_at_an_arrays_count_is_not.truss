@@ -1,0 +1,3 @@
+fn f(numbers: Array[Int64, 4]) -> Int64 {
+  numbers[4]
+}

@@ -1,0 +1,7 @@
+fn f(steps: UInt32) -> UInt32
+  decreases steps
+  cost time finite
+{
+  if steps == 0 { return 0 }
+  f(steps - 1)
+}

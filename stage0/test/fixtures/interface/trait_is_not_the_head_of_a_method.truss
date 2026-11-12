@@ -1,0 +1,3 @@
+fn Ordered.twice(self) -> Bool {
+  true
+}

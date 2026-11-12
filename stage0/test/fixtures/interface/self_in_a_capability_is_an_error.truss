@@ -1,0 +1,3 @@
+capability Logger {
+  fn log(message: Self)
+}

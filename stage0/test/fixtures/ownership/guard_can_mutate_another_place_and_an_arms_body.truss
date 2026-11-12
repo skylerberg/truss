@@ -1,0 +1,12 @@
+fn f() -> Int64 {
+  var n: Int64 = 0
+  var other: Int64 = 0
+  match n {
+    0 if bump(mut other) => 1
+    0 => {
+      n = 5
+      n + other
+    }
+    _ => 3
+  }
+}

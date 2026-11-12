@@ -1,0 +1,8 @@
+trait Ranked: Ordered {
+  law transitive(first: Self, second: Self, third: Self)
+    requires first < second
+    requires second < third
+  {
+    first < third
+  }
+}

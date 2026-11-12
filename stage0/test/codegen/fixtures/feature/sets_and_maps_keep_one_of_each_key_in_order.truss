@@ -1,0 +1,18 @@
+test "collections" {
+  var colors: Set[String] = ["red", "green", "red"]
+  assert colors.length() == 2
+  assert colors.contains("green")
+  assert !colors.contains("blue")
+  mut colors.insert("blue")
+  mut colors.insert("${1}")
+  assert colors.length() == 4
+  var ages: Map[String, Int64] = ["ada": 36, "alan": 41]
+  mut ages.insert("ada", value: 37)
+  assert ages.length() == 2
+  assert ages.contains("ada")
+  mut ages.insert("grace", value: 85)
+  mut ages.insert("alan", value: 42)
+  assert ages.length() == 3
+  let empty: Map[Int64, Int64] = [:]
+  assert empty.length() == 0
+}

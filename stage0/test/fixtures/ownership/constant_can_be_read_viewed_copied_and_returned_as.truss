@@ -1,0 +1,15 @@
+let limit: Int64 = 10
+
+fn first() -> Slice[Int64] {
+  names[0..1]
+}
+
+fn f() -> Int64 {
+  look(names)
+  keep(names.copy())
+  let view = names
+  look(view)
+  var count = limit
+  count += 1
+  count
+}

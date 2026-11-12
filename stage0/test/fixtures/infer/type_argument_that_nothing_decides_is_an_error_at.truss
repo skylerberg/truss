@@ -1,0 +1,7 @@
+fn make[Value]() -> Int64 {
+  1
+}
+
+fn f() -> Int64 {
+  make()
+}

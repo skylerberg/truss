@@ -1,0 +1,15 @@
+trait Ordered: Equal {
+  type Key: Hash
+  fn compare(self, other: Self) -> Ordering
+  fn max(own self, other: own Self) -> Self
+    ensures true
+  {
+    self
+  }
+
+  law transitive(a: Self, b: Self)
+    requires a <= b
+  {
+    true
+  }
+}

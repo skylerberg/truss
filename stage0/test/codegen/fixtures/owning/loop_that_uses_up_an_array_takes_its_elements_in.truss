@@ -1,0 +1,11 @@
+fn join(names: own Array[String, 3]) -> String {
+  var text = ""
+  for name in own names {
+    text = "${text}${name}"
+  }
+  text
+}
+
+test "used up" {
+  assert join(["a${1}", "b${2}", "c${3}"]) == "a1b2c3"
+}

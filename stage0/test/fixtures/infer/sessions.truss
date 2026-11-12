@@ -1,0 +1,22 @@
+capability Sessions {
+  fn touch(session: USize)
+  fn each(visit: (fn(USize) uses Clock))
+}
+
+type Table(sessions: List[USize])
+
+impl Sessions for Table {
+  fn touch(mut self, session: USize) {
+    mut self.sessions.push(session)
+  }
+
+  fn each(mut self, visit: (fn(USize) uses Clock)) {
+  }
+}
+
+fn serve(session: USize)
+  uses Sessions
+{
+  Sessions.touch(session)
+}
+

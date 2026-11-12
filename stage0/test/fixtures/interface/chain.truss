@@ -1,0 +1,3 @@
+type Chain[Value] =
+  | End
+  | indirect Link(value: Value, rest: Chain[Value])

@@ -1,0 +1,25 @@
+capability Hits {
+  fn hit()
+    cost time finite
+}
+
+type Counter(count: Int64)
+
+impl Hits for Counter {
+  fn hit(mut self) {
+    self.count = self.count.saturating_add(1)
+  }
+}
+
+fn f(count: UInt32, visit: (fn() -> Bool uses Hits cost time finite))
+  uses Hits
+  cost calls(visit) <= 1
+{
+  var index: UInt32 = 0
+  while index < count && visit()
+    invariant index <= count
+    decreases count - index
+  {
+    index = index + 1
+  }
+}

@@ -1,0 +1,21 @@
+trait Step {
+  fn step(own self) -> Int64
+    cost time finite
+}
+
+fn run(value: own any Step) -> Int64
+  cost time finite
+{
+  own value.step()
+}
+
+type Foo()
+
+impl Step for Foo {
+  fn step(own self) -> Int64
+    cost time finite
+  {
+    let value: any Step = any self
+    run(own value)
+  }
+}

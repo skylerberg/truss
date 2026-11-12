@@ -1,0 +1,5 @@
+fn T.each(self) yields Int64 {
+  concurrent {
+    yield 1
+  }
+}

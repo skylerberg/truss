@@ -1,0 +1,3 @@
+fn f(present: Option[Int64], other: Bool) -> Bool {
+  present is Some(value) || value > 0
+}

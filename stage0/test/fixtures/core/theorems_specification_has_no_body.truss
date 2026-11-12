@@ -1,0 +1,4 @@
+theorem doubled(value: Int64)
+  ensures value + value == 2 * value
+{
+}

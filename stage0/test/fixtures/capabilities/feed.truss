@@ -1,0 +1,62 @@
+capability Meter {
+  fn read() -> Int64
+}
+
+trait Feed {
+  capability Uses
+
+  fn pull(mut self) -> Option[Int64]
+    uses Self.Uses
+
+  fn skip(mut self)
+    uses Self.Uses
+  {
+    let _ = mut self.pull()
+  }
+}
+
+type Counter(next: Int64)
+
+impl Feed for Counter {
+  fn pull(mut self) -> Option[Int64] {
+    self.next += 1
+    Some(self.next)
+  }
+}
+
+type Gauge(last: Int64)
+
+impl Feed for Gauge {
+  capability Uses = Meter
+
+  fn pull(mut self) -> Option[Int64]
+    uses Meter
+  {
+    self.last = Meter.read()
+    Some(self.last)
+  }
+}
+
+type Twice[Source](source: Source)
+
+impl Feed for Twice[Source: Feed] {
+  capability Uses = Source.Uses
+
+  fn pull(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    let _ = mut self.source.pull()
+    mut self.source.pull()
+  }
+}
+
+fn drain[Source: Feed](source: mut Source) -> Int64
+  uses Source.Uses
+{
+  var total = 0
+  while mut source.pull() is Some(value) {
+    total += value
+  }
+  total
+}
+

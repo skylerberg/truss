@@ -1,0 +1,10 @@
+type Color =
+  | Red
+  | Green
+
+fn f(color: Option[Color]) -> Int64 {
+  match color {
+    Some(Red | Red) => 1
+    _ => 2
+  }
+}

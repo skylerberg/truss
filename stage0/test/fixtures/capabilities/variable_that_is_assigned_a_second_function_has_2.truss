@@ -1,0 +1,7 @@
+fn f() -> Instant
+  uses Clock
+{
+  var held = later(still)
+  held = tick
+  held()
+}

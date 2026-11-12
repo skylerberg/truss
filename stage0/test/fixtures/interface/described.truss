@@ -1,0 +1,27 @@
+trait Described {
+  fn describe(self) -> Int64
+
+  fn beside[Other](self, other: Other) -> Self { todo }
+}
+
+type One()
+
+impl Described for One {
+  fn describe(self) -> Int64 { todo }
+}
+
+type Both[Value](first: Value, second: Value)
+
+impl Described for Both[Value: Described] {
+  fn describe(self) -> Int64 { todo }
+}
+
+type FixedClock(time: Instant)
+
+impl Clock for FixedClock
+  uses Random
+{
+  fn now(self) -> Instant { todo }
+  fn monotonic(self) -> Duration { todo }
+  fn sleep(self, duration: Duration) {}
+}

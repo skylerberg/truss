@@ -1,0 +1,16 @@
+type Empty(value: Int64)
+  invariant value > 0
+  invariant value < 0
+
+fn ignore(visit: fn(Empty) -> Int64) -> Int64 {
+  0
+}
+
+fn f(x: Int64) -> Int64
+  ensures result <= 0
+{
+  if x > 0 {
+    let _ = ignore(fn(e) { e.value })
+  }
+  x
+}

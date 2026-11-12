@@ -1,0 +1,5 @@
+public trait Equal {
+  fn equal(self, other: Self) -> Bool
+}
+
+public type Ordering = Less | Same | Greater

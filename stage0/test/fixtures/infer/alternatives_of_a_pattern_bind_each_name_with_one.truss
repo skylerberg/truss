@@ -1,0 +1,9 @@
+type Either2 =
+  | Number(value: Int64)
+  | Text(value: String)
+
+fn f(either: Either2) -> Int64 {
+  match either {
+    Number(value) | Text(value) => 1
+  }
+}

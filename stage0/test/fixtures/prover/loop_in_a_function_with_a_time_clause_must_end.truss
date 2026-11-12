@@ -1,0 +1,8 @@
+fn f(count: UInt32)
+  cost time finite
+{
+  var i: UInt32 = 0
+  while i < count {
+    i = i
+  }
+}

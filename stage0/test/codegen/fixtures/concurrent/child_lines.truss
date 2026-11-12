@@ -1,0 +1,8 @@
+use standard::processes
+
+fn lines(count: Int64) -> processes::Command {
+  processes::Command.new("awk")
+    .argument("BEGIN { for (i = 0; i < ${count}; i++) { print \"out-line-\" i; print \"err-line-\" i > \"/dev/stderr\" } }")
+    .output(processes::Redirect.Capture)
+    .error_output(processes::Redirect.Capture)
+}

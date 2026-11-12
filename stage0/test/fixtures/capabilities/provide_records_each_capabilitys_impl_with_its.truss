@@ -1,0 +1,13 @@
+type Fixed[Tag](time: Instant, tag: Tag)
+
+impl Clock for Fixed[Tag] {
+  fn now(self) -> Instant { self.time }
+  fn monotonic(self) -> Duration { todo }
+  fn sleep(self, duration: Duration) {}
+}
+
+fn f() -> Instant {
+  provide Fixed(time: Instant.epoch, tag: true) {
+    Clock.now()
+  }
+}

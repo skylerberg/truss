@@ -1,0 +1,6 @@
+fn main(arguments: List[String]) -> ExitCode {
+  proof {
+    todo
+  }
+  ExitCode.success
+}

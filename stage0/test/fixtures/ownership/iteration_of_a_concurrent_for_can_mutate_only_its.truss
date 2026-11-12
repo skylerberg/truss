@@ -1,0 +1,7 @@
+fn f(items: List[Int64], total: mut Int64)
+  uses Tasks
+{
+  concurrent for item in items {
+    total = item
+  }
+}

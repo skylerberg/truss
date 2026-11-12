@@ -1,0 +1,10 @@
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  match Processes.run(lines(8000)) {
+    Ok(output) => Console.print_line("captured ${output.output.length()} and ${output.error_output.length()}")
+    Err(error) => Console.print_line("run: ${error}")
+  }
+  ExitCode.success
+}

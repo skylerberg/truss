@@ -1,0 +1,7 @@
+fn f(holder: mut Holder, keep: Bool) -> List[Int64] {
+  let moved = own holder.items
+  if keep {
+    holder.items = []
+  }
+  moved
+}

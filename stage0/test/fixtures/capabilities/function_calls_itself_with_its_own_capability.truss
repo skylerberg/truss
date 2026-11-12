@@ -1,0 +1,9 @@
+fn repeat[capability Mine](action: (fn() -> Instant uses Mine), again: Bool) -> Instant
+  uses Mine
+{
+  if again {
+    repeat(action, again: false)
+  } else {
+    action()
+  }
+}

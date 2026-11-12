@@ -1,0 +1,6 @@
+type Config(items: List[Int64])
+
+let config: Config = Config(items: [1])
+
+let Config.ports: List[Int64] = [1]
+

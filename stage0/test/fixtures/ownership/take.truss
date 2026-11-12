@@ -1,0 +1,6 @@
+type Box(items: List[Int64])
+
+fn take(box: own Box) -> Bool {
+  true
+}
+

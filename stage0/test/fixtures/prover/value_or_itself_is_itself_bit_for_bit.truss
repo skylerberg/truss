@@ -1,0 +1,5 @@
+fn f(value: UInt32) -> UInt32
+  ensures result == value
+{
+  value | value
+}

@@ -1,0 +1,4 @@
+fn each_index(count: USize, visit: (fn(index: USize) -> Int64 requires index < count)) -> Int64 {
+  todo
+}
+

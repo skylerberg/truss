@@ -1,0 +1,3 @@
+fn g() -> Shape {
+  Shape.Square(side: 2)
+}

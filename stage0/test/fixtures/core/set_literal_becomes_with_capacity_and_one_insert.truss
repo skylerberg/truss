@@ -1,0 +1,3 @@
+fn g(first: own String, second: own String) -> Set[String] {
+  [own first, own second]
+}
