@@ -498,6 +498,14 @@ impl Handles for NoHandles {
     Err(SystemError.Closed)
   }
 
+  fn accept_local(self, listener: Handle) -> Result[Handle, SystemError] {
+    Err(SystemError.Closed)
+  }
+
+  fn configure(self, socket: Handle, option: network::SocketOption) -> Result[Unit, SystemError] {
+    Err(SystemError.Closed)
+  }
+
   fn send_to(
     self,
     socket: Handle,

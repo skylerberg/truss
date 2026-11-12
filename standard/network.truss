@@ -619,6 +619,18 @@ public fn Connection.shut_down(mut self, direction: Direction) -> Result[Unit, S
   Handles.shut_down(self.handle, direction: direction)
 }
 
+public fn Connection.set_no_delay(mut self, enabled: Bool) -> Result[Unit, SystemError]
+  uses Handles
+{
+  Handles.configure(self.handle, option: SocketOption.NoDelay(enabled: enabled))
+}
+
+public fn Connection.set_keep_alive(mut self, idle: Option[Duration]) -> Result[Unit, SystemError]
+  uses Handles
+{
+  Handles.configure(self.handle, option: SocketOption.KeepAlive(idle: idle))
+}
+
 impl streams::Reader for Connection {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
     uses Handles
@@ -640,6 +652,14 @@ impl streams::Writer for Connection {
     Ok(Unit)
   }
 }
+
+public type SocketOption =
+  | NoDelay(enabled: Bool)
+  | KeepAlive(idle: Option[Duration])
+  derives Equal
+
+public type ListenOptions(backlog: UInt32 = 1024, reuse_port: Bool = false)
+  derives Equal
 
 public type Accepted(handle: streams::Handle, peer: SocketAddress)
 
@@ -663,6 +683,76 @@ public fn Listener.accept(mut self) -> Result[Connection, SystemError]
 }
 
 public fn Listener.connections(mut self) yields own Result[Connection, SystemError]
+  uses Handles
+{
+  while true {
+    yield mut self.accept()
+  }
+}
+
+public opaque type LocalConnection(handle: streams::Handle)
+
+public fn LocalConnection.from_handle(handle: own streams::Handle) -> LocalConnection {
+  LocalConnection(handle: own handle)
+}
+
+public fn LocalConnection.set_read_timeout(mut self, timeout: Option[Duration]) -> Result[Unit, SystemError]
+  uses Handles
+{
+  Handles.set_timeout(self.handle, direction: Direction.Receiving, timeout: timeout)
+}
+
+public fn LocalConnection.set_write_timeout(mut self, timeout: Option[Duration]) -> Result[Unit, SystemError]
+  uses Handles
+{
+  Handles.set_timeout(self.handle, direction: Direction.Sending, timeout: timeout)
+}
+
+public fn LocalConnection.shut_down(mut self, direction: Direction) -> Result[Unit, SystemError]
+  uses Handles
+{
+  Handles.shut_down(self.handle, direction: direction)
+}
+
+impl streams::Reader for LocalConnection {
+  fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError]
+    uses Handles
+  {
+    Handles.read(self.handle, buffer: mut buffer, limit: limit)
+  }
+}
+
+impl streams::Writer for LocalConnection {
+  fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
+    uses Handles
+  {
+    Handles.write(self.handle, bytes: bytes)
+  }
+
+  fn flush(mut self) -> Result[Unit, SystemError]
+    uses Handles
+  {
+    Ok(Unit)
+  }
+}
+
+public opaque type LocalListener(handle: streams::Handle, path: Path)
+
+public fn LocalListener.from_handle(handle: own streams::Handle, path: own Path) -> LocalListener {
+  LocalListener(handle: own handle, path: own path)
+}
+
+public fn LocalListener.path(self) -> Path {
+  self.path.copy()
+}
+
+public fn LocalListener.accept(mut self) -> Result[LocalConnection, SystemError]
+  uses Handles
+{
+  Ok(LocalConnection(handle: Handles.accept_local(self.handle)?))
+}
+
+public fn LocalListener.connections(mut self) yields own Result[LocalConnection, SystemError]
   uses Handles
 {
   while true {
@@ -747,6 +837,10 @@ impl NetworkClient for HostsAllowed
         Err(_) => {}
       }
     }
+    Err(SystemError.PermissionDenied)
+  }
+
+  fn connect_local(self, path: Path) -> Result[LocalConnection, SystemError] {
     Err(SystemError.PermissionDenied)
   }
 
