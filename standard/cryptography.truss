@@ -1,4 +1,5 @@
 use standard::cryptography::elliptic
+use standard::cryptography::modular
 use standard::intrinsic
 
 let sha256_constants: Array[UInt32, 64] = [
@@ -3682,9 +3683,9 @@ fn keyed_hash(curve: Curve, key: Slice[UInt8], message: Slice[UInt8]) -> List[UI
 fn scalar_of_digest(elliptic_curve: elliptic::Curve, digest: Slice[UInt8]) -> List[UInt64] {
   let size = elliptic_curve.size()
   let used = if digest.length() > size { digest[..size] } else { digest }
-  var scalar = elliptic::limbs_from_bytes(used, count: size / 4)
+  var scalar = modular::limbs_from_bytes(used, count: size / 4)
   let order = elliptic_curve.order()
-  if !elliptic::is_less(scalar.slice(), second: order.slice()) {
+  if !modular::is_less(scalar.slice(), second: order.slice()) {
     let scalars = elliptic_curve.scalars()
     scalar = scalars.subtract(scalar.slice(), second: order.slice())
   }
@@ -3693,7 +3694,7 @@ fn scalar_of_digest(elliptic_curve: elliptic::Curve, digest: Slice[UInt8]) -> Li
 
 fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic::Curve, private: Slice[UInt8], digest: Slice[UInt8]) -> List[UInt64] {
   let size = elliptic_curve.size()
-  let hashed = elliptic::limbs_to_bytes(scalar_of_digest(elliptic_curve, digest: digest).slice(), length: size)
+  let hashed = modular::limbs_to_bytes(scalar_of_digest(elliptic_curve, digest: digest).slice(), length: size)
   let length = digest_for(curve, message: []).length()
   var value: List[UInt8] = List.filled(1, count: length)
   var key: List[UInt8] = List.filled(0, count: length)
@@ -3713,7 +3714,7 @@ fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic::Curve, private: S
       value = keyed_hash(curve, key: key.slice(), message: value.slice())
       mut stream.append_slice(value.slice())
     }
-    let candidate = elliptic::limbs_from_bytes(stream[..size], count: size / 4)
+    let candidate = modular::limbs_from_bytes(stream[..size], count: size / 4)
     if elliptic_curve.is_valid_scalar(candidate.slice()) {
       return candidate
     }
@@ -3723,7 +3724,7 @@ fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic::Curve, private: S
     value = keyed_hash(curve, key: key.slice(), message: value.slice())
     attempts += 1
   }
-  elliptic::limbs_from_bytes([1], count: size / 4)
+  modular::limbs_from_bytes([1], count: size / 4)
 }
 
 public opaque type EcdsaVerifyingKey(curve: Curve, point: List[UInt8])
@@ -3766,8 +3767,8 @@ public fn EcdsaVerifyingKey.verify_digest(self, digest: Slice[UInt8], signature:
     None => return false
   }
   let count = size / 4
-  let r = elliptic::limbs_from_bytes(signature[..size], count: count)
-  let s = elliptic::limbs_from_bytes(signature[size..], count: count)
+  let r = modular::limbs_from_bytes(signature[..size], count: count)
+  let s = modular::limbs_from_bytes(signature[size..], count: count)
   if !elliptic_curve.is_valid_scalar(r.slice()) || !elliptic_curve.is_valid_scalar(s.slice()) {
     return false
   }
@@ -3776,13 +3777,13 @@ public fn EcdsaVerifyingKey.verify_digest(self, digest: Slice[UInt8], signature:
   let w = scalars.invert(scalars.to_montgomery(s.slice()).slice())
   let first = scalars.from_montgomery(scalars.multiply(e.slice(), second: w.slice()).slice())
   let second = scalars.from_montgomery(scalars.multiply(scalars.to_montgomery(r.slice()).slice(), second: w.slice()).slice())
-  let first_point = elliptic_curve.multiply(elliptic::limbs_to_bytes(first.slice(), length: size).slice(), point: elliptic_curve.base())
-  let second_point = elliptic_curve.multiply(elliptic::limbs_to_bytes(second.slice(), length: size).slice(), point: point)
+  let first_point = elliptic_curve.multiply(modular::limbs_to_bytes(first.slice(), length: size).slice(), point: elliptic_curve.base())
+  let second_point = elliptic_curve.multiply(modular::limbs_to_bytes(second.slice(), length: size).slice(), point: point)
   match elliptic_curve.affine(elliptic_curve.add(first_point, second: second_point)) {
     Some(affine) => {
       var x = affine.x.copy()
       let order = elliptic_curve.order()
-      if !elliptic::is_less(x.slice(), second: order.slice()) {
+      if !modular::is_less(x.slice(), second: order.slice()) {
         x = scalars.subtract(x.slice(), second: order.slice())
       }
       scalars.equal(x.slice(), second: r.slice())
@@ -3810,7 +3811,7 @@ fn random_scalar(curve: Curve) -> List[UInt8]
         }
       }
     }
-    if elliptic_curve.is_valid_scalar(elliptic::limbs_from_bytes(bytes.slice(), count: size / 4).slice()) {
+    if elliptic_curve.is_valid_scalar(modular::limbs_from_bytes(bytes.slice(), count: size / 4).slice()) {
       return bytes
     }
   }
@@ -3827,7 +3828,7 @@ public fn EcdsaSigningKey.from_scalar(curve: Curve, bytes: Slice[UInt8]) -> Opti
 {
   let elliptic_curve = curve_of(curve)
   if bytes.length() != elliptic_curve.size()
-    || !elliptic_curve.is_valid_scalar(elliptic::limbs_from_bytes(bytes, count: bytes.length() / 4).slice())
+    || !elliptic_curve.is_valid_scalar(modular::limbs_from_bytes(bytes, count: bytes.length() / 4).slice())
   {
     return None
   }
@@ -3856,21 +3857,21 @@ public fn EcdsaSigningKey.sign_digest(self, digest: Slice[UInt8]) -> List[UInt8]
   let size = elliptic_curve.size()
   let scalars = elliptic_curve.scalars()
   let nonce = deterministic_nonce(self.curve, elliptic_curve: elliptic_curve, private: self.scalar.slice(), digest: digest)
-  let point = elliptic_curve.multiply(elliptic::limbs_to_bytes(nonce.slice(), length: size).slice(), point: elliptic_curve.base())
+  let point = elliptic_curve.multiply(modular::limbs_to_bytes(nonce.slice(), length: size).slice(), point: elliptic_curve.base())
   let affine = elliptic_curve.affine(point).expect("a valid nonce times the base point is not the identity")
   var r = affine.x.copy()
   let order = elliptic_curve.order()
-  if !elliptic::is_less(r.slice(), second: order.slice()) {
+  if !modular::is_less(r.slice(), second: order.slice()) {
     r = scalars.subtract(r.slice(), second: order.slice())
   }
-  let d = elliptic::limbs_from_bytes(self.scalar.slice(), count: size / 4)
+  let d = modular::limbs_from_bytes(self.scalar.slice(), count: size / 4)
   let e = scalar_of_digest(elliptic_curve, digest: digest)
   let product = scalars.multiply(scalars.to_montgomery(r.slice()).slice(), second: scalars.to_montgomery(d.slice()).slice())
   let sum = scalars.add(scalars.to_montgomery(e.slice()).slice(), second: product.slice())
   let inverse = scalars.invert(scalars.to_montgomery(nonce.slice()).slice())
   let s = scalars.from_montgomery(scalars.multiply(inverse.slice(), second: sum.slice()).slice())
-  var signature = elliptic::limbs_to_bytes(r.slice(), length: size)
-  mut signature.append(elliptic::limbs_to_bytes(s.slice(), length: size))
+  var signature = modular::limbs_to_bytes(r.slice(), length: size)
+  mut signature.append(modular::limbs_to_bytes(s.slice(), length: size))
   signature
 }
 
@@ -3903,5 +3904,5 @@ public fn EcdhKey.agree(own self, peer: Slice[UInt8]) -> Option[List[UInt8]]
   let elliptic_curve = curve_of(self.curve)
   let point = elliptic_curve.decode(peer)?
   let shared = elliptic_curve.affine(elliptic_curve.multiply(self.scalar.slice(), point: point))?
-  Some(elliptic::limbs_to_bytes(shared.x.slice(), length: elliptic_curve.size()))
+  Some(modular::limbs_to_bytes(shared.x.slice(), length: elliptic_curve.size()))
 }
