@@ -380,7 +380,7 @@ the code that it replaces:
    such as `Current_target`, and its consumers' cases for
    specification-only forms in executable code.
 
-The prover's two translations of primitive operations, one for `Operator`
-and one for a call of an intrinsic, can be merged before the MIR exists,
-since the core form already names the operation in both. Pattern matching
-as a decision tree comes after step 3, as an improvement of the builder.
+The prover already reads `Operator` and a call of an intrinsic that is a
+primitive operation through one translation, since the core form names the
+operation in both. Pattern matching as a decision tree comes after step 3,
+as an improvement of the builder.

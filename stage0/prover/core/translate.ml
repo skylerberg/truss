@@ -2216,97 +2216,309 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
       (frame, []) arguments
   in
   let ty = type_of context frame node in
+  ( frame,
+    primitive_operation context frame ~node operation [ ty ] operands
+      ~arguments:(List.map Option.some arguments) ~fallback:(fun () ->
+        if float_format ty <> None then arrive context frame "operator" ty
+        else unsupported (at frame node) "this operator") )
+
+(* A primitive operation on built-in types, written as an operator or as a
+   call of the intrinsic module's operation: either way it has the same
+   obligations and facts. [types] are the operation's type arguments, the
+   operands' type first. [arguments] are the operands' expressions where
+   they are values, for the text of a diagnostic and its fixes. [fallback]
+   is the result of an operation the logic does not model. *)
+and primitive_operation context frame ~node (operation : Intrinsic.operation) types operands
+    ~(arguments : expression option list) ~fallback =
   let source = frame.source in
   let span = at frame node in
-  if float_format ty <> None then
-    let result =
-      match (operation, operands) with
-      | Add, [ left_term; right_term ] -> float_operation "fp.add" left_term right_term
-      | Subtract, [ left_term; right_term ] -> float_operation "fp.sub" left_term right_term
-      | Multiply, [ left_term; right_term ] -> float_operation "fp.mul" left_term right_term
-      | Divide, [ left_term; right_term ] -> float_operation "fp.div" left_term right_term
-      | Negate, [ left_term ] -> Logic.Operation ("fp.neg", [ left_term ])
-      | _ -> arrive context frame "operator" ty
-    in
-    (frame, result)
-  else
-    match (operation, operands) with
-    | (Add | Subtract | Multiply | Divide | Remainder), [ left; right ] ->
-        let operand, divisor =
-          match arguments with [ first; second ] -> (Some first, Some second) | _ -> (None, None)
-        in
-        (frame, arithmetic ?operand ?divisor context frame node ty operation left right)
-    | Negate, [ inner ] ->
-        let negated = Logic.Operation ("-", [ inner ]) in
-        if bounds ty <> None then
-          oblige context frame Overflow span
-            (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (Types.show ty))
-            (in_range ty negated)
-        else if ty <> Types.Integer then unsupported span "negating a value of `%s`" (Types.show ty);
-        (frame, negated)
-    | Complement, [ inner ] -> (frame, opaque_operation context frame ty "complement" [ inner ])
-    | (Shift_left | Shift_right), [ left; right ] ->
-        let amount = List.nth arguments 1 in
-        (match width ty with
-        | Some bits ->
-            oblige context frame Shift (at frame amount)
-              ~fixes:
-                (match parameter_operand context frame amount right with
-                | Some text -> add_requires context frame (Printf.sprintf "%s < %d" text bits)
-                | None -> [])
-              (Printf.sprintf "The shift amount `%s` may not be less than %d."
-                 (quote source amount.origin) bits)
-              Logic.(Operation ("<", [ right; int bits ]))
-        | None -> unsupported span "a shift of `%s`" (Types.show ty));
-        let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
-        let shifted = opaque_operation context frame ty name [ left; right ] in
-        (* An unsigned shift multiplies or divides by a power of two: to the
-           left exactly, where the product fits. *)
-        (match bounds ty with
-        | Some (low, high) when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
-            let scale = power_of context frame (Logic.int 2) right in
-            assume context frame
-              (match operation with
-              | Shift_left ->
-                  Logic.(
-                    Operation ("<=", [ Operation ("*", [ left; scale ]); Integer high ])
-                    ==> equal shifted (Operation ("*", [ left; scale ])))
-              | _ -> Logic.equal shifted (Logic.truncated_divide left scale))
-        | _ -> ());
-        (frame, shifted)
-    | (Bit_and | Bit_or | Bit_xor), [ left; right ] ->
-        let name = match operation with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
-        let term = opaque_operation context frame ty name [ left; right ] in
-        (* Of unsigned values, [and] is at most each operand, [or] at
-           least each, and [or] and [xor] at most their sum and below each
-           power of two both operands are below. *)
-        (match bounds ty with
-        | Some (low, _) when Z.equal low Z.zero -> (
-            let at_most bound = Logic.Operation ("<=", [ term; bound ]) in
-            match operation with
-            | Bit_and -> assume context frame Logic.(at_most left &&& at_most right)
-            | _ ->
-                let sum = Logic.Operation ("+", [ left; right ]) in
-                if operation = Bit_or then
-                  assume context frame
-                    Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
-                assume context frame (at_most sum);
-                declare context
-                  (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
-                let exponent = Logic.Symbol (variable "exponent") in
-                let below value =
-                  Logic.Operation
-                    ("<", [ value; Logic.Apply (Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
-                in
+  let argument index = Option.join (List.nth_opt arguments index) in
+  let is_float = match types with ty :: _ -> float_format ty <> None | [] -> false in
+  let exact operation left right =
+    match (operation : Intrinsic.operation) with
+    | Add | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
+    | Subtract | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
+    | _ -> Logic.Operation ("*", [ left; right ])
+  in
+  match (operation, types, operands) with
+  | Add, _ :: _, [ left; right ] when is_float -> float_operation "fp.add" left right
+  | Subtract, _ :: _, [ left; right ] when is_float -> float_operation "fp.sub" left right
+  | Multiply, _ :: _, [ left; right ] when is_float -> float_operation "fp.mul" left right
+  | Divide, _ :: _, [ left; right ] when is_float -> float_operation "fp.div" left right
+  | Negate, _ :: _, [ value ] when is_float -> Logic.Operation ("fp.neg", [ value ])
+  | (Add | Subtract | Multiply | Divide | Remainder), ty :: _, [ left; right ] when not is_float ->
+      let result =
+        arithmetic ?operand:(argument 0) ?divisor:(argument 1) context frame node ty operation left
+          right
+      in
+      if bounds ty <> None then assume context frame (in_range ty result);
+      result
+  | Negate, ty :: _, [ inner ] when not is_float ->
+      let negated = Logic.Operation ("-", [ inner ]) in
+      if bounds ty <> None then
+        oblige context frame Overflow span
+          (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (Types.show ty))
+          (in_range ty negated)
+      else if ty <> Types.Integer then unsupported span "negating a value of `%s`" (Types.show ty);
+      negated
+  | Complement, ty :: _, [ inner ] -> opaque_operation context frame ty "complement" [ inner ]
+  | (Shift_left | Shift_right), ty :: _, [ left; right ] ->
+      (match width ty with
+      | Some bits ->
+          let at_amount, text, fixes =
+            match argument 1 with
+            | Some amount ->
+                ( at frame amount,
+                  Printf.sprintf "The shift amount `%s`" (quote source amount.origin),
+                  match parameter_operand context frame amount right with
+                  | Some text -> add_requires context frame (Printf.sprintf "%s < %d" text bits)
+                  | None -> [] )
+            | None ->
+                (span, Printf.sprintf "The shift amount in `%s`" (quote source node.origin), [])
+          in
+          oblige context frame Shift at_amount ~fixes
+            (Printf.sprintf "%s may not be less than %d." text bits)
+            Logic.(Operation ("<", [ right; int bits ]))
+      | None -> unsupported span "a shift of `%s`" (Types.show ty));
+      let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
+      let shifted = opaque_operation context frame ty name [ left; right ] in
+      (* An unsigned shift multiplies or divides by a power of two: to the
+         left exactly, where the product fits. *)
+      (match bounds ty with
+      | Some (low, high) when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
+          let scale = power_of context frame (Logic.int 2) right in
+          assume context frame
+            (match operation with
+            | Shift_left ->
+                Logic.(
+                  Operation ("<=", [ Operation ("*", [ left; scale ]); Integer high ])
+                  ==> equal shifted (Operation ("*", [ left; scale ])))
+            | _ -> Logic.equal shifted (Logic.truncated_divide left scale))
+      | _ -> ());
+      shifted
+  | (Bit_and | Bit_or | Bit_xor), ty :: _, [ left; right ] ->
+      let name = match operation with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
+      let term = opaque_operation context frame ty name [ left; right ] in
+      (* Of unsigned values, [and] is at most each operand, [or] at
+         least each, and [or] and [xor] at most their sum and below each
+         power of two both operands are below. *)
+      (match bounds ty with
+      | Some (low, _) when Z.equal low Z.zero -> (
+          let at_most bound = Logic.Operation ("<=", [ term; bound ]) in
+          match operation with
+          | Bit_and -> assume context frame Logic.(at_most left &&& at_most right)
+          | _ ->
+              let sum = Logic.Operation ("+", [ left; right ]) in
+              if operation = Bit_or then
                 assume context frame
-                  (Logic.Forall
-                     ( [ (variable "exponent", Logic.Int) ],
-                       Logic.(
-                         Operation ("<=", [ int 0; exponent ])
-                         &&& below left &&& below right ==> below term) )))
-        | _ -> ());
-        (frame, term)
-    | _ -> unsupported span "this operator"
+                  Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
+              assume context frame (at_most sum);
+              declare context
+                (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
+              let exponent = Logic.Symbol (variable "exponent") in
+              let below value =
+                Logic.Operation
+                  ("<", [ value; Logic.Apply (Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
+              in
+              assume context frame
+                (Logic.Forall
+                   ( [ (variable "exponent", Logic.Int) ],
+                     Logic.(
+                       Operation ("<=", [ int 0; exponent ])
+                       &&& below left &&& below right ==> below term) )))
+      | _ -> ());
+      term
+  | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), ty :: _, [ left; right ]
+    when bounds ty <> None ->
+      let low, high = Option.get (bounds ty) in
+      let modulus = Z.succ (Z.sub high low) in
+      Logic.Operation
+        ( "+",
+          [
+            Logic.Integer low;
+            Logic.Operation
+              ( "mod",
+                [
+                  Logic.Operation ("-", [ exact operation left right; Logic.Integer low ]);
+                  Logic.Integer modulus;
+                ] );
+          ] )
+  | (Add_overflows | Subtract_overflows | Multiply_overflows), ty :: _, [ left; right ]
+    when bounds ty <> None ->
+      Logic.not_ (in_range ty (exact operation left right))
+  | Equal, _ :: _, [ left; right ] when is_float -> float_equal left right
+  | Less, _ :: _, [ left; right ] when is_float -> float_less left right
+  | Equal, ty :: _, [ left; right ] when bounds ty <> None -> Logic.equal left right
+  | Less, ty :: _, [ left; right ] when bounds ty <> None -> Logic.Operation ("<", [ left; right ])
+  | Fits, [ source; target ], [ value ] when bounds source <> None && bounds target <> None ->
+      in_range target value
+  | Fits, [ source; target ], [ value ] when float_format source <> None && bounds target <> None ->
+      float_fits target value
+  | Convert, [ source; target ], [ value ]
+    when bounds source <> None && bounds target <> None && not (Types.is_builtin Character target)
+    ->
+      let known = fallback () in
+      assume context frame Logic.(in_range target value ==> equal known value);
+      known
+  | (Leading_zeros | Trailing_zeros | Count_ones), ty :: _, [ value ] when bounds ty <> None -> (
+      let low, _ = Option.get (bounds ty) in
+      (* Each count of bits is a function of the value, at most the width,
+         and for an unsigned value the three are related: a nonzero value
+         lies between the powers of two its leading zeros give, has no
+         more ones than the bits below its highest one, all of them where
+         it is one less than a power of two, and its lowest one below its
+         highest; zero has no ones and is all zeros. *)
+      match width ty with
+      | Some bits ->
+          let count name =
+            let symbol = Symbol.Bit_count { count = name; width = bits } in
+            declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
+            Logic.Apply (symbol, [ value ])
+          in
+          let leading = count "leading_zeros"
+          and trailing = count "trailing_zeros"
+          and ones = count "count_ones" in
+          let term =
+            match operation with Leading_zeros -> leading | Trailing_zeros -> trailing | _ -> ones
+          in
+          assume context frame
+            Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
+          (if Z.equal low Z.zero && not (Logic.mentions frame.bound value) then
+             let power exponent = power_of context frame (Logic.int 2) exponent in
+             let width = Logic.int bits in
+             let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
+             let below_highest = Logic.Operation ("-", [ width; leading ]) in
+             List.iter (assume context frame)
+               Logic.
+                 [
+                   Operation ("<=", [ int 0; leading ])
+                   &&& Operation ("<=", [ leading; width ])
+                   &&& Operation ("<=", [ int 0; trailing ])
+                   &&& Operation ("<=", [ trailing; width ])
+                   &&& Operation ("<=", [ int 0; ones ])
+                   &&& Operation ("<=", [ ones; width ]);
+                   nonzero
+                   ==> (Operation
+                          ("<=", [ power (Operation ("-", [ int (bits - 1); leading ])); value ])
+                       &&& Operation ("<", [ value; power below_highest ]));
+                   equal (equal ones (int 0)) (equal value (int 0));
+                   nonzero ==> Operation ("<=", [ ones; below_highest ]);
+                   nonzero
+                   &&& equal (Operation ("+", [ value; int 1 ])) (power below_highest)
+                   ==> equal ones below_highest;
+                   nonzero
+                   ==> Operation ("<=", [ Operation ("+", [ trailing; leading ]); int (bits - 1) ]);
+                   equal value (int 0) ==> (equal trailing width &&& equal leading width);
+                 ]);
+          term
+      | None -> fallback ())
+  | _ -> (
+      match (operation, types) with
+      | (Ieee_equal | Ieee_less), ty :: _ when float_format ty <> None -> (
+          match operands with
+          | [ left; right ] ->
+              Logic.Operation
+                ((if operation = Ieee_equal then "fp.eq" else "fp.lt"), [ left; right ])
+          | _ -> fallback ())
+      | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _
+        when float_format ty <> None -> (
+          (* The rounding the compiled operation does, as IEEE 754 names it. *)
+          match operands with
+          | [ value ] -> (
+              match operation with
+              | Square_root -> Logic.Operation ("fp.sqrt", [ Logic.Operation ("RNE", []); value ])
+              | Floor ->
+                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTN", []); value ])
+              | Ceiling ->
+                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTP", []); value ])
+              | Truncate ->
+                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ])
+              | _ -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RNE", []); value ]))
+          | _ -> fallback ())
+      | Fused_multiply_add, ty :: _ when float_format ty <> None -> (
+          match operands with
+          | [ value; multiplier; addend ] ->
+              Logic.Operation ("fp.fma", [ Logic.Operation ("RNE", []); value; multiplier; addend ])
+          | _ -> fallback ())
+      | Is_nan, ty :: _ when float_format ty <> None -> (
+          match operands with [ value ] -> is_nan value | _ -> fallback ())
+      | From_bits, [ bits; target ] when bounds bits <> None -> (
+          match (operands, float_format target, width bits) with
+          | [ value ], Some (exponent, significand), Some width ->
+              Logic.Operation
+                ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+                  [ Logic.Operation (Printf.sprintf "(_ int2bv %d)" width, [ value ]) ] )
+          | _ -> fallback ())
+      | To_bits, [ source; bits ] when bounds bits <> None -> (
+          (* A float's bits are those that make it again, which every float but
+         a NaN has one of. *)
+          match (operands, float_format source, width bits) with
+          | [ value ], Some (exponent, significand), Some width ->
+              assume context frame
+                Logic.(
+                  not_ (is_nan value)
+                  ==> equal
+                        (Operation
+                           ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+                             [ Operation (Printf.sprintf "(_ int2bv %d)" width, [ fallback () ]) ]
+                           ))
+                        value);
+              fallback ()
+          | _ -> fallback ())
+      | Multiply_high, ty :: _ when bounds ty <> None -> (
+          (* The product's upper word: the exact product divided by the type's
+         size, rounded down, which is its upper word signed or not. *)
+          match (operands, width ty) with
+          | [ left; right ], Some bits ->
+              Logic.Operation
+                ( "div",
+                  [
+                    Logic.Operation ("*", [ left; right ]); Logic.Integer (Z.shift_left Z.one bits);
+                  ] )
+          | _ -> fallback ())
+      | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when bounds ty <> None ->
+          let name =
+            match operation with
+            | Rotate_left -> "rotate_left"
+            | Rotate_right -> "rotate_right"
+            | _ -> "swap_bytes"
+          in
+          opaque_operation context frame ty name operands
+      | Convert, [ source; target ] when float_format source <> None && bounds target <> None -> (
+          (* A float becomes an integer by being cut toward zero, which must be
+         a number in the target's range: the conversion does not check. *)
+          match operands with
+          | [ value ] ->
+              oblige context frame Requires (at frame node)
+                (Printf.sprintf
+                   "`%s` may not fit `%s`: it must be a number that, cut toward zero, is in its \
+                    range."
+                   (quote frame.source node.origin) (Types.show target))
+                (float_fits target value);
+              Logic.Operation ("to_int", [ truncated value ])
+          | _ -> fallback ())
+      | Convert, [ source; target ] when bounds source <> None && float_format target <> None -> (
+          (* An integer becomes the float nearest it, ties to even, as the
+         compiled cast rounds: exactly it, where the float can hold it. *)
+          match (operands, float_format target) with
+          | [ value ], Some (exponent, significand) ->
+              Logic.Operation
+                ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+                  [ Logic.Operation ("RNE", []); Logic.Operation ("to_real", [ value ]) ] )
+          | _ -> fallback ())
+      | Convert, [ _; target ] when Types.is_builtin Character target -> (
+          (* A [Character] is made from an integer only when the integer is a
+         Unicode scalar value, which the conversion does not check. *)
+          match operands with
+          | [ value ] ->
+              oblige context frame Requires (at frame node)
+                (Printf.sprintf
+                   "`%s` may not be a Unicode scalar value, which a `Character` must be."
+                   (quote frame.source node.origin))
+                (in_range target value);
+              value
+          | _ -> fallback ())
+      | _ -> fallback ())
 
 and arithmetic ?operand ?divisor context frame (node : expression) ty
     (operation : Intrinsic.operation) left right =
@@ -3094,7 +3306,14 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                   (Logic.equal (array_model context frame result_type array) elements);
                 array
             | _ -> arrive context frame "array" result_type)
-        | _ -> intrinsic context frame ~node operation types operands ~changed result_type
+        | _ ->
+            let arguments =
+              List.map
+                (fun (passed : passed) ->
+                  match passed.operand with Some (Value argument) -> Some argument | _ -> None)
+                values
+            in
+            intrinsic context frame ~node operation types operands ~arguments ~changed result_type
       in
       let frame = spend context frame (step_amount context frame call_ values) in
       Some (frame, result)
@@ -3110,8 +3329,8 @@ and handle_descriptor context handle =
   declare context (Logic.Function (Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
   Logic.Apply (Symbol.Handle_descriptor, [ handle ])
 
-and intrinsic context frame ~node (operation : Intrinsic.operation) types operands ~changed
-    result_type =
+and intrinsic context frame ~node (operation : Intrinsic.operation) types operands ~arguments
+    ~changed result_type =
   let known = arrive context frame "result" result_type in
   match (operation, types) with
   | Shared_update, _ ->
@@ -3206,103 +3425,9 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
           assume context frame (in_range (Types.builtin Int32) descriptor);
           descriptor
       | _ -> known)
-  | (Ieee_equal | Ieee_less), ty :: _ when float_format ty <> None -> (
-      match operands with
-      | [ left; right ] ->
-          Logic.Operation ((if operation = Ieee_equal then "fp.eq" else "fp.lt"), [ left; right ])
-      | _ -> known)
-  | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _ when float_format ty <> None
-    -> (
-      (* The rounding the compiled operation does, as IEEE 754 names it. *)
-      match operands with
-      | [ value ] -> (
-          match operation with
-          | Square_root -> Logic.Operation ("fp.sqrt", [ Logic.Operation ("RNE", []); value ])
-          | Floor -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTN", []); value ])
-          | Ceiling -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTP", []); value ])
-          | Truncate ->
-              Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ])
-          | _ -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RNE", []); value ]))
-      | _ -> known)
-  | Fused_multiply_add, ty :: _ when float_format ty <> None -> (
-      match operands with
-      | [ value; multiplier; addend ] ->
-          Logic.Operation ("fp.fma", [ Logic.Operation ("RNE", []); value; multiplier; addend ])
-      | _ -> known)
-  | Is_nan, ty :: _ when float_format ty <> None -> (
-      match operands with [ value ] -> is_nan value | _ -> known)
-  | From_bits, [ bits; target ] when bounds bits <> None -> (
-      match (operands, float_format target, width bits) with
-      | [ value ], Some (exponent, significand), Some width ->
-          Logic.Operation
-            ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-              [ Logic.Operation (Printf.sprintf "(_ int2bv %d)" width, [ value ]) ] )
-      | _ -> known)
-  | To_bits, [ source; bits ] when bounds bits <> None -> (
-      (* A float's bits are those that make it again, which every float but
-         a NaN has one of. *)
-      match (operands, float_format source, width bits) with
-      | [ value ], Some (exponent, significand), Some width ->
-          assume context frame
-            Logic.(
-              not_ (is_nan value)
-              ==> equal
-                    (Operation
-                       ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-                         [ Operation (Printf.sprintf "(_ int2bv %d)" width, [ known ]) ] ))
-                    value);
-          known
-      | _ -> known)
-  | Multiply_high, ty :: _ when bounds ty <> None -> (
-      (* The product's upper word: the exact product divided by the type's
-         size, rounded down, which is its upper word signed or not. *)
-      match (operands, width ty) with
-      | [ left; right ], Some bits ->
-          Logic.Operation
-            ( "div",
-              [ Logic.Operation ("*", [ left; right ]); Logic.Integer (Z.shift_left Z.one bits) ] )
-      | _ -> known)
-  | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when bounds ty <> None ->
-      let name =
-        match operation with
-        | Rotate_left -> "rotate_left"
-        | Rotate_right -> "rotate_right"
-        | _ -> "swap_bytes"
-      in
-      opaque_operation context frame ty name operands
-  | Convert, [ source; target ] when float_format source <> None && bounds target <> None -> (
-      (* A float becomes an integer by being cut toward zero, which must be
-         a number in the target's range: the conversion does not check. *)
-      match operands with
-      | [ value ] ->
-          oblige context frame Requires (at frame node)
-            (Printf.sprintf
-               "`%s` may not fit `%s`: it must be a number that, cut toward zero, is in its range."
-               (quote frame.source node.origin) (Types.show target))
-            (float_fits target value);
-          Logic.Operation ("to_int", [ truncated value ])
-      | _ -> known)
-  | Convert, [ source; target ] when bounds source <> None && float_format target <> None -> (
-      (* An integer becomes the float nearest it, ties to even, as the
-         compiled cast rounds: exactly it, where the float can hold it. *)
-      match (operands, float_format target) with
-      | [ value ], Some (exponent, significand) ->
-          Logic.Operation
-            ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-              [ Logic.Operation ("RNE", []); Logic.Operation ("to_real", [ value ]) ] )
-      | _ -> known)
-  | Convert, [ _; target ] when Types.is_builtin Character target -> (
-      (* A [Character] is made from an integer only when the integer is a
-         Unicode scalar value, which the conversion does not check. *)
-      match operands with
-      | [ value ] ->
-          oblige context frame Requires (at frame node)
-            (Printf.sprintf "`%s` may not be a Unicode scalar value, which a `Character` must be."
-               (quote frame.source node.origin))
-            (in_range target value);
-          value
-      | _ -> known)
-  | _ -> integer_intrinsic context frame ~node operation types operands known
+  | _ ->
+      primitive_operation context frame ~node operation types operands ~arguments
+        ~fallback:(fun () -> known)
 
 (* A function of the C library, by its row of the C library's table. It
    is given only an address into a storage, so each storage it is lent
@@ -3426,109 +3551,6 @@ and float_fits target value =
         &&& Operation ("<=", [ Integer low; cut ])
         &&& Operation ("<=", [ cut; Integer high ]))
   | None -> Logic.Boolean false
-
-and integer_intrinsic context frame ~node (operation : Intrinsic.operation) types operands known =
-  let integer = match types with ty :: _ -> bounds ty | [] -> None in
-  let exact operation left right =
-    match (operation : Intrinsic.operation) with
-    | Add | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
-    | Subtract | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
-    | Divide -> Logic.truncated_divide left right
-    | Remainder -> Logic.truncated_remainder left right
-    | _ -> Logic.Operation ("*", [ left; right ])
-  in
-  match (operation, integer, types, operands) with
-  (* An integer operation is defined where its operator is, so it has the
-     operator's obligations: a call of it, as an [impl] of [Add] makes, shows
-     what [+] would. *)
-  | (Add | Subtract | Multiply | Divide | Remainder), Some _, ty :: _, [ left; right ] ->
-      let result = arithmetic context frame node ty operation left right in
-      assume context frame (in_range ty result);
-      result
-  | Negate, Some _, ty :: _, [ value ] ->
-      let result = Logic.Operation ("-", [ value ]) in
-      oblige context frame Overflow (at frame node)
-        (Printf.sprintf "`%s` may overflow `%s`." (quote frame.source node.origin) (Types.show ty))
-        (in_range ty result);
-      result
-  | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), Some (low, high), _, [ left; right ] ->
-      let modulus = Z.succ (Z.sub high low) in
-      Logic.Operation
-        ( "+",
-          [
-            Logic.Integer low;
-            Logic.Operation
-              ( "mod",
-                [
-                  Logic.Operation ("-", [ exact operation left right; Logic.Integer low ]);
-                  Logic.Integer modulus;
-                ] );
-          ] )
-  | (Add_overflows | Subtract_overflows | Multiply_overflows), Some _, ty :: _, [ left; right ] ->
-      Logic.not_ (in_range ty (exact operation left right))
-  | Equal, None, ty :: _, [ left; right ] when float_format ty <> None -> float_equal left right
-  | Less, None, ty :: _, [ left; right ] when float_format ty <> None -> float_less left right
-  | Equal, Some _, _, [ left; right ] -> Logic.equal left right
-  | Less, Some _, _, [ left; right ] -> Logic.Operation ("<", [ left; right ])
-  | Fits, Some _, [ _; target ], [ value ] when bounds target <> None -> in_range target value
-  | Fits, None, [ source; target ], [ value ]
-    when float_format source <> None && bounds target <> None ->
-      float_fits target value
-  | Convert, Some _, [ _; target ], [ value ] when bounds target <> None ->
-      assume context frame Logic.(in_range target value ==> equal known value);
-      known
-  | (Leading_zeros | Trailing_zeros | Count_ones), Some (low, _), ty :: _, [ value ] -> (
-      (* Each count of bits is a function of the value, at most the width,
-         and for an unsigned value the three are related: a nonzero value
-         lies between the powers of two its leading zeros give, has no
-         more ones than the bits below its highest one, all of them where
-         it is one less than a power of two, and its lowest one below its
-         highest; zero has no ones and is all zeros. *)
-      match width ty with
-      | Some bits ->
-          let count name =
-            let symbol = Symbol.Bit_count { count = name; width = bits } in
-            declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
-            Logic.Apply (symbol, [ value ])
-          in
-          let leading = count "leading_zeros"
-          and trailing = count "trailing_zeros"
-          and ones = count "count_ones" in
-          let term =
-            match operation with Leading_zeros -> leading | Trailing_zeros -> trailing | _ -> ones
-          in
-          assume context frame
-            Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
-          (if Z.equal low Z.zero && not (Logic.mentions frame.bound value) then
-             let power exponent = power_of context frame (Logic.int 2) exponent in
-             let width = Logic.int bits in
-             let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
-             let below_highest = Logic.Operation ("-", [ width; leading ]) in
-             List.iter (assume context frame)
-               Logic.
-                 [
-                   Operation ("<=", [ int 0; leading ])
-                   &&& Operation ("<=", [ leading; width ])
-                   &&& Operation ("<=", [ int 0; trailing ])
-                   &&& Operation ("<=", [ trailing; width ])
-                   &&& Operation ("<=", [ int 0; ones ])
-                   &&& Operation ("<=", [ ones; width ]);
-                   nonzero
-                   ==> (Operation
-                          ("<=", [ power (Operation ("-", [ int (bits - 1); leading ])); value ])
-                       &&& Operation ("<", [ value; power below_highest ]));
-                   equal (equal ones (int 0)) (equal value (int 0));
-                   nonzero ==> Operation ("<=", [ ones; below_highest ]);
-                   nonzero
-                   &&& equal (Operation ("+", [ value; int 1 ])) (power below_highest)
-                   ==> equal ones below_highest;
-                   nonzero
-                   ==> Operation ("<=", [ Operation ("+", [ trailing; leading ]); int (bits - 1) ]);
-                   equal value (int 0) ==> (equal trailing width &&& equal leading width);
-                 ]);
-          term
-      | None -> known)
-  | _ -> known
 
 (* Lambdas and callbacks *)
 
