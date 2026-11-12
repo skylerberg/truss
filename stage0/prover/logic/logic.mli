@@ -142,6 +142,12 @@ val truncated_remainder : term -> term -> term
 val mentions : symbol list -> term -> bool
 (** Whether a term mentions any of the symbols, free. *)
 
+val free_symbols : term -> symbol list
+(** The symbols a term mentions free, as constants, not as applied functions. *)
+
+val quantified : term -> bool
+(** Whether a term has a quantifier in it. *)
+
 val replace : from:term -> into:term -> term -> term
 (** Each occurrence of [from] in a term replaced by [into], except under a quantifier that binds one
     of [from]'s symbols. *)

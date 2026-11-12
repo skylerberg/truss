@@ -241,6 +241,20 @@ let rec mentions symbols = function
       let shadowed = List.map fst bound in
       mentions (List.filter (fun symbol -> not (List.mem symbol shadowed)) symbols) body
 
+let rec free_symbols = function
+  | Symbol name -> [ name ]
+  | Integer _ | Boolean _ | Bits _ -> []
+  | Apply (_, arguments) | Operation (_, arguments) -> List.concat_map free_symbols arguments
+  | Is (_, argument) -> free_symbols argument
+  | Forall (bound, body) | Exists (bound, body) ->
+      List.filter (fun name -> not (List.mem_assoc name bound)) (free_symbols body)
+
+let rec quantified = function
+  | Forall _ | Exists _ -> true
+  | Symbol _ | Integer _ | Boolean _ | Bits _ -> false
+  | Apply (_, arguments) | Operation (_, arguments) -> List.exists quantified arguments
+  | Is (_, argument) -> quantified argument
+
 (* Each occurrence of a term, outside the quantifiers that bind its
    symbols, replaced. *)
 let rec replace ~from ~into term =

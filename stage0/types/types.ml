@@ -77,8 +77,28 @@ let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
 let is_integer_type type_ =
   match builtin_of type_ with Some found -> List.mem found integer_types | None -> false
 
-let is_signed type_ =
-  match builtin_of type_ with Some (Int8 | Int16 | Int32 | Int64 | ISize) -> true | _ -> false
+let integer_bits ?(usize_bits = 64) type_ =
+  match builtin_of type_ with
+  | Some Int8 -> Some (8, true)
+  | Some Int16 -> Some (16, true)
+  | Some Int32 -> Some (32, true)
+  | Some Int64 -> Some (64, true)
+  | Some ISize -> Some (usize_bits, true)
+  | Some UInt8 -> Some (8, false)
+  | Some UInt16 -> Some (16, false)
+  | Some UInt32 -> Some (32, false)
+  | Some UInt64 -> Some (64, false)
+  | Some USize -> Some (usize_bits, false)
+  | _ -> None
+
+let integer_range ?usize_bits type_ =
+  Option.map
+    (fun (bits, signed) ->
+      if signed then (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
+      else (Z.zero, Z.pred (Z.shift_left Z.one bits)))
+    (integer_bits ?usize_bits type_)
+
+let is_signed type_ = match integer_bits type_ with Some (_, signed) -> signed | None -> false
 
 let is_float_type type_ =
   match builtin_of type_ with Some found -> List.mem found float_types | None -> false

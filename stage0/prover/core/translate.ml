@@ -198,6 +198,18 @@ type cursor = { method_frame : frame; own : part; element : T.ty }
    the loop's own state moves on, as a cursor does when pulled. *)
 type received = { another : L.term; element : L.term; through : L.term; advance : frame -> frame }
 
+(* A loop at its head before its invariants are assumed: what it counts,
+   the fresh-name counter and the number of facts on entry, the validity
+   facts each iteration must keep, and the frame with what the body
+   changes given fresh values. *)
+type loop_start = {
+  loop_costs : loop_cost list;
+  fresh_mark : int;
+  facts_mark : int;
+  kept : (string * T.ty * L.term * (frame -> L.term option)) list;
+  havocked : frame;
+}
+
 (* An argument of a call, as the callee is given it: its position, its
    mode, what was written for it, if anything, its type, and its value. *)
 type passed = {
@@ -354,9 +366,13 @@ let made_here context frame name sort =
       declare context (L.Function (name, List.map (fun (_, sort, _) -> sort) outermost_first, sort));
       L.Apply (name, List.map (fun (bound, _, _) -> L.Symbol bound) outermost_first)
 
-let fresh context frame label sort =
+(* A name no other symbol of the query has, for a bound variable. *)
+let fresh_name context label =
   context.fresh <- context.fresh + 1;
-  let name = S.Variable { label; numbers = [ context.fresh ] } in
+  variable label ~numbers:[ context.fresh ]
+
+let fresh context frame label sort =
+  let name = fresh_name context label in
   Hashtbl.replace context.fresh_order name context.fresh;
   made_here context frame name sort
 
@@ -708,29 +724,9 @@ let at frame (node : expression) = span_of frame.source node.origin
 let builtin ty = T.builtin_of ty
 
 let bounds (ty : T.ty) =
-  let power n = Z.shift_left Z.one n in
-  let signed n = Some (Z.neg (power (n - 1)), Z.pred (power (n - 1))) in
-  let unsigned n = Some (Z.zero, Z.pred (power n)) in
-  match builtin ty with
-  | Some Int8 -> signed 8
-  | Some Int16 -> signed 16
-  | Some Int32 -> signed 32
-  | Some (Int64 | ISize) -> signed 64
-  | Some UInt8 -> unsigned 8
-  | Some UInt16 -> unsigned 16
-  | Some UInt32 -> unsigned 32
-  | Some (UInt64 | USize) -> unsigned 64
-  | Some Character -> Some (Z.zero, Z.of_int 0x10FFFF)
-  | _ -> None
+  if T.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF) else T.integer_range ty
 
-let width (ty : T.ty) =
-  match builtin ty with
-  | Some (Int8 | UInt8) -> Some 8
-  | Some (Int16 | UInt16) -> Some 16
-  | Some (Int32 | UInt32) -> Some 32
-  | Some (Int64 | UInt64 | USize | ISize) -> Some 64
-  | _ -> None
-
+let width (ty : T.ty) = Option.map fst (T.integer_bits ty)
 let is_numeric (ty : T.ty) = match ty with T.Integer -> true | _ -> bounds ty <> None
 
 (* A float type's widths in the solver's floating-point theory: its
@@ -790,6 +786,23 @@ let selector_name ty variant field = S.Field { type_key = type_key ty; variant; 
 let is_standard_equal = Well_known.is Equal
 let equal_trait = Well_known.path Equal
 
+(* [frame] without the locals declared after [outer]: those of a block,
+   an arm, or a loop end with it. *)
+let end_scope ~(outer : frame) (frame : frame) =
+  { frame with locals = Locals.filter (fun id _ -> Locals.mem id outer.locals) frame.locals }
+
+(* A callee's generics paired with its type arguments, as the frame sees
+   them. *)
+let callee_substitution frame (signature : T.signature) type_arguments =
+  let rec pair (generics : T.generic list) arguments =
+    match (generics, arguments) with
+    | generic :: generics, argument :: arguments ->
+        (generic.generic, T.substitute_argument frame.substitution argument)
+        :: pair generics arguments
+    | _ -> []
+  in
+  pair signature.generics type_arguments
+
 (* A type's interface, when it is a type whose fields this package sees. *)
 let visible_type context (ty : T.ty) =
   match ty with
@@ -798,11 +811,7 @@ let visible_type context (ty : T.ty) =
       | Some (Interface.Environment.Type_interface interface)
         when (not interface.opaque) || Path.package path = Path.package context.current ->
           let substitution =
-            try
-              List.combine
-                (List.map (fun (generic : T.generic) -> generic.generic) interface.type_generics)
-                arguments
-            with Invalid_argument _ -> []
+            Option.value ~default:[] (T.substitution_of interface.type_generics arguments)
           in
           Some (interface, substitution)
       | _ -> None)
@@ -1284,17 +1293,10 @@ let rec lends_mut (pattern : pattern) =
   | Alternatives alternatives -> List.exists lends_mut alternatives
   | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> false
 
-let holds_todo (body : block) =
-  let found = ref false in
-  Core_walk.block
-    (Core_walk.deep
-       {
-         Core_walk.ignore_all with
-         expression =
-           (fun (node : Core.expression) -> match node.kind with Todo -> found := true | _ -> ());
-       })
-    body;
-  !found
+let holds_todo body =
+  Core_walk.block_exists
+    ~expression:(fun (node : Core.expression) -> match node.kind with Todo -> true | _ -> false)
+    body
 
 (* The [proof]s written for a trait's laws on a type, in the package: each
    law's name, with the proof's source, the renaming of the proof's generic
@@ -1653,6 +1655,26 @@ and operand_value context frame = function
 (* A function-typed parameter whose type has a [requires], read as a value
    other than to call it or pass it to a parameter: the value's type keeps
    no [requires], so the [requires] must hold for every argument. *)
+(* Fresh valid arguments for a callback's inputs. *)
+and callback_arguments context frame inputs =
+  List.map
+    (fun (_, input) ->
+      let input = substituted context frame input in
+      let term = arrive context frame "argument" input in
+      assume_valid context frame input term;
+      term)
+    inputs
+
+(* The frame a callback parameter's [requires] is read in: its inputs bound
+   to [arguments], over the caller's state on entry. *)
+and callback_contract_frame frame inputs arguments =
+  let locals =
+    List.fold_left2
+      (fun locals (input, _) term -> Locals.add input term locals)
+      frame.old_locals inputs arguments
+  in
+  { frame with locals; self = frame.old_self; checking = false }
+
 and escaping_callback context frame local =
   match
     ( List.find_opt (fun (parameter : Core.parameter) -> parameter.local = local) context.parameters,
@@ -1661,15 +1683,7 @@ and escaping_callback context frame local =
   | ( Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ },
       Some (T.Function function_type) )
     when List.length inputs = List.length function_type.inputs ->
-      let arguments =
-        List.map
-          (fun (_, input) ->
-            let input = substituted context frame input in
-            let term = arrive context frame "argument" input in
-            assume_valid context frame input term;
-            term)
-          function_type.inputs
-      in
+      let arguments = callback_arguments context frame function_type.inputs in
       check_callback_contract context frame
         (span_of frame.source (List.hd requires).origin)
         ~name inputs requires arguments ~promised:(L.Boolean true)
@@ -1693,15 +1707,7 @@ and check_forwarded_callback context frame (node : expression) (call_ : call) (p
   | Some { callback_contract = Some { inputs; requires = _ :: _ as requires }; name; _ } -> (
       match parameter_type context frame call_ passed.position with
       | Some (T.Function expected) when List.length expected.inputs = List.length inputs ->
-          let arguments =
-            List.map
-              (fun (_, input) ->
-                let input = substituted context frame input in
-                let term = arrive context frame "argument" input in
-                assume_valid context frame input term;
-                term)
-              expected.inputs
-          in
+          let arguments = callback_arguments context frame expected.inputs in
           let known = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
           check_callback_contract context frame (at frame node) ~name inputs requires arguments
             ~promised:
@@ -1713,12 +1719,7 @@ and check_forwarded_callback context frame (node : expression) (call_ : call) (p
 (* That a function-typed parameter's [requires], read with its parameters
    as they were on entry, holds wherever [promised] does. *)
 and check_callback_contract context frame span ~name inputs requires arguments ~promised ~why =
-  let locals =
-    List.fold_left2
-      (fun locals (input, _) term -> Locals.add input term locals)
-      frame.old_locals inputs arguments
-  in
-  let inside = { frame with locals; self = frame.old_self; checking = false } in
+  let inside = callback_contract_frame frame inputs arguments in
   List.iter
     (fun (clause : expression) ->
       oblige context (restrict frame promised) Requires span
@@ -2378,8 +2379,7 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
     if !facts <> [] then Hashtbl.replace context.quantifier_facts term (List.rev !facts);
     Some (frame, term)
   in
-  context.fresh <- context.fresh + 1;
-  let symbol = S.Variable { label = "bound"; numbers = [ context.fresh ] } in
+  let symbol = fresh_name context "bound" in
   let inner = { frame with bound = symbol :: frame.bound } in
   let each = L.Symbol symbol in
   (* Over a collection's elements: by index into its sequence, or each
@@ -3937,14 +3937,7 @@ and callback_facts context frame (call_ : call) position known arguments =
               let substitution =
                 match Interface.Impls.signature context.database path with
                 | Some (signature : T.signature) ->
-                    let rec pair generics arguments =
-                      match (generics, arguments) with
-                      | (generic : T.generic) :: generics, argument :: arguments ->
-                          (generic.generic, T.substitute_argument frame.substitution argument)
-                          :: pair generics arguments
-                      | _ -> []
-                    in
-                    pair signature.generics type_arguments
+                    callee_substitution frame signature type_arguments
                 | None -> []
               in
               let inside = part_frame frame part ~arguments:known ~substitution in
@@ -3976,12 +3969,10 @@ and check_callback_requires context frame (node : expression) through (values : 
         when List.length inputs = List.length values ->
           (* The [requires] names the parameters as the caller passed them,
              which is what the caller showed it with. *)
-          let locals =
-            List.fold_left2
-              (fun locals (input, _) (passed : passed) -> Locals.add input passed.term locals)
-              frame.old_locals inputs values
+          let inside =
+            callback_contract_frame frame inputs
+              (List.map (fun (passed : passed) -> passed.term) values)
           in
-          let inside = { frame with locals; self = frame.old_self; checking = false } in
           List.iter
             (fun (clause : expression) ->
               oblige context frame Requires (at frame node)
@@ -4213,6 +4204,12 @@ and measure_type element : T.function_type =
     costs = [ { amortized = false; resource = T.Time; bound = Finite_cost } ];
   }
 
+(* [sequence_at], for a sequence whose elements the prover reads. *)
+and element_at context element term index =
+  match sequence_at context element term index with
+  | Some term -> term
+  | None -> raise (Foreign_unsupported "the elements of a sequence")
+
 and sequence_at context element term index =
   let sequence = sequence_type element in
   let index_trait = Well_known.path Index in
@@ -4256,8 +4253,7 @@ and sequence_at context element term index =
 and extensional context frame (ty : T.ty) a b =
   match ty with
   | Named { path; arguments = [ T.Type element ] } when Path.equal path sequence_path -> (
-      context.fresh <- context.fresh + 1;
-      let index = variable "index" ~numbers:[ context.fresh ] in
+      let index = fresh_name context "index" in
       match
         ( sequence_at context element a (L.Symbol index),
           sequence_at context element b (L.Symbol index) )
@@ -4280,8 +4276,7 @@ and extensional context frame (ty : T.ty) a b =
       let finite_map = Path.equal path finite_map_path in
       match arguments with
       | T.Type key :: rest ->
-          context.fresh <- context.fresh + 1;
-          let each = variable "key" ~numbers:[ context.fresh ] in
+          let each = fresh_name context "key" in
           let function_ name output inputs = finite_function context ty name output inputs in
           let key_sort = sort_of context key in
           let has =
@@ -4400,8 +4395,7 @@ and slice_run context frame (node : expression) base ~start ~stop ~inclusive =
   | Some viewed_model -> (
       let count = Costs.minus high low in
       assume context frame (L.equal (sequence_length context element viewed_model) count);
-      context.fresh <- context.fresh + 1;
-      let position = variable "index" ~numbers:[ context.fresh ] in
+      let position = fresh_name context "index" in
       match
         ( sequence_at context element viewed_model (L.Symbol position),
           sequence_at context element model (Costs.plus low (L.Symbol position)) )
@@ -4544,17 +4538,21 @@ and set_of context frame (ty : T.ty) ~element values =
         finite_function context finite "contains" L.Bool [ (value, element_sort) ] model
       in
       List.iter (fun value -> assume context frame (contains value)) values;
-      context.fresh <- context.fresh + 1;
-      let each = variable "value" ~numbers:[ context.fresh ] in
-      assume context frame
-        (L.Forall
-           ( [ (each, element_sort) ],
-             L.( ==> ) (contains (L.Symbol each))
-               (L.disjunction (List.map (L.equal (L.Symbol each)) values)) ));
+      only_members context frame "value" element_sort contains values;
       let size = finite_function context finite "size" L.Int [] model in
       assume context frame (Costs.at_most size (L.int (List.length values)));
       made)
     model
+
+(* That [contains] holds of nothing but [members]: a literal set's
+   elements, or a literal map's keys. *)
+and only_members context frame label sort contains members =
+  let each = fresh_name context label in
+  assume context frame
+    (L.Forall
+       ( [ (each, sort) ],
+         L.( ==> ) (contains (L.Symbol each))
+           (L.disjunction (List.map (L.equal (L.Symbol each)) members)) ))
 
 (* A specification's [FiniteMap] written out: each key with its value, and
    no other keys. Its keys must be distinct. *)
@@ -4602,13 +4600,7 @@ and map_literal context frame (node : expression) entries =
   List.iter
     (fun (_, key, entry) -> assume context frame L.(has key &&& equal (get key) entry))
     terms;
-  context.fresh <- context.fresh + 1;
-  let each = variable "key" ~numbers:[ context.fresh ] in
-  assume context frame
-    (L.Forall
-       ( [ (each, key_sort) ],
-         L.( ==> ) (has (L.Symbol each))
-           (L.disjunction (List.map (fun (_, key, _) -> L.equal (L.Symbol each) key) terms)) ));
+  only_members context frame "key" key_sort has (List.map (fun (_, key, _) -> key) terms);
   assume context frame
     (L.equal (finite_function context finite "size" L.Int [] model) (L.int (List.length terms)));
   (frame, made)
@@ -4805,8 +4797,7 @@ and appended context frame element parts part =
   (match (sequence_at context element longer length, frame.bound) with
   | Some last, _ -> assume context frame (L.equal last part)
   | None, _ -> ());
-  context.fresh <- context.fresh + 1;
-  let index = variable "index" ~numbers:[ context.fresh ] in
+  let index = fresh_name context "index" in
   (match
      ( sequence_at context element longer (L.Symbol index),
        sequence_at context element parts (L.Symbol index) )
@@ -4822,8 +4813,7 @@ and appended context frame element parts part =
   | _ -> ());
   (* Each sum over the longer sequence adds the new part's measure, as
      [Sequence.append]'s contract says. *)
-  context.fresh <- context.fresh + 1;
-  let measure = variable "measure" ~numbers:[ context.fresh ] in
+  let measure = fresh_name context "measure" in
   assume context frame
     (L.Forall
        ( [ (measure, sort_of context (T.Function (measure_type element))) ],
@@ -4839,16 +4829,10 @@ and appended context frame element parts part =
 
 (* Whether a clause mentions [result], so that it holds at each [yield]
    of a lending or yielding method, rather than where the method ends. *)
-and mentions_result (clause : expression) =
-  let found = ref false in
-  Core_walk.expression
-    {
-      Core_walk.ignore_all with
-      expression =
-        (fun (node : expression) -> match node.kind with Result -> found := true | _ -> ());
-    }
-    clause;
-  !found
+and mentions_result clause =
+  Core_walk.expression_exists
+    ~expression:(fun (node : expression) -> match node.kind with Result -> true | _ -> false)
+    clause
 
 and signature_terminates context path =
   match Interface.Impls.signature context.database path with
@@ -4950,15 +4934,7 @@ and named_function context frame (node : expression) path type_arguments contrac
   (match (ty, contract.parts) with
   | T.Function function_type, own :: _
     when own.requires <> [] && frame.checking && not (List.mem node.id context.passed_values) ->
-      let inputs =
-        List.map
-          (fun (_, input) ->
-            let input = substituted context frame input in
-            let term = arrive context frame "argument" input in
-            assume_valid context frame input term;
-            term)
-          function_type.inputs
-      in
+      let inputs = callback_arguments context frame function_type.inputs in
       if List.length own.parameters = List.length inputs then begin
         let inside =
           part_frame frame own
@@ -5096,15 +5072,7 @@ and check_named_callback context frame (call_ : call) (passed : passed) (named :
   let own = List.hd contract.parts in
   match parameter_type context frame call_ passed.position with
   | Some (T.Function expected) ->
-      let inputs =
-        List.map
-          (fun (_, input) ->
-            let input = substituted context frame input in
-            let term = arrive context frame "argument" input in
-            assume_valid context frame input term;
-            term)
-          expected.inputs
-      in
+      let inputs = callback_arguments context frame expected.inputs in
       let known = List.map (fun (passed : passed) -> (passed.position, passed.term)) values in
       let promised =
         L.conjunction (callback_facts context frame call_ passed.position known inputs)
@@ -5152,15 +5120,8 @@ and parameter_type context frame (call_ : call) index =
               | Some (Static, _) | None -> [])
             @ List.map (fun (info : T.parameter_info) -> info.type_) signature.parameters
           in
-          let rec pair (generics : T.generic list) arguments =
-            match (generics, arguments) with
-            | generic :: generics, argument :: arguments ->
-                (generic.generic, T.substitute_argument frame.substitution argument)
-                :: pair generics arguments
-            | _ -> []
-          in
           Option.map
-            (T.substitute (pair signature.generics type_arguments))
+            (T.substitute (callee_substitution frame signature type_arguments))
             (List.nth_opt types index)
       | None -> None)
   | _ -> None
@@ -5427,9 +5388,7 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
   let scrutinee_values = List.rev scrutinee_values in
   let result_type = type_of context frame node in
   let carries_value = not (T.equal result_type T.unit || result_type = T.Never) in
-  let scoped (joined : frame) =
-    { joined with locals = Locals.filter (fun id _ -> Locals.mem id frame.locals) joined.locals }
-  in
+  let scoped = end_scope ~outer:frame in
   (* Each arm is tried where no arm before it was taken: where its patterns
      did not match, or they did and its guard, which may change locals, was
      false. *)
@@ -5646,12 +5605,6 @@ and check_built context frame (node : expression) ty term =
    written as its argument, as a [requires] of the definition, which then
    holds at every call of it instead. *)
 and requires_fix context frame (part : part) (clause : expression) term (values : passed list) =
-  let rec free = function
-    | L.Symbol name -> [ name ]
-    | L.Forall (bound, body) | L.Exists (bound, body) ->
-        List.filter (fun name -> not (List.mem_assoc name bound)) (free body)
-    | term -> List.concat_map free (L.arguments term)
-  in
   let fixed name =
     List.mem name context.entry || match name with S.Constant _ | S.Literal _ -> true | _ -> false
   in
@@ -5683,7 +5636,7 @@ and requires_fix context frame (part : part) (clause : expression) term (values 
         | _ -> None)
       (List.mapi (fun index parameter -> (index, parameter)) part.parameters)
   in
-  if frame.source.key <> Some context.home || not (List.for_all fixed (free term)) then []
+  if frame.source.key <> Some context.home || not (List.for_all fixed (L.free_symbols term)) then []
   else
     let clause_span = span_of part.callee clause.origin in
     let clause_text = quote part.callee clause.origin in
@@ -5724,24 +5677,13 @@ and requires_fix context frame (part : part) (clause : expression) term (values 
    parameters as they arrive, so that a clause about it can be the
    definition's [requires]. *)
 and parameter_operand context frame (operand : expression) term =
-  (* The symbols of a term outside any quantifier, or [None] if it has one. *)
-  let rec free = function
-    | L.Symbol name -> Some [ name ]
-    | L.Forall _ | L.Exists _ -> None
-    | term ->
-        List.fold_left
-          (fun found argument ->
-            match (found, free argument) with
-            | Some found, Some more -> Some (found @ more)
-            | _ -> None)
-          (Some []) (L.arguments term)
-  in
   if
     frame.source.key = Some context.home
+    && (not (L.quantified term))
     &&
-    match free term with
-    | Some (_ :: _ as names) -> List.for_all (fun name -> List.mem name context.entry) names
-    | Some [] | None -> false
+    match L.free_symbols term with
+    | _ :: _ as names -> List.for_all (fun name -> List.mem name context.entry) names
+    | [] -> false
   then
     let text = quote frame.source operand.origin in
     let plain =
@@ -6743,15 +6685,8 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
   let keeps_capacity () =
     assume context frame (L.equal (capacity (List.hd changed)) (capacity (List.hd operands)))
   in
-  let at sequence index =
-    match sequence_at context element sequence index with
-    | Some term -> term
-    | None -> raise (Foreign_unsupported "the elements of a storage")
-  in
-  let bound () =
-    context.fresh <- context.fresh + 1;
-    variable "index" ~numbers:[ context.fresh ]
-  in
+  let at = element_at context element in
+  let bound () = fresh_name context "index" in
   let within index low high =
     L.(Operation ("<=", [ low; index ]) &&& Operation ("<", [ index; high ]))
   in
@@ -6760,8 +6695,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
   in
   let in_bounds index sequence = within index (L.int 0) (length sequence) in
   let each_sum relation =
-    context.fresh <- context.fresh + 1;
-    let measure = variable "measure" ~numbers:[ context.fresh ] in
+    let measure = fresh_name context "measure" in
     L.Forall
       ( [ (measure, sort_of context (T.Function (measure_type element))) ],
         relation
@@ -7898,8 +7832,7 @@ and block_value context frame (body : block) =
   match go frame body.statements with
   | Some (after, term) ->
       (* Locals declared inside the block end with it. *)
-      let locals = Locals.filter (fun id _ -> Locals.mem id frame.locals) after.locals in
-      Some ({ after with locals }, term)
+      Some (end_scope ~outer:frame after, term)
   | None -> None
 
 and statement context frame (node : statement) : frame option =
@@ -8188,13 +8121,8 @@ and sliced_owner_changed context frame (base : place) ~start ~stop =
    that run. *)
 and run_replaced context frame element ~before ~after ~start ~stop ~run =
   let length sequence = sequence_length context element sequence in
-  let at sequence index =
-    match sequence_at context element sequence index with
-    | Some term -> term
-    | None -> raise (Foreign_unsupported "the elements of a sequence")
-  in
-  context.fresh <- context.fresh + 1;
-  let k = variable "index" ~numbers:[ context.fresh ] in
+  let at = element_at context element in
+  let k = fresh_name context "index" in
   let index = L.Symbol k in
   let inside =
     match run with
@@ -8217,13 +8145,8 @@ and run_replaced context frame element ~before ~after ~start ~stop ~run =
    [part]. *)
 and replaced context frame element ~before ~after index part =
   let length sequence = sequence_length context element sequence in
-  let at sequence index =
-    match sequence_at context element sequence index with
-    | Some term -> term
-    | None -> raise (Foreign_unsupported "the elements of a sequence")
-  in
-  context.fresh <- context.fresh + 1;
-  let k = variable "index" ~numbers:[ context.fresh ] in
+  let at = element_at context element in
+  let k = fresh_name context "index" in
   assume context frame
     (L.conjunction [ L.equal (length after) (length before); L.equal (at after index) part ]);
   assume context frame
@@ -8525,15 +8448,10 @@ and while_ context frame (node : statement) condition clauses body =
   check_invariants context frame clauses ~when_:"on entry to the loop";
   (* The condition runs at the head of each iteration, so what it changes
      and what it spends are the iteration's. *)
-  let changed = changed_places ~condition frame body in
-  let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
-  loop_entry context frame costs;
-  let mark = context.fresh and facts_mark = List.length context.facts in
-  let kept = kept_validity context frame changed in
-  let head = havoc context frame changed in
-  assume_kept_validity context head kept;
-  let head =
-    if contains_yield body then { head with handed_out = havoc_parts context head } else head
+  let { loop_costs = costs; fresh_mark = mark; facts_mark; kept; havocked = head } =
+    enter_loop context frame ~entry:frame clauses
+      ~changed:(changed_places ~condition frame body)
+      body
   in
   let iterations = iterations_so_far context head costs in
   let head = loop_head context head costs ~iterations in
@@ -8630,9 +8548,40 @@ and while_ context frame (node : statement) condition clauses body =
           ~most)
       exits.breaks
   in
-  join_frames context (exit_ :: left)
-  |> Option.map (fun (joined : frame) ->
-      { joined with locals = Locals.filter (fun id _ -> Locals.mem id frame.locals) joined.locals })
+  leave_loop context frame (exit_ :: left)
+
+(* The start of a loop, from the frame before it and [entry], the frame its
+   invariants are checked in on entry. *)
+and enter_loop context frame ~entry clauses ~changed body =
+  let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
+  loop_entry context entry costs;
+  let fresh_mark = context.fresh and facts_mark = List.length context.facts in
+  let kept = kept_validity context frame changed in
+  let head = havoc context frame changed in
+  assume_kept_validity context head kept;
+  let havocked =
+    if contains_yield body then { head with handed_out = havoc_parts context head } else head
+  in
+  { loop_costs = costs; fresh_mark; facts_mark; kept; havocked }
+
+(* The frame after a loop, from the frames that leave it, without the
+   locals declared inside it. *)
+and leave_loop context frame frames =
+  Option.map (end_scope ~outer:frame) (join_frames context frames)
+
+(* The checks at the end of each iteration of a loop that receives parts:
+   its invariants and the validity it keeps, in the frames [with_through]
+   gives, whose [yielded] is the parts received through the iteration. *)
+and end_iterations context frame (node : statement) clauses (start : loop_start) ~head ~inside ~ends
+    ~breaks ~with_through =
+  loop_iterations context node head start.loop_costs ~mark:start.fresh_mark
+    ~facts:(facts_since context start.facts_mark @ [ inside.condition ])
+    ~ends:(List.map with_through ends) ~breaks:(List.map with_through breaks);
+  List.iter
+    (fun (end_ : frame) ->
+      check_invariants context (with_through end_) clauses ~when_:"after an iteration";
+      check_kept_validity context end_ (span_of frame.source node.origin) start.kept)
+    ends
 
 (* A ghost count of a loop's iterations so far, when the loop counts a
    cost by them. *)
@@ -8684,16 +8633,10 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let at_index (f : frame) next = snd (pattern_match context f pattern next element) in
       let entry = at_index { frame with yielded = Some (empty_parts context frame element) } low in
       check_invariants context entry clauses ~when_:"on entry to the loop";
-      let changed = changed_places frame body in
-      let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
-      loop_entry context entry costs;
-      let mark = context.fresh and facts_mark = List.length context.facts in
-      let kept = kept_validity context frame changed in
-      let head = havoc context frame changed in
-      assume_kept_validity context head kept;
-      let head =
-        if contains_yield body then { head with handed_out = havoc_parts context head } else head
+      let start =
+        enter_loop context frame ~entry clauses ~changed:(changed_places frame body) body
       in
+      let costs = start.loop_costs and head = start.havocked in
       (* The [n]th iteration, from 0, has the index [low + n]. *)
       let count =
         Costs.normalize
@@ -8707,8 +8650,7 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       (* [yielded] is the indexes so far, from [low] up. *)
       let before = some_parts context head element in
       assume context head (L.equal (sequence_length context element before) iterations);
-      (context.fresh <- context.fresh + 1;
-       let position = variable "index" ~numbers:[ context.fresh ] in
+      (let position = fresh_name context "index" in
        match sequence_at context element before (L.Symbol position) with
        | Some found ->
            assume context head
@@ -8741,15 +8683,8 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let with_through (f : frame) =
         at_index { f with loop = frame.loop; yielded = Some through } (Costs.plus index (L.int 1))
       in
-      loop_iterations context node head costs ~mark
-        ~facts:(facts_since context facts_mark @ [ inside.condition ])
-        ~ends:(List.map with_through ends)
-        ~breaks:(List.map with_through exits.breaks);
-      List.iter
-        (fun (end_ : frame) ->
-          check_invariants context (with_through end_) clauses ~when_:"after an iteration";
-          check_kept_validity context end_ span kept)
-        ends;
+      end_iterations context frame node clauses start ~head ~inside ~ends ~breaks:exits.breaks
+        ~with_through;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
         loop_exit context
@@ -8764,13 +8699,8 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
               ~most)
           exits.breaks
       in
-      join_frames context
+      leave_loop context frame
         (List.map (fun (f : frame) -> { f with yielded = outer_yielded }) (exit_ :: left))
-      |> Option.map (fun (joined : frame) ->
-          {
-            joined with
-            locals = Locals.filter (fun id _ -> Locals.mem id frame.locals) joined.locals;
-          })
   | Yielding_call ({ kind = Call call_; _ } as driven) ->
       each_loop context frame node pattern driven call_ clauses body
   | Yielding_call _ -> unsupported span "this `for` loop"
@@ -8796,15 +8726,7 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
     | Function { path; type_arguments } -> (
         let substitution =
           match Interface.Impls.signature context.database path with
-          | Some (signature : T.signature) ->
-              let rec pair generics arguments =
-                match (generics, arguments) with
-                | (generic : T.generic) :: generics, argument :: arguments ->
-                    (generic.generic, T.substitute_argument frame.substitution argument)
-                    :: pair generics arguments
-                | _ -> []
-              in
-              pair signature.generics type_arguments
+          | Some (signature : T.signature) -> callee_substitution frame signature type_arguments
           | None -> []
         in
         match Interface.Impls.signature context.database path with
@@ -9072,15 +8994,8 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
     (pattern : pattern) clauses body ~element_type ~changed ~start ~receive =
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
   check_invariants context entry clauses ~when_:"on entry to the loop";
-  let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
-  loop_entry context entry costs;
-  let mark = context.fresh and facts_mark = List.length context.facts in
-  let kept = kept_validity context frame changed in
-  let head = havoc context frame changed in
-  assume_kept_validity context head kept;
-  let head =
-    if contains_yield body then { head with handed_out = havoc_parts context head } else head
-  in
+  let loop = enter_loop context frame ~entry clauses ~changed body in
+  let costs = loop.loop_costs and head = loop.havocked in
   let before = start head in
   let iterations = sequence_length context element_type before in
   let head =
@@ -9102,18 +9017,11 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
   each_iteration ~head ~ends;
   let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
-  loop_iterations context node head costs ~mark
-    ~facts:(facts_since context facts_mark @ [ inside.condition ])
-    ~ends:(List.map with_through ends)
-    ~breaks:(List.map with_through exits.breaks);
-  List.iter
-    (fun (end_ : frame) ->
-      check_invariants context (with_through end_) clauses ~when_:"after an iteration";
-      check_kept_validity context end_ (span_of frame.source node.origin) kept)
-    ends;
+  end_iterations context frame node clauses loop ~head ~inside ~ends ~breaks:exits.breaks
+    ~with_through;
   let ended = received.advance (restrict head (L.not_ received.another)) in
-  let varies = made_since context mark in
-  let ended_facts = facts_since context ended_mark @ facts_since context facts_mark in
+  let varies = made_since context loop.fresh_mark in
+  let ended_facts = facts_since context ended_mark @ facts_since context loop.facts_mark in
   let exit_ =
     loop_exit context
       { ended with loop = frame.loop; yielded = Some before }
@@ -9130,27 +9038,14 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
                (sequence_length context element_type through)))
       exits.breaks
   in
-  join_frames context
+  leave_loop context frame
     (List.map (fun (f : frame) -> { f with yielded = frame.yielded }) (exit_ :: left))
-  |> Option.map (fun (joined : frame) ->
-      { joined with locals = Locals.filter (fun id _ -> Locals.mem id frame.locals) joined.locals })
 
 (* Whether a loop's body hands out parts of the method it is in. *)
-and contains_yield (body : block) =
-  let found = ref false in
-  let rec visit =
-    {
-      Core_walk.ignore_all with
-      expression = (fun node -> Core_walk.expression_children visit node);
-      statement =
-        (fun (node : statement) ->
-          (match node.kind with Yield _ -> found := true | _ -> ());
-          Core_walk.statement_children visit node);
-      pattern = (fun node -> Core_walk.pattern_children visit node);
-    }
-  in
-  Core_walk.block visit body;
-  !found
+and contains_yield body =
+  Core_walk.block_exists
+    ~statement:(fun (node : statement) -> match node.kind with Yield _ -> true | _ -> false)
+    body
 
 and havoc_parts context frame =
   match context.hands_out with

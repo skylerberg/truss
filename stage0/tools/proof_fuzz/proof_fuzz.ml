@@ -65,20 +65,7 @@ let load text =
 (* The bits and signedness of a built-in integer type, or of [Bool] as one
    bit. *)
 let integer (ty : Types.ty) =
-  match ty with
-  | Named { path; arguments = [] } -> (
-      match Intrinsic.builtin_of_path path with
-      | Some Int8 -> Some (8, true)
-      | Some Int16 -> Some (16, true)
-      | Some Int32 -> Some (32, true)
-      | Some (Int64 | ISize) -> Some (64, true)
-      | Some UInt8 -> Some (8, false)
-      | Some UInt16 -> Some (16, false)
-      | Some UInt32 -> Some (32, false)
-      | Some (UInt64 | USize) -> Some (64, false)
-      | Some Bool -> Some (1, false)
-      | _ -> None)
-  | _ -> None
+  if Types.is_builtin Bool ty then Some (1, false) else Types.integer_bits ty
 
 let extremes (bits, signed) =
   if signed then

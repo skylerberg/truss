@@ -1,17 +1,8 @@
 (* Where the [yield]s of a lending or yielding method's body are. *)
 
-let statement_yields (node : Core.statement) =
-  let found = ref false in
-  (Core_walk.deep
-     {
-       Core_walk.ignore_all with
-       statement =
-         (fun (inner : Core.statement) ->
-           match inner.kind with Yield _ -> found := true | _ -> ());
-     })
-    .statement
-    node;
-  !found
+let statement_yields =
+  Core_walk.statement_exists ~statement:(fun (inner : Core.statement) ->
+      match inner.kind with Yield _ -> true | _ -> false)
 
 let expression_yields (node : Core.expression) =
   statement_yields { id = node.id; origin = node.origin; kind = Evaluate node }
