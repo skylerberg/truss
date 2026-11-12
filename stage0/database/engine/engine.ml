@@ -32,6 +32,7 @@ type counters = Incremental.counters = {
 
 let counters = Incremental.counters
 let nodes = Incremental.nodes
+let nodes_including_fixed = Incremental.nodes_including_fixed
 let differing = Incremental.differing
 let unshared = Incremental.unshared
 let identity = Incremental.identity

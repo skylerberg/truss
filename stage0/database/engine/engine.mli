@@ -72,6 +72,8 @@ val counters : t -> counters
 val nodes : t -> node list
 (** Every input and result of the state, apart from its fixed bases'. *)
 
+val nodes_including_fixed : t -> node list
+
 val differing : t -> node list
 (** The nodes the engine itself holds: those that differ from its bases, or may. *)
 
