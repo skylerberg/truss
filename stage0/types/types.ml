@@ -61,7 +61,7 @@ let builtin_of = function
   | Named { path; arguments = [] } -> Intrinsic.builtin_of_path path
   | Named { path; _ } -> (
       match Intrinsic.builtin_of_path path with
-      | Some (Array | Storage | View | Shared) as found -> found
+      | Some (Array | Storage | View | Shared) as builtin -> builtin
       | _ -> None)
   | _ -> None
 
@@ -75,7 +75,7 @@ let integer_types : Intrinsic.builtin list =
 let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
 
 let is_integer_type type_ =
-  match builtin_of type_ with Some found -> List.mem found integer_types | None -> false
+  match builtin_of type_ with Some builtin -> List.mem builtin integer_types | None -> false
 
 let integer_bits ?(usize_bits = 64) type_ =
   match builtin_of type_ with
@@ -101,7 +101,7 @@ let integer_range ?usize_bits type_ =
 let is_signed type_ = match integer_bits type_ with Some (_, signed) -> signed | None -> false
 
 let is_float_type type_ =
-  match builtin_of type_ with Some found -> List.mem found float_types | None -> false
+  match builtin_of type_ with Some builtin -> List.mem builtin float_types | None -> false
 
 (* Substitution *)
 
@@ -278,25 +278,25 @@ let same_clauses (left : function_type) (right : function_type) =
   List.sort_uniq compare left.uses = List.sort_uniq compare right.uses
   && List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
 
-let bound_implies (given : cost_bound) (wanted : cost_bound) =
-  match (given, wanted) with
+let bound_implies (provided : cost_bound) (required : cost_bound) =
+  match (provided, required) with
   | _, Finite_cost -> true
   | (Order_of | No_more_than _ | Exactly_cost _), Order_of -> true
-  | (No_more_than (Some given) | Exactly_cost (Some given)), No_more_than (Some wanted) ->
-      Z.leq given wanted
-  | Exactly_cost (Some given), Exactly_cost (Some wanted) -> Z.equal given wanted
+  | (No_more_than (Some provided) | Exactly_cost (Some provided)), No_more_than (Some required) ->
+      Z.leq provided required
+  | Exactly_cost (Some provided), Exactly_cost (Some required) -> Z.equal provided required
   | _ -> false
 
-let costs_imply ~(given : cost list) ~(wanted : cost list) =
+let costs_imply ~(provided : cost list) ~(required : cost list) =
   List.for_all
-    (fun (wanted : cost) ->
+    (fun (required : cost) ->
       List.exists
-        (fun (given : cost) ->
-          given.resource = wanted.resource
-          && (wanted.amortized || not given.amortized)
-          && bound_implies given.bound wanted.bound)
-        given)
-    wanted
+        (fun (provided : cost) ->
+          provided.resource = required.resource
+          && (required.amortized || not provided.amortized)
+          && bound_implies provided.bound required.bound)
+        provided)
+    required
 
 (* Showing *)
 

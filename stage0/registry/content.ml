@@ -18,7 +18,7 @@ let is_input name =
 let published name = is_input name || Filename.check_suffix name ".md"
 
 let files ?(all = false) directory =
-  let found = ref [] in
+  let files = ref [] in
   let rec walk relative =
     let absolute = if relative = "" then directory else Filename.concat directory relative in
     let entries = try Sys.readdir absolute with Sys_error _ -> [||] in
@@ -35,9 +35,9 @@ let files ?(all = false) directory =
             then walk path
         | S_REG ->
             if all || (published entry && (entry <> "truss.lock" || relative = "")) then
-              found := (path, File_system.read full) :: !found
+              files := (path, File_system.read full) :: !files
         | _ -> ())
       entries
   in
   walk "";
-  List.rev !found
+  List.rev !files

@@ -377,18 +377,18 @@ and check_provide checking scope implementations body =
             ]
           "This implementation never changes its own state, so the place is provided without `mut`.";
       List.iter
-        (fun ((found : Core.provided), (interface : T.impl_interface)) ->
+        (fun ((provided : Core.provided), (interface : T.impl_interface)) ->
           check_grant checking implementation.origin
             ~what:
-              (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show found.capability)
+              (Printf.sprintf "The `impl` of `%s` for `%s`" (Path.show provided.capability)
                  (T.show interface.for_type))
-            (Path.package found.impl) interface.impl_uses;
+            (Path.package provided.impl) interface.impl_uses;
           require_available checking scope implementation.origin ~for_implementation:true
             interface.impl_uses)
         impls;
       provided :=
         union !provided
-          (List.map (fun ((found : Core.provided), _) -> T.Capability found.capability) impls))
+          (List.map (fun ((provided : Core.provided), _) -> T.Capability provided.capability) impls))
     implementations;
   checking.provides <- (scope.available, implementations, body) :: checking.provides;
   check_block checking { scope with available = union scope.available !provided } body
@@ -490,18 +490,18 @@ let rec can_call_capability_code (state : state) ~bounds ?(seen = []) (type_ : T
       || inside (T.result_type output)
   | T.Any trait -> trait_uses trait
   | T.Parameter parameter -> List.exists trait_uses (bounds parameter)
-  | T.Cursor { arguments = given; _ } -> arguments given
-  | T.Named { path; arguments = given } -> (
-      arguments given
+  | T.Cursor { arguments = type_arguments; _ } -> arguments type_arguments
+  | T.Named { path; arguments = type_arguments } -> (
+      arguments type_arguments
       || (not (List.exists (Path.equal path) seen))
          &&
          let inside = can_call_capability_code state ~bounds ~seen:(path :: seen) in
          let fields = List.exists (fun (field : T.field) -> inside field.field_type) in
-         (match Members.fields state.database path given with
-           | Some found -> fields found
+         (match Members.fields state.database path type_arguments with
+           | Some named_fields -> fields named_fields
            | None -> false)
          ||
-         match Members.variants state.database path given with
+         match Members.variants state.database path type_arguments with
          | Some variants ->
              List.exists
                (fun (variant : T.variant) -> fields (Option.value ~default:[] variant.fields))
@@ -528,8 +528,8 @@ let check_monitor_lock checking ~solved available implementations =
   let state = checking.state in
   let provides_tasks (implementation : Core.implementation) =
     List.exists
-      (fun ((found : Core.provided), (_ : T.impl_interface)) ->
-        Path.equal found.capability Core_walk.tasks_capability)
+      (fun ((provided : Core.provided), (_ : T.impl_interface)) ->
+        Path.equal provided.capability Core_walk.tasks_capability)
       (Form.capability_impls state implementation.type_)
   in
   let available =
@@ -569,8 +569,8 @@ let check_monitor_callbacks checking implementations =
     (fun (implementation : Core.implementation) ->
       if implementation.mode = Mut then
         List.iter
-          (fun ((found : Core.provided), (_ : T.impl_interface)) ->
-            match Query.demand state.database Environment.trait_interface found.capability with
+          (fun ((provided : Core.provided), (_ : T.impl_interface)) ->
+            match Query.demand state.database Environment.trait_interface provided.capability with
             | Some capability ->
                 List.iter
                   (fun (method_ : T.trait_method) ->
@@ -592,7 +592,7 @@ let check_monitor_callbacks checking implementations =
                               enter the monitor of a nested `provide`, and two tasks could \
                               deadlock. Pass the method the values that it needs instead of a \
                               callback."
-                             (T.show_capability (T.Capability found.capability))
+                             (T.show_capability (T.Capability provided.capability))
                              method_.method_name parameter.name)
                     | None -> ())
                   capability.methods

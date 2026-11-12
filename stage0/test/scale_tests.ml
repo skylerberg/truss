@@ -38,7 +38,7 @@ let package modules =
     (fun name ->
       match Query.demand database Type_checker.file_diagnostics (module_of name) with
       | [] -> ()
-      | found -> fail "%s has %d diagnostics" name (List.length found))
+      | actual -> fail "%s has %d diagnostics" name (List.length actual))
     ("app::core" :: names);
   database
 

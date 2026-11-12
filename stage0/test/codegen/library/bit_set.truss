@@ -1,11 +1,11 @@
 use standard::collections
 
 fn positions(bits: collections::BitSet) -> List[USize] {
-  var found: List[USize] = []
+  var set_positions: List[USize] = []
   for position in bits.ones() {
-    mut found.push(position)
+    mut set_positions.push(position)
   }
-  found
+  set_positions
 }
 
 fn with_ones(length: USize, ones: Slice[USize]) -> collections::BitSet {
@@ -81,18 +81,18 @@ test "two bit sets are united, intersected, subtracted, and inverted" {
   let left = with_ones(100, ones: [1, 2, 3, 70, 99].slice())
   let right = with_ones(100, ones: [2, 3, 4, 71, 99].slice())
   var union = left.copy()
-  mut union.unite(right)
+  mut union.union_with(right)
   assert positions(union) == [1, 2, 3, 4, 70, 71, 99]
   var intersection = left.copy()
-  mut intersection.intersect(right)
+  mut intersection.intersect_with(right)
   assert positions(intersection) == [2, 3, 99]
   var difference = left.copy()
-  mut difference.subtract(right)
+  mut difference.difference_with(right)
   assert positions(difference) == [1, 70]
   var inverse = left.copy()
-  mut inverse.invert()
+  mut inverse.complement()
   assert inverse.count_ones() == 95 && !inverse[1] && inverse[0] && inverse[98] && !inverse[99]
-  mut inverse.invert()
+  mut inverse.complement()
   assert inverse == left
 }
 

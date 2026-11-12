@@ -11,11 +11,12 @@ type visit = {
 let ignore_all =
   { expression = ignore; statement = ignore; pattern = ignore; callee = ignore; place = ignore }
 
-let callees found =
+let callees on_callee =
   {
     ignore_all with
-    expression = (fun node -> match node.kind with Call { callee; _ } -> found callee | _ -> ());
-    callee = found;
+    expression =
+      (fun node -> match node.kind with Call { callee; _ } -> on_callee callee | _ -> ());
+    callee = on_callee;
   }
 
 let place_type : place -> Types.ty = function
@@ -27,21 +28,21 @@ let place_origin : place -> origin = function
   | Lent value | Temporary value -> value.origin
 
 let rec lent_places : operand -> place list = function
-  | Place found -> [ found ]
+  | Place core_place -> [ core_place ]
   | Value { kind = Construct { fields; _ }; _ } ->
       List.concat_map (fun (_, field) -> Option.fold ~none:[] ~some:lent_places field) fields
   | Value _ -> []
 
-let rec place visit found =
-  visit.place found;
-  match found with
+let rec place visit core_place =
+  visit.place core_place;
+  match core_place with
   | Local _ | Constant _ -> ()
   | Field { base; _ } -> place visit base
   | Lent call -> visit.expression call
   | Temporary value -> visit.expression value
 
 let operand visit = function
-  | Place found -> place visit found
+  | Place core_place -> place visit core_place
   | Value value -> visit.expression value
 
 let block visit (body : block) =
@@ -67,7 +68,7 @@ let expression_children visit (node : expression) =
   | Method_time _ ->
       ()
   | Template { call; _ } -> visit.expression call
-  | Use found -> place visit found
+  | Use core_place -> place visit core_place
   | Copy value -> operand visit value
   | Lambda { parameters; body; _ } ->
       List.iter visit.pattern parameters;
@@ -249,18 +250,18 @@ let definition_children visit = function
   | Test body | Law_proof { body; _ } -> block visit body
   | Empty -> ()
 
-let definition visit found = definition_children (deep visit) found
+let definition visit core_definition = definition_children (deep visit) core_definition
 let tasks_capability = Well_known.path Tasks
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
 let tasks_use ?(solved = fun (_ : int) : Types.capability list -> []) (body : block) : tasks_use =
-  let found = ref No_tasks in
+  let usage = ref No_tasks in
   let rec used (capability : Types.capability) =
     match capability with
-    | Capability path -> if Path.equal path tasks_capability then found := Uses_tasks
+    | Capability path -> if Path.equal path tasks_capability then usage := Uses_tasks
     | Capability_parameter _ | Capability_projection _ ->
-        if !found = No_tasks then found := Through_parameter
+        if !usage = No_tasks then usage := Through_parameter
     | Capability_variable variable -> List.iter used (solved variable)
   in
   block
@@ -272,11 +273,11 @@ let tasks_use ?(solved = fun (_ : int) : Types.capability list -> []) (body : bl
          statement =
            (fun node ->
              match node.kind with
-             | Concurrent _ | For { mode = Concurrent_loop; _ } -> found := Uses_tasks
+             | Concurrent _ | For { mode = Concurrent_loop; _ } -> usage := Uses_tasks
              | _ -> ());
        })
     body;
-  !found
+  !usage
 
 let can_use_tasks ?solved (body : block) : bool = tasks_use ?solved body <> No_tasks
 

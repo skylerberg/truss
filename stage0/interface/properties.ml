@@ -115,9 +115,9 @@ let instantiate ~resolve (interface : T.type_interface) arguments conditions =
 (* The conditions of all of some types. [None] if any of them gives [None]. *)
 let all conditions types =
   List.fold_left
-    (fun found type_ ->
-      match (found, conditions type_) with
-      | Some found, Some more -> Some (found @ more)
+    (fun collected type_ ->
+      match (collected, conditions type_) with
+      | Some collected, Some more -> Some (collected @ more)
       | _ -> None)
     (Some []) types
 
@@ -135,12 +135,12 @@ let limit = 64
    definition's condition for its arguments.
 
    Computing a condition can reach a type whose answer is being computed,
-   when an associated type is that type. [within] holds the types in
+   when an associated type is that type. [in_progress] holds the types in
    progress. A type that is reached again adds no condition: a recursive
    type has a property unless another part of it prevents that, and is a
    view only if another part of it is. *)
-let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (type_ : T.ty) =
-  let each = all (conditions database ~facts_of ~resolve ~leaf ~within property) in
+let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) property (type_ : T.ty) =
+  let each = all (conditions database ~facts_of ~resolve ~leaf ~in_progress property) in
   match type_ with
   | T.Error _ | T.Hole | T.Variable _ | T.Never | T.Literal _ | T.Integer -> Some []
   (* A function value may be a capturing lambda, which views its captures.
@@ -181,15 +181,16 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(within = []) property (ty
           match Query.demand database Environment.type_interface path with
           | None -> (
               match property with View | Holds_function -> Some [] | Copyable | Plain -> None)
-          | Some _ when List.exists (T.equal type_) within -> Some []
-          | Some _ when List.length within > limit -> None
+          | Some _ when List.exists (T.equal type_) in_progress -> Some []
+          | Some _ when List.length in_progress > limit -> None
           | Some interface ->
               Option.bind
                 (conditions_of (facts_of path) property)
-                (fun found ->
+                (fun arguments_conditions ->
                   all
-                    (conditions database ~facts_of ~resolve ~leaf ~within:(type_ :: within) property)
-                    (instantiate ~resolve interface arguments found))))
+                    (conditions database ~facts_of ~resolve ~leaf
+                       ~in_progress:(type_ :: in_progress) property)
+                    (instantiate ~resolve interface arguments arguments_conditions))))
 
 (* A named type that contains itself through its arguments. No type
    definition's fields name such a type: [Kept[Marker]] is one when
@@ -223,7 +224,8 @@ let contents database ~facts_of ~resolve (type_ : T.ty) =
         ~enclosing:
           (Option.to_list (Option.map (fun named -> (named, step, defining)) named)
           @ List.map
-              (fun (other, within, earlier) -> (other, through within step, defining @ earlier))
+              (fun (other, occurrence_in_named, earlier) ->
+                (other, through occurrence_in_named step, defining @ earlier))
               enclosing)
         (through occurrence step)
     in
@@ -362,16 +364,16 @@ let groups =
       in
       let known = Path.Set.of_list types in
       let named type_ =
-        let found = ref [] in
+        let named_types = ref [] in
         ignore
           (T.map
              (function
                | T.Named { path; _ } when Path.Set.mem path known ->
-                   found := path :: !found;
+                   named_types := path :: !named_types;
                    None
                | _ -> None)
              type_);
-        !found
+        !named_types
       in
       let successors path =
         match Query.demand database Environment.type_interface path with
@@ -419,7 +421,8 @@ let rec group_facts =
          in
          let each facts =
            List.fold_left
-             (fun found (path, interface) -> Path.Map.add path (facts path interface) found)
+             (fun facts_by_path (path, interface) ->
+               Path.Map.add path (facts path interface) facts_by_path)
              Path.Map.empty interfaces
          in
          let rec settle assumed =
@@ -468,13 +471,13 @@ let has database ~bounds ~normalize property type_ =
     in
     if adds_nothing then Some [] else None
   in
-  let found =
+  let type_conditions =
     conditions database ~facts_of:(Query.demand database facts) ~resolve:normalize ~leaf property
       (normalize type_)
   in
   match property with
-  | Copyable | Plain -> Option.is_some found
-  | View | Holds_function -> Option.is_none found
+  | Copyable | Plain -> Option.is_some type_conditions
+  | View | Holds_function -> Option.is_none type_conditions
 
 let storable database ~bounds ~normalize type_ =
   let leaf type_ = if has_bound database ~bounds type_ storable_trait then Some [] else None in

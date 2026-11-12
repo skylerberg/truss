@@ -11,8 +11,8 @@ let contains text part = Substring.contains text part
 
 let malformed_at line text =
   match Manifest.parse text with
-  | exception Manifest.Malformed (found, _) when found = line -> ()
-  | exception Manifest.Malformed (found, message) -> fail "at line %d: %s" found message
+  | exception Manifest.Malformed (actual, _) when actual = line -> ()
+  | exception Manifest.Malformed (actual, message) -> fail "at line %d: %s" actual message
   | _ -> fail "accepted"
 
 let () =

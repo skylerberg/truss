@@ -74,14 +74,14 @@ let session directory =
    a command would leave it. *)
 let errors directory =
   let session, packages = session directory in
-  let found =
+  let actual =
     List.concat_map
       (fun (_, name) ->
         List.concat_map (Database.diagnostics session) (Database.package_modules session name))
       packages
   in
   Database.save_session session;
-  List.length found + List.length (Database.problems session)
+  List.length actual + List.length (Database.problems session)
 
 let executed directory =
   match Database.Testing.session_engine directory with
@@ -115,8 +115,8 @@ let clear directory = Option.iter Engine.clear_log (Database.Testing.session_eng
 let contains = Substring.contains
 
 let expect_errors directory count =
-  let found = errors directory in
-  if found <> count then fail "%d errors, expected %d" found count
+  let actual = errors directory in
+  if actual <> count then fail "%d errors, expected %d" actual count
 
 (* The background process, first, since a process cannot fork once a
    build has started domains *)
@@ -501,12 +501,12 @@ let () =
           change_interface root;
           let mine, _ = session root in
           (match Database.other_worktrees mine with
-          | [ found ] when Database.root found = Unix.realpath other -> (
-              match Database.overlap_with mine found with
+          | [ actual ] when Database.root actual = Unix.realpath other -> (
+              match Database.overlap_with mine actual with
               | Error message -> fail "%s" message
               | Ok [] -> fail "found no overlap"
               | Ok _ -> ())
-          | found -> fail "compared with [%s]" (String.concat "; " (List.map Database.root found)));
+          | actual -> fail "compared with [%s]" (String.concat "; " (List.map Database.root actual)));
           ignore (call "stop");
           ignore (Unix.waitpid [] child))
 
@@ -594,8 +594,8 @@ let () =
       let theirs, _ = session other in
       let _ = session (Filename.concat top "tools") in
       (match Database.other_worktrees theirs with
-      | [ found ] when Database.root found = Unix.realpath root -> ()
-      | found -> fail "compared with [%s]" (String.concat "; " (List.map Database.root found)));
+      | [ actual ] when Database.root actual = Unix.realpath root -> ()
+      | actual -> fail "compared with [%s]" (String.concat "; " (List.map Database.root actual)));
       (match Database.overlap_with theirs mine with
       | Error message -> fail "%s" message
       | Ok overlaps ->
@@ -609,8 +609,8 @@ let () =
           then fail "no overlap found");
       match Database.merge_preview mine theirs with
       | Error message -> fail "%s" message
-      | Ok found ->
-          if not (List.exists (fun (file, _, _) -> file = "main.truss") found) then
+      | Ok actual ->
+          if not (List.exists (fun (file, _, _) -> file = "main.truss") actual) then
             fail "no error found in the merge");
   test "a merge preview finds the errors the merge would have" (fun () ->
       fresh_store ();
@@ -627,12 +627,12 @@ let () =
       let theirs, _ = session other in
       match Database.merge_preview mine theirs with
       | Error message -> fail "%s" message
-      | Ok found ->
+      | Ok actual ->
           if
             not
               (List.exists
                  (fun (file, code, _) -> file = "caller.truss" && code = "types.missing_argument")
-                 found)
+                 actual)
           then fail "no error found")
 
 (* The layers stay apart *)

@@ -17,21 +17,22 @@ let () =
   test "a bug gathers what the compiler was doing, innermost first" (fun () ->
       expect_bug
         (fun () ->
-          Compiler_bug.within ~stage:"Compile" "lowering a caller" (fun () ->
-              Compiler_bug.within ~stage:"Compile" "lowering a cursor" (fun () ->
+          Compiler_bug.while_doing ~stage:"Compile" "lowering a caller" (fun () ->
+              Compiler_bug.while_doing ~stage:"Compile" "lowering a cursor" (fun () ->
                   Compiler_bug.bug ~stage:"Yields" "a local a cursor cannot keep")))
         (fun bug ->
           if bug.stage <> "Yields" || bug.doing <> [ "lowering a cursor"; "lowering a caller" ] then
             fail "got %s" (Compiler_bug.to_string bug)));
   test "a broken invariant the standard library finds is a bug of the stage that ran" (fun () ->
       expect_bug
-        (fun () -> Compiler_bug.within ~stage:"Compile" "lowering f" (fun () -> List.hd []))
+        (fun () -> Compiler_bug.while_doing ~stage:"Compile" "lowering f" (fun () -> List.hd []))
         (fun bug ->
           if bug.stage <> "Compile" || bug.doing <> [ "lowering f" ] then
             fail "got %s" (Compiler_bug.to_string bug)));
   test "a failed assert is a bug of the stage that ran" (fun () ->
       expect_bug
-        (fun () -> Compiler_bug.within ~stage:"Prover" "translating f" (fun () -> assert false))
+        (fun () ->
+          Compiler_bug.while_doing ~stage:"Prover" "translating f" (fun () -> assert false))
         (fun bug ->
           if
             bug.stage <> "Prover" || bug.doing <> [ "translating f" ]

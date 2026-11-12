@@ -239,13 +239,13 @@ let rec mangle = function
   | Program_main main -> marker "Program" ^ path main
 
 let limit = 200
-let kept = 180
+let prefix_length = 180
 
 (* A long name keeps its start, which is what a profiler shows, and ends
    with a hash of the whole name, which keeps it unique. *)
 let shorten name =
   if String.length name <= limit then name
-  else String.sub name 0 kept ^ "_Hash_" ^ Blake3.hex_digest ~digits:32 name
+  else String.sub name 0 prefix_length ^ "_Hash_" ^ Blake3.hex_digest ~digits:32 name
 
 let path_symbol = path
 let symbol key = shorten ("t_" ^ mangle key)

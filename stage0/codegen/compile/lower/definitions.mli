@@ -23,7 +23,7 @@ val test_key : Path.t -> Instance.key
 type code = {
   definition_key : Names.key;
   anchor : Path.t;
-  within : Path.t option;
+  enclosing_impl : Path.t option;
   text : string;
   result : T.result;
   substitution : T.substitution;

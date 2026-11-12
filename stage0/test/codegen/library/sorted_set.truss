@@ -1,11 +1,11 @@
 use standard::collections
 
 fn set_of(elements: List[Int64]) -> collections::SortedSet[Int64] {
-  var made: collections::SortedSet[Int64] = collections::SortedSet.new()
+  var sorted: collections::SortedSet[Int64] = collections::SortedSet.new()
   for element in elements {
-    mut made.insert(element)
+    mut sorted.insert(element)
   }
-  made
+  sorted
 }
 
 fn listed(sorted: collections::SortedSet[Int64]) -> List[Int64] {
@@ -18,81 +18,81 @@ fn listed(sorted: collections::SortedSet[Int64]) -> List[Int64] {
 
 fn or_minus_one(element: Option[Int64]) -> Int64 {
   match element {
-    Some(found) => found
+    Some(present) => present
     None => -1
   }
 }
 
 fn listed_within(sorted: collections::SortedSet[Int64], range: Range[Int64]) -> List[Int64] {
   var elements: List[Int64] = []
-  for element in sorted.within(range) {
+  for element in sorted.in_range(range) {
     mut elements.push(element)
   }
   elements
 }
 
 test "a sorted set keeps its elements in order, each once" {
-  var made = set_of([5, 1, 4, 1, 2, 5, 3])
-  assert made.length() == 5 && !made.is_empty()
-  assert listed(made) == [1, 2, 3, 4, 5]
+  var sorted = set_of([5, 1, 4, 1, 2, 5, 3])
+  assert sorted.length() == 5 && !sorted.is_empty()
+  assert listed(sorted) == [1, 2, 3, 4, 5]
   var backwards: List[Int64] = []
-  for element in made.reversed() {
+  for element in sorted.reversed() {
     mut backwards.push(element)
   }
   assert backwards == [5, 4, 3, 2, 1]
-  assert made.contains(4) && !made.contains(6) && !made.contains(0)
-  assert or_minus_one(made.first()) == 1 && or_minus_one(made.last()) == 5
-  assert mut made.insert_new(6) && !mut made.insert_new(6) && !mut made.insert_new(1)
-  assert listed(made) == [1, 2, 3, 4, 5, 6]
+  assert sorted.contains(4) && !sorted.contains(6) && !sorted.contains(0)
+  assert or_minus_one(sorted.first()) == 1 && or_minus_one(sorted.last()) == 5
+  assert mut sorted.insert_new(6) && !mut sorted.insert_new(6) && !mut sorted.insert_new(1)
+  assert listed(sorted) == [1, 2, 3, 4, 5, 6]
   let empty: collections::SortedSet[Int64] = collections::SortedSet.new()
   assert empty.is_empty() && empty.first() is None && empty.last() is None && !empty.contains(1)
 }
 
 test "elements are removed by value and from either end" {
-  var made = set_of([1, 2, 3, 4, 5, 6])
-  mut made.remove(3)
-  mut made.remove(30)
-  assert listed(made) == [1, 2, 4, 5, 6]
-  assert mut made.take(5) == Some(5) && mut made.take(5) is None
-  assert mut made.pop_first() == Some(1) && mut made.pop_last() == Some(6)
-  assert listed(made) == [2, 4]
-  mut made.clear()
-  assert made.is_empty() && mut made.pop_first() is None && mut made.pop_last() is None
-  mut made.insert(8)
-  assert listed(made) == [8]
+  var sorted = set_of([1, 2, 3, 4, 5, 6])
+  mut sorted.remove(3)
+  mut sorted.remove(30)
+  assert listed(sorted) == [1, 2, 4, 5, 6]
+  assert mut sorted.take(5) == Some(5) && mut sorted.take(5) is None
+  assert mut sorted.pop_first() == Some(1) && mut sorted.pop_last() == Some(6)
+  assert listed(sorted) == [2, 4]
+  mut sorted.clear()
+  assert sorted.is_empty() && mut sorted.pop_first() is None && mut sorted.pop_last() is None
+  mut sorted.insert(8)
+  assert listed(sorted) == [8]
 }
 
 test "a sorted set finds the elements nearest a value and those within a range" {
-  let made = set_of([10, 20, 30, 40])
-  assert or_minus_one(made.at_or_before(20)) == 20 && or_minus_one(made.at_or_before(25)) == 20
-  assert or_minus_one(made.at_or_before(5)) == -1 && or_minus_one(made.at_or_before(99)) == 40
-  assert or_minus_one(made.at_or_after(20)) == 20 && or_minus_one(made.at_or_after(25)) == 30
-  assert or_minus_one(made.at_or_after(5)) == 10 && or_minus_one(made.at_or_after(41)) == -1
-  assert listed_within(made, range: 15..35) == [20, 30]
-  assert listed_within(made, range: 20..40) == [20, 30]
-  assert listed_within(made, range: 20..=40) == [20, 30, 40]
-  assert listed_within(made, range: 0..100) == [10, 20, 30, 40]
-  assert listed_within(made, range: 10..10).is_empty()
-  assert listed_within(made, range: 35..15).is_empty()
+  let sorted = set_of([10, 20, 30, 40])
+  assert or_minus_one(sorted.at_or_before(20)) == 20 && or_minus_one(sorted.at_or_before(25)) == 20
+  assert or_minus_one(sorted.at_or_before(5)) == -1 && or_minus_one(sorted.at_or_before(99)) == 40
+  assert or_minus_one(sorted.at_or_after(20)) == 20 && or_minus_one(sorted.at_or_after(25)) == 30
+  assert or_minus_one(sorted.at_or_after(5)) == 10 && or_minus_one(sorted.at_or_after(41)) == -1
+  assert listed_within(sorted, range: 15..35) == [20, 30]
+  assert listed_within(sorted, range: 20..40) == [20, 30]
+  assert listed_within(sorted, range: 20..=40) == [20, 30, 40]
+  assert listed_within(sorted, range: 0..100) == [10, 20, 30, 40]
+  assert listed_within(sorted, range: 10..10).is_empty()
+  assert listed_within(sorted, range: 35..15).is_empty()
   let empty: collections::SortedSet[Int64] = collections::SortedSet.new()
   assert empty.at_or_before(1) is None && empty.at_or_after(1) is None
   assert listed_within(empty, range: 0..9).is_empty()
 }
 
 test "retain keeps the elements a function accepts, in order" {
-  var made = set_of([6, 5, 4, 3, 2, 1])
-  mut made.retain(fn(element) { element % 2 == 0 })
-  assert listed(made) == [2, 4, 6] && !made.contains(5)
-  mut made.retain(fn(element) { element > 100 })
-  assert made.is_empty()
+  var sorted = set_of([6, 5, 4, 3, 2, 1])
+  mut sorted.retain(fn(element) { element % 2 == 0 })
+  assert listed(sorted) == [2, 4, 6] && !sorted.contains(5)
+  mut sorted.retain(fn(element) { element > 100 })
+  assert sorted.is_empty()
 }
 
 test "a sorted set is made from elements in any order" {
   let elements: List[Int64] = [3, 1, 3, 2, 3, 1]
-  let made: collections::SortedSet[Int64] = collections::SortedSet.from(elements.copy())
-  assert listed(made) == [1, 2, 3]
+  let sorted: collections::SortedSet[Int64] = collections::SortedSet.from(elements.copy())
+  assert listed(sorted) == [1, 2, 3]
   var collected: collections::SortedSet[Int64] = collections::SortedSet.collect(elements.copy().each())
-  assert collected == made
+  assert collected == sorted
   let more: List[Int64] = [9, 2, 0, 2, 7]
   mut collected.extend(more.copy().each())
   assert listed(collected) == [0, 1, 2, 3, 7, 9]
@@ -152,38 +152,38 @@ test "sorted sets are equal when their elements are, hash alike, and copy apart"
 }
 
 test "a sorted set of many elements inserted out of order stays in order" {
-  var made: collections::SortedSet[Int64] = collections::SortedSet.new()
+  var sorted: collections::SortedSet[Int64] = collections::SortedSet.new()
   for step in 0..101 {
-    mut made.insert(step * 37 % 101)
+    mut sorted.insert(step * 37 % 101)
   }
-  assert made.length() == 101
+  assert sorted.length() == 101
   var expected: Int64 = 0
-  for element in made {
+  for element in sorted {
     assert element == expected
     expected += 1
   }
   for element in 0..101 {
     if element % 3 == 0 {
-      mut made.remove(element)
+      mut sorted.remove(element)
     }
   }
-  assert made.length() == 67
+  assert sorted.length() == 67
   for element in 0..101 {
-    assert made.contains(element) == (element % 3 != 0)
+    assert sorted.contains(element) == (element % 3 != 0)
   }
-  assert or_minus_one(made.at_or_after(33)) == 34 && or_minus_one(made.at_or_before(33)) == 32
+  assert or_minus_one(sorted.at_or_after(33)) == 34 && or_minus_one(sorted.at_or_before(33)) == 32
 }
 
 test "a sorted set orders text by its bytes" {
-  var made: collections::SortedSet[String] = collections::SortedSet.new()
-  mut made.insert("pear")
-  mut made.insert("apple")
-  mut made.insert("fig")
-  mut made.insert("apple")
+  var sorted: collections::SortedSet[String] = collections::SortedSet.new()
+  mut sorted.insert("pear")
+  mut sorted.insert("apple")
+  mut sorted.insert("fig")
+  mut sorted.insert("apple")
   var order = ""
-  for element in made {
+  for element in sorted {
     mut order.push(element.slice())
     mut order.push(" ")
   }
-  assert order == "apple fig pear " && made.contains("fig") && !made.contains("plum")
+  assert order == "apple fig pear " && sorted.contains("fig") && !sorted.contains("plum")
 }

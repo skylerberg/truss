@@ -785,21 +785,23 @@ let format_field_edits cursor ~start ~stop =
     else if plain (byte cursor position) then field_end (position + 1)
     else None
   in
-  let rec edits position found =
-    if position >= stop then Some (List.rev found)
+  let rec edits position reversed_edits =
+    if position >= stop then Some (List.rev reversed_edits)
     else
       let current = Char.chr (byte cursor position) and next = byte cursor (position + 1) in
       match current with
-      | '\\' -> edits (position + 2) found
+      | '\\' -> edits (position + 2) reversed_edits
       | ('{' | '}') when next = Char.code current ->
           edits (position + 2)
-            (Diagnostic.replace (span position (position + 2)) (String.make 1 current) :: found)
+            (Diagnostic.replace (span position (position + 2)) (String.make 1 current)
+            :: reversed_edits)
       | '{' -> (
           match field_end (position + 1) with
           | Some close when skip_spaces cursor (position + 1) < close ->
-              edits (close + 1) (Diagnostic.insert (Source.zero_width position) "$" :: found)
+              edits (close + 1)
+                (Diagnostic.insert (Source.zero_width position) "$" :: reversed_edits)
           | _ -> None)
-      | _ -> edits (position + 1) found
+      | _ -> edits (position + 1) reversed_edits
   in
   edits start []
 
@@ -990,12 +992,13 @@ let quoted_string cursor ~scan ~nesting ~delimiter =
           rest
     | _ -> false
   in
-  let rec quote_edits position found =
-    if position >= stop - 1 then List.rev found
-    else if byte cursor position = Char.code '\\' then quote_edits (position + 2) found
+  let rec quote_edits position reversed_edits =
+    if position >= stop - 1 then List.rev reversed_edits
+    else if byte cursor position = Char.code '\\' then quote_edits (position + 2) reversed_edits
     else if byte cursor position = quote && not (inside_interpolation position) then
-      quote_edits (position + 1) (Diagnostic.insert (Source.zero_width position) "\\" :: found)
-    else quote_edits (position + 1) found
+      quote_edits (position + 1)
+        (Diagnostic.insert (Source.zero_width position) "\\" :: reversed_edits)
+    else quote_edits (position + 1) reversed_edits
   in
   let template = delimiter = Char.code '`' in
   report cursor ~code:String_delimiter

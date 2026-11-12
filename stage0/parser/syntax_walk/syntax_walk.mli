@@ -20,6 +20,10 @@ val statement_parts :
   Syntax.statement ->
   unit
 
+val contains_break : Syntax.block -> bool
+(** Whether a loop body has a [break] that leaves that loop: one outside every nested loop and
+    lambda. *)
+
 val children : (Syntax.expression -> unit) -> Syntax.expression -> unit
 val statement : (Syntax.expression -> unit) -> Syntax.statement -> unit
 val type_expression : (Syntax.expression -> unit) -> Syntax.type_expression -> unit

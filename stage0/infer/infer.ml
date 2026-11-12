@@ -119,14 +119,14 @@ let exported_specification_of_path =
   Query.query ~name:"exported_specification_of_path" ~phase:Phases.bodies ~show:Path.show
     (of_path ~written:exported_specification)
 
-let evidence =
-  Query.query ~name:"evidence" ~phase:Phases.bodies ~show:Resolve.Names.show_key
+let evidence_packages =
+  Query.query ~name:"evidence_packages" ~phase:Phases.bodies ~show:Resolve.Names.show_key
     (fun database key ->
       match Query.demand database type_check_result key with
       | Some (result : type_check_result) -> result.evidence
       | None -> [])
 
-let clean database key =
+let clean_tables database key =
   match
     ( Query.demand database Resolve.Names.definition key,
       Query.demand database Resolve.resolved key,
@@ -143,4 +143,4 @@ let clean database key =
       Some tables
   | _ -> None
 
-let is_clean database key = Option.is_some (clean database key)
+let is_clean database key = Option.is_some (clean_tables database key)

@@ -16,7 +16,7 @@ val function_value_call :
   Syntax.argument list ->
   State.T.ty
 
-val argument_value :
+val check_argument :
   State.state -> State.env -> Syntax.expression -> Lookups.T.parameter_info -> Lookups.T.mode
 
 val match_arguments :

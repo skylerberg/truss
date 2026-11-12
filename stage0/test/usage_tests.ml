@@ -31,8 +31,8 @@ let () =
            }\n");
   test "a binding in a match arm must be used" (fun () ->
       one_diagnostic
-        "fn f(found: Option[Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    Some(value) => 1\n\
         \    None => 0\n\
         \  }\n\

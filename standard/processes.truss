@@ -6,7 +6,7 @@ public opaque type Command(
   program: String,
   arguments: List[String],
   variables: List[Variable],
-  clear_variables: Bool,
+  inherits_variables: Bool,
   directory: Option[Path],
   input: Redirect,
   output: Redirect,
@@ -156,7 +156,7 @@ public fn Command.new(program: StringSlice) -> Command {
     program: program.to_string(),
     arguments: [],
     variables: [],
-    clear_variables: false,
+    inherits_variables: true,
     directory: None,
     input: Redirect.Inherit,
     output: Redirect.Inherit,
@@ -186,7 +186,7 @@ public fn Command.variable(own self, name: StringSlice, value: StringSlice) -> C
 
 public fn Command.without_inherited_variables(own self) -> Command {
   var command = own self
-  command.clear_variables = true
+  command.inherits_variables = false
   command
 }
 

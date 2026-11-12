@@ -52,7 +52,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let b = st.b in
   let evidence = local b ~name:"evidence" Convention.evidence in
   result_slot st result;
-  let taken =
+  let parameter_places =
     List.map
       (fun (info : T.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
@@ -62,7 +62,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   start b (block b);
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let implementation = local b (Pointer { target = Value self_ty; writable = true }) in
-  if not (zero_size st self_ty) then
+  if not (is_zero_size st self_ty) then
     emit b
       (Call
          {
@@ -92,7 +92,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lir.root = Local implementation; projections = [ Deref ] })
-      :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
+      :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
   {
     key;
@@ -100,7 +100,7 @@ let entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
       finish_function st
         ~returns:(capability_signature.output <> Returns Never)
         ~first:[ evidence ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken)
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
         ();
     nested = [||];
   }
@@ -119,7 +119,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
   let b = st.b in
   let evidence = local b ~name:"evidence" Convention.evidence in
   result_slot st result;
-  let taken =
+  let parameter_places =
     List.map
       (fun (info : T.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic [] info.type_ in
@@ -177,7 +177,8 @@ let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
        {
          target =
            Evidence_call { evidence = implementation; capability; slot; signature = lir_signature };
-         arguments = List.filter_map (fun ((_, place), mode, ty) -> pass st mode ty place) taken;
+         arguments =
+           List.filter_map (fun ((_, place), mode, ty) -> pass st mode ty place) parameter_places;
          result = Convention.destination result (passed_on st result_ty);
        });
   tasks_call "unlock";
@@ -187,7 +188,7 @@ let locked_entry context (key : Instance.key) ~capability ~name : Lir.t =
       finish_function st
         ~returns:(capability_signature.output <> Returns Never)
         ~first:[ evidence ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken)
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places)
         ();
     nested = [||];
   }
@@ -280,18 +281,18 @@ let real_implementations st ~user capabilities =
               (Ground.path_name capability)
       in
       let implementation =
-        if zero_size st ty then Lir.Constant Null
+        if is_zero_size st ty then Lir.Constant Null
         else begin
           let value = binding st ty in
-          let made : Path.t =
+          let constructor : Path.t =
             match ty with
             | Named { path; _ } -> Method { owner = path; name = "new"; receiver = Static }
             | _ -> bug "%s implements %s" (Ground.to_string ty) (Path.show capability)
           in
           call_instance st
-            (Code { path = made; type_arguments = [] })
-            ~signature:(signature_of st.context made) ~substitution:[] ~arguments:[]
-            ~destination:value ();
+            (Code { path = constructor; type_arguments = [] })
+            ~signature:(signature_of st.context constructor)
+            ~substitution:[] ~arguments:[] ~destination:value ();
           Address { place = value; writable = true }
         end
       in
@@ -390,7 +391,7 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
     match ty.result with Returns t -> t | _ -> bug "an adapter for a function that yields"
   in
   result_slot st (Convention.result context.env result_ty);
-  let taken =
+  let parameter_places =
     List.map
       (fun ((mode : Ground.mode), ty) ->
         let types_mode : T.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
@@ -400,13 +401,13 @@ let adapter context (key : Instance.key) ~(function_ : Instance.key) ~(ty : Grou
   let evidence = evidence_parameters st ty.uses in
   start b (block b);
   call_instance st function_ ~signature ~substitution
-    ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
+    ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
   {
     key;
     main =
       finish_function st ~returns:(result_ty <> Never) ~first:[ environment ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
         ();
     nested = [||];
   }
@@ -435,7 +436,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   let b = st.b in
   let value = local b ~name:"value" (Raw (Pointer Opaque)) in
   result_slot st result;
-  let taken =
+  let parameter_places =
     List.map
       (fun (info : T.parameter_info) ->
         let ty = Monomorphic.ground context.monomorphic substitution info.type_ in
@@ -446,7 +447,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   start b (block b);
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let typed = local b (Pointer { target = Value self_ty; writable = true }) in
-  if not (zero_size st self_ty) then emit b (Assign (at typed, Use (Copy (at value))));
+  if not (is_zero_size st self_ty) then emit b (Assign (at typed, Use (Copy (at value))));
   let self_mode : T.mode = match receiver with Mut -> Mut | Own -> Own | Read | Static -> Read in
   let result_ty =
     match method_signature.output with
@@ -456,7 +457,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
   call_instance st method_key ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lir.root = Local typed; projections = [ Deref ] })
-      :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) taken)
+      :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(passed_on st result_ty) ();
   {
     key;
@@ -464,7 +465,7 @@ let any_entry context (key : Instance.key) (method_key : Instance.key) : Lir.t =
       finish_function st
         ~returns:(method_signature.output <> Returns Never)
         ~first:[ value ]
-        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
+        ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
         ();
     nested = [||];
   }

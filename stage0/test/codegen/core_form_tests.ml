@@ -41,8 +41,8 @@ fn count(items: List[Int64]) -> USize {
 }
 
 test "moves" {
-  let kept = keep([1, 2, 3])
-  assert count(kept) == 3
+  let held = keep([1, 2, 3])
+  assert count(held) == 3
 }
 |};
   passes "a trait method call resolves to the type's impl, or to a bound in a generic function"
@@ -239,14 +239,14 @@ test "alternatives" {
     {|type Box(width: Int64, height: Int64)
 
 fn first_or(value: Option[Int64], fallback: Int64) -> Int64 {
-  let Some(found) = value else {
+  let Some(present) = value else {
     return fallback
   }
-  found
+  present
 }
 
 fn positive(value: Option[Int64]) -> Bool {
-  if value is Some(found) && found > 0 {
+  if value is Some(present) && present > 0 {
     return true
   }
   false
@@ -254,8 +254,8 @@ fn positive(value: Option[Int64]) -> Bool {
 
 fn sign(value: Option[Int64]) -> Int64 {
   match value {
-    Some(found) if found < 0 => -1
-    Some(found) if found > 0 => 1
+    Some(present) if present < 0 => -1
+    Some(present) if present > 0 => 1
     _ => 0
   }
 }
@@ -823,11 +823,11 @@ fn total(shapes: List[any Shape]) -> Int64 {
 }
 
 fn names(shapes: List[any Shape]) -> List[String] {
-  var found: List[String] = []
+  var present: List[String] = []
   for shape in shapes {
-    mut found.push(shape.name())
+    mut present.push(shape.name())
   }
-  found
+  present
 }
 
 test "shapes" {
@@ -1105,7 +1105,7 @@ fn Names.either(self, second: Bool) lends String {
   }
 }
 
-fn Names.made(self, fresh: Bool) lends String {
+fn Names.built(self, fresh: Bool) lends String {
   if fresh {
     yield "${self.first} and ${self.second}"
   } else {
@@ -1144,8 +1144,8 @@ test "more shapes of values built around lent places" {
   }
   assert pair.either(true).length() == 4
   assert pair.either(false).length() == 3
-  assert pair.made(true).length() == 12
-  assert pair.made(false).length() == 3
+  assert pair.built(true).length() == 12
+  assert pair.built(false).length() == 3
 
   var many = Names(first: "${1}a", second: "${2}b", others: ["${3}rd", "${4}th!", "${5}th!!"])
   assert many.both() is None
@@ -1205,16 +1205,16 @@ let () =
     {|type Holder(slot: Option[String], count: Int64)
 
 fn take(slot: mut Option[String]) -> Option[String] {
-  let taken = own slot
+  let moved = own slot
   slot = None
-  taken
+  moved
 }
 
 test "a value moved out of a place lent mut, which is then given another" {
   var slot: Option[String] = Some("${40 + 2} is the answer")
-  let taken = take(mut slot)
+  let moved = take(mut slot)
   assert slot is None
-  assert taken is Some(text) && text.length() == 16
+  assert moved is Some(text) && text.length() == 16
   assert take(mut slot) is None
   var holder = Holder(slot: Some("${1}23456789 and more text"), count: 2)
   let from_field = take(mut holder.slot)
@@ -1420,8 +1420,8 @@ test "any Cursor, of a cursor that is written and of a yielding method's" {
   var written: any Cursor[Element = Int64] = any Countdown(left: 4)
   assert sum(mut written) == 6
   let items: List[Int64] = [3, 1, 4]
-  var made: any Cursor[Element = Int64] = any items.each()
-  assert sum(mut made) == 8
+  var built: any Cursor[Element = Int64] = any items.each()
+  assert sum(mut built) == 8
   var searched: any Cursor[Element = Int64] = any items.each()
   assert mut searched.find(fn(item) { item < 2 }) == Some(1)
   assert mut searched.next() == Some(4)
@@ -1467,8 +1467,8 @@ fn length_of(place: USize) -> USize {
 }
 
 fn length_of_own(place: USize) -> USize {
-  let found = text_of(place)
-  match own found {
+  let present = text_of(place)
+  match own present {
     Ok(text) => text.length()
     Err(_) => 0
   }

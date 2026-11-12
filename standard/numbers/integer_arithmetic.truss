@@ -156,15 +156,15 @@ public transparent fn Int8.saturating_from(value: Float64) -> Int8
   }
 }
 
-public transparent fn Int8.total(items: Slice[Int8]) -> Integer
+public transparent fn Int8.exact_sum(items: Slice[Int8]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn Int8.sum(items: Slice[Int8]) -> Int8
-  requires Int8.minimum <= Int8.total(items) && Int8.total(items) <= Int8.maximum
-  ensures result == Int8.total(items)
+  requires Int8.minimum <= Int8.exact_sum(items) && Int8.exact_sum(items) <= Int8.maximum
+  ensures result == Int8.exact_sum(items)
   cost time O(items.length())
 {
   Int8.wrapping_sum(items)
@@ -191,7 +191,7 @@ public fn Int8.saturating_sum(items: Slice[Int8]) -> Int8
 }
 
 public fn Int8.wrapping_sum(items: Slice[Int8]) -> Int8
-  ensures (Int8.total(items) - result) % 256 == 0
+  ensures (Int8.exact_sum(items) - result) % 256 == 0
   cost time O(items.length())
 {
   var total: Int8 = 0
@@ -480,15 +480,15 @@ public transparent fn Int16.saturating_from(value: Float64) -> Int16
   }
 }
 
-public transparent fn Int16.total(items: Slice[Int16]) -> Integer
+public transparent fn Int16.exact_sum(items: Slice[Int16]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn Int16.sum(items: Slice[Int16]) -> Int16
-  requires Int16.minimum <= Int16.total(items) && Int16.total(items) <= Int16.maximum
-  ensures result == Int16.total(items)
+  requires Int16.minimum <= Int16.exact_sum(items) && Int16.exact_sum(items) <= Int16.maximum
+  ensures result == Int16.exact_sum(items)
   cost time O(items.length())
 {
   Int16.wrapping_sum(items)
@@ -515,7 +515,7 @@ public fn Int16.saturating_sum(items: Slice[Int16]) -> Int16
 }
 
 public fn Int16.wrapping_sum(items: Slice[Int16]) -> Int16
-  ensures (Int16.total(items) - result) % 65536 == 0
+  ensures (Int16.exact_sum(items) - result) % 65536 == 0
   cost time O(items.length())
 {
   var total: Int16 = 0
@@ -804,15 +804,15 @@ public transparent fn Int32.saturating_from(value: Float64) -> Int32
   }
 }
 
-public transparent fn Int32.total(items: Slice[Int32]) -> Integer
+public transparent fn Int32.exact_sum(items: Slice[Int32]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn Int32.sum(items: Slice[Int32]) -> Int32
-  requires Int32.minimum <= Int32.total(items) && Int32.total(items) <= Int32.maximum
-  ensures result == Int32.total(items)
+  requires Int32.minimum <= Int32.exact_sum(items) && Int32.exact_sum(items) <= Int32.maximum
+  ensures result == Int32.exact_sum(items)
   cost time O(items.length())
 {
   Int32.wrapping_sum(items)
@@ -839,7 +839,7 @@ public fn Int32.saturating_sum(items: Slice[Int32]) -> Int32
 }
 
 public fn Int32.wrapping_sum(items: Slice[Int32]) -> Int32
-  ensures (Int32.total(items) - result) % 4294967296 == 0
+  ensures (Int32.exact_sum(items) - result) % 4294967296 == 0
   cost time O(items.length())
 {
   var total: Int32 = 0
@@ -1128,15 +1128,15 @@ public transparent fn Int64.saturating_from(value: Float64) -> Int64
   }
 }
 
-public transparent fn Int64.total(items: Slice[Int64]) -> Integer
+public transparent fn Int64.exact_sum(items: Slice[Int64]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn Int64.sum(items: Slice[Int64]) -> Int64
-  requires Int64.minimum <= Int64.total(items) && Int64.total(items) <= Int64.maximum
-  ensures result == Int64.total(items)
+  requires Int64.minimum <= Int64.exact_sum(items) && Int64.exact_sum(items) <= Int64.maximum
+  ensures result == Int64.exact_sum(items)
   cost time O(items.length())
 {
   Int64.wrapping_sum(items)
@@ -1163,7 +1163,7 @@ public fn Int64.saturating_sum(items: Slice[Int64]) -> Int64
 }
 
 public fn Int64.wrapping_sum(items: Slice[Int64]) -> Int64
-  ensures (Int64.total(items) - result) % 18446744073709551616 == 0
+  ensures (Int64.exact_sum(items) - result) % 18446744073709551616 == 0
   cost time O(items.length())
 {
   var total: Int64 = 0
@@ -1452,15 +1452,15 @@ public transparent fn ISize.saturating_from(value: Float64) -> ISize
   }
 }
 
-public transparent fn ISize.total(items: Slice[ISize]) -> Integer
+public transparent fn ISize.exact_sum(items: Slice[ISize]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn ISize.sum(items: Slice[ISize]) -> ISize
-  requires ISize.minimum <= ISize.total(items) && ISize.total(items) <= ISize.maximum
-  ensures result == ISize.total(items)
+  requires ISize.minimum <= ISize.exact_sum(items) && ISize.exact_sum(items) <= ISize.maximum
+  ensures result == ISize.exact_sum(items)
   cost time O(items.length())
 {
   ISize.wrapping_sum(items)
@@ -1487,7 +1487,7 @@ public fn ISize.saturating_sum(items: Slice[ISize]) -> ISize
 }
 
 public fn ISize.wrapping_sum(items: Slice[ISize]) -> ISize
-  ensures (ISize.total(items) - result) % 18446744073709551616 == 0
+  ensures (ISize.exact_sum(items) - result) % 18446744073709551616 == 0
   cost time O(items.length())
 {
   var total: ISize = 0
@@ -1755,15 +1755,15 @@ public transparent fn UInt8.saturating_from(value: Float64) -> UInt8
   }
 }
 
-public transparent fn UInt8.total(items: Slice[UInt8]) -> Integer
+public transparent fn UInt8.exact_sum(items: Slice[UInt8]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn UInt8.sum(items: Slice[UInt8]) -> UInt8
-  requires UInt8.minimum <= UInt8.total(items) && UInt8.total(items) <= UInt8.maximum
-  ensures result == UInt8.total(items)
+  requires UInt8.minimum <= UInt8.exact_sum(items) && UInt8.exact_sum(items) <= UInt8.maximum
+  ensures result == UInt8.exact_sum(items)
   cost time O(items.length())
 {
   UInt8.wrapping_sum(items)
@@ -1790,7 +1790,7 @@ public fn UInt8.saturating_sum(items: Slice[UInt8]) -> UInt8
 }
 
 public fn UInt8.wrapping_sum(items: Slice[UInt8]) -> UInt8
-  ensures (UInt8.total(items) - result) % 256 == 0
+  ensures (UInt8.exact_sum(items) - result) % 256 == 0
   cost time O(items.length())
 {
   var total: UInt8 = 0
@@ -2057,15 +2057,15 @@ public transparent fn UInt16.saturating_from(value: Float64) -> UInt16
   }
 }
 
-public transparent fn UInt16.total(items: Slice[UInt16]) -> Integer
+public transparent fn UInt16.exact_sum(items: Slice[UInt16]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn UInt16.sum(items: Slice[UInt16]) -> UInt16
-  requires UInt16.minimum <= UInt16.total(items) && UInt16.total(items) <= UInt16.maximum
-  ensures result == UInt16.total(items)
+  requires UInt16.minimum <= UInt16.exact_sum(items) && UInt16.exact_sum(items) <= UInt16.maximum
+  ensures result == UInt16.exact_sum(items)
   cost time O(items.length())
 {
   UInt16.wrapping_sum(items)
@@ -2092,7 +2092,7 @@ public fn UInt16.saturating_sum(items: Slice[UInt16]) -> UInt16
 }
 
 public fn UInt16.wrapping_sum(items: Slice[UInt16]) -> UInt16
-  ensures (UInt16.total(items) - result) % 65536 == 0
+  ensures (UInt16.exact_sum(items) - result) % 65536 == 0
   cost time O(items.length())
 {
   var total: UInt16 = 0
@@ -2359,15 +2359,15 @@ public transparent fn UInt32.saturating_from(value: Float64) -> UInt32
   }
 }
 
-public transparent fn UInt32.total(items: Slice[UInt32]) -> Integer
+public transparent fn UInt32.exact_sum(items: Slice[UInt32]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn UInt32.sum(items: Slice[UInt32]) -> UInt32
-  requires UInt32.minimum <= UInt32.total(items) && UInt32.total(items) <= UInt32.maximum
-  ensures result == UInt32.total(items)
+  requires UInt32.minimum <= UInt32.exact_sum(items) && UInt32.exact_sum(items) <= UInt32.maximum
+  ensures result == UInt32.exact_sum(items)
   cost time O(items.length())
 {
   UInt32.wrapping_sum(items)
@@ -2394,7 +2394,7 @@ public fn UInt32.saturating_sum(items: Slice[UInt32]) -> UInt32
 }
 
 public fn UInt32.wrapping_sum(items: Slice[UInt32]) -> UInt32
-  ensures (UInt32.total(items) - result) % 4294967296 == 0
+  ensures (UInt32.exact_sum(items) - result) % 4294967296 == 0
   cost time O(items.length())
 {
   var total: UInt32 = 0
@@ -2661,15 +2661,15 @@ public transparent fn UInt64.saturating_from(value: Float64) -> UInt64
   }
 }
 
-public transparent fn UInt64.total(items: Slice[UInt64]) -> Integer
+public transparent fn UInt64.exact_sum(items: Slice[UInt64]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn UInt64.sum(items: Slice[UInt64]) -> UInt64
-  requires UInt64.minimum <= UInt64.total(items) && UInt64.total(items) <= UInt64.maximum
-  ensures result == UInt64.total(items)
+  requires UInt64.minimum <= UInt64.exact_sum(items) && UInt64.exact_sum(items) <= UInt64.maximum
+  ensures result == UInt64.exact_sum(items)
   cost time O(items.length())
 {
   UInt64.wrapping_sum(items)
@@ -2696,7 +2696,7 @@ public fn UInt64.saturating_sum(items: Slice[UInt64]) -> UInt64
 }
 
 public fn UInt64.wrapping_sum(items: Slice[UInt64]) -> UInt64
-  ensures (UInt64.total(items) - result) % 18446744073709551616 == 0
+  ensures (UInt64.exact_sum(items) - result) % 18446744073709551616 == 0
   cost time O(items.length())
 {
   var total: UInt64 = 0
@@ -2963,15 +2963,15 @@ public transparent fn USize.saturating_from(value: Float64) -> USize
   }
 }
 
-public transparent fn USize.total(items: Slice[USize]) -> Integer
+public transparent fn USize.exact_sum(items: Slice[USize]) -> Integer
   cost time finite
 {
   items.model().sum(fn(item) { item })
 }
 
 public fn USize.sum(items: Slice[USize]) -> USize
-  requires USize.minimum <= USize.total(items) && USize.total(items) <= USize.maximum
-  ensures result == USize.total(items)
+  requires USize.minimum <= USize.exact_sum(items) && USize.exact_sum(items) <= USize.maximum
+  ensures result == USize.exact_sum(items)
   cost time O(items.length())
 {
   USize.wrapping_sum(items)
@@ -2998,7 +2998,7 @@ public fn USize.saturating_sum(items: Slice[USize]) -> USize
 }
 
 public fn USize.wrapping_sum(items: Slice[USize]) -> USize
-  ensures (USize.total(items) - result) % 18446744073709551616 == 0
+  ensures (USize.exact_sum(items) - result) % 18446744073709551616 == 0
   cost time O(items.length())
 {
   var total: USize = 0

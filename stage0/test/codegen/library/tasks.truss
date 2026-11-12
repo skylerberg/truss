@@ -82,13 +82,13 @@ fn produce_from(numbers: tasks::Channel[Int64], first: Int64, count: Int64)
 }
 
 fn with_parity(numbers: List[Int64], parity: Int64) -> List[Int64] {
-  var kept: List[Int64] = []
+  var selected: List[Int64] = []
   for number in numbers {
     if number % 2 == parity {
-      mut kept.push(number)
+      mut selected.push(number)
     }
   }
-  kept
+  selected
 }
 
 fn stepping(first: Int64, count: Int64) -> List[Int64] {
@@ -339,23 +339,23 @@ impl Clock for InstantClock {
   fn sleep(self, duration: Duration) {}
 }
 
-test "within returns the output of work that ends before the limit" {
+test "with_timeout returns the output of work that ends before the limit" {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed) {
       provide StoppedClock(never: tasks::Channel[Int64].new()) {
-        assert tasks::within(Duration.seconds(1), work: fn() { 7 }) == Some(7)
+        assert tasks::with_timeout(Duration.seconds(1), work: fn() { 7 }) == Some(7)
       }
     }
   }
 }
 
-test "within cancels work that is still waiting at the limit" {
+test "with_timeout cancels work that is still waiting at the limit" {
   let seeds: UInt64 = 16
   for seed in 0..seeds {
     provide tasks::SeededTasks.new(seed), InstantClock() {
       let never = tasks::Channel[Int64].new()
-      assert tasks::within(Duration.seconds(1), work: fn() { never.receive() }) is None
+      assert tasks::with_timeout(Duration.seconds(1), work: fn() { never.receive() }) is None
     }
   }
 }

@@ -31,10 +31,10 @@ type value =
 
 type specification = {
   active : bool;
-  result : bool;
+  names_result : bool;
   cost_bound : bool;
-  yielded : bool;
-  finished : bool;
+  names_yielded : bool;
+  names_finished : bool;
   elements : string list;
 }
 
@@ -42,7 +42,7 @@ type scope = {
   values : (value * string) String_map.t;
   types : target String_map.t;
   specification : specification;
-  hands_out : bool;
+  lends_or_yields : bool;
 }
 
 type state = {

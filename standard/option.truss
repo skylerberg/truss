@@ -167,9 +167,9 @@ public fn Option[Value].take(mut self) -> Option[Value]
   ensures identical(result, old(self))
   cost time O(1)
 {
-  let taken = own self
+  let previous = own self
   self = None
-  taken
+  previous
 }
 
 public fn Option[Value].replace(mut self, value: own Value) -> Option[Value]

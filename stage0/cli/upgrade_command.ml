@@ -167,7 +167,7 @@ let consequences (project : Project.t) text =
         (List.concat_map (Database.package_modules session) own)
   in
   let now = diagnostics project.session in
-  (signatures, List.filter (fun found -> not (List.mem found now)) (diagnostics trial))
+  (signatures, List.filter (fun diagnostic -> not (List.mem diagnostic now)) (diagnostics trial))
 
 let report ~json ~lock ~signatures ~broken =
   if json then
@@ -189,7 +189,7 @@ let report ~json ~lock ~signatures ~broken =
                             (List.map (fun path -> Json.String (Path.show path)) changed.read_by) );
                       ])
                   signatures) );
-           ("breaks", Json.List (List.map (fun found -> Json.String found) broken));
+           ("breaks", Json.List (List.map (fun sentence -> Json.String sentence) broken));
          ])
   else begin
     List.iter (fun change -> Output.print_line (change_sentence change)) lock;

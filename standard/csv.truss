@@ -1,7 +1,7 @@
 use standard::intrinsic
 use standard::streams
 
-public type Options(delimiter: Character = Character",", quote: Character = Character"\"", trim: Bool = false)
+public type Options(delimiter: Character = Character",", quote: Character = Character"\"", trim_fields: Bool = false)
 
 public type ParseErrorKind = UnterminatedQuote | UnexpectedQuote
   derives Equal
@@ -45,12 +45,12 @@ fn is_blank(character: Character) -> Bool
   character == Character" " || character == Character"\t"
 }
 
-fn append_field(row: mut List[String], field: own String, trimmed_length: USize, trim: Bool)
+fn append_field(row: mut List[String], field: own String, trimmed_length: USize, trim_fields: Bool)
   requires trimmed_length <= field.length()
   cost amortized time O(1)
 {
   var trimmed = own field
-  if trim {
+  if trim_fields {
     intrinsic::storage_shorten(mut trimmed.storage, length: trimmed_length)
   }
   mut row.push(own trimmed)
@@ -106,7 +106,7 @@ fn advance(state: mut ParserState, text: StringSlice, index: USize, options: Opt
       mut state.row,
       field: own state.field,
       trimmed_length: state.trimmed_length,
-      trim: options.trim && !state.quote_closed,
+      trim_fields: options.trim_fields && !state.quote_closed,
     )
     state.field = ""
     state.trimmed_length = 0
@@ -118,7 +118,7 @@ fn advance(state: mut ParserState, text: StringSlice, index: USize, options: Opt
         mut state.row,
         field: own state.field,
         trimmed_length: state.trimmed_length,
-        trim: options.trim && !state.quote_closed,
+        trim_fields: options.trim_fields && !state.quote_closed,
       )
       state.field = ""
       state.trimmed_length = 0
@@ -131,7 +131,7 @@ fn advance(state: mut ParserState, text: StringSlice, index: USize, options: Opt
       next = next + text.decode(next).length
     }
   } else {
-    let ignored = options.trim && is_blank(character) && (state.quote_closed || state.field.length() == 0)
+    let ignored = options.trim_fields && is_blank(character) && (state.quote_closed || state.field.length() == 0)
     if state.quote_closed && !ignored {
       return Err(ParseError(kind: ParseErrorKind.UnexpectedQuote, line: state.line, column: state.column))
     }
@@ -188,7 +188,7 @@ public fn parse(text: StringSlice, options: Options = Options()) -> Result[List[
       mut state.row,
       field: own state.field,
       trimmed_length: state.trimmed_length,
-      trim: options.trim && !state.quote_closed,
+      trim_fields: options.trim_fields && !state.quote_closed,
     )
     mut state.rows.push(own state.row)
   }
@@ -363,7 +363,7 @@ public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option
   var has_line = false
   while more
     invariant self.source.start <= self.source.pending.length()
-    invariant self.source.room > 0
+    invariant self.source.capacity > 0
   {
     match mut self.source.read_line() {
       Ok(Some(line)) => {
@@ -404,7 +404,7 @@ public fn RowReader[Source: streams::Reader].rows(mut self) yields own Result[Li
   var more = true
   while more
     invariant self.source.start <= self.source.pending.length()
-    invariant self.source.room > 0
+    invariant self.source.capacity > 0
   {
     match mut self.next_row() {
       Ok(Some(row)) => yield Ok(own row)

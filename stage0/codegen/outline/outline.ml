@@ -113,43 +113,43 @@ let regions fork (blocks : Lir.basic_block array) =
   (* The regions after one that always fails are never reached, in order
      or at once, since a failure ends the run. *)
   let rec from (start, kind) =
-    let found = region kind start in
-    match Option.map (fun next -> (next, mark_of next)) found.next with
-    | Some (next, Some (Region { region; _ })) -> found :: from (next, region)
-    | Some (_, Some (Regions_end _)) | None -> [ found ]
+    let current = region kind start in
+    match Option.map (fun next -> (next, mark_of next)) current.next with
+    | Some (next, Some (Region { region; _ })) -> current :: from (next, region)
+    | Some (_, Some (Regions_end _)) | None -> [ current ]
     | Some (_, _) -> bug "a region of fork %d that does not end at a mark" fork
   in
   match first with Some first -> from first | None -> bug "fork %d has no region" fork
 
 (* The locals a block names. *)
 let block_locals (block : Lir.basic_block) =
-  let found = ref Locals.empty in
+  let locals = ref Locals.empty in
   let visitor : Lir.visitor =
     {
       place =
         (fun place ->
-          match place.root with Local l -> found := Locals.add l !found | Static _ -> ());
+          match place.root with Local l -> locals := Locals.add l !locals | Static _ -> ());
       operand = (fun _ -> ());
     }
   in
   List.iter (Lir.visit_statement visitor) block.statements;
   Lir.visit_terminator visitor block.terminator;
-  !found
+  !locals
 
 (* The locals a block gives a whole new value. *)
 let block_assigns (block : Lir.basic_block) =
   List.fold_left
-    (fun found (statement : Lir.statement) ->
+    (fun assigned (statement : Lir.statement) ->
       match statement with
       | Assign ({ root = Local l; projections = [] }, _)
       | Call { result = Returned { root = Local l; projections = [] }; _ }
       | Call { result = Written { root = Local l; projections = [] }; _ } ->
-          Locals.add l found
-      | _ -> found)
+          Locals.add l assigned
+      | _ -> assigned)
     Locals.empty block.statements
 
 let union_over blocks (set : Blocks.t) of_block =
-  Blocks.fold (fun block found -> Locals.union (of_block blocks.(block)) found) set Locals.empty
+  Blocks.fold (fun block locals -> Locals.union (of_block blocks.(block)) locals) set Locals.empty
 
 (* Outlines the function's first fork. Gives the function without it and
    the nested functions made of its regions, which take the numbers from
@@ -170,9 +170,9 @@ let outline_fork env ~first_number (f : Lir.function_) =
          are still the loop's alone. *)
       let outside =
         List.fold_left
-          (fun found number ->
-            if Blocks.mem number in_a_region then found
-            else Locals.union (block_locals blocks.(number)) found)
+          (fun locals number ->
+            if Blocks.mem number in_a_region then locals
+            else Locals.union (block_locals blocks.(number)) locals)
           (Locals.of_list f.parameters) (Lir.reverse_postorder blocks)
       in
       (* The locals that each region's code refers to. The locals of the
@@ -193,11 +193,11 @@ let outline_fork env ~first_number (f : Lir.function_) =
          new value: the type checker lets no program do that, so it would
          be a temporary of the compiler's used twice. *)
       List.iteri
-        (fun i given ->
+        (fun i assigned_here ->
           List.iteri
             (fun j used ->
               if i <> j then
-                match Locals.choose_opt (Locals.inter given used) with
+                match Locals.choose_opt (Locals.inter assigned_here used) with
                 | Some local ->
                     bug "local %d is given a value in one region of fork %d and used in another"
                       local fork
@@ -210,7 +210,7 @@ let outline_fork env ~first_number (f : Lir.function_) =
         parent_locals := !parent_locals @ [ info ];
         List.length !parent_locals - 1
       in
-      let made =
+      let outlined =
         List.mapi
           (fun index region ->
             let number = first_number + index in
@@ -351,7 +351,7 @@ let outline_fork env ~first_number (f : Lir.function_) =
          for task regions, an assignment of each nested function to its
          region's [function_value]. *)
       let replacement : Lir.statement list =
-        match made with
+        match outlined with
         | [ (number, _, holder, _, Chunk { first; last }) ] ->
             [
               Fork_range
@@ -372,7 +372,7 @@ let outline_fork env ~first_number (f : Lir.function_) =
                         Function_value { code = Nested number; environment = Some (address holder) }
                       )
                 | Branch | Chunk _ -> bug "fork %d mixes task regions with other regions" fork)
-              made
+              outlined
         | _ ->
             [
               Fork
@@ -384,19 +384,19 @@ let outline_fork env ~first_number (f : Lir.function_) =
                         | Branch -> ()
                         | Chunk _ | Task _ -> bug "fork %d has a branch among other regions" fork);
                         (number, address holder))
-                      made;
+                      outlined;
                 };
             ]
       in
       let start = (List.hd regions).start in
-      let fills = List.concat_map (fun (_, _, _, fill, _) -> fill) made in
+      let fills = List.concat_map (fun (_, _, _, fill, _) -> fill) outlined in
       (* The environment of a task region is filled once, at the end of
          the function's entry block. A loop can reach the region again
          while tasks it spawned earlier still read the environment, and
          filling it there again would be a data race. The addresses it
          holds are of this function's locals, which do not change. *)
       let at_entry =
-        start <> 0 && match made with (_, _, _, _, Task _) :: _ -> true | _ -> false
+        start <> 0 && match outlined with (_, _, _, _, Task _) :: _ -> true | _ -> false
       in
       if at_entry then
         blocks.(0) <- { (blocks.(0)) with statements = blocks.(0).statements @ fills };
@@ -412,7 +412,7 @@ let outline_fork env ~first_number (f : Lir.function_) =
         end_block;
       Some
         ( { f with locals = Array.of_list !parent_locals; blocks },
-          List.map (fun (_, nested, _, _, _) -> nested) made )
+          List.map (fun (_, nested, _, _, _) -> nested) outlined )
 
 let instance env (instance : Lir.t) : Lir.t =
   let nested = ref (Array.to_list instance.nested) in
@@ -421,14 +421,14 @@ let instance env (instance : Lir.t) : Lir.t =
   let rec whole (f : Lir.function_) =
     match outline_fork env ~first_number:(List.length !nested) f with
     | None -> f
-    | Some (without, made) ->
+    | Some (without, outlined) ->
         let first = List.length !nested in
-        nested := !nested @ made;
+        nested := !nested @ outlined;
         List.iteri
-          (fun index made ->
-            let finished = whole made in
+          (fun index nested_function ->
+            let finished = whole nested_function in
             nested := List.mapi (fun i f -> if i = first + index then finished else f) !nested)
-          made;
+          outlined;
         whole without
   in
   let main = whole instance.main in

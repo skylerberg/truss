@@ -4,10 +4,10 @@ type context = {
   specification : bool;
   assert_allowed : bool;
   function_body : bool;
-  yields : bool;
+  in_yielding_method : bool;
   loop : loop;
-  parallel : bool;
-  task : bool;
+  in_parallel : bool;
+  in_task : bool;
 }
 
 val signature : Cursor.t -> Syntax.signature -> unit

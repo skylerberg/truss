@@ -459,7 +459,7 @@ let check_quoted text =
     problem =
       Some
         {
-          code = Number_underscore;
+          code = Number_digit_separator;
           message = Printf.sprintf "Digits are grouped with `_`, as in `%s`." grouped;
           start = offset;
           stop = offset + 1;

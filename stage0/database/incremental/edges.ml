@@ -134,24 +134,24 @@ let readers_here engine (node : node) ~phase =
   let in_phase (reader : node) = match phase with Some p -> reader.phase = p | None -> true in
   let own =
     Hashtbl.fold
-      (fun _ (reader : node) found -> if in_phase reader then reader :: found else found)
+      (fun _ (reader : node) readers -> if in_phase reader then reader :: readers else readers)
       node.readers []
   in
   match node.below with
   | None -> own
   | Some base ->
-      let from table found =
+      let from table readers =
         Hashtbl.fold
-          (fun _ (reader : node) found ->
-            if (not (in_phase reader)) || Hashtbl.mem engine.shadows reader.id then found
-            else shadow engine reader :: found)
-          table found
+          (fun _ (reader : node) readers ->
+            if (not (in_phase reader)) || Hashtbl.mem engine.shadows reader.id then readers
+            else shadow engine reader :: readers)
+          table readers
       in
       List.fold_left
-        (fun found (other : t) ->
+        (fun readers (other : t) ->
           match Hashtbl.find_opt other.foreign base.id with
-          | Some table -> from table found
-          | None -> found)
+          | Some table -> from table readers
+          | None -> readers)
         (from base.readers own) engine.bases
 
 (* Marks a result, and what reads it within its phase, as possibly changed.
@@ -189,7 +189,7 @@ let seed engine (node : node) =
    state, so it is written, though the node's result is as it was. A base's
    node is copied into the engine to be its root there, since a base never
    changes. *)
-let record (context : context) (node : node) =
+let record_read (context : context) (node : node) =
   match context.frame with
   | Some frame ->
       if not (Hashtbl.mem frame.seen node.id) then begin
@@ -209,11 +209,11 @@ let record (context : context) (node : node) =
 (* A cycle: every frame from the one for [node] to the newest is on it, so
    each of their results is the cycle. *)
 let cycle engine (node : node) =
-  let rec on_cycle found = function
+  let rec on_cycle frames = function
     | [] -> None
     | frame :: rest ->
-        let found = frame :: found in
-        if frame.owner == node then Some found else on_cycle found rest
+        let frames = frame :: frames in
+        if frame.owner == node then Some frames else on_cycle frames rest
   in
   match on_cycle [] engine.frames with
   | None -> [ label node ]

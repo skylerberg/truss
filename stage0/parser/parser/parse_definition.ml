@@ -250,12 +250,12 @@ let signature cursor ~name ~method_ : signature =
 let check_name cursor (name : definition_name) =
   let name = match name with Plain_name name | Member_name (_, name) -> name in
   if name.text = "old" then
-    Cursor.report cursor Reserved_name
+    Cursor.report cursor Reserved_specification_name
       (Cursor.absolute cursor name.span)
       "A function cannot be named `old`, which names a value as it was when a function was called, \
        in specifications."
   else if name.text = "identical" then
-    Cursor.report cursor Reserved_name
+    Cursor.report cursor Reserved_specification_name
       (Cursor.absolute cursor name.span)
       "A function cannot be named `identical`, which tests whether two values are the same value, \
        in specifications."

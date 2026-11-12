@@ -24,16 +24,16 @@ let gather ?(proofs = false) (project : Project.t) =
     if proofs then
       Proofs.diagnostics project
         (List.filter_map
-           (fun (module_, found) -> if found = [] then Some module_ else None)
+           (fun (module_, diagnostics) -> if diagnostics = [] then Some module_ else None)
            checked)
     else fun _ -> []
   in
   {
     files =
       List.filter_map
-        (fun (module_, found) ->
-          let found = if found = [] then proven module_ else found in
-          match Diagnostic.shown found with
+        (fun (module_, diagnostics) ->
+          let diagnostics = if diagnostics = [] then proven module_ else diagnostics in
+          match Diagnostic.shown diagnostics with
           | [] -> None
           | diagnostics -> Some { module_; source = Project.source project module_; diagnostics })
         checked;

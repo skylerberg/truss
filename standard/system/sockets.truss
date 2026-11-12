@@ -202,8 +202,8 @@ internal fn receive_from(
 internal fn addresses_of(host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
   let name = handles::with_file_error(calls::ended_with_zero_byte(host.bytes))?
   let room: USize = 4096
-  var found: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
-  let wrote = intrinsic::runtime_addresses_of_host(intrinsic::storage_view(name), addresses: mut found, room: room)
+  var resolved_bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
+  let wrote = intrinsic::runtime_addresses_of_host(intrinsic::storage_view(name), addresses: mut resolved_bytes, room: room)
   if wrote == -1 {
     return Err(SystemError.HostNotFound)
   }
@@ -211,8 +211,8 @@ internal fn addresses_of(host: StringSlice) -> Result[List[network::IpAddress], 
     return Err(SystemError.Unreachable)
   }
   let filled: USize = intrinsic::convert(wrote)
-  intrinsic::storage_lengthen(mut found, by: filled)
-  let bytes = intrinsic::storage_view(found)
+  intrinsic::storage_lengthen(mut resolved_bytes, by: filled)
+  let bytes = intrinsic::storage_view(resolved_bytes)
   var addresses: List[network::IpAddress] = []
   var start: USize = 0
   while start < filled

@@ -14,7 +14,7 @@ module Lower = Interface.Lower
 
 (* State *)
 
-type local = { type_ : T.ty; mutable_ : bool; mode : T.mode }
+type local = { type_ : T.ty; is_var : bool; mode : T.mode }
 
 (* The context of the code that is being checked. *)
 (* An enclosing construct that an early exit can leave: a loop, or a task
@@ -31,12 +31,12 @@ let tasks_exited_by (exit : exit) (enclosing : enclosing list) : Core.task list 
   match exit with
   | Return_exit -> List.filter_map (function Task task -> Some task | Loop -> None) enclosing
   | Break_exit | Continue_exit ->
-      let rec within_loop = function
+      let rec exited_in_loop = function
         | [] | Loop :: _ -> []
         | Task (Iteration _ as task) :: _ -> if exit = Break_exit then [ task ] else []
-        | Task (Branch _ as task) :: rest -> task :: within_loop rest
+        | Task (Branch _ as task) :: rest -> task :: exited_in_loop rest
       in
-      within_loop enclosing
+      exited_in_loop enclosing
 
 type env = {
   output : T.result option;
@@ -235,10 +235,10 @@ let rec operands state (value : expression) : expression list =
      [Bool]. An alias evaluates nothing itself. *)
   | If _ | Parenthesized _ | Mode _ -> []
   | _ ->
-      let found = ref [] in
+      let checked_parts = ref [] in
       Syntax_walk.expression_parts ~statement:ignore value ~expression:(fun part ->
-          found := checked part :: !found);
-      List.concat (List.rev !found)
+          checked_parts := checked part :: !checked_parts);
+      List.concat (List.rev !checked_parts)
 
 let rec build_expression state (value : expression) : Core.expression =
   let evaluated =
@@ -406,7 +406,7 @@ let resolve_capabilities state (capabilities : T.capability list) =
    solutions, projections normalized, and capability variables replaced
    by their solutions. An unsolved inference variable becomes an error.
    While the core form is built, a hole becomes [Never]. *)
-let rec final state type_ =
+let rec final_type state type_ =
   T.map ~capabilities:(final_capabilities state)
     (function
       | T.Variable _ | T.Literal _ -> Some (unsolved state)
@@ -423,12 +423,12 @@ and final_capabilities state capabilities =
        (List.map
           (function
             | T.Capability_projection { base; trait; name } ->
-                T.Capability_projection { base = final state base; trait; name }
+                T.Capability_projection { base = final_type state base; trait; name }
             | capability -> capability)
           capabilities))
 
 let final_argument state = function
-  | T.Type type_ -> T.Type (final state type_)
+  | T.Type type_ -> T.Type (final_type state type_)
   | T.Value value -> (
       match Unify.resolve_value state.unifier value with
       | T.Value_variable _ -> T.Type (unsolved state)
@@ -448,9 +448,9 @@ let unify state left right =
    while the arguments are checked. Capability sets are excluded: a function
    value may be widened to a type with more [uses], and [convert] compares
    the capability sets when it checks the value. *)
-let unify_as_hint state found expected =
+let unify_as_hint state actual expected =
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in
-  ignore (unify state found expected);
+  ignore (unify state actual expected);
   state.unifier.deferred_capability_equalities <- deferred_capability_equalities
 
 (* Normalizes the type arguments and the associated types of a trait
@@ -490,7 +490,7 @@ let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk 
 let associated state type_ (trait : T.trait_reference) name ~(at : span) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
   match Impls.associated_type state.database ~bounds:(bounds state) type_ trait name with
-  | Some found -> found
+  | Some associated_type -> associated_type
   | None -> (
       let of_impl =
         match implements state type_ trait with
@@ -653,36 +653,21 @@ let in_statement state env (span : span) body =
 
 (* Whether a statement diverges: its expression has type [Never], or it
    is a [while true] loop with no [break]. *)
-let rec statement_never state (written : statement) =
+let rec statement_diverges state (written : statement) =
   match written.kind with
   | Expression value -> (
       match state.tables.types.(value.id) with
       | Some type_ -> resolve state type_ = T.Never
       | None -> false)
-  | While { condition = { kind = True; _ }; body; _ } -> not (contains_break body)
+  | While { condition = { kind = True; _ }; body; _ } -> not (Syntax_walk.contains_break body)
   (* A [parallel] or [concurrent] block ends only when every branch does. *)
-  | Parallel body | Concurrent body -> List.exists (statement_never state) body.statements
+  | Parallel body | Concurrent body -> List.exists (statement_diverges state) body.statements
   | _ -> false
-
-and contains_break (written : block) =
-  let found = ref false in
-  let rec statement (written : statement) =
-    match written.kind with
-    | For _ | While _ -> ()
-    | _ -> Syntax_walk.statement_parts ~expression ~statement written
-  and expression (value : expression) =
-    match value.kind with
-    | Break -> found := true
-    | Lambda _ -> ()
-    | _ -> Syntax_walk.expression_parts ~expression ~statement value
-  in
-  List.iter statement written.statements;
-  !found
 
 (* Builds the core node of a block. The last expression is the block's
    value if the checker checked it as a value and not as a statement. *)
 let build_block state (written : block) : Core.block =
-  let rec go (statements : statement list) =
+  let rec build_statements (statements : statement list) =
     match statements with
     | [] -> ([], None)
     | [ ({ kind = Expression value; _ } as last) ]
@@ -690,23 +675,23 @@ let build_block state (written : block) : Core.block =
         ([], Some (build_expression state value))
     | first :: rest ->
         let first = build_statement state first in
-        let rest, value = go rest in
+        let rest, value = build_statements rest in
         (first :: rest, value)
   in
-  let statements, value = go written.statements in
+  let statements, value = build_statements written.statements in
   {
     statements;
     value;
     diverges =
       (match List.rev written.statements with
-      | last :: _ -> statement_never state last
+      | last :: _ -> statement_diverges state last
       | [] -> false);
   }
 
 (* Locals *)
 
-let declare state (name : name) type_ ~mutable_ ~mode =
-  Hashtbl.replace state.locals name.id { type_; mutable_; mode };
+let declare state (name : name) type_ ~is_var ~mode =
+  Hashtbl.replace state.locals name.id { type_; is_var; mode };
   state.tables.local_types.(name.id) <- Some type_;
   match current_frame state with
   | Some frame -> frame.bindings <- name.id :: frame.bindings
@@ -738,9 +723,9 @@ let names_variant (member : name) =
 
 let show state type_ = T.show (zonk state type_)
 
-let mismatched state (span : span) ~expected ~found =
-  let expected = zonk state expected and found = zonk state found in
-  match (resolve state found, expected) with
+let mismatched state (span : span) ~expected ~actual =
+  let expected = zonk state expected and actual = zonk state actual in
+  match (resolve state actual, expected) with
   | T.Literal (Integer_literal, _), _ when T.is_float_type expected ->
       reported state Integer_for_float span
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
@@ -748,9 +733,9 @@ let mismatched state (span : span) ~expected ~found =
            (T.show expected))
   | _ ->
       reported state Mismatch span
-        (Printf.sprintf "Expected `%s`, found `%s`." (T.show expected) (T.show found))
+        (Printf.sprintf "Expected `%s`, found `%s`." (T.show expected) (T.show actual))
 
-let mismatch state span ~expected ~found = ignore (mismatched state span ~expected ~found)
+let mismatch state span ~expected ~actual = ignore (mismatched state span ~expected ~actual)
 
 (* Places *)
 
@@ -875,8 +860,8 @@ type conversion = From_never | Owned_to_view | Function_widening | To_integer | 
      [Integer], and an [Integer] converts to a built-in integer that it
      fits.
 
-   In every other case, [found] must unify with [expected]. *)
-let convert state env ?(argument = false) ?expression (span : span) ~found ~expected =
+   In every other case, [actual] must unify with [expected]. *)
+let convert state env ?(argument = false) ?expression (span : span) ~actual ~expected =
   (* Wraps the expression's core node in the conversion. The wrapped node
      has the expected type. *)
   let converted (conversion : conversion option) =
@@ -887,7 +872,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
           Option.map
             (fun build () ->
               let inner : Core.expression = build () in
-              let expected = final state expected in
+              let expected = final_type state expected in
               let convert conversion =
                 synthetic_expression state ~origin:id expected
                   (Convert { conversion; value = inner })
@@ -928,70 +913,71 @@ let convert state env ?(argument = false) ?expression (span : span) ~found ~expe
                              lends = None;
                              uses = [];
                            })
-                  | given -> bug "`%s` is viewed and has no view" (T.show given)))
+                  | other -> bug "`%s` is viewed and has no view" (T.show other)))
             before
     | _ -> ()
   in
   converted
   @@
-  let given = normalize state found and wanted = normalize state expected in
+  let actual_type = normalize state actual and wanted = normalize state expected in
   let refused () =
-    mismatch state span ~expected ~found;
+    mismatch state span ~expected ~actual;
     None
   in
-  match (given, wanted, expression) with
+  match (actual_type, wanted, expression) with
   | T.Never, _, _ -> Some From_never
-  | T.Named given_named, T.Named wanted_named, _
+  | T.Named actual_named, T.Named wanted_named, _
     when argument
          && List.exists
               (fun (owned, view) ->
-                Path.equal given_named.path owned && Path.equal wanted_named.path view)
+                Path.equal actual_named.path owned && Path.equal wanted_named.path view)
               [
                 (Well_known.path List, Well_known.path Slice);
                 (Well_known.path String, Well_known.path String_slice);
               ] ->
-      if not (Unify.unify_arguments state.unifier wanted_named.arguments given_named.arguments) then
-        mismatch state span ~expected ~found;
+      if not (Unify.unify_arguments state.unifier wanted_named.arguments actual_named.arguments)
+      then mismatch state span ~expected ~actual;
       Some Owned_to_view
   | T.Integer, _, Some _ when argument && env.specification && T.is_integer_type wanted ->
       Some From_integer
   (* In a specification, a built-in integer converts to [Integer]. *)
-  | _, T.Integer, _ when env.specification && T.is_integer_type given -> Some To_integer
-  | T.Function given_function, T.Function wanted_function, _
-    when not (T.same_clauses given_function wanted_function) ->
+  | _, T.Integer, _ when env.specification && T.is_integer_type actual_type -> Some To_integer
+  | T.Function actual_function, T.Function wanted_function, _
+    when not (T.same_clauses actual_function wanted_function) ->
       let unlisted =
         List.filter
           (fun capability -> not (List.mem capability wanted_function.uses))
-          given_function.uses
+          actual_function.uses
       in
       (* If either set is not known yet, the check waits until the
          definition is checked: a subset constraint requires the value's
          [uses] to be within the expected type's. *)
       let unknown =
-        T.capabilities_unsolved given_function.uses || T.capabilities_unsolved wanted_function.uses
+        T.capabilities_unsolved actual_function.uses || T.capabilities_unsolved wanted_function.uses
       in
-      let proven = T.costs_imply ~given:given_function.costs ~wanted:wanted_function.costs in
+      let proven = T.costs_imply ~provided:actual_function.costs ~required:wanted_function.costs in
       if
         Unify.unify state.unifier wanted
           (T.Function
-             { given_function with uses = wanted_function.uses; costs = wanted_function.costs })
+             { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
         && (unlisted = [] || unknown)
         && (proven || argument || Option.is_some expression)
       then begin
         if unlisted <> [] then
           state.capability_constraints <-
             {
-              subset = given_function.uses;
+              subset = actual_function.uses;
               superset = wanted_function.uses;
               report_missing =
                 (fun _ ->
-                  mismatch state span ~expected:(final state expected) ~found:(final state found));
+                  mismatch state span ~expected:(final_type state expected)
+                    ~actual:(final_type state actual));
             }
             :: state.capability_constraints;
         Some Function_widening
       end
       else refused ()
-  | _ -> if Unify.unify state.unifier wanted given then None else refused ()
+  | _ -> if Unify.unify state.unifier wanted actual_type then None else refused ()
 
 (* Bounds *)
 
@@ -1019,7 +1005,8 @@ let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
                 match
                   Impls.associated_type state.database ~bounds:(bounds state) type_ trait name
                 with
-                | Some given when not (unify state given wanted) -> unmet type_ (Some (name, given))
+                | Some associated_type when not (unify state associated_type wanted) ->
+                    unmet type_ (Some (name, associated_type))
                 | _ -> ())
               bound.associated);
         true
@@ -1052,8 +1039,8 @@ let require_bounds state (span : span) ?of_type generics substitution =
             report state Unsatisfied_bound span
               (match other with
               | None -> needs ^ ", which does not hold."
-              | Some (name, given) ->
-                  Printf.sprintf "%s, and its `%s` is `%s`." needs name (show state given))))
+              | Some (name, associated_type) ->
+                  Printf.sprintf "%s, and its `%s` is `%s`." needs name (show state associated_type))))
     (Impls.required generics substitution)
 
 (* Instantiating types *)
@@ -1277,7 +1264,7 @@ let rec immutable state env (value : expression) : immutable option =
           match Hashtbl.find_opt state.locals id with
           | _ when captured -> Some (Captured path.last.text)
           | Some local ->
-              if local.mutable_ || local.mode = Mut then None else Some (Read_only path.last.text)
+              if local.is_var || local.mode = Mut then None else Some (Read_only path.last.text)
           | None -> None)
       | Some (Definition _ | Law_parameter _) -> Some (Read_only path.last.text)
       | _ -> None)
@@ -1485,7 +1472,7 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
    to drop: the field is a constructor too, or its type is [Plain].
    [operand] is the operand of the [yield]. *)
 let check_lent_value state env (operand : expression) =
-  let lends = ref false and taken = ref [] in
+  let has_lent_field = ref false and owned_values = ref [] in
   let rec fields (value : expression) =
     match (value.kind, state.tables.calls.(value.id)) with
     | Call (_, arguments), Some { callee = Constructor _; arguments = checked; _ } ->
@@ -1493,16 +1480,17 @@ let check_lent_value state env (operand : expression) =
           (fun (argument : argument) ->
             match
               List.find_opt
-                (fun (found : C.argument) -> found.expression = argument.value.id)
+                (fun (checked_argument : C.argument) ->
+                  checked_argument.expression = argument.value.id)
                 checked
             with
-            | Some { mode = Read | Mut; _ } -> lends := true
+            | Some { mode = Read | Mut; _ } -> has_lent_field := true
             | _ -> fields argument.value)
           arguments
-    | _ -> taken := value :: !taken
+    | _ -> owned_values := value :: !owned_values
   in
   fields operand;
-  if !lends && runs env then
+  if !has_lent_field && runs env then
     List.iter
       (fun (value : expression) ->
         defer state (fun () ->
@@ -1523,7 +1511,7 @@ let check_lent_value state env (operand : expression) =
                        owns nothing. Bind this value to a name first, and pass the name."
                     :: state.diagnostics;
                 true))
-      !taken
+      !owned_values
 
 (* Checks a value where an owned value is required and no parameter
    receives it: the initializer of a [var], the value of an assignment, an

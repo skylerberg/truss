@@ -264,33 +264,33 @@ fn Worker.ended(mut self, failed: mut Bool, outcome: UInt8, message: intrinsic::
   }
 }
 
-fn Worker.forget(mut self, taken: USize)
-  requires taken <= intrinsic::storage_length(self.unread)
+fn Worker.discard_consumed(mut self, consumed: USize)
+  requires consumed <= intrinsic::storage_length(self.unread)
 {
-  if taken > 0 {
+  if consumed > 0 {
     let length = intrinsic::storage_length(self.unread)
-    let rest = calls::copy_of(intrinsic::view_slice(intrinsic::storage_view(self.unread), start: taken, stop: length))
+    let rest = calls::copy_of(intrinsic::view_slice(intrinsic::storage_view(self.unread), start: consumed, stop: length))
     self.unread = own rest
   }
 }
 
 fn Worker.take_records(mut self, failed: mut Bool) {
-  var taken: USize = 0
+  var consumed: USize = 0
   var whole = true
   while whole
-    invariant taken <= intrinsic::storage_length(self.unread)
+    invariant consumed <= intrinsic::storage_length(self.unread)
   {
-    let available = intrinsic::storage_length(self.unread) - taken
+    let available = intrinsic::storage_length(self.unread) - consumed
     if available < 5 {
       whole = false
     } else {
-      let kind = intrinsic::view_at(intrinsic::storage_view(self.unread), index: taken)
-      let length = low_bytes_first(intrinsic::storage_view(self.unread), from: taken + 1)
+      let kind = intrinsic::view_at(intrinsic::storage_view(self.unread), index: consumed)
+      let length = low_bytes_first(intrinsic::storage_view(self.unread), from: consumed + 1)
       if available - 5 < length {
         whole = false
       } else {
         let content = calls::copy_of(
-          intrinsic::view_slice(intrinsic::storage_view(self.unread), start: taken + 5, stop: taken + 5 + length),
+          intrinsic::view_slice(intrinsic::storage_view(self.unread), start: consumed + 5, stop: consumed + 5 + length),
         )
         if kind == 4 {
           writing::append(mut self.echoed, bytes: intrinsic::storage_view(content))
@@ -298,11 +298,11 @@ fn Worker.take_records(mut self, failed: mut Bool) {
         } else if self.running {
           mut self.ended(mut failed, outcome: kind, message: intrinsic::storage_view(content))
         }
-        taken = taken + 5 + length
+        consumed = consumed + 5 + length
       }
     }
   }
-  mut self.forget(taken)
+  mut self.discard_consumed(consumed)
 }
 
 fn Worker.bury(mut self, failed: mut Bool, outcome: UInt8) {
@@ -446,9 +446,9 @@ fn read_what_came(
   {
     let process = workers[index].process
     if process >= 0 {
-      let found = (intrinsic::view_at(waited_for, index: index * 2 + 1) >> 16) & 65535
+      let returned_events = (intrinsic::view_at(waited_for, index: index * 2 + 1) >> 16) & 65535
       var alive = true
-      if (found & (intrinsic::libc_pollin() | intrinsic::libc_pollhup())) != 0 {
+      if (returned_events & (intrinsic::libc_pollin() | intrinsic::libc_pollhup())) != 0 {
         alive = mut workers[index].read_reports(mut failed)
       }
       let running = workers[index].running

@@ -205,7 +205,7 @@ public fn Character.to_ascii_lowercase(self) -> Character
   if code >= 65 && code <= 90 { intrinsic::convert(code + 32) } else { self }
 }
 
-public fn Character.digit_value(self, radix: UInt32 = 10) -> Option[UInt32]
+public fn Character.to_digit(self, radix: UInt32 = 10) -> Option[UInt32]
   requires 2 <= radix && radix <= 36
   ensures match result {
     Some(value) => value < radix

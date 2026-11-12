@@ -188,15 +188,15 @@ let problems files =
   Database.problems project.session
 
 let expect_problem files part =
-  let found = problems files in
-  if not (List.exists (fun problem -> contains problem part) found) then
-    fail "problems: [%s]" (String.concat "; " found)
+  let problems_reported = problems files in
+  if not (List.exists (fun problem -> contains problem part) problems_reported) then
+    fail "problems: [%s]" (String.concat "; " problems_reported)
 
 (* The same, of a directory that is there already. *)
 let expect_problem_in root part =
-  let found = (Report.gather (Project.load root)).problems in
-  if not (List.exists (fun problem -> contains problem part) found) then
-    fail "problems: [%s]" (String.concat "; " found)
+  let problems_reported = (Report.gather (Project.load root)).problems in
+  if not (List.exists (fun problem -> contains problem part) problems_reported) then
+    fail "problems: [%s]" (String.concat "; " problems_reported)
 
 let () =
   test "a package that does not say which Truss it is written for has a problem" (fun () ->
@@ -305,10 +305,10 @@ let () =
   test "show finds a definition of a package with an owner by its full path" (fun () ->
       let project = Project.load (directory owned) in
       match Show_command.find project ~body:false "acme::geometry::vector::double" with
-      | [ found ] ->
-          if not (contains found.text "public fn double(value: Int64) -> Int64") then
-            fail "showed %s" found.text
-      | found -> fail "found %d" (List.length found));
+      | [ shown ] ->
+          if not (contains shown.text "public fn double(value: Int64) -> Int64") then
+            fail "showed %s" shown.text
+      | shown -> fail "found %d" (List.length shown));
   test "show lists what a package with an owner makes public" (fun () ->
       let project = Project.load (directory owned) in
       if List.length (Show_command.find project ~body:false "acme::geometry") < 3 then
@@ -489,10 +489,10 @@ let () =
       in
       let project = Project.load root in
       match Show_command.find project ~body:false "demo::main::double" with
-      | [ found ] ->
+      | [ shown ] ->
           expect_string ~expected:"public fn double(value: Int64) -> Int64\n  requires value < 100"
-            found.text
-      | found -> fail "found %d" (List.length found));
+            shown.text
+      | shown -> fail "found %d" (List.length shown));
   test "a type is shown with its methods" (fun () ->
       let root =
         package
@@ -508,7 +508,7 @@ let () =
       expect_strings
         ~expected:[ "public type Point(x: Int64, y: Int64)"; "public fn Point.sum(self) -> Int64" ]
         (List.map
-           (fun (f : Show_command.found) -> f.text)
+           (fun (f : Show_command.shown_definition) -> f.text)
            (Show_command.find project ~body:false "demo::main::Point")))
 
 (* Holes *)
@@ -593,7 +593,7 @@ let () =
           expect_strings
             ~expected:[ "demo::main::main"; "demo::main::helper" ]
             (List.map Path.show way)
-      | Ok found -> fail "found %d" (List.length found)
+      | Ok reached -> fail "found %d" (List.length reached)
       | Error message -> fail "%s" message);
   test "a todo in a capability's method counts only where the method is called" (fun () ->
       let program called =
@@ -627,23 +627,25 @@ let () =
                    called );
              ])
       in
-      let found called =
+      let reached_from called =
         let project = program called in
         match
           Compile.unshippable (lowering project)
             ~main:(List.hd (Program_command.mains project))
             ~echo:false
         with
-        | Ok found -> found
+        | Ok unshippable -> unshippable
         | Error message -> failwith message
       in
-      (match found "say" with [] -> () | _ -> fail "a method nothing calls stops the program");
-      match found "shout" with
+      (match reached_from "say" with
+      | [] -> ()
+      | _ -> fail "a method nothing calls stops the program");
+      match reached_from "shout" with
       | [ { failure = `Todo; line = 12; way; _ } ] -> (
           match List.map Path.show way with
           | "demo::main::main" :: "demo::main::speak" :: _ -> ()
           | way -> fail "reached by %s" (String.concat ", " way))
-      | found -> fail "found %d" (List.length found));
+      | unshippable -> fail "found %d" (List.length unshippable));
   test "a package's program is the main of its main module, and of no other" (fun () ->
       let main_text = "fn main(arguments: List[String]) -> ExitCode {\n  ExitCode.success\n}\n" in
       let with_main = Project.load (package [ ("main.truss", main_text) ]) in
@@ -1008,10 +1010,10 @@ let versions root =
     (Registry.Lock.parse (read root "truss.lock"))
 
 let expect_versions root expected =
-  let found = versions root in
-  if found <> expected then
+  let listed = versions root in
+  if listed <> expected then
     fail "the lock file has [%s]"
-      (String.concat "; " (List.map (fun (name, version) -> name ^ " " ^ version) found))
+      (String.concat "; " (List.map (fun (name, version) -> name ^ " " ^ version) listed))
 
 let clean root = Report.clean (Report.gather (Project.load root))
 

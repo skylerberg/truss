@@ -88,7 +88,7 @@ let create ~text ~diagnostics ~base tokens ~first ~stop =
 (* A cursor over other tokens, such as an interpolation's, up to [stop],
    that reports to the same diagnostics with the same base, at the same
    depth. *)
-let over ?stop cursor tokens =
+let sub_cursor ?stop cursor tokens =
   let stop = Option.value stop ~default:(Array.length tokens) in
   let inner =
     create ~text:cursor.text ~diagnostics:cursor.diagnostics ~base:cursor.base tokens ~first:0 ~stop
@@ -229,7 +229,7 @@ let recovers : Diagnostic.Code.parser -> bool = function
   | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
   | Loop_cost_bound | Function_type_names | Misplaced_requires | Specification_only
   | Misplaced_assert | Misplaced_proof | Misplaced_yield | Misplaced_loop_exit | Leaves_parallel
-  | Echo_in_specification | Reserved_name ->
+  | Echo_in_specification | Reserved_specification_name ->
       false
 
 let report cursor ?notes ?fixes code span message =

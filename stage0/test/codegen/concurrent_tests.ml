@@ -99,10 +99,10 @@ fn main(arguments: List[String]) -> ExitCode
       Console.print_line("second")
       pair.second = 22
     }
-    let made = "made"
+    let built = "made"
     let lengths = ["a", "bb", "ccc"].map(fn(text) { text.length() })
   }
-  Console.print_line("${pair.first} ${pair.second} ${made} ${lengths[2]}")
+  Console.print_line("${pair.first} ${pair.second} ${built} ${lengths[2]}")
   ExitCode.success
 }
 |});
@@ -602,10 +602,10 @@ test "every element is still owned by the list after the loop" {
 test "a task that returns ends the loop, and later elements are not spawned" {
   var tasks = InOrder(opened: 0, cancelled: [])
   let bag = Bag(items: ["a${1}", "abcdef${2}", "abc${3}", "abcdefgh${4}"])
-  let found = provide mut tasks {
+  let present = provide mut tasks {
     first_longer(bag, limit: 4)
   }
-  assert found == "abcdef2"
+  assert present == "abcdef2"
   assert bag.items.length() == 4
   assert bag.items[3] == "abcdefgh4"
 }
@@ -613,10 +613,10 @@ test "a task that returns ends the loop, and later elements are not spawned" {
 test "no task returns" {
   var tasks = InOrder(opened: 0, cancelled: [])
   let bag = Bag(items: ["a${1}", "ab${2}"])
-  let found = provide mut tasks {
+  let present = provide mut tasks {
     first_longer(bag, limit: 9)
   }
-  assert found == "none"
+  assert present == "none"
 }
 |};
   passes_in_order "a task owns a value that a method computes, and copies a plain one" ~count:2
@@ -709,18 +709,18 @@ let () =
 
 test "a task returns the item it was given" {
   var tasks = InOrder(opened: 0, cancelled: [])
-  let found = provide mut tasks {
+  let present = provide mut tasks {
     longest(["a", "abcdef", "abc", "abcdefgh"], limit: 4)
   }
-  assert found == "abcdef"
+  assert present == "abcdef"
 }
 
 test "every item is taken when no task leaves" {
   var tasks = InOrder(opened: 0, cancelled: [])
-  let found = provide mut tasks {
+  let present = provide mut tasks {
     longest(["a", "ab", "abc"], limit: 4)
   }
-  assert found == "none"
+  assert present == "none"
 }
 |};
   passes_in_order "a value returned through two nested tasks is neither leaked nor dropped twice"
@@ -744,11 +744,11 @@ test "every item is taken when no task leaves" {
 
 test "the list is the function's result" {
   var tasks = InOrder(opened: 0, cancelled: [])
-  let found = provide mut tasks {
+  let present = provide mut tasks {
     nested(4, wanted: 2)
   }
-  assert found.length() == 2
-  assert found[0] == "item 2"
+  assert present.length() == 2
+  assert present[0] == "item 2"
   var again = InOrder(opened: 0, cancelled: [])
   let none = provide mut again {
     nested(2, wanted: 7)
@@ -1037,7 +1037,7 @@ fn label(index: Int64) -> Result[String, String] {
   }
 }
 
-fn kept(text: own String) -> Int64 {
+fn held(text: own String) -> Int64 {
   if text.length() > 0 { 1 } else { 0 }
 }
 
@@ -1048,7 +1048,7 @@ fn main(arguments: List[String]) -> ExitCode
   provide mut counter {
     concurrent for index in 0..2000 {
       match label(index) {
-        Ok(text) => Tally.add(kept(own text))
+        Ok(text) => Tally.add(held(own text))
         Err(_) => Tally.add(2)
       }
     }
@@ -1061,7 +1061,7 @@ fn main(arguments: List[String]) -> ExitCode
   parallel for sum in mut sums {
     match label(sum) {
       Ok(text) => {
-        sum = kept(own text)
+        sum = held(own text)
       }
       Err(_) => {
         sum = 2
@@ -1212,8 +1212,8 @@ fn main(arguments: List[String]) -> ExitCode
       concurrent {
         {
           for _ in 0..16 {
-            if mut listener.accept() is Ok(taken) {
-              var server = own taken
+            if mut listener.accept() is Ok(moved) {
+              var server = own moved
               var heard: List[UInt8] = []
               if mut server.read(mut heard, limit: 100) is Ok(_) {
                 let _ = mut server.write(heard.slice())
@@ -1222,8 +1222,8 @@ fn main(arguments: List[String]) -> ExitCode
           }
         }
         concurrent for _ in 0..16 {
-          if NetworkClient.connect(at, timeout: None) is Ok(made) {
-            var client = own made
+          if NetworkClient.connect(at, timeout: None) is Ok(built) {
+            var client = own built
             let request: List[UInt8] = [7, 8, 9]
             let _ = mut client.write(request.slice())
             var answer: List[UInt8] = []
@@ -1255,8 +1255,8 @@ fn main(arguments: List[String]) -> ExitCode
     let at = listener.local_address()
     concurrent {
       {
-        if NetworkClient.connect(at, timeout: Some(Duration.nanoseconds(2000000000))) is Ok(made) {
-          var client = own made
+        if NetworkClient.connect(at, timeout: Some(Duration.nanoseconds(2000000000))) is Ok(built) {
+          var client = own built
           let _ = mut client.set_read_timeout(Some(Duration.nanoseconds(50000000)))
           var heard: List[UInt8] = []
           if mut client.read(mut heard, limit: 10) is Err(error) {
@@ -1265,8 +1265,8 @@ fn main(arguments: List[String]) -> ExitCode
         }
       }
       {
-        if mut listener.accept() is Ok(taken) {
-          var server = own taken
+        if mut listener.accept() is Ok(moved) {
+          var server = own moved
           var heard: List[UInt8] = []
           if mut server.read(mut heard, limit: 10) is Ok(count) {
             Console.print_line("the peer closed ${count == 0}")

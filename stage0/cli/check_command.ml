@@ -10,7 +10,7 @@ let chosen (diagnostics : Diagnostic.t list) =
     (a.span.start < b.span.stop && b.span.start < a.span.stop)
     || (a.span.start = b.span.start && (a.span.start = a.span.stop || b.span.start = b.span.stop))
   in
-  let taken = ref [] in
+  let accepted_edits = ref [] in
   List.filter
     (fun (diagnostic : Diagnostic.t) ->
       match diagnostic.fixes with
@@ -18,10 +18,10 @@ let chosen (diagnostics : Diagnostic.t list) =
           let clear =
             List.for_all
               (fun (edit : Diagnostic.span Diagnostic.edit) ->
-                not (List.exists (overlaps edit) !taken))
+                not (List.exists (overlaps edit) !accepted_edits))
               fix.edits
           in
-          if clear then taken := fix.edits @ !taken;
+          if clear then accepted_edits := fix.edits @ !accepted_edits;
           clear
       | _ -> false)
     diagnostics
