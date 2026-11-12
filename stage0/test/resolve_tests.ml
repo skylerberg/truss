@@ -492,21 +492,21 @@ let () =
       ignore (Resolve.diagnostics database module_);
       let resolved =
         List.filter
-          (fun label -> String.length label > 9 && String.sub label 0 9 = "resolved(")
+          (String.starts_with ~prefix:"resolved(")
           (Engine.executed (Engine.of_context database))
       in
       if resolved <> [ "resolved(app::main::second)" ] then
         fail "resolved again: %s" (String.concat "; " resolved));
   test "moving a definition down resolves nothing again" (fun () ->
       let database = setup [ ("app::main", "fn first() -> Int64 { 1 }\n") ] in
+      let engine = Engine.of_context database in
       let module_ = module_of "app::main" in
-      ignore (Resolve.diagnostics database module_);
-      Database.Testing.set_text (Engine.of_context database) module_
-        "\n\nfn first() -> Int64 { 1 }\n";
-      Engine.clear_log (Engine.of_context database);
-      ignore (Resolve.diagnostics database module_);
-      if List.mem "resolved(app::main::first)" (Engine.executed (Engine.of_context database)) then
-        fail "resolved again")
+      expect_not_recomputed engine
+        ~first:(fun () -> ignore (Resolve.diagnostics database module_))
+        ~again:(fun () ->
+          Database.Testing.set_text engine module_ "\n\nfn first() -> Int64 { 1 }\n";
+          ignore (Resolve.diagnostics database module_))
+        [ "resolved(app::main::first)" ])
 
 (* What the review of resolution found *)
 
@@ -535,7 +535,7 @@ let () =
       ignore (Resolve.diagnostics database module_);
       let resolved =
         List.filter
-          (fun label -> String.length label > 9 && String.sub label 0 9 = "resolved(")
+          (String.starts_with ~prefix:"resolved(")
           (Engine.executed (Engine.of_context database))
       in
       if resolved <> [ "resolved(app::main::z)" ] then

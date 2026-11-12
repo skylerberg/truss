@@ -15,5 +15,11 @@ val wanted : string -> bool
 val fail : ('a, unit, string, unit) format4 -> 'a
 (** Reports a failure of the test that is running. *)
 
+val expect_not_recomputed :
+  Engine.t -> first:(unit -> unit) -> again:(unit -> unit) -> string list -> unit
+(** Fails the test unless [first] computes each result that a label names, as ["name(key)"], and
+    [again] computes none of them. A label that names no result fails, so a renamed query or key
+    cannot pass the check unnoticed. *)
+
 val finish : unit -> unit
 (** Prints the result and exits with status 1 if any test failed. *)

@@ -78,6 +78,7 @@
   lir_builder
   resolve
   diagnostic
+  source
   compile
   type_checker
   prover
