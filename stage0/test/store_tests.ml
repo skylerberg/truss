@@ -284,7 +284,7 @@ let () =
       let engine = opened empty copied in
       Engine.set engine value_input () 4;
       if Engine.get engine doubled () <> 8 then fail "another result";
-      if not (List.mem "saved_doubled()" (Engine.executed engine)) then fail "not computed")
+      if Engine.computed engine doubled <> [ () ] then fail "not computed")
 
 let () =
   test "a result computed in one state is found by another that reads the same" (fun () ->
@@ -313,11 +313,8 @@ let () =
       if Engine.get engine reads_through () <> 50 then fail "another result read through";
       (* The results that are not saved are computed, being cheap; the saved
          ones are found. *)
-      if
-        List.exists
-          (fun label -> label = "saved_doubled()" || label = "saved_reads_through()")
-          (Engine.executed engine)
-      then fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
+      if Engine.computed engine doubled <> [] || Engine.computed engine reads_through <> [] then
+        fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
   test "a result found as a fact reads what the computed one read" (fun () ->
       let store, _ = written () in
       let engine = attached store in

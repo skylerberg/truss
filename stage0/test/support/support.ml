@@ -5,6 +5,10 @@ let module_of text : Path.module_ =
   | name :: modules -> { package = { owner = None; name }; modules }
   | [] -> invalid_arg text
 
+let top_key module_name name : Resolve.Names.key =
+  let module_ = module_of module_name in
+  { module_; path = Top { module_; name }; ordinal = 0 }
+
 (* The standard library as a fixed base, shared by every test in a run, so
    that it is checked once. *)
 let standard = lazy (Database.Testing.standard_base ())

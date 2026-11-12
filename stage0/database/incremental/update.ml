@@ -73,7 +73,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   node.busy <- true;
   let frame = { owner = node; read = []; seen = Hashtbl.create 8; cyclic = None } in
   engine.frames <- frame :: engine.frames;
-  if engine.logging then engine.log <- label node :: engine.log;
+  if engine.logging then engine.log <- node :: engine.log;
   let finish () =
     engine.frames <- List.tl engine.frames;
     node.busy <- false
