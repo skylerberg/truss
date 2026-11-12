@@ -1,3 +1,5 @@
+use standard::cryptography::elliptic
+use standard::cryptography::modular
 use standard::intrinsic
 
 let sha256_constants: Array[UInt32, 64] = [
@@ -3650,4 +3652,269 @@ public fn AgreementKey.agree(own self, peer: AgreementPublicKey) -> Option[Secre
     any_bit = any_bit | shared[index]
   }
   if any_bit == 0 { None } else { Some(SecretKey(bytes: shared)) }
+}
+
+public type Curve = P256 | P384
+  derives Equal
+
+fn curve_of(curve: Curve) -> elliptic::Curve
+  uses Panic
+{
+  match curve {
+    P256 => elliptic::Curve.p256()
+    P384 => elliptic::Curve.p384()
+  }.expect("the curve's constants make a field")
+}
+
+fn digest_for(curve: Curve, message: Slice[UInt8]) -> List[UInt8] {
+  match curve {
+    P256 => {
+      let digest = sha256(message)
+      digest[..].to_list()
+    }
+    P384 => {
+      let digest = sha384(message)
+      digest[..].to_list()
+    }
+  }
+}
+
+fn keyed_hash(curve: Curve, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
+  match curve {
+    P256 => {
+      let code = hmac_sha256(key, message: message)
+      code[..].to_list()
+    }
+    P384 => {
+      let code = hmac_sha384(key, message: message)
+      code[..].to_list()
+    }
+  }
+}
+
+fn scalar_of_digest(elliptic_curve: elliptic::Curve, digest: Slice[UInt8]) -> List[UInt64] {
+  let size = elliptic_curve.size()
+  let used = if digest.length() > size { digest[..size] } else { digest }
+  var scalar = modular::limbs_from_bytes(used, count: size / 4)
+  let order = elliptic_curve.order()
+  if !modular::is_less(scalar.slice(), second: order.slice()) {
+    let scalars = elliptic_curve.scalars()
+    scalar = scalars.subtract(scalar.slice(), second: order.slice())
+  }
+  scalar
+}
+
+fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic::Curve, private: Slice[UInt8], digest: Slice[UInt8]) -> List[UInt64] {
+  let size = elliptic_curve.size()
+  let hashed = modular::limbs_to_bytes(scalar_of_digest(elliptic_curve, digest: digest).slice(), length: size)
+  let length = digest_for(curve, message: []).length()
+  var value: List[UInt8] = List.filled(1, count: length)
+  var key: List[UInt8] = List.filled(0, count: length)
+  let separators: List[UInt8] = [0, 1]
+  for separator in separators {
+    var input = value.copy()
+    mut input.push(separator)
+    mut input.append_slice(private)
+    mut input.append_slice(hashed.slice())
+    key = keyed_hash(curve, key: key.slice(), message: input.slice())
+    value = keyed_hash(curve, key: key.slice(), message: value.slice())
+  }
+  var attempts: USize = 0
+  while attempts < 64 {
+    var stream: List[UInt8] = []
+    while stream.length() < size {
+      value = keyed_hash(curve, key: key.slice(), message: value.slice())
+      mut stream.append_slice(value.slice())
+    }
+    let candidate = modular::limbs_from_bytes(stream[..size], count: size / 4)
+    if elliptic_curve.is_valid_scalar(candidate.slice()) {
+      return candidate
+    }
+    var input = value.copy()
+    mut input.push(0)
+    key = keyed_hash(curve, key: key.slice(), message: input.slice())
+    value = keyed_hash(curve, key: key.slice(), message: value.slice())
+    attempts += 1
+  }
+  modular::limbs_from_bytes([1], count: size / 4)
+}
+
+public opaque type EcdsaVerifyingKey(curve: Curve, point: List[UInt8])
+  derives Equal, Copyable
+
+public fn EcdsaVerifyingKey.from_sec1(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdsaVerifyingKey]
+  uses Panic
+{
+  let elliptic_curve = curve_of(curve)
+  if elliptic_curve.decode(bytes) is None {
+    return None
+  }
+  Some(EcdsaVerifyingKey(curve: curve, point: bytes.to_list()))
+}
+
+public fn EcdsaVerifyingKey.curve(self) -> Curve {
+  self.curve
+}
+
+public fn EcdsaVerifyingKey.sec1(self) -> Slice[UInt8] {
+  self.point.slice()
+}
+
+public fn EcdsaVerifyingKey.verify(self, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+  uses Panic
+{
+  self.verify_digest(digest_for(self.curve, message: message).slice(), signature: signature)
+}
+
+public fn EcdsaVerifyingKey.verify_digest(self, digest: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+  uses Panic
+{
+  let elliptic_curve = curve_of(self.curve)
+  let size = elliptic_curve.size()
+  if signature.length() != 2 * size {
+    return false
+  }
+  let point = match elliptic_curve.decode(self.point.slice()) {
+    Some(point) => own point
+    None => return false
+  }
+  let count = size / 4
+  let r = modular::limbs_from_bytes(signature[..size], count: count)
+  let s = modular::limbs_from_bytes(signature[size..], count: count)
+  if !elliptic_curve.is_valid_scalar(r.slice()) || !elliptic_curve.is_valid_scalar(s.slice()) {
+    return false
+  }
+  let scalars = elliptic_curve.scalars()
+  let e = scalars.to_montgomery(scalar_of_digest(elliptic_curve, digest: digest).slice())
+  let w = scalars.invert(scalars.to_montgomery(s.slice()).slice())
+  let first = scalars.from_montgomery(scalars.multiply(e.slice(), second: w.slice()).slice())
+  let second = scalars.from_montgomery(scalars.multiply(scalars.to_montgomery(r.slice()).slice(), second: w.slice()).slice())
+  let first_point = elliptic_curve.multiply(modular::limbs_to_bytes(first.slice(), length: size).slice(), point: elliptic_curve.base())
+  let second_point = elliptic_curve.multiply(modular::limbs_to_bytes(second.slice(), length: size).slice(), point: point)
+  match elliptic_curve.affine(elliptic_curve.add(first_point, second: second_point)) {
+    Some(affine) => {
+      var x = affine.x.copy()
+      let order = elliptic_curve.order()
+      if !modular::is_less(x.slice(), second: order.slice()) {
+        x = scalars.subtract(x.slice(), second: order.slice())
+      }
+      scalars.equal(x.slice(), second: r.slice())
+    }
+    None => false
+  }
+}
+
+public opaque type EcdsaSigningKey(curve: Curve, scalar: List[UInt8])
+  derives Copyable
+
+fn random_scalar(curve: Curve) -> List[UInt8]
+  uses Random, Panic
+{
+  let elliptic_curve = curve_of(curve)
+  let size = elliptic_curve.size()
+  while true {
+    var bytes: List[UInt8] = []
+    while bytes.length() < size {
+      let word = Random.next()
+      let count: USize = 8
+      for index in 0..count {
+        if bytes.length() < size {
+          mut bytes.push(intrinsic::convert((word >> (8 * index)) & 255))
+        }
+      }
+    }
+    if elliptic_curve.is_valid_scalar(modular::limbs_from_bytes(bytes.slice(), count: size / 4).slice()) {
+      return bytes
+    }
+  }
+}
+
+public fn EcdsaSigningKey.generate(curve: Curve) -> EcdsaSigningKey
+  uses Random, Panic
+{
+  EcdsaSigningKey(curve: curve, scalar: random_scalar(curve))
+}
+
+public fn EcdsaSigningKey.from_scalar(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdsaSigningKey]
+  uses Panic
+{
+  let elliptic_curve = curve_of(curve)
+  if bytes.length() != elliptic_curve.size()
+    || !elliptic_curve.is_valid_scalar(modular::limbs_from_bytes(bytes, count: bytes.length() / 4).slice())
+  {
+    return None
+  }
+  Some(EcdsaSigningKey(curve: curve, scalar: bytes.to_list()))
+}
+
+public fn EcdsaSigningKey.verifying_key(self) -> EcdsaVerifyingKey
+  uses Panic
+{
+  let elliptic_curve = curve_of(self.curve)
+  let point = elliptic_curve.multiply(self.scalar.slice(), point: elliptic_curve.base())
+  let affine = elliptic_curve.affine(point).expect("a valid scalar times the base point is not the identity")
+  EcdsaVerifyingKey(curve: self.curve, point: elliptic_curve.encode(affine))
+}
+
+public fn EcdsaSigningKey.sign(self, message: Slice[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  self.sign_digest(digest_for(self.curve, message: message).slice())
+}
+
+public fn EcdsaSigningKey.sign_digest(self, digest: Slice[UInt8]) -> List[UInt8]
+  uses Panic
+{
+  let elliptic_curve = curve_of(self.curve)
+  let size = elliptic_curve.size()
+  let scalars = elliptic_curve.scalars()
+  let nonce = deterministic_nonce(self.curve, elliptic_curve: elliptic_curve, private: self.scalar.slice(), digest: digest)
+  let point = elliptic_curve.multiply(modular::limbs_to_bytes(nonce.slice(), length: size).slice(), point: elliptic_curve.base())
+  let affine = elliptic_curve.affine(point).expect("a valid nonce times the base point is not the identity")
+  var r = affine.x.copy()
+  let order = elliptic_curve.order()
+  if !modular::is_less(r.slice(), second: order.slice()) {
+    r = scalars.subtract(r.slice(), second: order.slice())
+  }
+  let d = modular::limbs_from_bytes(self.scalar.slice(), count: size / 4)
+  let e = scalar_of_digest(elliptic_curve, digest: digest)
+  let product = scalars.multiply(scalars.to_montgomery(r.slice()).slice(), second: scalars.to_montgomery(d.slice()).slice())
+  let sum = scalars.add(scalars.to_montgomery(e.slice()).slice(), second: product.slice())
+  let inverse = scalars.invert(scalars.to_montgomery(nonce.slice()).slice())
+  let s = scalars.from_montgomery(scalars.multiply(inverse.slice(), second: sum.slice()).slice())
+  var signature = modular::limbs_to_bytes(r.slice(), length: size)
+  mut signature.append(modular::limbs_to_bytes(s.slice(), length: size))
+  signature
+}
+
+public opaque type EcdhKey(curve: Curve, scalar: List[UInt8])
+
+public fn EcdhKey.generate(curve: Curve) -> EcdhKey
+  uses Random, Panic
+{
+  EcdhKey(curve: curve, scalar: random_scalar(curve))
+}
+
+public fn EcdhKey.from_scalar(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdhKey]
+  uses Panic
+{
+  match EcdsaSigningKey.from_scalar(curve, bytes: bytes) {
+    Some(_) => Some(EcdhKey(curve: curve, scalar: bytes.to_list()))
+    None => None
+  }
+}
+
+public fn EcdhKey.public_key(self) -> List[UInt8]
+  uses Panic
+{
+  EcdsaSigningKey(curve: self.curve, scalar: self.scalar.copy()).verifying_key().point
+}
+
+public fn EcdhKey.agree(own self, peer: Slice[UInt8]) -> Option[List[UInt8]]
+  uses Panic
+{
+  let elliptic_curve = curve_of(self.curve)
+  let point = elliptic_curve.decode(peer)?
+  let shared = elliptic_curve.affine(elliptic_curve.multiply(self.scalar.slice(), point: point))?
+  Some(modular::limbs_to_bytes(shared.x.slice(), length: elliptic_curve.size()))
 }

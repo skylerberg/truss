@@ -1,0 +1,215 @@
+use standard::cryptography::modular
+
+internal type Point(x: List[UInt64], y: List[UInt64], z: List[UInt64])
+
+internal type Curve(field: modular::Field, scalars: modular::Field, b: List[UInt64], base: Point, size: USize)
+  invariant size <= 64
+
+fn hex_limbs(text: StringSlice, count: USize) -> List[UInt64] {
+  var bytes: List[UInt8] = []
+  var index: USize = 0
+  while index < text.length() && text.length() - index >= 2
+    invariant index <= text.length()
+  {
+    let high = text.byte(index).digit_value()
+    let low = text.byte(index + 1).digit_value()
+    mut bytes.push(if high < 16 && low < 16 { high * 16 + low } else { 0 })
+    index += 2
+  }
+  modular::limbs_from_bytes(bytes.slice(), count: count)
+}
+
+fn make_curve(
+  prime: StringSlice,
+  order: StringSlice,
+  b: StringSlice,
+  x: StringSlice,
+  y: StringSlice,
+  size: USize,
+) -> Option[Curve]
+  requires size <= 64
+{
+  let count = size / 4
+  let field = modular::Field.new(hex_limbs(prime, count: count))?
+  let scalars = modular::Field.new(hex_limbs(order, count: count))?
+  let base = Point(
+    x: field.to_montgomery(hex_limbs(x, count: count).slice()),
+    y: field.to_montgomery(hex_limbs(y, count: count).slice()),
+    z: field.montgomery_one(),
+  )
+  let curve_b = field.to_montgomery(hex_limbs(b, count: count).slice())
+  Some(Curve(field: own field, scalars: own scalars, b: own curve_b, base: own base, size: size))
+}
+
+internal fn Curve.p256() -> Option[Curve] {
+  make_curve(
+    "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+    order: "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+    b: "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b",
+    x: "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296",
+    y: "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+    size: 32,
+  )
+}
+
+internal fn Curve.p384() -> Option[Curve] {
+  make_curve(
+    "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff",
+    order: "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973",
+    b: "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef",
+    x: "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7",
+    y: "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f",
+    size: 48,
+  )
+}
+
+internal fn Curve.size(self) -> USize
+  ensures result <= 64
+{
+  self.size
+}
+
+internal fn Curve.scalars(self) -> modular::Field {
+  self.scalars.copy()
+}
+
+internal fn Curve.order(self) -> List[UInt64] {
+  self.scalars.modulus_limbs().to_list()
+}
+
+internal fn Curve.identity(self) -> Point {
+  Point(x: self.field.zero(), y: self.field.montgomery_one(), z: self.field.zero())
+}
+
+internal fn Curve.base(self) -> Point {
+  self.base.copy()
+}
+
+internal fn Curve.add(self, first: Point, second: Point) -> Point {
+  let field = self.field
+  let b = self.b.slice()
+  var t0 = field.multiply(first.x.slice(), second: second.x.slice())
+  var t1 = field.multiply(first.y.slice(), second: second.y.slice())
+  var t2 = field.multiply(first.z.slice(), second: second.z.slice())
+  var t3 = field.add(first.x.slice(), second: first.y.slice())
+  var t4 = field.add(second.x.slice(), second: second.y.slice())
+  t3 = field.multiply(t3.slice(), second: t4.slice())
+  t4 = field.add(t0.slice(), second: t1.slice())
+  t3 = field.subtract(t3.slice(), second: t4.slice())
+  t4 = field.add(first.y.slice(), second: first.z.slice())
+  var x3 = field.add(second.y.slice(), second: second.z.slice())
+  t4 = field.multiply(t4.slice(), second: x3.slice())
+  x3 = field.add(t1.slice(), second: t2.slice())
+  t4 = field.subtract(t4.slice(), second: x3.slice())
+  x3 = field.add(first.x.slice(), second: first.z.slice())
+  var y3 = field.add(second.x.slice(), second: second.z.slice())
+  x3 = field.multiply(x3.slice(), second: y3.slice())
+  y3 = field.add(t0.slice(), second: t2.slice())
+  y3 = field.subtract(x3.slice(), second: y3.slice())
+  var z3 = field.multiply(b, second: t2.slice())
+  x3 = field.subtract(y3.slice(), second: z3.slice())
+  z3 = field.add(x3.slice(), second: x3.slice())
+  x3 = field.add(x3.slice(), second: z3.slice())
+  z3 = field.subtract(t1.slice(), second: x3.slice())
+  x3 = field.add(t1.slice(), second: x3.slice())
+  y3 = field.multiply(b, second: y3.slice())
+  t1 = field.add(t2.slice(), second: t2.slice())
+  t2 = field.add(t1.slice(), second: t2.slice())
+  y3 = field.subtract(y3.slice(), second: t2.slice())
+  y3 = field.subtract(y3.slice(), second: t0.slice())
+  t1 = field.add(y3.slice(), second: y3.slice())
+  y3 = field.add(t1.slice(), second: y3.slice())
+  t1 = field.add(t0.slice(), second: t0.slice())
+  t0 = field.add(t1.slice(), second: t0.slice())
+  t0 = field.subtract(t0.slice(), second: t2.slice())
+  t1 = field.multiply(t4.slice(), second: y3.slice())
+  t2 = field.multiply(t0.slice(), second: y3.slice())
+  y3 = field.multiply(x3.slice(), second: z3.slice())
+  y3 = field.add(y3.slice(), second: t2.slice())
+  x3 = field.multiply(t3.slice(), second: x3.slice())
+  x3 = field.subtract(x3.slice(), second: t1.slice())
+  z3 = field.multiply(t4.slice(), second: z3.slice())
+  t1 = field.multiply(t3.slice(), second: t0.slice())
+  z3 = field.add(z3.slice(), second: t1.slice())
+  Point(x: own x3, y: own y3, z: own z3)
+}
+
+fn swap_points(first: mut Point, second: mut Point, bit: Bool) {
+  let x = modular::select(bit, first: first.x.slice(), second: second.x.slice())
+  let y = modular::select(bit, first: first.y.slice(), second: second.y.slice())
+  let z = modular::select(bit, first: first.z.slice(), second: second.z.slice())
+  second.x = modular::select(bit, first: second.x.slice(), second: first.x.slice())
+  second.y = modular::select(bit, first: second.y.slice(), second: first.y.slice())
+  second.z = modular::select(bit, first: second.z.slice(), second: first.z.slice())
+  first.x = own x
+  first.y = own y
+  first.z = own z
+}
+
+internal fn Curve.multiply(self, scalar: Slice[UInt8], point: Point) -> Point {
+  var low = self.identity()
+  var high = point.copy()
+  for byte in scalar {
+    var bit: UInt8 = 8
+    while bit > 0
+      invariant bit <= 8
+    {
+      bit -= 1
+      let set = ((byte >> bit) & 1) == 1
+      swap_points(mut low, second: mut high, bit: set)
+      high = self.add(low, second: high)
+      low = self.add(low, second: low)
+      swap_points(mut low, second: mut high, bit: set)
+    }
+  }
+  low
+}
+
+internal type Affine(x: List[UInt64], y: List[UInt64])
+
+internal fn Curve.affine(self, point: Point) -> Option[Affine] {
+  if self.field.is_zero(point.z.slice()) {
+    return None
+  }
+  let inverse = self.field.invert(point.z.slice())
+  let x = self.field.from_montgomery(self.field.multiply(point.x.slice(), second: inverse.slice()).slice())
+  let y = self.field.from_montgomery(self.field.multiply(point.y.slice(), second: inverse.slice()).slice())
+  Some(Affine(x: own x, y: own y))
+}
+
+internal fn Curve.encode(self, affine: Affine) -> List[UInt8] {
+  var bytes: List[UInt8] = [4]
+  mut bytes.append(modular::limbs_to_bytes(affine.x.slice(), length: self.size))
+  mut bytes.append(modular::limbs_to_bytes(affine.y.slice(), length: self.size))
+  bytes
+}
+
+internal fn Curve.decode(self, bytes: Slice[UInt8]) -> Option[Point] {
+  let size = self.size
+  let first: USize = 1
+  if bytes.length() != first + 2 * size || bytes[0] != 4 {
+    return None
+  }
+  let count = self.field.length()
+  let x = modular::limbs_from_bytes(bytes[first..first + size], count: count)
+  let y = modular::limbs_from_bytes(bytes[first + size..], count: count)
+  if !modular::is_less(x.slice(), second: self.field.modulus_limbs()) || !modular::is_less(y.slice(), second: self.field.modulus_limbs()) {
+    return None
+  }
+  let field = self.field
+  let mx = field.to_montgomery(x.slice())
+  let my = field.to_montgomery(y.slice())
+  let left = field.square(my.slice())
+  let x_squared = field.square(mx.slice())
+  let x_cubed = field.multiply(x_squared.slice(), second: mx.slice())
+  let three_x = field.add(field.add(mx.slice(), second: mx.slice()).slice(), second: mx.slice())
+  let right = field.add(field.subtract(x_cubed.slice(), second: three_x.slice()).slice(), second: self.b.slice())
+  if !field.equal(left.slice(), second: right.slice()) {
+    return None
+  }
+  Some(Point(x: own mx, y: own my, z: field.montgomery_one()))
+}
+
+internal fn Curve.is_valid_scalar(self, scalar: Slice[UInt64]) -> Bool {
+  !self.scalars.is_zero(scalar) && modular::is_less(scalar, second: self.scalars.modulus_limbs())
+}
