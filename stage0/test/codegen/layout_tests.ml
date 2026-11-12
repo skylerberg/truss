@@ -137,7 +137,7 @@ let () =
       let glue =
         Glue.create
           (create target_64 ~shape_of:(Monomorphic.shape standard_context))
-          ~kind_of:(Monomorphic.kind standard_context)
+          ~representation:(Monomorphic.representation standard_context)
           ~usize:(Monomorphic.builtin USize) ()
       in
       if Glue.trivial glue (list int64) then fail "a List is trivial";

@@ -576,7 +576,7 @@ let static_constant st path : Lir.place =
 let list_of st ty destination ~site fills =
   match Monomorphic.shape st.context.monomorphic ty with
   | Record [ (field, Typed storage) ] -> (
-      match Monomorphic.kind st.context.monomorphic storage with
+      match Monomorphic.representation st.context.monomorphic storage with
       | Storage element ->
           let storage_place = destination / Field field in
           let lower operation arguments destination =
@@ -608,7 +608,7 @@ let template_value st template_ty texts ~site ~parts =
   let element list_ty =
     match Monomorphic.shape st.context.monomorphic list_ty with
     | Record [ (_, Typed storage) ] -> (
-        match Monomorphic.kind st.context.monomorphic storage with
+        match Monomorphic.representation st.context.monomorphic storage with
         | Storage element -> element
         | _ -> bug "%s is not a list" (Ground.to_string list_ty))
     | _ -> bug "%s is not a list" (Ground.to_string list_ty)

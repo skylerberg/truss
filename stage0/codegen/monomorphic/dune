@@ -10,5 +10,4 @@
   ground
   memory_layout
   convention
-  glue
   zarith))

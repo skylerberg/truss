@@ -32,6 +32,8 @@ type shape =
 
 and variant_shape = { name : string; indirect : bool; fields : (string * member) list }
 
+type representation = Shape of shape | Storage of Ground.ty | Handle | Shared of Ground.ty
+
 type t = { size : int; alignment : int; form : form; niche : niche option }
 
 and form =

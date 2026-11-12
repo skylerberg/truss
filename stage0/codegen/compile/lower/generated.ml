@@ -317,7 +317,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   let string_ty, storage_field, storage_ty =
     match Monomorphic.shape context.monomorphic list_ty with
     | Record [ (field, Typed storage) ] -> (
-        match Monomorphic.kind context.monomorphic storage with
+        match Monomorphic.representation context.monomorphic storage with
         | Storage element -> (element, field, storage)
         | _ -> bug "a List that is not storage")
     | _ -> bug "main's arguments are not a List"
