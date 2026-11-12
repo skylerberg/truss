@@ -1,9 +1,12 @@
 (** Running the tests of one test executable. When the executable exits, it prints the result, and
-    exits with status 1 if any test failed. *)
+    exits with status 1 if any test failed. With [TRUSS_TEST_PROCESSES] set to a count, the
+    executable runs itself that many times at once, each process with [TRUSS_TEST_SHARE] set to its
+    share of the tests. *)
 
 val test : string -> (unit -> unit) -> unit
-(** Runs a test now. An exception it raises is a failure, and so is a result that an engine the test
-    made holds and a new engine with the same inputs computes differently. *)
+(** Runs a test now, unless [TRUSS_TEST_SHARE] gives it to another process. An exception it raises
+    is a failure, and so is a result that an engine the test made holds and a new engine with the
+    same inputs computes differently. *)
 
 val always : string -> (unit -> unit) -> unit
 (** Runs a test whatever [TRUSS_TEST] names, for a step that every test of the executable needs,

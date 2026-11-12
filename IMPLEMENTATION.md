@@ -212,3 +212,11 @@ Every stage of stage0 is tested the same way:
 - **One test can be run alone.** With `TRUSS_TEST` set, a test executable
   runs only the tests whose names contain it, for working on one:
   `TRUSS_TEST=standard::text _build/default/stage0/test/standard_library_tests.exe`.
+- **A slow suite runs as several processes.** A test executable runs its
+  tests one after another on one core, so the slowest suites would end a
+  run long after the others. With `TRUSS_TEST_PROCESSES` set to a count, the
+  harness runs the executable that many times at once, each process with
+  `TRUSS_TEST_SHARE` set to its share, every count-th test. Steps that every
+  test needs run in each process. Dune sets the count for `prover_tests`
+  and `database_tests`. A test must not depend on what an earlier test
+  did, since that test may run in another process.

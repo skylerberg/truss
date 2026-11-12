@@ -1,3 +1,65 @@
+(* With [TRUSS_TEST_SHARE] set to [index/count], a process runs every
+   [count]th test, from the [index]th on, so that several processes run
+   one executable's tests at once. A step that [always] runs runs in each
+   of them. *)
+let share =
+  match Sys.getenv_opt "TRUSS_TEST_SHARE" with
+  | None | Some "" -> None
+  | Some text -> (
+      match List.map int_of_string_opt (String.split_on_char '/' text) with
+      | [ Some index; Some count ] when 0 <= index && index < count -> Some (index, count)
+      | _ ->
+          prerr_endline ("TRUSS_TEST_SHARE is `index/count`, such as `0/2`, not `" ^ text ^ "`.");
+          exit 2)
+
+(* With [TRUSS_TEST_PROCESSES] set to a count, the executable runs itself
+   that many times at once, each with a share of the tests, before any
+   test runs, since one process runs its tests one after another on one
+   core. Each share's output is printed once all have ended, so that the
+   lines of two shares do not interleave, and the executable fails if any
+   share failed. *)
+let () =
+  match (Sys.getenv_opt "TRUSS_TEST_PROCESSES", share) with
+  | None, _ | Some "", _ | _, Some _ -> ()
+  | Some text, None ->
+      let processes =
+        match int_of_string_opt text with
+        | Some processes when processes > 0 -> processes
+        | _ ->
+            prerr_endline ("TRUSS_TEST_PROCESSES is a positive count, not `" ^ text ^ "`.");
+            exit 2
+      in
+      let environment =
+        Array.of_list
+          (List.filter
+             (fun binding -> not (String.starts_with ~prefix:"TRUSS_TEST_SHARE=" binding))
+             (Array.to_list (Unix.environment ())))
+      in
+      let shares =
+        List.init processes (fun index ->
+            let output = Filename.temp_file "truss-test-share" ".log" in
+            let descriptor = Unix.openfile output [ O_WRONLY; O_TRUNC; O_CLOEXEC ] 0o600 in
+            let pid =
+              Unix.create_process_env Sys.executable_name Sys.argv
+                (Array.append
+                   [| Printf.sprintf "TRUSS_TEST_SHARE=%d/%d" index processes |]
+                   environment)
+                Unix.stdin descriptor descriptor
+            in
+            Unix.close descriptor;
+            (pid, output))
+      in
+      let passed =
+        List.fold_left
+          (fun passed (pid, output) ->
+            let _, status = Unix.waitpid [] pid in
+            print_string (File_system.read output);
+            Sys.remove output;
+            passed && status = Unix.WEXITED 0)
+          true shares
+      in
+      exit (if passed then 0 else 1)
+
 let failures = ref 0
 let count = ref 0
 let current_test = ref ""
@@ -42,7 +104,16 @@ let always name body =
       List.iter (fun problem -> fail "the code database kept a stale result: %s" problem) problems
   | exception exception_ -> fail "auditing raised %s" (Printexc.to_string exception_)
 
-let test name body = if wanted name then always name body
+let ordinal = ref 0
+
+let test name body =
+  if wanted name then begin
+    let is_mine =
+      match share with Some (index, count) -> !ordinal mod count = index | None -> true
+    in
+    incr ordinal;
+    if is_mine then always name body
+  end
 
 let expect_not_recomputed engine ~first ~again query keys =
   let computed step =

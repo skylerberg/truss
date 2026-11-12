@@ -8,7 +8,6 @@
   compiler_bug_tests
   query_tests
   store_tests
-  database_tests
   resolve_tests
   standard_library_tests
   interface_tests
@@ -25,9 +24,9 @@
   manifest_tests
   registry_tests
   compatibility_tests
-  prover_tests
   library_use_tests
   scale_tests)
+ (modules :standard \ database_tests prover_tests)
  (libraries
   process
   harness
@@ -79,3 +78,41 @@
   cli)
  (deps
   (glob_files %{workspace_root}/*.md)))
+
+; The slowest suites run as several processes at once, each with a share of
+; the suite's tests, since one process runs its tests on one core.
+
+(tests
+ (names database_tests prover_tests)
+ (modules database_tests prover_tests)
+ (libraries
+  harness
+  substring
+  diagnostic
+  source
+  syntax
+  query
+  phases
+  engine
+  database
+  store
+  unix
+  path
+  workspace
+  project
+  process
+  resolve
+  support
+  logic
+  solver
+  prover
+  interface
+  infer
+  type_checker)
+ (deps
+  (glob_files %{workspace_root}/*.md))
+ (action
+  (setenv
+   TRUSS_TEST_PROCESSES
+   4
+   (run %{test}))))
