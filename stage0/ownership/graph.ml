@@ -930,11 +930,21 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       | Branch { condition; _ } -> evaluate builder condition
       | Switch_variant { place; _ } ->
           Option.iter (fun tracked -> emit_ builder (Read tracked) origin) (tracked builder place)
-      | Each { call = called; part; body = inside; after; loop } -> (
-          call builder called origin;
-          hold builder
-            { Mir.root = Local part; projections = [] }
-            { (call_result builder called) with part = true };
+      | For { iteration; part; body = inside; after; loop } -> (
+          let part_place = { Mir.root = Local part; projections = [] } in
+          (match iteration with
+          | Yielding called ->
+              call builder called origin;
+              hold builder part_place { (call_result builder called) with part = true }
+          | Range { start; stop; _ } ->
+              evaluate builder start;
+              evaluate builder stop
+          | Pull { cursor; _ } ->
+              (* Each pull changes the cursor. *)
+              Option.iter
+                (fun tracked -> emit_ builder (Mutate tracked) origin)
+                (tracked builder cursor);
+              hold builder part_place { nothing with views = views_of_copy builder cursor });
           let head = emit builder (Bind []) origin in
           Hashtbl.replace heads index head;
           pending_edges := (head, `Block inside) :: (head, `Block after) :: !pending_edges;
@@ -994,19 +1004,20 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
       firsts.(index) <- (if index = 0 then entry else first);
       lasts.(index) <- (match builder.last with Some last -> last | None -> first))
     body.blocks;
-  (* The innermost [Each] whose body reaches each [Iteration_end]. *)
+  (* The innermost [For] whose body reaches each [Iteration_end]. *)
   let each_of = Hashtbl.create 4 in
   Array.iteri
     (fun index (block : Mir.basic_block) ->
       match block.terminator with
-      | Each { body = inside; after; _ } ->
+      | For { body = inside; after; _ } ->
           let visited = Hashtbl.create 8 in
           let rec visit block =
             if block <> after && not (Hashtbl.mem visited block) then begin
               Hashtbl.replace visited block ();
               match body.blocks.(block).terminator with
-              | Iteration_end -> Hashtbl.replace each_of block index
-              | Each { after = inner_after; _ } -> visit inner_after
+              | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } ->
+                  Hashtbl.replace each_of block index
+              | For { after = inner_after; _ } -> visit inner_after
               | terminator -> List.iter visit (Mir.successors terminator)
             end
           in
@@ -1017,8 +1028,8 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
     (fun index (block : Mir.basic_block) ->
       let from = lasts.(index) in
       match block.terminator with
-      | Each _ -> ()
-      | Iteration_end -> (
+      | For _ -> ()
+      | Iteration_end | Exit_tasks { exit = Exit_iteration; _ } -> (
           match Hashtbl.find_opt each_of index with
           | Some each -> link builder from (Hashtbl.find heads each)
           | None -> ())
@@ -1026,38 +1037,20 @@ let body_points builder (body : Mir.body) ~returns ~is_var ~(entry : int) ~endin
           List.iter (fun target -> link builder from firsts.(target)) (Mir.successors terminator))
     body.blocks;
   List.iter (fun (from, `Block target) -> link builder from firsts.(target)) !pending_edges;
-  Array.iteri
-    (fun index (block : Mir.basic_block) ->
-      match block.header with
-      | Some { schedule = (Parallel_loop | Concurrent_loop) as schedule; _ } -> (
-          match Mir.successors block.terminator with
-          | inside :: _ ->
-              builder.fork_join_loops <-
-                {
-                  keyword = (if schedule = Parallel_loop then "parallel" else "concurrent");
-                  body = { first = -index - 1; limit = -inside };
-                  bound = [];
-                }
-                :: builder.fork_join_loops
-          | [] -> ())
-      | _ -> ())
-    body.blocks;
-  (* A parallel loop's body is the points of the blocks it runs, up to its
-     header. *)
+  (* A parallel loop's body is the points of the blocks it runs. *)
   builder.fork_join_loops <-
     List.map
       (fun (loop : fork_join_loop) ->
         if loop.body.limit < 0 then (
           let inside = -loop.body.limit in
-          let header = if loop.body.first < 0 then Some (-loop.body.first - 1) else None in
           let points = ref [] and visited = Hashtbl.create 8 in
           let rec visit block =
-            if (not (Hashtbl.mem visited block)) && Some block <> header then begin
+            if not (Hashtbl.mem visited block) then begin
               Hashtbl.replace visited block ();
               points := firsts.(block) :: lasts.(block) :: !points;
               match body.blocks.(block).terminator with
               | Iteration_end -> ()
-              | Each { after; _ } -> visit after
+              | For { after; _ } -> visit after
               | terminator -> List.iter visit (Mir.successors terminator)
             end
           in
