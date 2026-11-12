@@ -14,7 +14,7 @@ let () =
         (fun bug ->
           if bug.stage <> "Lower" || bug.message <> "no type for expression 7" || bug.doing <> []
           then fail "got %s" (Compiler_bug.to_string bug)));
-  test "a bug gathers what the compiler was doing, innermost first" (fun () ->
+  test "a bug gathers the compiler's context, innermost first" (fun () ->
       expect_bug
         (fun () ->
           Compiler_bug.while_doing ~stage:"Compile" "lowering a caller" (fun () ->

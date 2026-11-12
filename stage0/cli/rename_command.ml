@@ -166,7 +166,7 @@ let applied (project : Project.t) plan =
     (Project.modules project)
 
 (* A session of the worktree with the plan made, for checking it: a trial
-   that starts from the session's state, so only what the rename changes is
+   that starts from the session's state, so only the rename's changes are
    checked, and which is dropped after. Each module's text is given under
    the file it has after the plan, and the file of a module that moves is
    removed. *)

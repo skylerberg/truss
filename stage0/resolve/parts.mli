@@ -5,7 +5,7 @@
     definition of its own, with parts of its own. A part is broken when one of the definition's
     recovered spans lies in it: a span with width lies in every part it overlaps, and a zero-width
     one at [p] lies in the part that starts at [p] if there is one, and otherwise in the part with
-    [start <= p < stop]. A broken part is never checked, since its tree is not what the source says.
+    [start <= p < stop]. A broken part is never checked, since its tree does not match the source.
 *)
 
 type part =

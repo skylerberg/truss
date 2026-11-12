@@ -16,7 +16,7 @@ let cannot_run format = Printf.ksprintf (fun message -> raise (Cannot_run messag
 let manifest_name = "truss.toml"
 let absolute path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path
 
-(* A path with [.] and [..] parts worked out, and no trailing separator. *)
+(* A path with [.] and [..] parts resolved, and no trailing separator. *)
 let normalize path =
   let parts = String.split_on_char '/' (absolute path) in
   let segments =

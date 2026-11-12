@@ -1801,7 +1801,7 @@ public type AuthenticationError()
 
 impl Display for AuthenticationError {
   fn display(self, output: mut TextBuilder) {
-    mut output.write("the data is not what the key sealed")
+    mut output.write("the authentication tag does not match the data and key")
   }
 }
 

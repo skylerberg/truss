@@ -508,7 +508,7 @@ let () =
 (* Checking the engine *)
 
 let () =
-  test "an audit finds nothing in an engine whose queries are functions of what they read"
+  test "an audit finds nothing in an engine whose queries are pure functions of their reads"
     (fun () ->
       let engine, files, total = setup () in
       ignore (Engine.get engine total ());

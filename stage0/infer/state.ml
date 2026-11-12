@@ -394,7 +394,7 @@ let unsolved state =
       let report =
         reported state Cannot_infer
           (Span.make state.definition.span.start state.definition.span.start)
-          "A type in this definition cannot be worked out. Give the `let` a type, or the call type \
+          "A type in this definition cannot be inferred. Give the `let` a type, or the call type \
            arguments."
       in
       state.unsolved <- Some report;
@@ -597,7 +597,7 @@ let settle state frame =
   if unsolved <> [] then begin
     let report =
       reported state Cannot_infer frame.span
-        "The types in this statement cannot be worked out from it alone. Give the `let` a type, or \
+        "The types in this statement cannot be inferred from it alone. Give the `let` a type, or \
          the call type arguments, such as `var names: List[String] = []`."
     in
     if Option.is_none state.unsolved then state.unsolved <- Some report;

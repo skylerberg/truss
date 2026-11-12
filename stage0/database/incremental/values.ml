@@ -82,7 +82,7 @@ let fingerprint engine (node : node) =
           | exception Invalid_argument _ -> opaque ())
       | _ -> None)
 
-(* Puts a value's bytes in the store, if its fingerprint was worked out
+(* Puts a value's bytes in the store, if its fingerprint was computed
    before the engine had one. *)
 let ensure_stored engine (node : node) =
   match (engine.store, node.cell) with
@@ -111,8 +111,8 @@ let stored_bytes engine (node : node) =
   | Hashed { hash; _ }, Some store -> store.get hash
   | _ -> None
 
-(* An input's value, [None] for one that is not set. An input is what the
-   database gave, and cannot be computed again, so one whose value the store
+(* An input's value, [None] for one that is not set. An input's value
+   comes from the database and cannot be recomputed, so one whose value the store
    no longer has raises [Lost]: read as not set, it would give wrong
    results, which would be kept as facts. *)
 let input_value engine (cell : ('key, 'value) input_cell) : 'value option =

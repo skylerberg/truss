@@ -1358,7 +1358,8 @@ let () =
       | _ -> fail "expected code")
 
 let () =
-  test "a capability parameter stands for what the code it is given uses, wherever its type goes"
+  test
+    "a capability parameter stands for the capabilities its argument uses, wherever its type goes"
     (fun () ->
       let status, output, errors =
         run_main

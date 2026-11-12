@@ -40,7 +40,7 @@ let () =
       if List.length indexes <> 1 then fail "%d indexes" (List.length indexes);
       let again = Store.open_ directory in
       if Store.get again name <> Some "kept" then fail "lost after sealing");
-  test "a second store on one directory sees what the first adds" (fun () ->
+  test "a second store on one directory sees the first store's additions" (fun () ->
       let directory = fresh_directory () in
       let first = Store.open_ directory in
       let second = Store.open_ directory in
@@ -307,7 +307,7 @@ let () =
          ones are found. *)
       if Engine.computed engine doubled <> [] || Engine.computed engine reads_through <> [] then
         fail "computed [%s]" (String.concat "; " (Engine.executed engine)));
-  test "a result found as a fact reads what the computed one read" (fun () ->
+  test "a result found as a fact has the computed result's dependencies" (fun () ->
       let store, _ = written () in
       let engine = attached store in
       Engine.set engine value_input () 4;

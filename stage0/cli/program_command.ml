@@ -137,7 +137,7 @@ let build ~directory ~output ~json =
       let main = main project in
       refuse_holes ~json project main;
       (* Every proof the program reaches is done, the standard library's
-         included, so what they show is not checked again at run time. *)
+         included, so their obligations are not checked again at run time. *)
       let compile = Compiler.create ~checks:false project Release in
       refuse_unshippable ~json ~echo:true project compile main;
       let output =

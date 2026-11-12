@@ -1,6 +1,6 @@
 (* Lowers a function body from its core form.
 
-   The core form records what the type checker resolved: the callee of each
+   The core form records the results of name resolution and type checking: the callee of each
    call, whether each operand is a place or a value, and every type. So this
    lowering does no name resolution and no type inference. *)
 
@@ -1574,7 +1574,7 @@ and concurrent_for st ~origin ~(pattern : Core.pattern) ~iteration ~(body : Core
 (* Spawns one iteration of a [concurrent for] loop as a task. [f] lowers
    the iteration's body, and the task's argument is the current value of
    [loop.item]. If the group is already cancelled, [spawn] returns false:
-   [not_spawned] then releases what the item owns, and the enclosing code
+   [not_spawned] then drops the item, and the enclosing code
    breaks out of the loop that produces the items. *)
 and spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit)
     (function_type : unit -> unit) =
@@ -1605,8 +1605,8 @@ and spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit)
 
    If the loop owns the value ([owned]), it is moved, and the task owns
    and drops it. Otherwise the bytes are a bitwise copy of a borrowed
-   place, and the task never drops them: the place still owns what they
-   point at, and it outlives the task. *)
+   place, and the task never drops them: the place still owns the memory
+   they point to, and it outlives the task. *)
 and spawn_with_item st (loop : spawn_loop) (value : Lir.place) ~owned:is_owned
     ~(each : Lir.place -> unit) =
   let ty = loop.element in
@@ -2120,8 +2120,8 @@ and inline_lending st path type_arguments ~arguments ~call_site : Lir.place =
   in
   let reached = local st.builder (Raw (Integer UInt32)) in
   let lent = ref None and waiting = ref [] in
-  (* What the method's own scopes owned at a [yield] that the caller went
-     on from. *)
+  (* The places the method's own scopes owned at each [yield] the caller
+     resumed from. *)
   let owned_at_a_yield = ref [] in
   inline ~several st path type_arguments ~arguments ~call_site
     ~on_yield:(fun place ~owned:_ ~resume ~stop:_ ->

@@ -294,7 +294,7 @@ let open_ ~key ?pointer:name ?home ~version ~bases ~fingerprints () =
 
 (* A session that starts from another's state and changes on its own, for
    trying a change: the state is written, and opened again, so the two share
-   everything but what the trial changes. It is never saved. *)
+   everything but the trial's changes. It is never saved. *)
 let trial session =
   let state = current () in
   save session;

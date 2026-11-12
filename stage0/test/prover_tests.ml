@@ -549,7 +549,7 @@ let () =
         \  bump(mut point.x)\n\
         \  point.x + point.y\n\
          }\n");
-  test "a mut argument that is a field is known only by what the callee promises" (fun () ->
+  test "a mut argument that is a field is known only by the callee's postcondition" (fun () ->
       not_proven
         "type Point(x: Int64, y: Int64)\n\n\
          fn reset(value: mut Int64) {\n\
@@ -3093,10 +3093,10 @@ let () =
 (* Integer operations of the intrinsic module *)
 
 let () =
-  test "generic negation needs what the trait requires" (fun () ->
+  test "generic negation needs the trait method's precondition" (fun () ->
       not_proven "fn negate[Number: Negate](value: Number) -> Number.Output {\n  -value\n}\n"
         "prover.requires");
-  test "generic negation proves where what the trait requires holds" (fun () ->
+  test "generic negation proves where the trait method's precondition holds" (fun () ->
       proven
         "fn negate[Number: Negate](value: Number) -> Number.Output\n\
         \  requires value.negate_is_defined()\n\
@@ -3586,7 +3586,7 @@ let () =
       match check database (Support.module_of "app::main") with
       | [ { code; fixes = []; _ } ] when Diagnostic.Code.name code = "prover.assertion" -> ()
       | actual -> fail "%d diagnostics" (List.length actual));
-  test "an overflow names the fixes that change what the code means" (fun () ->
+  test "an overflow names the fixes that change the code's semantics" (fun () ->
       let actual = message "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
       if not (contains actual "checked operation") then fail "message %S" actual)
 

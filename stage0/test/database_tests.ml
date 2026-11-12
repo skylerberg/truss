@@ -655,7 +655,7 @@ let check_library library modules =
   Database.save_session library
 
 let () =
-  test "a library state opened again after an edit computes only what the edit reached" (fun () ->
+  test "a library state opened again after an edit recomputes only the edit's dependents" (fun () ->
       fresh_store ~empty:true ();
       let first = (library_module "first", library_function "first") in
       let second = (library_module "second", library_function "second") in

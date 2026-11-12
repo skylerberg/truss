@@ -50,7 +50,7 @@ touches. It follows [GOALS.md](GOALS.md) and the decisions in
 | `truss build` | Checks the package and builds its program for release, refusing any `todo` or `echo` `main` can reach |
 | `truss holes` | Lists every `todo`, with its type, the names in scope, and what it blocks |
 | `truss show` | Prints the signatures of a package, module, type, or definition |
-| `truss impact` | Lists what the worktree's changes from a base commit change, and what they reach |
+| `truss impact` | Lists the definitions the worktree's changes from a base commit modify, and their dependents |
 | `truss references`, `truss dependencies` | Lists what reads a definition, or what it reads, part by part |
 | `truss explain` | Says what is at a position: what a name means, its type, and the signature it refers to |
 | `truss overlap` | Lists where the worktree's changes meet other worktrees', or a branch's |
@@ -287,7 +287,7 @@ whose result is kept is not built or run again. External tests, those with
 - **`--timings`** lists every selected test, passing or not, with how long
   it took, slowest first, after the report. A cached test shows the
   duration of the run that kept its result, marked `cached`, so the list
-  says what the whole suite costs and not only what ran this time:
+  shows the whole suite's cost, not only this run's:
 
   ```text
   2.31s  weather::forecast "a year of hourly data"
@@ -473,7 +473,7 @@ Tests whose code changed: 1
 
 A definition is matched with its earlier self by its path, so a renamed
 definition is listed as removed and added. Two agents on the same
-repository can each run it and compare what they reach, and `truss overlap`
+repository can each run it and compare the dependents of their changes, and `truss overlap`
 does that for them. The JSON document is `{"format", "diagnostics",
 "problems", "base", "changes", "tests"}`, where each change has its path,
 `added`, `removed`, or `changed`, the parts that changed, its signature
@@ -513,7 +513,7 @@ truss overlap [--with BRANCH] [--merge] [--json]
 
 Lists where the worktree's changes from its common commit with another
 meet the other's, as DATABASE.md's "Parallel work" describes: a part both
-change, or a change of one that reads what the other changes, such as a
+change, or a change of one that depends on a change of the other, such as a
 new call to a function whose signature the other changes, which git merges
 cleanly and which breaks once merged. It compares with every other worktree
 of the repository that the background process has open, or with `--with`,
@@ -534,7 +534,7 @@ definition in its module and a method with its type. Renaming a module, as
 in `truss rename weather::forecast weather::outlook`, moves its file, and
 every `use` of it and every full path to it changes. The rename is made in
 a trial, a state that starts from the worktree's session and holds only
-what the rename changes, and is checked there first; it is refused, changing nothing, if it would
+the rename's changes, and is checked there first; it is refused, changing nothing, if it would
 cause any diagnostic, such as for a name that is taken, breaks a naming
 rule, or would hide another, which are the diagnostics a hand-made rename
 would cause. A worktree that already has diagnostics is refused too, since its
@@ -611,8 +611,8 @@ than the build's, and is the build's only if no package of the build was
 published with a higher one.
 
 The new versions are checked before the lock file is written, in a state of
-their own that starts from the project's session and holds what they
-change, as a rename is checked. The command prints:
+their own that starts from the project's session and holds their
+changes, as a rename is checked. The command prints:
 
 - **What changes in the lock file:** each package that moves, enters, or
   leaves, and each that would hold a capability it did not.
@@ -780,8 +780,8 @@ process" describes, and the command line is its client:
   is the one the command's directory is in, which is the current directory
   or the one `-C` names. Each project has a process of its own, so commands
   in different worktrees are answered at once. The command sends the
-  command line and the current directory, and shows what the process
-  answers. It runs the command line's own code, from that
+  command line and the current directory, and prints the process's
+  answer. It runs the command line's own code, from that
   directory, so the answer is the same as in the command's own process.
   What a command writes to standard error, such as the status line, comes
   to the command as it is written, and its output and exit status when it is

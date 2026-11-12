@@ -1,4 +1,4 @@
-(* [truss impact]: what the worktree's changes from a base commit reach.
+(* [truss impact]: the dependents of the worktree's changes from a base commit.
 
    The worktree's session is compared with a session of the base commit:
    every result a changed input can reach is brought up to date and

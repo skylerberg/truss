@@ -978,8 +978,6 @@ let () =
             (Query.demand database Resolve.Names.declarations module_))
         Standard_library.modules)
 
-(* What the review of body checking found *)
-
 let point = "type Point(x: Int64)\n\n"
 
 let () =
@@ -1641,7 +1639,7 @@ let () =
          \  let source: any Source[Item = Int64] = any input\n\
          \  source.first()\n\
           }\n"));
-  test "an associated type a bound fixes works out a type argument" (fun () ->
+  test "an associated type a bound fixes infers a type argument" (fun () ->
       fine
         (source
        ^ "fn first_of[Input: Source[Item = Output], Output](input: Input) -> Output {\n\

@@ -25,8 +25,8 @@ let add_views (held_views : held_views) holder views : held_views =
 
 (* Whether a local is an alias of another place: a [let] bound to a place, a
    pattern binding of a part of a place, or a loop variable bound to an
-   element. A parameter is not an alias: the function does not know what the
-   caller passed. *)
+   element. A parameter is not an alias: the function does not know its
+   argument. *)
 let aliases_place context (root : Place.root) =
   match root with
   | Local local ->
@@ -507,8 +507,8 @@ let check context (graph : Graph.t) : task_hazard option =
                     report context View_crosses_capability at
                       (Printf.sprintf
                          "This stores a view of `%s` in a capability implementation. The caller \
-                          cannot see the implementation, so it could mutate or drop what the view \
-                          borrows while the implementation still stores the view. Store a copy."
+                          cannot see the implementation, so it could mutate or drop the view's \
+                          original while the implementation still stores the view. Store a copy."
                          (show_root context stored_view.place.root))
                 | None, Some _, _ ->
                     report context Self_referential at

@@ -475,7 +475,7 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
             "a storage's capacity set to less than its length";
           set_capacity storage (value 1)
       | Storage_lengthen ->
-          (* The new elements are what the C library wrote into the room. *)
+          (* The new elements are the ones the C library wrote into the spare capacity. *)
           let storage = place (argument 0) in
           if checks then
             panic_if
@@ -896,8 +896,8 @@ let lower ?(checks = false) ?(value_arguments = []) env builder types operation 
                 | Fixed number -> number_constant number)
               parameters
           in
-          (* A checked build makes sure of what the prover holds each call
-             to: a view has the elements that the function reads, and a
+          (* A checked build checks the prover's preconditions for each
+             call: a view has the elements that the function reads, and a
              storage has the room that it writes into, or the elements that
              it changes. A function that reads up to a zero is given
              elements that end with one. *)

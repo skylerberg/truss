@@ -108,7 +108,7 @@ type overlap =
   | Reads of { this_worktree : bool; change : place; reads : place }
 
 (* Where two states' changes from a common base meet: each node both
-   changed, and each node one changed that reads what the other changed. *)
+   changed, and each node one changed that depends on a node the other changed. *)
 let overlaps ~base mine theirs =
   let changed engine =
     List.filter_map

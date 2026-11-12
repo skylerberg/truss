@@ -141,7 +141,7 @@ and named cursor start =
 (* [Shape.Circle(radius)] and [Shape::Circle(radius)]: a variant written
    with its type, as an expression names it and as Rust and Swift write a
    pattern. The qualifier is reported, and the result is the variant alone,
-   which is what the fix leaves. *)
+   as after the fix. *)
 and unqualified_variant cursor start (path : path) =
   let rec last_name (qualified : Token.t option) =
     match (Cursor.peek_kind cursor, Cursor.token_at cursor (cursor.index + 1)) with

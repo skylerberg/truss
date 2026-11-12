@@ -492,8 +492,6 @@ let () =
         Resolve.resolved
         [ Support.top_key "app::main" "first" ])
 
-(* What the review of resolution found *)
-
 let () =
   test "a method in another file of its type's package is resolved, and its import counts"
     (fun () ->

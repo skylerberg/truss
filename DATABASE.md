@@ -11,8 +11,6 @@ command line, which [CLI.md](CLI.md) describes, is its client, and the only
 program it serves: the database is a library, and every command and report
 is the command line's.
 
-## What the database does
-
 GOALS.md asks that a change cost O(change), not O(project), for building,
 testing, and verifying, and that agents can see exactly what their changes
 affect and where their work overlaps with other agents'. The database is what
@@ -99,8 +97,8 @@ each layer can be replaced without touching the others:
   manifests and module files, and sets the packages and their modules' text.
   It does not depend on code generation or the prover.
 - **A driver sets a stage's input through its session,** with
-  `Database.set`, and that is the one way: the roots code generation
-  searches from and what the solver said are set so. A stage declares the
+  `Database.set`, and that is the one way: the roots of code
+  generation and the solver's answers are set so. A stage declares the
   input; the database needs no function for it. Inputs are the only way
   anything outside the stages reaches them.
 - **A driver holds no engine.** The command line reads through a session's
@@ -218,7 +216,7 @@ compare those counts for the same edit in a small package and a large one
   through `Engine.observer` computes the result if the state has none, and
   the result is collected again unless something else makes it necessary.
   Comparing two states, and finding a definition by name, observe: a
-  question about a state does not change what the state maintains.
+  question about a state does not change the results it maintains.
 - **A read made outside any query first brings the engine up to date
   through the phase of what it reads,** so a driver never sees a result that
   a change has not reached yet. Later phases keep what is queued for them
@@ -238,7 +236,7 @@ compare those counts for the same edit in a small package and a large one
 
 Jane Street's Incremental pushes changes in the order of each node's height
 in the graph, and stops where a value is unchanged. Truss's phases are that
-order, fixed by the compiler's structure and not worked out for each node:
+order, fixed by the compiler's structure and not computed for each node:
 a query cannot come to read something above it, so heights never have to be
 maintained, and a query never has to be stopped and started again. Within a
 phase the engine marks the way Adapton does, and brings each marked result
@@ -378,7 +376,7 @@ inputs: they are queries over the files, in `Project`, of the first phase.
 | A file's stamp | Its path from the project's root | What says the file has not changed: for a file on disk, its size, modification time, and inode; for a commit's or a trial's, the hash of its text |
 | An unavailable package | The hash of its files | Why a registry package's files could not be had |
 | The wanted keys | How instances are lowered | The tests and programs whose keys a driver is about to demand |
-| What the solver said | A request's key | The answer |
+| A solver answer | A request's key | The answer |
 
 A *root* is a tree of files: the project being worked on, the standard
 library, or a registry package's files. The last two inputs are stages': a
@@ -391,7 +389,7 @@ stage declares an input, and a driver sets it through its session.
 | `Project.build` | Where each package of the build is: its root and directory |
 | `Project.package`, of a name | A package's dependencies, grants, `usize_bits`, and modules |
 | `Project.module_text`, of a module | The text of the module's file |
-| `Project.problems` | What the project's manifests and lock file show to be wrong |
+| `Project.problems` | The errors in the project's manifests and lock file |
 
 - **The stages read a package and a module's text as queries.** A stage
   cannot tell a project's package from a registry package or the standard
@@ -440,13 +438,13 @@ from one that is.
   key's input is never read as that key's result. A changed key format
   takes a new context, and keys of the old format stop matching instead of
   being misread.
-- **A fingerprint is worked out when it is first needed:** when the state is
+- **A fingerprint is computed when it is first needed:** when the state is
   written, or when a result that read the node is looked for as a fact.
 - **A result that was not read back is compared by fingerprint.** A state
   opened from the store holds fingerprints, and reads a value only when
   something asks for it. A result computed again there is compared with the
   fingerprint it had, so nothing is read from the store only to be compared.
-- **A value's bytes follow from what the value is, and nothing else.** Stage0
+- **A value's bytes depend only on the value.** Stage0
   makes them with OCaml's marshaling, written without sharing. Marshaling
   otherwise records which parts of a value are one block in memory, and that
   differs between a value computed from results in memory and the same value
@@ -536,8 +534,8 @@ its hash like any other:
   reach, apart from those of its fixed bases: each node's name and key, its
   fingerprint, what it read, as places in a table of names, and whether it
   is a root.
-- **A difference** names an earlier artifact and holds what the engine
-  itself holds and changed since: the nodes it computed, found as facts, or
+- **A difference** names an earlier artifact and holds the engine's own
+  nodes that changed since: the nodes it computed, found as facts, or
   set, those that became or stopped being roots, and the names of those it
   collected.
 
@@ -633,8 +631,8 @@ the library as a state of its own instead:
   version is a digest of the compiler's source and of what it is built
   with: the OCaml compiler, the build profile, the target, and the linked
   libraries. Tests, tools, and the library's text are left out. So an edit
-  to the library keeps the version, and the state computes only what the
-  edit reached; a change to the compiler gives a new version.
+  to the library keeps the version, and the state recomputes only the
+  edit's dependents; a change to the compiler gives a new version.
 - **The state is opened from a pointer the caller names,** so each caller,
   such as each share of the library's proofs, keeps a state of its own.
 - **It is folded when it is opened,** as a command run in its own process
@@ -938,8 +936,8 @@ built again, since the new compiler's clients start processes of their own.
 - **A worktree with no state near it** is checked from the files, over the
   standard library's artifact, and finds as a fact every result that any
   state computed from the same reads.
-- **A state is first written when a command is done,** with what the command
-  computed, so that the first artifact is a whole state.
+- **A state is first written when a command is done,** with the command's
+  results, so that the first artifact is a whole state.
 - **An idle session is written and dropped from memory** after an hour
   without requests, and opened again when next needed.
 
@@ -1031,7 +1029,7 @@ from the base's is that worktree's *change*. The two overlap where:
    definition, even on different lines, and two additions that answer one
    lookup, such as the two `find` methods, which both change the members of
    `List` named `find`.
-2. **One changed a node that reads what the other changed.** B's new
+2. **One changed a node that depends on a node the other changed.** B's new
    `quadruple` has a body that reads the signature of `parse`, and A changed
    that signature, so the database says "this worktree's change to the body
    of `quadruple` reads the signature of `parse`, which the other changes".
@@ -1078,7 +1076,7 @@ with the same inputs.
 - **Every test audits.** The test harness audits every engine a test made,
   when the test ends. So each test of each stage also tests that the
   database kept every result current, and that the stage's queries are
-  functions of what they read: a query that read something it did not go
+  pure functions of their reads: a query that read something it did not go
   through its context for would come out different in the new engine.
 - **Counts of work.** The engine counts what it marks, finds current,
   computes, finds as facts, copies, and collects. Tests make the same edit in a
@@ -1087,7 +1085,7 @@ with the same inputs.
   definition. They compare counts, never times, so they are the same on
   every machine.
 - **The fuzzer.** `stage0/tools/engine_fuzz` makes a random graph of
-  queries, whose reads depend on what they have read, over a few inputs, and
+  queries with dynamic dependencies over a few inputs, and
   makes random steps: it sets and removes inputs, asks for and releases
   results, writes the state and opens it again, and opens a second engine
   from the same state. After each step it audits each engine against one
@@ -1096,8 +1094,8 @@ with the same inputs.
   finds becomes a focused test.
 - **Times.** `stage0/tools/database_timing` makes a package of a given size
   in a store of its own and times a first check, writing the state, opening
-  it as a new process does, and three edits, each with what the engine
-  computed and found. It is a tool, run by hand, for work the counts do not
+  it as a new process does, and three edits, each with the counts of
+  results computed and found as facts. It is a tool, run by hand, for work the counts do not
   show, such as what is done for each reader of a result. No document
   records what it prints.
 
@@ -1149,8 +1147,8 @@ with the same inputs.
   package's content and the keys of the packages it depends on, and each a
   fixed base under every state that uses it, as the standard library is.
   A registry package's files are inputs of each session that uses it. A
-  second project that uses one finds as facts what the first computed of
-  it, and still holds its own nodes for them.
+  second project that uses one finds as facts the results the first
+  computed for it, and still holds its own nodes for them.
 - **Collecting registry packages.** A package's files stay in the store
   when no lock file names them any more.
 - **Artifacts read in part.** A whole state is one value, read whole to open

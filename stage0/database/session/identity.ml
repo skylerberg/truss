@@ -3,7 +3,7 @@
    key of every fact holds it, and each worktree's pointer and the
    background process's socket are named by it. The hash is remembered by
    the executable's path, size, modification and change times, and inode, so that it is
-   worked out once per build of the compiler. *)
+   computed once per build of the compiler. *)
 
 let executable () =
   try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> Sys.executable_name
