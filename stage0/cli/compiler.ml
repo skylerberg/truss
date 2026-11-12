@@ -18,6 +18,18 @@ let target () =
   | Some system -> Memory_layout.target_64 system
   | None -> Project.cannot_run "Stage0 builds programs only for Linux and macOS."
 
+(* Adds the instances a compiler asks keys for to the session's roots. *)
+let want session context lowering wanted =
+  Database.set session Compile.roots lowering (Compile.add_roots context lowering wanted)
+
+(* A compiler that lowers code and compiles nothing, so it needs no C
+   compiler. *)
+let lowering_only session context =
+  Compile.create ~want:(want session context) context (target ())
+    { compiler = "cc"; identity = "lowering only" }
+    (Build.cache (Database.objects_directory ()))
+    { build = Development; optimization = O1; extra = [] }
+
 (* A development build compiles at -O1, one C file per instance. A release
    build compiles at -O2 with link-time optimization. A build checks every
    fallible primitive operation at run time unless [checks] is false, which
@@ -45,9 +57,7 @@ let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
   in
   let own = List.map snd (Database.packages project.session) in
   Compile.create ~checks ~file_name
-    ~want:(fun lowering wanted ->
-      Database.set project.session Compile.roots lowering
-        (Compile.add_roots project.context lowering wanted))
+    ~want:(want project.session project.context)
     ~worked_on:(fun package -> List.mem package own)
     project.context (target ()) toolchain
     (Build.cache (Database.objects_directory ()))

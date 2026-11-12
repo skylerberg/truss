@@ -530,12 +530,7 @@ let () =
 
 (* Building *)
 
-(* Lowers code and compiles nothing, so it needs no C compiler. *)
-let lowering (project : Project.t) =
-  Compile.create project.context (Compiler.target ())
-    { compiler = "cc"; identity = "lowering only" }
-    (Build.cache (Database.objects_directory ()))
-    { build = Development; optimization = O1; extra = [] }
+let lowering (project : Project.t) = Compiler.lowering_only project.session project.context
 
 let () =
   test "a todo main can reach is refused, with the way from main to it" (fun () ->
@@ -801,6 +796,14 @@ let () =
                  dependents)
           then fail "four does not read it"
       | _ -> fail "double did not change its signature");
+  test "impact lists the tests a change reaches" (fun () ->
+      let root = repository doubling in
+      rewrite root "main.truss" (replace doubling "value * 2" "value + value");
+      let status, output =
+        captured (fun () -> Impact_command.run ~directory:root ~base:None ~json:false)
+      in
+      if status <> 0 then fail "status %d: %s" status output;
+      if not (contains output "Tests whose code changed: 1") then fail "wrote %s" output);
   test "moving a definition within its file changes nothing" (fun () ->
       let one = Fixtures.one and two = Fixtures.moving_a_definition_within_its_file_changes in
       let root = repository (one ^ "\n" ^ two) in
