@@ -1642,7 +1642,7 @@ let folds what ~folded ~run source =
         Lower.context ~checks:true database target_64 ~constant:(fun context path ->
             match Lower.constant context path with Folded data -> Some data.value | Run _ -> None)
       in
-      let value = context.constant in
+      let value = Lower.constant_value context in
       let constant name : Path.t = Top { module_ = example; name } in
       List.iter
         (fun name -> if value (constant name) = None then fail "%s is run, and should fold" name)

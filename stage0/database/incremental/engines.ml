@@ -144,7 +144,7 @@ let same_outcome engine (left : node) other (right : node) =
   | Result (query, mine), Result (other_query, theirs) -> (
       match Type.Id.provably_equal query.cells other_query.cells with
       | Some Type.Equal -> (
-          match (left.fingerprint, right.fingerprint) with
+          match (hash_of left.fingerprint, hash_of right.fingerprint) with
           | Some mine, Some theirs when mine = theirs -> true
           | _ -> (
               match (load engine mine, load other theirs) with
