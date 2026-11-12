@@ -11,8 +11,8 @@
    on, the width of [USize] and [ISize], and the system whose C library it
    calls. The widths differ only for code built to run while compiling for
    a target whose [USize] is narrower than the host's pointers: such code
-   runs on the host, with the target's [USize], so that it computes what the
-   target would. *)
+   runs on the host, with the target's [USize], so that it computes the
+   target's results. *)
 type target = { pointer_bytes : int; usize_bytes : int; system : Libc.system }
 
 val target_64 : Libc.system -> target

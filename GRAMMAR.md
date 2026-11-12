@@ -570,7 +570,7 @@ update     = LOWER_NAME { "." LOWER_NAME } ":" expression
   through an annotation instead.
 - `name[...]` is parsed the same way whether it indexes or gives type
   arguments. Name resolution decides which (see
-  [What the grammar leaves to later stages](#what-the-grammar-leaves-to-later-stages)).
+  [Constructs resolved after parsing](#constructs-resolved-after-parsing)).
 - A range with a missing start or end is allowed only directly in brackets,
   as in `items[2..]`.
 - An `argument` without a label is either the first argument, or a bare name
@@ -660,7 +660,7 @@ signature without a body, and a statement. The tests check every example
 against it, piece by piece, and check the parser against it (see
 [PARSER.md](PARSER.md#recursive-descent-with-no-backtracking)).
 
-## What the grammar leaves to later stages
+## Constructs resolved after parsing
 
 The parser builds the same tree for some constructs that mean different
 things. These are decided afterward, without changing the tree's shape:
@@ -673,6 +673,6 @@ things. These are decided afterward, without changing the tree's shape:
 | Whether an expression after `mut` or `own` starts with a place | Name resolution | It must start with a variable, a parameter, `self`, or a constant, followed by fields and indexes. |
 | A variant in a pattern | Type checking | Looked up in the type of the matched value. |
 | A method call or field | Type checking | Looked up in the type of the receiver. |
-| An `impl` for a trait with type parameters | Type checking | Chosen by the argument types, worked out first, with a literal operand taking the type of the other operand. |
+| An `impl` for a trait with type parameters | Type checking | Chosen by the argument types, inferred first, with a literal operand taking the type of the other operand. |
 | The cost words, `log`, `power`, `result`, `old` | The parser and name resolution | Names to the lexer. The parser checks their spelling where a `cost` clause expects them, and name resolution gives `log`, `power`, `time(...)`, `calls(...)`, `result`, and `old` their meaning in specifications. |
 | The expected type of `[...]` | Type checking | `List` unless an `Array` or `Set` is expected. |

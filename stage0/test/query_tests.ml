@@ -147,7 +147,7 @@ let () =
   test "readers and reads are the edges in both directions" (fun () ->
       let engine, _, total = setup () in
       ignore (Engine.get engine total ());
-      let node label = List.find (fun n -> Engine.label n = label) (Engine.nodes engine) in
+      let node label = List.find (fun node -> Engine.label node = label) (Engine.nodes engine) in
       if labels (Engine.reads engine (node "total()")) <> [ "parity(a)"; "parity(b)" ] then
         fail "reads";
       if labels (Engine.readers engine (node "length(a)")) <> [ "parity(a)" ] then fail "readers")
@@ -230,25 +230,25 @@ let () =
       let engine = Engine.create () in
       let flag = Query.input ~name:"flag" ~show:(fun () -> "") () in
       let value = Query.input ~name:"value" ~show:(fun () -> "") () in
-      let x = unit_query "x" (fun database () -> Query.get database value ()) in
-      let y =
+      let x_query = unit_query "x" (fun database () -> Query.get database value ()) in
+      let y_query =
         unit_query "y" (fun database () ->
-            if Query.get database flag () then Query.demand database x () else 0)
+            if Query.get database flag () then Query.demand database x_query () else 0)
       in
-      let n =
+      let node =
         unit_query "n" (fun database () ->
-            if Query.get database flag () then Query.demand database y ()
+            if Query.get database flag () then Query.demand database y_query ()
             else
-              let direct = Query.demand database x () in
-              direct + Query.demand database y ())
+              let direct = Query.demand database x_query () in
+              direct + Query.demand database y_query ())
       in
       Engine.set engine flag () true;
       Engine.set engine value () 1;
-      ignore (Engine.get engine n ());
+      ignore (Engine.get engine node ());
       Engine.set engine flag () false;
       ignore (Engine.stabilize engine);
       Engine.set engine value () 99;
-      let result = Engine.get engine n () in
+      let result = Engine.get engine node () in
       if result <> 99 then fail "n is %d" result);
   test "a result is collected once the query that stopped reading it has ended" (fun () ->
       let engine = Engine.create () in
@@ -350,15 +350,18 @@ let () =
   test "a cycle that appears later reaches every query on it" (fun () ->
       let engine = Engine.create () in
       let toggle = Query.input ~name:"toggle" ~show:(fun () -> "") () in
-      let rec d =
+      let rec d_query =
         lazy
           (unit_query "d" (fun database () ->
-               if Query.get database toggle () then Query.demand database (Lazy.force e) () else 1))
-      and e = lazy (unit_query "e" (fun database () -> Query.demand database (Lazy.force d) ())) in
+               if Query.get database toggle () then Query.demand database (Lazy.force e_query) ()
+               else 1))
+      and e_query =
+        lazy (unit_query "e" (fun database () -> Query.demand database (Lazy.force d_query) ()))
+      in
       Engine.set engine toggle () false;
-      if Engine.get engine (Lazy.force e) () <> 1 then fail "no value before the cycle";
+      if Engine.get engine (Lazy.force e_query) () <> 1 then fail "no value before the cycle";
       Engine.set engine toggle () true;
-      match Engine.get engine (Lazy.force e) () with
+      match Engine.get engine (Lazy.force e_query) () with
       | _ -> fail "no cycle once it appeared"
       | exception Query.Cycle _ -> ());
   test "a query that raises is computed again when what it read changes" (fun () ->
@@ -508,7 +511,7 @@ let () =
 (* Checking the engine *)
 
 let () =
-  test "an audit finds nothing in an engine whose queries are functions of what they read"
+  test "an audit finds nothing in an engine whose queries are pure functions of their reads"
     (fun () ->
       let engine, files, total = setup () in
       ignore (Engine.get engine total ());

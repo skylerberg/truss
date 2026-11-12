@@ -321,8 +321,10 @@ let () =
       let directory = package () in
       write directory "truss.toml" "[package]\nname = \n";
       let session, _ = session directory in
-      if not (List.exists (fun p -> contains p "truss.toml:2") (Database.problems session)) then
-        fail "problems: [%s]" (String.concat "; " (Database.problems session)));
+      if
+        not
+          (List.exists (fun problem -> contains problem "truss.toml:2") (Database.problems session))
+      then fail "problems: [%s]" (String.concat "; " (Database.problems session)));
   test "a package cannot depend on one that runs only on 64-bit targets unless it does too"
     (fun () ->
       fresh_store ();
@@ -336,7 +338,7 @@ let () =
       if
         not
           (List.exists
-             (fun p -> contains p "runs only on 64-bit targets")
+             (fun problem -> contains problem "runs only on 64-bit targets")
              (Database.problems session))
       then fail "problems: [%s]" (String.concat "; " (Database.problems session)));
   test "a session opened in a package's directory is about that package alone" (fun () ->
@@ -530,9 +532,9 @@ let () =
             fail "double's signature is not changed: %s"
               (String.concat "; "
                  (List.map
-                    (fun (path, part, d) ->
+                    (fun (path, part, digest) ->
                       Printf.sprintf "%s %s %s" (Path.show path) (Option.value part ~default:"-")
-                        (match d with
+                        (match digest with
                         | Database.Changed -> "changed"
                         | Added -> "added"
                         | Same -> "same"))
@@ -569,7 +571,7 @@ let () =
               (String.concat "; "
                  (List.map
                     (function
-                      | Database.Both_change p -> "both " ^ p.label
+                      | Database.Both_change problem -> "both " ^ problem.label
                       | Reads { this_worktree; change; reads } ->
                           Printf.sprintf "%b %s %s" this_worktree change.label reads.label)
                     overlaps)));
@@ -655,7 +657,7 @@ let check_library library modules =
   Database.save_session library
 
 let () =
-  test "a library state opened again after an edit computes only what the edit reached" (fun () ->
+  test "a library state opened again after an edit recomputes only the edit's dependents" (fun () ->
       fresh_store ~empty:true ();
       let first = (library_module "first", library_function "first") in
       let second = (library_module "second", library_function "second") in

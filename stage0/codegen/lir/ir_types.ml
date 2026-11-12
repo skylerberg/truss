@@ -222,7 +222,7 @@ type statement =
       (** Before outlining only. Where a region of a [parallel] statement starts. Its code runs from
           here to the next [Region] or the [Regions_end] of the same [fork], which is its one way
           out, and the regions of a fork touch no place that another changes. Run in place, in
-          order, the regions mean what the statement means. *)
+          order, the regions have the statement's semantics. *)
   | Regions_end of { fork : int }  (** Before outlining only. Where a fork's last region ends. *)
   | Fork of { branches : (int * operand) list }
       (** Runs each nested function, given the address of its environment, and continues when all

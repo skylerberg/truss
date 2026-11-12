@@ -214,6 +214,12 @@ type operation =
           that takes nothing: [libc_o_creat()] *)
 
 val operations : operation list
+
+val primitive : operation -> bool
+(** Whether an operation is a primitive operation on built-in values: arithmetic, comparison,
+    conversion, and the bitwise and float operations. Its result depends only on its operands, it
+    changes nothing, and an operator such as [+] means the same operation. *)
+
 val operation_name : operation -> string
 val operation_path : operation -> Path.t
 val operation_of_path : Path.t -> operation option

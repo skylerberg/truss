@@ -200,7 +200,7 @@ let macro_call cursor ~(name : name) ~(bang : Token.t) ~(opening : Token.t) =
   | _ -> Cursor.report cursor Macro_call bang.span message
 
 (* [todo!()] and [unreachable!()]: the keyword alone is the expression. With
-   arguments, removing them would lose what they say, so there is no fix. *)
+   arguments, removing them would lose the message, so there is no fix. *)
 let keyword_macro cursor ~(bang : Token.t) ~(closing : Token.t) ~empty =
   let message = "Truss has no macros. `todo` and `unreachable` are written without `!()`." in
   if empty then

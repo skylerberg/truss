@@ -77,7 +77,7 @@ type kind =
   | Library  (** The standard library as a state of its own *)
   | Published  (** A published package with the packages it was published with *)
 
-(* What the database keeps with a session of the session layer. *)
+(* The database's state for a session of the session layer. *)
 type project = {
   kind : kind;
   update : Session.t -> unit;  (** Brings the inputs in line with the session's files *)
@@ -441,8 +441,8 @@ let open_session directory =
             (* Before any command holds the session's engine. *)
             Session.compact ~waited_for:true session;
             update session;
-            (* The state is written when the command is done, with what the
-               command computed, so that a first write holds a whole state. *)
+            (* The state is written when the command is done, with the
+               command's results, so that a first write holds a whole state. *)
             ignore (Engine.stabilize (Session.engine session));
             Ok (session, target_packages session (relative_to root directory)))
 
@@ -609,7 +609,7 @@ let overlap_with session other =
 
 (* A session that starts from another's state, with other files: some of
    its files replaced, added, or, with [None], removed. It shares with the
-   session everything but what the change reaches, and is never saved, so a
+   session everything but the change's dependents, and is never saved, so a
    change, such as a rename or another lock file, is tried before any file
    is written. *)
 let trial_over session (files : Files.t) =

@@ -185,8 +185,8 @@ and type_argument_of_expression state (value : expression) : Types.argument =
           Types.Type
             (error state Arity value.span
                (Printf.sprintf
-                  "The value of `%s` cannot be worked out: a constant used in a type cannot refer \
-                   to itself, and is made of literals, arithmetic, and other such constants."
+                  "The value of `%s` cannot be computed: a constant used in a type cannot refer to \
+                   itself, and is made of literals, arithmetic, and other such constants."
                   name.text)))
   | _ -> (
       match static_ state value with

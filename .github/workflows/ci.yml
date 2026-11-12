@@ -160,9 +160,9 @@ jobs:
             solver-share-${{ matrix.share }}-
             solver-
 
-      # What the last run on main worked out for this share, kept in the code
-      # database's store, so that a run works out only what an edit to the
-      # library changed. A state is read only by the compiler that wrote it,
+      # The state the last run on main saved for this share, kept in the
+      # code database's store, so that a run recomputes only the dependents
+      # of an edit to the library. A state is read only by the compiler that wrote it,
       # so the key names the compiler's sources, and a change to them starts
       # from nothing and leaves the old states behind.
       - uses: actions/cache/restore@v6.1.0

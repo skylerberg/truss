@@ -1,5 +1,3 @@
-(* The command line, rewritten for the argument parser. *)
-
 (* [truss -C DIRECTORY COMMAND ...] is parsed as [truss COMMAND -C
    DIRECTORY ...], as in git. *)
 let leading_directory = function

@@ -53,7 +53,8 @@ let no_diagnostics files =
       | [] -> ()
       | reported ->
           fail "%s: %s" name
-            (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) reported)))
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) reported)))
     files
 
 (* The one diagnostic of the file [app::main], with its code, and, if
@@ -491,8 +492,6 @@ let () =
           ignore (Resolve.diagnostics database module_))
         Resolve.resolved
         [ Support.top_key "app::main" "first" ])
-
-(* What the review of resolution found *)
 
 let () =
   test "a method in another file of its type's package is resolved, and its import counts"
