@@ -61,6 +61,10 @@ val declarations : (Path.module_, declaration list) Query.query
 module Member_map : Map.S with type key = Path.t * string
 
 val package_declarations : (Path.package, declaration list) Query.query
+
+val impl_types : (Path.module_, (Path.t option * Path.t) list) Query.query
+(** Each [impl] of a module, with the type its head names, if it names one. *)
+
 val traits_declaring : (Path.package * String_map.key, Path.t list) Query.query
 val members : (Path.t * string, key list) Query.query
 

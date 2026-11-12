@@ -339,6 +339,23 @@ let owner database ~from (head : type_head) =
   | Some path -> path
   | None -> top from (spell_path head.path)
 
+(* Each [impl] of a module, with the type its head names, from the head as
+   written: what an [impl]'s interface resolves its type to, read without
+   lowering the interface. *)
+let impl_types =
+  Query.query ~name:"impl_types" ~phase:Phases.declarations ~saved:true ~show:Path.show_module
+    (fun database module_ ->
+      List.filter_map
+        (fun (item : definition Syntax.item) ->
+          match item.value.kind with
+          | Impl { trait_; type_; _ } ->
+              Some
+                ( head_type database ~from:module_ type_.path,
+                  (Impl { module_; trait = spell_path_type trait_; for_type = spell_head type_ }
+                    : Path.t) )
+          | _ -> None)
+        (Query.demand database Workspace.file module_).definitions)
+
 let declarations =
   Query.query ~name:"declarations" ~phase:Phases.declarations ~show:Path.show_module ~saved:true
     (fun database module_ ->
