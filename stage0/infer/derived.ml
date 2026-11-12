@@ -53,14 +53,7 @@ let form database (path : Path.t) : Core.t option =
           in
           let arm found body : Core.arm = { patterns = [ found ]; guard = None; body; origin } in
           let self_type = interface.for_type in
-          let bounds (parameter : T.parameter) =
-            List.concat_map
-              (fun (generic : T.generic) ->
-                match generic.kind with
-                | Type_generic bounds when generic.generic = parameter -> bounds
-                | _ -> [])
-              interface.impl_generics
-          in
+          let bounds = T.bounds_of interface.impl_generics in
           let result =
             match signature.output with
             | Returns type_ -> type_

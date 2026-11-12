@@ -53,12 +53,6 @@ type t = {
   used : (string, unit) Hashtbl.t;  (** Results this process read or added *)
 }
 
-let rec make_directory path =
-  if not (Sys.file_exists path) then begin
-    make_directory (Filename.dirname path);
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
 let segments_directory t = Filename.concat t.root "segments"
 let directory t = t.root
 
@@ -73,8 +67,6 @@ let default_directory () =
             Option.value (Sys.getenv_opt "HOME") ~default:(Filename.get_temp_dir_name ())
           in
           Filename.concat (Filename.concat home ".cache") "truss")
-
-let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 (* Reading records *)
 
@@ -179,7 +171,7 @@ let find_in segment key =
 
 let load_segment path =
   let segment = { path; index = None; table = Hashtbl.create 64; scanned = 0; channel = None } in
-  (match read_file (index_path path) with
+  (match File_system.read (index_path path) with
   | index when String.length index mod entry_width = 0 -> segment.index <- Some index
   | _ | (exception Sys_error _) -> scan segment);
   segment
@@ -212,7 +204,7 @@ let refresh t =
     (fun s ->
       if s.index = None then
         if Sys.file_exists (index_path s.path) then
-          begin match read_file (index_path s.path) with
+          begin match File_system.read (index_path s.path) with
           | index when String.length index mod entry_width = 0 -> s.index <- Some index
           | _ | (exception Sys_error _) -> scan s
           end
@@ -227,17 +219,12 @@ let writer_name () =
   Random.self_init ();
   Printf.sprintf "%d-%d-%06x" (Unix.getpid ()) (int_of_float (Unix.time ())) (Random.bits ())
 
-let rec write_all descriptor bytes offset =
-  if offset < String.length bytes then
-    let written = Unix.write_substring descriptor bytes offset (String.length bytes - offset) in
-    write_all descriptor bytes (offset + written)
-
 let new_writer t =
-  make_directory (segments_directory t);
+  File_system.make_directory (segments_directory t);
   let path = Filename.concat (segments_directory t) (writer_name () ^ ".segment") in
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC ] 0o644 in
   Unix.lockf descriptor F_LOCK 0;
-  write_all descriptor header 0;
+  File_system.write_all descriptor header;
   let segment =
     {
       path;
@@ -255,7 +242,7 @@ let pending_limit = 1024 * 1024
 
 let drain writer =
   if Buffer.length writer.pending > 0 then begin
-    write_all writer.descriptor (Buffer.contents writer.pending) 0;
+    File_system.write_all writer.descriptor (Buffer.contents writer.pending);
     Buffer.clear writer.pending
   end
 
@@ -273,10 +260,7 @@ let write_index segment =
       Buffer.add_int64_le buffer (Int64.of_int offset);
       Buffer.add_int32_le buffer (Int32.of_int length))
     entries;
-  let path = index_path segment.path in
-  let temporary = path ^ ".partial" in
-  Out_channel.with_open_bin temporary (fun out -> Buffer.output_buffer out buffer);
-  Sys.rename temporary path;
+  File_system.write_atomically (index_path segment.path) (Buffer.contents buffer);
   segment.index <- Some (Buffer.contents buffer)
 
 let writing : t list ref = ref []
@@ -324,7 +308,7 @@ let append_record t kind key value =
   if Buffer.length writer.pending >= pending_limit then drain writer
 
 let open_ root =
-  make_directory root;
+  File_system.make_directory root;
   let t = { root; segments = []; refreshed = 0.; writer = None; used = Hashtbl.create 64 } in
   refresh t;
   t
@@ -416,7 +400,7 @@ let add_result t ~kind ~key value =
 
 let files t name =
   let path = Filename.concat t.root name in
-  make_directory path;
+  File_system.make_directory path;
   path
 
 (* Pointers *)
@@ -435,7 +419,7 @@ let file_name name =
     name
 
 let pointer t name =
-  make_directory (pointers_directory t);
+  File_system.make_directory (pointers_directory t);
   {
     store = t;
     pointer_path = Filename.concat (pointers_directory t) (file_name name ^ ".pointer");
@@ -482,7 +466,7 @@ let framed bytes =
   head ^ checksum [ head; bytes ] ^ bytes
 
 let read pointer =
-  match read_file pointer.pointer_path with
+  match File_system.read pointer.pointer_path with
   | exception Sys_error _ -> None
   | contents ->
       let total = String.length contents in
@@ -500,14 +484,7 @@ let read pointer =
    name are durable, so a pointer never names a value a crash lost. *)
 let point pointer bytes =
   flush pointer.store;
-  let temporary = pointer.pointer_path ^ ".partial" in
-  let descriptor = Unix.openfile temporary [ O_WRONLY; O_CLOEXEC; O_CREAT; O_TRUNC ] 0o644 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close descriptor)
-    (fun () ->
-      write_all descriptor (framed bytes) 0;
-      Unix.fsync descriptor);
-  Sys.rename temporary pointer.pointer_path
+  File_system.write_atomically ~durable:true pointer.pointer_path (framed bytes)
 
 let remove_pointer pointer =
   List.iter

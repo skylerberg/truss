@@ -25,6 +25,18 @@ val position : t -> int -> int * int
     counted. A line break is a line feed, a carriage return followed by a line feed, or a carriage
     return on its own, which the scanner reports but still treats as a line break. *)
 
+(** What a column counts. *)
+type units = Bytes | Scalar_values | Utf_16_code_units
+
+val location : units -> t -> int -> int * int
+(** [location units source offset] is the line and column of [offset], both counting from 0, the
+    column in [units]. Lines break as in {!position}, and a byte order mark is not counted. *)
+
+val offset : units -> t -> line:int -> column:int -> int
+(** The inverse of {!location}: the byte offset of a line and column counting from 0. A column past
+    the end of its line gives the end of the line, and a line past the end of the file gives the end
+    of the file. *)
+
 val line_start : t -> int -> int
 (** The offset where the line holding [offset] starts. *)
 

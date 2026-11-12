@@ -14,7 +14,7 @@ type context = {
 
 let report context ?(fixes = []) code (span : span) message =
   context.diagnostics <-
-    Diagnostic.make ~fixes ~code:(Usage code) (Source.span span.start span.stop) message
+    Diagnostic.make ~fixes ~code:(Usage code) (Syntax.Span.to_source span) message
     :: context.diagnostics
 
 (* Unused variables *)
@@ -111,7 +111,7 @@ let check_unused context (definition : definition) =
             [
               Diagnostic.fix
                 (Printf.sprintf "Write `%s`." replacement)
-                [ Diagnostic.replace (Source.span name.span.start name.span.stop) replacement ];
+                [ Diagnostic.replace (Syntax.Span.to_source name.span) replacement ];
             ]
           (Printf.sprintf "`%s` is never used. Bind it to `_` instead." name.text))
     (pattern_bindings definition)

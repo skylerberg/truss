@@ -68,7 +68,7 @@ let rec function_value_call state env (value : expression) (callee : expression)
             })
           pairs
       in
-      let result = output_type function_type.output in
+      let result = T.result_type function_type.output in
       note_lending state value function_type.output;
       state.tables.calls.(value.id) <-
         Some
@@ -141,7 +141,7 @@ and match_arguments state (value : expression) (parameters : T.parameter_info li
               | None ->
                   report state Unknown_label label.span
                     ~fixes:
-                      (match Resolve.closest label.text (List.map fst named) with
+                      (match Diagnostic.closest label.text (List.map fst named) with
                       | Some candidate ->
                           [
                             fix

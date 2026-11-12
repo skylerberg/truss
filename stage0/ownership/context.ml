@@ -72,10 +72,8 @@ let report context ?(fixes = []) ?(notes = []) code (at : Syntax.span) message =
   context.diagnostics <-
     Diagnostic.make ~fixes
       ~notes:
-        (List.map
-           (fun ((note : Syntax.span), text) -> (Source.span note.start note.stop, text))
-           notes)
-      ~code:(Ownership code) (Source.span at.start at.stop) message
+        (List.map (fun ((note : Syntax.span), text) -> (Syntax.Span.to_source note, text)) notes)
+      ~code:(Ownership code) (Syntax.Span.to_source at) message
     :: context.diagnostics
 
 let kind_of_mode : T.mode -> kind = function Own -> Owned | Read -> Borrowed | Mut -> Borrowed_mut
@@ -148,7 +146,11 @@ let collect context (definition : Core.definition) =
 let copy_at context (moved : Core.origin) =
   (match Hashtbl.find_opt context.marks moved with
     | Some (Own, { written; marked }) ->
-        [ Diagnostic.delete (Source.span (span context written).start (span context marked).start) ]
+        [
+          Diagnostic.delete
+            (Syntax.Span.to_source
+               (Syntax.Span.make (span context written).start (span context marked).start));
+        ]
     | Some ((Read | Mut), _) | None -> [])
   @ [ Diagnostic.insert (span context moved).stop ".copy()" ]
 

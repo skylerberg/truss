@@ -28,7 +28,7 @@ let create database resolved =
   }
 
 let reported context code (span : span) message =
-  let diagnostic = Diagnostic.make ~code:(Types code) (Source.span span.start span.stop) message in
+  let diagnostic = Diagnostic.make ~code:(Types code) (Syntax.Span.to_source span) message in
   context.diagnostics := diagnostic :: !(context.diagnostics);
   Diagnostic.reported diagnostic
 
@@ -467,20 +467,11 @@ let generics context owner (written : generic_parameter list) : T.generic list =
 let specification_type (path : Path.t) =
   match path with Top { module_; _ } -> module_ = Well_known.specification | _ -> false
 
-let rec mentions_integer = function
-  | T.Integer -> true
-  | T.Named { path; _ } when specification_type path -> true
-  | T.Named { arguments; _ } | T.Cursor { arguments; _ } ->
-      List.exists
-        (function T.Type type_ -> mentions_integer type_ | T.Value _ | T.Capabilities _ -> false)
-        arguments
-  | T.Function { inputs; output; _ } -> (
-      List.exists (fun (_, type_) -> mentions_integer type_) inputs
-      ||
-      match output with
-      | Returns type_ | Yields (_, type_) | Lends (_, type_) -> mentions_integer type_)
-  | T.Projection { base; _ } -> mentions_integer base
-  | T.Parameter _ | T.Any _ | T.Never | T.Variable _ | T.Literal _ | T.Hole | T.Error _ -> false
+let mentions_integer =
+  T.exists (function
+    | T.Integer -> true
+    | T.Named { path; _ } -> specification_type path
+    | _ -> false)
 
 (* A signature, given the generics of the head before it and the type of
    [self]. *)
@@ -525,9 +516,7 @@ let signature context ~owner ~head ~self_type (written : signature) : T.signatur
     | Some (Lends (written_mode, result)) -> T.Lends (mode written_mode, type_ context result)
   in
   let terminates = terminates written.clauses in
-  let result_type =
-    match output with Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
-  in
+  let result_type = T.result_type output in
   {
     generics = generics_;
     receiver;

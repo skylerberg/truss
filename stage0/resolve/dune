@@ -13,4 +13,5 @@
   diagnostic
   token
   syntax
-  syntax_walk))
+  syntax_walk
+  syntax_print))

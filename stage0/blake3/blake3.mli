@@ -23,3 +23,7 @@ val derive_key : context:string -> string -> string
 
 val to_hex : string -> string
 (** Lowercase hexadecimal, two digits per byte. *)
+
+val hex_digest : ?digits:int -> string -> string
+(** [hash] in lowercase hexadecimal, or its first [digits] digits, for a name made from content,
+    such as a file name. *)

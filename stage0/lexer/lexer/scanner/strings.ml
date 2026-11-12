@@ -231,13 +231,10 @@ and scan_escape cursor buffer =
     cursor.position <- stop;
     `Continue
   in
-  let is_hexadecimal current =
-    is_digit current || (current >= 0x61 && current <= 0x66) || (current >= 0x41 && current <= 0x46)
-  in
   (* The value of exactly [count] hexadecimal digits at [position]. *)
   let hex_value position count =
     let rec all index =
-      index >= count || (is_hexadecimal (byte cursor (position + index)) && all (index + 1))
+      index >= count || (is_hexadecimal_digit (byte cursor (position + index)) && all (index + 1))
     in
     if all 0 then Some (int_of_string ("0x" ^ String.sub cursor.text position count)) else None
   in
@@ -307,7 +304,8 @@ and scan_escape cursor buffer =
         else
           let digits_start = start + 3 in
           let rec digits_end position =
-            if is_hexadecimal (byte cursor position) then digits_end (position + 1) else position
+            if is_hexadecimal_digit (byte cursor position) then digits_end (position + 1)
+            else position
           in
           let stop = digits_end digits_start in
           let count = stop - digits_start in

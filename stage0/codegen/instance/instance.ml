@@ -245,7 +245,7 @@ let kept = 180
    with a hash of the whole name, which keeps it unique. *)
 let shorten name =
   if String.length name <= limit then name
-  else String.sub name 0 kept ^ "_Hash_" ^ String.sub (Blake3.to_hex (Blake3.hash name)) 0 32
+  else String.sub name 0 kept ^ "_Hash_" ^ Blake3.hex_digest ~digits:32 name
 
 let path_symbol = path
 let symbol key = shorten ("t_" ^ mangle key)

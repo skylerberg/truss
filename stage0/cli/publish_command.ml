@@ -175,16 +175,16 @@ let decide (project : Project.t) registry (package : Project.package) =
               let breaks =
                 List.map
                   (fun (path, what) ->
-                    let was = Impact_command.signature (Database.context published) path
-                    and now = Impact_command.signature project.context path in
+                    let was = Signatures.of_path (Database.context published) path
+                    and now = Signatures.of_path project.context path in
                     String.concat ""
                       (Printf.sprintf "%s %s." (Path.show path) what
                       ::
                       (if was <> now then
                          List.filter_map Fun.id
                            [
-                             Option.map (Printf.sprintf "\n    was: %s") was;
-                             Option.map (Printf.sprintf "\n    now: %s") now;
+                             Option.map (fun text -> "\n" ^ Signatures.labeled "was:" text) was;
+                             Option.map (fun text -> "\n" ^ Signatures.labeled "now:" text) now;
                            ]
                        else [])))
                   (Compatibility.breaks found)

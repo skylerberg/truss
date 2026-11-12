@@ -57,7 +57,5 @@ type state = {
 val report :
   state -> ?fixes:Diagnostic.fix list -> Diagnostic.Code.resolve -> Syntax.span -> string -> unit
 
-val closest : string -> string list -> string option
-
 val definition :
   state -> path:Path.t -> ?container:Path.t * Syntax.definition -> Syntax.definition -> unit

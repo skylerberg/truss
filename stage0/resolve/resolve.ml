@@ -225,5 +225,3 @@ let diagnostics database module_ =
         match Query.demand database resolved key with
         | Some resolved -> resolved.diagnostics
         | None -> []))
-
-let closest = Walk.closest

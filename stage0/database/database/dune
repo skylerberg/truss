@@ -18,4 +18,5 @@
   compiler_version
   type_checker
   registry
-  resolve))
+  resolve
+  process))

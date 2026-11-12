@@ -246,3 +246,7 @@ let to_hex digest =
   String.concat ""
     (List.init (String.length digest) (fun index ->
          Printf.sprintf "%02x" (Char.code digest.[index])))
+
+let hex_digest ?digits text =
+  let hex = to_hex (hash text) in
+  match digits with Some digits -> String.sub hex 0 digits | None -> hex

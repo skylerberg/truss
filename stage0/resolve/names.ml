@@ -74,8 +74,7 @@ let show_key key =
   else Printf.sprintf "%s#%d" (Path.show key.path) key.ordinal
 
 (* Spelling types as written, for naming [impl]s and law proofs. *)
-let spell_path (path : path) =
-  String.concat "::" (List.map (fun (name : name) -> name.text) path.modules @ [ path.last.text ])
+let spell_path = Syntax_print.path
 
 let rec spell_type (type_ : type_expression) =
   match type_.kind with

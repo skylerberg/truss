@@ -51,6 +51,11 @@ let signature (operation : Intrinsic.operation) : T.signature =
       generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
     }
   in
+  (* The work a coroutine or a task runs: a function of one [UInt64]. *)
+  let work_item = T.builtin UInt64 in
+  let work =
+    T.Function { inputs = [ (Read, work_item) ]; output = Returns T.unit; uses = []; costs = [] }
+  in
   let with_storage ?(mode = T.Read) ?(output = T.Returns T.unit) rest =
     make ~generics:[ "Element" ] ~output (input ~mode "storage" (storage element) :: rest)
   in
@@ -154,17 +159,11 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Storage_model ->
       { (with_storage ~output:(Returns (sequence element)) []) with specification_only = true }
   | Array_model ->
-      let count = parameter operation "count" in
-      let array =
-        T.Named
-          {
-            path = Intrinsic.builtin_path Array;
-            arguments = [ T.Type element; T.Value (Value_parameter count) ];
-          }
-      in
       {
-        (make ~generics:[ "Element" ] ~output:(Returns (sequence element)) [ input "array" array ]) with
-        generics = [ generic "Element"; { T.generic = count; kind = Value_generic } ];
+        (over_array
+           ~output:(fun _ -> Returns (sequence element))
+           (fun array -> [ input "array" array ]))
+        with
         specification_only = true;
       }
   | View_model ->
@@ -188,28 +187,16 @@ let signature (operation : Intrinsic.operation) : T.signature =
       make ~output:(Returns (T.builtin Int32)) [ input ~mode:Own "handle" (T.builtin Handle) ]
   | Run_test -> make [ input "index" (T.builtin UInt32) ]
   | Coroutine_start ->
-      let item = T.builtin UInt64 in
-      let work : T.function_type =
-        { inputs = [ (Read, item) ]; output = Returns T.unit; uses = []; costs = [] }
-      in
       {
-        (make ~output:(Returns usize)
-           [ input ~mode:Own "work" (T.Function work); input "item" item ])
-        with
+        (make ~output:(Returns usize) [ input ~mode:Own "work" work; input "item" work_item ]) with
         stores_functions = [ "work" ];
-        transparent = false;
       }
   | Tasks_spawn ->
-      let item = T.builtin UInt64 in
-      let work : T.function_type =
-        { inputs = [ (Read, item) ]; output = Returns T.unit; uses = []; costs = [] }
-      in
       {
         (make ~output:(Returns bool)
-           [ input "group" item; input ~mode:Own "work" (T.Function work); input "item" item ])
+           [ input "group" work_item; input ~mode:Own "work" work; input "item" work_item ])
         with
         stores_functions = [ "work" ];
-        transparent = false;
       }
   | Shared_new | Shared_update | Shared_key -> (
       let storable : T.trait_reference =

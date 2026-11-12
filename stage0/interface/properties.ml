@@ -210,9 +210,6 @@ type contents = {
   recursions : recursion list;
 }
 
-let function_output : T.result -> T.ty = function
-  | Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
-
 (* [resolve] normalizes a type and gives the [impl]s whose definitions
    replaced its associated types. *)
 let contents database ~facts_of ~resolve (type_ : T.ty) =
@@ -237,7 +234,7 @@ let contents database ~facts_of ~resolve (type_ : T.ty) =
           (fun (_, input) ->
             inside (if T.terminates function_ then Function_input else Indirect) input)
           inputs;
-        inside Indirect (function_output output)
+        inside Indirect (T.result_type output)
     | T.Any { trait_arguments; associated; _ } ->
         List.iter (inside Indirect) (type_arguments trait_arguments @ List.map snd associated)
     | T.Cursor { arguments; _ } -> List.iter (inside Indirect) (type_arguments arguments)

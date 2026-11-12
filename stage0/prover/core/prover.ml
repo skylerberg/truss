@@ -267,7 +267,7 @@ let counterexample members (obligation : Translate.obligation) answer_values =
   ^ match path with [] -> "" | path -> " On that path, " ^ String.concat ", " path ^ "."
 
 let diagnostic code span message = Diagnostic.make ~code:(Diagnostic.Code.Prover code) span message
-let source_span (span : span) : Diagnostic.span = Source.span span.start span.stop
+let source_span (span : span) : Diagnostic.span = Syntax.Span.to_source span
 
 (* A span inside its definition's text, which every span of the
    definition's own tree is; anything else would be a bug, and is shown at

@@ -381,7 +381,7 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
     receiver_argument @ check_arguments state env parameters matched ~offset:receiver_offset
   in
   let reference = { trait with trait_arguments } in
-  let result = output_type instance.signature.output in
+  let result = T.result_type instance.signature.output in
   note_lending state value instance.signature.output;
   let own_arguments =
     List.filteri
@@ -446,7 +446,7 @@ and capability_call state env (value : expression) capability (member : name) ar
         match_arguments state value instance.signature.parameters arguments ~record:false
       in
       let checked = check_arguments state env instance.signature.parameters matched ~offset:0 in
-      let result = output_type instance.signature.output in
+      let result = T.result_type instance.signature.output in
       state.tables.calls.(value.id) <-
         Some
           {
@@ -553,7 +553,7 @@ and method_call state env ?expected (value : expression) (base : expression) (me
             | None ->
                 error state Unknown_member member.span
                   ~fixes:
-                    (match Resolve.closest member.text candidates with
+                    (match Diagnostic.closest member.text candidates with
                     | Some candidate ->
                         [
                           fix
@@ -690,7 +690,7 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   in
   let checked = check_arguments state env instance.signature.parameters matched ~offset:1 in
   let reference = { trait with trait_arguments } in
-  let result = output_type instance.signature.output in
+  let result = T.result_type instance.signature.output in
   note_lending state value instance.signature.output;
   let receiver_argument =
     {
