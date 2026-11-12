@@ -8,14 +8,6 @@ type state = {
   mutable diagnostics : Syntax.diagnostic list;
 }
 
-val reported :
-  state ->
-  ?fixes:Syntax.span Diagnostic.fix list ->
-  Diagnostic.Code.types ->
-  Syntax.span ->
-  string ->
-  Diagnostic.reported
-
 val report :
   state ->
   ?fixes:Syntax.span Diagnostic.fix list ->
