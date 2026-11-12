@@ -127,27 +127,34 @@ and statement_kind =
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
   | Proof of Core.block  (** Only the prover reads it. *)
 
-type loop = {
-  clauses : Core.loop_clause list;
-  schedule : Core.loop_mode;
-  counter : local option;
-      (** The counter of a loop over an integer range, which is at least the range's start and at
-          most its stop at the header. *)
-  origin : Core.origin;
-}
+type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
 (** The clauses of a loop, which its header carries. *)
 
+(** What a [for] loop iterates over. *)
+type iteration =
+  | Yielding of call  (** The parts a call of a yielding method yields. *)
+  | Range of { start : operand; stop : operand; inclusive : bool }
+      (** The integers or characters from [start] to [stop], each once. A range of [Character] skips
+          the surrogates. *)
+  | Pull of { cursor : place; next : callee option }
+      (** The values a cursor gives until it has none: the built-in cursor of a yielding method when
+          [next] is [None], or else the cursor type's [Cursor.next]. *)
+
 (** Where an early exit from [concurrent] code goes once its tasks end. *)
-type task_exit = Exit_return of operand option | Exit_to of block
+type task_exit =
+  | Exit_return of operand option
+  | Exit_to of block
+  | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
   | Switch_variant of { place : place; cases : (string * block) list }
-  | Each of { call : call; part : local; body : block; after : block; loop : loop }
-      (** A [for] loop over a call of a yielding method. [body] runs for each part the callee
-          yields, which [part] holds, and ends with {!Iteration_end} or a jump to [after]. *)
-  | Iteration_end  (** The end of an iteration of the enclosing {!Each}. *)
+  | For of { iteration : iteration; part : local; body : block; after : block; loop : loop }
+      (** A [for] loop. [body] runs once for each element, which [part] holds, and ends with
+          {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
+          [loop]'s schedule says. *)
+  | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
   | Yield of { mode : Types.mode; part : operand; resume : block }
   | Return of operand option
   | Exit_tasks of { tasks : Core.task list; exit : task_exit }
@@ -191,6 +198,7 @@ type scope = {
   frame : frame;
   mutable bound : local list;
   mutable loans : int list;
+  mutable temporaries : local list;  (** In reverse. *)
   provides : bool;
 }
 
@@ -205,7 +213,6 @@ type builder = {
   mutable current : block option;
       (** The block being built, or [None] where control does not reach. *)
   sources : (Core.local, local) Hashtbl.t;
-  mutable temporaries : local list;  (** Of the statement being built. *)
   mutable scopes : scope list;  (** Innermost first. *)
   mutable loops : enclosing_loop list;
   mutable compound_target : place option;
@@ -213,6 +220,8 @@ type builder = {
   lambdas : body list ref;  (** In reverse, shared by the bodies of a definition. *)
   forks : int ref;
   mutable loan_count : int;
+  mutable deferred : local list option;
+      (** While a [let] binds, the locals it binds, which join the scope after its [else]. *)
   mutable binds_into : frame;
       (** The frame new bindings belong to: a block's, or for [is], the statement around it. *)
 }
@@ -225,7 +234,6 @@ let create ~lambdas ~forks =
     block_count = 0;
     current = None;
     sources = Hashtbl.create 16;
-    temporaries = [];
     scopes = [];
     loops = [];
     compound_target = None;
@@ -233,6 +241,7 @@ let create ~lambdas ~forks =
     lambdas;
     forks;
     loan_count = 0;
+    deferred = None;
     binds_into = Bindings;
   }
 
@@ -242,9 +251,13 @@ let new_local b kind type_ origin =
   b.local_count <- local + 1;
   local
 
+(* Makes a local dead where the innermost scope ends. *)
+let add_temporary b local =
+  match b.scopes with scope :: _ -> scope.temporaries <- local :: scope.temporaries | [] -> ()
+
 let temporary b type_ origin =
   let local = new_local b Temporary type_ origin in
-  b.temporaries <- local :: b.temporaries;
+  add_temporary b local;
   local
 
 let at local = { root = Local local; projections = [] }
@@ -291,6 +304,11 @@ let source b (local : Core.local) =
   | Some found -> found
   | None -> bug "a local that nothing binds"
 
+let register_binding b local =
+  match List.find_opt (fun scope -> scope.frame = b.binds_into) b.scopes with
+  | Some scope -> scope.bound <- local :: scope.bound
+  | None -> ()
+
 (* The local a core local is bound to. Each alternative of a pattern binds
    the same locals, and a loop binds its pattern again on each iteration, so
    a core local has one local wherever it is bound. *)
@@ -300,9 +318,9 @@ let bind_source b (local : Core.local) mode type_ origin =
   | None ->
       let found = new_local b (Source { local; mode }) type_ origin in
       Hashtbl.replace b.sources local found;
-      (match List.find_opt (fun scope -> scope.frame = b.binds_into) b.scopes with
-      | Some scope -> scope.bound <- found :: scope.bound
-      | None -> ());
+      (match b.deferred with
+      | Some deferred -> b.deferred <- Some (found :: deferred)
+      | None -> register_binding b found);
       found
 
 (* Starts a loan of what [borrowed] borrows or views. A jump out of the
@@ -326,12 +344,13 @@ let end_loans b loans origin =
 let end_scope b scope origin =
   if scope.loans <> [] then emit b (Loan_end (List.rev scope.loans)) origin;
   if scope.bound <> [] then emit b (Dead (List.rev scope.bound)) origin;
+  if scope.temporaries <> [] then emit b (Dead (List.rev scope.temporaries)) origin;
   if scope.provides then emit b Provide_end origin
 
 (* Runs [f] in a new scope, and ends the scope's bindings where control
    leaves it normally. *)
 let in_scope ?(provides = false) b origin f =
-  let scope = { frame = Bindings; bound = []; loans = []; provides } in
+  let scope = { frame = Bindings; bound = []; loans = []; temporaries = []; provides } in
   b.scopes <- scope :: b.scopes;
   let result = f () in
   b.scopes <- List.tl b.scopes;
@@ -353,15 +372,11 @@ let leave_scopes b ~depth origin =
 (* Runs [f] as one statement: its loans end after it, and the temporaries it
    makes are dead. *)
 let in_statement b origin f =
-  let outer = b.temporaries in
-  b.temporaries <- [];
-  let scope = { frame = Statement; bound = []; loans = []; provides = false } in
+  let scope = { frame = Statement; bound = []; loans = []; temporaries = []; provides = false } in
   b.scopes <- scope :: b.scopes;
   let result = f () in
   b.scopes <- List.tl b.scopes;
   end_scope b scope origin;
-  if b.temporaries <> [] then emit b (Dead (List.rev b.temporaries)) origin;
-  b.temporaries <- outer;
   result
 
 let ( let* ) = Option.bind
@@ -388,6 +403,29 @@ let diverges (type_ : Types.ty) = type_ = Types.Never
 let rec field_path (place : place) = function
   | [] -> place
   | field :: rest -> field_path (project place (Field field)) rest
+
+(* A value held in a local that no scope makes dead, for a jump that ends
+   every scope it leaves. *)
+let held_past_scopes b origin (value : operand) =
+  match value with
+  | Use { type_; node; _ } ->
+      let local = new_local b Temporary type_ origin in
+      assign b (at local) (Operand value) origin;
+      Use { place = at local; type_; node; origin }
+  | Constant _ | Borrow _ | Take _ -> value
+
+(* Returns: every scope ends, then the function returns the value. *)
+let return_ b value origin =
+  let value = Option.map (held_past_scopes b origin) value in
+  leave_scopes b ~depth:0 origin;
+  terminate b (Return value) origin
+
+(* How many scopes stay when a task's exit is taken. *)
+let exit_depth b (exit : task_exit) =
+  match (exit, b.loops) with
+  | Exit_return _, _ -> Some 0
+  | (Exit_to _ | Exit_iteration), loop :: _ -> Some loop.depth
+  | _, [] -> None
 
 (* Expressions *)
 
@@ -532,12 +570,10 @@ let rec expression b (node : Core.expression) : operand option =
                   | _ -> ())
                 provided)
       | Return None ->
-          terminate b (Return None) origin;
+          return_ b None origin;
           None
       | Return (Some returned) ->
-          Option.iter
-            (fun value -> terminate b (Return (Some value)) origin)
-            (expression b returned);
+          Option.iter (fun value -> return_ b (Some value) origin) (expression b returned);
           None
       | Break -> (
           match b.loops with
@@ -570,10 +606,22 @@ let rec expression b (node : Core.expression) : operand option =
             | Continue -> (
                 match b.loops with
                 | { continue_ = Jump block; _ } :: _ -> Some (Exit_to block)
-                | _ -> bug "a task's `continue` of a loop that does not continue by a jump")
+                | { continue_ = Next_iteration; _ } :: _ -> Some Exit_iteration
+                | [] -> bug "a `continue` outside a loop")
             | _ -> bug "a task's exit that is not a `return`, `break`, or `continue`"
           in
-          Option.iter (fun exit -> terminate b (Exit_tasks { tasks; exit }) origin) task_exit;
+          Option.iter
+            (fun exit ->
+              let exit =
+                match exit with
+                | Exit_return value -> Exit_return (Option.map (held_past_scopes b origin) value)
+                | Exit_to _ | Exit_iteration -> exit
+              in
+              (match (exit, exit_depth b exit) with
+              | _, Some depth -> leave_scopes b ~depth origin
+              | _, None -> ());
+              terminate b (Exit_tasks { tasks; exit }) origin)
+            task_exit;
           None
       | Todo ->
           terminate b Todo origin;
@@ -609,7 +657,7 @@ let rec expression b (node : Core.expression) : operand option =
       | Specification_function _ | Method_time _ ->
           bug "a specification's expression in code that runs")
 
-and no_clauses origin = { clauses = []; schedule = Sequential; counter = None; origin }
+and no_clauses origin = { clauses = []; schedule = Sequential; origin }
 
 and operands b nodes =
   in_order b
@@ -668,7 +716,7 @@ and held b (value : operand) type_ origin =
       Use { place = at local; type_; node; origin }
   | Borrow { mode; _ } ->
       let local = new_local b (Lent Read) type_ origin in
-      b.temporaries <- local :: b.temporaries;
+      add_temporary b local;
       assign b (at local) (Operand value) origin;
       Borrow { place = at local; type_; mode; origin }
 
@@ -744,7 +792,7 @@ and place b (found : Core.place) : place option =
           match called.lends with
           | Some mode ->
               let part = new_local b (Lent mode) lending.type_ lending.origin in
-              b.temporaries <- part :: b.temporaries;
+              add_temporary b part;
               emit b (Lend { part; call }) lending.origin;
               (match call.arguments with
               | Passed { mode; value = Borrow _ as receiver; _ } :: _ ->
@@ -879,40 +927,32 @@ and condition b (node : Core.expression) ~yes ~no =
 
 (* A condition whose temporaries end before either way out. *)
 and scoped_condition ?(keeps_lent = false) b (node : Core.expression) ~yes ~no =
-  let outer = b.temporaries in
-  b.temporaries <- [];
-  let scope = { frame = Condition; bound = []; loans = []; provides = false } in
+  let scope = { frame = Condition; bound = []; loans = []; temporaries = []; provides = false } in
   b.scopes <- scope :: b.scopes;
   let yes' = new_block b and no' = new_block b in
   condition b node ~yes:yes' ~no:no';
   b.scopes <- List.tl b.scopes;
-  let made = List.rev b.temporaries in
-  b.temporaries <- outer;
   (* The condition of an [if] or a guard lends for the rest of its statement,
      so that what [is] binds of a lent part can be used in the branch. A
      [while] condition's loans end before the body. *)
-  let made =
-    if keeps_lent then begin
-      let lent, others =
-        List.partition
-          (fun local -> match (Hashtbl.find b.infos local).kind with Lent _ -> true | _ -> false)
-          made
-      in
-      b.temporaries <- List.rev lent @ b.temporaries;
-      (match b.scopes with
-      | enclosing :: _ ->
-          enclosing.loans <- scope.loans @ enclosing.loans;
-          scope.loans <- []
-      | [] -> ());
-      others
-    end
-    else made
-  in
+  if keeps_lent then begin
+    let lent, others =
+      List.partition
+        (fun local -> match (Hashtbl.find b.infos local).kind with Lent _ -> true | _ -> false)
+        scope.temporaries
+    in
+    List.iter (add_temporary b) (List.rev lent);
+    scope.temporaries <- others;
+    match b.scopes with
+    | enclosing :: _ ->
+        enclosing.loans <- scope.loans @ enclosing.loans;
+        scope.loans <- []
+    | [] -> ()
+  end;
   List.iter
     (fun (entry, target) ->
       start b entry;
-      if scope.loans <> [] then emit b (Loan_end (List.rev scope.loans)) node.origin;
-      if made <> [] then emit b (Dead made) node.origin;
+      end_scope b scope node.origin;
       goto b target node.origin)
     [ (yes', yes); (no', no) ]
 
@@ -1224,13 +1264,20 @@ and statement b (node : Core.statement) =
           match scrutinee b value with
           | None -> ()
           | Some found ->
+              (* The pattern's bindings join the scope after the [else]
+                 block, which runs where they are not bound. *)
               let failed = new_block b and matched = new_block b in
+              let enclosing = b.deferred in
+              b.deferred <- Some [];
               match_patterns b [ pattern ] [ found ] ~fail:failed ~matched origin;
+              let bound = Option.value ~default:[] b.deferred in
+              b.deferred <- enclosing;
               start b failed;
               (match else_ with
               | Some else_ -> ignore (in_scope b origin (fun () -> block b else_))
               | None -> ());
               terminate b Unreachable origin;
+              List.iter (register_binding b) (List.rev bound);
               start b matched)
       | Evaluate value -> ignore (expression b value)
       | Assign { target; value = written } -> (
@@ -1258,7 +1305,7 @@ and statement b (node : Core.statement) =
                 new_local b (Source { local = bound; mode }) (operand_type right) origin
               in
               Hashtbl.replace b.sources bound local;
-              b.temporaries <- local :: b.temporaries;
+              add_temporary b local;
               emit b (Live [ local ]) origin;
               assign b (at local) (Operand right_value) origin;
               let bound_value =
@@ -1281,7 +1328,7 @@ and statement b (node : Core.statement) =
                   | Some updated -> assign b target (Operand updated) origin
                   | None -> ())))
       | For { pattern; iteration; clauses; body; mode } -> (
-          let loop = { clauses; schedule = mode; counter = None; origin } in
+          let loop = { clauses; schedule = mode; origin } in
           let each ~bind_part =
             in_scope b origin (fun () ->
                 bind_part ();
@@ -1301,8 +1348,7 @@ and statement b (node : Core.statement) =
       | While { condition = tested; clauses; body } ->
           let header = new_block b and inside = new_block b and after = new_block b in
           goto b header origin;
-          (Hashtbl.find b.pending header).heading <-
-            Some { clauses; schedule = Sequential; counter = None; origin };
+          (Hashtbl.find b.pending header).heading <- Some { clauses; schedule = Sequential; origin };
           start b header;
           scoped_condition b tested ~yes:inside ~no:after;
           start b inside;
@@ -1346,157 +1392,59 @@ and looping b ~break_ ~continue_ f =
    inclusive range ends at its stop before stepping, so the counter never
    steps past the type's greatest value. A [Character] steps over the
    surrogates. *)
+(* A [for] loop: the structured [For] terminator, with its body as a region
+   that [each] lowers, given a function that binds the pattern to the
+   element. The loop borrows what it iterates over for the body. *)
+and for_loop ?cursor_type b ~origin ~(pattern : Core.pattern) ~iteration ~loop ~each =
+  let part = new_local b Temporary pattern.type_ origin in
+  let inside = new_block b and after = new_block b in
+  terminate b (For { iteration; part; body = inside; after; loop }) origin;
+  start b inside;
+  looping b ~break_:after ~continue_:Next_iteration (fun () ->
+      each (fun () ->
+          (match iteration with
+          | Yielding { arguments = Passed { mode; value = Borrow _ as receiver; _ } :: _; _ } ->
+              ignore (start_loan b receiver (if mode = Mut then Mut else Read) Loop_body origin)
+          | Pull { cursor; _ } ->
+              ignore
+                (start_loan b
+                   (Borrow
+                      {
+                        place = cursor;
+                        type_ = Option.value ~default:pattern.type_ cursor_type;
+                        mode = Read;
+                        origin;
+                      })
+                   Read Loop_body origin)
+          | Yielding _ | Range _ -> ());
+          match iteration with
+          | Range _ -> bind ~owned:true b pattern (at part)
+          | Yielding _ | Pull _ -> bind b pattern (at part)));
+  terminate b Iteration_end origin;
+  start b after
+
 and range_loop b ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each =
   match (expression b low, expression b high) with
-  | Some low_value, Some high_value ->
-      let counter = new_local b Temporary low.type_ origin in
-      b.temporaries <- counter :: b.temporaries;
-      assign b (at counter) (Operand low_value) origin;
-      let stop = temporary b high.type_ origin in
-      assign b (at stop) (Operand high_value) origin;
-      let read local = Use { place = at local; type_ = low.type_; node = origin; origin } in
-      let header = new_block b
-      and inside = new_block b
-      and step = new_block b
-      and after = new_block b in
-      goto b header origin;
-      (Hashtbl.find b.pending header).heading <- Some { loop with counter = Some counter };
-      start b header;
-      let more =
-        hold b Types.bool origin
-          (Compare
-             {
-               comparison = (if inclusive then Less_equal else Less);
-               left = read counter;
-               right = read stop;
-             })
-      in
-      Option.iter
-        (fun condition -> terminate b (Branch { condition; yes = inside; no = after }) origin)
-        more;
-      start b inside;
-      looping b ~break_:after ~continue_:(Jump step) (fun () ->
-          each (fun () -> bind ~owned:true b pattern (at counter)));
-      goto b step origin;
-      start b step;
-      if inclusive then (
-        let last =
-          hold b Types.bool origin
-            (Compare { comparison = Equal; left = read counter; right = read stop })
-        in
-        let next = new_block b in
-        Option.iter
-          (fun condition -> terminate b (Branch { condition; yes = after; no = next }) origin)
-          last;
-        start b next);
-      let one = Constant (Integer Z.one) in
-      assign b (at counter) (Operation { operation = Add; operands = [ read counter; one ] }) origin;
-      if Types.is_builtin Character low.type_ then (
-        let surrogate =
-          hold b Types.bool origin
-            (Compare
-               {
-                 comparison = Equal;
-                 left = read counter;
-                 right = Constant (Integer (Z.of_int 0xD800));
-               })
-        in
-        let skip = new_block b and stepped = new_block b in
-        Option.iter
-          (fun condition -> terminate b (Branch { condition; yes = skip; no = stepped }) origin)
-          surrogate;
-        start b skip;
-        assign b (at counter) (Operand (Constant (Integer (Z.of_int 0xE000)))) origin;
-        goto b stepped origin;
-        start b stepped);
-      goto b header origin;
-      start b after
+  | Some start, Some stop ->
+      let start = held b start low.type_ origin and stop = held b stop high.type_ origin in
+      for_loop b ~origin ~pattern ~iteration:(Range { start; stop; inclusive }) ~loop ~each
   | _ -> ()
 
 (* A loop over a call of a yielding method. *)
 and each_loop b ~origin ~pattern ~called ~node ~loop ~each =
-  match call_of b called ~node with
-  | None -> ()
-  | Some call ->
-      let part = new_local b Temporary pattern.Core.type_ origin in
-      let inside = new_block b and after = new_block b in
-      terminate b (Each { call; part; body = inside; after; loop }) origin;
-      start b inside;
-      looping b ~break_:after ~continue_:Next_iteration (fun () ->
-          each (fun () ->
-              (match call.arguments with
-              | Passed { mode; value = Borrow _ as receiver; _ } :: _ ->
-                  ignore (start_loan b receiver (if mode = Mut then Mut else Read) Loop_body origin)
-              | _ -> ());
-              bind b pattern (at part)));
-      terminate b Iteration_end origin;
-      start b after
+  Option.iter
+    (fun call -> for_loop b ~origin ~pattern ~iteration:(Yielding call) ~loop ~each)
+    (call_of b called ~node)
 
 (* A loop that pulls a cursor until it has no next value. *)
 and cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each =
   match place b cursor with
   | None -> ()
-  | Some cursor_place ->
-      let option_type = Types.named (Well_known.path Option) [ pattern.Core.type_ ] in
-      let pulled = new_local b Temporary option_type origin in
-      let header = new_block b and some = new_block b and after = new_block b in
-      goto b header origin;
-      (Hashtbl.find b.pending header).heading <- Some loop;
-      start b header;
-      (match next with
-      | None -> emit b (Pull { destination = at pulled; cursor = cursor_place }) origin
-      | Some next -> (
-          match callee_of b next with
-          | Some callee ->
-              emit b
-                (Call
-                   {
-                     destination = Some (at pulled);
-                     call =
-                       {
-                         callee;
-                         arguments =
-                           [
-                             Passed
-                               {
-                                 mode = Mut;
-                                 value =
-                                   Borrow
-                                     {
-                                       place = cursor_place;
-                                       type_ = Core_walk.place_type cursor;
-                                       mode = Mut;
-                                       origin;
-                                     };
-                                 mark = None;
-                               };
-                           ];
-                         uses = Types.no_capabilities;
-                         node = origin;
-                       };
-                   })
-                origin
-          | None -> ()));
-      terminate b
-        (Switch_variant { place = at pulled; cases = [ ("Some", some); ("None", after) ] })
-        origin;
-      start b some;
-      looping b ~break_:after ~continue_:(Jump header) (fun () ->
-          each (fun () ->
-              ignore
-                (start_loan b
-                   (Borrow
-                      {
-                        place = cursor_place;
-                        type_ = Core_walk.place_type cursor;
-                        mode = Read;
-                        origin;
-                      })
-                   Read Loop_body origin);
-              bind b pattern
-                (project (at pulled) (Variant_field { variant = "Some"; field = "value" }))));
-      goto b header origin;
-      start b after
+  | Some place_ ->
+      let cursor_type = Core_walk.place_type cursor in
+      let cursor = place_ in
+      let next = match next with Some next -> callee_of b next | None -> None in
+      for_loop ~cursor_type b ~origin ~pattern ~iteration:(Pull { cursor; next }) ~loop ~each
 
 (* A quantifier that runs: a loop that stops at the first element that
    decides it. *)
@@ -1546,7 +1494,7 @@ and lambda b (parameters : Core.pattern list) (captures : Core.capture list) (bo
           (fun (pattern : Core.pattern) local ->
             match pattern.kind with Bind _ -> () | _ -> bind inner pattern (at local))
           parameters locals;
-        Option.iter (fun value -> terminate inner (Return (Some value)) 0) (block inner body);
+        Option.iter (fun value -> return_ inner (Some value) 0) (block inner body);
         locals)
   in
   let body = finish inner ~parameters:parameter_locals in
@@ -1593,7 +1541,7 @@ and canonical (blocks : basic_block array) =
     | Switch_variant { place; cases } ->
         Switch_variant
           { place; cases = List.map (fun (variant, block) -> (variant, target block)) cases }
-    | Each each -> Each { each with body = target each.body; after = target each.after }
+    | For loop -> For { loop with body = target loop.body; after = target loop.after }
     | Yield yielded -> Yield { yielded with resume = target yielded.resume }
     | Exit_tasks { tasks; exit = Exit_to block } ->
         Exit_tasks { tasks; exit = Exit_to (target block) }
@@ -1608,7 +1556,7 @@ and successors = function
   | Goto block -> [ block ]
   | Branch { yes; no; _ } -> [ yes; no ]
   | Switch_variant { cases; _ } -> List.map snd cases
-  | Each { body; after; _ } -> [ body; after ]
+  | For { body; after; _ } -> [ body; after ]
   | Yield { resume; _ } -> [ resume ]
   | Exit_tasks { exit = Exit_to block; _ } -> [ block ]
   | Iteration_end | Return _ | Exit_tasks _ | Unreachable | Todo -> []
@@ -1633,7 +1581,7 @@ let of_definition (definition : Core.definition) =
       start b (new_block b);
       in_scope b 0 (fun () ->
           Option.iter
-            (fun value -> terminate b (Return (if returns then Some value else None)) 0)
+            (fun value -> return_ b (if returns then Some value else None) 0)
             (block b body));
       let body = finish b ~parameters in
       { body; lambdas = Array.of_list (List.rev !(b.lambdas)) })
@@ -1763,8 +1711,16 @@ let show_terminator = function
       Printf.sprintf "switch %s %s" (show_place place)
         (String.concat " "
            (List.map (fun (variant, block) -> Printf.sprintf "%s: %d" variant block) cases))
-  | Each { call; part; body; after; _ } ->
-      Printf.sprintf "each _%d in %s %d after %d" part (show_call call) body after
+  | For { iteration; part; body; after; _ } ->
+      Printf.sprintf "for _%d in %s %d after %d" part
+        (match iteration with
+        | Yielding call -> show_call call
+        | Range { start; stop; inclusive } ->
+            Printf.sprintf "%s%s%s" (show_operand start)
+              (if inclusive then "..=" else "..")
+              (show_operand stop)
+        | Pull { cursor; _ } -> "pull " ^ show_place cursor)
+        body after
   | Iteration_end -> "next"
   | Yield { mode; part; resume } ->
       Printf.sprintf "yield %s %s %d" (show_mode mode) (show_operand part) resume
@@ -1772,6 +1728,7 @@ let show_terminator = function
   | Return (Some value) -> "return " ^ show_operand value
   | Exit_tasks { exit = Exit_return value; _ } -> (
       "exit tasks, return" ^ match value with Some value -> " " ^ show_operand value | None -> "")
+  | Exit_tasks { exit = Exit_iteration; _ } -> "exit tasks, next"
   | Exit_tasks { exit = Exit_to block; _ } -> Printf.sprintf "exit tasks, goto %d" block
   | Unreachable -> "unreachable"
   | Todo -> "todo"
