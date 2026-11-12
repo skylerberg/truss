@@ -1,4 +1,4 @@
-fn f(items: mut List[Int64]) -> Int64
+fn run_example(items: mut List[Int64]) -> Int64
   requires items.length() == 0
 {
   mut items.push(7)

@@ -1,4 +1,4 @@
-fn f(read: (fn(Int64) -> Int64 uses Clock cost time finite), value: Int64) -> Bool
+fn run_example(read: (fn(Int64) -> Int64 uses Clock cost time finite), value: Int64) -> Bool
   uses Clock
   ensures result
 {

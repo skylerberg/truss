@@ -1,6 +1,6 @@
 theorem passes_through(value: Bool)
-  ensures apply(fn(x) {
-      var held = apply(fn(y) { y }, value: x)
+  ensures apply(fn(first_number) {
+      var held = apply(fn(second_number) { second_number }, value: first_number)
       held
     }, value: value) == value
 {

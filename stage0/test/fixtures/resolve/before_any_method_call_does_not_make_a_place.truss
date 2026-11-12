@@ -1,5 +1,5 @@
 fn make() -> Option[List[Int64]] { todo }
 
-fn f() -> Option[Int64] {
+fn run_example() -> Option[Int64] {
   mut make()?.pop()
 }

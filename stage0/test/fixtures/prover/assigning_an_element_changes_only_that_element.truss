@@ -1,4 +1,4 @@
-fn f(items: mut List[Int64])
+fn run_example(items: mut List[Int64])
   requires items.length() > 1
   ensures items.length() == old(items.length())
   ensures items[0] == 0

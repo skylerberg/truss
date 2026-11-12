@@ -142,7 +142,7 @@ let () =
 (* Data *)
 
 let shape = Fixtures.Prover.shape
-let point = "type Point(x: Int64, y: Int64)\n  derives Equal\n\n"
+let point = "type Point(first_number: Int64, second_number: Int64)\n  derives Equal\n\n"
 
 let () =
   test "match binds a variant's fields" (fun () ->
@@ -1216,8 +1216,8 @@ let () =
 (* Concurrent code *)
 
 let early_return ensures =
-  "fn f(first: mut Int64, second: mut Int64) -> Int64\n  requires second < 100\n" ^ ensures
-  ^ "  uses Tasks\n{\n  concurrent {\n    return 0\n    second += 1\n  }\n}\n"
+  "fn run_example(first: mut Int64, second: mut Int64) -> Int64\n  requires second < 100\n"
+  ^ ensures ^ "  uses Tasks\n{\n  concurrent {\n    return 0\n    second += 1\n  }\n}\n"
 
 let () =
   test "an early exit from a concurrent block waits for the other branches" (fun () ->
@@ -1402,7 +1402,7 @@ let () =
                  {\n\
                 \  (value + value + value + value) / 4\n\
                  }\n\n\
-                 fn f(value: Int64) -> Int64\n\
+                 fn run_example(value: Int64) -> Int64\n\
                 \  requires 0 <= value && value < 100\n\
                 \  ensures result == value\n\
                 \  cost time O(1)\n\
@@ -1413,7 +1413,7 @@ let () =
         let key =
           List.find
             (fun (declaration : Resolve.Names.declaration) ->
-              Path.show declaration.path = "app::main::f")
+              Path.show declaration.path = "app::main::run_example")
             (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
         in
         match Query.demand database Prover.proof (Resolve.Names.key_of key) with
@@ -1444,7 +1444,7 @@ let () =
       let key =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.show declaration.path = "app::main::f")
+            Path.show declaration.path = "app::main::run_example")
           (Query.demand database Resolve.Names.declarations (Support.module_of "app::main"))
       in
       match Query.demand database Prover.proof (Resolve.Names.key_of key) with
@@ -1471,19 +1471,21 @@ let triggered fact =
     {
       declarations =
         [
-          Function (variable "f", [ Int ], Int);
-          Function (variable "g", [ Int ], Int);
-          Constant (variable "n", Int);
+          Function (variable "run_example", [ Int ], Int);
+          Function (variable "second_example", [ Int ], Int);
+          Constant (variable "limit_count", Int);
         ];
       facts = [ fact ];
-      goal = Operation (">", [ Apply (variable "f", [ Symbol (variable "n") ]); int 0 ]);
+      goal =
+        Operation
+          (">", [ Apply (variable "run_example", [ Symbol (variable "limit_count") ]); int 0 ]);
     }
 
 let () =
   let open Logic in
-  let i_term = Symbol (variable "i") and j_term = Symbol (variable "j") in
-  let applied_f term = Apply (variable "f", [ term ])
-  and applied_g term = Apply (variable "g", [ term ]) in
+  let i_term = Symbol (variable "step_index") and j_term = Symbol (variable "other_index") in
+  let applied_f term = Apply (variable "run_example", [ term ])
+  and applied_g term = Apply (variable "second_example", [ term ]) in
   let positive term = Operation (">", [ term; int 0 ]) in
   let expect fact fragment =
     let text = triggered fact in
@@ -1492,20 +1494,21 @@ let () =
   test "a quantified fact triggers on an application of its variable" (fun () ->
       expect
         (Forall
-           ( [ (variable "i", Int) ],
+           ( [ (variable "step_index", Int) ],
              Operation (">=", [ i_term; int 0 ]) ==> positive (applied_f i_term) ))
         ":pattern ((x0 b0))");
   test "a trigger has no arithmetic on a bound variable" (fun () ->
       let text =
         triggered
           (Forall
-             ([ (variable "i", Int) ], positive (applied_f (Operation ("+", [ i_term; int 1 ])))))
+             ( [ (variable "step_index", Int) ],
+               positive (applied_f (Operation ("+", [ i_term; int 1 ]))) ))
       in
       if contains text ":pattern" then fail "%s" text);
   test "a trigger that would match its own body's larger term is passed over" (fun () ->
       expect
         (Forall
-           ( [ (variable "i", Int) ],
+           ( [ (variable "step_index", Int) ],
              Operation ("<", [ applied_f i_term; applied_f (Operation ("+", [ i_term; int 1 ])) ])
              &&& positive (applied_g i_term) ))
         ":pattern ((x2 b0)))");
@@ -1513,7 +1516,7 @@ let () =
       let text =
         triggered
           (Forall
-             ( [ (variable "i", Int) ],
+             ( [ (variable "step_index", Int) ],
                equal (applied_f i_term) (Operation ("+", [ applied_g i_term; int 1 ])) ))
       in
       if (not (contains text ":pattern ((x0 b0)))")) || contains text ":pattern ((x1" then
@@ -1522,12 +1525,14 @@ let () =
     {
       declarations =
         [
-          Function (variable "f", [ Int ], Int);
-          Function (variable "g", [ Int ], Int);
-          Constant (variable "n", Int);
+          Function (variable "run_example", [ Int ], Int);
+          Function (variable "second_example", [ Int ], Int);
+          Constant (variable "limit_count", Int);
         ];
       facts = [ fact ];
-      goal = Operation (">", [ Apply (variable "f", [ Symbol (variable "n") ]); int 0 ]);
+      goal =
+        Operation
+          (">", [ Apply (variable "run_example", [ Symbol (variable "limit_count") ]); int 0 ]);
     }
   in
   test "a quantified fact with no trigger is told apart" (fun () ->
@@ -1536,15 +1541,16 @@ let () =
           (untriggered
              (query
                 (Forall
-                   ( [ (variable "i", Int) ],
+                   ( [ (variable "step_index", Int) ],
                      positive (applied_f (Operation ("+", [ i_term; int 1 ]))) ))))
       then fail "a fact on f(i + 1) alone has no trigger";
-      if untriggered (query (Forall ([ (variable "i", Int) ], positive (applied_f i_term)))) then
-        fail "a fact on f(i) has one");
+      if
+        untriggered (query (Forall ([ (variable "step_index", Int) ], positive (applied_f i_term))))
+      then fail "a fact on f(i) has one");
   test "variables named by no one application share a trigger" (fun () ->
       expect
         (Forall
-           ( [ (variable "i", Int); (variable "j", Int) ],
+           ( [ (variable "step_index", Int); (variable "other_index", Int) ],
              Operation ("<", [ applied_f i_term; applied_g j_term ]) ))
         ":pattern ((x0 b0) (x2 b1))")
 

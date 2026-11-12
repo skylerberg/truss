@@ -1,3 +1,3 @@
-fn f() -> String {
+fn run_example() -> String {
   (identity)[Int64](5)
 }

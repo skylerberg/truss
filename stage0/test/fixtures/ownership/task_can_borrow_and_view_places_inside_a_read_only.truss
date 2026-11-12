@@ -7,7 +7,7 @@ fn Pair.words(self) yields own StringSlice {
   yield self.text.slice()
 }
 
-fn f(pair: Pair, names: List[String], parts: List[Slice[Int64]])
+fn run_example(pair: Pair, names: List[String], parts: List[Slice[Int64]])
   uses Tasks
 {
   concurrent for list in pair.each() {

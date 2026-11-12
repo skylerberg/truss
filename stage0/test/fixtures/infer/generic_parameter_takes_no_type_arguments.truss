@@ -1,3 +1,3 @@
-fn f[Element: Default]() -> Element {
+fn run_example[Element: Default]() -> Element {
   Element[Int64].default()
 }

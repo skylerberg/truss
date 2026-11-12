@@ -1,4 +1,4 @@
-fn f() {
+fn run_example() {
   for index in 0..10 {
     let next = index.wrapping_add(1)
     let byte: UInt8 = index

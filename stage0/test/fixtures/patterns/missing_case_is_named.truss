@@ -1,4 +1,4 @@
-fn f(present: Option[Priority]) -> Int64 {
+fn run_example(present: Option[Priority]) -> Int64 {
   match present {
     Some(Low) => 1
     Some(Normal) => 2

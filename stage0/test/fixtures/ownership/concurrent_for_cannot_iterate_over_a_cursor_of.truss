@@ -1,4 +1,4 @@
-fn f(parts: List[Slice[Int64]])
+fn run_example(parts: List[Slice[Int64]])
   uses Tasks
 {
   var cursor = parts.each()

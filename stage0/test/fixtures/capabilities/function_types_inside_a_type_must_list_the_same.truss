@@ -1,4 +1,4 @@
-fn f() -> USize
+fn run_example() -> USize
   uses Clock
 {
   let actions: List[(fn() -> Instant uses Clock)] = [tick]

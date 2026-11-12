@@ -1,9 +1,9 @@
-type Point(x: Int64)
+type Point(first_number: Int64)
 
 fn Point.get(self) -> Int64 {
-  self.x
+  self.first_number
 }
 
 fn read() -> Int64 {
-  Point(x: 1).get()
+  Point(first_number: 1).get()
 }

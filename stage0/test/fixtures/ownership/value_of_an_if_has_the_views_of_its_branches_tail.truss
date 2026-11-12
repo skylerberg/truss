@@ -1,4 +1,4 @@
-fn f(items: mut List[Int64], first: Bool) -> USize {
+fn run_example(items: mut List[Int64], first: Bool) -> USize {
   let part = if first { items[..1] } else { items[1..] }
   mut items.push(1)
   part.length()

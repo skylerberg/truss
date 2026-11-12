@@ -1,4 +1,4 @@
-trait T
+trait Payload
 {
-  type K
+  type Kappa
 }

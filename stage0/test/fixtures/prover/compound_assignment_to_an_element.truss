@@ -1,4 +1,4 @@
-fn f(items: mut List[UInt8])
+fn run_example(items: mut List[UInt8])
   requires items.length() > 0
   requires items[0] < 255
   ensures items[0] == old(items[0]) + 1

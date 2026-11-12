@@ -1,4 +1,4 @@
-fn f(value: Option[UInt8]) -> Option[UInt8] {
+fn run_example(value: Option[UInt8]) -> Option[UInt8] {
   let inner = value?
   Some(inner + 1)
 }

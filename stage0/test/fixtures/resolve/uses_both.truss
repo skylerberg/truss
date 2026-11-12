@@ -1,5 +1,5 @@
 use acme::geometry::vector
 
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   vector::length(1) + acme::geometry::vector::length(2)
 }

@@ -1,4 +1,4 @@
-fn f(text: String) -> Int64 {
+fn run_example(text: String) -> Int64 {
   match text {
     "a" => 1
   }

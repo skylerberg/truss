@@ -1,10 +1,10 @@
-type Point(x: Int64, y: Int64)
+type Point(first_number: Int64, second_number: Int64)
 
 let small: Int64 = 2 + 3 * 4
 let flag: Bool = small > 10 && !false
 let names: List[String] = ["a", "bc"]
 let rows: List[List[Int64]] = [[1, 2], [3]]
-let corner: Point = Point(x: 1, y: small)
+let corner: Point = Point(first_number: 1, second_number: small)
 let primes: Array[Int64, 3] = [2, 3, 5]
 let colors: Set[String] = ["red", "green", "red"]
 
@@ -13,6 +13,6 @@ test "constants" {
   assert flag
   assert names.length() == 2 && names[1] == "bc"
   assert rows[0][1] == 2 && rows[1].length() == 1
-  assert corner.y == 14
+  assert corner.second_number == 14
   assert colors.length() == 2
 }

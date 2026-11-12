@@ -10,5 +10,5 @@ fn count_to(limit: UInt8 = 3) -> UInt8
   count
 }
 
-fn f() -> UInt8
+fn run_example() -> UInt8
   ensures result == 

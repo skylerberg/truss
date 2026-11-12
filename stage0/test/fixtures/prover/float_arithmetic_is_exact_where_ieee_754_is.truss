@@ -1,4 +1,4 @@
-fn f() -> Float64
+fn run_example() -> Float64
   ensures result == 0.5
 {
   0.25 + 0.25

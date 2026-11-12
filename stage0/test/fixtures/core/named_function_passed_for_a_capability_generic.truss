@@ -1,4 +1,4 @@
-fn g()
+fn second_example()
   uses Console
 {
   apply(shout)

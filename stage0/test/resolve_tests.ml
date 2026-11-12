@@ -191,7 +191,7 @@ let () =
       one_diagnostic Fixtures.Resolve.local_cannot_share_a_name_with_a_function_in_the
         "resolve.hides_name");
   test "a generic parameter cannot hide a prelude type" (fun () ->
-      one_diagnostic "fn f[Option](value: Option) {}\n" "resolve.hides_name");
+      one_diagnostic "fn run_example[Option](value: Option) {}\n" "resolve.hides_name");
   test "locals in sibling blocks may share a name" (fun () ->
       no_diagnostics [ ("app::main", Fixtures.Resolve.locals_in_sibling_blocks_may_share_a_name) ])
 
@@ -224,15 +224,16 @@ let () =
       one_diagnostic Fixtures.Resolve.null_is_an_error_with_a_fix_that_writes_none "resolve.null"
         ~fixed:Fixtures.Resolve.null_is_an_error_with_a_fix_that_writes_none_fixed);
   test "an unknown type is an error" (fun () ->
-      one_diagnostic "fn f(value: Strng) {}\n" "resolve.unknown_name")
+      one_diagnostic "fn run_example(value: Strng) {}\n" "resolve.unknown_name")
 
 (* The prelude *)
 
 let () =
   test "a prelude type is the standard library's" (fun () ->
-      refers "fn f(value: Option[Int64]) {}\n" ~name:("Option", 1) "standard::option::Option");
+      refers "fn run_example(value: Option[Int64]) {}\n" ~name:("Option", 1)
+        "standard::option::Option");
   test "a built-in type is the intrinsic module's" (fun () ->
-      refers "fn f(value: Int64) {}\n" ~name:("Int64", 1) "standard::intrinsic::Int64");
+      refers "fn run_example(value: Int64) {}\n" ~name:("Int64", 1) "standard::intrinsic::Int64");
   test "a prelude variant is written bare" (fun () ->
       refers Fixtures.Resolve.prelude_variant_is_written_bare ~name:("Some", 1)
         "variant Some of standard::option::Option")
@@ -334,7 +335,7 @@ let () =
         "resolve.not_visible");
   test "an import nothing uses is an error with a fix that deletes it" (fun () ->
       one_diagnostic ~others Fixtures.Resolve.import_nothing_uses_is_an_error_with_a_fix_that
-        "resolve.unused_import" ~fixed:"\nfn f() {}\n");
+        "resolve.unused_import" ~fixed:"\nfn run_example() {}\n");
   test "an import of a module that does not exist is an error" (fun () ->
       one_diagnostic Fixtures.Resolve.import_of_a_module_that_does_not_exist_is_an_error
         "resolve.unknown_module");
@@ -436,7 +437,7 @@ let () =
       Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
       let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
-      if resolved <> [ Support.top_key "app::main" "z" ] then
+      if resolved <> [ Support.top_key "app::main" "third_number" ] then
         fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "an import used only in a part the parser could not read is not unused" (fun () ->
       let database =
@@ -460,7 +461,7 @@ let () =
   test "a definition cannot take a prelude name" (fun () ->
       one_diagnostic "type List(count: Int64)\n" "resolve.hides_name");
   test "a generic parameter cannot take a prelude variant's name" (fun () ->
-      one_diagnostic "fn f[Some](value: Some) {}\n" "resolve.hides_name");
+      one_diagnostic "fn run_example[Some](value: Some) {}\n" "resolve.hides_name");
   test "a trait whose header did not parse is not resolved" (fun () ->
       let database =
         setup [ ("app::main", Fixtures.Resolve.trait_whose_header_did_not_parse_is_not_resolved) ]

@@ -2,7 +2,7 @@ fn make() -> Option[String] { todo }
 
 fn keep(text: own String) {}
 
-fn f() {
+fn run_example() {
   if make() is Some(text) {
     keep(own text)
   }

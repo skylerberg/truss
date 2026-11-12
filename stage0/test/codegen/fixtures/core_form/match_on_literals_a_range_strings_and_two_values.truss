@@ -17,9 +17,9 @@ fn greeting(word: String) -> Int64 {
 
 fn both(first: Option[Int64], second: Option[Int64]) -> Int64 {
   match first, second {
-    Some(a), Some(b) => a + b
-    Some(a), None => a
-    None, Some(b) => b
+    Some(first_value), Some(second_value) => first_value + second_value
+    Some(first_value), None => first_value
+    None, Some(second_value) => second_value
     None, None => 0
   }
 }

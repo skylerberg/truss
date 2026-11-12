@@ -1,9 +1,9 @@
-type Point(x: Float64, y: Float64)
+type Point(first_number: Float64, second_number: Float64)
   derives Equal
 
-fn f(a: Point, b: Point) -> Bool
-  requires a == b
+fn run_example(first_value: Point, second_value: Point) -> Bool
+  requires first_value == second_value
   ensures result
 {
-  a.x == b.x
+  first_value.first_number == second_value.first_number
 }

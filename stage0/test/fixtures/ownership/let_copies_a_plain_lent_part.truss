@@ -1,4 +1,4 @@
-fn f(counter: Counter) -> Int64 {
+fn run_example(counter: Counter) -> Int64 {
   let now = counter.current()
   now
 }

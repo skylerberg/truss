@@ -7,7 +7,7 @@ fn first[Reader: sources::Source](reader: Reader) -> Instant
   reader.read()
 }
 
-fn f() -> Instant
+fn run_example() -> Instant
   uses Clock
 {
   first(timers::Timer())

@@ -1,4 +1,4 @@
-fn f(items: List[Int64], index: USize) -> Int64
+fn run_example(items: List[Int64], index: USize) -> Int64
   requires index < items.length()
 {
   items[index]

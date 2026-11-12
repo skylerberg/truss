@@ -1,7 +1,7 @@
 let on: Bool = true
 
-fn f(b: Bool) -> Int64 {
-  match b {
+fn run_example(second_value: Bool) -> Int64 {
+  match second_value {
     on => 1
     false => 2
   }

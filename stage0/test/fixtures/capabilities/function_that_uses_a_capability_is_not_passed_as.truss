@@ -2,6 +2,6 @@ fn apply(action: fn() -> Instant) -> Instant {
   action()
 }
 
-fn f() -> Instant {
+fn run_example() -> Instant {
   apply(tick)
 }

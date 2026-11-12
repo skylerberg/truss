@@ -1,5 +1,5 @@
 
-fn f(pair: mut Pair)
+fn run_example(pair: mut Pair)
   requires pair.first == 1
   ensures pair.first == 1
 {

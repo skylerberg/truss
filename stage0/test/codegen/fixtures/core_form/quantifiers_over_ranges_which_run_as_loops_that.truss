@@ -1,20 +1,20 @@
 fn all_positive(items: List[Int64]) -> Bool {
-  forall i in 0..items.length() => items[i] > 0
+  forall step_index in 0..items.length() => items[step_index] > 0
 }
 
 fn any_long(names: List[String], over: USize) -> Bool {
-  exists i in 0..names.length() => names[i].length() > over
+  exists step_index in 0..names.length() => names[step_index].length() > over
 }
 
 fn sorted(items: List[Int64]) -> Bool {
-  forall i in 1..items.length() => items[i - 1] <= items[i]
+  forall step_index in 1..items.length() => items[step_index - 1] <= items[step_index]
 }
 
 fn first_long(names: List[String]) -> Int64 {
   var looked: Int64 = 0
   for name in names {
     looked += 1
-    if exists i in 0..=name.length() => i > 3 {
+    if exists step_index in 0..=name.length() => step_index > 3 {
       return looked
     }
   }
@@ -33,7 +33,7 @@ test "quantifiers over ranges run as loops that stop at the first answer" {
   assert !sorted([1, 3, 2])
   assert sorted([7])
   assert first_long(names) == 2
-  assert (forall i in 0..3 => exists j in 0..3 => i + j == 2)
-  assert !(forall i in 0..3 => exists j in 0..3 => i + j == 3)
-  assert !(exists i in 0..3 => forall j in 0..3 => i * j > 0)
+  assert (forall step_index in 0..3 => exists other_index in 0..3 => step_index + other_index == 2)
+  assert !(forall step_index in 0..3 => exists other_index in 0..3 => step_index + other_index == 3)
+  assert !(exists step_index in 0..3 => forall other_index in 0..3 => step_index * other_index > 0)
 }

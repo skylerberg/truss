@@ -1,4 +1,4 @@
-fn f(items: own List[Int64]) {
+fn run_example(items: own List[Int64]) {
   var held: List[Int64] = []
   held = own items
   let _ = held

@@ -1,4 +1,4 @@
-fn f(range: mut Span)
+fn run_example(range: mut Span)
   requires range.high < 1000
 {
   range.low = range.high + 1

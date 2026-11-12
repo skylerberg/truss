@@ -1,7 +1,7 @@
-fn f() -> Int64 {
-  var n: Int64 = 0
-  match n {
-    0 if bump(mut n) => 1
+fn run_example() -> Int64 {
+  var limit_count: Int64 = 0
+  match limit_count {
+    0 if bump(mut limit_count) => 1
     0 => 2
     _ => 3
   }

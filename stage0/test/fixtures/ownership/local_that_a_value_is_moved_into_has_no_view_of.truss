@@ -1,4 +1,4 @@
-fn f(first: own List[Int64]) -> List[Int64] {
+fn run_example(first: own List[Int64]) -> List[Int64] {
   var items = own first
   let moved = own items
   items = [1]

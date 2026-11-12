@@ -1,5 +1,5 @@
 fn zeros[count: USize]() -> Array[Int64, count] { todo }
 
-fn f() {
+fn run_example() {
   let _ = zeros()
 }

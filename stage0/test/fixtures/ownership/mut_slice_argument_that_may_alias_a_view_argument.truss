@@ -1,5 +1,5 @@
-fn f(first: mut Slice[Int64], other: Slice[Int64]) {}
+fn run_example(first: mut Slice[Int64], other: Slice[Int64]) {}
 
-fn g(items: mut List[Int64]) {
-  f(mut items[0..2], other: items[0..2])
+fn second_example(items: mut List[Int64]) {
+  run_example(mut items[0..2], other: items[0..2])
 }

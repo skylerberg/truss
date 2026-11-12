@@ -3,7 +3,7 @@ fn grow(limit: mut USize, visit: (fn(index: USize) -> Int64 requires index < lim
   visit(limit - 1)
 }
 
-fn f(items: List[Int64]) -> Int64 {
-  var n: USize = 0
-  grow(mut n, visit: fn(i) { items[i] })
+fn run_example(items: List[Int64]) -> Int64 {
+  var limit_count: USize = 0
+  grow(mut limit_count, visit: fn(step_index) { items[step_index] })
 }
