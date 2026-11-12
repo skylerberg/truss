@@ -3668,15 +3668,27 @@ fn curve_of(curve: Curve) -> elliptic::Curve
 
 fn digest_for(curve: Curve, message: Slice[UInt8]) -> List[UInt8] {
   match curve {
-    P256 => sha256(message)[..].to_list()
-    P384 => sha384(message)[..].to_list()
+    P256 => {
+      let digest = sha256(message)
+      digest[..].to_list()
+    }
+    P384 => {
+      let digest = sha384(message)
+      digest[..].to_list()
+    }
   }
 }
 
 fn keyed_hash(curve: Curve, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
   match curve {
-    P256 => hmac_sha256(key, message: message)[..].to_list()
-    P384 => hmac_sha384(key, message: message)[..].to_list()
+    P256 => {
+      let code = hmac_sha256(key, message: message)
+      code[..].to_list()
+    }
+    P384 => {
+      let code = hmac_sha384(key, message: message)
+      code[..].to_list()
+    }
   }
 }
 
