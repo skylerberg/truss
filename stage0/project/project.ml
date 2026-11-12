@@ -17,7 +17,10 @@ let registry_root hash = "registry " ^ hash
 let package_root name = "package " ^ Path.show_package name
 let lock_file = "truss.lock"
 let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
-let parent path = match String.rindex_opt path '/' with Some i -> String.sub path 0 i | None -> ""
+
+let parent path =
+  match String.rindex_opt path '/' with Some separator -> String.sub path 0 separator | None -> ""
+
 let segments path = if path = "" then [] else String.split_on_char '/' path
 
 let rec package_directory ~is_package directory =
@@ -247,8 +250,8 @@ let selection =
                   version Manifest.truss_version
             | _ -> ())
           selected;
-        (* The lock file is written one way: what the manifests and the
-           versions in it give. Another is a problem whose fix is to write
+        (* The lock file has one canonical form, derived from the manifests
+           and its versions. Another is a problem whose fix is to write
            that one. *)
         match written with
         | Some written when selection_problems = [] ->
@@ -349,7 +352,7 @@ let module_text =
    the cycle. *)
 let dependency_cycle (packages : (string * Manifest.package) list) =
   let dependencies name =
-    match List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages with
+    match List.find_opt (fun (_, (package : Manifest.package)) -> package.name = name) packages with
     | Some (_, package) ->
         List.map (fun (dependency : Manifest.dependency) -> dependency.package) package.dependencies
     | None -> []
@@ -384,7 +387,9 @@ let problems =
       let packages = own.packages in
       let problems = ref [] in
       let problem directory = manifest_problem problems directory in
-      let named name = List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages in
+      let named name =
+        List.find_opt (fun (_, (package : Manifest.package)) -> package.name = name) packages
+      in
       let selected_named name =
         List.find_opt
           (fun (selected : Registry.Selection.package) -> selected.name = name)
@@ -414,10 +419,12 @@ let problems =
                        could be read two ways. Give one of them another name."
                       name (Path.show_package other))
                 (List.sort_uniq Path.compare_package
-                   (List.map (fun (_, (p : Manifest.package)) -> p.name) packages
+                   (List.map (fun (_, (package : Manifest.package)) -> package.name) packages
                    @ List.concat_map
-                       (fun (_, (p : Manifest.package)) ->
-                         List.map (fun (d : Manifest.dependency) -> d.package) p.dependencies)
+                       (fun (_, (package : Manifest.package)) ->
+                         List.map
+                           (fun (dependency : Manifest.dependency) -> dependency.package)
+                           package.dependencies)
                        packages))
           | { owner = Some _; _ } -> ());
           List.iter

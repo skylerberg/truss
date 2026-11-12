@@ -450,11 +450,11 @@ let () =
   List.iter
     (fun (what, text, code) -> test (what ^ " is an error") (fun () -> one_diagnostic text code))
     [
-      ( "giving up a constant with `own`",
-        keep ^ names ^ Fixtures.Ownership.giving_up_a_constant_with_own,
+      ( "moving a constant with `own`",
+        keep ^ names ^ Fixtures.Ownership.moving_a_constant_with_own,
         "ownership.not_owned" );
-      ( "giving up a field of a constant with `own`",
-        keep ^ config ^ Fixtures.Ownership.giving_up_a_field_of_a_constant_with_own,
+      ( "moving a field of a constant with `own`",
+        keep ^ config ^ Fixtures.Ownership.moving_a_field_of_a_constant_with_own,
         "ownership.not_owned" );
       ( "passing a constant to an `own` parameter",
         keep ^ names ^ Fixtures.Ownership.passing_a_constant_to_an_own_parameter,

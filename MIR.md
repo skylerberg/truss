@@ -1,15 +1,15 @@
 # Truss MIR
 
-This document describes the design of stage0's mid-level IR, the MIR, which
-is to live in `stage0/mir/`. None of it is built yet: [Not built](#not-built)
-lists the order it is built in. The MIR is a control-flow graph of each
+This document describes the design of stage0's mid-level IR, the MIR, in
+`stage0/mir/`. Its builder is built, and no stage reads it yet:
+[Not built](#not-built) lists the order the rest is built in. The MIR is a control-flow graph of each
 definition's body, built from the core form that
 [TYPECHECKER.md](TYPECHECKER.md) describes. The ownership check, the prover
 ([PROVER.md](PROVER.md)), and code generation ([CODEGEN.md](CODEGEN.md)) are
 to read it in place of the core form. The MIR of a definition is a query
 of the code database, which [DATABASE.md](DATABASE.md) describes.
 
-## What the MIR is for
+## Motivation
 
 The core form is a tree that is still close to the source: it has
 compound assignment, five kinds of loop, lending calls as places, and
@@ -61,7 +61,7 @@ read only by the prover, would cost more than it gives. The MIR is a
 second representation, but all three consumers read it, and it is what
 makes them agree.
 
-## What the MIR keeps
+## Contents
 
 | The MIR has | Because |
 |---|---|
@@ -98,65 +98,86 @@ loops that enclose them.
 
 ### Places and operands
 
-A place is a local followed by projections: a field of a record, a field of
-a variant that a test has selected, and the element that a borrow local
-holds. A constant's static data is a place too, and it is read-only.
+A place is a local followed by projections: a field of a record, and a
+field of a variant that a test has selected. A constant's static data is a
+place too, and it is read-only.
 
-A **borrow local** holds a borrow of a place. A lending call, such as
-`items[index]` (a call of `Index.at`), makes one with a `lend` statement,
-and the borrow lasts until an `end_lend` statement. The core form's
-`Lent` place is a lending call whose loan ends with the statement; the MIR
-builder places the `end_lend` at the end of that statement. A compound
-assignment's target and a borrowed operand of a call are borrow locals in
-the same way, so a place is evaluated once however often it is read.
+A local is one of:
+
+- **a source local:** a parameter, `self`, or a local that a pattern or a
+  lambda binds, with its mode. A local bound with `Read` or `mut` is the
+  place it was bound to, as a borrowed parameter is the caller's place, and
+  not a copy of it.
+- **a temporary,** a value with no name, which is dead at the end of the
+  statement that makes it.
+- **a lent local,** the part that a lending call lends, or a compound
+  assignment's target. It is the place itself, so a place is evaluated once
+  however often it is read, and its loan lasts until it is dead.
+
+A lending call, such as `items[index]` (a call of `Index.at`), makes a lent
+local with a `lend` statement. The core form's `Lent` place lends for the
+rest of its statement, so the builder makes the lent local dead where the
+statement ends.
 
 An operand is one of:
 
-- `copy place`, for a type that copies implicitly
-- `move place`, which leaves the place without a value
+- `use place`, which reads the value out of the place: a copy for a type
+  that copies implicitly, and a move otherwise. It names the core node it
+  reads for, by which the ownership check reports a move.
 - `borrow place`, read-only or `mut`, for a parameter that borrows
-- a constant: a literal of a built-in type, or a string literal
+- a constant: unit, a literal of a built-in type, or a string literal
 
-The builder chooses between `copy` and `move` from the type. The ownership
-check reports a `move` that is not allowed, as it does for a `Use` today.
+The type decides between a copy and a move, so the builder needs no fact
+about types, and the MIR is a function of the core form alone.
 
 ### Statements
 
 | Statement | Meaning |
 |---|---|
-| `local = rvalue` | Write a value to a local or a place. |
-| `local = call(callee, arguments)` | A call. The callee is the core form's: a function, a trait method with its evidence, a capability method, an intrinsic, or a function value. An argument the source leaves out is `default`, and the callee fills it in, as DESIGN.md requires. |
-| `borrow = lend callee(arguments)` | A call of a lending method, whose result is a borrow local. |
-| `end_lend borrow` | The end of a borrow local's loan. For a `mut` loan, the lender's place has the lent part's final value from here on. |
-| `local = pull cursor` | The next value of the built-in cursor of a yielding method, an `Option`. A user type's `Cursor.next` is an ordinary call. |
-| `assert local` | An `assert` that can run: stop the program if the `Bool` local is false. |
-| `echo place` | Record a value's debug output. |
-| `ghost statement` | A statement that only the prover reads: an assertion or an assumption of a core expression, an assignment to a ghost local, or a call of a theorem. |
-| `region(kind)`, `regions_end` | The start of a region of a `parallel` block, a `concurrent` block, or a loop whose iterations run at once, and the end of the last region. Code generation outlines each region, as it outlines the LIR's. |
+| `place = rvalue` | Write a value to a place. |
+| `place = call(callee, arguments)` | A call. The callee is the core form's: a function, a trait method with its evidence, a capability method, an intrinsic that is not a primitive operation, or a function value. An argument the source leaves out is `default`, and the callee fills it in, as DESIGN.md requires. |
+| `local = lend callee(arguments)` | A call of a lending method, whose part the lent local is. |
+| `place = slice slice_range(base, start, stop)` | A slice, whose result views `base`. |
+| `place = template from_template(record)` | A tagged string, with its literal texts, on which the prover runs the tag's checks. |
+| `place = pull cursor` | The next value of the built-in cursor of a yielding method, an `Option`. A user type's `Cursor.next` is an ordinary call. |
+| `live locals`, `dead locals` | Where locals start to hold values, and where they stop: the end of a scope, of a statement, or of a loan. A jump out of scopes, such as a `break`, ends them first. |
+| `assert operand` | An `assert` that can run: stop the program if the `Bool` is false. |
+| `echo operand` | Record a value's debug output. |
+| `provide implementations`, `provide end` | The start and the end of a `provide` block. |
+| `fork start`, `fork end` | The start of each branch of a `parallel` or `concurrent` block, and the end of its last. Code generation outlines each branch, as it outlines the LIR's regions. |
+| `ghost assert`, `proof` | An `assert` that cannot run, and a `proof` block, which only the prover reads. |
 
 | Rvalue | Meaning |
 |---|---|
 | an operand | |
 | `operation(op, operands)` | A primitive operation on built-in types. See [Primitive operations](#primitive-operations). |
 | `compare(comparison, left, right)` | A comparison of two values of one built-in type. |
-| `construct(type, variant, fields)` | A record or a variant, with every field, in the order the fields are evaluated. |
+| `not operand` | |
+| `construct(variant, fields)` | A record or a variant, with every field, in the order the fields are evaluated. A field that is a `borrow` lends its place to the value, as a yielded construct does. |
+| `array(elements)` | An array literal. |
 | `is_variant(place, variant)` | Whether a sum type's value holds the variant. |
 | `convert(conversion, operand)` | A conversion the type checker inserted. |
-| `function(lambda or path, captures)` | A function value. |
 | `to_any(operand, trait, evidence)` | A value as `any Trait`. |
+| `copy(operand)` | A `copy()` that the compiler implements. |
+| `function(path)`, `lambda(body, captures)` | A function value. |
 
 | Terminator | Meaning |
 |---|---|
 | `goto block` | Jump. |
-| `branch(local, yes, no)` | Branch on a `Bool`. |
-| `switch_variant(place, cases, default)` | Branch on a sum type's variant. |
-| `loop(header)` | Enter the natural loop at `header`. The header carries the loop's `invariant`, `decreases`, and `cost` clauses, and its schedule: one iteration after another, or at once as the regions of a `parallel for` or a `concurrent for`. |
-| `each(call, pattern, body, after)` | A `for` loop over a call of a yielding method. `body` is a region that runs once for each part the callee yields, and ends with `continue` or `break`. |
-| `yield(mode, operand, resume)` | In a lending or yielding method, give a part to the caller's loop, and go on at `resume` unless the loop has ended. |
+| `branch(operand, yes, no)` | Branch on a `Bool`. |
+| `switch_variant(place, cases)` | Branch on a sum type's variant. |
+| `each(call, part, body, after)` | A `for` loop over a call of a yielding method. `body` runs once for each part the callee yields, which the local `part` holds, and ends with `next` or a jump to `after`. |
+| `next` | The end of an iteration of the enclosing `each`. |
+| `yield(mode, operand, resume)` | In a lending or yielding method, give a part to the caller's loop, and continue at `resume` unless the loop has ended. |
 | `return operand` | Return a value, or nothing. |
-| `exit_tasks(tasks, exit)` | An early exit from `concurrent` code: end these tasks, then take `exit`, a `return`, a `break`, or a `continue`. |
+| `exit_tasks(tasks, exit)` | An early exit from `concurrent` code: end these tasks, then return or jump. |
 | `unreachable` | A point the prover shows is never reached: the last arm of a `match` whose guards cover every case, or `unreachable` as written. |
 | `todo` | Stop the program at a `todo`. |
+
+Every other loop is a natural loop of jumps. Its header block carries the
+loop's `invariant`, `decreases`, and `cost` clauses, its schedule (one
+iteration after another, or at once for a `parallel for` or a
+`concurrent for`), and, for a loop over an integer range, its counter.
 
 `each` stays a structured terminator, unlike other loops. Code generation
 inlines the yielding method and runs the body at each of its `yield`s, and
@@ -315,12 +336,12 @@ outlining of regions.
 
 ## Queries
 
-The MIR of a definition is a query on its core form, so it is built once
-and read by all three consumers. It is canonical in the way the LIR is:
-locals numbered in order of first use, blocks in reverse postorder,
-nothing unused. A change that leaves a definition's MIR unchanged, such as
-a renamed local, does not reach the ownership check, the prover, or code
-generation.
+The MIR of a definition is a query on its core form and its interface, so
+it is built once and read by all three consumers. A function for
+specifications only has none, since its body never runs. The MIR is
+canonical: its blocks are in reverse postorder from the entry, with the
+blocks that control cannot reach removed, and its locals are numbered in
+the order the builder makes them, which follows the core form.
 
 ## Specifications
 
@@ -364,23 +385,20 @@ that reaches it as a bug in the compiler.
 
 ## Not built
 
-The MIR is not built. It is built in this order, and each step removes
-the code that it replaces:
+The builder is built. The rest is built in this order, and each step
+removes the code that it replaces:
 
-1. **The builder,** from the ownership check's graph builder, which
-   already lowers the core form to a control-flow graph in evaluation
-   order.
-2. **The ownership check** reads the MIR, and its own graph builder is
+1. **The ownership check** reads the MIR, and its own graph builder is
    removed.
-3. **Code generation** lowers the MIR to the LIR, and its lowering of the
+2. **Code generation** lowers the MIR to the LIR, and its lowering of the
    core form is removed.
-4. **The prover** runs the MIR forward, and its walk of the core form is
+3. **The prover** runs the MIR forward, and its walk of the core form is
    removed.
-5. **The core form** loses the forms that only the builder then reads,
+4. **The core form** loses the forms that only the builder then reads,
    such as `Current_target`, and its consumers' cases for
    specification-only forms in executable code.
 
-The prover's two translations of primitive operations, one for `Operator`
-and one for a call of an intrinsic, can be merged before the MIR exists,
-since the core form already names the operation in both. Pattern matching
-as a decision tree comes after step 3, as an improvement of the builder.
+The prover already reads `Operator` and a call of an intrinsic that is a
+primitive operation through one translation, since the core form names the
+operation in both. Pattern matching as a decision tree comes after step 2,
+as an improvement of the builder.

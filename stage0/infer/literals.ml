@@ -15,15 +15,15 @@ let round ~precision ~minimum ~maximum ~(significand : Z.t) ~(exponent : Z.t) : 
     in
     (* The binary exponent [e] with [2^e <= value < 2^(e + 1)]. *)
     let estimate = Z.numbits numerator - Z.numbits denominator in
-    let at_least e =
-      if e >= 0 then Z.geq numerator (Z.mul denominator (Z.shift_left Z.one e))
-      else Z.geq (Z.shift_left numerator (-e)) denominator
+    let at_least expression =
+      if expression >= 0 then Z.geq numerator (Z.mul denominator (Z.shift_left Z.one expression))
+      else Z.geq (Z.shift_left numerator (-expression)) denominator
     in
-    let e = if at_least estimate then estimate else estimate - 1 in
-    let e = max e minimum in
+    let expression = if at_least estimate then estimate else estimate - 1 in
+    let expression = max expression minimum in
     (* The significand at that exponent: [value / 2^(e - precision + 1)],
        rounded to the nearest integer, ties to even. *)
-    let scale = e - precision + 1 in
+    let scale = expression - precision + 1 in
     let scaled_numerator, scaled_denominator =
       if scale >= 0 then (numerator, Z.shift_left denominator scale)
       else (Z.shift_left numerator (-scale), denominator)

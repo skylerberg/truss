@@ -1,7 +1,7 @@
 module Compatibility = Cli.Compatibility
 
-(* The tests of whether a release keeps what the one before it offered.
-   Each gives a module as it was and as it is, and states what changed. *)
+(* Each test gives a module before and after a release, and states the
+   compatibility changes. *)
 
 open Harness
 open Support

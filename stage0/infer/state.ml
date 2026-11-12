@@ -239,7 +239,7 @@ let rec build_expression state (value : expression) : Core.expression =
   in
   if
     List.exists
-      (fun (operand : expression) -> was_hole state (fun t -> t.types) operand.id)
+      (fun (operand : expression) -> was_hole state (fun tables -> tables.types) operand.id)
       evaluated
   then begin
     let evaluate (operand : expression) : Core.statement option =
@@ -288,7 +288,7 @@ let build_statement state (written : statement) : Core.statement =
   in
   let hole (value : expression) =
     let value = unmarked value in
-    if was_hole state (fun t -> t.types) value.id then Some value else None
+    if was_hole state (fun tables -> tables.types) value.id then Some value else None
   in
   match
     match written.kind with
@@ -319,7 +319,7 @@ let register_pattern state (written : pattern) kind =
         | None -> bug "`%s` has a node and no type" (source state written.span))
 
 let build_pattern state (written : pattern) : Core.pattern =
-  if was_hole state (fun t -> t.scrutinee_types) written.id then
+  if was_hole state (fun tables -> tables.scrutinee_types) written.id then
     { id = fresh_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
   else
     match state.form.pattern_builders.(written.id) with
@@ -394,7 +394,7 @@ let unsolved state =
       let report =
         reported state Cannot_infer
           (Span.make state.definition.span.start state.definition.span.start)
-          "A type in this definition cannot be worked out. Give the `let` a type, or the call type \
+          "A type in this definition cannot be inferred. Give the `let` a type, or the call type \
            arguments."
       in
       state.unsolved <- Some report;
@@ -597,7 +597,7 @@ let settle state frame =
   if unsolved <> [] then begin
     let report =
       reported state Cannot_infer frame.span
-        "The types in this statement cannot be worked out from it alone. Give the `let` a type, or \
+        "The types in this statement cannot be inferred from it alone. Give the `let` a type, or \
          the call type arguments, such as `var names: List[String] = []`."
     in
     if Option.is_none state.unsolved then state.unsolved <- Some report;

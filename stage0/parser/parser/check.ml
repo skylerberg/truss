@@ -138,8 +138,8 @@ and requires_placement cursor ~top (type_ : type_expression) =
             match clause.kind with
             | Requires _ ->
                 report cursor Misplaced_requires clause.span
-                  "A function type has a `requires` only as the type of a parameter, where it says \
-                   what the function passes its callback."
+                  "A function type has a `requires` only as the type of a parameter, where it \
+                   constrains the arguments the callee passes its callback."
             | _ -> ())
           clauses;
       List.iter (fun (_, input) -> requires_placement cursor ~top:false input) inputs;

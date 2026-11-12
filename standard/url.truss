@@ -1,5 +1,6 @@
 use standard::intrinsic
 use standard::network
+use standard::serialization
 use standard::text
 
 public type Host =
@@ -1071,4 +1072,16 @@ public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
   literals.length() > 0
     && parses_with_parts_after_authority(literals, part: "~")
     && parses_with_parts_after_authority(literals, part: "")
+}
+
+impl serialization::Serialize for Url {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for Url {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Url, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "a URL")
+  }
 }

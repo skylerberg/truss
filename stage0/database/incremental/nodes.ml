@@ -84,15 +84,20 @@ and node = {
   mutable verified_at : int;
   mutable root : bool;  (** Demanded by a driver: maintained across changes, and never collected *)
   mutable alive : bool;
-  mutable fingerprint : string option;
-      (** The hash of its outcome's bytes, worked out when first needed *)
-  mutable stored : bool;  (** Whether the store has its value's bytes, under its fingerprint *)
-  mutable opaque : bool;
-      (** Whether its outcome has no bytes, so that its fingerprint is of this one computation *)
+  mutable fingerprint : fingerprint;
   mutable identity : string option;
-  mutable written : bool;  (** In the chain of artifacts *)
-  mutable superseding : bool;  (** In one of the chain's differences *)
+  mutable written : written;
 }
+
+(* Where the chain of artifacts holds a node. *)
+and written = Unwritten | In_whole | In_difference
+
+and fingerprint =
+  | Unknown  (** Not computed yet, or forgotten since the outcome changed *)
+  | Hashed of { hash : string; stored : bool }
+      (** The hash of the outcome's bytes; [stored] when the store has them under it *)
+  | Opaque of string
+      (** An outcome with no bytes: a nonce, so that it equals no other computation's *)
 
 and cell =
   | Input : ('key, 'value) input * ('key, 'value) input_cell -> cell
@@ -178,12 +183,12 @@ let remember engine =
   if !auditing && not !within_audit then begin
     if !remembered_count = Weak.length !remembered then begin
       let live = ref [] in
-      for i = 0 to Weak.length !remembered - 1 do
-        match Weak.get !remembered i with Some e -> live := e :: !live | None -> ()
+      for index = 0 to Weak.length !remembered - 1 do
+        match Weak.get !remembered index with Some engine -> live := engine :: !live | None -> ()
       done;
       let live = List.rev !live in
       let grown = Weak.create (max 16 (2 * (List.length live + 1))) in
-      List.iteri (fun i e -> Weak.set grown i (Some e)) live;
+      List.iteri (fun index engine -> Weak.set grown index (Some engine)) live;
       remembered := grown;
       remembered_count := List.length live
     end;
@@ -247,6 +252,11 @@ let create ?(log = false) ?(bases = []) () =
   in
   remember engine;
   engine
+
+let hash_of = function
+  | Unknown -> None
+  | Hashed { hash; _ } -> Some hash
+  | Opaque nonce -> Some nonce
 
 let context engine = { engine; frame = None; observing = false }
 let observer engine = { engine; frame = None; observing = true }
@@ -332,12 +342,9 @@ let new_node engine ~phase ~below =
       verified_at = 0;
       root = false;
       alive = true;
-      fingerprint = None;
-      stored = false;
-      opaque = false;
+      fingerprint = Unknown;
       identity = None;
-      written = false;
-      superseding = false;
+      written = Unwritten;
     }
   in
   Hashtbl.replace engine.own node.id node;
@@ -369,16 +376,16 @@ let input_cells engine (input : ('key, 'value) input) : ('key, 'value) input_cel
 
 (* A result as an engine sees it: its own, or else a base's. *)
 let find_result engine (query : ('key, 'value) query) (key : 'key) =
-  let look e =
-    match find_table e query.number query.cells with
+  let look engine =
+    match find_table engine query.number query.cells with
     | Some table -> Hashtbl.find_opt table key
     | None -> None
   in
   match look engine with Some cell -> Some cell | None -> List.find_map look engine.bases
 
 let find_input engine (input : ('key, 'value) input) (key : 'key) =
-  let look e =
-    match find_table e input.input_number input.input_cells with
+  let look engine =
+    match find_table engine input.input_number input.input_cells with
     | Some table -> Hashtbl.find_opt table key
     | None -> None
   in

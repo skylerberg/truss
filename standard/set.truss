@@ -1,6 +1,6 @@
 public opaque type Set[Element: Hash + Ordered](elements: List[Element])
-  invariant forall i in 0..elements.length() => forall j in 0..elements.length() =>
-    i < j ==> !(elements.model()[i] == elements.model()[j])
+  invariant forall first in 0..elements.length() => forall second in 0..elements.length() =>
+    first < second ==> !(elements.model()[first] == elements.model()[second])
   derives Copyable
 
 impl Model for Set[Element: Hash + Ordered] {
@@ -29,7 +29,7 @@ public transparent fn Set[Element: Hash + Ordered].length(self) -> USize
 internal fn Set[Element: Hash + Ordered].index_of(self, element: Element) -> USize
   ensures result <= self.elements.length()
   ensures result < self.elements.length() ==> self.elements.model()[result] == element
-  ensures forall i in 0..self.elements.length() => i == result || !(self.elements.model()[i] == element)
+  ensures forall position in 0..self.elements.length() => position == result || !(self.elements.model()[position] == element)
   ensures (result < self.elements.length()) == contains_equal(self.model(), value: element)
   cost time O(self.elements.length() * time(Element.equal))
 {
@@ -40,7 +40,7 @@ internal fn Set[Element: Hash + Ordered].index_of(self, element: Element) -> USi
     invariant match_index <= self.elements.length()
     invariant match_index < self.elements.length() ==> self.elements.model()[match_index] == element
     invariant match_index == self.elements.length() ==>
-      forall i in 0..index => !(self.elements.model()[i] == element)
+      forall position in 0..index => !(self.elements.model()[position] == element)
     decreases self.elements.length() - index
     cost time O(index * time(Element.equal))
   {
@@ -50,8 +50,8 @@ internal fn Set[Element: Hash + Ordered].index_of(self, element: Element) -> USi
     index += 1
   }
   proof {
-    assert forall i in 0..self.elements.model().length() =>
-      self.model().contains(self.elements.model()[i])
+    assert forall position in 0..self.elements.model().length() =>
+      self.model().contains(self.elements.model()[position])
   }
   match_index
 }
@@ -71,8 +71,8 @@ internal fn Set[Element: Hash + Ordered].insert_absent(mut self, element: own El
   ensures forall other: Element =>
     self.model().contains(other) ==> old(self.model()).contains(other) || identical(other, element)
   ensures self.elements.length() == old(self.elements.length()) + 1
-  ensures forall i in 0..old(self.elements.length()) =>
-    identical(self.elements.model()[i], old(self.elements.model())[i])
+  ensures forall index in 0..old(self.elements.length()) =>
+    identical(self.elements.model()[index], old(self.elements.model())[index])
   ensures identical(self.elements.model()[old(self.elements.length())], element)
   ensures identical(
     self.elements.model(),
@@ -83,14 +83,14 @@ internal fn Set[Element: Hash + Ordered].insert_absent(mut self, element: own El
 {
   let position = self.elements.length()
   proof {
-    assert forall i in 0..self.elements.model().length() =>
-      self.model().contains(self.elements.model()[i])
-    assert forall i in 0..self.elements.model().length() => !(self.elements.model()[i] == element)
+    assert forall index in 0..self.elements.model().length() =>
+      self.model().contains(self.elements.model()[index])
+    assert forall index in 0..self.elements.model().length() => !(self.elements.model()[index] == element)
   }
   mut self.elements.push(own element)
   proof {
-    assert forall i in 0..old(self.elements.model()).length() =>
-      identical(self.elements.model()[i], old(self.elements.model())[i])
+    assert forall index in 0..old(self.elements.model()).length() =>
+      identical(self.elements.model()[index], old(self.elements.model())[index])
     assert self.elements.model().elements().contains(self.elements.model()[position])
   }
 }
@@ -207,8 +207,8 @@ public fn Set[Element: Hash + Ordered].retain(mut self, keep: (fn(Element) -> Bo
   for index in 0..count
     invariant self.elements.length() == count
     invariant kept_count <= index
-    invariant forall i in 0..self.elements.length() => forall j in 0..self.elements.length() =>
-      i < j ==> !(self.elements.model()[i] == self.elements.model()[j])
+    invariant forall earlier in 0..self.elements.length() => forall later in 0..self.elements.length() =>
+      earlier < later ==> !(self.elements.model()[earlier] == self.elements.model()[later])
   {
     if keep(self.elements[index]) {
       mut self.elements.swap(kept_count, second: index)
@@ -223,8 +223,8 @@ public fn Set[Element: Hash + Ordered].extend[Source: Cursor[Element = Element]]
 {
   var cursor = own elements
   while mut cursor.next() is Some(element)
-    invariant forall i in 0..self.elements.length() => forall j in 0..self.elements.length() =>
-      i < j ==> !(self.elements.model()[i] == self.elements.model()[j])
+    invariant forall first in 0..self.elements.length() => forall second in 0..self.elements.length() =>
+      first < second ==> !(self.elements.model()[first] == self.elements.model()[second])
   {
     mut self.insert(own element)
   }
@@ -239,8 +239,8 @@ public fn Set[Element: Hash + Ordered].remove_all(mut self, other: Set[Element])
   for index in 0..count
     invariant self.elements.length() == count
     invariant kept_count <= index
-    invariant forall i in 0..self.elements.length() => forall j in 0..self.elements.length() =>
-      i < j ==> !(self.elements.model()[i] == self.elements.model()[j])
+    invariant forall earlier in 0..self.elements.length() => forall later in 0..self.elements.length() =>
+      earlier < later ==> !(self.elements.model()[earlier] == self.elements.model()[later])
   {
     if !other.contains(self.elements[index]) {
       mut self.elements.swap(kept_count, second: index)
@@ -258,7 +258,7 @@ public fn Set[Element: Hash + Ordered].is_subset_of(self, other: Set[Element]) -
   var index: USize = 0
   while index < self.elements.length()
     invariant index <= self.elements.length()
-    invariant forall i in 0..index => contains_equal(other.model(), value: self.elements.model()[i])
+    invariant forall position in 0..index => contains_equal(other.model(), value: self.elements.model()[position])
     decreases self.elements.length() - index
     cost time O(index * (1 + other.length() * time(Element.equal)))
   {
@@ -289,7 +289,7 @@ public fn Set[Element: Hash + Ordered].is_disjoint_from(self, other: Set[Element
   var index: USize = 0
   while index < self.elements.length()
     invariant index <= self.elements.length()
-    invariant forall i in 0..index => !contains_equal(other.model(), value: self.elements.model()[i])
+    invariant forall position in 0..index => !contains_equal(other.model(), value: self.elements.model()[position])
     decreases self.elements.length() - index
     cost time O(index * (1 + other.length() * time(Element.equal)))
   {
@@ -310,8 +310,8 @@ public fn Set[Element: Hash + Ordered + Copyable].union(self, other: Set[Element
   var union = self.copy()
   for index in 0..other.elements.length()
     invariant union.elements.length() <= self.elements.length() + index
-    invariant forall i in 0..union.elements.length() => forall j in 0..union.elements.length() =>
-      i < j ==> !(union.elements.model()[i] == union.elements.model()[j])
+    invariant forall first in 0..union.elements.length() => forall second in 0..union.elements.length() =>
+      first < second ==> !(union.elements.model()[first] == union.elements.model()[second])
   {
     mut union.insert(other.elements[index].copy())
   }
@@ -324,8 +324,8 @@ public fn Set[Element: Hash + Ordered + Copyable].intersection(self, other: Set[
   var intersection: Set[Element] = []
   for index in 0..self.elements.length()
     invariant intersection.elements.length() <= index
-    invariant forall i in 0..intersection.elements.length() => forall j in 0..intersection.elements.length() =>
-      i < j ==> !(intersection.elements.model()[i] == intersection.elements.model()[j])
+    invariant forall first in 0..intersection.elements.length() => forall second in 0..intersection.elements.length() =>
+      first < second ==> !(intersection.elements.model()[first] == intersection.elements.model()[second])
   {
     if other.contains(self.elements[index]) {
       mut intersection.insert(self.elements[index].copy())
@@ -340,8 +340,8 @@ public fn Set[Element: Hash + Ordered + Copyable].difference(self, other: Set[El
   var difference: Set[Element] = []
   for index in 0..self.elements.length()
     invariant difference.elements.length() <= index
-    invariant forall i in 0..difference.elements.length() => forall j in 0..difference.elements.length() =>
-      i < j ==> !(difference.elements.model()[i] == difference.elements.model()[j])
+    invariant forall first in 0..difference.elements.length() => forall second in 0..difference.elements.length() =>
+      first < second ==> !(difference.elements.model()[first] == difference.elements.model()[second])
   {
     if !other.contains(self.elements[index]) {
       mut difference.insert(self.elements[index].copy())
@@ -356,8 +356,8 @@ public fn Set[Element: Hash + Ordered + Copyable].symmetric_difference(self, oth
   var symmetric_difference = self.difference(other)
   for index in 0..other.elements.length()
     invariant symmetric_difference.elements.length() <= self.elements.length() + index
-    invariant forall i in 0..symmetric_difference.elements.length() => forall j in 0..symmetric_difference.elements.length() =>
-      i < j ==> !(symmetric_difference.elements.model()[i] == symmetric_difference.elements.model()[j])
+    invariant forall first in 0..symmetric_difference.elements.length() => forall second in 0..symmetric_difference.elements.length() =>
+      first < second ==> !(symmetric_difference.elements.model()[first] == symmetric_difference.elements.model()[second])
   {
     if !self.contains(other.elements[index]) {
       mut symmetric_difference.insert(other.elements[index].copy())
@@ -394,15 +394,15 @@ public fn Set[Element: Hash + Ordered].each(own self) yields own Element
 }
 
 internal fn Set[Element: Hash + Ordered].elements_included_in(self, other: Set[Element]) -> Bool
-  ensures result == (forall i in 0..self.elements.length() => exists j in 0..other.elements.length() =>
-    self.elements.model()[i] == other.elements.model()[j])
+  ensures result == (forall first in 0..self.elements.length() => exists second in 0..other.elements.length() =>
+    self.elements.model()[first] == other.elements.model()[second])
   cost time O(self.elements.length() * (1 + other.elements.length() * time(Element.equal)))
 {
   var index: USize = 0
   while index < self.elements.length()
     invariant index <= self.elements.length()
-    invariant forall i in 0..index => exists j in 0..other.elements.length() =>
-      self.elements.model()[i] == other.elements.model()[j]
+    invariant forall first in 0..index => exists second in 0..other.elements.length() =>
+      self.elements.model()[first] == other.elements.model()[second]
     decreases self.elements.length() - index
     cost time O(index * (1 + other.elements.length() * time(Element.equal)))
   {
@@ -443,8 +443,8 @@ impl From[List[Element]] for Set[Element: Hash + Ordered] {
   fn from(value: own List[Element]) -> Set[Element] {
     var set: Set[Element] = Set.with_capacity(value.length())
     for element in own value
-      invariant forall i in 0..set.elements.length() => forall j in 0..set.elements.length() =>
-      i < j ==> !(set.elements.model()[i] == set.elements.model()[j])
+      invariant forall first in 0..set.elements.length() => forall second in 0..set.elements.length() =>
+      first < second ==> !(set.elements.model()[first] == set.elements.model()[second])
     {
       mut set.insert(own element)
     }

@@ -19,7 +19,7 @@ let glue ?(extra = []) () =
    local [target], using local [buffer]. *)
 let fill_storage ~target ~buffer values =
   let count = List.length values in
-  let usize_constant n = Lir.Constant (Integer (USize, Z.of_int n)) in
+  let usize_constant number = Lir.Constant (Integer (USize, Z.of_int number)) in
   Lir.Call
     {
       target = Intrinsic Allocate;
@@ -27,8 +27,9 @@ let fill_storage ~target ~buffer values =
       result = Returned (at buffer);
     }
   :: List.mapi
-       (fun i v ->
-         Lir.Assign (at ~projections:[ Index (usize_constant i) ] buffer, Use (constant_int32 v)))
+       (fun index value ->
+         Lir.Assign
+           (at ~projections:[ Index (usize_constant index) ] buffer, Use (constant_int32 value)))
        values
   @ [
       Assign
@@ -73,8 +74,10 @@ let () =
   test "a copy of storage of plain data is one allocation and one memory copy" (fun () ->
       let calls =
         Array.to_list (Lir.canonical (Glue.copy glue (storage int32)).main).blocks
-        |> List.concat_map (fun (b : Lir.basic_block) -> b.statements)
-        |> List.filter_map (function Lir.Call { target = Intrinsic i; _ } -> Some i | _ -> None)
+        |> List.concat_map (fun (block : Lir.basic_block) -> block.statements)
+        |> List.filter_map (function
+          | Lir.Call { target = Intrinsic index; _ } -> Some index
+          | _ -> None)
       in
       if calls <> [ Allocate; Copy_bytes ] then fail "the copy makes other calls");
   test "a copy of storage keeps its values when the original changes" (fun () ->
@@ -135,7 +138,7 @@ let () =
   test "a copy of storage of storage copies every element and both drop cleanly" (fun () ->
       let inner = storage int32 in
       let outer = storage inner in
-      let usize_constant n = Lir.Constant (Integer (USize, Z.of_int n)) in
+      let usize_constant number = Lir.Constant (Integer (USize, Z.of_int number)) in
       expect_status 4
         [
           Glue.copy glue outer;

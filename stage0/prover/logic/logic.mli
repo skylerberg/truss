@@ -1,9 +1,9 @@
 (** The solver's logic: sorts, terms, and queries, and their canonical text in SMT-LIB.
 
-    Symbols here are the prover's own names: each is a {!symbol}, which says what the symbol stands
-    for, so the prover tells one kind from another by its constructor. A query's canonical text
-    never contains them: {!text} numbers every declared symbol by its first appearance, so two
-    queries that differ only in names have the same text, and so the same hash. *)
+    Symbols here are the prover's own names: each is a {!symbol}, whose constructor gives its kind.
+    A query's canonical text never contains them: {!text} numbers every declared symbol by its first
+    appearance, so two queries that differ only in names have the same text, and so the same hash.
+*)
 
 type sort =
   | Int  (** The mathematical integers, which every built-in integer type is a range of. *)

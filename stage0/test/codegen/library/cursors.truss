@@ -42,7 +42,7 @@ test "a cursor is collected, counted, and folded, and gives its last value" {
   assert count_to(0).to_list().length() == 0
 }
 
-test "find takes values up to the first that matches, and the cursor goes on from there" {
+test "find takes values up to the first that matches, and the cursor continues from there" {
   var cursor = count_to(6)
   assert mut cursor.find(fn(item) { item > 3 }) == Some(4)
   assert mut cursor.next() == Some(5)

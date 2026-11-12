@@ -1,9 +1,9 @@
-(** Whether a release of a package keeps what the release before it offered, read from the two
+(** Whether a release of a package is compatible with the release before it, read from the two
     releases' public definitions. *)
 
 type change =
-  | Breaks of string  (** What a user of the release before could rely on and no longer can *)
-  | Grows of string  (** What the release offers that the one before did not *)
+  | Breaks of string  (** A guarantee of the release before that this one drops *)
+  | Grows of string  (** An addition to the public API of the release before *)
 
 type public_change = { path : Path.t; change : change }
 (** A change to a public definition, with what changed as the end of a sentence about it. *)
@@ -17,7 +17,7 @@ val compare :
     A signature's types are compared as the checker worked them out. A contract is compared as it is
     written: a release may drop a [requires] clause and add an [ensures] or a cost clause, and any
     other difference in one breaks. A yielding method that could be pulled as a cursor and no longer
-    can breaks too, though that is worked out from its body. *)
+    can breaks too, though that is inferred from its body. *)
 
 val breaks : public_change list -> (Path.t * string) list
 val grows : public_change list -> (Path.t * string) list

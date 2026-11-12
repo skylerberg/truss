@@ -67,8 +67,10 @@ let () =
       let text = Source.text (Query.demand database Workspace.file checks).source in
       let actual =
         List.map
-          (fun (d : Diagnostic.t) ->
-            (Diagnostic.Code.name d.code, String.sub text d.span.start (d.span.stop - d.span.start)))
+          (fun (diagnostic : Diagnostic.t) ->
+            ( Diagnostic.Code.name diagnostic.code,
+              String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
+            ))
           (Type_checker.diagnostics database checks)
       in
       let expected =

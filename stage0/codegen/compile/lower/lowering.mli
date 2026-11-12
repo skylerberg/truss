@@ -2,7 +2,7 @@ type cleanup =
   | Drop_value of Lir.place
   | Free_pointed of Lir.place
   | Free_blocks of { place : Lir.place; variants : string list }
-  | Give_back of { lent : Lir.place; source : Lir.place; ty : Ground.ty }
+  | Write_back of { destination : Lir.place; source : Lir.place; ty : Ground.ty }
   | Finish_lend of lend
   | Join_group of Lir.statement
 

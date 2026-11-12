@@ -6,7 +6,7 @@ fn take(slot: mut Option[String]) -> Option[String] {
   moved
 }
 
-test "a value moved out of a place lent mut, which is then given another" {
+test "moved and reinitialized" {
   var slot: Option[String] = Some("${40 + 2} is the answer")
   let moved = take(mut slot)
   assert slot is None

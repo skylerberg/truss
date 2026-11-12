@@ -26,7 +26,7 @@ fn Counters.slots(mut self) yields mut Slot {
   }
 }
 
-test "values built around lent places" {
+test "constructors of lent places" {
   let bag = Bag(items: ["${1}st", "${2}nd"])
   if bag.first() is Some(name) {
     assert name.length() == 3

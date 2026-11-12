@@ -166,9 +166,9 @@ and frame = {
   finished : Logic.term option;  (** What [finished] names here. *)
   yielded_so_far : Logic.term option;
       (** In a lending or yielding method's own body, the parts it has yielded so far. *)
-  updating : Logic.term option;  (** What the target of an update holds before it. *)
+  updating : Logic.term option;  (** The update target's value before the update. *)
   spent : (Costs.counter * Logic.term) list;
-      (** Each counter's value here: what the code proven has spent since it began. *)
+      (** Each counter's cost so far in the definition being proven. *)
 }
 
 (* What a loop's body may change. *)
@@ -185,7 +185,7 @@ type loop_cost = {
   counter : Costs.counter;
   entry : Logic.term;  (** The counter on entry to the loop. *)
   rule : loop_rule;
-  held : (frame -> Logic.term) option;  (** The potential of what the loop changes. *)
+  held : (frame -> Logic.term) option;  (** The potential of the values the loop changes. *)
 }
 
 (* Which elements an index or a range reaches: one, or the run from a start
@@ -206,10 +206,10 @@ type received = {
   advance : frame -> frame;
 }
 
-(* A loop at its head before its invariants are assumed: what it counts,
-   the fresh-name counter and the number of facts on entry, the validity
-   facts each iteration must keep, and the frame with what the body
-   changes given fresh values. *)
+(* A loop at its head before its invariants are assumed: its counters,
+   the fresh-name counter and the fact count on entry, the validity facts
+   each iteration preserves, and the frame with the body's changes
+   havocked. *)
 type loop_start = {
   loop_costs : loop_cost list;
   fresh_mark : int;
@@ -280,7 +280,8 @@ type context = {
       (** Its [ensures]: the clauses for each [yield], which mention [result], and the others. *)
   home : Names.key;  (** The definition being proven, whose spans and obligations are in it. *)
   mutable laws_assumed : string list;  (** Each trait and type whose laws are facts already. *)
-  mutable counters : Costs.counter list;  (** What the code proven counts, for its cost clauses. *)
+  mutable counters : Costs.counter list;
+      (** The counters of the cost clauses of the definition being proven. *)
   mutable own_constants : (Costs.counter * Costs.constants) list;
       (** By counter, the constants of the definition's own [O(...)] bounds, which a call back into
           it assumes. *)
@@ -330,8 +331,8 @@ type context = {
   mutable call_targets : (Logic.term * Core.local) list;
       (** Each function-typed parameter a [calls] clause counts, with its local. *)
   mutable passed_values : int list;
-      (** Each named function passed straight to a parameter, which the call checks against what the
-          parameter promises. *)
+      (** Each named function passed directly as an argument, which the call checks against the
+          parameter's function type. *)
   mutable reading_callback : bool;
       (** Reading a function-typed parameter to call it or pass it, where its [requires] is checked,
           not lost. *)
@@ -1041,9 +1042,8 @@ let bind frame local ty term =
     types = Locals.add local ty frame.types;
   }
 
-(* A type in a frame: its generic parameters replaced by what they stand
-   for, and each associated type of a known type by what its [impl]
-   chooses, so a trait's [Self.Key] read for a [List] is a [USize]. *)
+(* A type in a frame, substituted and normalized: a trait's [Self.Key]
+   read for a [List] is a [USize]. *)
 let substituted context frame ty =
   Interface.Impls.normalize context.database
     ~bounds:(fun _ -> [])
@@ -1051,8 +1051,6 @@ let substituted context frame ty =
 
 let type_of context frame (node : expression) = substituted context frame node.type_
 
-(* A local's type in a frame, as it was bound, with what the frame's
-   generic parameters stand for. *)
 let local_type context frame local =
   Option.map (substituted context frame) (Locals.find_opt local frame.types)
 
@@ -1169,9 +1167,8 @@ let join context ?value_type frames =
         in
         List.fold_left (fun amount (from, into) -> Logic.replace ~from ~into amount) amount renamed
       in
-      (* A counter where paths join is what the path taken spent: a fresh
-         symbol defined as a choice between them, which a loop's bound on
-         one iteration can see through. *)
+      (* At a join, a counter is a fresh symbol defined as an [ite] of the
+         paths' costs, which a loop's per-iteration bound can see through. *)
       let spent =
         List.map
           (fun (key, term) ->
@@ -1525,9 +1522,8 @@ let method_contract ?reading_package database (trait : Types.trait_reference) na
                 ~body:(body_of callee))
             (part_of callee)
       | Some (_, _, Provided) | None ->
-          (* A method the [impl] leaves to its trait: the trait's clauses,
-             with the [impl]'s signature for the method, and the trait's
-             body, which is what the method does for this [impl]. *)
+          (* A method the [impl] leaves to its trait: the trait's clauses and
+             default body, with the [impl]'s signature for the method. *)
           Option.map
             (fun own ->
               make_contract database path ~own ~others:[]
@@ -2006,8 +2002,8 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
       | None -> unsupported (at frame node) "an update's target outside an update")
   | Quantified { quantifier; binder; body } -> quantified context frame quantifier binder body
   | Yielded -> (
-      (* What the nearest loop or method yields: a loop's own parts, or
-         else, in a lending or yielding method's body, the method's. *)
+      (* The parts the innermost loop has received, or else, in a lending or
+         yielding method's body, the parts the method has yielded. *)
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> Some (frame, yielded)
       | None, Some yielded_so_far when source.key = Some context.home -> Some (frame, yielded_so_far)
@@ -2090,8 +2086,8 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
    [&&] keeps what its right side binds, as an [is] does. *)
 and short_circuit context frame right ~runs ~otherwise ~binds combine =
   let after, right_value = value context (restrict frame runs) right in
-  (* What the right side spends is known only where it ran, so where it
-     spends anything the paths where it ran and did not run are joined. *)
+  (* The right operand's cost accrues only on the path that evaluates
+     it, so a right operand with a cost joins the two paths. *)
   let changed =
     Locals.exists (fun id term -> Locals.find_opt id after.locals <> Some term) frame.locals
     || after.self <> frame.self || after.spent <> frame.spent
@@ -2115,9 +2111,8 @@ and equal_of context frame (ty : Types.ty) left right =
     | Some equal -> equal
     | None -> derived_equal context frame ty left right
 
-(* [==] on a type whose [impl] of [Equal] is written: the term a call of its
-   [equal] is, so that what the [impl]'s contract says of a call holds of
-   it. *)
+(* [==] on a type with a written [impl] of [Equal]: a call of its [equal],
+   so that the [impl]'s postcondition holds of it. *)
 and written_equal context ty left right =
   match concrete_impl context { trait = equal_trait; trait_arguments = []; associated = [] } ty with
   | Some (((Impl _ : Path.t) as impl), arguments) -> (
@@ -2216,97 +2211,309 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
       (frame, []) arguments
   in
   let ty = type_of context frame node in
+  ( frame,
+    primitive_operation context frame ~node operation [ ty ] operands
+      ~arguments:(List.map Option.some arguments) ~fallback:(fun () ->
+        if float_format ty <> None then arrive context frame "operator" ty
+        else unsupported (at frame node) "this operator") )
+
+(* A primitive operation on built-in types, written as an operator or as a
+   call of the intrinsic module's operation: either way it has the same
+   obligations and facts. [types] are the operation's type arguments, the
+   operands' type first. [arguments] are the operands' expressions where
+   they are values, for the text of a diagnostic and its fixes. [fallback]
+   is the result of an operation the logic does not model. *)
+and primitive_operation context frame ~node (operation : Intrinsic.operation) types operands
+    ~(arguments : expression option list) ~fallback =
   let source = frame.source in
   let span = at frame node in
-  if float_format ty <> None then
-    let result =
-      match (operation, operands) with
-      | Add, [ left_term; right_term ] -> float_operation "fp.add" left_term right_term
-      | Subtract, [ left_term; right_term ] -> float_operation "fp.sub" left_term right_term
-      | Multiply, [ left_term; right_term ] -> float_operation "fp.mul" left_term right_term
-      | Divide, [ left_term; right_term ] -> float_operation "fp.div" left_term right_term
-      | Negate, [ left_term ] -> Logic.Operation ("fp.neg", [ left_term ])
-      | _ -> arrive context frame "operator" ty
-    in
-    (frame, result)
-  else
-    match (operation, operands) with
-    | (Add | Subtract | Multiply | Divide | Remainder), [ left; right ] ->
-        let operand, divisor =
-          match arguments with [ first; second ] -> (Some first, Some second) | _ -> (None, None)
-        in
-        (frame, arithmetic ?operand ?divisor context frame node ty operation left right)
-    | Negate, [ inner ] ->
-        let negated = Logic.Operation ("-", [ inner ]) in
-        if bounds ty <> None then
-          oblige context frame Overflow span
-            (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (Types.show ty))
-            (in_range ty negated)
-        else if ty <> Types.Integer then unsupported span "negating a value of `%s`" (Types.show ty);
-        (frame, negated)
-    | Complement, [ inner ] -> (frame, opaque_operation context frame ty "complement" [ inner ])
-    | (Shift_left | Shift_right), [ left; right ] ->
-        let amount = List.nth arguments 1 in
-        (match width ty with
-        | Some bits ->
-            oblige context frame Shift (at frame amount)
-              ~fixes:
-                (match parameter_operand context frame amount right with
-                | Some text -> add_requires context frame (Printf.sprintf "%s < %d" text bits)
-                | None -> [])
-              (Printf.sprintf "The shift amount `%s` may not be less than %d."
-                 (quote source amount.origin) bits)
-              Logic.(Operation ("<", [ right; int bits ]))
-        | None -> unsupported span "a shift of `%s`" (Types.show ty));
-        let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
-        let shifted = opaque_operation context frame ty name [ left; right ] in
-        (* An unsigned shift multiplies or divides by a power of two: to the
-           left exactly, where the product fits. *)
-        (match bounds ty with
-        | Some (low, high) when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
-            let scale = power_of context frame (Logic.int 2) right in
-            assume context frame
-              (match operation with
-              | Shift_left ->
-                  Logic.(
-                    Operation ("<=", [ Operation ("*", [ left; scale ]); Integer high ])
-                    ==> equal shifted (Operation ("*", [ left; scale ])))
-              | _ -> Logic.equal shifted (Logic.truncated_divide left scale))
-        | _ -> ());
-        (frame, shifted)
-    | (Bit_and | Bit_or | Bit_xor), [ left; right ] ->
-        let name = match operation with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
-        let term = opaque_operation context frame ty name [ left; right ] in
-        (* Of unsigned values, [and] is at most each operand, [or] at
-           least each, and [or] and [xor] at most their sum and below each
-           power of two both operands are below. *)
-        (match bounds ty with
-        | Some (low, _) when Z.equal low Z.zero -> (
-            let at_most bound = Logic.Operation ("<=", [ term; bound ]) in
-            match operation with
-            | Bit_and -> assume context frame Logic.(at_most left &&& at_most right)
-            | _ ->
-                let sum = Logic.Operation ("+", [ left; right ]) in
-                if operation = Bit_or then
-                  assume context frame
-                    Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
-                assume context frame (at_most sum);
-                declare context
-                  (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
-                let exponent = Logic.Symbol (variable "exponent") in
-                let below value =
-                  Logic.Operation
-                    ("<", [ value; Logic.Apply (Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
-                in
+  let argument index = Option.join (List.nth_opt arguments index) in
+  let is_float = match types with ty :: _ -> float_format ty <> None | [] -> false in
+  let exact operation left right =
+    match (operation : Intrinsic.operation) with
+    | Add | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
+    | Subtract | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
+    | _ -> Logic.Operation ("*", [ left; right ])
+  in
+  match (operation, types, operands) with
+  | Add, _ :: _, [ left; right ] when is_float -> float_operation "fp.add" left right
+  | Subtract, _ :: _, [ left; right ] when is_float -> float_operation "fp.sub" left right
+  | Multiply, _ :: _, [ left; right ] when is_float -> float_operation "fp.mul" left right
+  | Divide, _ :: _, [ left; right ] when is_float -> float_operation "fp.div" left right
+  | Negate, _ :: _, [ value ] when is_float -> Logic.Operation ("fp.neg", [ value ])
+  | (Add | Subtract | Multiply | Divide | Remainder), ty :: _, [ left; right ] when not is_float ->
+      let result =
+        arithmetic ?operand:(argument 0) ?divisor:(argument 1) context frame node ty operation left
+          right
+      in
+      if bounds ty <> None then assume context frame (in_range ty result);
+      result
+  | Negate, ty :: _, [ inner ] when not is_float ->
+      let negated = Logic.Operation ("-", [ inner ]) in
+      if bounds ty <> None then
+        oblige context frame Overflow span
+          (Printf.sprintf "`%s` may overflow `%s`." (quote source node.origin) (Types.show ty))
+          (in_range ty negated)
+      else if ty <> Types.Integer then unsupported span "negating a value of `%s`" (Types.show ty);
+      negated
+  | Complement, ty :: _, [ inner ] -> opaque_operation context frame ty "complement" [ inner ]
+  | (Shift_left | Shift_right), ty :: _, [ left; right ] ->
+      (match width ty with
+      | Some bits ->
+          let at_amount, text, fixes =
+            match argument 1 with
+            | Some amount ->
+                ( at frame amount,
+                  Printf.sprintf "The shift amount `%s`" (quote source amount.origin),
+                  match parameter_operand context frame amount right with
+                  | Some text -> add_requires context frame (Printf.sprintf "%s < %d" text bits)
+                  | None -> [] )
+            | None ->
+                (span, Printf.sprintf "The shift amount in `%s`" (quote source node.origin), [])
+          in
+          oblige context frame Shift at_amount ~fixes
+            (Printf.sprintf "%s may not be less than %d." text bits)
+            Logic.(Operation ("<", [ right; int bits ]))
+      | None -> unsupported span "a shift of `%s`" (Types.show ty));
+      let name = match operation with Shift_left -> "shift_left" | _ -> "shift_right" in
+      let shifted = opaque_operation context frame ty name [ left; right ] in
+      (* An unsigned shift multiplies or divides by a power of two: to the
+         left exactly, where the product fits. *)
+      (match bounds ty with
+      | Some (low, high) when Z.equal low Z.zero && not (Logic.mentions frame.bound right) ->
+          let scale = power_of context frame (Logic.int 2) right in
+          assume context frame
+            (match operation with
+            | Shift_left ->
+                Logic.(
+                  Operation ("<=", [ Operation ("*", [ left; scale ]); Integer high ])
+                  ==> equal shifted (Operation ("*", [ left; scale ])))
+            | _ -> Logic.equal shifted (Logic.truncated_divide left scale))
+      | _ -> ());
+      shifted
+  | (Bit_and | Bit_or | Bit_xor), ty :: _, [ left; right ] ->
+      let name = match operation with Bit_and -> "and" | Bit_or -> "or" | _ -> "xor" in
+      let term = opaque_operation context frame ty name [ left; right ] in
+      (* Of unsigned values, [and] is at most each operand, [or] at
+         least each, and [or] and [xor] at most their sum and below each
+         power of two both operands are below. *)
+      (match bounds ty with
+      | Some (low, _) when Z.equal low Z.zero -> (
+          let at_most bound = Logic.Operation ("<=", [ term; bound ]) in
+          match operation with
+          | Bit_and -> assume context frame Logic.(at_most left &&& at_most right)
+          | _ ->
+              let sum = Logic.Operation ("+", [ left; right ]) in
+              if operation = Bit_or then
                 assume context frame
-                  (Logic.Forall
-                     ( [ (variable "exponent", Logic.Int) ],
-                       Logic.(
-                         Operation ("<=", [ int 0; exponent ])
-                         &&& below left &&& below right ==> below term) )))
-        | _ -> ());
-        (frame, term)
-    | _ -> unsupported span "this operator"
+                  Logic.(Operation ("<=", [ left; term ]) &&& Operation ("<=", [ right; term ]));
+              assume context frame (at_most sum);
+              declare context
+                (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
+              let exponent = Logic.Symbol (variable "exponent") in
+              let below value =
+                Logic.Operation
+                  ("<", [ value; Logic.Apply (Symbol.Cost_power, [ Logic.int 2; exponent ]) ])
+              in
+              assume context frame
+                (Logic.Forall
+                   ( [ (variable "exponent", Logic.Int) ],
+                     Logic.(
+                       Operation ("<=", [ int 0; exponent ])
+                       &&& below left &&& below right ==> below term) )))
+      | _ -> ());
+      term
+  | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), ty :: _, [ left; right ]
+    when bounds ty <> None ->
+      let low, high = Option.get (bounds ty) in
+      let modulus = Z.succ (Z.sub high low) in
+      Logic.Operation
+        ( "+",
+          [
+            Logic.Integer low;
+            Logic.Operation
+              ( "mod",
+                [
+                  Logic.Operation ("-", [ exact operation left right; Logic.Integer low ]);
+                  Logic.Integer modulus;
+                ] );
+          ] )
+  | (Add_overflows | Subtract_overflows | Multiply_overflows), ty :: _, [ left; right ]
+    when bounds ty <> None ->
+      Logic.not_ (in_range ty (exact operation left right))
+  | Equal, _ :: _, [ left; right ] when is_float -> float_equal left right
+  | Less, _ :: _, [ left; right ] when is_float -> float_less left right
+  | Equal, ty :: _, [ left; right ] when bounds ty <> None -> Logic.equal left right
+  | Less, ty :: _, [ left; right ] when bounds ty <> None -> Logic.Operation ("<", [ left; right ])
+  | Fits, [ source; target ], [ value ] when bounds source <> None && bounds target <> None ->
+      in_range target value
+  | Fits, [ source; target ], [ value ] when float_format source <> None && bounds target <> None ->
+      float_fits target value
+  | Convert, [ source; target ], [ value ]
+    when bounds source <> None && bounds target <> None && not (Types.is_builtin Character target)
+    ->
+      let known = fallback () in
+      assume context frame Logic.(in_range target value ==> equal known value);
+      known
+  | (Leading_zeros | Trailing_zeros | Count_ones), ty :: _, [ value ] when bounds ty <> None -> (
+      let low, _ = Option.get (bounds ty) in
+      (* Each count of bits is a function of the value, at most the width,
+         and for an unsigned value the three are related: a nonzero value
+         lies between the powers of two its leading zeros give, has no
+         more ones than the bits below its highest one, all of them where
+         it is one less than a power of two, and its lowest one below its
+         highest; zero has no ones and is all zeros. *)
+      match width ty with
+      | Some bits ->
+          let count name =
+            let symbol = Symbol.Bit_count { count = name; width = bits } in
+            declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
+            Logic.Apply (symbol, [ value ])
+          in
+          let leading = count "leading_zeros"
+          and trailing = count "trailing_zeros"
+          and ones = count "count_ones" in
+          let term =
+            match operation with Leading_zeros -> leading | Trailing_zeros -> trailing | _ -> ones
+          in
+          assume context frame
+            Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
+          (if Z.equal low Z.zero && not (Logic.mentions frame.bound value) then
+             let power exponent = power_of context frame (Logic.int 2) exponent in
+             let width = Logic.int bits in
+             let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
+             let below_highest = Logic.Operation ("-", [ width; leading ]) in
+             List.iter (assume context frame)
+               Logic.
+                 [
+                   Operation ("<=", [ int 0; leading ])
+                   &&& Operation ("<=", [ leading; width ])
+                   &&& Operation ("<=", [ int 0; trailing ])
+                   &&& Operation ("<=", [ trailing; width ])
+                   &&& Operation ("<=", [ int 0; ones ])
+                   &&& Operation ("<=", [ ones; width ]);
+                   nonzero
+                   ==> (Operation
+                          ("<=", [ power (Operation ("-", [ int (bits - 1); leading ])); value ])
+                       &&& Operation ("<", [ value; power below_highest ]));
+                   equal (equal ones (int 0)) (equal value (int 0));
+                   nonzero ==> Operation ("<=", [ ones; below_highest ]);
+                   nonzero
+                   &&& equal (Operation ("+", [ value; int 1 ])) (power below_highest)
+                   ==> equal ones below_highest;
+                   nonzero
+                   ==> Operation ("<=", [ Operation ("+", [ trailing; leading ]); int (bits - 1) ]);
+                   equal value (int 0) ==> (equal trailing width &&& equal leading width);
+                 ]);
+          term
+      | None -> fallback ())
+  | _ -> (
+      match (operation, types) with
+      | (Ieee_equal | Ieee_less), ty :: _ when float_format ty <> None -> (
+          match operands with
+          | [ left; right ] ->
+              Logic.Operation
+                ((if operation = Ieee_equal then "fp.eq" else "fp.lt"), [ left; right ])
+          | _ -> fallback ())
+      | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _
+        when float_format ty <> None -> (
+          (* The rounding the compiled operation does, as IEEE 754 names it. *)
+          match operands with
+          | [ value ] -> (
+              match operation with
+              | Square_root -> Logic.Operation ("fp.sqrt", [ Logic.Operation ("RNE", []); value ])
+              | Floor ->
+                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTN", []); value ])
+              | Ceiling ->
+                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTP", []); value ])
+              | Truncate ->
+                  Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ])
+              | _ -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RNE", []); value ]))
+          | _ -> fallback ())
+      | Fused_multiply_add, ty :: _ when float_format ty <> None -> (
+          match operands with
+          | [ value; multiplier; addend ] ->
+              Logic.Operation ("fp.fma", [ Logic.Operation ("RNE", []); value; multiplier; addend ])
+          | _ -> fallback ())
+      | Is_nan, ty :: _ when float_format ty <> None -> (
+          match operands with [ value ] -> is_nan value | _ -> fallback ())
+      | From_bits, [ bits; target ] when bounds bits <> None -> (
+          match (operands, float_format target, width bits) with
+          | [ value ], Some (exponent, significand), Some width ->
+              Logic.Operation
+                ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+                  [ Logic.Operation (Printf.sprintf "(_ int2bv %d)" width, [ value ]) ] )
+          | _ -> fallback ())
+      | To_bits, [ source; bits ] when bounds bits <> None -> (
+          (* A float's bits are those that make it again, which every float but
+         a NaN has one of. *)
+          match (operands, float_format source, width bits) with
+          | [ value ], Some (exponent, significand), Some width ->
+              assume context frame
+                Logic.(
+                  not_ (is_nan value)
+                  ==> equal
+                        (Operation
+                           ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+                             [ Operation (Printf.sprintf "(_ int2bv %d)" width, [ fallback () ]) ]
+                           ))
+                        value);
+              fallback ()
+          | _ -> fallback ())
+      | Multiply_high, ty :: _ when bounds ty <> None -> (
+          (* The product's upper word: the exact product divided by the type's
+         size, rounded down, which is its upper word signed or not. *)
+          match (operands, width ty) with
+          | [ left; right ], Some bits ->
+              Logic.Operation
+                ( "div",
+                  [
+                    Logic.Operation ("*", [ left; right ]); Logic.Integer (Z.shift_left Z.one bits);
+                  ] )
+          | _ -> fallback ())
+      | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when bounds ty <> None ->
+          let name =
+            match operation with
+            | Rotate_left -> "rotate_left"
+            | Rotate_right -> "rotate_right"
+            | _ -> "swap_bytes"
+          in
+          opaque_operation context frame ty name operands
+      | Convert, [ source; target ] when float_format source <> None && bounds target <> None -> (
+          (* A float becomes an integer by being cut toward zero, which must be
+         a number in the target's range: the conversion does not check. *)
+          match operands with
+          | [ value ] ->
+              oblige context frame Requires (at frame node)
+                (Printf.sprintf
+                   "`%s` may not fit `%s`: it must be a number that, cut toward zero, is in its \
+                    range."
+                   (quote frame.source node.origin) (Types.show target))
+                (float_fits target value);
+              Logic.Operation ("to_int", [ truncated value ])
+          | _ -> fallback ())
+      | Convert, [ source; target ] when bounds source <> None && float_format target <> None -> (
+          (* An integer becomes the float nearest it, ties to even, as the
+         compiled cast rounds: exactly it, where the float can hold it. *)
+          match (operands, float_format target) with
+          | [ value ], Some (exponent, significand) ->
+              Logic.Operation
+                ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
+                  [ Logic.Operation ("RNE", []); Logic.Operation ("to_real", [ value ]) ] )
+          | _ -> fallback ())
+      | Convert, [ _; target ] when Types.is_builtin Character target -> (
+          (* A [Character] is made from an integer only when the integer is a
+         Unicode scalar value, which the conversion does not check. *)
+          match operands with
+          | [ value ] ->
+              oblige context frame Requires (at frame node)
+                (Printf.sprintf
+                   "`%s` may not be a Unicode scalar value, which a `Character` must be."
+                   (quote frame.source node.origin))
+                (in_range target value);
+              value
+          | _ -> fallback ())
+      | _ -> fallback ())
 
 and arithmetic ?operand ?divisor context frame (node : expression) ty
     (operation : Intrinsic.operation) left right =
@@ -2406,7 +2613,7 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
     in
     let bound = [ (bound_symbol, sort) ] in
     (* In code, a quantifier over a range runs its body once for each value
-       in it, which costs that many times what the body spends, when that
+       in it, which costs that many times the body's cost, when that cost
        is the same for every value. *)
     let frame =
       match count with
@@ -2518,7 +2725,7 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
         (type_of context frame collection)
         (snd (value context frame collection))
         (at frame collection)
-  (* In code that runs, the collection is what the call of [each] is given. *)
+  (* In executable code, the collection is the argument of the [each] call. *)
   | Over_each
       {
         pattern;
@@ -2530,9 +2737,9 @@ and quantified context frame (quantifier : Syntax.quantifier) binder body =
         (at frame call)
   | Over_each { call; _ } -> unsupported (at frame call) "this quantifier's loop"
 
-(* A [USize] generic argument's value: a number, or what the parameter
-   stands for here, or the parameter itself, a constant the solver knows
-   nothing more of. *)
+(* A [USize] generic argument's value: a literal, the frame's
+   substitution for a parameter, or else the parameter as an uninterpreted
+   constant. *)
 and value_term context frame (value : Types.value) =
   match value with
   | Value_parameter parameter -> (
@@ -2585,8 +2792,8 @@ and array_model context frame (ty : Types.ty) term =
 (* A call's arguments, as its callee is given them, in its order: each
    written one with its value, and none for a default, which the callee's
    own form holds. Lambdas are proven last, as the type checker checks
-   them, so that what the callee promises to pass them can mention the
-   other arguments. *)
+   them, so that the [requires] of a callback's type can mention the other
+   arguments. *)
 and call_arguments context frame (node : expression) (call_ : call) ~facts_for =
   let indexed = List.mapi (fun position argument -> (position, argument)) call_.arguments in
   let is_lambda = function
@@ -2914,8 +3121,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
           | (Bound | Dynamic) when name = "from_template" && Path.equal trait.trait template_trait
             ->
               oblige context frame Requires span
-                "A call of `from_template` through a bound or `any` cannot see what the tag \
-                 requires of its template: build the value with a template, where the tag is \
+                "A call of `from_template` through a bound or `any` cannot see the tag's \
+                 `requires` on its template: build the value with a template, where the tag is \
                  known."
                 (Logic.Boolean false)
           | _ -> ());
@@ -2988,7 +3195,7 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
         (capability_contract context.database capability name)
   | Intrinsic { operation; type_arguments } ->
       (* Lending a part of a storage changes nothing until the lend ends,
-         where what the caller left is written back. *)
+         when the borrower's final value is written back. *)
       let frame =
         match operation with
         | Storage_at_mut | Array_at_mut | View_at_mut -> frame
@@ -3048,8 +3255,8 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                 view
             | _ -> arrive context frame "view" result_type)
         | Array_at_mut, [ array; index ] -> (
-            (* The element at [index], lent to change until the lend ends,
-               where the array takes back what the borrower left. *)
+            (* The element at [index], lent [mut] until the lend ends, when the
+               borrower's final value is written back to the array. *)
             match array.type_ with
             | Named { arguments = Types.Type element :: _; _ } -> (
                 let model = array_model context frame array.type_ array.term in
@@ -3094,7 +3301,14 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
                   (Logic.equal (array_model context frame result_type array) elements);
                 array
             | _ -> arrive context frame "array" result_type)
-        | _ -> intrinsic context frame ~node operation types operands ~changed result_type
+        | _ ->
+            let arguments =
+              List.map
+                (fun (passed : passed) ->
+                  match passed.operand with Some (Value argument) -> Some argument | _ -> None)
+                values
+            in
+            intrinsic context frame ~node operation types operands ~arguments ~changed result_type
       in
       let frame = spend context frame (step_amount context frame call_ values) in
       Some (frame, result)
@@ -3110,8 +3324,8 @@ and handle_descriptor context handle =
   declare context (Logic.Function (Symbol.Handle_descriptor, [ handle_sort ], Logic.Int));
   Logic.Apply (Symbol.Handle_descriptor, [ handle ])
 
-and intrinsic context frame ~node (operation : Intrinsic.operation) types operands ~changed
-    result_type =
+and intrinsic context frame ~node (operation : Intrinsic.operation) types operands ~arguments
+    ~changed result_type =
   let known = arrive context frame "result" result_type in
   match (operation, types) with
   | Shared_update, _ ->
@@ -3206,103 +3420,9 @@ and intrinsic context frame ~node (operation : Intrinsic.operation) types operan
           assume context frame (in_range (Types.builtin Int32) descriptor);
           descriptor
       | _ -> known)
-  | (Ieee_equal | Ieee_less), ty :: _ when float_format ty <> None -> (
-      match operands with
-      | [ left; right ] ->
-          Logic.Operation ((if operation = Ieee_equal then "fp.eq" else "fp.lt"), [ left; right ])
-      | _ -> known)
-  | (Square_root | Floor | Ceiling | Truncate | Round_to_even), ty :: _ when float_format ty <> None
-    -> (
-      (* The rounding the compiled operation does, as IEEE 754 names it. *)
-      match operands with
-      | [ value ] -> (
-          match operation with
-          | Square_root -> Logic.Operation ("fp.sqrt", [ Logic.Operation ("RNE", []); value ])
-          | Floor -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTN", []); value ])
-          | Ceiling -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTP", []); value ])
-          | Truncate ->
-              Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RTZ", []); value ])
-          | _ -> Logic.Operation ("fp.roundToIntegral", [ Logic.Operation ("RNE", []); value ]))
-      | _ -> known)
-  | Fused_multiply_add, ty :: _ when float_format ty <> None -> (
-      match operands with
-      | [ value; multiplier; addend ] ->
-          Logic.Operation ("fp.fma", [ Logic.Operation ("RNE", []); value; multiplier; addend ])
-      | _ -> known)
-  | Is_nan, ty :: _ when float_format ty <> None -> (
-      match operands with [ value ] -> is_nan value | _ -> known)
-  | From_bits, [ bits; target ] when bounds bits <> None -> (
-      match (operands, float_format target, width bits) with
-      | [ value ], Some (exponent, significand), Some width ->
-          Logic.Operation
-            ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-              [ Logic.Operation (Printf.sprintf "(_ int2bv %d)" width, [ value ]) ] )
-      | _ -> known)
-  | To_bits, [ source; bits ] when bounds bits <> None -> (
-      (* A float's bits are those that make it again, which every float but
-         a NaN has one of. *)
-      match (operands, float_format source, width bits) with
-      | [ value ], Some (exponent, significand), Some width ->
-          assume context frame
-            Logic.(
-              not_ (is_nan value)
-              ==> equal
-                    (Operation
-                       ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-                         [ Operation (Printf.sprintf "(_ int2bv %d)" width, [ known ]) ] ))
-                    value);
-          known
-      | _ -> known)
-  | Multiply_high, ty :: _ when bounds ty <> None -> (
-      (* The product's upper word: the exact product divided by the type's
-         size, rounded down, which is its upper word signed or not. *)
-      match (operands, width ty) with
-      | [ left; right ], Some bits ->
-          Logic.Operation
-            ( "div",
-              [ Logic.Operation ("*", [ left; right ]); Logic.Integer (Z.shift_left Z.one bits) ] )
-      | _ -> known)
-  | (Rotate_left | Rotate_right | Swap_bytes), ty :: _ when bounds ty <> None ->
-      let name =
-        match operation with
-        | Rotate_left -> "rotate_left"
-        | Rotate_right -> "rotate_right"
-        | _ -> "swap_bytes"
-      in
-      opaque_operation context frame ty name operands
-  | Convert, [ source; target ] when float_format source <> None && bounds target <> None -> (
-      (* A float becomes an integer by being cut toward zero, which must be
-         a number in the target's range: the conversion does not check. *)
-      match operands with
-      | [ value ] ->
-          oblige context frame Requires (at frame node)
-            (Printf.sprintf
-               "`%s` may not fit `%s`: it must be a number that, cut toward zero, is in its range."
-               (quote frame.source node.origin) (Types.show target))
-            (float_fits target value);
-          Logic.Operation ("to_int", [ truncated value ])
-      | _ -> known)
-  | Convert, [ source; target ] when bounds source <> None && float_format target <> None -> (
-      (* An integer becomes the float nearest it, ties to even, as the
-         compiled cast rounds: exactly it, where the float can hold it. *)
-      match (operands, float_format target) with
-      | [ value ], Some (exponent, significand) ->
-          Logic.Operation
-            ( Printf.sprintf "(_ to_fp %d %d)" exponent significand,
-              [ Logic.Operation ("RNE", []); Logic.Operation ("to_real", [ value ]) ] )
-      | _ -> known)
-  | Convert, [ _; target ] when Types.is_builtin Character target -> (
-      (* A [Character] is made from an integer only when the integer is a
-         Unicode scalar value, which the conversion does not check. *)
-      match operands with
-      | [ value ] ->
-          oblige context frame Requires (at frame node)
-            (Printf.sprintf "`%s` may not be a Unicode scalar value, which a `Character` must be."
-               (quote frame.source node.origin))
-            (in_range target value);
-          value
-      | _ -> known)
-  | _ -> integer_intrinsic context frame ~node operation types operands known
+  | _ ->
+      primitive_operation context frame ~node operation types operands ~arguments
+        ~fallback:(fun () -> known)
 
 (* A function of the C library, by its row of the C library's table. It
    is given only an address into a storage, so each storage it is lent
@@ -3427,115 +3547,12 @@ and float_fits target value =
         &&& Operation ("<=", [ cut; Integer high ]))
   | None -> Logic.Boolean false
 
-and integer_intrinsic context frame ~node (operation : Intrinsic.operation) types operands known =
-  let integer = match types with ty :: _ -> bounds ty | [] -> None in
-  let exact operation left right =
-    match (operation : Intrinsic.operation) with
-    | Add | Wrapping_add | Add_overflows -> Logic.Operation ("+", [ left; right ])
-    | Subtract | Wrapping_subtract | Subtract_overflows -> Logic.Operation ("-", [ left; right ])
-    | Divide -> Logic.truncated_divide left right
-    | Remainder -> Logic.truncated_remainder left right
-    | _ -> Logic.Operation ("*", [ left; right ])
-  in
-  match (operation, integer, types, operands) with
-  (* An integer operation is defined where its operator is, so it has the
-     operator's obligations: a call of it, as an [impl] of [Add] makes, shows
-     what [+] would. *)
-  | (Add | Subtract | Multiply | Divide | Remainder), Some _, ty :: _, [ left; right ] ->
-      let result = arithmetic context frame node ty operation left right in
-      assume context frame (in_range ty result);
-      result
-  | Negate, Some _, ty :: _, [ value ] ->
-      let result = Logic.Operation ("-", [ value ]) in
-      oblige context frame Overflow (at frame node)
-        (Printf.sprintf "`%s` may overflow `%s`." (quote frame.source node.origin) (Types.show ty))
-        (in_range ty result);
-      result
-  | (Wrapping_add | Wrapping_subtract | Wrapping_multiply), Some (low, high), _, [ left; right ] ->
-      let modulus = Z.succ (Z.sub high low) in
-      Logic.Operation
-        ( "+",
-          [
-            Logic.Integer low;
-            Logic.Operation
-              ( "mod",
-                [
-                  Logic.Operation ("-", [ exact operation left right; Logic.Integer low ]);
-                  Logic.Integer modulus;
-                ] );
-          ] )
-  | (Add_overflows | Subtract_overflows | Multiply_overflows), Some _, ty :: _, [ left; right ] ->
-      Logic.not_ (in_range ty (exact operation left right))
-  | Equal, None, ty :: _, [ left; right ] when float_format ty <> None -> float_equal left right
-  | Less, None, ty :: _, [ left; right ] when float_format ty <> None -> float_less left right
-  | Equal, Some _, _, [ left; right ] -> Logic.equal left right
-  | Less, Some _, _, [ left; right ] -> Logic.Operation ("<", [ left; right ])
-  | Fits, Some _, [ _; target ], [ value ] when bounds target <> None -> in_range target value
-  | Fits, None, [ source; target ], [ value ]
-    when float_format source <> None && bounds target <> None ->
-      float_fits target value
-  | Convert, Some _, [ _; target ], [ value ] when bounds target <> None ->
-      assume context frame Logic.(in_range target value ==> equal known value);
-      known
-  | (Leading_zeros | Trailing_zeros | Count_ones), Some (low, _), ty :: _, [ value ] -> (
-      (* Each count of bits is a function of the value, at most the width,
-         and for an unsigned value the three are related: a nonzero value
-         lies between the powers of two its leading zeros give, has no
-         more ones than the bits below its highest one, all of them where
-         it is one less than a power of two, and its lowest one below its
-         highest; zero has no ones and is all zeros. *)
-      match width ty with
-      | Some bits ->
-          let count name =
-            let symbol = Symbol.Bit_count { count = name; width = bits } in
-            declare context (Logic.Function (symbol, [ Logic.Int ], Logic.Int));
-            Logic.Apply (symbol, [ value ])
-          in
-          let leading = count "leading_zeros"
-          and trailing = count "trailing_zeros"
-          and ones = count "count_ones" in
-          let term =
-            match operation with Leading_zeros -> leading | Trailing_zeros -> trailing | _ -> ones
-          in
-          assume context frame
-            Logic.(Operation ("<=", [ int 0; term ]) &&& Operation ("<=", [ term; int bits ]));
-          (if Z.equal low Z.zero && not (Logic.mentions frame.bound value) then
-             let power exponent = power_of context frame (Logic.int 2) exponent in
-             let width = Logic.int bits in
-             let nonzero = Logic.not_ (Logic.equal value (Logic.int 0)) in
-             let below_highest = Logic.Operation ("-", [ width; leading ]) in
-             List.iter (assume context frame)
-               Logic.
-                 [
-                   Operation ("<=", [ int 0; leading ])
-                   &&& Operation ("<=", [ leading; width ])
-                   &&& Operation ("<=", [ int 0; trailing ])
-                   &&& Operation ("<=", [ trailing; width ])
-                   &&& Operation ("<=", [ int 0; ones ])
-                   &&& Operation ("<=", [ ones; width ]);
-                   nonzero
-                   ==> (Operation
-                          ("<=", [ power (Operation ("-", [ int (bits - 1); leading ])); value ])
-                       &&& Operation ("<", [ value; power below_highest ]));
-                   equal (equal ones (int 0)) (equal value (int 0));
-                   nonzero ==> Operation ("<=", [ ones; below_highest ]);
-                   nonzero
-                   &&& equal (Operation ("+", [ value; int 1 ])) (power below_highest)
-                   ==> equal ones below_highest;
-                   nonzero
-                   ==> Operation ("<=", [ Operation ("+", [ trailing; leading ]); int (bits - 1) ]);
-                   equal value (int 0) ==> (equal trailing width &&& equal leading width);
-                 ]);
-          term
-      | None -> known)
-  | _ -> known
-
 (* Lambdas and callbacks *)
 
-(* A lambda is proven where it is written, with fresh arguments of its
-   function type and what the callee promises to pass it; it ends exactly
-   when its function type has a [time] clause; and it is a value about
-   which nothing more is known. *)
+(* A lambda is proven where it is written, with fresh arguments that
+   satisfy its function type's [requires]; it is proven to terminate
+   exactly when its function type has a [time] clause; and it is a value
+   about which nothing more is known. *)
 and lambda context frame (node : expression) (parameters : pattern list) captures (body : block)
     ~facts =
   (* Inside a quantifier, a lambda that captures none of its bound values is
@@ -3571,9 +3588,9 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
   in
   if List.length parameters <> List.length function_type.inputs then
     unsupported span "a lambda with a different number of parameters";
-  (* A lambda's body runs only where it is called, which may be nowhere, so
-     what its path assumes is only where it is called: what the body
-     assumes of its arguments, or of what it calls, holds of no other path. *)
+  (* A lambda's body may run any number of times, including none, so it is
+     proven under a fresh path condition: its assumptions about its
+     arguments and callees hold on no other path. *)
   let called = fresh context frame "called" Logic.Bool in
   let inside = { (restrict frame called) with result = None; loop = None; updating = None } in
   let start_fresh = context.fresh
@@ -3591,9 +3608,9 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
   in
   let arguments = List.rev arguments in
   List.iter (assume context inside) (facts arguments);
-  (* A lambda counts on its own: what its type's cost clauses promise, and,
-     where the code around it counts time, its time, to bound [time(f)]
-     for it. *)
+  (* A lambda's costs are counted apart from the enclosing function: the
+     cost clauses of its type, and, where the enclosing function counts
+     time, its time, to bound [time(f)] for it. *)
   let promised =
     List.filter_map
       (fun (cost : Types.cost) ->
@@ -3718,8 +3735,8 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
                   goal)
               promised)
           exits;
-        (* A bound on the time of one call, from what the lambda does not
-           change, shown only once a cost uses it. *)
+        (* A bound on the time of one call in terms of the values the lambda
+           does not change, proven only once a cost uses it. *)
         if counts_time && not times_by_type then
           let spent = List.map (fun exit_ -> spent_of exit_ time_units) exits in
           let most =
@@ -4078,8 +4095,8 @@ and check_callback_requires context frame (node : expression) through (values : 
       with
       | Some { callback_contract = Some { inputs; requires }; name; _ }
         when List.length inputs = List.length values ->
-          (* The [requires] names the parameters as the caller passed them,
-             which is what the caller showed it with. *)
+          (* The [requires] is read with the callback's parameters bound to
+             this call's arguments. *)
           let inside =
             callback_contract_frame frame inputs
               (List.map (fun (passed : passed) -> passed.term) values)
@@ -5290,7 +5307,7 @@ and keeps_cost context path (contract : contract) (asked : Types.cost) =
           | _ -> false)
       | None -> false)
 
-(* A constant is its value, worked out from its definition, which is made
+(* A constant is its value, computed from its definition, which is made
    of literals, arithmetic, other constants, and values built from them. *)
 and constant_value context frame path =
   match
@@ -5468,7 +5485,7 @@ and fields_match context frame span type_ variant term (fields : (string * patte
     (Logic.Boolean true, frame) fields
 
 (* Each binding a pattern lends [mut] from the value it matches, with how
-   the value is rebuilt from what the binding holds when the lend ends:
+   the value is rebuilt from the binding's final value when the lend ends:
    through the variants and fields that lead to it, each other field kept. *)
 and lent_bindings context frame (pattern : pattern) ty :
     (Core.local * (Logic.term -> Logic.term -> Logic.term)) list =
@@ -6385,10 +6402,10 @@ and contract_call context frame (node : expression) (call_ : call) path contract
                  &&& not_ (cursor_ended context cursor_type result))
          | _ -> ())
      | _ -> ());
-  (* What the call spends, by the callee's cost clauses, read with the
-     arguments as passed and [result]. How much the potential of what the
-     call changed grew: what it returns and leaves in [mut] arguments, less
-     what it was given to change or to keep. *)
+  (* The call's cost is the callee's cost clauses with the arguments and
+     [result] substituted. [change] is the call's change in potential: that
+     of its result and its [mut] arguments after the call, less that of its
+     [mut] and [own] arguments before it. *)
   let change () =
     List.fold_left
       (fun total (passed : passed) ->
@@ -6407,9 +6424,9 @@ and contract_call context frame (node : expression) (call_ : call) path contract
       (match contract.result_kind with
       | `Yields -> Costs.zero
       | `Lends -> (
-          (* A part lent stays where it was, so the call hands over none
-             of its potential; what the caller's statement did to it, the
-             method does not pay for, and the caller does. *)
+          (* A lent part stays in place, so the call hands over none of its
+             potential, and the caller, not the method, pays for the
+             caller's changes to it. *)
           match lent_final with
           | Some leave ->
               Costs.minus
@@ -6623,8 +6640,8 @@ and growth change =
    clause about the counter's resource, from its first part that has one.
    A call back into the definition proven, through a cycle, assumes its
    [O(...)] bound with the definition's own constants; every function of a
-   cycle is then proven with the first pair, so that each assumes of the
-   others what they show. *)
+   cycle is then proven with the first pair, so that each assumes the
+   bounds the others prove. *)
 and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_frame : part -> frame)
     ~uses ~(values : passed list) ~change (counter : Costs.counter) =
   let assumed =
@@ -6807,13 +6824,11 @@ and function_value_amount context frame (function_type : Types.function_type) ca
       then unknown_amount context frame counter
       else Costs.zero
 
-(* [time(f)], the time one call through a function value takes: one unit
-   when its type has an [O(...)] bound, at least one otherwise, and for a
-   lambda whose calls the prover could bound, that bound. *)
-(* What the intrinsic module's storage and views hold, as the compiler
-   declares it: each is a sequence of its elements, its model, and each
-   operation changes or reads that sequence. An operation that stops the
-   program on a bad index says what holds when it returns. *)
+(* The intrinsic storage and view operations, as the compiler declares
+   them: a storage or a view is modeled as the sequence of its elements,
+   and each operation reads or changes that sequence. An operation that
+   stops the program on a bad index assumes on return that the index was
+   valid. *)
 and buffer_operation context frame ~(node : expression) (operation : Intrinsic.operation) element
     operands ~changed known =
   let length sequence = sequence_length context element sequence in
@@ -6884,7 +6899,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       assume context frame (Logic.equal (capacity (List.hd changed)) room);
       known
   | Storage_lengthen, [ buffer; by ] ->
-      (* What the C library wrote into its room is the storage's. *)
+      (* The elements the C library wrote into the spare capacity join the storage. *)
       let before = storage buffer and after = changed_storage () in
       needs
         (Logic.Operation ("<=", [ Logic.Operation ("+", [ length before; by ]); capacity buffer ]));
@@ -7459,22 +7474,21 @@ and copied context frame ty term =
             Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
         | _ -> unknown_amount context frame counter)
 
-(* Loops' costs. A loop with a [cost] clause about a counter is bounded by
-   it: what the loop has spent so far is within the clause at its head, on
-   entry and after each iteration, and after the loop, the loop counts as
-   the clause, as a call with that bound would. Any other counter is
-   bounded by the loop's iterations so far times a bound on one iteration,
-   [per], which is worked out from what the body spends and then shown of
-   each iteration.
+(* Loops' costs. A loop's [cost] clause about a counter bounds the loop's
+   cost so far at its head, on entry and after each iteration, and after
+   the loop the loop costs the clause's bound, as a call with that bound
+   would. Any other counter is bounded by the iterations so far times a
+   per-iteration bound, [per], which is inferred from the body's cost and
+   then proven of each iteration.
 
    Where the values a loop changes hold potential, which amortized callees
-   spend and save, a second bound, [per_held], is about what the loop has
-   spent plus the potential it holds, which is what telescopes when each
-   iteration spends potential earlier ones saved. Both are assumed at the
-   head, and are sound to assume even unbounded, since each run of the loop
-   has a largest iteration; only the one that what an iteration spends
-   calls for is worked out and shown. [held] is the potential of the values
-   the loop changes, in a frame. *)
+   spend and save, a second bound, [per_held], bounds the loop's cost so far
+   plus the potential it holds. That sum telescopes when each iteration
+   spends potential that earlier ones saved. Both bounds are assumed at the
+   head. The assumption is sound even before the bound is inferred, since
+   each run of the loop has a last iteration. Only the bound an iteration's
+   cost needs is inferred and proven. [held] maps a frame to the potential
+   of the values the loop changes. *)
 and loop_costs context frame (clauses : loop_clause list) ~held =
   List.map
     (fun (counter : Costs.counter) ->
@@ -7520,7 +7534,7 @@ and loop_costs context frame (clauses : loop_clause list) ~held =
 and counting_of (cost : Core.cost) : Costs.counting =
   match cost.bound with Order_of _ | Finite -> Units | At_most _ -> At_most | Exactly _ -> Exactly
 
-(* A loop's [cost] clause, about what the loop has spent so far, at [at]. *)
+(* That a loop's [cost] clause bounds the loop's cost so far, at [at]. *)
 and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : Core.cost) constants
     ~since =
   let amount =
@@ -7593,9 +7607,9 @@ and loop_entry context frame costs =
       | Per_iteration _ -> ())
     costs
 
-(* After the body: each bound on one iteration is worked out from what the
-   iterations that ended spent, and every iteration, ended or left by
-   [break], is shown to be within its counter's bound. An iteration that
+(* After the body: each per-iteration bound is inferred from the costs of
+   the iterations that completed, and every iteration, completed or exited
+   by [break], is proven to be within its counter's bound. An iteration that
    spends or saves potential is bounded with the potential the loop
    holds. *)
 and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~breaks =
@@ -7653,15 +7667,15 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
               List.iter2
                 (fun (frame : frame) spent ->
                   oblige context frame Cost span
-                    "The prover cannot show that this iteration of the loop spends no more than \
-                     the bound it found for every iteration from what the loop does not change: \
+                    "The prover cannot show that this iteration of the loop costs no more than the \
+                     per-iteration bound it inferred from the values the loop does not change: \
                      give the loop a `cost` clause."
                     (counted_with ~counter:cost.counter ~at:spent ~bound:per))
                 frames spent
           | None ->
               oblige context head Cost span
-                "The prover cannot bound what one iteration of this loop spends by what the loop \
-                 does not change, so it cannot count the loop's cost: give the loop a `cost` \
+                "The prover cannot bound the cost of one iteration of this loop by the values the \
+                 loop does not change, so it cannot count the loop's cost: give the loop a `cost` \
                  clause."
                 (Logic.Boolean false)))
     costs
@@ -7829,9 +7843,9 @@ and potential context frame ?(seen = []) (ty : Types.ty) term =
       fact context frame
         Logic.(validity context frame ~assuming:true ty term ==> Operation ("<=", [ int 0; held ]));
       match (potential_clause context ty, constructors context ty) with
-      (* A type whose fields are seen holds what they hold; one whose fields
-         are not, as a [List] outside its package, is read as the buffer its
-         model says it is. *)
+      (* A type with visible fields holds its fields' potential; one with
+         opaque fields, such as a [List] outside its package, is read as the
+         buffer its model says it is. *)
       | None, None when Option.is_some (buffer_elements context ty) -> (
           (* A buffer's potential is what it saved for growing, as a
              doubling array saves it: twice its length less its capacity,
@@ -8039,7 +8053,7 @@ and statement context frame (node : statement) : frame option =
   else statement_kind context frame node
 
 (* A proof is ghost code, which a build leaves out: what it shows is known
-   after it, but the program goes on from where it was, with nothing the
+   after it, but the program continues from where it was, with nothing the
    proof changed, whichever way the proof ends, or if it never ends. A
    [todo] in it stands for the proof still to write, so what follows is not
    shown on the paths that reach one, which are what this gives. *)
@@ -8149,8 +8163,8 @@ and concurrent context frame (node : statement) branches =
               match run waiting.at branch with
               | Some ended, _ -> [ { waiting with at = ended } ]
               | None, stopped ->
-                  (* The branch left too, so either exit may be the one
-                     taken, with what the branch did before it left. *)
+                  (* The branch exited too, so either exit may be the one
+                     taken, with the branch's effects before it exited. *)
                   List.map (fun (stop : leaving) -> { waiting with at = stop.at }) stopped @ stopped)
             pending
         in
@@ -8210,8 +8224,8 @@ and yield_part context frame (node : statement) (mode : Types.mode) (part : oper
       show each ~at:frame ~result:(Some handed) ~yielded:before ~finished:None
         ~when_:"for the part yielded here";
       check_valid context frame span part_type handed ~deep:true ~when_:"for the part yielded here";
-      (* What the caller leaves in a part lent [mut] is stored back in each
-         place it lends. *)
+      (* The caller's changes to a part lent [mut] are written to each lent
+         place. *)
       let frame, part_after =
         if mode = Types.Mut && Core_walk.lent_places part <> [] then (
           let part_after = arrive context frame "lent" part_type in
@@ -8503,9 +8517,9 @@ and lent_root (place : place) =
   | Field { base; _ } -> lent_root base
   | _ -> false
 
-(* Stores into a part of what a call lends to be changed: the call is made
-   once, and what the caller leaves in the part it lends is [leave] of that
-   part, so a field's new value is built into the part as lent. *)
+(* Stores into a part of a call's [mut] lent result: the call is made once,
+   and the part's final value is [leave] of the part, so a field's new value
+   is built into the part as lent. *)
 and store_lent context frame (place : place) leave =
   match place with
   | Lent ({ kind = Call call_; _ } as node) -> (
@@ -9248,9 +9262,9 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
       })
 
 (* A [for] loop that receives parts one at a time: from a yielding method
-   it calls, or from a cursor it pulls. [start] is what was received before
-   an iteration, at the head, and [receive] is what an iteration receives,
-   having assumed what the method says of it. *)
+   it calls, or from a cursor it pulls. [start] is the parts received before
+   an iteration, at the head, and [receive] is the part an iteration
+   receives, with the method's [ensures] for it assumed. *)
 and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (node : statement)
     (pattern : pattern) clauses body ~element_type ~changed ~start ~receive =
   let entry = { frame with yielded = Some (empty_parts context frame element_type) } in
@@ -9306,7 +9320,7 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
        (fun (exit_frame : frame) -> { exit_frame with yielded = frame.yielded })
        (exit_ :: left))
 
-(* Whether a loop's body hands out parts of the method it is in. *)
+(* Whether a loop's body yields. *)
 and contains_yield body =
   Core_walk.block_exists
     ~statement:(fun (node : statement) -> match node.kind with Yield _ -> true | _ -> false)
@@ -9479,8 +9493,8 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
   let spent =
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
-  (* An amortized bound is on what is spent plus the growth of the
-     potential of what the definition returns and changes. *)
+  (* An amortized bound is on the cost plus the change in potential of the
+     definition's result and changed values. *)
   let spent = if promise.clause.amortized then Costs.plus spent (change ()) else spent in
   let amount =
     match promise.clause.bound with
@@ -9605,10 +9619,10 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(s
   in
   let values_of (at : frame) = paired (values_of at) in
   let own_terms = values_of start in
-  (* An [impl]'s method also keeps its trait's or its capability's contract:
-     the precondition is what callers through a bound or the capability
-     show, so it is assumed, and implies the method's own; the
-     postcondition is what they assume, so it is shown. *)
+  (* An [impl]'s method also keeps its trait's or its capability's contract.
+     Callers through a bound or the capability prove that precondition, so
+     it is assumed and must imply the method's own. They assume that
+     postcondition, so it is proven. *)
   let trait_frame (at : frame) ~result =
     match inherited with
     | Some ((part : part), substitution, _) when List.length part.parameters = List.length own_terms
@@ -9788,8 +9802,9 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(s
                    (quote source ensured.origin))
                 term)
             contract.ensures);
-      (* How much the potential of what the definition returns and changes
-         grew, less what it was given to keep, for an amortized bound. *)
+      (* For an amortized bound: the potential of the result and the [mut]
+         parameters on return, less that of the [mut] and [own] parameters
+         on entry. *)
       let change () =
         let potential_change =
           List.fold_left
@@ -9813,9 +9828,8 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(s
               | _ -> total)
             Costs.zero parameters
         in
-        (* What the caller does to a part lent to it [mut] is the caller's
-           to pay for, so the part's own change in potential is not the
-           method's. *)
+        (* The caller pays for its changes to a part lent to it [mut], so the
+           part's change in potential is not the method's. *)
         let potential_change =
           List.fold_left
             (fun total (ty, handed, back) ->
@@ -9855,23 +9869,21 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(s
                    (quote part.callee clause.origin))
                 term)
             part.ensures;
-          (* A method that replaces one its trait provides must return what
-             the provided body returns, which is its definition. *)
           begin match (inherited, returned) with
           | Some (_, _, Some provided), Some returned ->
               if is_functional_block provided then
                 begin match block_value context inside provided with
                 | Some (_, defined) ->
                     oblige context frame Ensures returns_span
-                      "This method replaces one its trait provides, so it must return what the \
-                       provided body returns, and it may not."
+                      "This method overrides its trait's default body, so it must return the same \
+                       value, and it may not."
                       (Logic.equal returned defined)
                 | None -> ()
                 end
               else
                 oblige context frame Ensures returns_span
-                  "This method replaces one its trait provides, whose body is not functional, so \
-                   there is no definition to show this one agrees with."
+                  "This method overrides its trait's default body, which is not functional, so \
+                   there is no definition to prove it equal to."
                   (Logic.Boolean false)
           | _ -> ()
           end

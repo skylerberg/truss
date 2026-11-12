@@ -1,4 +1,4 @@
-(* [truss impact]: what the worktree's changes from a base commit reach.
+(* [truss impact]: the dependents of the worktree's changes from a base commit.
 
    The worktree's session is compared with a session of the base commit:
    every result a changed input can reach is brought up to date and
@@ -23,7 +23,7 @@ let declarations context packages =
       List.concat_map
         (fun module_ ->
           List.filter
-            (fun (d : Names.declaration) -> d.ordinal = 0)
+            (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
             (try Query.demand context Names.declarations module_ with Not_found -> []))
         (Query.demand context Workspace.modules name))
     packages
@@ -45,7 +45,7 @@ let changes (project : Project.t) base =
   let old_context = Database.context base and context = project.context in
   let paths context session =
     List.map
-      (fun (d : Names.declaration) -> d.path)
+      (fun (declaration : Names.declaration) -> declaration.path)
       (declarations context (Database.packages session))
   in
   let old_paths = paths old_context base and now = paths context mine in
@@ -63,7 +63,7 @@ let changes (project : Project.t) base =
             read_by = [];
           }
         else
-          let signature_changed = List.exists (fun p -> List.mem p Signatures.parts) parts in
+          let signature_changed = List.exists (fun part -> List.mem part Signatures.parts) parts in
           {
             path;
             status = `Changed parts;
@@ -109,7 +109,8 @@ let tests_changed (project : Project.t) base =
     in
     Compile.test_keys compile
       (List.filter_map
-         (fun (d : Names.declaration) -> match d.path with Test _ -> Some d.path | _ -> None)
+         (fun (declaration : Names.declaration) ->
+           match declaration.path with Test _ -> Some declaration.path | _ -> None)
          (declarations context (Database.packages session)))
   in
   let mine = keys project.context project.session in
@@ -117,7 +118,7 @@ let tests_changed (project : Project.t) base =
   let results = Compiler.test_results () in
   List.filter_map
     (fun (path, key) ->
-      match List.find_opt (fun (p, _) -> Path.equal p path) theirs with
+      match List.find_opt (fun (their_path, _) -> Path.equal their_path path) theirs with
       | Some (_, base_key) when base_key = key -> None
       | _ -> Some (path, results.find key <> None))
     mine
@@ -136,32 +137,32 @@ let readers_json read_by =
            ])
        read_by)
 
-let change_json c =
+let change_json change =
   Json.Object
     [
-      ("path", Json.String (Path.show c.path));
-      ("change", Json.String (status_word c.status));
+      ("path", Json.String (Path.show change.path));
+      ("change", Json.String (status_word change.status));
       ( "parts",
         Json.List
-          (match c.status with
-          | `Changed parts -> List.map (fun p -> Json.String p) parts
+          (match change.status with
+          | `Changed parts -> List.map (fun part -> Json.String part) parts
           | _ -> []) );
-      ("before", Json.option (fun s -> Json.String s) c.before);
-      ("after", Json.option (fun s -> Json.String s) c.after);
-      ("read_by", readers_json c.read_by);
+      ("before", Json.option (fun text -> Json.String text) change.before);
+      ("after", Json.option (fun text -> Json.String text) change.after);
+      ("read_by", readers_json change.read_by);
     ]
 
-let print_change c =
-  Output.printf "  %s: %s\n" (Path.show c.path)
-    (match c.status with
+let print_change change =
+  Output.printf "  %s: %s\n" (Path.show change.path)
+    (match change.status with
     | `Changed parts -> String.concat ", " parts
     | status -> status_word status);
-  Option.iter (fun text -> Output.print_line (Signatures.labeled "was:" text)) c.before;
-  Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) c.after;
-  if c.read_by <> [] then
+  Option.iter (fun text -> Output.print_line (Signatures.labeled "was:" text)) change.before;
+  Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) change.after;
+  if change.read_by <> [] then
     Output.printf "    read by: %s\n"
       (String.concat ", "
-         (List.sort_uniq compare (List.map (fun (reader, _, _) -> Path.show reader) c.read_by)))
+         (List.sort_uniq compare (List.map (fun (reader, _, _) -> Path.show reader) change.read_by)))
 
 let run ~directory ~base ~json =
   let project = Project.load directory in

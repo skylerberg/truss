@@ -172,7 +172,8 @@ let impact =
              default branch.")
   in
   command "impact"
-    ~doc:"List what the worktree's changes from a base commit change, and what they reach."
+    ~doc:
+      "List the definitions the worktree's changes from a base commit modify, and their dependents."
     Term.(
       const (fun directory base json -> Outcome.Exit (Impact_command.run ~directory ~base ~json))
       $ directory $ base $ json)
@@ -367,8 +368,8 @@ let truss =
     ]
 
 (* Parses the arguments and runs the command, writing as [Output] says. A
-   reason the command cannot run, or a bug in the compiler with what the
-   compiler was doing, gives status 2. *)
+   reason the command cannot run, or a compiler bug with its context,
+   gives status 2. *)
 let evaluate arguments =
   let buffer_out = Buffer.create 256 and buffer_err = Buffer.create 256 in
   let help = Format.formatter_of_buffer buffer_out
@@ -396,7 +397,7 @@ let evaluate arguments =
         Outcome.Exit 2
     | exception Compiler_bug.Bug bug ->
         Output.eprint_line
-          ("The compiler has a bug, and cannot go on. Please report it.\n  "
+          ("The compiler has a bug, and cannot continue. Please report it.\n  "
          ^ Compiler_bug.to_string bug);
         Outcome.Exit 2
   in
@@ -404,7 +405,7 @@ let evaluate arguments =
   Format.pp_print_flush err ();
   Output.print (Buffer.contents buffer_out);
   Output.eprint (Buffer.contents buffer_err);
-  (* What the command computed is saved, so another process finds it. *)
+  (* The command's results are saved for other processes. *)
   List.iter Database.save_session !Project.opened;
   Project.opened := [];
   outcome
@@ -456,7 +457,8 @@ let serve key = Database.serve ~key ~handle
 
 (* The command's first word, and whether it is one that runs no code of a
    worktree, which the client runs itself. *)
-let command_of arguments = List.find_opt (fun a -> not (String.starts_with ~prefix:"-" a)) arguments
+let command_of arguments =
+  List.find_opt (fun argument -> not (String.starts_with ~prefix:"-" argument)) arguments
 
 let finish (outcome : Outcome.t) =
   match outcome with

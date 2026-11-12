@@ -12,8 +12,8 @@ let () =
 
 (* CI proves the library on several runners at once. [TRUSS_PROOF_SHARE]
    names this run's share as [index/count], and the run checks and proves
-   only its own modules: what they use of the others is worked out as it is
-   needed. The modules are dealt out by weight, heaviest first, each to the
+   only its own modules, and computes the parts of other modules they use on
+   demand. The modules are dealt out by weight, heaviest first, each to the
    share with the least so far, so that the shares take about as long as
    each other. A module's weight is what proving it was measured to cost,
    which [Proof_weights] lists. The letters of a module's source do not
@@ -42,9 +42,14 @@ let weight ((module_ : Path.module_), source) =
   | Some measured -> measured
   | None -> max 1 (letters source / Proof_weights.letters_for_one)
 
+let test_name (module_ : Path.module_) =
+  Printf.sprintf "%s checks cleanly and proves" (Path.show_module module_)
+
+(* With [TRUSS_TEST] set, only the modules whose tests it names are checked
+   and proven. *)
 let modules =
   match share with
-  | None -> Standard_library.modules
+  | None -> List.filter (fun (module_, _) -> wanted (test_name module_)) Standard_library.modules
   | Some (index, count) ->
       let totals = Array.make count 0 in
       let weighed = List.map (fun entry -> (weight entry, entry)) Standard_library.modules in
@@ -136,9 +141,9 @@ let timed label work =
   result
 
 (* [TRUSS_PROOF_STATE] names a state of the library in the code database's
-   store. A run that names one starts from what the last such run saved,
-   works out only what an edit to the library changed, and saves the
-   result. A run that names none starts from the sources. *)
+   store. A run that names one starts from the state the last such run
+   saved, recomputes only the dependents of an edit to the library, and
+   saves the result. A run that names none starts from the sources. *)
 let session =
   match Sys.getenv_opt "TRUSS_PROOF_STATE" with
   | None | Some "" -> None
@@ -200,9 +205,7 @@ let () =
            checked));
   List.iter
     (fun ((module_ : Path.module_), errors) ->
-      test
-        (Printf.sprintf "%s checks cleanly and proves" (Path.show_module module_))
-        (fun () ->
+      test (test_name module_) (fun () ->
           let source = (Query.demand database Workspace.file module_).source in
           let report =
             List.iter (fun diagnostic -> fail "%s" (Diagnostic.render source diagnostic))

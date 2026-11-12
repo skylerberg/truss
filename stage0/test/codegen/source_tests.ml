@@ -39,8 +39,8 @@ let () =
   passes "strings compare, order, and trim" Fixtures.Source.strings_compare_order_and_trim
 
 let () =
-  passes "constants are static data, worked out exactly"
-    Fixtures.Source.constants_are_static_data_worked_out_exactly
+  passes "constants are static data, computed exactly"
+    Fixtures.Source.constants_are_static_data_computed_exactly
 
 let () =
   passes "a named function is passed as a function value"
@@ -54,8 +54,8 @@ let () =
 let () =
   passes "a constant that compares constants is folded"
     Fixtures.Source.constant_that_compares_constants_is_folded;
-  passes "a constant made of one that is worked out by running is worked out by running too"
-    Fixtures.Source.constant_made_of_one_that_is_worked_out_by_running;
+  passes "a constant made of one that is computed by running is computed by running too"
+    Fixtures.Source.constant_made_of_one_that_is_computed_by_running;
   test "a constant whose sum does not fit its type is an error before any code is run" (fun () ->
       let database = Engine.context (Engine.create ~bases:[ Lazy.force checked_standard ] ()) in
       Database.load_package (Engine.of_context database)

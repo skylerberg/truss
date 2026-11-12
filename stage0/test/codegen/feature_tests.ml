@@ -19,20 +19,20 @@ let () =
     (fun () ->
       expect_output Fixtures.Feature.associated_capability_set_gives_each_instance_the
         (String.concat "" (List.init 8 (Printf.sprintf "test %d passed\n"))));
-  passes "a lending method goes on after its caller's statement"
-    Fixtures.Feature.lending_method_goes_on_after_its_callers_statement;
-  passes "a lending method lends a value it made, which lasts for the statement"
-    Fixtures.Feature.lending_method_lends_a_value_it_made_which_lasts;
-  (* The caller goes on from either [yield], and only the first has
+  passes "a lending method resumes after its caller's statement"
+    Fixtures.Feature.lending_method_resumes_after_its_callers_statement;
+  passes "a lending method lends a local it owns, which lives until the caller's statement ends"
+    Fixtures.Feature.lending_method_lends_a_local_it_owns_which_lives;
+  (* The caller continues from either [yield], and only the first has
      [label] in scope. *)
   passes "a lending method owns a value at one of its yields and not at another"
     Fixtures.Feature.lending_method_owns_a_value_at_one_of_its_yields;
   passes "a lending method yields inside a loop over a yielding method that owns a value"
     Fixtures.Feature.lending_method_yields_inside_a_loop_over_a;
-  passes "a lending method lends to change from either of two yields, one with a value in scope"
-    Fixtures.Feature.lending_method_lends_to_change_from_either_of_two;
-  passes "a lending method goes on when its caller's statement leaves early"
-    Fixtures.Feature.lending_method_goes_on_when_its_callers_statement;
+  passes "a `lends mut` method yields on two paths, and owns a local at one of them"
+    Fixtures.Feature.lends_mut_method_yields_on_two_paths_and_owns_a;
+  passes "a lending method resumes when its caller's statement exits early"
+    Fixtures.Feature.lending_method_resumes_when_its_callers_statement;
   passes "a cursor dropped before it ends drops what it holds"
     Fixtures.Feature.cursor_dropped_before_it_ends_drops_what_it_holds;
   passes "sets and maps keep one of each key, in order"
@@ -54,8 +54,8 @@ let () =
     Fixtures.Feature.method_that_yields_through_recursion_drives_a_for;
   passes "a recursive loop over views of strings gives copies, and leaves the tree whole"
     Fixtures.Feature.recursive_loop_over_views_of_strings_gives_copies;
-  passes "a constant that needs its code run is worked out while compiling"
-    Fixtures.Feature.constant_that_needs_its_code_run_is_worked_out;
+  passes "a constant that needs its code run is evaluated while compiling"
+    Fixtures.Feature.constant_that_needs_its_code_run_is_evaluated;
   passes "a program of many features together: generics, any, lambdas, ?, Map, mut loops"
     Fixtures.Feature.program_of_many_features_together_generics_any;
   passes "a yielding method's defaults are filled when it is pulled or looped over"

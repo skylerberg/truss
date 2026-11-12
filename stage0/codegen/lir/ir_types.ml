@@ -222,15 +222,15 @@ type statement =
       (** Before outlining only. Where a region of a [parallel] statement starts. Its code runs from
           here to the next [Region] or the [Regions_end] of the same [fork], which is its one way
           out, and the regions of a fork touch no place that another changes. Run in place, in
-          order, the regions mean what the statement means. *)
+          order, the regions have the statement's semantics. *)
   | Regions_end of { fork : int }  (** Before outlining only. Where a fork's last region ends. *)
   | Fork of { branches : (int * operand) list }
-      (** Runs each nested function, given the address of its environment, and goes on when all have
-          returned. They may run at the same time. *)
+      (** Runs each nested function, given the address of its environment, and continues when all
+          have returned. They may run at the same time. *)
   | Fork_range of { body : int; environment : operand; first : operand; last : operand }
       (** Runs the nested function, given the address of its environment and the first and last
           index of a part, for parts that together hold each [UInt64] index from [first] to [last]
-          once, and goes on when all have returned. The parts may run at the same time. *)
+          once, and continues when all have returned. The parts may run at the same time. *)
 
 type terminator =
   | Goto of block

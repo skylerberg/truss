@@ -1,0 +1,134 @@
+use standard::collections
+use standard::map
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].new(
+  capacity: USize,
+) -> collections::LruCache[Key, Value]
+  requires capacity > 0
+{
+  collections::LruCache(capacity: capacity, entries: [:], recency: collections::Deque.new(), clock: 0)
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].length(self) -> USize {
+  self.entries.length()
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].is_empty(self) -> Bool {
+  self.entries.is_empty()
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].capacity(self) -> USize {
+  self.capacity
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].contains(self, key: Key) -> Bool {
+  self.entries.contains(key)
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].peek(self, key: Key) lends Option[Value] {
+  if self.entries.contains(key) {
+    yield Some(self.entries[key].value)
+  } else {
+    yield None
+  }
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].get(mut self, key: Key) lends Option[Value] {
+  if self.entries.contains(key) {
+    touch(mut self, key: key)
+  }
+  if self.entries.contains(key) {
+    yield Some(self.entries[key].value)
+  } else {
+    yield None
+  }
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].insert(
+  mut self,
+  key: own Key,
+  value: own Value,
+) -> Option[map::Entry[Key, Value]] {
+  let stamp = next_stamp(mut self)
+  let replaced = mut self.entries.replace(key.copy(), value: collections::LruSlot(value: own value, stamp: stamp))
+  mut self.recency.push_back(collections::LruUse(key: own key, stamp: stamp))
+  var evicted: Option[map::Entry[Key, Value]] = None
+  if replaced is None && self.entries.length() > self.capacity {
+    evicted = evict_least_recent(mut self)
+  }
+  compact(mut self)
+  evicted
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].remove(mut self, key: Key) -> Option[Value] {
+  match mut self.entries.take(key) {
+    Some(slot) => Some(own slot.value)
+    None => None
+  }
+}
+
+public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].clear(mut self) {
+  mut self.entries.clear()
+  mut self.recency.clear()
+}
+
+fn next_stamp[Key: Hash + Ordered + Copyable, Value](cache: mut collections::LruCache[Key, Value]) -> UInt64 {
+  cache.clock = cache.clock.wrapping_add(1)
+  cache.clock
+}
+
+fn touch[Key: Hash + Ordered + Copyable, Value](cache: mut collections::LruCache[Key, Value], key: Key) {
+  let stamp = next_stamp(mut cache)
+  match mut cache.entries.take(key) {
+    Some(slot) => {
+      mut cache.entries.insert(key.copy(), value: collections::LruSlot(value: own slot.value, stamp: stamp))
+      mut cache.recency.push_back(collections::LruUse(key: key.copy(), stamp: stamp))
+    }
+    None => {}
+  }
+  compact(mut cache)
+}
+
+fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].is_current(self, used: collections::LruUse[Key]) -> Bool {
+  self.entries.contains(used.key) && self.entries[used.key].stamp == used.stamp
+}
+
+fn evict_least_recent[Key: Hash + Ordered + Copyable, Value](
+  cache: mut collections::LruCache[Key, Value],
+) -> Option[map::Entry[Key, Value]] {
+  while true
+    decreases cache.recency.length()
+  {
+    match mut cache.recency.pop_front() {
+      Some(used) => {
+        if cache.is_current(used) {
+          match mut cache.entries.take(used.key) {
+            Some(slot) => return Some(map::Entry(key: own used.key, value: own slot.value))
+            None => {}
+          }
+        }
+      }
+      None => return None
+    }
+  }
+}
+
+fn compact[Key: Hash + Ordered + Copyable, Value](cache: mut collections::LruCache[Key, Value]) {
+  if cache.recency.length() < 32 || cache.recency.length() / 2 <= cache.entries.length() {
+    return
+  }
+  var kept: collections::Deque[collections::LruUse[Key]] = collections::Deque.with_capacity(cache.entries.length())
+  while true
+    decreases cache.recency.length()
+  {
+    match mut cache.recency.pop_front() {
+      Some(used) => {
+        if cache.is_current(used) {
+          mut kept.push_back(own used)
+        }
+      }
+      None => break
+    }
+  }
+  cache.recency = own kept
+}

@@ -486,3 +486,30 @@ test "tasks spawn tasks of their own" {
     }
   }
 }
+
+test "a cell's updates from many tasks each see the value the one before left" {
+  provide tasks::SeededTasks.new(5) {
+    let totals: tasks::Cell[List[Int64]] = tasks::Cell.new([0])
+    concurrent for number in 0..20 {
+      let _ = totals.update(fn(list) {
+        mut list.push(number)
+        list.length()
+      })
+    }
+    assert totals.read(fn(list) { list.length() }) == 21
+    let other = totals.copy()
+    let _ = other.update(fn(list) { mut list.clear() })
+    assert totals.read(fn(list) { list.is_empty() })
+  }
+}
+
+test "a counter adds what each task adds, and gives the total" {
+  provide tasks::SeededTasks.new(3) {
+    let requests = tasks::Counter.new()
+    concurrent for _ in 0..50 {
+      let _ = requests.add()
+    }
+    assert requests.value() == 50
+    assert requests.add(-10) == 40
+  }
+}

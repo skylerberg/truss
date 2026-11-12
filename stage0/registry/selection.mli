@@ -6,7 +6,7 @@ type package = {
   version : Version.t;
   hash : string;
   manifest : Manifest.package;
-  record : Lock.t;  (** What the package was published with *)
+  record : Lock.t;  (** The package's lock record at publication *)
 }
 (** A registry package of a build. *)
 

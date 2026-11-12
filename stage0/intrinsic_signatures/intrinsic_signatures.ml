@@ -17,7 +17,7 @@ let sequence element =
 
 let signature (operation : Intrinsic.operation) : Types.signature =
   let generic name = { Types.generic = parameter operation name; kind = Type_generic [] } in
-  let p name = Types.Parameter (parameter operation name) in
+  let parameter_type name = Types.Parameter (parameter operation name) in
   let input ?(mode = Types.Read) name type_ = { Types.name; mode; type_; has_default = false } in
   let make ?(generics = []) ?(output = Types.Returns Types.unit) parameters : Types.signature =
     {
@@ -32,7 +32,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       transparent = false;
     }
   in
-  let value = p "Value" and element = p "Element" in
+  let value = parameter_type "Value" and element = parameter_type "Element" in
   let usize = Types.builtin USize and bool = Types.bool in
   let binary output =
     make ~generics:[ "Value" ] ~output:(Returns output) [ input "left" value; input "right" value ]
@@ -75,23 +75,27 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   | Leading_zeros | Trailing_zeros | Count_ones -> unary usize
   | Shift_left | Shift_right ->
       make ~generics:[ "Value"; "Amount" ] ~output:(Returns value)
-        [ input "value" value; input "amount" (p "Amount") ]
+        [ input "value" value; input "amount" (parameter_type "Amount") ]
   | Rotate_left | Rotate_right ->
       make ~generics:[ "Value" ] ~output:(Returns value)
         [ input "value" value; input "amount" usize ]
   | Convert ->
       make ~generics:[ "Source"; "Target" ]
-        ~output:(Returns (p "Target"))
-        [ input "value" (p "Source") ]
+        ~output:(Returns (parameter_type "Target"))
+        [ input "value" (parameter_type "Source") ]
   | Fits ->
-      make ~generics:[ "Source"; "Target" ] ~output:(Returns bool) [ input "value" (p "Source") ]
+      make ~generics:[ "Source"; "Target" ] ~output:(Returns bool)
+        [ input "value" (parameter_type "Source") ]
   | Fused_multiply_add ->
       make ~generics:[ "Value" ] ~output:(Returns value)
         [ input "value" value; input "multiplier" value; input "addend" value ]
   | To_bits ->
-      make ~generics:[ "Value"; "Bits" ] ~output:(Returns (p "Bits")) [ input "value" value ]
+      make ~generics:[ "Value"; "Bits" ]
+        ~output:(Returns (parameter_type "Bits"))
+        [ input "value" value ]
   | From_bits ->
-      make ~generics:[ "Bits"; "Value" ] ~output:(Returns value) [ input "bits" (p "Bits") ]
+      make ~generics:[ "Bits"; "Value" ] ~output:(Returns value)
+        [ input "bits" (parameter_type "Bits") ]
   | Compare_bytes ->
       make
         ~output:(Returns (Types.builtin Int8))
@@ -223,18 +227,18 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       | Shared_update ->
           let change : Types.function_type =
             {
-              inputs = [ (Mut, value); (Own, p "Input") ];
-              output = Returns (p "Result");
+              inputs = [ (Mut, value); (Own, parameter_type "Input") ];
+              output = Returns (parameter_type "Result");
               uses = [];
               costs = [];
             }
           in
           {
             (make
-               ~output:(Returns (p "Result"))
+               ~output:(Returns (parameter_type "Result"))
                [
                  input "shared" shared;
-                 input ~mode:Own "input" (p "Input");
+                 input ~mode:Own "input" (parameter_type "Input");
                  input "change" (Types.Function change);
                ])
             with

@@ -72,7 +72,7 @@ let () =
     Fixtures.Core_form.array_literal_and_a_generic_value_parameter_used
 
 let () =
-  test "a call of a lending method that never yields compiles, and stops where the method does"
+  test "a call of a lending method that never yields compiles, and the code after it is unreachable"
     (fun () ->
       expect_output Fixtures.Core_form.call_of_a_lending_method_that_never_yields
         "test 0 panicked\nmessage 35\nno cell\n  at example/main.truss:6:3\n")
@@ -110,14 +110,14 @@ let () =
     Fixtures.Core_form.slice_of_a_small_array_or_of_one_in_a_small_record
 
 let () =
-  passes "values that a method builds around places it lends, to read and to change"
-    Fixtures.Core_form.values_that_a_method_builds_around_places_it_lends
+  passes "constructors of lent places, yielded read-only and `mut`"
+    Fixtures.Core_form.constructors_of_lent_places_yielded_read_only_and
 
 let () =
   passes
-    "a lent value holds the addresses of its places: read through them, changed in them, and \
-     copied where it is used whole"
-    Fixtures.Core_form.lent_value_holds_the_addresses_of_its_places_read
+    "a lent value is read and changed through the addresses it holds, and copied where it is used \
+     whole"
+    Fixtures.Core_form.lent_value_is_read_and_changed_through_the
 
 let () =
   passes
@@ -126,12 +126,12 @@ let () =
     Fixtures.Core_form.lending_method_that_yields_on_several_paths_places
 
 let () =
-  passes "a method that yields values built around lent places and loops over itself"
-    Fixtures.Core_form.method_that_yields_values_built_around_lent_places
+  passes "a method that yields constructors of lent places and loops over itself"
+    Fixtures.Core_form.method_that_yields_constructors_of_lent_places_and
 
 let () =
-  passes "a value moved out of a whole place lent mut, which is then given another"
-    Fixtures.Core_form.value_moved_out_of_a_whole_place_lent_mut_which_is
+  passes "a value moved out of a `mut` parameter, which is then reinitialized"
+    Fixtures.Core_form.value_moved_out_of_a_mut_parameter_which_is_then
 
 let () =
   passes "quantifiers over ranges, which run as loops that stop at the first answer"
@@ -165,7 +165,7 @@ let () =
   passes "a function with a default, called through a function value, uses what it is given"
     Fixtures.Core_form.function_with_a_default_called_through_a_function
 
-(* Checks which of a module's constants fold and which are worked out by
+(* Checks which of a module's constants fold and which are computed by
    running their evaluators, and that the module's test passes. *)
 let folds what ~folded ~run source =
   test what (fun () ->
@@ -174,7 +174,7 @@ let folds what ~folded ~run source =
         Lower.context ~checks:true database target_64 ~constant:(fun context path ->
             match Lower.constant context path with Folded data -> Some data.value | Run _ -> None)
       in
-      let value = context.constant in
+      let value = Lower.constant_value context in
       let constant name : Path.t = Top { module_ = example; name } in
       List.iter
         (fun name -> if value (constant name) = None then fail "%s is run, and should fold" name)

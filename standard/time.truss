@@ -1,5 +1,6 @@
 use standard::core
 use standard::intrinsic
+use standard::serialization
 use standard::text
 
 public opaque type Duration(nanoseconds: Int64)
@@ -321,14 +322,14 @@ internal fn skip_digits(text: StringSlice, from: USize) -> USize
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
-  ensures forall i in from..result => text.byte(i) >= 48 && text.byte(i) <= 57
+  ensures forall position in from..result => text.byte(position) >= 48 && text.byte(position) <= 57
   cost time O(result - from)
 {
   var index = from
   while index < text.length() && text.byte(index) >= 48 && text.byte(index) <= 57
     invariant from <= index
     invariant index <= text.length()
-    invariant forall i in from..index => text.byte(i) >= 48 && text.byte(i) <= 57
+    invariant forall position in from..index => text.byte(position) >= 48 && text.byte(position) <= 57
     decreases text.length() - index
     cost time O(index - from)
   {
@@ -340,7 +341,7 @@ internal fn skip_digits(text: StringSlice, from: USize) -> USize
 internal fn parse_integer(text: StringSlice, from: USize, to: USize) -> Option[UInt64]
   requires from <= to
   requires to <= text.length()
-  requires forall i in from..to => text.byte(i) >= 48 && text.byte(i) <= 57
+  requires forall position in from..to => text.byte(position) >= 48 && text.byte(position) <= 57
   cost time O(to - from)
 {
   var value: UInt64 = 0
@@ -366,7 +367,7 @@ internal fn parse_integer(text: StringSlice, from: USize, to: USize) -> Option[U
 internal fn parse_fraction(text: StringSlice, from: USize, to: USize, unit: UInt64) -> UInt64
   requires from <= to
   requires to <= text.length()
-  requires forall i in from..to => text.byte(i) >= 48 && text.byte(i) <= 57
+  requires forall position in from..to => text.byte(position) >= 48 && text.byte(position) <= 57
   requires 0 < unit && unit <= 3600000000000
   ensures result < unit
   cost time O(to - from)
@@ -2546,5 +2547,65 @@ impl Clock for ManualClock {
     if !duration.is_negative() {
       mut self.advance(duration)
     }
+  }
+}
+
+impl serialization::Serialize for Duration {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for Duration {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Duration, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "a duration")
+  }
+}
+
+impl serialization::Serialize for Instant {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for Instant {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Instant, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "an instant, such as `2024-01-02T03:04:05Z`")
+  }
+}
+
+impl serialization::Serialize for Date {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for Date {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Date, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "a date, such as `2024-01-02`")
+  }
+}
+
+impl serialization::Serialize for TimeOfDay {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for TimeOfDay {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[TimeOfDay, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "a time of day, such as `03:04:05`")
+  }
+}
+
+impl serialization::Serialize for DateTime {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for DateTime {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[DateTime, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "a date and time, such as `2024-01-02T03:04:05`")
   }
 }

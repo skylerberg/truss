@@ -50,7 +50,7 @@ fn rename_first(names: mut Names, to: String) -> Bool {
   false
 }
 
-test "more shapes of values built around lent places" {
+test "more constructors of lent places" {
   let pair = Names(first: "${1}st", second: "${2}nd!", others: [])
   if pair.both() is Some(both) {
     assert both.left.length() + both.right.length() == 7

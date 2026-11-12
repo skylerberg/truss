@@ -79,7 +79,7 @@ let characters =
         | _ -> (first, characters))
       (None, []) (records "UnicodeData.txt")
   in
-  List.sort (fun a b -> compare a.code b.code) characters
+  List.sort (fun left right -> compare left.code right.code) characters
 
 let in_categories names =
   Ucd.merge

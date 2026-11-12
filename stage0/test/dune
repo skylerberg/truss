@@ -14,6 +14,7 @@
   interface_tests
   infer_tests
   core_tests
+  mir_tests
   patterns_tests
   usage_tests
   ownership_tests
@@ -44,6 +45,7 @@
   core
   core_print
   core_walk
+  mir
   parser
   reference
   cbor

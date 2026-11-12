@@ -1,8 +1,7 @@
 module Layout = Lexer.For_testing.Layout
 
-(* The lexer's tests. Each test gives an input and states exactly what the
-   lexer must do with it: the tokens, or the one diagnostic with its code,
-   position, and fix.
+(* Each test gives an input and the lexer's exact output: the tokens, or
+   the one diagnostic with its code, position, and fix.
 
    Fuzzing and benchmarks are tools in stage0/tools, not tests. *)
 
@@ -18,7 +17,11 @@ let equal_lists show name expected actual =
 (* Lexing *)
 
 let lex text = Lexer.lex (Source.create ~path:"test.truss" text)
-let codes text = List.map (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code) (snd (lex text))
+
+let codes text =
+  List.map
+    (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
+    (snd (lex text))
 
 (* A token, shown compactly: names and literals as written, punctuation and
    keywords by spelling, NEWLINE as "NL", and a zero-width closer that layout
@@ -97,13 +100,16 @@ let error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
   | diagnostics ->
       fail "expected one diagnostic, got [%s]"
         (String.concat "; "
-           (List.map (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code) diagnostics))
+           (List.map
+              (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
+              diagnostics))
 
 (* The texts that the fixes of the diagnostic with [code] produce. *)
 let fixed_texts text ~code =
   List.concat_map
-    (fun (d : Diagnostic.t) ->
-      if d.code = Lexer code then List.map (Diagnostic.apply_fix text) d.fixes else [])
+    (fun (diagnostic : Diagnostic.t) ->
+      if diagnostic.code = Lexer code then List.map (Diagnostic.apply_fix text) diagnostic.fixes
+      else [])
     (snd (lex text))
 
 (* Source text *)
@@ -187,11 +193,11 @@ let () =
   test "every use of a misspelled name gets the same fix" (fun () ->
       let replacements =
         List.concat_map
-          (fun (d : Diagnostic.t) ->
+          (fun (diagnostic : Diagnostic.t) ->
             List.concat_map
               (fun (fix : _ Diagnostic.fix) ->
-                List.map (fun (e : _ Diagnostic.edit) -> e.replacement) fix.edits)
-              d.fixes)
+                List.map (fun (edit : _ Diagnostic.edit) -> edit.replacement) fix.edits)
+              diagnostic.fixes)
           (snd (lex "userName(userName)"))
       in
       equal_lists Fun.id "replacements" [ "user_name"; "user_name" ] replacements)
@@ -586,8 +592,9 @@ let () =
   test "diagnostics past the limit do not cost the shown ones their fixes" (fun () ->
       let text = String.concat "" (List.init 250 (Printf.sprintf "a%d;\n")) in
       List.iteri
-        (fun index (d : Diagnostic.t) ->
-          if index < Diagnostic.limit && d.fixes = [] then fail "diagnostic %d has no fix" index)
+        (fun index (diagnostic : Diagnostic.t) ->
+          if index < Diagnostic.limit && diagnostic.fixes = [] then
+            fail "diagnostic %d has no fix" index)
         (snd (lex text)));
   test "overlapping edits are refused" (fun () ->
       let fix =
@@ -607,20 +614,21 @@ let () =
       in
       let before = List.sort compare (codes text) in
       List.iter
-        (fun (d : Diagnostic.t) ->
+        (fun (diagnostic : Diagnostic.t) ->
           List.iter
             (fun fix ->
               let expected =
                 let rec remove_one = function
                   | [] -> []
                   | code :: rest ->
-                      if code = Diagnostic.Code.name d.code then rest else code :: remove_one rest
+                      if code = Diagnostic.Code.name diagnostic.code then rest
+                      else code :: remove_one rest
                 in
                 remove_one before
               in
               equal_lists Fun.id "codes after the fix" expected
                 (List.sort compare (codes (Diagnostic.apply_fix text fix))))
-            d.fixes)
+            diagnostic.fixes)
         (snd (lex text)))
 
 (* The documents *)
@@ -650,7 +658,10 @@ let () =
         | Some kind -> Some kind
         | None ->
             if spelling = "_" then Some Underscore
-            else Option.map (fun p -> Punctuation p) (List.assoc_opt spelling Token.punctuation)
+            else
+              Option.map
+                (fun punctuation -> Punctuation punctuation)
+                (List.assoc_opt spelling Token.punctuation)
       in
       let listed first second =
         List.filter_map kind_of (backticked (between grammar first second))

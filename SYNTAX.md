@@ -1,6 +1,6 @@
 # Truss Syntax
 
-This document describes how Truss code is written. For what the code means
+This document describes how Truss code is written. For semantics
 (capabilities, costs, memory, failure, and so on), see [DESIGN.md](DESIGN.md).
 It describes the language, not a compiler: what stage0 builds of it is in
 the documents of stage0's stages, which
@@ -656,8 +656,8 @@ fields, and returning it:
 }
 ```
 
-- The base is handed over the same way as an `own` argument: mark a place with
-  `own` to give it up, or call `copy()` to keep it. Types that copy implicitly
+- The base is moved as an `own` argument is: mark a place with `own` to move
+  it, or call `copy()` to keep it. Types that copy implicitly
   (see [DESIGN.md](DESIGN.md#memory)) need neither, as with `origin` above.
 - A field can be a path, such as `server.port`, to update a nested field.
 - `origin with (x)` uses a local variable named `x`, as building a record
@@ -937,14 +937,14 @@ The target of `calls` is a function parameter (`calls(visit)`), a capability
 method (`calls(FileRead.read)`), or a whole capability (`calls(FileRead)`).
 `O(f)` means that the cost is at most `c * f + d` for every input, for some
 constants `c` and `d` that the prover finds. So `O(rows * columns)` and
-`O(text.length() + pattern.length())` mean exactly what they say, and small
-inputs need no special case.
+`O(text.length() + pattern.length())` hold for every input size, small inputs
+included.
 
 A bound is an expression that can use:
 
 - the parameters, `self`, their fields, and pure methods with a `time` clause,
   such as `items.length()`
-- `result`, for bounds that depend on what the function returns, as in
+- `result`, for bounds that depend on the return value, as in
   `cost time O(text.length() + result.length())`
 - `+`, `*`, and `/` and `-` where the result stays at or above zero, all on
   exact integers
@@ -1077,8 +1077,8 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log cost time finite))
   A function that returns a function type with clauses puts it in
   parentheses: `fn make_counter() -> (fn(Int64) -> Int64 uses Clock)`.
 
-The type of a function-typed parameter can say what the function passes it,
-with a `requires`. Its inputs are then named, so the `requires` can mention
+The type of a function-typed parameter can constrain, with a `requires`, the
+arguments the callback is called with. Its inputs are then named, so the `requires` can mention
 them, and it can also mention the parameters before it:
 
 ```truss
@@ -1387,14 +1387,14 @@ mut grid.cell(position).visit()
 - **The mark is on the place the part is lent from.** In
   `mut grid.cell(position).visit()`, `mut` chooses the `cell` that lends
   `mut`, and the part it lends is then changed by `visit` with no mark of
-  its own. A part cannot be given up with `own`, and `let` keeps one only by
+  its own. A part cannot be moved with `own`, and `let` keeps one only by
   copying it.
 - **A lending method yields exactly once on every path.** A path with no
   `yield`, or with two, is a compile error. A loop body that yields and then
   returns is one path with one `yield`.
 - A lending method cannot drive a `for` loop or be pulled.
 
-A method can also lend a value that it builds around its parts. This is how
+A method can also lend a constructor applied to its parts. This is how
 a lookup that can miss lends an `Option` without copying the element:
 
 ```truss
@@ -1428,8 +1428,8 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
   `yield Some(mut self.second)`, the caller could change the variant, as
   `mut pair.maybe() = None` does, and `self.second` would be left without a
   value: a use after free. To lend an `Option` to be changed, the method
-  yields a local `Option` with `yield mut` and stores what the caller left
-  in it after the `yield`, as Swift's `_modify` accessors do.
+  yields a local `Option` with `yield mut`, and after the `yield` writes
+  the local's value to the field, as Swift's `_modify` accessors do.
 - **The value owns none of what it was lent.** It holds each lent place's
   value for as long as it is lent, and `self` is lent whole for that time,
   as it is when one part is lent.
@@ -1652,9 +1652,9 @@ mut scores.update_each(fn(score) { score = score / 2 })
 - A lambda's parameter types, modes, and result type are never written. They
   come from the function type the lambda is passed as. In `update_each`,
   which takes `fn(mut Element)`, `score` can be changed.
-- Types are worked out from the outside in: the receiver and the other
+- Types are inferred from the outside in: the receiver and the other
   arguments decide the function type first, and then the lambda's body is
-  checked. A parameter's type is never worked out from how the body uses it.
+  checked. A parameter's type is never inferred from how the body uses it.
 - When nothing gives the lambda a function type, give one to the `let`, or
   type arguments to the call:
 
@@ -1673,7 +1673,7 @@ mut scores.update_each(fn(score) { score = score / 2 })
   alone or inside another value, stored in a place the caller keeps, or
   given to an `own` function-typed parameter, because it would outlive the
   variables it reads. A named function, and a lambda that reads no local
-  variable, can be returned, stored, and given up freely.
+  variable, can be returned, stored, and moved freely.
 - A lambda's capabilities are inferred from its body. A lambda that calls
   `Clock.now()` can only be passed where a function type with `uses Clock`
   is expected.
@@ -1785,7 +1785,7 @@ fn sum[count: USize](values: Array[Int64, count]) -> Int64
 | `scores[i] = 0` | Replaces element `i`, which must be in bounds. |
 | `ports[name]` | The value for `name`, which must be proven present, for example by an earlier `if ports.contains(name)`. |
 | `ports.get(name)` | `Some(value)`, or `None` if `name` is missing. |
-| `ports[own name] = 8080` | Inserts or replaces the value for `name`. The map keeps the key, so a key that is not plain data is given up with `own` or copied. |
+| `ports[own name] = 8080` | Inserts or replaces the value for `name`. The map keeps the key, so a key that is not plain data is moved with `own` or copied. |
 
 - Ranges without a start or an end, such as `2..`, are only allowed inside
   brackets.
@@ -1854,7 +1854,7 @@ for index in 1..count
 }
 ```
 
-A `cost` clause on a loop states what the loop has spent so far, at the
+A `cost` clause on a loop bounds the loop's cost so far, at the
 start of every iteration and when it ends. A loop needs one only when its
 iterations cost different amounts, as when each one handles a row of its own
 length:
@@ -2118,7 +2118,7 @@ These capabilities are in the prelude:
 | `Processes` | Running other programs |
 | `Signals` | Waiting for a signal sent to the program |
 | `Tasks` | Running `concurrent` code and using channels |
-| `Log` | Recording what the program did |
+| `Log` | Writing to the program's log |
 | `Panic` | Ending the program |
 
 Each capability's methods are the least an implementation has to give.
@@ -2331,7 +2331,8 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
   branches, waits for them to end, and then leaves. Above, a query that
   fails cancels the other query, and `profile` returns the error.
 - The code after the block does not run when a branch leaves early, so a
-  branch that takes a value out of a place gives one back before it ends.
+  branch that moves a value out of a place reinitializes the place before
+  it ends.
 - In a cancelled task, a call of the standard capabilities that would wait
   returns at once: `Err(SystemError.Cancelled)` where it returns a
   `Result`, and `None` where it returns an `Option`. `Tasks.cancelled()`
@@ -2353,7 +2354,7 @@ The body may read any place but may only change its own element and its
 own variables. `break` leaves the loop and cancels the iterations that are
 still running, and `continue` ends one iteration.
 
-An iteration keeps running after the loop has gone on to the next value,
+An iteration keeps running after the loop has advanced to the next value,
 so what it is given must stay valid until the loop ends:
 
 - A range, a cursor, and a method that `yields own` values give each task
@@ -2523,7 +2524,7 @@ test "two deposits both arrive" {
 
 - The seeded implementation switches tasks only at capability calls, which
   are the only points where one task can see what another did.
-- A test in which no task can go on fails, and reports what each task was
+- A test that deadlocks fails, and reports what each task was
   waiting for. The report is a panic, so a function that provides a
   `SeededTasks` or a `World` outside a test declares `uses Panic`.
 
@@ -2816,7 +2817,7 @@ impl Loggable for Event {}
 
 - A type must implement the required traits before it can implement the
   trait: `impl Ordered for Point` needs `Point` to implement `Equal`.
-- A bound includes what the trait requires, so with `[Element: Ordered]`,
+- A bound includes the required traits, so with `[Element: Ordered]`,
   `==` works on `Element`.
 - Laws can use the methods of required traits.
 - A trait cannot redeclare a method of a trait it requires. It can add a
@@ -2900,7 +2901,7 @@ impl From[UInt32] for Int64 {
 let total = Int64.from(count)
 ```
 
-- The `impl` is chosen by the types of the arguments, which are worked out
+- The `impl` is chosen by the types of the arguments, which are inferred
   first, without looking at which `impl`s exist. A literal argument has its
   default type. So adding an `impl` never changes which one an existing call
   uses.
@@ -2947,7 +2948,7 @@ fn first[Items: Iterable](items: Items) -> Option[Items.Element]
   implementation decides, as in `Index`'s `Output`.
 - A trait states its methods' preconditions through its own methods, as
   `Index` does with `contains_key`, so generic code can show them, and an
-  implementation says what they mean for its type: a `List`'s keys are the
+  implementation defines them for its type: a `List`'s keys are the
   indexes below its length.
 
 ### Associated capability sets
@@ -3020,7 +3021,7 @@ type Option[Value] =
   derives Equal, Hash, Ordered
 ```
 
-| Trait | What the compiler writes |
+| Trait | Derived implementation |
 |---|---|
 | `Equal` | Two values are equal when all their fields are equal. |
 | `Hash` | Combines the hashes of all fields. |

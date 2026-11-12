@@ -25,7 +25,7 @@ let module_exists (project : Project.t) (module_ : Path.module_) =
    names after it, as a module of it. *)
 let in_package (project : Project.t) from_ =
   let is_package package =
-    List.exists (fun (p : Project.package) -> p.name = package) project.packages
+    List.exists (fun (candidate : Project.package) -> candidate.name = package) project.packages
   in
   let argument = Path_argument.parse from_ in
   match Path.split_module ~is_package argument.names with
@@ -48,11 +48,12 @@ let what (project : Project.t) from_ =
         let module_ : Path.module_ = { package; modules = List.rev rest } in
         let declared path =
           List.exists
-            (fun (d : Names.declaration) ->
-              match (d.path, path) with
-              | Method { owner; name; _ }, Path.Method { owner = o; name = n; _ } ->
-                  Path.equal owner o && name = n
-              | p, path -> Path.equal p path)
+            (fun (declaration : Names.declaration) ->
+              match (declaration.path, path) with
+              | Method { owner; name; _ }, Path.Method { owner = other_owner; name = other_name; _ }
+                ->
+                  Path.equal owner other_owner && name = other_name
+              | candidate, path -> Path.equal candidate path)
             (List.concat_map
                (Query.demand project.context Names.declarations)
                (Project.modules project))
@@ -91,13 +92,17 @@ let plan_definition (project : Project.t) path name =
   let occurrences = References.all project in
   let edits =
     List.filter (References.names_definition path) occurrences
-    |> List.map (fun (o : References.occurrence) -> (o.module_, Diagnostic.replace o.span name))
+    |> List.map (fun (occurrence : References.occurrence) ->
+        (occurrence.module_, Diagnostic.replace occurrence.span name))
   in
   {
     edits =
       List.map
         (fun module_ ->
-          (module_, List.filter_map (fun (m, e) -> if m = module_ then Some e else None) edits))
+          ( module_,
+            List.filter_map
+              (fun (edit_module, edit) -> if edit_module = module_ then Some edit else None)
+              edits ))
         (List.sort_uniq compare (List.map fst edits));
     moved = None;
   }
@@ -123,15 +128,18 @@ let plan_module (project : Project.t) (old_module : Path.module_) to_ =
   let last = List.nth modules (List.length modules - 1) in
   let edits =
     List.filter_map
-      (fun (o : References.occurrence) ->
-        match o.target with
-        | Module m when m = old_module ->
+      (fun (occurrence : References.occurrence) ->
+        match occurrence.target with
+        | Module edit_module when edit_module = old_module ->
             (* Written through its import, one name, or as a full path. *)
-            let text = Source.text (Project.parsed project o.module_).source in
-            let written = String.sub text o.span.start (o.span.stop - o.span.start) in
+            let text = Source.text (Project.parsed project occurrence.module_).source in
+            let written =
+              String.sub text occurrence.span.start (occurrence.span.stop - occurrence.span.start)
+            in
             Some
-              ( o.module_,
-                Diagnostic.replace o.span (if String.contains written ':' then full else last) )
+              ( occurrence.module_,
+                Diagnostic.replace occurrence.span
+                  (if String.contains written ':' then full else last) )
         | _ -> None)
       (References.all project)
     @ List.map
@@ -143,7 +151,10 @@ let plan_module (project : Project.t) (old_module : Path.module_) to_ =
     edits =
       List.map
         (fun module_ ->
-          (module_, List.filter_map (fun (m, e) -> if m = module_ then Some e else None) edits))
+          ( module_,
+            List.filter_map
+              (fun (edit_module, edit) -> if edit_module = module_ then Some edit else None)
+              edits ))
         files;
     moved = Some (old_module, new_module);
   }
@@ -166,7 +177,7 @@ let applied (project : Project.t) plan =
     (Project.modules project)
 
 (* A session of the worktree with the plan made, for checking it: a trial
-   that starts from the session's state, so only what the rename changes is
+   that starts from the session's state, so only the rename's changes are
    checked, and which is dropped after. Each module's text is given under
    the file it has after the plan, and the file of a module that moves is
    removed. *)
@@ -183,7 +194,11 @@ let trial (project : Project.t) after =
   Database.trial project.session (written @ removed)
 
 let file_of (project : Project.t) (module_ : Path.module_) =
-  match List.find_opt (fun (p : Project.package) -> p.name = module_.package) project.packages with
+  match
+    List.find_opt
+      (fun (candidate : Project.package) -> candidate.name = module_.package)
+      project.packages
+  with
   | Some package -> Filename.concat package.directory (String.concat "/" module_.modules ^ ".truss")
   | None -> Project.file project module_
 

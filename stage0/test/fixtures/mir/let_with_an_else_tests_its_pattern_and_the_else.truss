@@ -1,0 +1,4 @@
+fn g(value: Option[Int64]) -> Int64 {
+  let Some(x) = value else { return 1 }
+  x
+}

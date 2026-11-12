@@ -534,8 +534,6 @@ let () =
             (Query.demand database Resolve.Names.declarations module_))
         Standard_library.modules)
 
-(* What the review of body checking found *)
-
 let point = "type Point(x: Int64)\n\n"
 
 let () =
@@ -849,8 +847,8 @@ let () =
         "types.no_impl");
   test "`any value` of a generic parameter whose bound fixes the associated types is fine"
     (fun () -> fine (source ^ Fixtures.Infer.any_value_of_a_generic_parameter_whose_bound_fixes));
-  test "an associated type a bound fixes works out a type argument" (fun () ->
-      fine (source ^ Fixtures.Infer.associated_type_a_bound_fixes_works_out_a_type));
+  test "an associated type a bound fixes infers a type argument" (fun () ->
+      fine (source ^ Fixtures.Infer.associated_type_a_bound_fixes_infers_a_type));
   test "an associated type a bound fixes must be the one the impl gives" (fun () ->
       one_diagnostic
         (source ^ Fixtures.Infer.associated_type_a_bound_fixes_must_be_the_one_the)

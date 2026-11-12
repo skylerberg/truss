@@ -102,6 +102,11 @@ let () =
   test "only a record derives Default" (fun () ->
       one_diagnostic Fixtures.Interface.only_a_record_derives_default "types.cannot_derive";
       no_diagnostics [ ("app::main", "type Point(x: Int64, y: Int64)\n  derives Default\n") ]);
+  test "deriving Serialize needs every field to implement it" (fun () ->
+      one_diagnostic Fixtures.Interface.deriving_serialize_needs_every_field_to_implement
+        "types.cannot_derive";
+      no_diagnostics
+        [ ("app::main", Fixtures.Interface.deriving_serialize_needs_every_field_to_implement_2) ]);
   test "deriving Ordered needs Equal derived too" (fun () ->
       one_diagnostic "type Point(x: Int64)\n  derives Ordered\n" "types.cannot_derive");
   test "a generic type derives under conditions on its parameters" (fun () ->
@@ -470,8 +475,6 @@ let () =
             (base ^ Fixtures.Interface.adding_an_impl_of_one_trait_re_checks_nothing_that);
           ignore (Query.demand database asker ()))
         asker [ () ])
-
-(* What the review of interfaces found *)
 
 let () =
   test "a type that contains itself with growing arguments does not hang" (fun () ->

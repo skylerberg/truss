@@ -4,19 +4,19 @@
 open Definitions
 open Lir_builder
 
-(* What leaving a scope does: drop what a place still owns, free the heap
-   block a pointer points at, once what is in it has been dropped, free the
-   block of a value whose variant is one of [variants] without dropping
-   what is in it, give a place back the value that was lent out of it to be
-   changed, let a lending method go on, or join a task group with the given
-   call of [Tasks.join]. *)
 type cleanup =
-  | Drop_value of Lir.place
+  | Drop_value of Lir.place  (** Drops the place's value, if the place still owns it. *)
   | Free_pointed of Lir.place
+      (** Frees the heap block that the pointer at the place points to, after the block's contents
+          are dropped. *)
   | Free_blocks of { place : Lir.place; variants : string list }
-  | Give_back of { lent : Lir.place; source : Lir.place; ty : Ground.ty }
-  | Finish_lend of lend
-  | Join_group of Lir.statement
+      (** Frees the block of the value at [place] where its variant is one of [variants], without
+          dropping what is in the block. *)
+  | Write_back of { destination : Lir.place; source : Lir.place; ty : Ground.ty }
+      (** Moves the value at [source] into [destination], the place it was moved out of so that the
+          caller could change it. *)
+  | Finish_lend of lend  (** Lets a lending method run its code after its [yield]. *)
+  | Join_group of Lir.statement  (** Joins a task group with the call of [Tasks.join]. *)
 
 (* A lending call whose method has more to do once it has lent its part. The
    method's body is written into the caller up to its [yield]; the rest of
@@ -24,7 +24,7 @@ type cleanup =
    that owns the lend jumps to [resume], with [selector] saying which way it
    was going, and [finished] sends it on, to one of [ways].
 
-   The caller goes on from whichever [yield] the method reached. So a local
+   The caller continues from whichever [yield] the method reached. So a local
    that the method owns at one [yield] and not at another may or may not
    hold a value there, and the rest of the method drops it only on the
    path from its own [yield]. [owned] is every such local, and [finished]
@@ -38,7 +38,7 @@ and lend = {
   selector : Lir.local;
   mutable ways : Lir.block list;  (** Most recent first, numbered from the first *)
   owned : Lir.place list;
-      (** What the method's own scopes owned at a [yield] that the caller went on from *)
+      (** The places the method's own scopes owned at each [yield] the caller resumed from *)
 }
 
 (* A scope owns what is dropped as it ends: the scope of a block's names,
@@ -314,7 +314,7 @@ let returned_type st =
       | _ -> None)
   | No_result -> None
 
-(* Drops what the result's slot holds, before it is written again: an early
+(* Drops the result slot's value before it is written again: an early
    [return] can come after part of the result was written. *)
 let clear_result st =
   match (returned_type st, result_place st) with
@@ -345,10 +345,11 @@ let drop_scope st (scope : scope) =
           in
           finish st.builder (Switch_variant { place; cases; default = Some after });
           start st.builder after
-      | Give_back { lent; source; ty } ->
-          emit st.builder (Assign (source, Use (if trivial st ty then Copy lent else Move lent)))
+      | Write_back { destination; source; ty } ->
+          emit st.builder
+            (Assign (destination, Use (if trivial st ty then Copy source else Move source)))
       | Finish_lend lend ->
-          (* The method goes on from its [yield] now, and comes back here. *)
+          (* The method resumes from its [yield] now, and returns here. *)
           let way = block st.builder in
           emit st.builder
             (Assign
@@ -472,9 +473,8 @@ let looping st ~continue_ ~break_ ~depth body =
   body ();
   st.loops <- List.tl st.loops
 
-(* Replaces the value at a place the program names with one worked out
-   beforehand: what the place still owns is dropped, and the new value moved
-   in. *)
+(* Replaces the value at a place with one computed beforehand: the old
+   value is dropped, and the new value moved in. *)
 let replace st place ty ~by =
   if not (trivial st ty) then emit st.builder (Drop place);
   emit st.builder (Assign (place, Use (owned st by ty)))

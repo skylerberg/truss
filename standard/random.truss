@@ -213,7 +213,7 @@ public fn Generator.choose_index[Element](mut self, items: Slice[Element]) -> Op
 public fn Generator.sample(mut self, population: USize, count: USize) -> List[USize]
   requires count <= population
   ensures result.length() == count
-  ensures forall i in 0..result.length() => result.model()[i] < population
+  ensures forall offset in 0..result.length() => result.model()[offset] < population
   cost time finite
 {
   var chosen: List[USize] = List.with_capacity(count)
@@ -223,7 +223,7 @@ public fn Generator.sample(mut self, population: USize, count: USize) -> List[US
     invariant start <= position
     invariant position <= population
     invariant chosen.length() == position - start
-    invariant forall i in 0..chosen.length() => chosen.model()[i] < population
+    invariant forall offset in 0..chosen.length() => chosen.model()[offset] < population
     decreases population - position
   {
     let candidate = mut self.index(position + 1)

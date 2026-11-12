@@ -27,8 +27,8 @@ let forget engine (node : node) =
       | None -> ())
   | Unfilled -> ()
 
-(* A result is collectable, and an input only while it is not set: one that
-   is set holds what the database gave it. *)
+(* A result is collectable, and an input only while it is not set: the value of
+   a set input comes from the database and cannot be recomputed. *)
 let collectable (node : node) =
   match node.cell with
   | Input (_, { slot = Unset; _ }) | Result _ -> true
@@ -44,7 +44,8 @@ let rec collect engine (node : node) =
     forget engine node;
     Hashtbl.remove engine.own node.id;
     Hashtbl.remove engine.unsaved node.id;
-    if node.written then engine.collected <- (name node, key_bytes node) :: engine.collected;
+    if node.written <> Unwritten then
+      engine.collected <- (name node, key_bytes node) :: engine.collected;
     engine.tally.collections <- engine.tally.collections + 1;
     let reads = node.reads in
     node.reads <- [];
@@ -85,9 +86,9 @@ let commit_reads engine (node : node) (reads : node list) =
     old
 
 (* Copies a base's node into an engine, where a change may have reached it.
-   The copy holds the same result and reads what the base's node read, as
-   the engine sees each, and what the engine's own nodes read of the base's
-   node they now read of the copy. *)
+   The copy holds the same result and has the base node's dependencies, as
+   the engine sees each, and the engine's own nodes that depended on the
+   base's node now depend on the copy. *)
 let shadow engine (base : node) =
   match Hashtbl.find_opt engine.shadows base.id with
   | Some own -> own
@@ -105,11 +106,9 @@ let shadow engine (base : node) =
         | Unfilled -> invalid_arg "Incremental: a node with no cell"
       in
       own.fingerprint <- base.fingerprint;
-      own.stored <- base.stored;
-      own.opaque <- base.opaque;
       own.identity <- base.identity;
       own.root <- base.root;
-      own.written <- true;
+      own.written <- In_whole;
       Hashtbl.replace engine.shadows base.id own;
       engine.tally.copies <- engine.tally.copies + 1;
       let reads = List.map (resolve engine) base.reads in
@@ -131,7 +130,9 @@ let shadow engine (base : node) =
    engine unless it already was, since its copy is then among the own
    readers if it still reads this. [phase] narrows to one phase. *)
 let readers_here engine (node : node) ~phase =
-  let in_phase (reader : node) = match phase with Some p -> reader.phase = p | None -> true in
+  let in_phase (reader : node) =
+    match phase with Some wanted_phase -> reader.phase = wanted_phase | None -> true
+  in
   let own =
     Hashtbl.fold
       (fun _ (reader : node) readers -> if in_phase reader then reader :: readers else readers)

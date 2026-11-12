@@ -199,7 +199,9 @@ let demand (context : context) (query : ('key, 'value) query) (key : 'key) : 'va
     ensure_result engine query cell
   end;
   record_read context node;
-  let result = match value engine query cell with value -> Ok value | exception e -> Error e in
+  let result =
+    match value engine query cell with value -> Ok value | exception raised -> Error raised
+  in
   (match (context.frame, result) with
   | None, _ ->
       (* What a driver only observed is collected again, unless something

@@ -37,7 +37,7 @@ let () =
       expect_string ~expected:"1/1 tag(UInt8: Less Equal Greater) niche . 3+253"
         (describe ~extra (named "Ordering")));
   test "a tag is the smallest unsigned integer that numbers every variant" (fun () ->
-      let many = Sum (List.init 300 (fun i -> variant (Printf.sprintf "V%d" i) [])) in
+      let many = Sum (List.init 300 (fun index -> variant (Printf.sprintf "V%d" index) [])) in
       expect_int ~expected:2 (layout ~extra:[ ("Many", many) ] (named "Many")).size);
   test "a sum type is a tag followed by the largest variant's fields" (fun () ->
       let extra =

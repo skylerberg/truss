@@ -1,6 +1,6 @@
 (* Writes the module [Compiler_version]: a digest of the compiler's source
-   under a directory, and of the other arguments, which name what the source
-   is built with. Tests and tools are left out, since they are not part of
+   under a directory, and of the other arguments, which name the toolchain
+   and settings the source is built with. Tests and tools are left out, since they are not part of
    the compiler, and so is every file that is not OCaml source or a build
    rule, so the standard library's text changes nothing. *)
 

@@ -46,8 +46,8 @@ let impl_laws ?reveal database (key : Names.key) source =
       ]
   | _ -> []
 
-(* [standard::specification]'s contracts say what the mathematical
-   collections are, so they are the trusted base, not obligations. *)
+(* [standard::specification]'s contracts define the mathematical
+   collections, so they are the trusted base, not obligations. *)
 let is_specification_module (key : Names.key) = key.module_ = Well_known.specification
 
 let declaration database (key : Names.key) =
@@ -377,8 +377,8 @@ let clamp_to_definition database (key : Names.key) (span : span) =
    when it does not, and it mentions any, it is asked once more with each
    of them defined exactly, as the operation on its operands' bits of
    their type's width, which the solver decides by bit-blasting. A
-   definition says what the operation is, so the second query means what
-   the first does, and its answer is as sound. *)
+   definition gives the operation's semantics, so the second query is
+   equivalent to the first, and its answer is as sound. *)
 (* An obligation's answer: the solver's, or what running the code that
    decides it gave, or that it timed out, or none yet, while a response it
    needs is pending. [Solved_hidden] is an answer that is not a proof,
@@ -621,8 +621,8 @@ let answers (oracles : oracles) (obligations : Translate.obligation list) =
     | Some Timed_out -> Run_timed_out
     | Some Not_run | None -> (
         (* Each question is asked only once what it depends on is
-           answered: a pending response stops the search, which goes on
-           once it is answered, rather than asking what the answer may make
+           answered: a pending response stops the search, which continues
+           once it is answered, rather than asking a question the answer may make
            unneeded. *)
         let ask variant ~with_locals = oracles.solve ~index ~choice ~variant ~with_locals in
         let asked plain exact =
@@ -726,7 +726,7 @@ let definition_states oracles database (key : Names.key) =
       List.map
         (fun ((obligation : Translate.obligation), (answer : answer)) ->
           let span = clamp_to_definition obligation.span in
-          (* These fixes change what the code means, so they are named, not
+          (* These fixes change the code's semantics, so they are named, not
              applied. *)
           let others =
             match obligation.code with

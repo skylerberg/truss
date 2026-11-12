@@ -30,7 +30,9 @@ let () =
       with
       | [] -> ()
       | actual ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
   test "a template check that does not hold fails, saying it ran" (fun () ->
       match
         proven_with_running
@@ -41,9 +43,9 @@ let () =
             fail "%s" (Diagnostic.Code.name diagnostic.code);
           let ran = "Running it on this template's text gives `false`." in
           let length = String.length ran and message = diagnostic.message in
-          let rec contains i =
-            i + length <= String.length message
-            && (String.sub message i length = ran || contains (i + 1))
+          let rec contains position =
+            position + length <= String.length message
+            && (String.sub message position length = ran || contains (position + 1))
           in
           if not (contains 0) then fail "%s" message
       | actual -> fail "%d diagnostics" (List.length actual));
@@ -52,19 +54,23 @@ let () =
       match proven_with_running text with
       | [] -> ()
       | actual ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)))
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
 
 let counting = Fixtures.Evaluate.counting
 
 let () =
-  test "a call whose arguments are known is worked out by running it" (fun () ->
+  test "a call whose arguments are known is evaluated by running it" (fun () ->
       match
         proven_with_running
-          (counting ^ Fixtures.Evaluate.call_whose_arguments_are_known_is_worked_out_by)
+          (counting ^ Fixtures.Evaluate.call_whose_arguments_are_known_is_evaluated_by)
       with
       | [] -> ()
       | actual ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
   test "without running it, such a call is known only by its contract" (fun () ->
       let database, _ =
         load (counting ^ Fixtures.Evaluate.without_running_it_such_a_call_is_known_only_by)
@@ -88,7 +94,9 @@ let () =
       (match proven_with_running (source "4") with
       | [] -> ()
       | actual ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
       match proven_with_running (source "3") with
       | [ _ ] -> ()
       | actual -> fail "%d diagnostics for the default's value" (List.length actual))
@@ -115,7 +123,9 @@ let () =
       match proven_with_running (accepts_all ^ use) with
       | [] -> ()
       | actual ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)))
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
 
 (* The same call with the same arguments, in one database, before and
    after the callee's body changes: a stale value would prove a false
@@ -135,7 +145,9 @@ let () =
       (match proven () with
       | [] -> ()
       | actual ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
       Database.Testing.set_text (Engine.of_context database) example (source "0");
       match proven () with
       | [ _ ] -> ()
@@ -170,7 +182,9 @@ let () =
       (match proven () with
       | [] -> ()
       | actual ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
       if !runs <> 2 then fail "expected 2 runs, got %d" !runs)
 
 (* Only a proof that used a value from running code trusts compiled code. *)

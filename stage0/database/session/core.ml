@@ -223,7 +223,10 @@ let known_homes state =
     In_channel.with_open_bin (homes_file state) In_channel.input_lines
     |> List.filter_map (fun line ->
         match String.index_opt line '\t' with
-        | Some i -> Some (String.sub line 0 i, String.sub line (i + 1) (String.length line - i - 1))
+        | Some separator ->
+            Some
+              ( String.sub line 0 separator,
+                String.sub line (separator + 1) (String.length line - separator - 1) )
         | None -> None)
   with Sys_error _ -> []
 
@@ -294,7 +297,7 @@ let open_ ~key ?pointer:name ?home ~version ~bases ~fingerprints () =
 
 (* A session that starts from another's state and changes on its own, for
    trying a change: the state is written, and opened again, so the two share
-   everything but what the trial changes. It is never saved. *)
+   everything but the trial's changes. It is never saved. *)
 let trial session =
   let state = current () in
   save session;
@@ -390,13 +393,13 @@ let close_all state =
 let reset () =
   match !state with
   | None -> ()
-  | Some s ->
+  | Some current ->
       Hashtbl.iter
         (fun _ session ->
           save session;
           Option.iter Store.unlock session.pointer)
-        s.sessions;
-      close_all s;
+        current.sessions;
+      close_all current;
       state := None
 
 (* Runs a command. If a state it reads has lost an input's value, as after
@@ -406,7 +409,7 @@ let recovering run =
   try run ()
   with Engine.Lost _ ->
     (match !state with
-    | Some s ->
+    | Some current ->
         Hashtbl.iter
           (fun _ session ->
             Option.iter
@@ -414,8 +417,8 @@ let recovering run =
                 Store.remove_pointer pointer;
                 Store.unlock pointer)
               session.pointer)
-          s.sessions;
-        close_all s;
+          current.sessions;
+        close_all current;
         state := None
     | None -> ());
     run ()

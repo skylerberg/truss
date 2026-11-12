@@ -12,16 +12,18 @@ let rec needs_drop (ty : Ground.ty) =
   | Named { path = Top { name = "Option"; _ }; arguments = [ Type inner ] } -> needs_drop inner
   | _ -> false
 
-let elaborate f =
+let elaborate function_ =
   Lir.canonical
-    (Drops.elaborate (shape_env ~extra:drop_shapes ()) ~needs_drop ~environment:(fun _ -> []) f)
+    (Drops.elaborate (shape_env ~extra:drop_shapes ()) ~needs_drop
+       ~environment:(fun _ -> [])
+       function_)
 
-let elaborated f = Lir.function_to_string (elaborate f)
+let elaborated function_ = Lir.function_to_string (elaborate function_)
 let condition = local ~name:"ready" (Raw Bool)
 let consume = call "consume" ~result:None ~parameters:[ value text ]
 
-let expect_lir ~expected f =
-  let actual = elaborated f in
+let expect_lir ~expected function_ =
+  let actual = elaborated function_ in
   if actual <> String.concat "\n" expected then
     fail "expected:\n%s\ngot:\n%s" (String.concat "\n" expected) actual
 
@@ -116,11 +118,28 @@ let () =
       | exception Compiler_bug.Bug bug ->
           if bug.message <> "local 1 may still own a value where the function returns" then
             fail "got %s" bug.message);
-  test "a borrowed local is neither dropped nor counted as owning" (fun () ->
+  test "a borrowed local does not own a value where the function returns" (fun () ->
       expect_lir ~expected:[ "fn(_0: Text)"; "b0: return" ]
         (function_ ~parameters:[ 0 ]
            [ local ~borrowed:true (value text) ]
-           [ block [ Drop (at 0) ] (Return None) ]));
+           [ block [] (Return None) ]));
+  test "a drop of a borrowed local is a compiler bug" (fun () ->
+      match
+        elaborated
+          (function_ ~parameters:[ 0 ]
+             [ local ~borrowed:true (value text) ]
+             [ block [ Drop (at 0) ] (Return None) ])
+      with
+      | _ -> fail "expected a compiler bug"
+      | exception Compiler_bug.Bug bug ->
+          if bug.message <> "a drop of local 0, which a borrowed local holds and its owner drops"
+          then fail "got %s" bug.message);
+  test "a drop through a pointer that a borrowed local holds is kept" (fun () ->
+      expect_lir
+        ~expected:[ "fn(_0: *mut Text)"; "b0: drop *_0; return" ]
+        (function_ ~parameters:[ 0 ]
+           [ local ~borrowed:true (Pointer { target = value text; writable = true }) ]
+           [ block [ Drop (at ~projections:[ Deref ] 0) ] (Return None) ]));
   test "an assignment that moves out of its own place first drops nothing" (fun () ->
       let rebuild = call "rebuild" ~result:(Some (value text)) ~parameters:[ value text ] in
       expect_lir
@@ -225,9 +244,9 @@ let () =
                 ~environment:(fun _ -> [])
                 keep.main;
           };
-          ( entry [] [] |> fun e ->
+          ( entry [] [] |> fun built_entry ->
             {
-              e with
+              built_entry with
               main =
                 Drops.elaborate (shape_env ~extra:drop_shapes ()) ~needs_drop
                   ~environment:(fun _ -> [])

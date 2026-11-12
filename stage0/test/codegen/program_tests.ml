@@ -15,7 +15,9 @@ let () =
         let database, compile = load text in
         match Compile.run_tests ~results compile ~time_limit:2000 (tests_of database) with
         | Ok records ->
-            ( (if List.for_all (fun (r : Compile.record) -> r.outcome = Passed) records then 0 else 1),
+            ( (if List.for_all (fun (record : Compile.record) -> record.outcome = Passed) records
+               then 0
+               else 1),
               render_records records )
         | Error message -> failwith message
       in
@@ -57,8 +59,11 @@ let () =
     (fun () ->
       let output = run_source Fixtures.Program.build_checks_each_primitive_operation_that_could in
       let contains text =
-        let n = String.length text and m = String.length output in
-        let rec occurs_at i = i + n <= m && (String.sub output i n = text || occurs_at (i + 1)) in
+        let text_length = String.length text and output_length = String.length output in
+        let rec occurs_at position =
+          position + text_length <= output_length
+          && (String.sub output position text_length = text || occurs_at (position + 1))
+        in
         if not (occurs_at 0) then fail "%S is not in the output:\n%s" text output
       in
       List.iter contains
@@ -515,10 +520,11 @@ let () =
       | _ -> fail "expected code")
 
 let () =
-  test "a capability parameter stands for what the code it is given uses, wherever its type goes"
+  test
+    "a capability parameter stands for the capabilities its argument uses, wherever its type goes"
     (fun () ->
       let status, output, errors =
-        run_main Fixtures.Program.capability_parameter_stands_for_what_the_code_it
+        run_main Fixtures.Program.capability_parameter_stands_for_the_capabilities
       in
       if status <> 0 then fail "status %d: %s" status errors;
       expect_string ~expected:"inside\nnamed\nkept\n" output)
@@ -543,13 +549,15 @@ let () =
               (fun () ->
                 let database, compile = load text in
                 List.iter
-                  (fun (d : Resolve.Names.declaration) ->
+                  (fun (declaration : Resolve.Names.declaration) ->
                     match
-                      (d.path, Query.demand database Interface.Environment.signature d.path)
+                      ( declaration.path,
+                        Query.demand database Interface.Environment.signature declaration.path )
                     with
                     | Top _, Some { generics = []; specification_only = false; _ } ->
                         ignore
-                          (Compile.compiled compile (Code { path = d.path; type_arguments = [] }))
+                          (Compile.compiled compile
+                             (Code { path = declaration.path; type_arguments = [] }))
                     | _ -> ())
                   (Query.demand database Resolve.Names.declarations example);
                 if tests_of database <> [] then

@@ -10,7 +10,12 @@ let bug format = Compiler_bug.bug ~stage:"Infer" format
 
 let gives (trait : Path.t) name =
   match (Well_known.of_path trait, name) with
-  | Some Equal, "equal" | Some Hash, "hash" | Some Ordered, "compare" | Some Default, "default" ->
+  | Some Equal, "equal"
+  | Some Hash, "hash"
+  | Some Ordered, "compare"
+  | Some Default, "default"
+  | Some Serialize, "serialize"
+  | Some Deserialize, "deserialize" ->
       true
   | _ -> false
 
@@ -81,14 +86,17 @@ let form database (path : Path.t) : Core.t option =
                 signature.parameters
           in
           let other_place () : Core.place =
-            match List.filter (fun (p : Core.parameter) -> p.local <> Self) parameters with
+            match
+              List.filter (fun (parameter : Core.parameter) -> parameter.local <> Self) parameters
+            with
             | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_; origin }
             | _ -> bug "`%s` takes one value beside its own" (Path.show path)
           in
           (* A call of a method of the trait [wanted] on a value of
              [of_type]. The evidence is the type's [impl], or a bound if the
              type is a generic parameter. *)
-          let method_of (wanted : Path.t) name (receiver : Path.receiver) of_type arguments type_ =
+          let method_of ?(type_arguments = []) (wanted : Path.t) name (receiver : Path.receiver)
+              of_type arguments type_ =
             let reference : Types.trait_reference =
               { trait = wanted; trait_arguments = []; associated = [] }
             in
@@ -110,6 +118,25 @@ let form database (path : Path.t) : Core.t option =
                          name;
                          receiver;
                          self_type = of_type;
+                         type_arguments;
+                         evidence;
+                       };
+                   arguments;
+                   lends = None;
+                   uses = [];
+                 })
+          in
+          let trait_call ~trait ~name ~receiver ~self_type ~evidence arguments type_ =
+            node type_
+              (Call
+                 {
+                   callee =
+                     Trait_method
+                       {
+                         trait = { trait; trait_arguments = []; associated = [] };
+                         name;
+                         receiver;
+                         self_type;
                          type_arguments = [];
                          evidence;
                        };
@@ -117,6 +144,22 @@ let form database (path : Path.t) : Core.t option =
                    lends = None;
                    uses = [];
                  })
+          in
+          let text_argument text : Core.argument =
+            Passed
+              {
+                mode = Read;
+                value = Value (node (Types.named (Well_known.path String_slice) []) (String text));
+                mark = None;
+              }
+          in
+          let count_argument count : Core.argument =
+            Passed
+              {
+                mode = Read;
+                value = Value (node (Types.builtin USize) (Integer (Z.of_int count)));
+                mark = None;
+              }
           in
           let read place : Core.argument =
             Passed { mode = Read; value = Place place; mark = None }
@@ -441,6 +484,400 @@ let form database (path : Path.t) : Core.t option =
                                           field.field_type)) ))
                               (record_fields ());
                         }))
+            | "Serialize", "serialize" ->
+                let sink, sink_type =
+                  match List.rev parameters with
+                  | ({ local; type_; _ } : Core.parameter) :: _ ->
+                      (Core.Local { local; type_; origin }, type_)
+                  | [] -> bug "`serialize` takes a serializer"
+                in
+                let sink_argument : Core.argument =
+                  Passed { mode = Mut; value = Place sink; mark = None }
+                in
+                let serializer = Well_known.path Serializer in
+                let call name arguments =
+                  statement
+                    (Evaluate
+                       (trait_call ~trait:serializer ~name ~receiver:Mut ~self_type:sink_type
+                          ~evidence:Bound (sink_argument :: arguments) unit))
+                in
+                let serialized ((field : Types.field), place) =
+                  [
+                    call "field" [ text_argument field.field_name ];
+                    statement
+                      (Evaluate
+                         (method_of trait "serialize" Read field.field_type
+                            ~type_arguments:[ Types.Type sink_type ]
+                            [ read place; sink_argument ]
+                            unit));
+                  ]
+                in
+                of_self unit (fun variant _ mine ->
+                    let begin_, end_ =
+                      match variant with
+                      | None ->
+                          ( [ call "begin_record" [ count_argument (List.length mine) ] ],
+                            "end_record" )
+                      | Some variant ->
+                          ( [
+                              call "begin_variant"
+                                [ text_argument variant; count_argument (List.length mine) ];
+                            ],
+                            "end_variant" )
+                    in
+                    let mine =
+                      Environment.in_declared_order database type_ ~variant
+                        ~name:(fun ((field : Types.field), _) -> field.field_name)
+                        mine
+                    in
+                    {
+                      statements = begin_ @ List.concat_map serialized mine @ [ call end_ [] ];
+                      value = None;
+                    })
+            | "Deserialize", "deserialize" -> (
+                let source, source_type =
+                  match parameters with
+                  | [ ({ local; type_; _ } : Core.parameter) ] ->
+                      (Core.Local { local; type_; origin }, type_)
+                  | _ -> bug "`deserialize` takes a deserializer"
+                in
+                let source_argument mode : Core.argument =
+                  Passed { mode; value = Place source; mark = None }
+                in
+                let deserializer = Well_known.path Deserializer in
+                let error_type =
+                  match result with
+                  | Named { arguments = [ _; Type error ]; _ } -> error
+                  | _ -> bug "`deserialize` returns a `Result`"
+                in
+                let result_of ok = Types.named (Well_known.path Result) [ ok; error_type ] in
+                let source_call name arguments type_ =
+                  trait_call ~trait:deserializer ~name ~receiver:Mut ~self_type:source_type
+                    ~evidence:Bound
+                    (source_argument Mut :: arguments)
+                    type_
+                in
+                let finish name = statement (Evaluate (source_call name [] unit)) in
+                (* [call?]: the value of [call]'s [Ok], or a return of its
+                   [Err]. *)
+                let attempted ok call =
+                  let value = local () and error = local () in
+                  node ok
+                    (Match
+                       {
+                         scrutinees = [ Value call ];
+                         arms =
+                           [
+                             arm
+                               (pattern (result_of ok)
+                                  (Variant
+                                     {
+                                       variant = "Ok";
+                                       fields =
+                                         [
+                                           ( "value",
+                                             pattern ok
+                                               (Bind
+                                                  {
+                                                    local = value;
+                                                    name = "value";
+                                                    is_var = false;
+                                                    mode = Own;
+                                                  }) );
+                                         ];
+                                     }))
+                               (giving
+                                  (node ok (Use (Local { local = value; type_ = ok; origin }))));
+                             arm
+                               (pattern (result_of ok)
+                                  (Variant
+                                     {
+                                       variant = "Err";
+                                       fields =
+                                         [
+                                           ( "error",
+                                             pattern error_type
+                                               (Bind
+                                                  {
+                                                    local = error;
+                                                    name = "error";
+                                                    is_var = false;
+                                                    mode = Own;
+                                                  }) );
+                                         ];
+                                     }))
+                               (giving
+                                  (node Types.Never
+                                     (Return
+                                        (Some
+                                           (node result
+                                              (Construct
+                                                 {
+                                                   variant = Some "Err";
+                                                   fields =
+                                                     [
+                                                       ( "error",
+                                                         Some
+                                                           (Core.Value
+                                                              (node error_type
+                                                                 (Use
+                                                                    (Local
+                                                                       {
+                                                                         local = error;
+                                                                         type_ = error_type;
+                                                                         origin;
+                                                                       })))) );
+                                                     ];
+                                                 }))))));
+                           ];
+                       })
+                in
+                let read_field function_ (field : Types.field) ok =
+                  attempted ok
+                    (node (result_of ok)
+                       (Call
+                          {
+                            callee =
+                              Function
+                                {
+                                  path = Well_known.path function_;
+                                  type_arguments =
+                                    [ Types.Type field.field_type; Types.Type source_type ];
+                                };
+                            arguments = [ source_argument Mut; text_argument field.field_name ];
+                            lends = None;
+                            uses = [];
+                          }))
+                in
+                let bind_local local name type_ ~is_var value =
+                  statement
+                    (Let
+                       {
+                         pattern = pattern type_ (Bind { local; name; is_var; mode = Own });
+                         value = Value value;
+                         else_ = None;
+                       })
+                in
+                (* Reads the fields of a record or of a variant, then builds
+                   the value. A field without a default is read before the
+                   value is built, and one with a default after, into the
+                   value that its default built. *)
+                let fields_then_built variant (fields : Types.field list) end_ : Core.block =
+                  let required, defaulted =
+                    match variant with
+                    | None ->
+                        List.partition
+                          (fun (field : Types.field) -> not field.field_has_default)
+                          fields
+                    | Some _ -> (fields, [])
+                  in
+                  let read = List.map (fun (field : Types.field) -> (field, local ())) required in
+                  let built = local () in
+                  let built_place : Core.place =
+                    Local { local = built; type_ = self_type; origin }
+                  in
+                  let lets =
+                    List.map
+                      (fun ((field : Types.field), local) ->
+                        bind_local local field.field_name field.field_type ~is_var:false
+                          (read_field Deserialize_required field field.field_type))
+                      read
+                  in
+                  let construct =
+                    node self_type
+                      (Construct
+                         {
+                           variant;
+                           fields =
+                             List.map
+                               (fun (field : Types.field) ->
+                                 ( field.field_name,
+                                   match List.assq_opt field read with
+                                   | Some local ->
+                                       Some
+                                         (Core.Value
+                                            (node field.field_type
+                                               (Use
+                                                  (Local { local; type_ = field.field_type; origin }))))
+                                   | None -> None ))
+                               fields;
+                         })
+                  in
+                  let updates =
+                    List.map
+                      (fun (field : Types.field) ->
+                        let optional = Types.named (Well_known.path Option) [ field.field_type ] in
+                        let present = local () in
+                        statement
+                          (Evaluate
+                             (node unit
+                                (Match
+                                   {
+                                     scrutinees =
+                                       [ Value (read_field Deserialize_optional field optional) ];
+                                     arms =
+                                       [
+                                         arm
+                                           (pattern optional
+                                              (Variant
+                                                 {
+                                                   variant = "Some";
+                                                   fields =
+                                                     [
+                                                       ( "value",
+                                                         pattern field.field_type
+                                                           (Bind
+                                                              {
+                                                                local = present;
+                                                                name = field.field_name;
+                                                                is_var = false;
+                                                                mode = Own;
+                                                              }) );
+                                                     ];
+                                                 }))
+                                           {
+                                             statements =
+                                               [
+                                                 statement
+                                                   (Assign
+                                                      {
+                                                        target =
+                                                          (match variant with
+                                                          | None ->
+                                                              Field
+                                                                {
+                                                                  base = built_place;
+                                                                  field = field.field_name;
+                                                                  type_ = field.field_type;
+                                                                  origin;
+                                                                }
+                                                          | Some _ ->
+                                                              bug "a variant's field with a default");
+                                                        value =
+                                                          node field.field_type
+                                                            (Use
+                                                               (Local
+                                                                  {
+                                                                    local = present;
+                                                                    type_ = field.field_type;
+                                                                    origin;
+                                                                  }));
+                                                      });
+                                               ];
+                                             value = None;
+                                           };
+                                         arm (pattern optional Wildcard)
+                                           { statements = []; value = None };
+                                       ];
+                                   }))))
+                      defaulted
+                  in
+                  {
+                    statements =
+                      lets
+                      @ [ bind_local built "built" self_type ~is_var:(defaulted <> []) construct ]
+                      @ updates
+                      @ [ finish end_ ];
+                    value =
+                      Some
+                        (node result
+                           (Construct
+                              {
+                                variant = Some "Ok";
+                                fields =
+                                  [
+                                    ("value", Some (Core.Value (node self_type (Use built_place))));
+                                  ];
+                              }));
+                  }
+                in
+                let begun name =
+                  statement (Evaluate (attempted unit (source_call name [] (result_of unit))))
+                in
+                match variants with
+                | None ->
+                    let body = fields_then_built None (record_fields ()) "end_record" in
+                    { body with statements = begun "begin_record" :: body.statements }
+                | Some variants ->
+                    let string_type = Types.named (Well_known.path String) [] in
+                    let name = local () in
+                    let name_place : Core.place =
+                      Local { local = name; type_ = string_type; origin }
+                    in
+                    let equal =
+                      let reference : Types.trait_reference =
+                        { trait = Well_known.path Equal; trait_arguments = []; associated = [] }
+                      in
+                      match Impls.implements database ~bounds string_type reference with
+                      | Some (From_impl { impl; substitution }) ->
+                          Core.Trait_method
+                            {
+                              trait = reference;
+                              name = "equal";
+                              receiver = Read;
+                              self_type = string_type;
+                              type_arguments = [];
+                              evidence = Impl { impl; arguments = substitution };
+                            }
+                      | _ -> bug "`String` has no `Equal`"
+                    in
+                    let unknown =
+                      node Types.Never
+                        (Return
+                           (Some
+                              (node result
+                                 (Construct
+                                    {
+                                      variant = Some "Err";
+                                      fields =
+                                        [
+                                          ( "error",
+                                            Some
+                                              (Core.Value
+                                                 (node error_type
+                                                    (Call
+                                                       {
+                                                         callee =
+                                                           Function
+                                                             {
+                                                               path =
+                                                                 Well_known.path Unknown_variant;
+                                                               type_arguments =
+                                                                 [ Types.Type source_type ];
+                                                             };
+                                                         arguments =
+                                                           [ source_argument Read; read name_place ];
+                                                         lends = None;
+                                                         uses = [];
+                                                       }))) );
+                                        ];
+                                    }))))
+                    in
+                    {
+                      statements =
+                        [
+                          bind_local name "name" string_type ~is_var:false
+                            (attempted string_type
+                               (source_call "variant" [] (result_of string_type)));
+                        ];
+                      value =
+                        Some
+                          (node result
+                             (Match
+                                {
+                                  scrutinees = [ Place name_place ];
+                                  arms =
+                                    List.map
+                                      (fun (variant, fields) ->
+                                        arm
+                                          (pattern string_type
+                                             (Equal_to
+                                                { value = node string_type (String variant); equal }))
+                                          (fields_then_built (Some variant) fields "end_variant"))
+                                      variants
+                                    @ [ arm (pattern string_type Wildcard) (giving unknown) ];
+                                }));
+                    })
             | _ -> bug "`%s` cannot be derived" (Path.show path)
           in
           Some

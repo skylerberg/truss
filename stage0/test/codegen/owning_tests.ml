@@ -25,8 +25,8 @@ let () =
     Fixtures.Owning.loop_that_uses_up_an_array_takes_its_elements_in;
   passes "a loop that uses up an array and is left early drops the elements it did not reach"
     Fixtures.Owning.loop_that_uses_up_an_array_and_is_left_early_drops;
-  passes "an array given up as a list keeps its elements in order"
-    Fixtures.Owning.array_given_up_as_a_list_keeps_its_elements_in;
+  passes "an array moved into a list keeps its elements in order"
+    Fixtures.Owning.array_moved_into_a_list_keeps_its_elements_in;
   passes "continue keeps a list a loop is over, when the list is a call's result"
     Fixtures.Owning.continue_keeps_a_list_a_loop_is_over_when_the_list;
   passes "a loop over a yielding function that takes nothing"

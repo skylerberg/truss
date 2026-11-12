@@ -548,21 +548,26 @@ let delete span = { span; replacement = "" }
 let edit_distance left right =
   let rows = String.length left + 1 and columns = String.length right + 1 in
   let table = Array.make_matrix rows columns 0 in
-  for i = 0 to rows - 1 do
-    table.(i).(0) <- i
+  for row = 0 to rows - 1 do
+    table.(row).(0) <- row
   done;
-  for j = 0 to columns - 1 do
-    table.(0).(j) <- j
+  for column = 0 to columns - 1 do
+    table.(0).(column) <- column
   done;
-  for i = 1 to rows - 1 do
-    for j = 1 to columns - 1 do
-      let cost = if left.[i - 1] = right.[j - 1] then 0 else 1 in
+  for row = 1 to rows - 1 do
+    for column = 1 to columns - 1 do
+      let cost = if left.[row - 1] = right.[column - 1] then 0 else 1 in
       let best =
-        min (min (table.(i - 1).(j) + 1) (table.(i).(j - 1) + 1)) (table.(i - 1).(j - 1) + cost)
+        min
+          (min (table.(row - 1).(column) + 1) (table.(row).(column - 1) + 1))
+          (table.(row - 1).(column - 1) + cost)
       in
-      table.(i).(j) <-
-        (if i > 1 && j > 1 && left.[i - 1] = right.[j - 2] && left.[i - 2] = right.[j - 1] then
-           min best (table.(i - 2).(j - 2) + 1)
+      table.(row).(column) <-
+        (if
+           row > 1 && column > 1
+           && left.[row - 1] = right.[column - 2]
+           && left.[row - 2] = right.[column - 1]
+         then min best (table.(row - 2).(column - 2) + 1)
          else best)
     done
   done;
@@ -609,7 +614,7 @@ let apply_fix text (fix : span fix) =
   (* Edits at the same offset apply in the order they are listed. *)
   let edits =
     List.stable_sort
-      (fun (a : span edit) (b : span edit) -> compare a.span.start b.span.start)
+      (fun (left : span edit) (right : span edit) -> compare left.span.start right.span.start)
       fix.edits
   in
   let buffer = Buffer.create (String.length text) in
@@ -636,7 +641,7 @@ module Collector = struct
 
   let to_list collector =
     List.stable_sort
-      (fun (a : diagnostic) (b : diagnostic) -> compare a.span.start b.span.start)
+      (fun (left : diagnostic) (right : diagnostic) -> compare left.span.start right.span.start)
       (Dynarray.to_list collector)
 end
 
@@ -687,9 +692,11 @@ let quote text =
       | "\\" -> Buffer.add_string buffer "\\\\"
       | "\n" -> Buffer.add_string buffer "\\n"
       | "\t" -> Buffer.add_string buffer "\\t"
-      | c when String.length c = 1 && (Char.code c.[0] < 0x20 || Char.code c.[0] = 0x7F) ->
-          Printf.bprintf buffer "\\x%02X" (Char.code c.[0])
-      | c -> Buffer.add_string buffer c)
+      | scalar
+        when String.length scalar = 1 && (Char.code scalar.[0] < 0x20 || Char.code scalar.[0] = 0x7F)
+        ->
+          Printf.bprintf buffer "\\x%02X" (Char.code scalar.[0])
+      | scalar -> Buffer.add_string buffer scalar)
     ~invalid:(fun byte -> Printf.bprintf buffer "\\x%02X" (Char.code byte));
   Buffer.add_char buffer '"';
   Buffer.contents buffer
@@ -709,7 +716,7 @@ let render source diagnostic =
   let _, start_column = Source.position source start in
   let _, stop_column = Source.position source (min diagnostic.span.stop line_end) in
   let is_printable =
-    String.for_all (fun c -> c = '\t' || Char.code c >= 0x20) line
+    String.for_all (fun character -> character = '\t' || Char.code character >= 0x20) line
     &&
     let valid = ref true in
     iter_utf8 line ~valid:ignore ~invalid:(fun _ -> valid := false);
@@ -722,7 +729,7 @@ let render source diagnostic =
     for index = line_start to start - 1 do
       match text.[index] with
       | '\t' -> Buffer.add_char leading '\t'
-      | c when Char.code c land 0xC0 = 0x80 -> ()
+      | character when Char.code character land 0xC0 = 0x80 -> ()
       | _ -> Buffer.add_char leading ' '
     done;
     Printf.bprintf buffer "  | %s%s\n" (Buffer.contents leading)
@@ -757,9 +764,11 @@ let json_string value =
       | "\n" -> Buffer.add_string buffer "\\n"
       | "\r" -> Buffer.add_string buffer "\\r"
       | "\t" -> Buffer.add_string buffer "\\t"
-      | c when String.length c = 1 && (Char.code c.[0] < 0x20 || Char.code c.[0] = 0x7F) ->
-          Printf.bprintf buffer "\\u%04x" (Char.code c.[0])
-      | c -> Buffer.add_string buffer c)
+      | scalar
+        when String.length scalar = 1 && (Char.code scalar.[0] < 0x20 || Char.code scalar.[0] = 0x7F)
+        ->
+          Printf.bprintf buffer "\\u%04x" (Char.code scalar.[0])
+      | scalar -> Buffer.add_string buffer scalar)
     ~invalid:(fun _ -> Buffer.add_string buffer "\xEF\xBF\xBD");
   Buffer.add_char buffer '"';
   Buffer.contents buffer

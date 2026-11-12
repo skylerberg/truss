@@ -19,7 +19,7 @@ fn Tree.entries(self) yields Entry {
   }
 }
 
-test "a method that yields values around lent places, and loops over itself" {
+test "a method that yields constructors of lent places and loops over itself" {
   let tree = Tree.Node(
     left: Tree.Node(left: Tree.Leaf, name: "${1}st", right: Tree.Leaf),
     name: "${2}nd!",

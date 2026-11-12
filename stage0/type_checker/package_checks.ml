@@ -735,7 +735,7 @@ let manifest_sentence ~package = function
         (Path.show_package dependency)
 
 (* Which dependencies a package uses is known only once all of its code
-   checks: a call in a body with an error may not have been worked out. So a
+   checks: a call in a body with an error may not have been resolved. So a
    package with an error elsewhere is not told that a dependency is unused,
    which a fix would then delete. *)
 let manifest_problems =
