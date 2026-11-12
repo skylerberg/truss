@@ -1,0 +1,5 @@
+trait Shown {
+  type Part
+}
+
+type Knot(shown: any Shown[Part = (fn(Knot) -> Bool cost time finite)])

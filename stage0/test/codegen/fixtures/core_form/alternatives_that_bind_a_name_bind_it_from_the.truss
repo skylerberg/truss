@@ -1,0 +1,44 @@
+type Shape =
+  | Circle(radius: Int64)
+  | Square(extra: Int64, side: Int64)
+  | Labelled(label: String, inner: Int64)
+  | Named(count: Int64, name: String)
+  | Point
+
+fn size(shape: Shape) -> Int64 {
+  match shape {
+    Circle(radius: n) | Square(side: n, ..) => n
+    Labelled(inner: n, ..) | Named(count: n, ..) if n > 100 => 100
+    Labelled(inner: n, ..) | Named(count: n, ..) => n
+    Point => 0
+  }
+}
+
+fn text_length(shape: Shape) -> USize {
+  match shape {
+    Labelled(label: text, ..) | Named(name: text, ..) => text.length()
+    _ => 0
+  }
+}
+
+fn take_text(shape: own Shape) -> String {
+  match own shape {
+    Labelled(label: text, ..) | Named(name: text, ..) => text
+    _ => "none"
+  }
+}
+
+test "alternatives" {
+  assert size(Shape.Circle(radius: 3)) == 3
+  assert size(Shape.Square(extra: 9, side: 4)) == 4
+  assert size(Shape.Labelled(label: "a", inner: 5)) == 5
+  assert size(Shape.Named(count: 500, name: "b")) == 100
+  assert size(Shape.Named(count: 6, name: "b")) == 6
+  assert size(Shape.Point) == 0
+  assert text_length(Shape.Labelled(label: "round", inner: 3)) == 5
+  assert text_length(Shape.Named(count: 4, name: "box")) == 3
+  assert text_length(Shape.Point) == 0
+  assert take_text(Shape.Named(count: 4, name: "box")) == "box"
+  assert take_text(Shape.Labelled(label: "round", inner: 3)) == "round"
+  assert take_text(Shape.Point) == "none"
+}

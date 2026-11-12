@@ -1,0 +1,13 @@
+fn f(couple: Couple) -> USize
+  ensures result <= 2
+{
+  var cursor = couple.each()
+  var seen: USize = 0
+  for value in cursor
+    invariant seen <= yielded.length()
+  {
+    let _ = value
+    seen += 1
+  }
+  seen
+}

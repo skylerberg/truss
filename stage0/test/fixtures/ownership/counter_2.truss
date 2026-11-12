@@ -1,0 +1,10 @@
+type Counter(count: Int64)
+
+fn Counter.current(self) lends Int64 {
+  yield self.count
+}
+
+fn Counter.step(mut self) {
+  self.count = 3
+}
+

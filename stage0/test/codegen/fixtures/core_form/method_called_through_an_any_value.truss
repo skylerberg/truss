@@ -1,0 +1,50 @@
+trait Shape {
+  fn area(self) -> Int64
+  fn name(self) -> String
+}
+
+type Square(side: Int64)
+
+type Rectangle(width: Int64, height: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 {
+    self.side * self.side
+  }
+
+  fn name(self) -> String {
+    "square ${self.side}"
+  }
+}
+
+impl Shape for Rectangle {
+  fn area(self) -> Int64 {
+    self.width * self.height
+  }
+
+  fn name(self) -> String {
+    "rectangle ${self.width}x${self.height}"
+  }
+}
+
+fn total(shapes: List[any Shape]) -> Int64 {
+  var sum = 0
+  for shape in shapes {
+    sum += shape.area()
+  }
+  sum
+}
+
+fn names(shapes: List[any Shape]) -> List[String] {
+  var present: List[String] = []
+  for shape in shapes {
+    mut present.push(shape.name())
+  }
+  present
+}
+
+test "shapes" {
+  let shapes: List[any Shape] = [any Square(side: 3), any Rectangle(width: 2, height: 5)]
+  assert total(shapes) == 19
+  assert names(shapes) == ["square 3", "rectangle 2x5"]
+}

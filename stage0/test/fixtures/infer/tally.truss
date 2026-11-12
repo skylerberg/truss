@@ -1,0 +1,54 @@
+capability Counter {
+  fn bump()
+}
+
+type Tally(count: USize)
+
+impl Counter for Tally {
+  fn bump(mut self) {
+    self.count = 1
+  }
+}
+
+type Scheduler(turn: UInt64)
+
+impl Tasks for Scheduler {
+  fn open(self) -> UInt64 {
+    0
+  }
+
+  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    false
+  }
+
+  fn join(self, task_group: UInt64) {}
+
+  fn cancel(self, task_group: UInt64) -> Bool {
+    false
+  }
+
+  fn cancelled(self) -> Bool {
+    false
+  }
+
+  fn watch(self, key: UInt64) -> UInt64 {
+    0
+  }
+
+  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {}
+
+  fn wake(self, key: UInt64) {}
+
+  fn lock(self, mutex: UInt64) {}
+
+  fn unlock(self, mutex: UInt64) {}
+
+  fn yield_now(self) {}
+}
+
+fn count_once()
+  uses Counter
+{
+  Counter.bump()
+}
+

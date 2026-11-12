@@ -1,0 +1,11 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree)
+
+fn f(tree: Tree) -> Int64 {
+  match tree {
+    Node(Lef) => 1
+    Leaf => 2
+    _ => 3
+  }
+}

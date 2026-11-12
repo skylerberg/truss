@@ -1,0 +1,8 @@
+test "copied" {
+  var first: List[Int64] = List.with_capacity(8)
+  var second = first.copy()
+  mut second.push(1)
+  mut first.push(2)
+  assert first[0] == 2
+  assert second[0] == 1
+}

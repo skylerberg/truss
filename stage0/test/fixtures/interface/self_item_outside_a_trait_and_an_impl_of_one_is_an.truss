@@ -1,0 +1,5 @@
+type Box(value: Int64)
+
+fn Box.get(self) -> Self.Item {
+  todo
+}

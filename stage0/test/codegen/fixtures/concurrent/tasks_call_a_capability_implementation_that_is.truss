@@ -1,0 +1,36 @@
+type Counter(count: Int64)
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+}
+
+impl Tally for Counter {
+  fn add(mut self, amount: Int64) {
+    self.count += amount
+  }
+
+  fn total(self) -> Int64 {
+    self.count
+  }
+}
+
+fn tallied(count: Int64) -> Int64
+  uses Tasks, Tally
+{
+  concurrent for index in 1..=count {
+    Tally.add(index)
+  }
+  Tally.total()
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var counter = Counter(count: 0)
+  let total = provide mut counter {
+    tallied(4)
+  }
+  Console.print_line("total ${total}")
+  ExitCode.success
+}

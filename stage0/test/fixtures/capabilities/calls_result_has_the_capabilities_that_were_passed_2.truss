@@ -1,0 +1,6 @@
+fn f() -> Instant
+  uses Clock
+{
+  let held = later(tick)
+  held()
+}

@@ -1,0 +1,3 @@
+fn f[Number: UnsignedInteger](value: Number) -> Bool {
+  value < -1
+}

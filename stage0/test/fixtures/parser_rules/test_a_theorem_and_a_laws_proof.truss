@@ -1,0 +1,5 @@
+test "writes"
+  uses FileWrite
+{
+  assert true
+}

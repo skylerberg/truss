@@ -1,0 +1,10 @@
+fn below_three(index: USize) -> USize
+  requires index < 3
+{
+  index
+}
+
+fn f() -> USize {
+  let g = below_three
+  g(5)
+}

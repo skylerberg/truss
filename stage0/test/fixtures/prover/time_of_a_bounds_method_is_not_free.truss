@@ -1,0 +1,15 @@
+fn contains[Element: Equal](items: List[Element], item: Element) -> Bool
+  cost time O(items.length())
+{
+  var index: USize = 0
+  while index < items.length()
+    invariant index <= items.length()
+    decreases items.length() - index
+  {
+    if items[index] == item {
+      return true
+    }
+    index += 1
+  }
+  false
+}

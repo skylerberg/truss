@@ -1,0 +1,9 @@
+use lib::vector
+
+public type Meters(value: Int64)
+
+impl Add[Meters] for vector::Vector[Element] {
+  type Output = vector::Vector[Element]
+  fn add_is_defined(self, right: Meters) -> Bool { true }
+  fn add(self, right: Meters) -> vector::Vector[Element] { todo }
+}

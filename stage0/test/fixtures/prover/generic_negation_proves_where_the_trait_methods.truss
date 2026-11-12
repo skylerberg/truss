@@ -1,0 +1,5 @@
+fn negate[Number: Negate](value: Number) -> Number.Output
+  requires value.negate_is_defined()
+{
+  -value
+}

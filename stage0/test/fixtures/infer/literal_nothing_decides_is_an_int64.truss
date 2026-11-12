@@ -1,0 +1,4 @@
+fn f() -> Int64 {
+  var best = 0
+  best
+}

@@ -1,0 +1,3 @@
+internal fn double(value: Int64) -> Missing {
+  value
+}

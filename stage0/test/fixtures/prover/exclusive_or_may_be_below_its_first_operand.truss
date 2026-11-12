@@ -1,0 +1,4 @@
+theorem at_least_the_first(first: UInt64, second: UInt64)
+  ensures (first ^ second) >= first
+{
+}

@@ -70,7 +70,7 @@ let () =
 
 let () =
   test "GRAMMAR.md's grammar accepts a file" (fun () ->
-      let text = "use a::b\n\nfn f() -> Int64 {\n  1\n}\n" in
+      let text = Fixtures.Parser_documents.grammar_mds_grammar_accepts_a_file in
       let tokens, _ = Lexer.lex (source text) in
       if not (Reference.accepts Reference.file (Array.to_list tokens)) then fail "rejected");
   test "GRAMMAR.md's grammar rejects every input the parser rejects" (fun () ->

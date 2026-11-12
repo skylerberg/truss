@@ -1,0 +1,4 @@
+fn keep(visit: (fn(index: Int64) -> Int64 requires index < 1)) -> Int64 {
+  let g: fn(Int64) -> Int64 = visit
+  g(5)
+}

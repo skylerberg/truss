@@ -1,0 +1,6 @@
+fn f(count: UInt64) -> UInt64
+  decreases count
+  cost time O(log(count))
+{
+  if count == 0 { 0 } else { f(count / 2) }
+}

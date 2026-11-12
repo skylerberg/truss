@@ -1,0 +1,8 @@
+fn f(ready: Bool) {
+  while ready {
+    let present = make()
+    keep_found(own present)
+  }
+}
+
+fn keep_found(present: own Option[String]) {}

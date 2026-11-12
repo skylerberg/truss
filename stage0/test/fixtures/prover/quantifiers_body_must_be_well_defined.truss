@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> Int64
+  requires forall i in 0..items.length() + 1 => items[i] > 0
+{
+  0
+}

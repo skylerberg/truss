@@ -1,0 +1,3 @@
+fn f(ports: Map[String, Int64]) {
+  ports["ftp"] = 21
+}

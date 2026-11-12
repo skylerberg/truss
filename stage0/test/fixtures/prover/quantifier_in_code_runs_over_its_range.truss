@@ -1,0 +1,5 @@
+fn all_positive(items: List[Int64]) -> Bool
+  cost time O(items.length())
+{
+  forall index in 0..items.length() => items[index] > 0
+}

@@ -1,0 +1,13 @@
+type Point(x: Int64, y: Int64)
+
+fn reset(value: mut Int64) {
+  value = 0
+}
+
+fn f() -> Int64
+  ensures result == 0
+{
+  var point = Point(x: 1, y: 2)
+  reset(mut point.x)
+  point.x
+}

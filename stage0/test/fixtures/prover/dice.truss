@@ -1,0 +1,5 @@
+capability Dice {
+  fn roll() -> UInt8
+    ensures result >= 1 && result <= 6
+}
+

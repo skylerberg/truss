@@ -1,0 +1,17 @@
+fn take(items: mut List[Int64], view: Slice[Int64]) {}
+
+fn give(view: Slice[Int64], items: mut List[Int64]) {}
+
+fn measure(items: mut List[Int64], count: USize) {}
+
+fn show(item: Int64, count: USize) {}
+
+fn change(item: mut Int64, count: USize) {}
+
+fn count_of(view: Slice[Int64], count: USize) {}
+
+fn grow(items: mut List[Int64]) -> USize {
+  mut items.push(1)
+  items.length()
+}
+

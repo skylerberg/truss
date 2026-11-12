@@ -1,0 +1,6 @@
+fn g(value: UInt64) -> USize
+  ensures result <= log(value) + 1
+  ensures power(2, result) >= 1
+{
+  todo
+}

@@ -1,0 +1,7 @@
+fn f(items: List[Int64], index: USize) -> Int64 {
+  if index > 3 {
+    items[index]
+  } else {
+    items[index]
+  }
+}

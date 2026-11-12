@@ -1,0 +1,5 @@
+fn f() -> Int64
+  cost time O(1)
+{
+  0
+}

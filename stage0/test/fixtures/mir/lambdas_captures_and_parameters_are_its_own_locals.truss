@@ -1,0 +1,7 @@
+fn apply(transform: fn(Int64) -> Int64) -> Int64 {
+  transform(1)
+}
+
+fn g(offset: Int64) -> Int64 {
+  apply(fn(value) { value + offset })
+}

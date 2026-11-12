@@ -1,0 +1,39 @@
+type Bag(items: List[Int64])
+
+impl Add[Int64] for Bag {
+  type Output = Bag
+
+  fn add_is_defined(self, right: Int64) -> Bool {
+    true
+  }
+
+  fn add(self, right: Int64) -> Bag {
+    var items = self.items.copy()
+    mut items.push(right)
+    Bag(items: own items)
+  }
+}
+
+fn parse(text: String) -> Result[Int64, String] {
+  if text == "bad" { Err("bad") } else { Ok(1) }
+}
+
+fn bump(bag: mut Bag, text: String) -> Result[Int64, String] {
+  bag += parse(text)?
+  Ok(0)
+}
+
+fn grow(bag: mut Bag) -> Int64 {
+  mut bag.items.push(7)
+  mut bag.items.push(8)
+  1
+}
+
+test "operand first" {
+  var bag = Bag(items: [5])
+  let _ = bump(mut bag, text: "bad")
+  let _ = bump(mut bag, text: "good")
+  assert bag.items.length() == 2
+  bag += grow(mut bag)
+  assert bag.items.length() == 5
+}

@@ -1,0 +1,6 @@
+fn f(holders: mut List[Holder]) {
+  for holder in mut holders {
+    let items = own holder.items
+    holder.items = own items
+  }
+}

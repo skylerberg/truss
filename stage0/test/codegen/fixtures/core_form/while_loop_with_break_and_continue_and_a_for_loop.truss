@@ -1,0 +1,28 @@
+fn sum_of_odds_below(limit: Int64) -> Int64 {
+  var total = 0
+  var next = 0
+  while true {
+    next += 1
+    if next >= limit {
+      break
+    }
+    if next % 2 == 0 {
+      continue
+    }
+    total = total + next
+  }
+  total
+}
+
+fn triangle(rows: Int64) -> Int64 {
+  var total = 0
+  for row in 1..=rows {
+    total = total + row
+  }
+  total
+}
+
+test "loops" {
+  assert sum_of_odds_below(8) == 16
+  assert triangle(4) == 10
+}

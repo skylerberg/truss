@@ -1,0 +1,3 @@
+fn f(fast: Bool) -> Instant {
+  each_time(if fast { still } else { tick })
+}

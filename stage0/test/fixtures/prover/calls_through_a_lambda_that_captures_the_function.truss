@@ -1,0 +1,16 @@
+fn each(items: List[Int64], visit: (fn(Int64) cost time finite))
+  cost calls(visit) == items.length()
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn twice(items: List[Int64], visit: (fn(Int64) cost time finite))
+  cost calls(visit) == items.length()
+{
+  each(items, visit: fn(item) {
+    visit(item)
+    visit(item)
+  })
+}

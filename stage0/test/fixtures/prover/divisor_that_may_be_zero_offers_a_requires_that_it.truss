@@ -1,0 +1,3 @@
+fn halves(total: UInt32, parts: UInt32) -> UInt32 {
+  total / parts
+}

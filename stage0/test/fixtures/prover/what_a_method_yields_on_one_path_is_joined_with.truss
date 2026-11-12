@@ -1,0 +1,10 @@
+type Maybe(present: Bool)
+
+fn Maybe.each(self) yields Int64
+  ensures yielded.length() == 0
+  cost time finite
+{
+  if self.present {
+    yield 1
+  }
+}

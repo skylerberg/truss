@@ -1,0 +1,17 @@
+fn tick()
+  uses Clock
+{
+}
+
+fn f(items: List[Int64])
+  uses Tasks, Clock
+{
+  concurrent {
+    tick()
+    tick()
+  }
+  concurrent for item in items {
+    let _ = item
+    tick()
+  }
+}

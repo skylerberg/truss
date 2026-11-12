@@ -1,0 +1,7 @@
+trait Shown {
+  fn label(self) -> Int64
+}
+
+fn f[Value: Shown](value: mut Value) -> Int64 {
+  Shown.label(mut value)
+}

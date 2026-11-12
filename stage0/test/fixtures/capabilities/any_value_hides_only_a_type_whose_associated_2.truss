@@ -1,0 +1,3 @@
+fn boxed() -> any Feed {
+  any Gauge(last: 0)
+}

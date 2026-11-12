@@ -1,0 +1,3 @@
+public fn nothing() -> Int64 {
+  0
+}

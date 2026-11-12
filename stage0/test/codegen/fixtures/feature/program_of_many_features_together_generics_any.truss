@@ -1,0 +1,98 @@
+type ParseError =
+  | Empty
+  | NotANumber(text: String)
+  derives Equal
+
+fn parse_digit(byte: UInt8) -> Option[Int64] {
+  if byte >= 48 && byte <= 57 {
+    let digit: Int64 = intrinsic_free_convert(byte - 48)
+    Some(digit)
+  } else {
+    None
+  }
+}
+
+fn intrinsic_free_convert(byte: UInt8) -> Int64 {
+  var value = 0
+  var left = byte
+  while left > 0 {
+    value += 1
+    left -= 1
+  }
+  value
+}
+
+fn largest[Item: Ordered + Copyable](items: List[Item]) -> Option[Item] {
+  var best: Option[Item] = None
+  for item in items {
+    if best is Some(current) && current >= item {
+      continue
+    }
+    best = Some(item.copy())
+  }
+  best
+}
+
+trait Shape {
+  fn area(self) -> Int64
+  fn name(self) -> String
+}
+
+type Square(side: Int64)
+type Rectangle(width: Int64, height: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 { self.side * self.side }
+  fn name(self) -> String { "square ${self.side}" }
+}
+
+impl Shape for Rectangle {
+  fn area(self) -> Int64 { self.width * self.height }
+  fn name(self) -> String { "rectangle ${self.width}x${self.height}" }
+}
+
+fn checked(text: own String) -> Result[String, ParseError] {
+  if text.is_empty() {
+    return Err(ParseError.Empty)
+  }
+  Ok(own text)
+}
+
+fn twice(text: String) -> Result[USize, ParseError] {
+  let value = checked(text.copy())?
+  Ok(value.length() * 2)
+}
+
+test "everything" {
+  assert parse_digit(55) == Some(7)
+  assert parse_digit(65) == None
+  assert largest([3, 9, 2]) == Some(9)
+  assert largest(["b", "c", "a"]) == Some("c")
+  let empty: List[Int64] = []
+  assert largest(empty) == None
+  let shapes: List[any Shape] = [any Square(side: 3), any Rectangle(width: 2, height: 5)]
+  var total = 0
+  var names: List[String] = []
+  for shape in shapes {
+    total += shape.area()
+    mut names.push(shape.name())
+  }
+  assert total == 19
+  assert names == ["square 3", "rectangle 2x5"]
+  let doubled = [1, 2, 3].map(fn(x) { x * 2 })
+  assert doubled == [2, 4, 6]
+  let labels = [1, 2].map(fn(x) { "#${x}" })
+  assert labels == ["#1", "#2"]
+  assert twice("abc") == Ok(6)
+  assert twice("") == Err(ParseError.Empty)
+  var counts: Map[String, Int64] = [:]
+  for word in ["a", "b", "a"] {
+    mut counts.insert(word.copy(), value: 1)
+  }
+  assert counts.length() == 2
+  var scores: List[Int64] = [1, 2, 3]
+  for score in mut scores {
+    score *= 10
+  }
+  assert scores == [10, 20, 30]
+}

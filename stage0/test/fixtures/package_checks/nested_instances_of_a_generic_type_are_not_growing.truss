@@ -1,0 +1,3 @@
+type Couple[First, Second](first: First, second: Second)
+
+type Nest(value: Couple[Couple[Int64, String], Couple[String, Int64]])

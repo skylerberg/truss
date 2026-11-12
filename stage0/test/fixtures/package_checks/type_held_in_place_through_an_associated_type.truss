@@ -1,0 +1,13 @@
+trait Shown {
+  type Part
+}
+
+type Marker()
+
+impl Shown for Marker {
+  type Part = Tree
+}
+
+type Kept[Source: Shown](part: Source.Part)
+
+type Tree(held: Kept[Marker], count: Int64)

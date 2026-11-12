@@ -1,0 +1,15 @@
+
+test "parallel in a test" {
+  var board = Board(cells: filled(50))
+  parallel {
+    let first = collatz(27)
+    let second = collatz(97)
+  }
+  assert first == 111
+  assert second == 118
+  parallel for cell in mut board {
+    cell = cell.wrapping_multiply(2)
+  }
+  assert board.cells[0] == 2
+  assert board.cells[49] == 100
+}

@@ -1,0 +1,6 @@
+use lib::arith
+
+fn main(arguments: List[String]) -> ExitCode {
+  let _ = arith::two()
+  ExitCode.success
+}

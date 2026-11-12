@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> USize {
+  var boxed: any Cursor[Element = Int64] = any items.each()
+  let _ = own boxed.skip(1)
+  0
+}

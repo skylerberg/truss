@@ -1,0 +1,24 @@
+trait Zero {
+  fn zero(self) -> UInt8
+    cost time finite
+
+  law is_zero(value: Self) { value.zero() == 0 }
+}
+
+impl Zero for UInt8 {
+  fn zero(self) -> UInt8
+    cost time finite
+  {
+    self
+  }
+}
+
+proof Zero.is_zero for UInt8 {
+  todo
+}
+
+fn f(x: UInt8) -> UInt8
+  ensures result == 0
+{
+  x.zero()
+}

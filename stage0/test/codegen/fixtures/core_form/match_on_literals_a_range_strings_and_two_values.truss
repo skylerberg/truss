@@ -1,0 +1,39 @@
+fn kind(value: Int64) -> String {
+  match value {
+    0 => "zero"
+    1 | 2 | 3 => "small"
+    4..10 => "medium"
+    _ => "large"
+  }
+}
+
+fn greeting(word: String) -> Int64 {
+  match word {
+    "hello" => 1
+    "bye" => 2
+    _ => 0
+  }
+}
+
+fn both(first: Option[Int64], second: Option[Int64]) -> Int64 {
+  match first, second {
+    Some(a), Some(b) => a + b
+    Some(a), None => a
+    None, Some(b) => b
+    None, None => 0
+  }
+}
+
+test "matches" {
+  assert kind(0) == "zero"
+  assert kind(2) == "small"
+  assert kind(7) == "medium"
+  assert kind(10) == "large"
+  assert greeting("hello") == 1
+  assert greeting("bye") == 2
+  assert greeting("what") == 0
+  assert both(Some(1), second: Some(2)) == 3
+  assert both(Some(1), second: None) == 1
+  assert both(None, second: Some(2)) == 2
+  assert both(None, second: None) == 0
+}

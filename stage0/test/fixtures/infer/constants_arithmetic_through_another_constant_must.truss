@@ -1,0 +1,3 @@
+let most: UInt8 = 255
+
+let more: UInt8 = most + 1

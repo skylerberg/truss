@@ -1,0 +1,5 @@
+fn Holder.take_items(mut self) -> List[Int64] {
+  let moved = own self.items
+  self.items = []
+  moved
+}

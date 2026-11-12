@@ -1,0 +1,18 @@
+type Grid(cells: List[Int64])
+
+fn Grid.broken(self) lends Int64
+  uses Panic
+{
+  Panic.crash("no cell")
+}
+
+fn read(grid: Grid) -> Int64
+  uses Panic
+{
+  grid.broken() + 1
+}
+
+test "reads" {
+  let grid = Grid(cells: [1])
+  assert read(grid) == 2
+}

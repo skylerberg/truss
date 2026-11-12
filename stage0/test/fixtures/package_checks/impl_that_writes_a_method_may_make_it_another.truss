@@ -1,0 +1,19 @@
+trait Labelled {
+  fn label(self) -> Int64
+    cost time O(1)
+  {
+    0
+  }
+}
+
+type Counter(count: Int64)
+
+fn Counter.label(own self) -> Int64 { todo }
+
+impl Labelled for Counter {
+  fn label(self) -> Int64
+    cost time O(1)
+  {
+    0
+  }
+}

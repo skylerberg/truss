@@ -1,0 +1,14 @@
+fn apply(limit: USize, visit: (fn(index: USize) requires index < limit)) {
+  if limit > 0 {
+    visit(0)
+  }
+}
+
+fn check(index: USize)
+  requires index < 5
+{
+}
+
+fn f() {
+  apply(10, visit: check)
+}

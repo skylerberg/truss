@@ -1,0 +1,14 @@
+type Positive(n: Int64)
+  invariant n > 0
+
+fn apply(change: fn(Positive) -> Positive, value: Positive) -> Positive {
+  change(value)
+}
+
+fn f() -> Positive {
+  apply(fn(p) {
+    var q = p
+    q.n = 0
+    q
+  }, value: Positive(n: 1))
+}

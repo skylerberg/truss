@@ -1,0 +1,6 @@
+type Tree[Value] =
+  | Leaf
+  | indirect Node(left: Tree[Value], right: Tree[Value])
+  invariant is_balanced(self)
+  derives Equal, Hash
+  cost potential size(self)

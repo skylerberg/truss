@@ -1,0 +1,6 @@
+fn bump(present: Option[UInt8]) -> UInt8 {
+  match present {
+    Some(count) => count + 1
+    None => 0
+  }
+}

@@ -1,0 +1,5 @@
+fn f(value: Int64) -> Int64
+  ensures result == value / 2
+{
+  apply(fn(each) { each / 2 }, value: value)
+}

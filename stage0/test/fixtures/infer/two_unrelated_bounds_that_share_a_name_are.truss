@@ -1,0 +1,11 @@
+trait First {
+  fn label(self) -> Int64
+}
+
+trait Second {
+  fn label(mut self) -> Int64
+}
+
+fn f[Value: First + Second](value: Value) -> Int64 {
+  value.label()
+}

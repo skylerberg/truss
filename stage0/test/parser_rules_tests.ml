@@ -17,27 +17,11 @@ let () =
       definition "fn hourly::Forecast.summary(self) -> String { todo }"
         "(fn hourly::Forecast.summary (self) -> String (block todo))");
   test "clauses in the order written" (fun () ->
-      definition
-        "fn f(x: Int64) -> Int64\n\
-        \  ensures result > x\n\
-        \  requires x > 0\n\
-        \  decreases x, 1\n\
-        \  uses Clock\n\
-         {\n\
-        \  x\n\
-         }"
+      definition Fixtures.Parser_rules.clauses_in_the_order_written
         "(fn f ((x: Int64)) -> Int64 (ensures (> result x)) (requires (> x 0)) (decreases x 1) \
          (uses Clock) (block x))");
   test "cost clauses" (fun () ->
-      definition
-        "fn f(visit: (fn(Item) cost time finite))\n\
-        \  cost amortized time O(items.length() * time(visit))\n\
-        \  cost allocations <= 1\n\
-        \  cost calls(visit) == 2\n\
-        \  cost calls(FileRead.read) == 3\n\
-        \  cost calls(FileRead) == 4\n\
-        \  cost time finite\n\
-         {}"
+      definition Fixtures.Parser_rules.cost_clauses
         "(fn f ((visit: (fn (Item) (cost time finite)))) (cost amortized time (O (* (call (. items \
          length)) (call time visit)))) (cost allocations (<= 1)) (cost (calls visit) (== 2)) (cost \
          (calls FileRead.read) (== 3)) (cost (calls FileRead) (== 4)) (cost time finite) (block))");
@@ -48,7 +32,7 @@ let () =
       if codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a trait's body on the next line" (fun () ->
-      definition "trait T\n{\n  type K\n}" "(trait T (type K))");
+      definition Fixtures.Parser_rules.traits_body_on_the_next_line "(trait T (type K))");
   test "a misspelled cost word has a fix" (fun () ->
       error "fn f() cost allocation == 0 {}" ~code:Cost_word ~at:"allocation"
         ~fixed:"fn f() cost allocations == 0 {}");
@@ -74,81 +58,53 @@ let () =
       definition "type DiscardLog()" "(type DiscardLog ())";
       definition "type Bit = Zero | One" "(type Bit (= Zero One))";
       definition "public opaque type Session = todo" "(public opaque (type Session = todo))";
-      definition
-        "type Tree[Value] =\n\
-        \  | Leaf\n\
-        \  | indirect Node(left: Tree[Value], right: Tree[Value])\n\
-        \  invariant is_balanced(self)\n\
-        \  derives Equal, Hash\n\
-        \  cost potential size(self)"
+      definition Fixtures.Parser_rules.types
         "(type Tree[Value] (= Leaf (indirect Node ((left: Tree[Value]) (right: Tree[Value])))) \
          (invariant (call is_balanced self)) (derives Equal Hash) (cost potential (call size \
          self)))");
   test "a trait" (fun () ->
-      definition
-        "trait Ordered: Equal {\n\
-        \  type Key: Hash\n\
-        \  fn compare(self, other: Self) -> Ordering\n\
-        \  fn max(own self, other: own Self) -> Self\n\
-        \    ensures true\n\
-        \  {\n\
-        \    self\n\
-        \  }\n\n\
-        \  law transitive(a: Self, b: Self)\n\
-        \    requires a <= b\n\
-        \  {\n\
-        \    true\n\
-        \  }\n\
-         }"
+      definition Fixtures.Parser_rules.trait
         "(trait Ordered : Equal (type Key: Hash) (law transitive ((a: Self) (b: Self)) (requires \
          (<= a b)) (block true)) (fn compare (self (other: Self)) -> Ordering) (fn max (own self \
          (other: own Self)) -> Self (ensures true) (block self)))";
       definition "trait Loggable: Display + Hash {}" "(trait Loggable : Display + Hash)");
   test "an impl" (fun () ->
-      definition
-        "impl FileRead for FilesWithin\n\
-        \  uses FileRead\n\
-         {\n\
-        \  type Error = FileError\n\
-        \  fn read(self) -> Bytes { todo }\n\
-         }"
+      definition Fixtures.Parser_rules.impl
         "(impl FileRead for FilesWithin (uses FileRead) (type Error = FileError) (fn read (self) \
          -> Bytes (block todo)))";
       definition "impl Display for List[Element: Display] {}"
         "(impl Display for List[Element: Display])");
   test "an associated capability set" (fun () ->
-      definition
-        "trait Feed {\n  capability Uses\n  fn pull(mut self) -> Int64\n    uses Self.Uses\n}"
+      definition Fixtures.Parser_rules.associated_capability_set
         "(trait Feed (capability Uses) (fn pull (mut self) -> Int64 (uses Self.Uses)))";
-      definition
-        "impl Feed for Zip[First: Feed, Second: Feed] {\n\
-        \  capability Uses = First.Uses, Second.Uses, Clock\n\
-         }"
+      definition Fixtures.Parser_rules.associated_capability_set_2
         "(impl Feed for Zip[First: Feed, Second: Feed] (capability Uses = First.Uses Second.Uses \
          Clock))";
-      definition "fn drain[Source: Feed](source: mut Source)\n  uses Source.Uses, Clock\n{\n}"
+      definition Fixtures.Parser_rules.associated_capability_set_3
         "(fn drain[Source: Feed] ((source: mut Source)) (uses Source.Uses Clock) (block))";
       definition "fn run(step: (fn() uses Self.Uses)) {}"
         "(fn run ((step: (fn () (uses Self.Uses)))) (block))");
   test "an associated capability set is named after a dot" (fun () ->
-      error "fn f()\n  uses Self\n{\n}" ~code:Unexpected_token ~at:"\n{";
-      error "impl Feed for Gauge {\n  capability Uses\n}" ~code:Unexpected_token ~at:"}";
+      error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot
+        ~code:Unexpected_token ~at:"\n{";
+      error Fixtures.Parser_rules.associated_capability_set_is_named_after_a_dot_2
+        ~code:Unexpected_token ~at:"}";
       error "type Point(x: Int64)\n  derives Self.Uses" ~code:Unexpected_token ~at:"Self");
   test "a capability" (fun () ->
-      definition "capability Clock {\n  fn now() -> Instant\n  fn sleep(duration: Duration)\n}"
+      definition Fixtures.Parser_rules.capability
         "(capability Clock (fn now () -> Instant) (fn sleep ((duration: Duration))))");
   test "a capability's methods take no self" (fun () ->
-      error "capability Clock {\n  fn now(self) -> Instant\n}" ~code:Misplaced_self ~at:"self");
+      error Fixtures.Parser_rules.capabilitys_methods_take_no_self ~code:Misplaced_self ~at:"self");
   test "an impl's methods need bodies" (fun () ->
-      error "impl Clock for Fixed {\n  fn now(self) -> Instant\n}" ~code:Missing_body ~at:"\n}"
-        ~fixed:"impl Clock for Fixed {\n  fn now(self) -> Instant { todo }\n}");
+      error Fixtures.Parser_rules.impls_methods_need_bodies ~code:Missing_body ~at:"\n}"
+        ~fixed:Fixtures.Parser_rules.impls_methods_need_bodies_fixed);
   test "constants" (fun () ->
       definition "public let UInt8.maximum: UInt8 = 255" "(public (let UInt8.maximum : UInt8 255))";
       definition "let pi: Float64 = 3.14" "(let pi : Float64 314e-2)");
   test "a test, a theorem, and a law's proof" (fun () ->
-      definition "test \"writes\"\n  uses FileWrite\n{\n  assert true\n}"
+      definition Fixtures.Parser_rules.test_a_theorem_and_a_laws_proof
         "(test \"writes\" (uses FileWrite) (block (assert true)))";
-      definition "public theorem keeps[Element](items: List[Element])\n  ensures true\n{\n}"
+      definition Fixtures.Parser_rules.test_a_theorem_and_a_laws_proof_2
         "(public (theorem keeps[Element] ((items: List[Element])) (ensures true) (block)))";
       definition "proof Monoid.associative for Int64 {\n  lemma()\n}"
         "(proof Monoid.associative for Int64 (block (call lemma)))");
@@ -254,18 +210,18 @@ let () =
   test "a quantifier over a range is an expression in code" (fun () ->
       statement "let x = forall i in s => i" "(let x (forall (in i s) i))");
   test "a quantifier over a type in a test" (fun () ->
-      error "test \"a\" {\n  let x = forall value: Int64 => value == value\n}"
-        ~code:Specification_only ~at:"forall");
+      error Fixtures.Parser_rules.quantifier_over_a_type_in_a_test ~code:Specification_only
+        ~at:"forall");
   test "==> in a test" (fun () ->
-      error "test \"a\" {\n  let x = a ==> b\n}" ~code:Specification_only ~at:"==>");
+      error Fixtures.Parser_rules.in_a_test ~code:Specification_only ~at:"==>");
   test "==> in a constant" (fun () ->
       error "let x: Bool = a ==> b" ~code:Specification_only ~at:"==>");
   test "==> and a quantifier over a type in a function's body are left to the type checker"
     (fun () ->
-      definition "fn f() -> Bool {\n  a ==> forall value: Int64 => value == value\n}"
+      definition Fixtures.Parser_rules.and_a_quantifier_over_a_type_in_a_functions_body
         "(fn f () -> Bool (block (==> a (forall value: Int64 (== value value)))))");
   test "a yielding method's parameter cannot be named yielded or finished" (fun () ->
-      error "fn T.each(self, yielded: Int64) yields Int64 {\n  yield 1\n}"
+      error Fixtures.Parser_rules.yielding_methods_parameter_cannot_be_named_yielded
         ~code:Reserved_specification_name ~at:"yielded";
       definition "fn f(finished: Bool) {}" "(fn f ((finished: Bool)) (block))");
   test "a loop's cost clause" (fun () ->
@@ -284,29 +240,26 @@ let () =
   test "assert in a proof block" (fun () ->
       statement "proof {\n  assert true\n}" "(proof (block (assert true)))");
   test "assert in a lambda in a test" (fun () ->
-      error "test \"a\" {\n  run(fn(x) { assert x })\n}" ~code:Misplaced_assert ~at:"assert");
+      error Fixtures.Parser_rules.assert_in_a_lambda_in_a_test ~code:Misplaced_assert ~at:"assert");
   test "a proof block outside a function's body" (fun () ->
-      error "test \"a\" {\n  proof {}\n}" ~code:Misplaced_proof ~at:"proof");
+      error Fixtures.Parser_rules.proof_block_outside_a_functions_body ~code:Misplaced_proof
+        ~at:"proof");
   test "yield only in a method that yields" (fun () ->
       body_error "yield 1" ~code:Misplaced_yield ~at:"yield";
-      definition "fn T.each(self) yields Int64 {\n  yield 1\n}"
+      definition Fixtures.Parser_rules.yield_only_in_a_method_that_yields
         "(fn T.each (self) yields Int64 (block (yield 1)))");
   test "a method that lends" (fun () ->
-      definition
-        "fn Grid.cell(mut self, position: Position) lends mut Cell {\n  yield mut self.cells[0]\n}"
+      definition Fixtures.Parser_rules.method_that_lends
         "(fn Grid.cell (mut self (position: Position)) lends mut Cell (block (yield (mut ([] (. \
          self cells) 0)))))");
   test "lends own" (fun () ->
       error "fn T.part(own self) lends own Part {}" ~code:Lends_own ~at:"own Part"
         ~fixed:"fn T.part(own self) lends Part {}");
   test "yield in a lambda" (fun () ->
-      error "fn T.each(self) yields Int64 {\n  f(fn() { yield 1 })\n}" ~code:Misplaced_yield
-        ~at:"yield 1");
+      error Fixtures.Parser_rules.yield_in_a_lambda ~code:Misplaced_yield ~at:"yield 1");
   test "yield in concurrent code" (fun () ->
-      error "fn T.each(self) yields Int64 {\n  concurrent {\n    yield 1\n  }\n}"
-        ~code:Misplaced_yield ~at:"yield 1";
-      error "fn T.each(self) yields Int64 {\n  concurrent for x in s {\n    yield x\n  }\n}"
-        ~code:Misplaced_yield ~at:"yield x");
+      error Fixtures.Parser_rules.yield_in_concurrent_code ~code:Misplaced_yield ~at:"yield 1";
+      error Fixtures.Parser_rules.yield_in_concurrent_code_2 ~code:Misplaced_yield ~at:"yield x");
   test "break outside a loop" (fun () -> body_error "break" ~code:Misplaced_loop_exit ~at:"break");
   test "continue across a lambda" (fun () ->
       body_error "for x in s {\n  f(fn() { continue })\n}" ~code:Misplaced_loop_exit ~at:"continue");
@@ -340,7 +293,8 @@ let () =
   test "echo in a specification" (fun () ->
       error "fn f(x: Int64) requires echo x > 0 {}" ~code:Echo_in_specification ~at:"echo");
   test "a statement rule applies in every block" (fun () ->
-      body_error "let x = provide Fixed() {\n  assert true\n}" ~code:Misplaced_assert ~at:"assert");
+      body_error Fixtures.Parser_rules.statement_rule_applies_in_every_block ~code:Misplaced_assert
+        ~at:"assert");
   test "echo in a proof" (fun () ->
       body_error "proof {\n  echo x\n}" ~code:Echo_in_specification ~at:"echo")
 
@@ -364,7 +318,9 @@ let () =
         <> [ "(call f error x error (call g error))"; "(let y 2)" ]
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "an error in a clause leaves the body parsed" (fun () ->
-      let file, diagnostics = parse "fn f() requires + ensures true {\n  x\n}" in
+      let file, diagnostics =
+        parse Fixtures.Parser_rules.error_in_a_clause_leaves_the_body_parsed
+      in
       if codes diagnostics <> [ "parser.unexpected_token" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics));
       match file.definitions with
@@ -373,11 +329,15 @@ let () =
             fail "got %s" (Syntax_print.definition value)
       | _ -> fail "wrong definitions");
   test "an error in a member leaves the next member parsed" (fun () ->
-      let file, diagnostics = parse "trait T {\n  fn a(\n  fn b()\n}" in
+      let file, diagnostics =
+        parse Fixtures.Parser_rules.error_in_a_member_leaves_the_next_member_parsed
+      in
       ignore file;
       if List.length diagnostics > 2 then fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "nothing is reported before a closer the lexer inserted" (fun () ->
-      let _, diagnostics = parse "fn f() {\n  let x = (1 +\n}" in
+      let _, diagnostics =
+        parse Fixtures.Parser_rules.nothing_is_reported_before_a_closer_the_lexer
+      in
       if codes diagnostics <> [ "lexer.unclosed_bracket" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a reserved word is reported as reserved" (fun () ->
@@ -414,8 +374,8 @@ let () =
       body_error "let f = items.map(|item| { item })" ~code:Closure_bars ~at:"|"
         ~fixed:"let f = items.map(fn(item) { item })");
   test "|x| before let ... else" (fun () ->
-      body_error "let Some(f) = || g() else {\n  return\n}" ~code:Closure_bars ~at:"||"
-        ~fixed:"let Some(f) = (fn() { g() }) else {\n  return\n}");
+      body_error Fixtures.Parser_rules.x_before_let_else ~code:Closure_bars ~at:"||"
+        ~fixed:Fixtures.Parser_rules.x_before_let_else_fixed);
   test "|| x" (fun () ->
       body_error "let f = run(|| 1)" ~code:Closure_bars ~at:"||" ~fixed:"let f = run(fn() { 1 })");
   test "Point { x: 1.0 }" (fun () ->
@@ -455,9 +415,8 @@ let () =
       if List.map Syntax_print.statement statements <> [ "(let shape (. geometry::Shape Circle))" ]
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "a variant with its type in a pattern" (fun () ->
-      body_error "let area = match shape {\n  Shape.Circle(radius) => radius\n  _ => 0.0\n}"
-        ~code:Qualified_variant ~at:"Shape."
-        ~fixed:"let area = match shape {\n  Circle(radius) => radius\n  _ => 0.0\n}";
+      body_error Fixtures.Parser_rules.variant_with_its_type_in_a_pattern ~code:Qualified_variant
+        ~at:"Shape." ~fixed:Fixtures.Parser_rules.variant_with_its_type_in_a_pattern_fixed;
       body_error "let empty = shape is geometry::Shape::Empty" ~code:Qualified_variant
         ~at:"geometry::Shape::" ~fixed:"let empty = shape is Empty");
   test "a constant of a type in a pattern is not a variant" (fun () ->
@@ -526,7 +485,7 @@ let () =
         ~alternatives:[ "let off = (!flags.ready) is true" ]);
   test "a negation that is not the whole left operand of is needs none" (fun () ->
       let _, diagnostics =
-        body_of "let a = (!flag) is true\nlet b = !(value is Some(_))\nlet c = -count is 0"
+        body_of Fixtures.Parser_rules.negation_that_is_not_the_whole_left_operand_of_is
       in
       if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "a ?? b" (fun () ->
@@ -542,13 +501,7 @@ let () =
         <> [ "(let port (call (. (. settings port) unwrap_or) 80))" ]
       then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "a ? after a call is still a try" (fun () ->
-      let _, diagnostics =
-        body_of
-          "let text = read(path)?\n\
-           let both = first? == second?\n\
-           let less = nested?? - 1\n\
-           let table = [key?: 1]"
-      in
+      let _, diagnostics = body_of Fixtures.Parser_rules.after_a_call_is_still_a_try in
       if codes diagnostics <> [] then fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "items.map { it.name }" (fun () ->
       body_error "let names = items.map { it.name }" ~code:Trailing_lambda ~at:"{ it"

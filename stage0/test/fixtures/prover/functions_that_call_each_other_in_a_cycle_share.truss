@@ -1,0 +1,13 @@
+fn even(count: UInt32) -> Bool
+  decreases count
+  cost time O(count)
+{
+  if count == 0 { true } else { odd(count - 1) }
+}
+
+fn odd(count: UInt32) -> Bool
+  decreases count
+  cost time O(count)
+{
+  if count == 0 { false } else { even(count - 1) }
+}

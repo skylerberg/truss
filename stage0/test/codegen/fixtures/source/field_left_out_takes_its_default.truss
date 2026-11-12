@@ -1,0 +1,9 @@
+type Request(path: String, retries: Int64 = 3, secure: Bool = true)
+
+test "defaults" {
+  let request = Request(path: "/")
+  assert request.retries == 3
+  assert request.secure
+  let other = Request(path: "/", retries: 5)
+  assert other.retries == 5
+}

@@ -1,0 +1,11 @@
+type Box[Inner](inner: Inner)
+
+impl Shown for Box[Inner: Shown] {
+  type Part = (fn(Kept[Inner]) -> Bool cost time finite)
+}
+
+impl Shown for Marker {
+  type Part = Int64
+}
+
+type Holder(held: Kept[Box[Box[Marker]]])

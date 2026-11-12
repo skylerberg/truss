@@ -1,0 +1,13 @@
+type Box(width: Int64, label: String)
+
+let wide: Int64 = 40
+
+fn labelled(width: Int64) -> Box {
+  Box(width: width + wide, label: "box")
+}
+
+test "builds" {
+  let box = labelled(2)
+  assert box.width == 42
+  assert box.label == "box"
+}

@@ -1,0 +1,19 @@
+use standard::log
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Log
+{
+  log::debug("left out")
+  log::information(
+    "started",
+    fields: [
+      log::Field.integer("port", value: 8080),
+      log::Field.string("host", value: "a \"quoted\" name\n"),
+      log::Field.bool("ready", value: true),
+      log::Field.float("load", value: 0.5),
+      log::Field.duration("took", value: Duration.nanoseconds(1500)),
+    ],
+  )
+  log::error("stopped")
+  ExitCode(0)
+}

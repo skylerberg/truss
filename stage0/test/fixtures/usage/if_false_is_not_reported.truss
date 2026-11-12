@@ -1,0 +1,6 @@
+fn f() -> Int64 {
+  if false {
+    return 0
+  }
+  1
+}

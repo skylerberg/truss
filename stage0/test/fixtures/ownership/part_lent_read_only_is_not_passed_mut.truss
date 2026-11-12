@@ -1,0 +1,5 @@
+fn change(cell: mut Cell) {}
+
+fn f(grid: mut Grid) {
+  change(grid.cell(0))
+}

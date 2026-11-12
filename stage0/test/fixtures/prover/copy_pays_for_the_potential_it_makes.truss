@@ -1,0 +1,5 @@
+fn push_copy[Element: Copyable](list: mut List[Element], item: Element)
+  cost amortized time O(1 + time(Element.copy))
+{
+  mut list.push(item.copy())
+}

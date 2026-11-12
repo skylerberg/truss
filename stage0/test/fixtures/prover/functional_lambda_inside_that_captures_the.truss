@@ -1,0 +1,10 @@
+theorem wrongly_constant()
+  ensures apply(fn(x) {
+      var held = apply(fn(_) { x }, value: true)
+      held
+    }, value: true) == apply(fn(x) {
+      var held = apply(fn(_) { x }, value: true)
+      held
+    }, value: false)
+{
+}

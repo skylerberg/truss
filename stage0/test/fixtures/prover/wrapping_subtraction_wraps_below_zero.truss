@@ -1,0 +1,6 @@
+fn f(value: UInt8) -> UInt8
+  requires value == 1
+  ensures result == 255
+{
+  value.wrapping_subtract(2)
+}

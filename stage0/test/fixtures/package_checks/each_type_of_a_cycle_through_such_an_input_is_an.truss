@@ -1,0 +1,5 @@
+type Left =
+  | Stop
+  | Go(right: List[Right])
+
+type Right(run: (fn(Int64, Left) -> Bool cost time O(1)))

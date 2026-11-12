@@ -1,0 +1,5 @@
+impl Measured for Box {
+  fn measure(self) -> Int64 {
+    self.size
+  }
+}

@@ -1,0 +1,16 @@
+type Point(x: Int64, y: Int64)
+
+fn bump(value: mut Int64)
+  requires value < 100
+  ensures value == old(value) + 1
+{
+  value += 1
+}
+
+fn f() -> Int64
+  ensures result == 4
+{
+  var point = Point(x: 1, y: 2)
+  bump(mut point.x)
+  point.x + point.y
+}

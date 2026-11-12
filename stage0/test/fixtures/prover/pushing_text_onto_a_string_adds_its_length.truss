@@ -1,0 +1,7 @@
+fn f() -> USize
+  ensures result == 5
+{
+  var text = "ab"
+  mut text.push("cde")
+  text.length()
+}

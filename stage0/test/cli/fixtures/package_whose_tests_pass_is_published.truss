@@ -1,0 +1,4 @@
+
+test "a turn is whole" {
+  assert turn() == 360
+}

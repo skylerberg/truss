@@ -1,0 +1,12 @@
+fn shift_left_all(items: mut List[Int64], position: USize)
+  requires position <= items.length()
+  ensures items.length() == old(items.length())
+  decreases position
+  cost time O(position)
+  cost amortized time O(position)
+{
+  if position >= 2 {
+    mut items.swap(position - 1, second: position - 2)
+    shift_left_all(mut items, position: position - 1)
+  }
+}

@@ -1,0 +1,3 @@
+fn f(count: UInt32, length: UInt64) -> Bool {
+  length == count
+}

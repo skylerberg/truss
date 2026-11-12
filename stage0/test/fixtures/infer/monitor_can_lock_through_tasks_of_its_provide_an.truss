@@ -1,0 +1,32 @@
+fn same() {
+  var tally = Tally(count: 0)
+  let scheduler = Scheduler(turn: 0)
+  provide mut tally, scheduler {
+    concurrent {
+      count_once()
+      count_once()
+    }
+  }
+}
+
+fn enclosing() {
+  var tally = Tally(count: 0)
+  let scheduler = Scheduler(turn: 0)
+  provide scheduler {
+    provide mut tally {
+      concurrent {
+        count_once()
+        count_once()
+      }
+    }
+  }
+}
+
+fn through_parameter[capability Granted](run: (fn() uses Granted))
+  uses Granted
+{
+  var tally = Tally(count: 0)
+  provide mut tally {
+    run()
+  }
+}

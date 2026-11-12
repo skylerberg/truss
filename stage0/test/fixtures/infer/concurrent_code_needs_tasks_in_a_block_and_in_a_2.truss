@@ -1,0 +1,7 @@
+fn g(item: Int64) {}
+
+fn f(items: List[Int64]) {
+  concurrent for item in items {
+    g(item)
+  }
+}

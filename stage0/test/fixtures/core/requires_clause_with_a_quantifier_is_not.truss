@@ -1,0 +1,10 @@
+fn g(items: List[Int64], limit: Int64) -> Int64
+  requires limit > 0
+  requires forall index in 0..items.length() => items[index] < limit
+  ensures result >= 0
+{
+  proof {
+    assert limit > 0
+  }
+  limit
+}

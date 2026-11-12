@@ -1,0 +1,8 @@
+type Day(count: Int32)
+  derives Equal, Ordered
+
+theorem days_order_as_their_counts()
+  ensures forall first: Day => forall second: Day =>
+    (first < second) == (first.count < second.count)
+{
+}

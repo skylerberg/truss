@@ -1,0 +1,9 @@
+fn halve(count: UInt32) -> UInt32
+  requires count < 100
+{
+  count / 2
+}
+
+fn quarter(count: UInt32) -> UInt32 {
+  halve(count) / 2
+}

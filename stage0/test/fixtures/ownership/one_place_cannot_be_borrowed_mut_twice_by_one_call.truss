@@ -1,0 +1,6 @@
+fn swap(first: mut Int64, second: mut Int64) {}
+
+fn f() {
+  var first = 1
+  swap(mut first, second: mut first)
+}

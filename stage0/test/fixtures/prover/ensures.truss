@@ -1,0 +1,5 @@
+type Pair(first: Int64, second: Int64)
+
+type Tagged(tag: Int64, value: Int64)
+
+fn Pair.tagged(mut self) lends mut Tagged

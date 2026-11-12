@@ -1,0 +1,5 @@
+trait Feed {
+  capability Uses
+  fn pull(mut self) -> Int64
+    uses Self.Uses
+}

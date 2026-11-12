@@ -1,0 +1,3 @@
+test "a" {
+  let x = forall value: Int64 => value == value
+}

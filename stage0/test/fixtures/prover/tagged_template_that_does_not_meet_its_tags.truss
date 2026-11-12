@@ -1,0 +1,3 @@
+fn f(name: String) -> Shout {
+  Shout"hey ${name.copy()}"
+}

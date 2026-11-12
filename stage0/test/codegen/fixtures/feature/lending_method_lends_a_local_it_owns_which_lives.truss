@@ -1,0 +1,11 @@
+type Holder(id: Int64)
+
+fn Holder.label(self) lends String {
+  let text = "label ${self.id}"
+  yield text
+}
+
+test "lent" {
+  let holder = Holder(id: 1)
+  assert holder.label() == "label 1"
+}

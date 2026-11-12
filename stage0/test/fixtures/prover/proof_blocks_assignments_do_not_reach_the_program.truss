@@ -1,0 +1,9 @@
+fn f() -> Int64
+  ensures result == 5
+{
+  var x: Int64 = 0
+  proof {
+    x = 5
+  }
+  x
+}

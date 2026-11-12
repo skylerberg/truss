@@ -1,0 +1,7 @@
+use clock_library::time
+
+fn f() -> Instant
+  uses Clock
+{
+  time::stamp()
+}

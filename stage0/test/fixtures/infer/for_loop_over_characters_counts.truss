@@ -1,0 +1,5 @@
+fn f(first: Character, last: Character) {
+  for letter in first..last {
+    let _ = letter
+  }
+}

@@ -1,0 +1,11 @@
+type Keeper(held: StringSlice)
+
+impl Journal for Keeper {
+  fn write(mut self, text: StringSlice) {
+    self.held = text
+  }
+
+  fn last(self) -> StringSlice {
+    self.held
+  }
+}

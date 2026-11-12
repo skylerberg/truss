@@ -1,0 +1,40 @@
+type Counter(count: Int64, calls: Int64)
+
+capability Tally {
+  fn add(amount: Int64)
+  fn total() -> Int64
+  fn calls() -> Int64
+}
+
+impl Tally for Counter {
+  fn add(mut self, amount: Int64) {
+    let before = self.count
+    self.calls += 1
+    self.count = before + amount
+  }
+
+  fn total(self) -> Int64 {
+    self.count
+  }
+
+  fn calls(self) -> Int64 {
+    self.calls
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var counter = Counter(count: 0, calls: 0)
+  provide mut counter {
+    concurrent for task in 0..8 {
+      for step in 0..5000 {
+        if task >= 0 && step >= 0 {
+          Tally.add(1)
+        }
+      }
+    }
+    Console.print_line("total ${Tally.total()} after ${Tally.calls()} calls")
+  }
+  ExitCode.success
+}

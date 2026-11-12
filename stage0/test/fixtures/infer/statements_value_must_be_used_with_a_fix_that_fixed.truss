@@ -1,0 +1,3 @@
+fn f(items: List[Int64]) {
+  let _ = items.length()
+}

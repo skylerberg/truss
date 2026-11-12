@@ -1,0 +1,10 @@
+fn sum(first: own USize, second: USize) {}
+
+fn bump(count: mut USize) -> USize {
+  count = 1
+  count
+}
+
+fn f(count: mut USize) {
+  sum(count, second: bump(mut count))
+}

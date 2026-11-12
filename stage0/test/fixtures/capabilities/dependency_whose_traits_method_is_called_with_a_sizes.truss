@@ -1,0 +1,9 @@
+public trait Doubled {
+  fn doubled(self) -> Int64
+}
+
+impl Doubled for Int64 {
+  fn doubled(self) -> Int64 {
+    self
+  }
+}

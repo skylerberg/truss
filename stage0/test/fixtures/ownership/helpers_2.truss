@@ -1,0 +1,10 @@
+type Holder(items: List[Int64], count: USize)
+
+fn wait(count: USize) -> Result[USize, USize]
+  uses Clock
+{
+  Ok(count)
+}
+
+fn keep(items: own List[Int64]) {}
+

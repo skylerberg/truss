@@ -1,0 +1,15 @@
+fn bump(count: mut Int64)
+  requires count < 100
+  ensures count == old(count) + 1
+{
+  count += 1
+}
+
+fn f() -> Int64
+  ensures result == 5
+{
+  var value: Int64 = 3
+  bump(mut value)
+  bump(mut value)
+  value
+}

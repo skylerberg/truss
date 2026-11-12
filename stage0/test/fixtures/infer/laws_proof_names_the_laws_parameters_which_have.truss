@@ -1,0 +1,16 @@
+type Pair(first: UInt8, second: UInt8)
+  derives Equal
+
+fn same(first: Pair, second: Pair) -> Bool {
+  first == second
+}
+
+impl Ordered for Pair {
+  fn compare(self, other: Pair) -> Ordering {
+    self.first.compare(other.first)
+  }
+}
+
+proof Ordered.agrees_with_equal for Pair {
+  let _ = same(first, second: second)
+}

@@ -1,0 +1,13 @@
+fn f(last: UInt32) -> UInt64
+  requires last < 1000
+  ensures result == last + 1
+{
+  var seen: UInt64 = 0
+  for index in 0..=last
+    invariant seen == index
+    invariant index <= last + 1
+  {
+    seen += 1
+  }
+  seen
+}

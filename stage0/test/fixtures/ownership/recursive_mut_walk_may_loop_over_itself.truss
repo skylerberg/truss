@@ -1,0 +1,10 @@
+type Tree(value: Int64, children: List[Tree])
+
+fn Tree.each(mut self) yields mut Int64 {
+  yield mut self.value
+  for child in mut self.children {
+    for value in mut child.each() {
+      yield mut value
+    }
+  }
+}

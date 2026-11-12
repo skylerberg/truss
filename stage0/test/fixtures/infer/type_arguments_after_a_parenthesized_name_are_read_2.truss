@@ -1,0 +1,3 @@
+fn f() -> String {
+  (identity)[Int64](5)
+}

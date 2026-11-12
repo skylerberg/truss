@@ -1,0 +1,20 @@
+fn double(value: Int64) -> Int64 {
+  value * 2
+}
+
+fn apply(transform: fn(Int64) -> Int64, value: Int64) -> Int64 {
+  transform(value)
+}
+
+fn doubled(value: Int64) -> Int64 {
+  apply(double, value: value)
+}
+
+fn named() -> fn(Int64) -> Int64 {
+  double
+}
+
+test "function values" {
+  assert doubled(4) == 8
+  assert apply(named(), value: 5) == 10
+}

@@ -1,0 +1,27 @@
+fn search(count: Int64)
+  uses Tasks, Console
+{
+  concurrent for index in 0..count {
+    concurrent {
+      {
+        if index == 1 {
+          continue
+        }
+        if index == 2 {
+          break
+        }
+        Console.print_line("first ${index}")
+      }
+      Console.print_line("beside ${index}")
+    }
+    Console.print_line("after block ${index}")
+  }
+  Console.print_line("after the loop")
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  search(5)
+  ExitCode.success
+}

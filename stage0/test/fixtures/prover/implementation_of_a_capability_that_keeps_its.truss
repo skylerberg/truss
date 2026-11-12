@@ -1,0 +1,8 @@
+type Fair(face: UInt8)
+  invariant face >= 1 && face <= 6
+
+impl Dice for Fair {
+  fn roll(self) -> UInt8 {
+    self.face
+  }
+}

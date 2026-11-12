@@ -1,0 +1,12 @@
+fn folded[Source: Feed, capability Granted](
+  source: mut Source,
+  step: (fn(Int64) -> Int64 uses Granted),
+) -> Int64
+  uses Source.Uses, Granted
+{
+  match mut source.pull() {
+    Some(value) => step(value)
+    None => 0
+  }
+}
+

@@ -1,0 +1,30 @@
+
+fn fib(n: Int64) -> Int64 {
+  if n < 2 {
+    return n
+  }
+  parallel {
+    let left = fib(n - 1)
+    let right = fib(n - 2)
+  }
+  left.wrapping_add(right)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var counter = Counter(count: 0)
+  provide mut counter {
+    concurrent for _ in 0..64 {
+      Tasks.yield_now()
+      Tally.add(fib(15))
+      var numbers: List[Int64] = [1, 2, 3, 4, 5, 6, 7, 8]
+      parallel for item in mut numbers {
+        item = item * 2
+      }
+      Tally.add(numbers[7])
+    }
+    Console.print_line("total ${Tally.total()}")
+  }
+  ExitCode.success
+}

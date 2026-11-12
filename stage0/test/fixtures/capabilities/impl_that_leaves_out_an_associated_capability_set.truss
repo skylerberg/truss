@@ -1,0 +1,5 @@
+fn f() -> Int64 {
+  var counter = Counter(next: 0)
+  mut counter.skip()
+  drain(mut counter)
+}

@@ -1,0 +1,7 @@
+fn g(items: List[Int64], visit: (fn(Int64) cost time finite))
+  uses Clock
+  cost calls(visit) == items.length()
+  cost calls(Clock.now) <= 1
+  cost time O(items.length() * time(visit))
+{
+}

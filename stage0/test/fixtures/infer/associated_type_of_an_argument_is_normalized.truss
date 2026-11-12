@@ -1,0 +1,5 @@
+fn has_key[Collection: Index](collection: Collection, key: Collection.Key) {}
+
+fn f(items: List[Int64]) {
+  has_key(items, key: 0)
+}

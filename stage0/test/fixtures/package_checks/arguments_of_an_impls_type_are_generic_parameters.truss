@@ -1,0 +1,5 @@
+type Box[Inner](inner: Inner)
+
+impl Shown for Box[Marker] {
+  type Part = Int64
+}

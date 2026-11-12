@@ -1,0 +1,3 @@
+trait Changeable: Iterable {
+  fn each(mut self) yields mut Self.Element
+}

@@ -1,0 +1,24 @@
+trait Scale[Factor] {
+  fn scale(self, by: Factor) -> Int64
+    cost time finite
+
+  law zero(value: Self, by: Factor) { value.scale(by) == 0 }
+}
+
+type Box()
+
+impl Scale[Int64] for Box {
+  fn scale(self, by: Int64) -> Int64
+    cost time finite
+  {
+    0
+  }
+}
+
+impl Scale[Bool] for Box {
+  fn scale(self, by: Bool) -> Int64
+    cost time finite
+  {
+    1
+  }
+}

@@ -1,0 +1,7 @@
+type Outer(inner: Kept[Marker])
+
+type Other()
+
+impl Shown for Other {
+  type Part = List[Kept[Marker]]
+}

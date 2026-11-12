@@ -1,0 +1,5 @@
+fn twice[Number: SignedInteger](value: Number) -> Number
+  requires -50 <= value && value <= 50
+{
+  value + value
+}

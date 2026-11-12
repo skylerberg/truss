@@ -1,0 +1,6 @@
+fn f(items: List[Int64]) {
+  var total: List[Int64] = []
+  parallel for item in items {
+    mut total.push(item)
+  }
+}
