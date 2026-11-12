@@ -129,7 +129,7 @@ Each document has one job, and a fact is stated in one of them:
   it is written, and its exact grammar. They describe the language, whether
   or not stage0 builds all of it yet.
 - **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
-  [TYPECHECKER.md](TYPECHECKER.md), [PROVER.md](PROVER.md),
+  [TYPECHECKER.md](TYPECHECKER.md), [MIR.md](MIR.md), [PROVER.md](PROVER.md),
   [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and
   [CLI.md](CLI.md) say what stage0 does,**
   each for its own stage, and each ends with the one list of what that stage
