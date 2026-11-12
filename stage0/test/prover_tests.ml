@@ -4841,18 +4841,22 @@ let () =
 
 (* Addresses of views *)
 
+(* A module of the standard library, which alone can import
+   [standard::intrinsic]: its diagnostics. *)
+let in_standard text =
+  let database = Engine.context (Engine.create ~log:true ()) in
+  Database.load_package (Engine.of_context database)
+    ~name:{ owner = None; name = "standard" }
+    ~dependencies:[]
+    [ (Support.module_of "standard::probe", text) ];
+  check database (Support.module_of "standard::probe")
+
+let proven_in_standard text =
+  match in_standard text with
+  | [] -> ()
+  | actual -> fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual))
+
 let () =
-  let proven_in_standard text =
-    let database = Engine.context (Engine.create ~log:true ()) in
-    Database.load_package (Engine.of_context database)
-      ~name:{ owner = None; name = "standard" }
-      ~dependencies:[]
-      [ (Support.module_of "standard::probe", text) ];
-    match check database (Support.module_of "standard::probe") with
-    | [] -> ()
-    | actual ->
-        fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual))
-  in
   test "a view of a scalar ends within the address space and is not at zero" (fun () ->
       proven_in_standard
         "use standard::intrinsic\n\n\
@@ -4864,3 +4868,26 @@ let () =
         \  }\n\
         \  first\n\
          }\n")
+
+(* Intrinsic operations *)
+
+let () =
+  test "an intrinsic operation has its operator's facts" (fun () ->
+      proven_in_standard
+        "use standard::intrinsic\n\n\
+         fn low(value: UInt64, mask: UInt64) -> UInt64\n\
+        \  ensures result <= mask\n\
+         {\n\
+        \  intrinsic::bit_and(value, right: mask)\n\
+         }\n");
+  test "an intrinsic shift has its operator's obligation on the amount" (fun () ->
+      match
+        Support.codes
+          (in_standard
+             "use standard::intrinsic\n\n\
+              fn shifted(value: UInt64, amount: UInt64) -> UInt64 {\n\
+             \  intrinsic::shift_left(value, amount: amount)\n\
+              }\n")
+      with
+      | [ "prover.shift" ] -> ()
+      | codes -> fail "expected prover.shift, found %s" (String.concat ", " codes))
