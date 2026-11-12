@@ -393,7 +393,13 @@ let put t bytes =
   key
 
 let get t key = if String.length key <> key_width then None else lookup t key
-let result_key ~kind ~key = Blake3.hash ("result\000" ^ kind ^ "\000" ^ key)
+
+(* A result's name. Values share the segments with results, and the
+   derive-key mode keeps every result's name apart from every value's. *)
+let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-12 store result"
+
+let result_key ~kind ~key =
+  derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text kind; Cbor.Bytes key ]))
 
 let find_result t ~kind ~key =
   let name = result_key ~kind ~key in

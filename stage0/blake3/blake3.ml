@@ -17,6 +17,8 @@ let chunk_start = 1
 let chunk_end = 2
 let parent = 4
 let root = 8
+let derive_key_context = 32
+let derive_key_material = 64
 let block_length = 64
 let chunk_length = 1024
 
@@ -159,16 +161,18 @@ let chaining_value ?(flags = 0) output =
     ~flags:(output.flags lor flags)
 
 (* The output of the chunk numbered [counter], which holds [length] bytes of
-   [input] from [offset]. Every block but the last is compressed here. *)
-let chunk_output input ~offset ~length ~counter =
-  let chaining = ref initial in
+   [input] from [offset]. Every block but the last is compressed here. [key]
+   and [mode] are the chaining value and the flags that the hash's mode
+   starts every chunk and parent node with. *)
+let chunk_output ~key ~mode input ~offset ~length ~counter =
+  let chaining = ref key in
   let blocks = if length = 0 then 1 else (length + block_length - 1) / block_length in
   for index = 0 to blocks - 2 do
     chaining :=
       compress !chaining
         (words input (offset + (index * block_length)) block_length)
         ~counter ~length:block_length
-        ~flags:(if index = 0 then chunk_start else 0)
+        ~flags:(mode lor if index = 0 then chunk_start else 0)
   done;
   let last_offset = (blocks - 1) * block_length in
   let last_length = length - last_offset in
@@ -177,19 +181,21 @@ let chunk_output input ~offset ~length ~counter =
     block = words input (offset + last_offset) last_length;
     counter;
     length = last_length;
-    flags = (if blocks = 1 then chunk_start else 0) lor chunk_end;
+    flags = mode lor (if blocks = 1 then chunk_start else 0) lor chunk_end;
   }
 
-let parent_output left right =
+let parent_output ~key ~mode left right =
   {
-    chaining = initial;
+    chaining = key;
     block = Array.append left right;
     counter = 0;
     length = block_length;
-    flags = parent;
+    flags = mode lor parent;
   }
 
-let hash input =
+(* The eight words of the root's chaining value, which are the first 32
+   bytes of the hash's output. *)
+let root_words ~key ~mode input =
   let total = String.length input in
   let chunks = if total = 0 then 1 else (total + chunk_length - 1) / chunk_length in
   (* The stack of chaining values of complete subtrees, merged as the
@@ -198,14 +204,15 @@ let hash input =
   let stack = ref [] in
   for index = 0 to chunks - 2 do
     let output =
-      chunk_output input ~offset:(index * chunk_length) ~length:chunk_length ~counter:index
+      chunk_output ~key ~mode input ~offset:(index * chunk_length) ~length:chunk_length
+        ~counter:index
     in
     let value = ref (chaining_value output) in
     let finished = ref (index + 1) in
     while !finished land 1 = 0 do
       (match !stack with
       | left :: rest ->
-          value := chaining_value (parent_output left !value);
+          value := chaining_value (parent_output ~key ~mode left !value);
           stack := rest
       | [] -> assert false);
       finished := !finished lsr 1
@@ -214,16 +221,26 @@ let hash input =
   done;
   let last_offset = (chunks - 1) * chunk_length in
   let last =
-    chunk_output input ~offset:last_offset ~length:(total - last_offset) ~counter:(chunks - 1)
+    chunk_output ~key ~mode input ~offset:last_offset ~length:(total - last_offset)
+      ~counter:(chunks - 1)
   in
   let output =
-    List.fold_left (fun right left -> parent_output left (chaining_value right)) last !stack
+    List.fold_left
+      (fun right left -> parent_output ~key ~mode left (chaining_value right))
+      last !stack
   in
+  chaining_value ~flags:root output
+
+let bytes_of_words words =
   let digest = Bytes.create 32 in
-  Array.iteri
-    (fun place word -> Bytes.set_int32_le digest (place * 4) (Int32.of_int word))
-    (chaining_value ~flags:root output);
+  Array.iteri (fun place word -> Bytes.set_int32_le digest (place * 4) (Int32.of_int word)) words;
   Bytes.unsafe_to_string digest
+
+let hash input = bytes_of_words (root_words ~key:initial ~mode:0 input)
+
+let derive_key ~context =
+  let key = root_words ~key:initial ~mode:derive_key_context context in
+  fun material -> bytes_of_words (root_words ~key ~mode:derive_key_material material)
 
 let to_hex digest =
   String.concat ""

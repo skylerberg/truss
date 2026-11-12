@@ -164,12 +164,14 @@ let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_s
 (* What an instance refers to, and the hash of its own code. A constant
    worked out by running code refers to the evaluator that works it out,
    whose code is what decides its value. *)
+let evaluated_own_hash =
+  Blake3.derive_key ~context:"truss 2026-11-12 evaluated constant own hash" ""
+
 let linked =
   Query.query ~name:"linked" ~phase:Phases.linking ~show:show_instance
     (fun database (lowering, key) ->
       match Query.demand database (Lazy.force lowered) (lowering, key) with
-      | Evaluate (path, _) ->
-          (Blake3.hash "a constant worked out by its evaluator", [ Instance.Evaluator path ])
+      | Evaluate (path, _) -> (evaluated_own_hash, [ Instance.Evaluator path ])
       | Compiled compiled ->
           let context = fresh_context lowering database in
           let references = Reachable.compiled_references context.env compiled in
@@ -244,15 +246,16 @@ let () = ignore (Lazy.force reach)
    reach, the version of code generation, and the target, since [USize] is
    a [typedef] in the C, so the LIR can be the same for two widths while
    results such as [USize.maximum] are not. *)
+let derive_test_key = Blake3.derive_key ~context:"truss 2026-11-12 test key"
+
 let test_key_query =
   Query.query ~name:"test_key" ~phase:Phases.keys ~saved:true ~portable:true
     ~show:(fun (lowering, path) -> show_lowering lowering ^ " " ^ Path.show path)
     (fun database (lowering, path) ->
-      Blake3.hash
+      derive_test_key
         (Cbor.encode
            (Cbor.Array
               [
-                Text "truss test";
                 Cbor.int Lir.version;
                 target_key lowering.target;
                 Bytes (Query.demand database (Lazy.force reach) (lowering, Lower.test_key path));
@@ -890,25 +893,26 @@ let build_program t ~main ~output =
   let root = Instance.Program_main main in
   build t ~roots:[ root ] ~startup:(Startup.program_calling (Instance.symbol root)) ~output
 
-(* Works out a tagged template's check: each of the tag's [from_template]'s
-   clauses that can run, for a template of these literal texts, by its
-   position among the clauses, with whether it holds. Results are kept for
-   the compiler's run, and, with [results], under the key of the code that
-   ran, as test results are, which the texts are part of. *)
 (* What a run of code while compiling is kept under: the key of everything
    its root can reach, which its inputs are part of. *)
+let derive_run_key = Blake3.derive_key ~context:"truss 2026-11-12 compile-time run key"
+
 let run_key t root =
   t.want t.lowering [ root ];
-  Blake3.hash
+  derive_run_key
     (Cbor.encode
        (Cbor.Array
           [
-            Text "truss code run while compiling";
             Cbor.int Lir.version;
             target_key t.lowering.target;
             Bytes (Query.demand t.database (Lazy.force reach) (t.lowering, root));
           ]))
 
+(* Works out a tagged template's check: each of the tag's [from_template]'s
+   clauses that can run, for a template of these literal texts, by its
+   position among the clauses, with whether it holds. Results are kept for
+   the compiler's run, and, with [results], under the key of the code that
+   ran, as test results are, which the texts are part of. *)
 let check_template ?results t ~time_limit ~from_template ~texts =
   reporting t @@ fun () ->
   match Lower.template_checked t.context from_template with

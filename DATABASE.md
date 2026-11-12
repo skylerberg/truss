@@ -429,6 +429,17 @@ from one that is.
 - **Every hash is BLAKE3,** written in stage0 from the specification and
   tested against the official test vectors, since `digestif`, the OCaml
   library at hand, has BLAKE2 and not BLAKE3.
+- **Content is hashed in the default mode, and keys in the derive-key
+  mode.** A value, a file's text, or an executable is named by its plain
+  hash. A key made of fields writes them as a deterministic CBOR array and
+  hashes that under a context, a constant string that names the kind of
+  key, such as `truss 2026-11-12 store result`. CBOR prefixes every field
+  with its length, so two lists of fields never share an encoding. The
+  mode's flags make every key of one context disjoint from every plain hash
+  and from every key of another context, so a value whose bytes spell a
+  key's input is never read as that key's result. A changed key format
+  takes a new context, and keys of the old format stop matching instead of
+  being misread.
 - **A fingerprint is worked out when it is first needed:** when the state is
   written, or when a result that read the node is looked for as a fact.
 - **A result that was not read back is compared by fingerprint.** A state
@@ -641,8 +652,8 @@ the machine. It holds:
 | Kind | Named by | Where |
 |---|---|---|
 | Values, artifacts among them | The BLAKE3 hash of their bytes | `segments/` |
-| Facts, and what each result first read | The hash of their key | `segments/` |
-| Results of expensive steps | The hash of their kind and of exactly the input that made them (see [Exact keys](#exact-keys)) | `segments/` |
+| Facts, and what each result first read | Their kind and key, hashed as a store result | `segments/` |
+| Results of expensive steps | Their kind and exactly the input that made them, hashed as a store result (see [Exact keys](#exact-keys)) | `segments/` |
 | A package's artifact | The key of its sources | `segments/` |
 | Object files | Their key, as CODEGEN.md describes | `objects/`, one file each, since a linker reads them by path |
 | A registry package's files | The hash of the files, as SYNTAX.md's "The lock file" defines it | `packages/`, one directory each |
@@ -660,8 +671,8 @@ them, with sorted indexes like git's pack files:
 
 - **A record** is a kind byte, a 32-byte key, the value's length, the value,
   and an 8-byte FNV-1a checksum of the rest. Every key has the same width: a
-  value's is the hash of its bytes, and a result's is the hash of its kind
-  and key.
+  value's is the hash of its bytes, and a result's is derived from its
+  kind and key under the store result's context.
 - **Each process that writes has a segment of its own,** locked while it
   writes, so writers never share a file and need no lock to write. A value
   two processes both add is in both segments, which is harmless, since its

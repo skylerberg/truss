@@ -97,7 +97,7 @@ let project session =
 (* A package whose sources never change is checked once, written whole, and
    found from then on by the key of its sources: for the standard library,
    which is built into the compiler, the compiler's identity. *)
-let standard_key identity = identity ^ " standard"
+let standard_key identity = Cbor.encode (Cbor.Array [ Cbor.Text identity; Cbor.Text "standard" ])
 
 let stored_standard () =
   let store = Session.store () and identity = Session.identity () in

@@ -355,6 +355,7 @@ let encode_table ?(path = Ground.encode_path) ?instance (table : table) =
         table.entries;
     ]
 
+let derive_lir_hash = Blake3.derive_key ~context:"truss 2026-11-12 lir instance"
+
 let hash t =
-  Blake3.hash
-    (Cbor.encode (Cbor.Array [ Text "truss lir"; Cbor.int version; encode (canonical_instance t) ]))
+  derive_lir_hash (Cbor.encode (Cbor.Array [ Cbor.int version; encode (canonical_instance t) ]))

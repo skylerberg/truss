@@ -40,8 +40,8 @@ val flush : t -> unit
 (** {1 Results} *)
 
 val find_result : t -> kind:string -> key:string -> string option
-(** The result of a kind, such as ["tests"], kept under a key: the hash of exactly the input that
-    made it. *)
+(** The result of a kind, such as ["tests"], kept under a key: exactly the input that made it, or
+    its hash. *)
 
 val add_result : t -> kind:string -> key:string -> string -> unit
 
