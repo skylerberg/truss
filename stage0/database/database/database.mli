@@ -121,9 +121,9 @@ val store_directory : unit -> string
 (** {1 Dependencies}
 
     An edge records that a part of one definition, such as its body, read a part of another, such as
-    its signature, when the session last computed it. The edges over-approximate: a read of a result
-    about a whole package, such as its impls, is an edge to every definition that result read. No
-    read is missing. *)
+    its signature, when the session last computed it. The edges over-approximate: a read of a
+    lookup, such as a type's impls, is an edge to every definition the lookup read. No read is
+    missing. *)
 
 val dependencies : session -> Path.t list -> Graph_types.edge list
 (** The edges from the definitions' parts. *)
