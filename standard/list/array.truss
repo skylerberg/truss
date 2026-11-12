@@ -2,14 +2,14 @@ use standard::intrinsic
 use standard::list::slice
 
 public fn Array[Element: Copyable, count: USize].filled(value: Element) -> Array[Element, count]
-  ensures forall position in 0..count => identical(result.model()[position], value)
+  ensures forall i in 0..count => identical(result.model()[i], value)
   cost time O(count * time(Element.copy))
 {
   var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
   for index in 0..count
     invariant intrinsic::storage_length(elements) == index
     invariant intrinsic::storage_capacity(elements) == count
-    invariant forall position in 0..index => identical(intrinsic::storage_model(elements)[position], value)
+    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], value)
   {
     intrinsic::storage_push(mut elements, value: value.copy())
   }
@@ -19,7 +19,7 @@ public fn Array[Element: Copyable, count: USize].filled(value: Element) -> Array
 public fn Array[Element, count: USize].generate(
   make: (fn(index: USize) -> Element requires index < count cost time finite),
 ) -> Array[Element, count]
-  ensures forall position in 0..count => identical(result.model()[position], make(position))
+  ensures forall i in 0..count => identical(result.model()[i], make(i))
   cost calls(make) == count
   cost time O(count * time(make))
 {
@@ -27,7 +27,7 @@ public fn Array[Element, count: USize].generate(
   for index in 0..count
     invariant intrinsic::storage_length(elements) == index
     invariant intrinsic::storage_capacity(elements) == count
-    invariant forall position in 0..index => identical(intrinsic::storage_model(elements)[position], make(position))
+    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], make(i))
   {
     intrinsic::storage_push(mut elements, value: make(index))
   }
@@ -109,7 +109,7 @@ impl Iterable for Array[Element, count: USize] {
   fn each(self) yields Element
     ensures identical(result, self.model()[yielded.length()])
     ensures yielded.length() <= count
-    ensures forall position in 0..yielded.length() => identical(yielded[position], self.model()[position])
+    ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
     ensures finished ==> yielded.length() == count
     ensures finished ==> identical(yielded, self.model())
     cost time O(count)
@@ -118,7 +118,7 @@ impl Iterable for Array[Element, count: USize] {
     while index < count
       invariant index <= count
       invariant yielded.length() == index
-      invariant forall position in 0..yielded.length() => identical(yielded[position], self.model()[position])
+      invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
       decreases count - index
     {
       yield self[index]
@@ -138,7 +138,7 @@ public fn Array[Element, count: USize].each(mut self) yields mut Element
 public fn Array[Element, count: USize].each(own self) yields own Element
   ensures identical(result, self.model()[yielded.length()])
   ensures yielded.length() <= count
-  ensures forall index in 0..yielded.length() => identical(yielded[index], self.model()[index])
+  ensures forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
   ensures finished ==> yielded.length() == count
   ensures finished ==> identical(yielded, self.model())
   cost time O(count)
@@ -147,9 +147,9 @@ public fn Array[Element, count: USize].each(own self) yields own Element
   mut remaining.reverse()
   while remaining.length() > 0
     invariant remaining.length() + yielded.length() == count
-    invariant forall index in 0..remaining.length() =>
-      identical(remaining.model()[index], self.model()[count - 1 - index])
-    invariant forall index in 0..yielded.length() => identical(yielded[index], self.model()[index])
+    invariant forall i in 0..remaining.length() =>
+      identical(remaining.model()[i], self.model()[count - 1 - i])
+    invariant forall i in 0..yielded.length() => identical(yielded[i], self.model()[i])
     decreases remaining.length()
   {
     yield intrinsic::storage_pop(mut remaining.storage)
@@ -180,7 +180,7 @@ public fn Array[Element, count: USize].map_each[Output, capability Granted](
 
 impl Equal for Array[Element: Equal, count: USize] {
   fn equal(self, other: Array[Element, count]) -> Bool
-    ensures result == (forall index in 0..count => self.model()[index] == other.model()[index])
+    ensures result == (forall i in 0..count => self.model()[i] == other.model()[i])
   {
     self.slice() == other.slice()
   }

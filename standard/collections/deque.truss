@@ -303,7 +303,7 @@ public fn collections::Deque[Element].each(own self) yields own Element
 impl Equal for collections::Deque[Element: Equal] {
   fn equal(self, other: collections::Deque[Element]) -> Bool
     ensures result == (self.length() == other.length()
-      && forall position in 0..self.length() => self[position] == other[position])
+      && forall i in 0..self.length() => self[i] == other[i])
   {
     if self.length() != other.length() {
       return false
@@ -311,7 +311,7 @@ impl Equal for collections::Deque[Element: Equal] {
     var index: USize = 0
     while index < self.length()
       invariant index <= self.length()
-      invariant forall position in 0..index => self[position] == other[position]
+      invariant forall i in 0..index => self[i] == other[i]
       decreases self.length() - index
     {
       if self[index] != other[index] {
