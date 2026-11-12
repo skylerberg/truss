@@ -2,8 +2,6 @@
    collection literals, lambdas, [if], and [match]. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -18,7 +16,7 @@ open Statements
 
 let rec string_literal state env ?expected (value : expression) (literal : string_literal) =
   let parts = List.map (fun (part, _) -> (part, expression state env part)) literal.rest in
-  let template : C.template =
+  let template : Tables.template =
     {
       from_template = None;
       part_conversions = List.map (fun _ -> None) parts;
@@ -40,7 +38,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
             }
     | None -> ()
   in
-  let trait_call trait name receiver self_type evidence arguments result : C.call =
+  let trait_call trait name receiver self_type evidence arguments result : Tables.call =
     {
       callee =
         Trait_method
@@ -48,7 +46,12 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
       arguments =
         List.mapi
           (fun index (written : expression) ->
-            { C.expression = written.id; parameter_index = index; mode = T.Read; mark = None })
+            {
+              Tables.expression = written.id;
+              parameter_index = index;
+              mode = Types.Read;
+              mark = None;
+            })
           arguments;
       omitted_defaults = [];
       uses = [];
@@ -65,18 +68,18 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
         (fun index ((part : expression), part_type) ->
           defer state (fun () ->
               let part_type = normalize state part_type in
-              if T.contains_unsolved part_type then false
+              if Types.contains_unsolved part_type then false
               else begin
                 let display = trait_reference (Well_known.path Display) in
                 (match implements state part_type display with
                 | Some evidence ->
                     set_part index
-                      (trait_call display "display" Path.Read part_type evidence [ part ] T.unit)
+                      (trait_call display "display" Path.Read part_type evidence [ part ] Types.unit)
                 | None ->
                     report state No_impl part.span
                       (Printf.sprintf
                          "`%s` does not implement `Display`, so it cannot be interpolated."
-                         (T.show part_type)));
+                         (Types.show part_type)));
                 true
               end))
         parts;
@@ -85,7 +88,8 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
       match target state tag.last with
       | Some (Definition (Type, tag_path)) ->
           let tag_type =
-            T.Named { path = tag_path; arguments = instantiate_type state tag.last.span tag_path }
+            Types.Named
+              { path = tag_path; arguments = instantiate_type state tag.last.span tag_path }
           in
           (* Each part goes into the template that the tag receives. *)
           List.iter (fun (part, part_type) -> check_owned state env part part_type) parts;
@@ -100,7 +104,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
               | None -> bug "a tagged string's part type was not worked out");
           defer state (fun () ->
               let tag_type = normalize state tag_type in
-              if T.contains_unsolved tag_type then false
+              if Types.contains_unsolved tag_type then false
               else begin
                 (match implements state tag_type template_trait with
                 | Some evidence ->
@@ -124,9 +128,10 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                     List.iteri
                       (fun index ((part_expression : expression), part_type) ->
                         let part_type = normalize state part_type in
-                        if not (T.equal part_type part) then
+                        if not (Types.equal part_type part) then
                           let from =
-                            trait_reference ~arguments:[ T.Type part_type ] (Well_known.path From)
+                            trait_reference ~arguments:[ Types.Type part_type ]
+                              (Well_known.path From)
                           in
                           match implements state part from with
                           | Some evidence ->
@@ -136,42 +141,43 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
                           | None ->
                               report state No_impl part_expression.span
                                 (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
-                                   (T.show part_type) (T.show part) (T.show tag_type)))
+                                   (Types.show part_type) (Types.show part) (Types.show tag_type)))
                       parts
                 | None ->
-                    if not (T.is_error tag_type) then
+                    if not (Types.is_error tag_type) then
                       report state No_impl literal.span
                         (Printf.sprintf
                            "`%s` does not implement `FromTemplate`, so it is not a tag."
-                           (T.show tag_type)));
+                           (Types.show tag_type)));
                 true
               end);
           tag_type
-      | Some (Unknown report) -> T.Error report
+      | Some (Unknown report) -> Types.Error report
       | _ -> error state Not_a_type tag.last.span "A string's tag is a type.")
 
 and list_literal state env ?expected (value : expression) items =
   let expected = Option.map (normalize state) expected in
   let element, make =
     match expected with
-    | Some (T.Named { path; arguments = T.Type element :: rest })
+    | Some (Types.Named { path; arguments = Types.Type element :: rest })
       when Well_known.is Set path || Well_known.is List path || Well_known.is Sequence path
            || Well_known.is Finite_set path ->
-        (element, fun element -> T.Named { path; arguments = T.Type element :: rest })
-    | Some (T.Named { path; arguments = [ T.Type element; count ] })
+        (element, fun element -> Types.Named { path; arguments = Types.Type element :: rest })
+    | Some (Types.Named { path; arguments = [ Types.Type element; count ] })
       when Intrinsic.builtin_of_path path = Some Array ->
         (match count with
-        | T.Value (Known count) when (not (Z.fits_int count)) || Z.to_int count <> List.length items
-          ->
+        | Types.Value (Known count)
+          when (not (Z.fits_int count)) || Z.to_int count <> List.length items ->
             report state Mismatch value.span
               (Printf.sprintf "This array has %d elements, and its type says %s."
                  (List.length items) (Z.to_string count))
         | _ -> ());
-        (element, fun element -> T.Named { path; arguments = [ T.Type element; count ] })
+        (element, fun element -> Types.Named { path; arguments = [ Types.Type element; count ] })
     | _ ->
         let element = fresh state in
         ( element,
-          fun element -> T.Named { path = Well_known.path List; arguments = [ T.Type element ] } )
+          fun element ->
+            Types.Named { path = Well_known.path List; arguments = [ Types.Type element ] } )
   in
   List.iter (fun item -> check state env item element) items;
   List.iter (fun item -> check_owned state env item element) items;
@@ -182,14 +188,15 @@ and list_literal state env ?expected (value : expression) items =
 and map_literal state env ?expected (value : expression) entries =
   let key, value_type =
     match Option.map (normalize state) expected with
-    | Some (T.Named { path; arguments = [ T.Type key; T.Type value_type ] })
+    | Some (Types.Named { path; arguments = [ Types.Type key; Types.Type value_type ] })
       when Well_known.is Map path || Well_known.is Finite_map path ->
         (key, value_type)
     | _ -> (fresh state, fresh state)
   in
   let map_type =
     match Option.map (normalize state) expected with
-    | Some (T.Named { path; _ }) when Well_known.is Finite_map path -> Well_known.path Finite_map
+    | Some (Types.Named { path; _ }) when Well_known.is Finite_map path ->
+        Well_known.path Finite_map
     | _ -> Well_known.path Map
   in
   List.iter
@@ -206,7 +213,7 @@ and map_literal state env ?expected (value : expression) entries =
              let entry_key = build_expression state entry_key in
              (entry_key, build_expression state entry_value))
            entries));
-  T.Named { path = map_type; arguments = [ T.Type key; T.Type value_type ] }
+  Types.Named { path = map_type; arguments = [ Types.Type key; Types.Type value_type ] }
 
 (* A lambda. Its parameter types come only from the expected type. *)
 and lambda state env ?expected (value : expression) parameters body =
@@ -216,31 +223,31 @@ and lambda state env ?expected (value : expression) parameters body =
   (* A lambda with no known parameter types is still checked, so that its
      own errors are reported. Its parameters get the unknown type. *)
   let untyped unknown =
-    List.iter (fun written -> pattern state env written unknown ~mode:T.Read) parameters;
+    List.iter (fun written -> pattern state env written unknown ~mode:Types.Read) parameters;
     ignore (block_value state env body);
     unknown
   in
   let result =
     match expected with
-    | Some (T.Function function_type) when List.length function_type.inputs = List.length parameters
-      ->
+    | Some (Types.Function function_type)
+      when List.length function_type.inputs = List.length parameters ->
         List.iter2
           (fun written (mode, input) -> pattern state env written input ~mode)
           parameters function_type.inputs;
-        let output = T.result_type function_type.output in
+        let output = Types.result_type function_type.output in
         let lambda_env = { env with output = Some (Returns output); enclosing = [] } in
         let body_type = block_value state lambda_env ~expected:output body in
         convert state lambda_env ?expression:(block_value_id body) body.span ~actual:body_type
           ~expected:output;
-        T.Function function_type
-    | Some (T.Function function_type) ->
+        Types.Function function_type
+    | Some (Types.Function function_type) ->
         untyped
           (error state Mismatch value.span
              (Printf.sprintf "This lambda takes %d parameters, and `%s` takes %d."
                 (List.length parameters)
-                (T.show (T.Function function_type))
+                (Types.show (Types.Function function_type))
                 (List.length function_type.inputs)))
-    | Some ((T.Error _ | T.Hole) as unknown) -> untyped unknown
+    | Some ((Types.Error _ | Types.Hole) as unknown) -> untyped unknown
     | _ ->
         untyped
           (error state Lambda_needs_type value.span
@@ -282,14 +289,14 @@ and lambda state env ?expected (value : expression) parameters body =
           body = build_block state body;
           result =
             (match Form.type_of state value with
-            | T.Function function_type -> T.result_type function_type.output
-            | type_ -> bug "a lambda of type `%s`" (T.show type_));
+            | Types.Function function_type -> Types.result_type function_type.output
+            | type_ -> bug "a lambda of type `%s`" (Types.show type_));
         });
   result
 
 and if_ state env ?expected (value : expression) (test : expression) then_ else_ =
   let condition_type = in_statement state env test.span (fun () -> expression state env test) in
-  coerce state env test ~actual:condition_type ~expected:T.bool;
+  coerce state env test ~actual:condition_type ~expected:Types.bool;
   register_expression state value (fun () ->
       let condition = build_expression state test in
       let then_ = build_block state then_ in
@@ -308,13 +315,13 @@ and if_ state env ?expected (value : expression) (test : expression) then_ else_
         });
   match else_ with
   | None ->
-      let then_type = block_value state env ~expected:T.unit then_ in
+      let then_type = block_value state env ~expected:Types.unit then_ in
       (match resolve state then_type with
-      | T.Never -> ()
+      | Types.Never -> ()
       | _ ->
-          if not (unify state then_type T.unit) then
-            mismatch state then_.span ~expected:T.unit ~actual:then_type);
-      T.unit
+          if not (unify state then_type Types.unit) then
+            mismatch state then_.span ~expected:Types.unit ~actual:then_type);
+      Types.unit
   | Some branch ->
       let then_type = block_value state env ?expected then_ in
       let else_type, else_span, else_end =
@@ -339,9 +346,9 @@ and block_value_id (written : block) =
    branch's value is checked against it. Otherwise the branches must have
    the same type. *)
 and join state env ~expected branches =
-  let live = List.filter (fun (type_, _, _) -> resolve state type_ <> T.Never) branches in
+  let live = List.filter (fun (type_, _, _) -> resolve state type_ <> Types.Never) branches in
   match (live, expected) with
-  | [], _ -> T.Never
+  | [], _ -> Types.Never
   | _, Some expected ->
       List.iter
         (fun (actual, span, expression) -> convert state env ?expression span ~actual ~expected)
@@ -396,13 +403,13 @@ and match_ state env ?expected (value : expression) scrutinees arms =
               (Printf.sprintf "This arm has %d patterns, and the `match` has %d values."
                  (List.length arm.patterns) (List.length types))
           in
-          List.iter (fun written -> pattern state env written unknown ~mode:T.Read) arm.patterns
+          List.iter (fun written -> pattern state env written unknown ~mode:Types.Read) arm.patterns
         else
           List.iter2
             (fun written (scrutinee, type_) ->
               pattern state env written type_ ~mode:(scrutinee_mode state scrutinee))
             arm.patterns types;
-        Option.iter (fun guard -> check state env guard T.bool) arm.guard;
+        Option.iter (fun guard -> check state env guard Types.bool) arm.guard;
         ( arm_value state env ?expected arm.body,
           arm.body.span,
           match arm.body.kind with Expression value -> Some value.id | _ -> None ))
@@ -417,7 +424,7 @@ and arm_value state env ?expected (body : statement) =
   | Expression value -> expression state env ?expected value
   | _ ->
       ignore (statement state env body ~last:false);
-      T.unit
+      Types.unit
 
 (* The element type of a quantifier's range or collection. In executable
    code, a quantifier over a collection is a loop, so the call of the
@@ -425,14 +432,15 @@ and arm_value state env ?expected (body : statement) =
 and element_of_collection state env ~(quantifier : expression) (collection : expression) =
   let collection_type = normalize state (expression state env collection) in
   match collection_type with
-  | T.Named { path; arguments = [ T.Type element ] } when Well_known.is Range path -> element
-  | T.Error _ | T.Hole -> collection_type
+  | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is Range path ->
+      element
+  | Types.Error _ | Types.Hole -> collection_type
   | _ -> (
-      match each_call state collection.span collection_type T.Read with
+      match each_call state collection.span collection_type Types.Read with
       | Some (call, element) ->
           if runs env then
             state.tables.loops.(quantifier.id) <- Some (Yielding { call; mode = Read });
           element
       | None ->
           error state Not_indexable collection.span
-            (Printf.sprintf "`%s` cannot be looped over." (T.show collection_type)))
+            (Printf.sprintf "`%s` cannot be looped over." (Types.show collection_type)))

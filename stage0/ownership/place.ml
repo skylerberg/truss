@@ -1,7 +1,4 @@
 (* The places of a core form that the ownership check tracks. *)
-
-module T = Types
-
 type root =
   | Local of Core.local
   | Constant of Path.t
@@ -57,7 +54,7 @@ let is_prefix prefix place =
    place. An index of any other collection is a call of the collection's
    [at], which lends the element. *)
 let is_storage type_ =
-  T.is_well_known List type_ || T.is_well_known Slice type_ || T.is_builtin Array type_
+  Types.is_well_known List type_ || Types.is_well_known Slice type_ || Types.is_builtin Array type_
 
 (* If the expression is an index of a [List], a [Slice], or an [Array],
    the collection that is indexed. *)
@@ -92,7 +89,7 @@ let rec of_core (place : Core.place) : t option =
 
 (* A [Slice] or a [StringSlice]: a view that an owned collection converts
    to, and through which the collection's elements can be mutated. *)
-let is_slice_type type_ = T.is_well_known Slice type_ || T.is_well_known String_slice type_
+let is_slice_type type_ = Types.is_well_known Slice type_ || Types.is_well_known String_slice type_
 
 (* The slice that a mutation of a place writes through, if there is one:
    the innermost place of a slice type on the way to the mutated place.

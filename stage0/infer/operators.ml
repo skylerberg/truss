@@ -2,8 +2,6 @@
    resolved to a trait method), and [any]. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -28,8 +26,8 @@ let rec try_ state env (value : expression) (inner : expression) =
             ~exited_tasks:(tasks_exited_by Return_exit env.enclosing)
       | None -> bug "`?` where nothing is returned");
   match (inner_type, output) with
-  | ( T.Named { path; arguments = [ T.Type ok; T.Type error ] },
-      Some (T.Named { path = output_path; arguments = [ _; T.Type output_error ] }) )
+  | ( Types.Named { path; arguments = [ Types.Type ok; Types.Type error ] },
+      Some (Types.Named { path = output_path; arguments = [ _; Types.Type output_error ] }) )
     when Well_known.is Result path && Well_known.is Result output_path ->
       if not (unify state error output_error) then
         report state Wrong_try value.span
@@ -38,10 +36,11 @@ let rec try_ state env (value : expression) (inner : expression) =
               `%s`. Convert it first with `map_error`."
              (show state output_error) (show state error));
       ok
-  | T.Named { path; arguments = [ T.Type some ] }, Some (T.Named { path = output_path; _ })
+  | ( Types.Named { path; arguments = [ Types.Type some ] },
+      Some (Types.Named { path = output_path; _ }) )
     when Well_known.is Option path && Well_known.is Option output_path ->
       some
-  | (T.Error _ | T.Hole), _ -> inner_type
+  | (Types.Error _ | Types.Hole), _ -> inner_type
   | _ ->
       error state Wrong_try value.span
         "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
@@ -51,11 +50,11 @@ let rec try_ state env (value : expression) (inner : expression) =
 and with_ state env (value : expression) (base : expression) updates =
   let base_type = normalize state (expression state env base) in
   (match base_type with
-  | T.Named { path; _ } when not (Members.fields_visible state.database ~package:state.package path)
-    ->
+  | Types.Named { path; _ }
+    when not (Members.fields_visible state.database ~package:state.package path) ->
       report state Private_field value.span
         (Printf.sprintf "`%s` is opaque, so only its own package can update its fields."
-           (T.show base_type))
+           (Types.show base_type))
   | _ -> ());
   List.iter
     (fun (update : update) ->
@@ -64,12 +63,12 @@ and with_ state env (value : expression) (base : expression) updates =
           let rec field_type type_ (names : name list) =
             match (names, normalize state type_) with
             | [], type_ -> Some type_
-            | (name : name) :: rest, (T.Named { path; arguments } as record_type) -> (
+            | (name : name) :: rest, (Types.Named { path; arguments } as record_type) -> (
                 match Members.fields state.database path arguments with
                 | Some fields -> (
                     match
                       List.find_opt
-                        (fun (written : T.field) -> written.field_name = name.text)
+                        (fun (written : Types.field) -> written.field_name = name.text)
                         fields
                     with
                     | Some written -> field_type written.field_type rest
@@ -128,18 +127,21 @@ and with_ state env (value : expression) (base : expression) updates =
 and prefix state env ?expected (value : expression) operator (inner : expression) =
   match operator with
   | Not ->
-      check state env inner T.bool;
-      built_in_operator state value [ inner ] T.bool;
+      check state env inner Types.bool;
+      built_in_operator state value [ inner ] Types.bool;
       register_expression state value (fun () -> Not (build_expression state inner));
-      T.bool
+      Types.bool
   | Complement ->
       let type_ = expression state env ?expected inner in
       built_in_operator state value [ inner ] type_;
       register_expression state value (fun () -> Form.operator state value Complement [ inner ]);
       if
         not
-          (T.is_integer_type (normalize state type_)
-          || match resolve state type_ with T.Literal (Integer_literal, _) -> true | _ -> false)
+          (Types.is_integer_type (normalize state type_)
+          ||
+          match resolve state type_ with
+          | Types.Literal (Integer_literal, _) -> true
+          | _ -> false)
       then
         report state No_impl value.span
           (Printf.sprintf "`~` works on built-in integers, not `%s`." (show state type_));
@@ -157,38 +159,47 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           record state inner type_;
           defer state (fun () ->
               match resolve state type_ with
-              | T.Literal _ | T.Variable _ -> false
+              | Types.Literal _ | Types.Variable _ -> false
               | resolved ->
                   (* A negated literal of an unsigned type gets only this
                      diagnostic, and no second one for a value out of range. *)
                   if
-                    T.is_integer_type resolved
-                    && (not (T.is_signed resolved))
+                    Types.is_integer_type resolved
+                    && (not (Types.is_signed resolved))
                     && not (Z.equal number Z.zero)
                   then
                     report state Negated_unsigned value.span
-                      (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (T.show resolved))
+                      (Printf.sprintf "`%s` is unsigned, so it cannot be negated."
+                         (Types.show resolved))
                   else check_literal_fits state value (Z.neg number) type_;
                   true);
           type_
       | _ ->
           let type_ = expression state env ?expected inner in
           let resolved = normalize state type_ in
-          if resolved = T.Hole then T.Hole
-          else if T.is_integer_type resolved && not (T.is_signed resolved) then begin
+          if resolved = Types.Hole then Types.Hole
+          else if Types.is_integer_type resolved && not (Types.is_signed resolved) then begin
             report state Negated_unsigned value.span
-              (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (T.show resolved));
+              (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved));
             type_
           end
-          else if env.specification && (T.is_integer_type resolved || resolved = T.Integer) then begin
+          else if env.specification && (Types.is_integer_type resolved || resolved = Types.Integer)
+          then begin
             register_expression state value (fun () -> Form.operator state value Negate [ inner ]);
-            T.Integer
+            Types.Integer
           end
           else begin
             Form.register_call state value;
             operator_call
               ~operands:
-                [ { C.expression = inner.id; parameter_index = 0; mode = T.Read; mark = None } ]
+                [
+                  {
+                    Tables.expression = inner.id;
+                    parameter_index = 0;
+                    mode = Types.Read;
+                    mark = None;
+                  };
+                ]
               state value ~trait:(Well_known.path Negate) ~method_:"negate" ~left:type_ ~right:None
           end)
 
@@ -196,7 +207,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
    types of both operands are inferred, and the result type is the [impl]'s
    [Output]. *)
 and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~left ~right =
-  let arguments = match right with Some right -> [ T.Type right ] | None -> [] in
+  let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
   let reference = trait_reference ~arguments trait in
   let result = fresh state in
   state.tables.calls.(value.id) <-
@@ -221,9 +232,9 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
       let left = normalize state left in
       let reference = Unify.zonk_trait state.unifier reference in
       if
-        T.contains_unsolved left
+        Types.contains_unsolved left
         || List.exists
-             (function T.Type type_ -> T.contains_unsolved type_ | _ -> false)
+             (function Types.Type type_ -> Types.contains_unsolved type_ | _ -> false)
              reference.trait_arguments
       then false
       else begin
@@ -236,8 +247,8 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
             if not (unify state result output) then
               report state Mismatch value.span
                 (Printf.sprintf "This operator gives `%s`, and `%s` is expected."
-                   (T.show (zonk state output))
-                   (T.show decided));
+                   (Types.show (zonk state output))
+                   (Types.show decided));
             state.tables.calls.(value.id) <-
               Some
                 {
@@ -258,11 +269,11 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
                 }
         | None ->
             let unknown =
-              if T.is_error left then left
+              if Types.is_error left then left
               else
                 error state No_impl value.span
                   (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
-                     (T.show left) (T.show_trait reference))
+                     (Types.show left) (Types.show_trait reference))
             in
             ignore (unify state result unknown));
         true
@@ -273,9 +284,11 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
    have that type, as an untyped constant does in Go. *)
 and literal_operands state ~left ~right =
   match (resolve state left, resolve state right) with
-  | T.Literal (kind, _), other when Unify.literal_fits kind other -> ignore (unify state left right)
-  | other, T.Literal (kind, _) when Unify.literal_fits kind other -> ignore (unify state left right)
-  | T.Literal (left_kind, _), T.Literal (right_kind, _) when left_kind = right_kind ->
+  | Types.Literal (kind, _), other when Unify.literal_fits kind other ->
+      ignore (unify state left right)
+  | other, Types.Literal (kind, _) when Unify.literal_fits kind other ->
+      ignore (unify state left right)
+  | Types.Literal (left_kind, _), Types.Literal (right_kind, _) when left_kind = right_kind ->
       ignore (unify state left right)
   | _ -> ()
 
@@ -289,14 +302,14 @@ and built_in_operator state (value : expression) (operands : expression list) re
         arguments =
           List.mapi
             (fun index (operand : expression) ->
-              { C.expression = operand.id; parameter_index = index; mode = Read; mark = None })
+              { Tables.expression = operand.id; parameter_index = index; mode = Read; mark = None })
             operands;
         omitted_defaults = [];
         uses = [];
         callee_result = result;
       }
 
-and is_hole state type_ = resolve state type_ = T.Hole
+and is_hole state type_ = resolve state type_ = Types.Hole
 
 (* Checks both operands, the right against the type of the left. Returns
    whether the type of either is a hole left by a [todo]. *)
@@ -307,7 +320,7 @@ and operands_hole state env (left : expression) (right : expression) =
 
 and is_string state type_ =
   let type_ = normalize state type_ in
-  T.is_well_known String type_ || T.is_well_known String_slice type_
+  Types.is_well_known String type_ || Types.is_well_known String_slice type_
 
 and binary state env ?expected (value : expression) operator (left : expression)
     (right : expression) =
@@ -317,9 +330,9 @@ and binary state env ?expected (value : expression) operator (left : expression)
         report state Specification_only value.span
           "`==>` is only for specifications and the bodies of functions for specifications only; \
            in code, write `!a || b`.";
-      check state env left T.bool;
-      check state env right T.bool;
-      built_in_operator state value [ left; right ] T.bool;
+      check state env left Types.bool;
+      check state env right Types.bool;
+      built_in_operator state value [ left; right ] Types.bool;
       register_expression state value (fun () ->
           let first = build_expression state left in
           let second = build_expression state right in
@@ -327,7 +340,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
           | And -> And (first, second)
           | Or -> Or (first, second)
           | _ -> Implies (first, second));
-      T.bool
+      Types.bool
   | Bit_and | Bit_or | Bit_xor ->
       let left_type = expression state env ?expected left in
       let right_type = expression state env ~expected:left_type right in
@@ -339,12 +352,12 @@ and binary state env ?expected (value : expression) operator (left : expression)
         mismatch state right.span ~expected:left_type ~actual:right_type;
       defer state (fun () ->
           match normalize state left_type with
-          | T.Literal _ | T.Variable _ -> false
+          | Types.Literal _ | Types.Variable _ -> false
           | resolved ->
-              if not (T.is_integer_type resolved || T.is_error resolved) then
+              if not (Types.is_integer_type resolved || Types.is_error resolved) then
                 report state No_impl value.span
                   (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
-                     (T.show resolved));
+                     (Types.show resolved));
               true);
       left_type
   | Shift_left | Shift_right ->
@@ -354,43 +367,44 @@ and binary state env ?expected (value : expression) operator (left : expression)
       register_expression state value (fun () ->
           Form.operator state value (Form.operation_of operator) [ left; right ]);
       (match resolve state right_type with
-      | T.Literal (Integer_literal, _) -> ignore (unify state right_type (T.builtin USize))
+      | Types.Literal (Integer_literal, _) -> ignore (unify state right_type (Types.builtin USize))
       | _ -> ());
       defer state (fun () ->
           match (normalize state left_type, normalize state right_type) with
-          | (T.Literal _ | T.Variable _), _ | _, (T.Literal _ | T.Variable _) -> false
+          | (Types.Literal _ | Types.Variable _), _ | _, (Types.Literal _ | Types.Variable _) ->
+              false
           | left_resolved, right_resolved ->
-              if not (T.is_integer_type left_resolved || T.is_error left_resolved) then
+              if not (Types.is_integer_type left_resolved || Types.is_error left_resolved) then
                 report state No_impl left.span
                   (Printf.sprintf "Shifts work on built-in integers, not `%s`."
-                     (T.show left_resolved));
+                     (Types.show left_resolved));
               if
                 not
-                  ((T.is_integer_type right_resolved && not (T.is_signed right_resolved))
-                  || T.is_error right_resolved)
+                  ((Types.is_integer_type right_resolved && not (Types.is_signed right_resolved))
+                  || Types.is_error right_resolved)
               then
                 report state Mismatch right.span
                   (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
-                     (T.show right_resolved));
+                     (Types.show right_resolved));
               true);
       left_type
   | (Equal | Not_equal | Less | Less_equal | Greater | Greater_equal)
     when operands_hole state env left right ->
       register_expression state value (fun () -> Form.built_in_comparison state operator left right);
-      T.bool
+      Types.bool
   | Equal | Not_equal | Less | Less_equal | Greater | Greater_equal ->
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
       literal_operands state ~left:left_type ~right:right_type;
       let integers type_ =
         let type_ = normalize state type_ in
-        T.is_integer_type type_ || type_ = T.Integer
-        || match resolve state type_ with T.Literal (Integer_literal, _) -> true | _ -> false
+        Types.is_integer_type type_ || type_ = Types.Integer
+        || match resolve state type_ with Types.Literal (Integer_literal, _) -> true | _ -> false
       in
       if env.specification && integers left_type && integers right_type then begin
         register_expression state value (fun () ->
             Form.built_in_comparison state operator left right);
-        T.bool
+        Types.bool
       end
       else begin
         register_expression state value (fun () -> Form.comparison state value operator left right);
@@ -400,8 +414,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
            [Ordering]. *)
         let trait, method_, result =
           match operator with
-          | Equal | Not_equal -> (Well_known.path Equal, "equal", T.bool)
-          | _ -> (Well_known.path Ordered, "compare", T.named (Well_known.path Ordering) [])
+          | Equal | Not_equal -> (Well_known.path Equal, "equal", Types.bool)
+          | _ -> (Well_known.path Ordered, "compare", Types.named (Well_known.path Ordering) [])
         in
         state.tables.calls.(value.id) <-
           Some
@@ -426,13 +440,13 @@ and binary state env ?expected (value : expression) operator (left : expression)
               callee_result = result;
             };
         resolve_evidence state value left_type (trait_reference trait);
-        T.bool
+        Types.bool
       end
   | (Add | Subtract | Multiply | Divide | Remainder) when operands_hole state env left right ->
       (* Any operation on a hole is accepted, and its type is a hole. *)
       register_expression state value (fun () ->
           Form.operator state value (Form.operation_of operator) [ left; right ]);
-      T.Hole
+      Types.Hole
   | Add | Subtract | Multiply | Divide | Remainder ->
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
@@ -465,29 +479,32 @@ and binary state env ?expected (value : expression) operator (left : expression)
       else begin
         let integers type_ =
           let type_ = normalize state type_ in
-          T.is_integer_type type_ || type_ = T.Integer
-          || match resolve state type_ with T.Literal (Integer_literal, _) -> true | _ -> false
+          Types.is_integer_type type_ || type_ = Types.Integer
+          ||
+          match resolve state type_ with
+          | Types.Literal (Integer_literal, _) -> true
+          | _ -> false
         in
         if env.specification && integers left_type && integers right_type then begin
           ignore
             (match resolve state left_type with
-            | T.Literal _ -> unify state left_type T.Integer
+            | Types.Literal _ -> unify state left_type Types.Integer
             | _ -> true);
           ignore
             (match resolve state right_type with
-            | T.Literal _ -> unify state right_type T.Integer
+            | Types.Literal _ -> unify state right_type Types.Integer
             | _ -> true);
           register_expression state value (fun () ->
               Form.operator state value (Form.operation_of operator) [ left; right ]);
-          T.Integer
+          Types.Integer
         end
         else
           let same_builtin =
             match (resolve state left_type, resolve state right_type) with
-            | T.Literal (left_kind, _), T.Literal (right_kind, _) -> left_kind = right_kind
+            | Types.Literal (left_kind, _), Types.Literal (right_kind, _) -> left_kind = right_kind
             | left_resolved, right_resolved ->
-                (T.is_integer_type left_resolved || T.is_float_type left_resolved)
-                && T.equal left_resolved right_resolved
+                (Types.is_integer_type left_resolved || Types.is_float_type left_resolved)
+                && Types.equal left_resolved right_resolved
           in
           let trait, method_ =
             match operator with
@@ -498,18 +515,28 @@ and binary state env ?expected (value : expression) operator (left : expression)
             | _ -> (Well_known.path Remainder, "remainder")
           in
           if
-            (T.is_integer_type (normalize state left_type)
-            && T.is_integer_type (normalize state right_type))
-            && not (T.equal (normalize state left_type) (normalize state right_type))
-          then T.Error (mismatched_operands state value left right ~left_type ~right_type)
+            (Types.is_integer_type (normalize state left_type)
+            && Types.is_integer_type (normalize state right_type))
+            && not (Types.equal (normalize state left_type) (normalize state right_type))
+          then Types.Error (mismatched_operands state value left right ~left_type ~right_type)
           else begin
             Form.register_call state value;
             let result =
               operator_call
                 ~operands:
                   [
-                    { C.expression = left.id; parameter_index = 0; mode = T.Read; mark = None };
-                    { C.expression = right.id; parameter_index = 1; mode = T.Read; mark = None };
+                    {
+                      Tables.expression = left.id;
+                      parameter_index = 0;
+                      mode = Types.Read;
+                      mark = None;
+                    };
+                    {
+                      Tables.expression = right.id;
+                      parameter_index = 1;
+                      mode = Types.Read;
+                      mark = None;
+                    };
                   ]
                 state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
             in
@@ -524,29 +551,29 @@ and binary state env ?expected (value : expression) operator (left : expression)
 and mismatched_operands state (value : expression) (left : expression) (right : expression)
     ~left_type ~right_type =
   let left_type = normalize state left_type and right_type = normalize state right_type in
-  if T.is_integer_type left_type && T.is_integer_type right_type then begin
-    let from = trait_reference ~arguments:[ T.Type right_type ] (Well_known.path From) in
+  if Types.is_integer_type left_type && Types.is_integer_type right_type then begin
+    let from = trait_reference ~arguments:[ Types.Type right_type ] (Well_known.path From) in
     let fixes =
       if Option.is_some (implements state left_type from) then
         [
           fix
-            (Printf.sprintf "Convert the right side to `%s`." (T.show left_type))
+            (Printf.sprintf "Convert the right side to `%s`." (Types.show left_type))
             [
               replace right.span
-                (Printf.sprintf "%s.from(%s)" (T.show left_type) (source state right.span));
+                (Printf.sprintf "%s.from(%s)" (Types.show left_type) (source state right.span));
             ];
         ]
       else if
         Option.is_some
           (implements state right_type
-             (trait_reference ~arguments:[ T.Type left_type ] (Well_known.path From)))
+             (trait_reference ~arguments:[ Types.Type left_type ] (Well_known.path From)))
       then
         [
           fix
-            (Printf.sprintf "Convert the left side to `%s`." (T.show right_type))
+            (Printf.sprintf "Convert the left side to `%s`." (Types.show right_type))
             [
               replace left.span
-                (Printf.sprintf "%s.from(%s)" (T.show right_type) (source state left.span));
+                (Printf.sprintf "%s.from(%s)" (Types.show right_type) (source state left.span));
             ];
         ]
       else []
@@ -554,30 +581,30 @@ and mismatched_operands state (value : expression) (left : expression) (right : 
     reported state Mismatched_integers value.span ~fixes
       (Printf.sprintf
          "Integer types never convert implicitly: this compares or combines `%s` with `%s`."
-         (T.show left_type) (T.show right_type))
+         (Types.show left_type) (Types.show right_type))
   end
   else mismatched state right.span ~expected:left_type ~actual:right_type
 
 (* [any value] *)
 and any_ state env ?expected (value : expression) (inner : expression) =
   match Option.map (normalize state) expected with
-  | Some (T.Any trait as any_type) ->
+  | Some (Types.Any trait as any_type) ->
       let inner_type = expression state env inner in
       register_expression state value (fun () ->
           let inner = build_expression state inner in
           match (Form.type_of state value, implements state inner.type_ trait) with
-          | T.Any trait, Some implementation ->
+          | Types.Any trait, Some implementation ->
               To_any { value = inner; trait; evidence = Form.evidence (evidence_of implementation) }
           | _ -> bug "`any` of a value whose type does not implement the trait");
       require state ~at:value.span inner_type trait ~unmet:(fun inner_type other ->
           report state No_impl value.span
             (match other with
             | None ->
-                Printf.sprintf "`%s` does not implement `%s`." (T.show inner_type)
-                  (T.show_trait trait)
+                Printf.sprintf "`%s` does not implement `%s`." (Types.show inner_type)
+                  (Types.show_trait trait)
             | Some (name, associated_type) ->
-                Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`." (T.show any_type)
-                  name (T.show inner_type) (show state associated_type)));
+                Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`."
+                  (Types.show any_type) name (Types.show inner_type) (show state associated_type)));
       (* Code that holds the [any] value calls its methods without the
          capabilities of the type that it hides, so that type's associated
          capability sets must be empty. Otherwise a method would use a
@@ -588,7 +615,7 @@ and any_ state env ?expected (value : expression) (inner : expression) =
           && begin
             if Option.is_some (implements state inner_type trait) then
               List.iter
-                (fun (bound : T.trait_reference) ->
+                (fun (bound : Types.trait_reference) ->
                   match Query.demand state.database Environment.trait_interface bound.trait with
                   | Some interface ->
                       List.iter
@@ -603,11 +630,11 @@ and any_ state env ?expected (value : expression) (inner : expression) =
                                 (Printf.sprintf
                                    "`%s` cannot be an `%s`: its `%s` is %s, and code that holds an \
                                     `any` value has no capability to give to its methods."
-                                   (T.show inner_type) (T.show any_type) name
+                                   (Types.show inner_type) (Types.show any_type) name
                                    (String.concat ", "
                                       (List.map
                                          (fun capability ->
-                                           "`" ^ T.show_capability capability ^ "`")
+                                           "`" ^ Types.show_capability capability ^ "`")
                                          set))))
                         interface.associated_capabilities
                   | None -> ())

@@ -5,8 +5,6 @@
    have been moved on some path to it. A use of a place that overlaps a
    moved place is an error. Whether a place can be moved at all needs no
    dataflow: it depends on the place and on how its root is bound. *)
-
-module T = Types
 open Graph
 open Context
 
@@ -15,7 +13,7 @@ open Context
 type verdict =
   | Moves  (** The place is moved. *)
   | Reads  (** A view is returned: the place is only read. *)
-  | Refused of (context -> Syntax.span -> T.ty -> unit)  (** The move is an error. *)
+  | Refused of (context -> Syntax.span -> Types.ty -> unit)  (** The move is an error. *)
 
 let verdict context (place : Place.t) ~type_ ~returned ~captured : verdict =
   let copy title type_ (at : Syntax.span) =

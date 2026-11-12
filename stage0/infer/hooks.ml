@@ -5,15 +5,14 @@
    [Expressions] sets them when it is linked. *)
 
 open Syntax
-module T = Types
 open State
 
 let not_set name _ = failwith ("Hooks." ^ name ^ " was not set")
 
-let expression_hook : (state -> env -> ?expected:T.ty -> expression -> T.ty) ref =
+let expression_hook : (state -> env -> ?expected:Types.ty -> expression -> Types.ty) ref =
   ref (fun _ _ ?expected:_ -> not_set "expression")
 
-let check_hook : (state -> env -> expression -> T.ty -> unit) ref =
+let check_hook : (state -> env -> expression -> Types.ty -> unit) ref =
   ref (fun _ _ _ -> not_set "check")
 
 let expression state env ?expected value = !expression_hook state env ?expected value

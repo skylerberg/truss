@@ -119,7 +119,7 @@ let pulled context (yielding : Ground.yielding) :
   let owned =
     List.filter_map
       (fun (arrives, mode, ty, bit) ->
-        if mode = T.Own && not (trivial st ty) then
+        if mode = Types.Own && not (trivial st ty) then
           Option.map
             (fun local ->
               ( local,

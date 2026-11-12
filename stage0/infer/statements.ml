@@ -2,8 +2,6 @@
    iterations, and the value of a block. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
@@ -20,13 +18,13 @@ open Operators
    expected type of the block, as part of the enclosing statement. *)
 let rec block_value state env ?expected (written : block) =
   let rec statements_value = function
-    | [] -> T.unit
+    | [] -> Types.unit
     | [ (last : statement) ] -> (
         match last.kind with
         | Expression value -> expression state env ?expected value
         | _ ->
             ignore (statement state env last ~last:true);
-            if statement_diverges state last then T.Never else T.unit)
+            if statement_diverges state last then Types.Never else Types.unit)
     | (first : statement) :: rest ->
         ignore (in_statement state env first.span (fun () -> statement state env first ~last:false));
         statements_value rest
@@ -43,18 +41,18 @@ and statement state env (written : statement) ~last : unit =
       if not last then
         defer state (fun () ->
             match normalize state type_ with
-            | T.Variable _ | T.Literal _ -> false
+            | Types.Variable _ | Types.Literal _ -> false
             | resolved ->
                 if
                   not
-                    (resolved = T.unit || resolved = T.Never || T.is_error resolved
-                   || resolved = T.Hole)
+                    (resolved = Types.unit || resolved = Types.Never || Types.is_error resolved
+                   || resolved = Types.Hole)
                 then
                   report state Unused_value value.span
                     ~fixes:[ fix "Discard it on purpose." [ insert value.span.start "let _ = " ] ]
                     (Printf.sprintf
                        "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
-                       (T.show resolved));
+                       (Types.show resolved));
                 true)
   | Let { is_var; pattern = written_pattern; annotation; value; else_ } ->
       let type_ =
@@ -70,13 +68,15 @@ and statement state env (written : statement) ~last : unit =
       | Some block -> (
           let else_type = block_value state env block in
           match resolve state else_type with
-          | T.Never -> ()
+          | Types.Never -> ()
           | _ ->
               report state Mismatch block.span
                 "The `else` of a `let` must leave the block, with `return`, `break`, `continue`, \
                  or `unreachable`.")
       | None -> ());
-      let mode = if is_var then T.Own else if borrowed state value then T.Read else T.Own in
+      let mode =
+        if is_var then Types.Own else if borrowed state value then Types.Read else Types.Own
+      in
       register_statement state written (fun () ->
           let value = Form.operand mode (build_expression state value) in
           let pattern = build_pattern state written_pattern in
@@ -132,12 +132,17 @@ and statement state env (written : statement) ~last : unit =
                   ~operands:
                     [
                       {
-                        C.expression = written_target.id;
+                        Tables.expression = written_target.id;
                         parameter_index = 0;
-                        mode = T.Read;
+                        mode = Types.Read;
                         mark = None;
                       };
-                      { C.expression = value.id; parameter_index = 1; mode = T.Read; mark = None };
+                      {
+                        Tables.expression = value.id;
+                        parameter_index = 1;
+                        mode = Types.Read;
+                        mark = None;
+                      };
                     ]
                   state fake ~trait ~method_ ~left:target_type ~right:(Some right_type)
               in
@@ -145,42 +150,46 @@ and statement state env (written : statement) ~last : unit =
                 mismatch state value.span ~expected:target_type ~actual:result
           | Shift_left | Shift_right ->
               (match resolve state right_type with
-              | T.Literal (Integer_literal, _) -> ignore (unify state right_type (T.builtin USize))
+              | Types.Literal (Integer_literal, _) ->
+                  ignore (unify state right_type (Types.builtin USize))
               | _ -> ());
               defer state (fun () ->
                   match (normalize state target_type, normalize state right_type) with
-                  | (T.Literal _ | T.Variable _), _ | _, (T.Literal _ | T.Variable _) -> false
+                  | (Types.Literal _ | Types.Variable _), _ | _, (Types.Literal _ | Types.Variable _)
+                    ->
+                      false
                   | left, right ->
-                      if not (T.is_integer_type left || T.is_error left) then
+                      if not (Types.is_integer_type left || Types.is_error left) then
                         report state No_impl written_target.span
                           (Printf.sprintf "Shifts work on built-in integers, not `%s`."
-                             (T.show left));
+                             (Types.show left));
                       if
                         not
-                          ((T.is_integer_type right && not (T.is_signed right)) || T.is_error right)
+                          ((Types.is_integer_type right && not (Types.is_signed right))
+                          || Types.is_error right)
                       then
                         report state Mismatch value.span
                           (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
-                             (T.show right));
+                             (Types.show right));
                       true)
           | _ ->
               if not (unify state target_type right_type) then
                 mismatch state value.span ~expected:target_type ~actual:right_type;
               defer state (fun () ->
                   match normalize state target_type with
-                  | T.Literal _ | T.Variable _ -> false
+                  | Types.Literal _ | Types.Variable _ -> false
                   | resolved ->
-                      if not (T.is_integer_type resolved || T.is_error resolved) then
+                      if not (Types.is_integer_type resolved || Types.is_error resolved) then
                         report state No_impl written_target.span
                           (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
-                             (T.show resolved));
+                             (Types.show resolved));
                       true)))
   | For { mode = running; pattern = written_pattern; iterable; clauses; body } ->
       let mode, inner =
         match iterable.kind with
-        | Mode (Mut, inner) when Option.is_none (marked_call state inner) -> (T.Mut, inner)
-        | Mode (Own, inner) when Option.is_none (marked_call state inner) -> (T.Own, inner)
-        | _ -> (T.Read, iterable)
+        | Mode (Mut, inner) when Option.is_none (marked_call state inner) -> (Types.Mut, inner)
+        | Mode (Own, inner) when Option.is_none (marked_call state inner) -> (Types.Own, inner)
+        | _ -> (Types.Read, iterable)
       in
       (* The types in the loop's header are inferred before the body is
          checked, so the type of the loop variable depends only on the
@@ -193,7 +202,7 @@ and statement state env (written : statement) ~last : unit =
              match state.tables.types.(inner.id) with
              | Some type_ -> record state iterable type_
              | None -> ());
-          if mode = T.Mut then mutate state env ~by:Mut_mark inner;
+          if mode = Types.Mut then mutate state env ~by:Mut_mark inner;
           binding_pattern state env written_pattern element ~is_var:false ~mode:variable_mode);
       List.iter
         (loop_clause state { env with loop_element = Option.map (resolve state) !loop_element })
@@ -222,7 +231,7 @@ and statement state env (written : statement) ~last : unit =
       in
       loop_body state { env with enclosing = loop :: env.enclosing } body
   | While { condition = test; clauses; body } ->
-      in_statement state env test.span (fun () -> check state env test T.bool);
+      in_statement state env test.span (fun () -> check state env test Types.bool);
       List.iter (loop_clause state env) clauses;
       register_statement state written (fun () ->
           let condition = build_expression state test in
@@ -252,7 +261,7 @@ and statement state env (written : statement) ~last : unit =
       register_statement state written (fun () ->
           let value = build_expression state value in
           Assert { value; executable = Form.is_executable state value });
-      check state env value T.bool
+      check state env value Types.bool
   | Yield value -> (
       match env.output with
       | Some (Yields (_, element) | Lends (_, element)) ->
@@ -275,7 +284,7 @@ and statement state env (written : statement) ~last : unit =
               let mode =
                 match env.output with
                 | Some (Yields (mode, _) | Lends (mode, _)) -> mode
-                | _ -> T.Read
+                | _ -> Types.Read
               in
               Yield { mode; part = Form.operand mode (build_expression state inner) });
           coerce state env inner ~actual ~expected:element
@@ -302,7 +311,7 @@ and assigns_through_index state env (written : statement) (target : expression) 
       with
       | Some ((Impls.From_impl _ | From_bound | From_any) as evidence_source), Some method_ ->
           let index = trait_reference (Well_known.path Index) in
-          let parameter name type_ : T.parameter_info =
+          let parameter name type_ : Types.parameter_info =
             { name; mode = Own; type_; has_default = false }
           in
           mutate state env ~by:Assignment base;
@@ -317,8 +326,8 @@ and assigns_through_index state env (written : statement) (target : expression) 
           let call : expression =
             { kind = Expression_error; span = written.span; id = written.id }
           in
-          record state call T.unit;
-          let argument (argument_expression : expression) position mode : C.argument =
+          record state call Types.unit;
+          let argument (argument_expression : expression) position mode : Tables.argument =
             { expression = argument_expression.id; parameter_index = position; mode; mark = None }
           in
           state.tables.calls.(written.id) <-
@@ -337,7 +346,7 @@ and assigns_through_index state env (written : statement) (target : expression) 
                 arguments = [ argument base 0 Mut; argument key 1 Own; argument value 2 Own ];
                 omitted_defaults = [];
                 uses = method_.method_signature.uses;
-                callee_result = T.unit;
+                callee_result = Types.unit;
               };
           Form.register_call state call;
           register_statement state written (fun () -> Evaluate (build_expression state call));
@@ -354,7 +363,7 @@ and loop_body state env (body : block) =
 and loop_clause state env (clause : loop_clause) =
   let env = { env with specification = true } in
   match clause.kind with
-  | Invariant value -> check state env value T.bool
+  | Invariant value -> check state env value Types.bool
   | Loop_decreases measures ->
       List.iter (fun measure -> ignore (expression state env measure)) measures
   | Loop_cost { resource; bound; _ } -> (
@@ -373,17 +382,17 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
   | Range { start = Some _; stop = Some _; inclusive; _ } -> (
       let range_type = normalize state (expression state env iterable) in
       match range_type with
-      | T.Named { arguments = [ T.Type element ]; _ } ->
+      | Types.Named { arguments = [ Types.Type element ]; _ } ->
           defer state (fun () ->
               let element = normalize state element in
-              if T.contains_unsolved element then false
+              if Types.contains_unsolved element then false
               else begin
-                if T.is_integer_type element || T.is_builtin Character element then
+                if Types.is_integer_type element || Types.is_builtin Character element then
                   state.tables.loops.(written.id) <- Some (Integer_range { element; inclusive })
-                else if not (T.is_error element) then
+                else if not (Types.is_error element) then
                   report state Not_indexable iterable.span
                     (Printf.sprintf "A `for` loop's range is of integers, not `%s`."
-                       (T.show element));
+                       (Types.show element));
                 true
               end);
           (element, mode)
@@ -394,7 +403,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
         Option.bind (called iterable) (fun (inner : expression) -> state.tables.calls.(inner.id))
       in
       match (type_, call) with
-      | T.Cursor { method_; _ }, Some call ->
+      | Types.Cursor { method_; _ }, Some call ->
           (* The iterable is a call of a yielding method, as in
              [for x in mut items.each()]. The loop iterates over that call.
              The loop variable has the mode that the method yields with. *)
@@ -405,7 +414,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
             | _ -> mode
           in
           (call.callee_result, yields)
-      | T.Error _, _ | T.Hole, _ -> (type_, mode)
+      | Types.Error _, _ | Types.Hole, _ -> (type_, mode)
       | _ -> (
           match each_call state iterable.span type_ mode with
           | Some (call, element) ->
@@ -422,7 +431,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
                       (Printf.sprintf
                          "`%s` has no `each` that takes %s, so a `for` loop cannot go over it this \
                           way."
-                         (T.show type_)
+                         (Types.show type_)
                          (Path.show_receiver
-                            (match mode with T.Read -> Read | Mut -> Mut | Own -> Own))),
+                            (match mode with Types.Read -> Read | Mut -> Mut | Own -> Own))),
                     mode ))))
