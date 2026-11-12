@@ -84,15 +84,20 @@ and node = {
   mutable verified_at : int;
   mutable root : bool;  (** Demanded by a driver: maintained across changes, and never collected *)
   mutable alive : bool;
-  mutable fingerprint : string option;
-      (** The hash of its outcome's bytes, worked out when first needed *)
-  mutable stored : bool;  (** Whether the store has its value's bytes, under its fingerprint *)
-  mutable opaque : bool;
-      (** Whether its outcome has no bytes, so that its fingerprint is of this one computation *)
+  mutable fingerprint : fingerprint;
   mutable identity : string option;
-  mutable written : bool;  (** In the chain of artifacts *)
-  mutable superseding : bool;  (** In one of the chain's differences *)
+  mutable written : written;
 }
+
+(* Where the chain of artifacts holds a node. *)
+and written = Unwritten | In_whole | In_difference
+
+and fingerprint =
+  | Unknown  (** Not worked out yet, or forgotten since the outcome changed *)
+  | Hashed of { hash : string; stored : bool }
+      (** The hash of the outcome's bytes; [stored] when the store has them under it *)
+  | Opaque of string
+      (** An outcome with no bytes: a nonce, so that it equals no other computation's *)
 
 and cell =
   | Input : ('key, 'value) input * ('key, 'value) input_cell -> cell
@@ -248,6 +253,11 @@ let create ?(log = false) ?(bases = []) () =
   remember engine;
   engine
 
+let hash_of = function
+  | Unknown -> None
+  | Hashed { hash; _ } -> Some hash
+  | Opaque nonce -> Some nonce
+
 let context engine = { engine; frame = None; observing = false }
 let observer engine = { engine; frame = None; observing = true }
 let engine_of (context : context) = context.engine
@@ -332,12 +342,9 @@ let new_node engine ~phase ~below =
       verified_at = 0;
       root = false;
       alive = true;
-      fingerprint = None;
-      stored = false;
-      opaque = false;
+      fingerprint = Unknown;
       identity = None;
-      written = false;
-      superseding = false;
+      written = Unwritten;
     }
   in
   Hashtbl.replace engine.own node.id node;

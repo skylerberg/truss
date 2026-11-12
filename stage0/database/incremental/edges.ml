@@ -44,7 +44,8 @@ let rec collect engine (node : node) =
     forget engine node;
     Hashtbl.remove engine.own node.id;
     Hashtbl.remove engine.unsaved node.id;
-    if node.written then engine.collected <- (name node, key_bytes node) :: engine.collected;
+    if node.written <> Unwritten then
+      engine.collected <- (name node, key_bytes node) :: engine.collected;
     engine.tally.collections <- engine.tally.collections + 1;
     let reads = node.reads in
     node.reads <- [];
@@ -105,11 +106,9 @@ let shadow engine (base : node) =
         | Unfilled -> invalid_arg "Incremental: a node with no cell"
       in
       own.fingerprint <- base.fingerprint;
-      own.stored <- base.stored;
-      own.opaque <- base.opaque;
       own.identity <- base.identity;
       own.root <- base.root;
-      own.written <- true;
+      own.written <- In_whole;
       Hashtbl.replace engine.shadows base.id own;
       engine.tally.copies <- engine.tally.copies + 1;
       let reads = List.map (resolve engine) base.reads in
