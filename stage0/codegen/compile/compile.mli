@@ -47,7 +47,7 @@ val create :
   Build.settings ->
   t
 
-(* What an instance compiles to: its LIR, lowered or generated, with its
+(* An instance's compiled form: its LIR, lowered or generated, with its
    drops elaborated, in canonical form, or a constant's static data. Each
    is made once. *)
 val compiled : t -> Instance.key -> Lir.compiled
@@ -108,7 +108,7 @@ val run_tests :
 
 (* Builds, at [output], a program that runs tests that are instances made
    by hand, in order, as [run_tests] builds one of tests in source. It is
-   for testing the runner on what no source compiles to, such as a test
+   for testing the runner on LIR no source compiles to, such as a test
    that leaves a block allocated. *)
 val build_supplied_tests :
   t -> time_limit:int -> Lir.t list -> output:string -> (unit, string) result

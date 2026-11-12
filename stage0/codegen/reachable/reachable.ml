@@ -277,10 +277,10 @@ let unit_key ~own reached =
 
 (* The key of everything an instance of a group can reach. The group's
    instances are numbered in the order a walk from the instance first
-   reaches them, and each is written as its own hash and what it refers to:
+   reaches them, and each is written as its own hash and its references:
    a number for an instance of the group, and the key of everything it can
-   reach for any other. [link] gives an instance's own hash and what it
-   refers to, and [deep] the key of an instance outside the group. *)
+   reach for any other. [link] gives an instance's own hash and its
+   references, and [deep] the key of an instance outside the group. *)
 let group_key ~link ~deep ~members start =
   let inside key = List.exists (Instance.equal key) members in
   let order = Table.create 8 in

@@ -256,7 +256,7 @@ test "memory files follow symbolic links and share the bytes of hard links" {
   }
 }
 
-test "memory files refuse what a file's permissions forbid" {
+test "memory files refuse operations a file's permissions forbid" {
   var memory = files::MemoryFiles.new().with_text(path_of("/secret"), contents: "hidden")
   provide mut memory {
     assert FileWrite.set_permissions(path_of("/secret"), permissions: files::Permissions.from_mode(0o444)) is Ok(_)

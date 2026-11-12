@@ -199,7 +199,7 @@ test "parsing reaches both ends of a type and refuses the next value" {
   assert UInt64.parse("99999999999999999999999999") == Err(core::ParseIntegerError.OutOfRange)
 }
 
-test "parsing says what is wrong with text that is not an integer" {
+test "parsing names the problem with text that is not an integer" {
   assert Int32.parse("") == Err(core::ParseIntegerError.Empty)
   assert Int32.parse("-") == Err(core::ParseIntegerError.Empty)
   assert Int32.parse("+") == Err(core::ParseIntegerError.Empty)

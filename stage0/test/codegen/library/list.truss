@@ -360,7 +360,7 @@ test "reversed lends elements to change, from the last to the first" {
   assert same_items(items, expected: [102, 101, 100])
 }
 
-test "a list is made of copies of a value, or of what a function gives for each index" {
+test "a list is made of copies of a value, or of a function's result for each index" {
   let zeros: List[Int64] = List.filled(0, count: 3)
   assert same_items(zeros, expected: [0, 0, 0])
   let words: List[String] = List.filled("ab${1}", count: 2)
@@ -603,7 +603,7 @@ test "sorted returns a sorted copy and leaves the list as it was" {
   assert none.sorted().is_empty()
 }
 
-test "sort_by_key orders a list by what a function gives for each element" {
+test "sort_by_key orders a list by a function's result for each element" {
   var words: List[String] = ["pear", "fig", "banana", "kiwi"]
   mut words.sort_by_key(fn(word) { word.length() })
   assert words[0] == "fig" && words[3] == "banana"

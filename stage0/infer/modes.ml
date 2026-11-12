@@ -130,8 +130,8 @@ let mutate state env ~(by : mutation) (value : expression) =
   | Some (Captured name), _ ->
       report state code value.span
         (Printf.sprintf
-           "A lambda cannot change what it captures, and `%s` is from outside it. Return the new \
-            value instead, or use a loop."
+           "A lambda cannot change its captures, and `%s` is from outside it. Return the new value \
+            instead, or use a loop."
            name)
   | Some (Read_only name), _ ->
       report state code value.span

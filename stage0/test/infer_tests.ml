@@ -289,8 +289,9 @@ let () =
   test "a let cannot be assigned" (fun () ->
       one_diagnostic Fixtures.Infer.let_cannot_be_assigned "types.not_assignable");
   List.iter
-    (fun (what, text) ->
-      test (what ^ " cannot be marked `mut`") (fun () -> one_diagnostic text "types.wrong_mark"))
+    (fun (construct, text) ->
+      test (construct ^ " cannot be marked `mut`") (fun () ->
+          one_diagnostic text "types.wrong_mark"))
     [
       ("a read-only parameter", Fixtures.Infer.read_only_parameter);
       ("an `own` parameter", Fixtures.Infer.own_parameter);
@@ -705,7 +706,7 @@ let () =
       one_diagnostic Fixtures.Infer.loops_cost_bound_is_checked "resolve.unknown_name")
 
 (* Every error type carries its report, so nothing is accepted of code that
-   reported nothing: what was once an error with no report is reported. *)
+   reported nothing: an error that once had no report is reported. *)
 
 let identity = Fixtures.Infer.identity
 
@@ -734,8 +735,8 @@ let () =
       one_diagnostic Fixtures.Infer.type_with_no_fields_is_not_its_own_value "types.not_a_value");
   test "`self` outside a method is an error" (fun () ->
       one_diagnostic Fixtures.Infer.self_outside_a_method_is_an_error "types.not_a_value");
-  test "`old` without what it is about is an error" (fun () ->
-      one_diagnostic Fixtures.Infer.old_without_what_it_is_about_is_an_error "types.not_a_value");
+  test "`old` without its operand is an error" (fun () ->
+      one_diagnostic Fixtures.Infer.old_without_its_operand_is_an_error "types.not_a_value");
   test "a type argument that nothing decides is an error at its call" (fun () ->
       one_diagnostic Fixtures.Infer.type_argument_that_nothing_decides_is_an_error_at
         "types.cannot_infer");

@@ -286,7 +286,7 @@ let run ~directory ~json =
                                   Json.Object
                                     [
                                       ("path", Json.String (Path.show path));
-                                      ("what", Json.String description);
+                                      ("addition", Json.String description);
                                     ])
                                 grows) );
                        ])

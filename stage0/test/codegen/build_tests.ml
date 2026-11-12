@@ -1,9 +1,9 @@
-(* What a build reaches, test keys, and the test runner. *)
+(* The instances a build reaches, test keys, and the test runner. *)
 
 open Memory_layout
 open Codegen_support
 
-(* What a build reaches, and test keys *)
+(* Reachable instances, and test keys *)
 
 (* A program whose [entry] calls [helper], under the given names, and whose
    [helper] returns [value]. *)
@@ -23,7 +23,7 @@ let named_program ~entry_name ~helper_name returned =
 let lookup instances key =
   List.find (fun (instance : Lir.t) -> Instance.equal instance.key key) instances
 
-(* What each instance of a small program refers to. *)
+(* Each instance's references in a small program. *)
 let references program key =
   Reachable.compiled_references (shape_env ()) (Lir.Code (lookup program key))
 
@@ -97,7 +97,7 @@ let () =
         test_key ~entry_name:"start" ~helper_name:"helper" 1
         <> test_key ~entry_name:"begin" ~helper_name:"assist" 1
       then fail "the keys differ");
-  test "changing what a test reaches changes its key" (fun () ->
+  test "changing the code a test reaches changes its key" (fun () ->
       if
         test_key ~entry_name:"start" ~helper_name:"helper" 1
         = test_key ~entry_name:"start" ~helper_name:"helper" 2

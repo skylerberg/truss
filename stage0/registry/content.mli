@@ -18,4 +18,4 @@ val files : ?all:bool -> string -> (string * string) list
 (** The files of the package in a directory that are published, each by its path from the directory,
     with its bytes, in order of path: its manifest, its lock file, its modules, and the Markdown
     files beside them, leaving out the directories of other packages. With [all], every file under
-    the directory, which is what a published package's directory holds. *)
+    the directory, as a published package's directory holds. *)

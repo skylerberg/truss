@@ -47,7 +47,7 @@ let compile_one toolchain cache settings (name, text) =
     | Ok () ->
         Sys.rename partial output;
         (* [TRUSS_KEEP_C] keeps each C file beside its object, for reading
-           what was emitted. *)
+           the emitted code. *)
         if Sys.getenv_opt "TRUSS_KEEP_C" = None then Sys.remove source
         else Sys.rename source (Filename.concat cache.directory (key ^ ".c"));
         Ok output

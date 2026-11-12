@@ -48,5 +48,5 @@ val solve : t -> ?values:Logic.symbol list -> Logic.query -> answer
     process, and solving the same text twice gives the same answer. *)
 
 val solved : t -> int
-(** How many queries this solver has run itself, leaving out those answered from a cache: what
+(** How many queries this solver has run itself, leaving out those answered from a cache, as
     incremental work's tests count. *)

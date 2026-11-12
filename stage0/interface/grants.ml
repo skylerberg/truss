@@ -63,12 +63,12 @@ let missing database ~package ~of_ (uses : Types.capability_set) =
         | _ -> None)
       (uses :> Types.capability list)
 
-let message ~what ~of_ capability =
+let message ~subject ~of_ capability =
   let of_ = Path.show_package of_ in
   Printf.sprintf
     "%s uses `%s`, which the manifest does not grant `%s`. To grant it, add \"%s\" to the entry \
      for `%s` in `truss.toml`."
-    what (written capability) of_ (written capability) of_
+    subject (written capability) of_ (written capability) of_
 
 let rec evidence_uses database ~bounds ?(depth = 0) (evidence : Impls.evidence) =
   match evidence with
@@ -96,7 +96,7 @@ let messages database ~package impls =
       let of_ = Path.package impl in
       List.map
         (message
-           ~what:
+           ~subject:
              (Printf.sprintf "The `impl` of `%s` for `%s`"
                 (Types.show_trait interface.implements)
                 (Types.show interface.for_type))

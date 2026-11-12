@@ -1,7 +1,7 @@
 (* The background process: one per user and compiler, which holds sessions
    between commands. *)
 
-(* Only the user may reach the background process: what travels over its
+(* Only the user may reach the background process: the data on its
    socket is marshaled, and reading marshaled bytes from another user would
    let that user run code as this one. *)
 let servers_directory () =

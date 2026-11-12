@@ -8,10 +8,12 @@ let mir_of database key = Query.demand database Mir.mir key
 
 (* Fails unless every jump of a body reaches one of its blocks and every
    local it names is one of its locals. *)
-let check_body what (body : Mir.body) =
+let check_body definition (body : Mir.body) =
   let blocks = Array.length body.blocks and locals = Array.length body.locals in
-  let block index = if index < 0 || index >= blocks then fail "%s: a jump to block %d" what index in
-  let local index = if index < 0 || index >= locals then fail "%s: local _%d" what index in
+  let block index =
+    if index < 0 || index >= blocks then fail "%s: a jump to block %d" definition index
+  in
+  let local index = if index < 0 || index >= locals then fail "%s: local _%d" definition index in
   let place (place : Mir.place) =
     match place.root with Local found -> local found | Constant _ -> ()
   in
@@ -62,17 +64,17 @@ let () =
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
               let key = Resolve.Names.key_of declaration in
-              let what = Resolve.Names.show_key key in
+              let definition = Resolve.Names.show_key key in
               match
                 try mir_of database key
                 with Compiler_bug.Bug bug ->
-                  fail "%s: %s" what bug.message;
+                  fail "%s: %s" definition bug.message;
                   None
               with
               | Some mir ->
                   incr built;
-                  check_body what mir.body;
-                  Array.iter (check_body what) mir.lambdas
+                  check_body definition mir.body;
+                  Array.iter (check_body definition) mir.lambdas
               | None -> ())
             (Query.demand database Resolve.Names.declarations module_)))
     Standard_library.modules;

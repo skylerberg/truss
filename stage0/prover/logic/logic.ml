@@ -485,8 +485,8 @@ let prune query =
    of its first appearance in a walk of the facts, in order, and then the
    goal. A datatype's constructors and selectors are named after
    its sort and their positions. Bound variables are named by their depth
-   and position, so a quantifier's text does not depend on what its
-   variables were called. *)
+   and position, so a quantifier's text does not depend on its
+   variables' names. *)
 type numbering = {
   declared : (symbol, declaration) Hashtbl.t;
   datatypes : (string, (symbol * (symbol * sort) list) list) Hashtbl.t;

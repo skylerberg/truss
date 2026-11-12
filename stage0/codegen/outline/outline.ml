@@ -33,7 +33,7 @@ let cut_at_marks fork (function_ : Lir.function_) : Lir.basic_block array =
     !next - 1
   in
   let cut (block : Lir.basic_block) : Lir.basic_block =
-    (* Pieces in order, each a mark and what follows it up to the next. *)
+    (* Pieces in order, each a mark and the statements after it up to the next. *)
     let rec pieces current = function
       | [] -> [ List.rev current ]
       | statement :: rest when marks fork statement && current <> [] ->

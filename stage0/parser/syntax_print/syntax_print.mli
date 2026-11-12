@@ -1,7 +1,7 @@
 (** Prints a syntax tree as a compact S-expression, for tests and for [stage0/tools/debug]. Spans,
-    blank lines, and how literals were written are left out, so the output shows what a tree says.
-    Names and literals print as written in Truss, and every other node as a parenthesized form named
-    by its keyword or operator, such as [(+ a (- b c))]. *)
+    blank lines, and how literals were written are left out, so the output shows only the tree's
+    structure. Names and literals print as written in Truss, and every other node as a parenthesized
+    form named by its keyword or operator, such as [(+ a (- b c))]. *)
 
 val path : Syntax.path -> string
 val expression : Syntax.expression -> string

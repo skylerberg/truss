@@ -5,7 +5,7 @@
 
 type t = {
   list : unit -> (string * string) list;
-      (** Each file's path and stamp. A file whose stamp is what it was has not changed. *)
+      (** Each file's path and stamp. A file whose stamp is unchanged has not changed. *)
   read : string -> string option;  (** A file's text; [None] for one that cannot be read *)
 }
 

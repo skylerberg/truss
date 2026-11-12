@@ -307,7 +307,7 @@ let real_implementations st ~user capabilities =
     capabilities
 
 (* The standard library's function that copies bytes into a [String],
-   replacing what is not UTF-8. *)
+   replacing invalid UTF-8. *)
 let text_copied_from = Well_known.path Text_copied_from
 
 (* The C [main]'s Truss side: the program's arguments as a [List] of

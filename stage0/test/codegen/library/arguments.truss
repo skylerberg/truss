@@ -80,7 +80,7 @@ test "everything after `--` is positional, and so is a negative number" {
   assert parse_text(tool(), text: "in.txt -5 -.5 -") is Ok(parsed) && joined(parsed.values("extra")) == "-5,-.5,-,"
 }
 
-test "arguments that do not fit say what is wrong" {
+test "arguments that do not fit name the problem" {
   assert fails(tool(), text: "--color in.txt", expected: arguments::Error.UnknownOption(name: "--color"))
   assert fails(tool(), text: "-x in.txt", expected: arguments::Error.UnknownOption(name: "-x"))
   assert fails(tool(), text: "in.txt --level", expected: arguments::Error.MissingValue(name: "level"))

@@ -2,8 +2,8 @@
 
 This document describes `truss`, the one program that people and agents run
 to work on Truss code. It lives in [`stage0/cli/`](stage0/cli) and covers
-checking, testing, running, building, and the tools that tell an agent what
-a change affects. It follows [GOALS.md](GOALS.md) and the decisions in
+checking, testing, running, building, and the tools that tell an agent a
+change's effects. It follows [GOALS.md](GOALS.md) and the decisions in
 [DESIGN.md](DESIGN.md). It drives the type checker
 ([TYPECHECKER.md](TYPECHECKER.md)), the prover ([PROVER.md](PROVER.md)), and
 code generation ([CODEGEN.md](CODEGEN.md)) through the code database
@@ -381,8 +381,8 @@ Building for another target, which CODEGEN.md allows through the target's
 ## Tools for agents
 
 These commands answer the questions that GOALS.md says dominate fast
-development: which code is unfinished, what a definition promises, what a
-change affects, and how to rename a definition everywhere at once.
+development: unfinished code, a definition's contract, a change's
+effects, and how to rename a definition everywhere at once.
 
 ### `truss holes`
 
@@ -392,7 +392,7 @@ truss holes [--json] [FILE_OR_DIRECTORY...]
 
 Lists every `todo` in the packages, or in the named files, as DESIGN.md's
 "Unfinished code" requires. Each hole has its position, its expected type,
-the bindings in scope with their types, and what it blocks: `main`, if
+the bindings in scope with their types, and the work it blocks: `main`, if
 `main` reaches it, and each test that reaches it. A `todo` in a theorem or a
 `proof` block is a hole in a proof and is listed the same way. Each hole is
 a task that a person or agent can do independently. A type defined as
@@ -512,7 +512,7 @@ truss explain [--json] FILE:LINE:COLUMN
 ```
 
 Describes the name or expression at a position, written as diagnostics write
-positions: what a name refers to, its type, and the signature of its
+positions: a name's referent, its type, and the signature of its
 definition. An agent can ask about one name without reading the file around
 it.
 
@@ -727,8 +727,9 @@ The comparison covers every public definition and every `impl`:
 Types are compared after type checking, so a type written through another
 `use` is the same type. The exit status is 1 when the package is not
 published. The JSON document is `{"format", "diagnostics", "problems",
-"package", "version", "hash", "grows"}`, or with `"refused"`, the sentences
-that give the reasons.
+"package", "version", "hash", "grows"}`, each entry of `grows` being
+`{"path", "addition"}`, or with `"refused"`, the sentences that give the
+reasons.
 
 ## The language server
 
@@ -738,7 +739,7 @@ truss lsp
 
 Speaks the Language Server Protocol on standard input and output. It holds
 the text of each file the editor has open and, after each change, reports
-what `truss check` would report for the open files with that text instead
+the diagnostics `truss check` would report for the open files with that text instead
 of the files on disk. It writes no file.
 
 - **The check runs where commands run:** in the project's background

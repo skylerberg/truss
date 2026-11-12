@@ -42,8 +42,8 @@ jobs:
           opam-sha256: ${{ env.OPAM_SHA256 }}
           ocaml-version: ${{ env.OCAML_VERSION }}
 
-      # Pull requests start from main's dune cache, so they build only what
-      # they changed.
+      # Pull requests start from main's dune cache, so they build only their
+      # changes.
       - uses: actions/cache/restore@v6.1.0
         with:
           path: ~/.cache/dune

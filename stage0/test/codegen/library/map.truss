@@ -165,7 +165,7 @@ test "a map takes keys of other types" {
   assert squares.length() == 10 && squares.contains(18) && !squares.contains(7)
 }
 
-test "a seeded map starts empty and holds what is put in it" {
+test "a seeded map starts empty and holds its inserted entries" {
   provide random::SeededRandom.new(11) {
     var seeded: Map[String, Int64] = Map.seeded()
     assert seeded.is_empty()

@@ -1,4 +1,4 @@
-(* What lowering reads: its context, and the code and the signature of the
+(* Lowering's inputs: its context, and the code and the signature of the
    instance being lowered. *)
 module Names = Resolve.Names
 module Environment = Interface.Environment
@@ -60,7 +60,7 @@ let context ?(checks = false)
 
 let test_key path = Instance.Code { path; type_arguments = [] }
 
-(* Where a function is written, and what its generic parameters stand for in
+(* Where a function is written, and its generic parameters' instantiation in
    this instance. Its body is in the core form of the definition. *)
 type code = {
   definition_key : Names.key;  (** The definition that holds the body *)
@@ -80,8 +80,8 @@ type code = {
 let demand context query key = Query.demand context.database query key
 
 (* The code of a function lowering writes itself, which has no source: only
-   what its positions are relative to, what its generic parameters stand
-   for, and its result. *)
+   the base of its positions, its generic parameters' instantiation, and
+   its result. *)
 let unwritten ~definition_key ~anchor ~substitution ~result =
   {
     definition_key;
@@ -109,7 +109,7 @@ let impl_interface context impl =
   | Some position -> position
   | None -> bug "no interface for %s" (Path.show impl)
 
-(* What an [impl]'s [Self] and its trait's parameters stand for, in terms of
+(* The instantiation of an [impl]'s [Self] and its trait's parameters, in terms of
    the [impl]'s own generic parameters. *)
 let trait_substitution context impl =
   match Interface.Impls.trait_substitution context.database impl with
