@@ -177,7 +177,7 @@ public fn Path.join_path(self, other: Path) -> Path
   join_paths(self.text.slice(), second: other.text.slice())
 }
 
-public fn Path.join_within(self, part: Path) -> Result[Path, SystemError]
+public fn Path.join_confined(self, part: Path) -> Result[Path, SystemError]
   ensures match result {
     Ok(joined) => joined.starts_with(self)
     Err(_) => true
@@ -188,11 +188,11 @@ public fn Path.join_within(self, part: Path) -> Result[Path, SystemError]
     return Err(SystemError.PermissionDenied)
   }
   let inner = part.normalized()
-  let within = inner.text.slice()
-  if within.length() >= 2 && within.byte(0) == 46 && within.byte(1) == 46 && (within.length() == 2 || within.byte(2) == 47) {
+  let part_text = inner.text.slice()
+  if part_text.length() >= 2 && part_text.byte(0) == 46 && part_text.byte(1) == 46 && (part_text.length() == 2 || part_text.byte(2) == 47) {
     return Err(SystemError.PermissionDenied)
   }
-  let joined = if within.length() == 1 && within.byte(0) == 46 {
+  let joined = if part_text.length() == 1 && part_text.byte(0) == 46 {
     Path(text: self.text.slice().to_string())
   } else {
     self.join_path(inner)
@@ -415,14 +415,14 @@ public fn Path.starts_with(self, base: Path) -> Bool
     if wanted.is_empty() {
       return true
     }
-    let found = next_component(text, from: mine)
-    if found.end - found.start != wanted.end - wanted.start {
+    let component = next_component(text, from: mine)
+    if component.end - component.start != wanted.end - wanted.start {
       return false
     }
-    if !text.part(found.start, to: found.end).matches_at(prefix.part(wanted.start, to: wanted.end), offset: 0) {
+    if !text.part(component.start, to: component.end).matches_at(prefix.part(wanted.start, to: wanted.end), offset: 0) {
       return false
     }
-    mine = found.end
+    mine = component.end
     theirs = wanted.end
   }
   true
@@ -448,14 +448,14 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
     if wanted.is_empty() {
       theirs = prefix.length()
     } else {
-      let found = next_component(text, from: mine)
-      if found.end - found.start != wanted.end - wanted.start {
+      let component = next_component(text, from: mine)
+      if component.end - component.start != wanted.end - wanted.start {
         return None
       }
-      if !text.part(found.start, to: found.end).matches_at(prefix.part(wanted.start, to: wanted.end), offset: 0) {
+      if !text.part(component.start, to: component.end).matches_at(prefix.part(wanted.start, to: wanted.end), offset: 0) {
         return None
       }
-      mine = found.end
+      mine = component.end
       theirs = wanted.end
     }
   }
@@ -819,13 +819,13 @@ public fn copy(from: Path, to: Path) -> Result[UInt64, SystemError]
 public fn create_directories(directory: Path) -> Result[Unit, SystemError]
   uses FileRead, FileWrite
 {
-  var made = if directory.is_absolute() { Path.new("/") } else { Path.new("") }
+  var prefix = if directory.is_absolute() { Path.new("/") } else { Path.new("") }
   for component in directory.components() {
-    made = made.join(component)
-    match FileWrite.create_directory(made) {
+    prefix = prefix.join(component)
+    match FileWrite.create_directory(prefix) {
       Ok(_) => {}
       Err(AlreadyExists) => {
-        if !FileRead.metadata(made, follow_links: true)?.is_directory() {
+        if !FileRead.metadata(prefix, follow_links: true)?.is_directory() {
           return Err(SystemError.NotADirectory)
         }
       }
@@ -846,14 +846,14 @@ public fn remove_all(path: Path) -> Result[Unit, SystemError]
   FileWrite.remove(path)
 }
 
-public fn create_temporary_directory(within: Path, prefix: StringSlice) -> Result[Path, SystemError]
+public fn create_temporary_directory(parent: Path, prefix: StringSlice) -> Result[Path, SystemError]
   uses FileWrite, Random
 {
   var failure = SystemError.AlreadyExists
   for _ in 0..16 {
     var name = prefix.to_string()
     mut name.push(Random.next().format(radix: 16, minimum_digits: 16).slice())
-    let directory = within.join(name.slice())
+    let directory = parent.join(name.slice())
     match FileWrite.create_directory(directory) {
       Ok(_) => return Ok(own directory)
       Err(AlreadyExists) => {}
@@ -1148,7 +1148,7 @@ public fn Glob.matches(self, path: Path) -> Bool
 public fn Glob.find(self, root: Path) -> Result[List[Path], SystemError]
   uses FileRead
 {
-  var found: List[Path] = []
+  var paths: List[Path] = []
   for entry in walk(root)? {
     let matches = if self.absolute {
       self.matches(entry.path)
@@ -1159,10 +1159,10 @@ public fn Glob.find(self, root: Path) -> Result[List[Path], SystemError]
       }
     }
     if entry.depth > 0 && matches {
-      mut found.push(entry.path.copy())
+      mut paths.push(entry.path.copy())
     }
   }
-  Ok(own found)
+  Ok(own paths)
 }
 
 public type GlobError(offset: USize)
@@ -1181,32 +1181,32 @@ impl FileRead for FilesWithin
   uses FileRead
 {
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
-    FileRead.read(self.root.join_within(file)?)
+    FileRead.read(self.root.join_confined(file)?)
   }
 
   fn read_text(self, file: Path) -> Result[String, SystemError] {
-    FileRead.read_text(self.root.join_within(file)?)
+    FileRead.read_text(self.root.join_confined(file)?)
   }
 
   fn open(self, file: Path) -> Result[FileReader, SystemError] {
-    FileRead.open(self.root.join_within(file)?)
+    FileRead.open(self.root.join_confined(file)?)
   }
 
   fn metadata(self, path: Path, follow_links: Bool) -> Result[Metadata, SystemError] {
-    FileRead.metadata(self.root.join_within(path)?, follow_links: follow_links)
+    FileRead.metadata(self.root.join_confined(path)?, follow_links: follow_links)
   }
 
   fn list(self, directory: Path) -> Result[List[DirectoryEntry], SystemError] {
-    FileRead.list(self.root.join_within(directory)?)
+    FileRead.list(self.root.join_confined(directory)?)
   }
 
   fn read_link(self, link: Path) -> Result[Path, SystemError] {
-    FileRead.read_link(self.root.join_within(link)?)
+    FileRead.read_link(self.root.join_confined(link)?)
   }
 
   fn resolve(self, path: Path) -> Result[Path, SystemError] {
     let root = FileRead.resolve(self.root)?
-    let resolved = FileRead.resolve(self.root.join_within(path)?)?
+    let resolved = FileRead.resolve(self.root.join_confined(path)?)?
     match resolved.relative_to(root) {
       Some(relative) => Ok(own relative)
       None => Err(SystemError.PermissionDenied)
@@ -1218,39 +1218,39 @@ impl FileWrite for FilesWithin
   uses FileWrite
 {
   fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
-    FileWrite.write(self.root.join_within(file)?, contents: contents)
+    FileWrite.write(self.root.join_confined(file)?, contents: contents)
   }
 
   fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
-    FileWrite.write_text(self.root.join_within(file)?, contents: contents)
+    FileWrite.write_text(self.root.join_confined(file)?, contents: contents)
   }
 
   fn open(self, file: Path, mode: WriteMode) -> Result[File, SystemError] {
-    FileWrite.open(self.root.join_within(file)?, mode: mode)
+    FileWrite.open(self.root.join_confined(file)?, mode: mode)
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
-    FileWrite.create_directory(self.root.join_within(directory)?)
+    FileWrite.create_directory(self.root.join_confined(directory)?)
   }
 
   fn remove(self, path: Path) -> Result[Unit, SystemError] {
-    FileWrite.remove(self.root.join_within(path)?)
+    FileWrite.remove(self.root.join_confined(path)?)
   }
 
   fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
-    FileWrite.rename(self.root.join_within(from)?, to: self.root.join_within(to)?)
+    FileWrite.rename(self.root.join_confined(from)?, to: self.root.join_confined(to)?)
   }
 
   fn link(self, target: Path, link: Path, kind: LinkKind) -> Result[Unit, SystemError] {
-    FileWrite.link(self.root.join_within(target)?, link: self.root.join_within(link)?, kind: kind)
+    FileWrite.link(self.root.join_confined(target)?, link: self.root.join_confined(link)?, kind: kind)
   }
 
   fn set_permissions(self, path: Path, permissions: Permissions) -> Result[Unit, SystemError] {
-    FileWrite.set_permissions(self.root.join_within(path)?, permissions: permissions)
+    FileWrite.set_permissions(self.root.join_confined(path)?, permissions: permissions)
   }
 
   fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
-    FileWrite.set_modified(self.root.join_within(path)?, time: time)
+    FileWrite.set_modified(self.root.join_confined(path)?, time: time)
   }
 }
 
@@ -1445,7 +1445,7 @@ internal fn MemoryFiles.add_inode(mut self, kind: own InodeKind, permissions: Pe
 
 internal fn MemoryFiles.kind_of(self, inode: UInt64) -> Option[FileKind] {
   match self.inodes.get(inode) {
-    Some(found) => match found.kind {
+    Some(entry) => match entry.kind {
       Bytes(_) => Some(FileKind.File)
       Directory => Some(FileKind.Directory)
       Link(_) => Some(FileKind.SymbolicLink)
@@ -1477,7 +1477,7 @@ internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Lo
       }
     }
     match self.inodes.get(inode) {
-      Some(found) => match found.kind {
+      Some(entry) => match entry.kind {
         Link(target) => {
           if unresolved.is_empty() && !follow_last {
             return Ok(Located(path: own candidate, inode: Some(inode)))
@@ -1538,7 +1538,7 @@ internal fn MemoryFiles.is_open(self, inode: UInt64) -> Bool {
 
 internal fn MemoryFiles.forget_if_unreachable(mut self, inode: UInt64) {
   let unnamed = match self.inodes.get(inode) {
-    Some(found) => found.link_count == 0
+    Some(unnamed) => unnamed.link_count == 0
     None => false
   }
   if unnamed && !self.is_open(inode) {
@@ -1549,8 +1549,8 @@ internal fn MemoryFiles.forget_if_unreachable(mut self, inode: UInt64) {
 internal fn MemoryFiles.remove_name(mut self, path: Path, inode: UInt64) {
   mut self.names.remove(path)
   match mut self.inodes.take(inode) {
-    Some(found) => {
-      var changed = own found
+    Some(entry) => {
+      var changed = own entry
       changed.link_count = changed.link_count.saturating_subtract(1)
       mut self.inodes.insert(inode, value: own changed)
     }
@@ -1580,9 +1580,9 @@ internal fn MemoryFiles.remove_tree(mut self, path: Path, keep_directory: Bool) 
 internal fn MemoryFiles.read_bytes(self, file: Path) -> Result[List[UInt8], SystemError] {
   let inode = self.existing(file, follow_last: true)?
   match self.inodes.get(inode) {
-    Some(found) => match found.kind {
+    Some(entry) => match entry.kind {
       Bytes(contents) => {
-        if (found.permissions.mode() & 0o444) == 0 {
+        if (entry.permissions.mode() & 0o444) == 0 {
           return Err(SystemError.PermissionDenied)
         }
         Ok(contents.copy())
@@ -1596,8 +1596,8 @@ internal fn MemoryFiles.read_bytes(self, file: Path) -> Result[List[UInt8], Syst
 
 internal fn MemoryFiles.replace_contents(mut self, inode: UInt64, contents: own List[UInt8]) -> Result[Unit, SystemError] {
   match mut self.inodes.take(inode) {
-    Some(found) => {
-      var changed = own found
+    Some(entry) => {
+      var changed = own entry
       let outcome: Result[Unit, SystemError] = match changed.kind {
         Bytes(_) => if changed.permissions.is_read_only() { Err(SystemError.PermissionDenied) } else { Ok(Unit) }
         Directory => Err(SystemError.IsADirectory)
@@ -1634,8 +1634,8 @@ internal fn MemoryFiles.change_inode(
 ) -> Result[Unit, SystemError] {
   let inode = self.existing(path, follow_last: true)?
   match mut self.inodes.take(inode) {
-    Some(found) => {
-      var changed = own found
+    Some(entry) => {
+      var changed = own entry
       if permissions is Some(new_permissions) {
         changed.permissions = new_permissions
       }
@@ -1651,13 +1651,13 @@ internal fn MemoryFiles.change_inode(
 
 internal fn MemoryFiles.metadata_of(self, inode: UInt64) -> Result[Metadata, SystemError] {
   match self.inodes.get(inode) {
-    Some(found) => {
-      let length: USize = match found.kind {
+    Some(entry) => {
+      let length: USize = match entry.kind {
         Bytes(contents) => contents.length()
         Directory => 0
         Link(target) => target.bytes().length()
       }
-      let kind = match found.kind {
+      let kind = match entry.kind {
         Bytes(_) => FileKind.File
         Directory => FileKind.Directory
         Link(_) => FileKind.SymbolicLink
@@ -1665,8 +1665,8 @@ internal fn MemoryFiles.metadata_of(self, inode: UInt64) -> Result[Metadata, Sys
       Ok(Metadata(
         kind: kind,
         length: intrinsic::convert(length),
-        permissions: found.permissions,
-        modified: found.modified,
+        permissions: entry.permissions,
+        modified: entry.modified,
         accessed: None,
         created: None,
       ))
@@ -1699,7 +1699,7 @@ internal fn MemoryFiles.open_file_index(self, handle: streams::Handle) -> Option
 
 internal fn MemoryFiles.length_of(self, inode: UInt64) -> UInt64 {
   match self.inodes.get(inode) {
-    Some(found) => match found.kind {
+    Some(entry) => match entry.kind {
       Bytes(contents) => intrinsic::convert(contents.length())
       _ => 0
     }
@@ -1712,7 +1712,7 @@ internal fn MemoryFiles.copy_out(self, inode: UInt64, from: UInt64, buffer: mut 
   ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
 {
   match self.inodes.get(inode) {
-    Some(found) => match found.kind {
+    Some(entry) => match entry.kind {
       Bytes(contents) => {
         let length: UInt64 = intrinsic::convert(contents.length())
         if from >= length {
@@ -1735,8 +1735,8 @@ internal fn MemoryFiles.copy_in(mut self, inode: UInt64, at: UInt64, bytes: Slic
   ensures self.open_files.length() == old(self.open_files.length())
 {
   match mut self.inodes.take(inode) {
-    Some(found) => {
-      var changed = own found
+    Some(entry) => {
+      var changed = own entry
       let outcome: Result[Unit, SystemError] = match mut changed.kind {
         Bytes(contents) => overwrite(mut contents, at: at, bytes: bytes)
         Directory => Err(SystemError.IsADirectory)
@@ -1757,8 +1757,8 @@ internal fn MemoryFiles.resize(mut self, inode: UInt64, length: UInt64) -> Resul
   }
   let wanted: USize = intrinsic::convert(length)
   match mut self.inodes.take(inode) {
-    Some(found) => {
-      var changed = own found
+    Some(entry) => {
+      var changed = own entry
       let outcome: Result[Unit, SystemError] = match mut changed.kind {
         Bytes(contents) => {
           if wanted < contents.length() {
@@ -1810,9 +1810,9 @@ internal fn MemoryFiles.open_to_write(mut self, file: Path, mode: WriteMode) -> 
       existing
     }
     None => {
-      let made = mut self.add_inode(InodeKind.Bytes(contents: []), permissions: Permissions.from_mode(0o644))
-      mut self.names.insert(own located.path, value: made)
-      made
+      let inode = mut self.add_inode(InodeKind.Bytes(contents: []), permissions: Permissions.from_mode(0o644))
+      mut self.names.insert(own located.path, value: inode)
+      inode
     }
   }
   let handle = mut self.add_open_file(
@@ -1867,7 +1867,7 @@ impl FileRead for MemoryFiles {
   fn read_link(self, link: Path) -> Result[Path, SystemError] {
     let inode = self.existing(link, follow_last: false)?
     match self.inodes.get(inode) {
-      Some(found) => match found.kind {
+      Some(entry) => match entry.kind {
         Link(target) => Ok(target.copy())
         _ => Err(SystemError.InvalidInput)
       }
@@ -1982,8 +1982,8 @@ impl FileWrite for MemoryFiles {
           return Err(SystemError.PermissionDenied)
         }
         match mut self.inodes.take(inode) {
-          Some(found) => {
-            var changed = own found
+          Some(entry) => {
+            var changed = own entry
             changed.link_count = changed.link_count.saturating_add(1)
             mut self.inodes.insert(inode, value: own changed)
           }
@@ -2079,9 +2079,9 @@ impl Handles for MemoryFiles {
       FromEnd(offset) => offset_from(self.length_of(self.open_files[index].inode), by: offset)
     }
     match position {
-      Some(found) => {
-        self.open_files[index].position = found
-        Ok(found)
+      Some(new_position) => {
+        self.open_files[index].position = new_position
+        Ok(new_position)
       }
       None => Err(SystemError.InvalidInput)
     }

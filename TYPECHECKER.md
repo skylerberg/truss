@@ -1298,12 +1298,12 @@ copied instead.
     resumes after its `yield`, so it may yield while the place is moved out.
 
   Until the place is assigned, using it is a use after move. So `Option.take`
-  is `let taken = own self`, then `self = None`, then `taken`. This is sound
+  is `let previous = own self`, then `self = None`, then `previous`. This is sound
   because a panic ends the program: no code can observe the place while it is
   uninitialized. Rust unwinds, so it forbids the move and offers `mem::replace`
   instead.
-- **A local that a value is moved into owns the value.** After `let taken = own
-  items`, `taken` has no views, and `items` can be assigned again while `taken`
+- **A local that a value is moved into owns the value.** After `let moved = own
+  items`, `moved` has no views, and `items` can be assigned again while `moved`
   is live.
 - **Returning a place that is not owned is an error,** with a fix that copies
   it. This applies to the function's tail expression, and to the tail
@@ -1368,7 +1368,7 @@ uses one definition of the places that a value views, `Graph.views_of`.
 - **A call's result views every argument that it could borrow from.** A result
   of a view type holds the loan of every argument that the call borrows,
   read-only or `mut`, and that is not `Plain`, and of every argument of a view
-  type. So `found.unwrap_or(default: backup[..])` views `backup`, and `mut
+  type. So `cached.unwrap_or(default: backup[..])` views `backup`, and `mut
   backup.push(9)` is rejected while the result is live. A `Plain` argument,
   such as an index, contributes no loan, so the rule is rarely more
   conservative than necessary.
@@ -1762,8 +1762,8 @@ the error is fixed.
   each function converted to such a type uses beyond the `uses` of the type,
   and the capabilities that a lambda's body needs beyond the `uses` of its
   type. So `for_each(3, visit: tick)` needs `Clock` when `tick` uses it and
-  `visit` is a `(fn(Int64) uses Granted)`. After `let kept = later(tick)`,
-  where `later` returns its argument, `kept` is a `(fn() -> Instant uses
+  `visit` is a `(fn(Int64) uses Granted)`. After `let delayed = later(tick)`,
+  where `later` returns its argument, `delayed` is a `(fn() -> Instant uses
   Clock)`, and calling it needs `Clock`.
 - **The sets are solved after the whole definition is checked,** because a
   constraint on a set can be anywhere in the definition: a `var` that stores a

@@ -641,7 +641,7 @@ public fn quote(text: StringSlice) -> String
   String(storage: own output)
 }
 
-public fn Value.number(value: Float64) -> Option[Value]
+public fn Value.from_float64(value: Float64) -> Option[Value]
   ensures (result is Some(_)) == value.is_finite()
   cost time O(1)
 {
@@ -657,7 +657,7 @@ public transparent fn Value.is_null(self) -> Bool
   self is Null
 }
 
-public transparent fn Value.to_bool(self) -> Option[Bool]
+public transparent fn Value.as_bool(self) -> Option[Bool]
   cost time O(1)
 {
   match self {
@@ -666,7 +666,7 @@ public transparent fn Value.to_bool(self) -> Option[Bool]
   }
 }
 
-public transparent fn Value.to_int64(self) -> Option[Int64]
+public transparent fn Value.as_int64(self) -> Option[Int64]
   cost time O(1)
 {
   match self {
@@ -675,7 +675,7 @@ public transparent fn Value.to_int64(self) -> Option[Int64]
   }
 }
 
-public transparent fn Value.to_float64(self) -> Option[Float64]
+public transparent fn Value.as_float64(self) -> Option[Float64]
   cost time O(1)
 {
   match self {
@@ -684,7 +684,7 @@ public transparent fn Value.to_float64(self) -> Option[Float64]
   }
 }
 
-public transparent fn Value.text(self) -> Option[StringSlice]
+public transparent fn Value.as_text(self) -> Option[StringSlice]
   cost time O(1)
 {
   match self {
@@ -693,7 +693,7 @@ public transparent fn Value.text(self) -> Option[StringSlice]
   }
 }
 
-public transparent fn Value.items(self) -> Option[Slice[Value]]
+public transparent fn Value.as_items(self) -> Option[Slice[Value]]
   cost time O(1)
 {
   match self {
@@ -702,7 +702,7 @@ public transparent fn Value.items(self) -> Option[Slice[Value]]
   }
 }
 
-public fn Value.members(self) lends Option[Map[String, Value]]
+public fn Value.as_members(self) lends Option[Map[String, Value]]
   cost time O(1)
 {
   match self {
@@ -835,8 +835,8 @@ fn Value.pointer_targets(self, path: StringSlice) yields Value
       match unescaped_pointer_token(token) {
         Some(name) => {
           if members.contains(name) {
-            for found in members[name].pointer_targets(rest) {
-              yield found
+            for target in members[name].pointer_targets(rest) {
+              yield target
             }
           }
         }
@@ -847,8 +847,8 @@ fn Value.pointer_targets(self, path: StringSlice) yields Value
       match pointer_array_index(token) {
         Some(index) => {
           if index < items.length() {
-            for found in items[index].pointer_targets(rest) {
-              yield found
+            for target in items[index].pointer_targets(rest) {
+              yield target
             }
           }
         }
@@ -862,8 +862,8 @@ fn Value.pointer_targets(self, path: StringSlice) yields Value
 public fn Value.pointer(self, path: StringSlice) lends Option[Value]
   cost time finite
 {
-  for found in self.pointer_targets(path) {
-    yield Some(found)
+  for target in self.pointer_targets(path) {
+    yield Some(target)
     return
   }
   yield None

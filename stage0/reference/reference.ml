@@ -166,7 +166,7 @@ module Snippet = struct
           let kind, diagnostics =
             if Parser.is_use tokens piece then
               let parsed = Parser.use_line source tokens piece in
-              (Use, Parser.placed parsed)
+              (Use, Parser.diagnostics_in_file parsed)
             else if starts_definition tokens piece then
               match Parser.example_definition source tokens piece with
               | Example_definition, diagnostics -> (Definition, diagnostics)

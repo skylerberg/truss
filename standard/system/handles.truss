@@ -196,7 +196,7 @@ internal fn controlling_terminal() -> streams::Handle {
 }
 
 internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, SystemError]
-  ensures !(result is Ok(kept) && outcome is Ok(given) && !identical(kept, given))
+  ensures !(result is Ok(converted) && outcome is Ok(original) && !identical(converted, original))
   ensures (result is Ok(_)) == (outcome is Ok(_))
 {
   match own outcome {

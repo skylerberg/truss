@@ -423,7 +423,7 @@ and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind 
 
 and pattern_kind =
   | Wildcard
-  | Bind of { local : local; name : string; mutable_ : bool; mode : Types.mode }
+  | Bind of { local : local; name : string; is_var : bool; mode : Types.mode }
       (** Binds the matched value to a local. [mode] is [Own] if the binding owns the value, and
           [Read] or [Mut] if it borrows part of the scrutinee. *)
   | Variant of { variant : string; fields : (string * pattern) list }

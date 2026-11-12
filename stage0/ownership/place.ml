@@ -27,31 +27,31 @@ type overlap =
 let overlap left right =
   if left.root <> right.root then Disjoint
   else
-    let rec go left right =
+    let rec steps_overlap left right =
       match (left, right) with
       | [], _ | _, [] -> Overlapping
       | Field first :: left, Field second :: right ->
-          if first = second then go left right else Disjoint
+          if first = second then steps_overlap left right else Disjoint
       | Element first :: left, Element second :: right -> (
-          if first.node = second.node then go left right
+          if first.node = second.node then steps_overlap left right
           else
-            match go left right with
+            match steps_overlap left right with
             | Disjoint -> Disjoint
             | _ -> Maybe_disjoint (first.origin, second.origin))
-      | _ :: left, _ :: right -> go left right
+      | _ :: left, _ :: right -> steps_overlap left right
     in
-    go left.steps right.steps
+    steps_overlap left.steps right.steps
 
 let is_prefix prefix place =
   prefix.root = place.root
   &&
-  let rec go = function
+  let rec steps_prefix = function
     | [], _ -> true
-    | Field first :: prefix, Field second :: place -> first = second && go (prefix, place)
-    | Element _ :: prefix, Element _ :: place -> go (prefix, place)
+    | Field first :: prefix, Field second :: place -> first = second && steps_prefix (prefix, place)
+    | Element _ :: prefix, Element _ :: place -> steps_prefix (prefix, place)
     | _ -> false
   in
-  go (prefix.steps, place.steps)
+  steps_prefix (prefix.steps, place.steps)
 
 (* A [List], a [Slice], or an [Array]. An element of one of these is a
    place. An index of any other collection is a call of the collection's

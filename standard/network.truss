@@ -219,7 +219,7 @@ internal type Group(value: UInt16, end: USize)
 
 internal fn parse_group(text: StringSlice, from: USize) -> Result[Group, AddressError]
   requires from <= text.length()
-  ensures !(result is Ok(found) && (found.end <= from || found.end > text.length()))
+  ensures !(result is Ok(parsed_group) && (parsed_group.end <= from || parsed_group.end > text.length()))
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(1)
 {
@@ -277,14 +277,14 @@ internal fn Ipv6Parser.with_group(self, text: StringSlice) -> Result[Ipv6Parser,
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(1)
 {
-  let found = parse_group(text, from: self.index)?
+  let parsed_group = parse_group(text, from: self.index)?
   var groups = self.groups
-  groups[self.count] = found.value
+  groups[self.count] = parsed_group.value
   let count = self.count + 1
-  if found.end == text.length() {
-    return Ok(Ipv6Parser(groups: groups, count: count, gap: self.gap, index: found.end, pending: false))
+  if parsed_group.end == text.length() {
+    return Ok(Ipv6Parser(groups: groups, count: count, gap: self.gap, index: parsed_group.end, pending: false))
   }
-  let colon = expect_byte(text, from: found.end, byte: 58)?
+  let colon = expect_byte(text, from: parsed_group.end, byte: 58)?
   if colon < text.length() && text.byte(colon) == 58 {
     if self.gap != 9 {
       return Err(AddressError(offset: colon))
@@ -502,13 +502,13 @@ internal fn mask_octet(octet: UInt8, index: USize, prefix_length: UInt8) -> UInt
   requires index < 16
   cost time O(1)
 {
-  let kept: USize = intrinsic::convert(prefix_length)
-  if kept >= 8 * index + 8 {
+  let prefix_bits: USize = intrinsic::convert(prefix_length)
+  if prefix_bits >= 8 * index + 8 {
     octet
-  } else if kept <= 8 * index {
+  } else if prefix_bits <= 8 * index {
     0
   } else {
-    let dropped = 8 * index + 8 - kept
+    let dropped = 8 * index + 8 - prefix_bits
     (octet >> dropped) << dropped
   }
 }
@@ -521,23 +521,23 @@ public fn IpNetwork.new(address: IpAddress, prefix_length: UInt8) -> Option[IpNe
       if prefix_length > 32 {
         return None
       }
-      var kept = octets
+      var masked = octets
       let count: USize = 4
       for index in 0..count {
-        kept[index] = mask_octet(octets[index], index: index, prefix_length: prefix_length)
+        masked[index] = mask_octet(octets[index], index: index, prefix_length: prefix_length)
       }
-      Some(IpNetwork(address: IpAddress.Version4(kept), prefix_length: prefix_length))
+      Some(IpNetwork(address: IpAddress.Version4(masked), prefix_length: prefix_length))
     }
     Version6(octets) => {
       if prefix_length > 128 {
         return None
       }
-      var kept = octets
+      var masked = octets
       let count: USize = 16
       for index in 0..count {
-        kept[index] = mask_octet(octets[index], index: index, prefix_length: prefix_length)
+        masked[index] = mask_octet(octets[index], index: index, prefix_length: prefix_length)
       }
-      Some(IpNetwork(address: IpAddress.Version6(kept), prefix_length: prefix_length))
+      Some(IpNetwork(address: IpAddress.Version6(masked), prefix_length: prefix_length))
     }
   }
 }

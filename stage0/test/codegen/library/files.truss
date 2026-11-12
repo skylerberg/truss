@@ -9,8 +9,8 @@ fn shows(path: Path, expected: StringSlice) -> Bool {
   }
 }
 
-fn holds(found: Option[StringSlice], expected: StringSlice) -> Bool {
-  match found {
+fn holds(actual: Option[StringSlice], expected: StringSlice) -> Bool {
+  match actual {
     Some(text) => text == expected
     None => false
   }
@@ -132,27 +132,27 @@ test "normalizing keeps the double dots that lead out of a relative path, and no
   assert shows(Path.new("/usr//local/./bin/").normalized(), expected: "/usr/local/bin")
 }
 
-fn within(base: StringSlice, part: StringSlice, expected: StringSlice) -> Bool {
-  match Path.new(base).join_within(Path.new(part)) {
+fn joins_to(base: StringSlice, part: StringSlice, expected: StringSlice) -> Bool {
+  match Path.new(base).join_confined(Path.new(part)) {
     Ok(joined) => shows(joined, expected: expected)
     Err(_) => false
   }
 }
 
 fn refused(base: StringSlice, part: StringSlice) -> Bool {
-  Path.new(base).join_within(Path.new(part)) is Err(error) && error == SystemError.PermissionDenied
+  Path.new(base).join_confined(Path.new(part)) is Err(error) && error == SystemError.PermissionDenied
 }
 
 test "joining within a directory refuses a part that would leave it" {
-  assert within("/srv/data", part: "a/b", expected: "/srv/data/a/b")
-  assert within("/srv/data", part: "a/../b", expected: "/srv/data/b")
-  assert within("/srv/data", part: "./a//b/", expected: "/srv/data/a/b")
-  assert within("/srv/data", part: ".", expected: "/srv/data")
-  assert within("/srv/data", part: "", expected: "/srv/data")
-  assert within("/srv/data", part: "a/..", expected: "/srv/data")
-  assert within("data", part: "x", expected: "data/x")
-  assert within("", part: "x", expected: "x")
-  assert within("/srv/data", part: "..a", expected: "/srv/data/..a")
+  assert joins_to("/srv/data", part: "a/b", expected: "/srv/data/a/b")
+  assert joins_to("/srv/data", part: "a/../b", expected: "/srv/data/b")
+  assert joins_to("/srv/data", part: "./a//b/", expected: "/srv/data/a/b")
+  assert joins_to("/srv/data", part: ".", expected: "/srv/data")
+  assert joins_to("/srv/data", part: "", expected: "/srv/data")
+  assert joins_to("/srv/data", part: "a/..", expected: "/srv/data")
+  assert joins_to("data", part: "x", expected: "data/x")
+  assert joins_to("", part: "x", expected: "x")
+  assert joins_to("/srv/data", part: "..a", expected: "/srv/data/..a")
   assert refused("/srv/data", part: "..")
   assert refused("/srv/data", part: "../x")
   assert refused("/srv/data", part: "a/../../x")
@@ -375,7 +375,7 @@ test "create_directories makes each missing directory of a path" {
   var memory = files::MemoryFiles.new().with_text(path_of("/file"), contents: "x")
   provide mut memory {
     assert files::create_directories(path_of("/a/b/c")) is Ok(_)
-    assert FileRead.metadata(path_of("/a/b/c")) is Ok(made) && made.is_directory()
+    assert FileRead.metadata(path_of("/a/b/c")) is Ok(metadata) && metadata.is_directory()
     assert files::create_directories(path_of("/a/b/c")) is Ok(_)
     assert files::create_directories(path_of("/a/b/d/e")) is Ok(_)
     assert FileRead.list(path_of("/a/b")) is Ok(entries) && entries.length() == 2
@@ -458,8 +458,8 @@ test "create_temporary_directory makes a new directory with the prefix" {
       && files::create_temporary_directory(path_of("/tmp"), prefix: "build-") is Ok(second)
       && first != second
       && "${first}".starts_with("/tmp/build-")
-      && FileRead.metadata(first) is Ok(made)
-      && made.is_directory()
+      && FileRead.metadata(first) is Ok(metadata)
+      && metadata.is_directory()
     assert files::create_temporary_directory(path_of("/none"), prefix: "x") is Err(NotFound)
   }
 }
@@ -533,10 +533,10 @@ test "find lists the paths below a directory that a glob matches" {
   var memory = project()
   provide mut memory {
     assert files::Glob.parse("**/*.truss") is Ok(glob)
-      && glob.find(path_of("/project")) is Ok(found)
-      && found.length() == 2
-      && "${found[0]}" == "/project/source/main.truss"
-      && "${found[1]}" == "/project/source/library/list.truss"
+      && glob.find(path_of("/project")) is Ok(paths)
+      && paths.length() == 2
+      && "${paths[0]}" == "/project/source/main.truss"
+      && "${paths[1]}" == "/project/source/library/list.truss"
     assert files::Glob.parse("/project/*") is Ok(absolute)
       && absolute.find(path_of("/project")) is Ok(top)
       && top.length() == 2

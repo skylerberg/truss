@@ -19,13 +19,7 @@ module Usage = Type_checker.For_testing.Usage
 open Harness
 open Support
 
-let check database module_ =
-  Resolve.diagnostics database module_
-  @ Interface.diagnostics database module_
-  @ Infer.diagnostics database module_
-  @ Patterns.diagnostics database module_
-  @ Usage.diagnostics database module_
-  @ Ownership.diagnostics database module_
+let check = Type_checker.through Ownership
 
 let helpers =
   "type Held[View](view: View)\n\n\
@@ -51,8 +45,8 @@ let helpers =
    fn same[Value](value: own Value) -> Value {\n\
   \  value\n\
    }\n\n\
-   fn put[Value](kept: mut List[Value], value: own Value) {\n\
-  \  mut kept.push(own value)\n\
+   fn put[Value](held: mut List[Value], value: own Value) {\n\
+  \  mut held.push(own value)\n\
    }\n\n"
 
 (* A place that stores a [List[Int64]]. *)
@@ -164,8 +158,8 @@ let makers =
       type_ = Some "fn() -> USize";
       make =
         (fun ~suffix place ->
-          ( [ Printf.sprintf "let made%s: fn() -> USize = fn() { %s.length() }" suffix place ],
-            "made" ^ suffix ));
+          ( [ Printf.sprintf "let built%s: fn() -> USize = fn() { %s.length() }" suffix place ],
+            "built" ^ suffix ));
     };
     { maker = "a cursor"; type_ = None; make = (fun ~suffix:_ place -> ([], place ^ ".each()")) };
     {
@@ -173,8 +167,8 @@ let makers =
       type_ = Some "any Sized";
       make =
         (fun ~suffix place ->
-          ( [ Printf.sprintf "let made%s: any Sized = any Window(view: %s[0..2])" suffix place ],
-            "own made" ^ suffix ));
+          ( [ Printf.sprintf "let built%s: any Sized = any Window(view: %s[0..2])" suffix place ],
+            "own built" ^ suffix ));
     };
   ]
 
@@ -328,7 +322,7 @@ let () =
           | [] -> ()
           | errors -> fail "the generated module does not parse: %s" (String.concat " " errors));
           let diagnostics = check database module_ in
-          let within (generated : generated) =
+          let verdict_of (generated : generated) =
             List.filter
               (fun (diagnostic : Diagnostic.t) ->
                 generated.start <= diagnostic.span.start && diagnostic.span.start < generated.stop)
@@ -341,21 +335,21 @@ let () =
           in
           List.iter
             (fun (generated : generated) ->
-              let found = within generated in
-              match List.filter (fun diagnostic -> not (is_ownership diagnostic)) found with
+              let actual = verdict_of generated in
+              match List.filter (fun diagnostic -> not (is_ownership diagnostic)) actual with
               | (other : Diagnostic.t) :: _ ->
                   wrong generated
                     (Printf.sprintf "the generated function is wrong: %s %s"
                        (Diagnostic.Code.name other.code) other.message)
               | [] ->
-                  if generated.rejected && found = [] then wrong generated "accepted"
-                  else if (not generated.rejected) && found <> [] then
+                  if generated.rejected && actual = [] then wrong generated "accepted"
+                  else if (not generated.rejected) && actual <> [] then
                     wrong generated
                       (String.concat "; "
                          (List.map
                             (fun (d : Diagnostic.t) ->
                               Diagnostic.Code.name d.code ^ " " ^ d.message)
-                            found)))
+                            actual)))
             functions;
           if !shown > 5 then fail "%d of %d functions are wrong" !shown (List.length functions)))
     makers

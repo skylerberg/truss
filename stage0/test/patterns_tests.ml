@@ -5,12 +5,7 @@ module Patterns = Type_checker.For_testing.Patterns
 open Harness
 open Support
 
-let check database module_ =
-  Resolve.diagnostics database module_
-  @ Interface.diagnostics database module_
-  @ Infer.diagnostics database module_
-  @ Patterns.diagnostics database module_
-
+let check = Type_checker.through Patterns
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 let priority = "type Priority =\n  | Low\n  | Normal\n  | Urgent(deadline: Instant)\n\n"
@@ -19,23 +14,23 @@ let message text =
   let database = setup [ ("app::main", text) ] in
   match check database (module_of "app::main") with
   | [ diagnostic ] -> diagnostic.message
-  | found -> failwith (Printf.sprintf "%d diagnostics" (List.length found))
+  | actual -> failwith (Printf.sprintf "%d diagnostics" (List.length actual))
 
 let () =
   test "a missing case is named" (fun () ->
       let text =
         priority
-        ^ "fn f(found: Option[Priority]) -> Int64 {\n\
-          \  match found {\n\
+        ^ "fn f(present: Option[Priority]) -> Int64 {\n\
+          \  match present {\n\
           \    Some(Low) => 1\n\
           \    Some(Normal) => 2\n\
           \    None => 3\n\
           \  }\n\
            }\n"
       in
-      let found = message text in
+      let actual = message text in
       let expected = "`Some(Urgent(_))` is not covered" in
-      if not (Substring.contains found expected) then fail "message %S" found);
+      if not (Substring.contains actual expected) then fail "message %S" actual);
   test "a missing case's fix adds an arm with todo" (fun () ->
       one_diagnostic "fn f(ready: Bool) -> Int64 {\n  match ready {\n    true => 1\n  }\n}\n"
         "patterns.not_covered"
@@ -48,8 +43,8 @@ let () =
            }\n");
   test "an arm earlier arms cover is an error with a fix that deletes it" (fun () ->
       one_diagnostic
-        "fn f(found: Option[Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    Some(value) => value\n\
         \    None => 0\n\
         \    _ => 1\n\
@@ -57,16 +52,16 @@ let () =
          }\n"
         "patterns.unreachable_arm"
         ~fixed:
-          "fn f(found: Option[Int64]) -> Int64 {\n\
-          \  match found {\n\
+          "fn f(present: Option[Int64]) -> Int64 {\n\
+          \  match present {\n\
           \    Some(value) => value\n\
           \    None => 0\n\
           \  }\n\
            }\n");
   test "an alternative the alternatives before it cover is an error" (fun () ->
       one_diagnostic
-        "fn f(found: Option[Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    None | None => 0\n\
         \    Some(value) => value\n\
         \  }\n\
@@ -85,7 +80,7 @@ let () =
         \  }\n\
          }\n");
   test "integer ranges that leave a gap name it" (fun () ->
-      let found =
+      let actual =
         message
           "fn f(byte: UInt8) -> Int64 {\n\
           \  match byte {\n\
@@ -94,7 +89,7 @@ let () =
           \  }\n\
            }\n"
       in
-      if not (Substring.contains found "`100`") then fail "message %S" found);
+      if not (Substring.contains actual "`100`") then fail "message %S" actual);
   test "a match on a string needs a pattern that matches everything" (fun () ->
       one_diagnostic "fn f(text: String) -> Int64 {\n  match text {\n    \"a\" => 1\n  }\n}\n"
         "patterns.not_covered");
@@ -122,7 +117,7 @@ let () =
         "patterns.not_covered");
   test "a pattern that can fail cannot be a let's" (fun () ->
       one_diagnostic
-        "fn f(found: Option[Int64]) -> Int64 {\n  let Some(value) = found\n  value\n}\n"
+        "fn f(present: Option[Int64]) -> Int64 {\n  let Some(value) = present\n  value\n}\n"
         "patterns.refutable");
   test "a record pattern cannot fail" (fun () ->
       fine
@@ -172,8 +167,8 @@ let () =
   in
   let expect text expected =
     match codes_of text with
-    | found when found = expected -> ()
-    | found -> fail "found [%s]" (String.concat "; " found)
+    | actual when actual = expected -> ()
+    | actual -> fail "found [%s]" (String.concat "; " actual)
   in
   test "a qualified constant covers only its value" (fun () ->
       expect
@@ -232,10 +227,10 @@ let () =
         []);
   test "a constant whose value is not evaluated at compile time covers only itself" (fun () ->
       expect
-        "let made: Int64 = 3 << 0\n\n\
+        "let built: Int64 = 3 << 0\n\n\
          fn f(n: Int64) -> Int64 {\n\
         \  match n {\n\
-        \    made => 1\n\
+        \    built => 1\n\
         \    3 => 2\n\
         \    _ => 3\n\
         \  }\n\
@@ -276,8 +271,8 @@ let () =
           \  }\n\
            }\n"
       with
-      | found when List.mem "patterns.not_covered" found ->
-          fail "found [%s]" (String.concat "; " found)
+      | actual when List.mem "patterns.not_covered" actual ->
+          fail "found [%s]" (String.concat "; " actual)
       | _ -> ());
   test "code that builds a type that failed to parse reports nothing more" (fun () ->
       (* The definition that builds the value has no error of its own. It
@@ -289,11 +284,11 @@ let () =
               ("type Entry = {\n\
                \  name: String\n\
                 }\n\n\
-                fn made(name: String) -> Entry {\n\
+                fn built(name: String) -> Entry {\n\
                \  Entry(name: " ^ argument ^ ")\n}\n")
           with
           | [] -> ()
-          | found -> fail "found [%s]" (String.concat "; " found))
+          | actual -> fail "found [%s]" (String.concat "; " actual))
         [ "own name"; "\"${name}\"" ]);
   test "a sub-pattern that failed to type makes no arm unreachable" (fun () ->
       match
@@ -309,8 +304,8 @@ let () =
           \  }\n\
            }\n"
       with
-      | found when List.exists (fun code -> String.starts_with ~prefix:"patterns." code) found ->
-          fail "found [%s]" (String.concat "; " found)
+      | actual when List.exists (fun code -> String.starts_with ~prefix:"patterns." code) actual ->
+          fail "found [%s]" (String.concat "; " actual)
       | _ -> ())
 
 (* Alternatives *)

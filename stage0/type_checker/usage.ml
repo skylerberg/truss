@@ -147,14 +147,12 @@ let rec statement_diverges context (written : statement) =
       not (breaks body)
   | _ -> false
 
-let line_start text position = Source.line_start (Source.create ~path:"" text) position
-
 let check_block context (written : block) =
-  let rec go = function
+  let rec check_statements = function
     | first :: (next :: _ as rest) ->
         if statement_diverges context first then begin
           let last = List.nth rest (List.length rest - 1) in
-          let start = line_start context.text next.span.start in
+          let start = Source.fragment_line_start context.text next.span.start in
           let start = if start > 0 then start - 1 else start in
           report context Unreachable_code next.span
             ~fixes:
@@ -164,10 +162,10 @@ let check_block context (written : block) =
               ]
             "This code can never run: the statement before it never finishes."
         end
-        else go rest
+        else check_statements rest
     | _ -> ()
   in
-  go written.statements
+  check_statements written.statements
 
 let check_unreachable context (definition : definition) =
   let rec expression (value : expression) =
@@ -211,7 +209,7 @@ let definition_diagnostics =
       match
         ( Query.demand database Resolve.Names.definition key,
           Query.demand database Resolve.resolved key,
-          Infer.clean database key,
+          Infer.clean_tables database key,
           Query.demand database Resolve.Names.text key )
       with
       | Some definition, Some resolved, Some tables, Some text ->

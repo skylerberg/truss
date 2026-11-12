@@ -17,7 +17,7 @@ val coerce :
   State.env ->
   ?argument:bool ->
   Syntax.expression ->
-  found:Unify.T.ty ->
+  actual:Unify.T.ty ->
   expected:Unify.T.ty ->
   unit
 

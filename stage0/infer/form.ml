@@ -34,8 +34,9 @@ let evidence : C.evidence -> Core.evidence = function
 let callee (callee : C.callee) : Core.callee =
   match callee with
   | Function { path; type_arguments } -> Function { path; type_arguments }
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = found } ->
-      Trait_method { trait; name; receiver; self_type; type_arguments; evidence = evidence found }
+  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = inferred } ->
+      Trait_method
+        { trait; name; receiver; self_type; type_arguments; evidence = evidence inferred }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Constructor _ | Indirect | Built_in_operator -> bug "this callee has no core callee"
@@ -242,7 +243,7 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                   id = fresh_node_id state;
                   origin = value.id;
                   type_ = field.field_type;
-                  kind = Bind { local; name = field.field_name; mutable_ = false; mode = Own };
+                  kind = Bind { local; name = field.field_name; is_var = false; mode = Own };
                 })
               fields;
           captures = [];
@@ -295,7 +296,7 @@ let local_use state ~origin (id : id) : Core.kind =
 
 let self_type state (env : env) =
   match env.self with
-  | Some type_ -> final state type_
+  | Some type_ -> final_type state type_
   | None -> bug "`self` is used outside a method"
 
 (* The place of [self]. *)
@@ -403,7 +404,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                    id = fresh_node_id state;
                    origin;
                    type_ = builder_type;
-                   kind = Bind { local = builder; name = "builder"; mutable_ = true; mode = Own };
+                   kind = Bind { local = builder; name = "builder"; is_var = true; mode = Own };
                  };
                value = Value (make builder_type (call (builder_method "new" Static) []));
                else_ = None;
@@ -509,7 +510,7 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                id = fresh_node_id state;
                origin;
                type_ = storage_type;
-               kind = Bind { local = storage; name = "storage"; mutable_ = true; mode = Own };
+               kind = Bind { local = storage; name = "storage"; is_var = true; mode = Own };
              };
            value =
              Value
@@ -648,7 +649,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
   else
     let equal = trait_reference (Well_known.path Equal) in
     match implements state type_ equal with
-    | Some found ->
+    | Some implementation ->
         Equal_to
           {
             value;
@@ -660,7 +661,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
                   receiver = Read;
                   self_type = type_;
                   type_arguments = [];
-                  evidence = evidence (evidence_of found);
+                  evidence = evidence (evidence_of implementation);
                 };
           }
     | None ->
@@ -921,7 +922,7 @@ let iteration state (written : statement) (iterable : expression) : Core.iterati
         | _ -> (
             let trait = trait_reference Impls.cursor_trait in
             match implements state cursor trait with
-            | Some found ->
+            | Some implementation ->
                 Some
                   (Trait_method
                      {
@@ -930,7 +931,7 @@ let iteration state (written : statement) (iterable : expression) : Core.iterati
                        receiver = Mut;
                        self_type = cursor;
                        type_arguments = [];
-                       evidence = evidence (evidence_of found);
+                       evidence = evidence (evidence_of implementation);
                      })
             | None ->
                 bug "a loop iterates over `%s`, which does not implement `Cursor`" (T.show cursor))
@@ -986,8 +987,8 @@ let early_exit (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.
    is the success variant: its arm evaluates to the variant's field. The
    second is the failure variant: its arm returns the failure variant of
    the function's result type, with the same fields. *)
-let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leaves : Core.task list)
-    : Core.kind =
+let try_ state (value : expression) (inner : expression) ~(output : T.ty)
+    ~(exited_tasks : Core.task list) : Core.kind =
   let scrutinee = build_expression state inner in
   let variants (type_ : T.ty) =
     match type_ with
@@ -1024,7 +1025,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leav
                         id = fresh_node_id state;
                         origin = value.id;
                         type_ = field.field_type;
-                        kind = Bind { local; name = field.field_name; mutable_ = false; mode = Own };
+                        kind = Bind { local; name = field.field_name; is_var = false; mode = Own };
                       } ))
                   fields;
             };
@@ -1056,7 +1057,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leav
               value =
                 Some
                   (make T.Never
-                     (early_exit leaves state ~origin:value.id
+                     (early_exit exited_tasks state ~origin:value.id
                         (Return
                            (Some
                               (make output
@@ -1165,7 +1166,7 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
                    id = fresh_node_id state;
                    origin;
                    type_;
-                   kind = Bind { local; name; mutable_ = true; mode = Own };
+                   kind = Bind { local; name; is_var = true; mode = Own };
                  };
                value = Value created;
                else_ = None;

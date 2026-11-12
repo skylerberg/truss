@@ -376,7 +376,8 @@ let operation_name = function
   | System_is_architecture X86_64 -> "system_is_x86_64"
   | System_is_architecture Arm64 -> "system_is_arm64"
   | Libc function_ ->
-      (if Libc.of_the_runtime function_ then "runtime_" else "libc_") ^ Libc.function_name function_
+      (if Libc.is_runtime_function function_ then "runtime_" else "libc_")
+      ^ Libc.function_name function_
   | Libc_number number ->
       (* A name does not start with an underscore, as some of C's do. *)
       let name = Libc.number_name number in

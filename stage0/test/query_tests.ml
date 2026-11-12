@@ -279,20 +279,20 @@ let () =
       Engine.set engine switch () true;
       if Engine.get engine reader () <> 7 then fail "the input lost its value")
 
-let made = ref None
+let created = ref None
 
 let[@inline never] make_and_forget () =
   let engine, _, total = setup () in
   ignore (Engine.get engine total ());
   let weak = Weak.create 1 in
   Weak.set weak 0 (Some engine);
-  made := Some weak
+  created := Some weak
 
 let () =
   test "an engine nothing refers to is freed with everything it held" (fun () ->
       make_and_forget ();
       Gc.full_major ();
-      match !made with
+      match !created with
       | Some weak -> if Weak.check weak 0 then fail "the engine is still held"
       | None -> fail "no engine was made")
 
@@ -530,7 +530,7 @@ let () =
       let _, engine, build = over_base () in
       Engine.set engine build.files "b" "four";
       ignore (Engine.get engine build.total ());
-      match Engine.audit ~flat:true engine with
+      match Engine.audit ~include_bases:true engine with
       | [] -> ()
       | problems -> fail "found [%s]" (String.concat "; " problems))
 

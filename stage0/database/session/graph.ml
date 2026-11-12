@@ -5,7 +5,7 @@
    nodes about no definition, to the definitions and parts they reach. *)
 let definition_reads engine memo node =
   let own = Option.map (fun (s : Query.subject) -> s.path) (Engine.subject node) in
-  let found = Hashtbl.create 8 in
+  let targets = Hashtbl.create 8 in
   let seen = Hashtbl.create 16 in
   let rec walk n =
     List.iter
@@ -15,7 +15,7 @@ let definition_reads engine memo node =
           Hashtbl.replace seen identity ();
           match Engine.subject read with
           | Some subject when Some subject.path <> own ->
-              Hashtbl.replace found (subject.path, Option.value subject.part ~default:"") ()
+              Hashtbl.replace targets (subject.path, Option.value subject.part ~default:"") ()
           | Some _ | None -> (
               if
                 (* A fixed base's own lookups are not followed, so a
@@ -23,13 +23,13 @@ let definition_reads engine memo node =
                 not (Engine.is_fixed read)
               then
                 match Hashtbl.find_opt memo identity with
-                | Some reached -> List.iter (fun r -> Hashtbl.replace found r ()) reached
+                | Some reached -> List.iter (fun r -> Hashtbl.replace targets r ()) reached
                 | None -> walk read)
         end)
       (Engine.reads engine n)
   in
   walk node;
-  Hashtbl.fold (fun r () acc -> r :: acc) found []
+  Hashtbl.fold (fun r () acc -> r :: acc) targets []
 
 type dependencies = (Path.t, (Path.t * string * string) list) Hashtbl.t
 
@@ -77,19 +77,19 @@ let compare_nodes mine theirs =
     | Some other -> if Engine.same_outcome mine node theirs other then Same else Changed
   in
   let seen = Hashtbl.create 256 in
-  let found = ref [] in
+  let differing = ref [] in
   let add node =
     let identity = Engine.identity node in
     if not (Hashtbl.mem seen identity) then begin
       Hashtbl.replace seen identity ();
-      found := node :: !found
+      differing := node :: !differing
     end
   in
   List.iter add (Engine.unshared mine theirs);
   List.iter
     (fun other -> Option.iter add (Engine.current_in other mine))
     (Engine.unshared theirs mine);
-  List.rev_map (fun node -> (node, differs node)) !found
+  List.rev_map (fun node -> (node, differs node)) !differing
 
 (* Every part of a definition that a change between two states could reach,
    in the first, with how it compares with the same part in the second. *)

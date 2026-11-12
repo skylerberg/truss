@@ -14,7 +14,7 @@ module Properties = Interface.Properties
 (* A diagnostic at a place inside a definition, moved to its file. *)
 type placed = { module_ : Path.module_; diagnostic : Diagnostic.t }
 
-let at database (key : Names.key) ?(fixes = []) code (span : span) message =
+let diagnostic_at database (key : Names.key) ?(fixes = []) code (span : span) message =
   match Query.demand database Names.base key with
   | Some (module_, base) ->
       Some
@@ -54,7 +54,7 @@ let check_location database (declaration : Names.declaration) (definition : defi
   let package = declaration.module_.package in
   if impl.impl_broken || List.mem package (outer_packages impl) then None
   else
-    at database key Impl_location (header_span definition)
+    diagnostic_at database key Impl_location (header_span definition)
       (Printf.sprintf
          "This `impl` must be in the package of `%s`, of `%s`, or of a type its trait's arguments \
           name, so that only one place can hold it."
@@ -80,7 +80,7 @@ let overlap (first : T.impl_interface) (second : T.impl_interface) =
   (* Binding a variable to a type that holds it would make an infinite
      type, which no head can be. *)
   let occurs parameter =
-    T.exists ~resolve (function T.Parameter found -> found = parameter | _ -> false)
+    T.exists ~resolve (function T.Parameter other -> other = parameter | _ -> false)
   in
   let bind parameter other =
     if other = T.Parameter parameter then true
@@ -140,8 +140,8 @@ let check_method_names database (declaration : Names.declaration) (definition : 
               impl.impl_methods
           in
           let clash message =
-            at database (Names.key_of declaration) Method_name_clash (header_span definition)
-              message
+            diagnostic_at database (Names.key_of declaration) Method_name_clash
+              (header_span definition) message
           in
           if own = [] then None
           else if List.exists same_version own then
@@ -238,7 +238,7 @@ let self_occurrences database (start : Path.t) =
   in
   List.concat_map
     (fun (field, target, occurrence) ->
-      List.map (fun found -> (field, found)) (from target occurrence))
+      List.map (fun path -> (field, path)) (from target occurrence))
     (Query.demand database contained start)
 
 (* Whether a generic type contains itself with growing type arguments,
@@ -255,7 +255,7 @@ let grows database (start : Path.t) =
     match List.nth_opt parameters index with
     | None -> []
     | Some parameter ->
-        let mentions = T.exists (function T.Parameter found -> found = parameter | _ -> false) in
+        let mentions = T.exists (function T.Parameter other -> other = parameter | _ -> false) in
         let rec targets (type_ : T.ty) =
           match type_ with
           | T.Named { path = target; arguments } ->
@@ -289,7 +289,7 @@ let grows database (start : Path.t) =
     (fun index -> List.exists (fun (target, growing) -> walk target growing) (edges (start, index)))
     (List.init (List.length parameters) Fun.id)
 
-let not_strictly_positive =
+let not_strictly_positive_message =
   "A function stored in such a value could be called on the value and call itself through it, so a \
    function with a `time` clause might not terminate. Remove the `time` clause from the function \
    type, or pass the function the fields that it needs instead of the whole value."
@@ -318,7 +318,7 @@ let check_recursion database (declaration : Names.declaration) (definition : def
   match definition.kind with
   | Type_definition _ when grows database declaration.path ->
       Option.to_list
-        (at database (Names.key_of declaration) Growing_type (header_span definition)
+        (diagnostic_at database (Names.key_of declaration) Growing_type (header_span definition)
            "This type contains itself with different type arguments, so it has no fixed set of \
             instances, and generic code is compiled once for each set of arguments.")
   | Type_definition { name; body; _ } ->
@@ -343,28 +343,28 @@ let check_recursion database (declaration : Names.declaration) (definition : def
             in
             match variant_span with
             | Some span ->
-                at database key Needs_indirect span
+                diagnostic_at database key Needs_indirect span
                   ~fixes:
                     [
                       Diagnostic.fix "Mark the variant `indirect`."
-                        [ Diagnostic.replace (Span.zero_width span.start) "indirect " ];
+                        [ Diagnostic.insert (Span.zero_width span.start) "indirect " ];
                     ]
                   "This type contains itself in place, so it would be infinitely large. Mark the \
                    variant `indirect` to keep its fields on the heap."
             | None ->
-                at database key Needs_indirect (header_span definition)
+                diagnostic_at database key Needs_indirect (header_span definition)
                   "This record contains itself in place, so it would be infinitely large. A record \
                    has no variant to mark `indirect`; use a sum type with an `indirect` variant, \
                    or a collection.")
       in
       let function_input =
         Option.bind (first Function_input) (fun field ->
-            at database key Not_strictly_positive
+            diagnostic_at database key Not_strictly_positive
               (Option.value ~default:(header_span definition) (field_span body field))
               (Printf.sprintf
                  "Through this field, `%s` contains a function type that has a `time` clause and \
                   whose input contains `%s`. %s"
-                 name.text name.text not_strictly_positive))
+                 name.text name.text not_strictly_positive_message))
       in
       Option.to_list in_place @ Option.to_list function_input
   | _ -> []
@@ -404,18 +404,18 @@ let check_associated_types database (declaration : Names.declaration) (definitio
         (fun (recursive, (occurrence : Properties.occurrence)) ->
           match occurrence with
           | In_place ->
-              at database key Needs_indirect span
+              diagnostic_at database key Needs_indirect span
                 (Printf.sprintf
                    "With this definition of `%s`, `%s` contains itself in place, so it would be \
                     infinitely large. Define `%s` as a type that holds it in a collection or in an \
                     `indirect` variant."
                    name (T.show recursive) name)
           | Function_input ->
-              at database key Not_strictly_positive span
+              diagnostic_at database key Not_strictly_positive span
                 (Printf.sprintf
                    "With this definition of `%s`, `%s` contains a function type that has a `time` \
                     clause and whose input contains `%s`. %s"
-                   name (T.show recursive) (T.show recursive) not_strictly_positive)
+                   name (T.show recursive) (T.show recursive) not_strictly_positive_message)
           | Indirect -> None)
         (List.sort_uniq compare
            (List.filter_map
@@ -473,7 +473,7 @@ let check_instantiation database (package : Path.package) =
       generic
   in
   let reaches from target =
-    let rec go seen path =
+    let rec reaches_from seen path =
       if Path.equal path target then true
       else if List.exists (Path.equal path) seen then false
       else
@@ -482,17 +482,19 @@ let check_instantiation database (package : Path.package) =
             (fun ((declaration : Names.declaration), _) -> Path.equal declaration.path path)
             edges
         with
-        | Some (_, outgoing) -> List.exists (fun (next, _) -> go (path :: seen) next) outgoing
+        | Some (_, outgoing) ->
+            List.exists (fun (next, _) -> reaches_from (path :: seen) next) outgoing
         | None -> false
     in
-    go [] from
+    reaches_from [] from
   in
   List.filter_map
     (fun ((declaration : Names.declaration), outgoing) ->
       if List.exists (fun (callee, grows) -> grows && reaches callee declaration.path) outgoing then
         match Query.demand database Names.definition (Names.key_of declaration) with
         | Some definition ->
-            at database (Names.key_of declaration) Instantiation_cycle (header_span definition)
+            diagnostic_at database (Names.key_of declaration) Instantiation_cycle
+              (header_span definition)
               "This generic code instantiates itself with type arguments that grow each time \
                around, so it would be compiled without end."
         | None -> None
@@ -511,18 +513,19 @@ let check_tests database (package : Path.package) =
   in
   snd
     (List.fold_left
-       (fun (seen, found) (declaration : Names.declaration) ->
+       (fun (seen, diagnostics) (declaration : Names.declaration) ->
          let name = match declaration.path with Test { name; _ } -> name | _ -> "" in
          if List.mem name seen then
            match Query.demand database Names.definition (Names.key_of declaration) with
            | Some definition ->
                ( seen,
-                 found
+                 diagnostics
                  @ Option.to_list
-                     (at database (Names.key_of declaration) Duplicate_test definition.span
+                     (diagnostic_at database (Names.key_of declaration) Duplicate_test
+                        definition.span
                         (Printf.sprintf "Another test of this package is named %S." name)) )
-           | None -> (seen, found)
-         else (name :: seen, found))
+           | None -> (seen, diagnostics)
+         else (name :: seen, diagnostics))
        ([], []) tests)
 
 (* A package's errors, by its name. *)
@@ -612,7 +615,8 @@ let check =
             List.filter_map
               (fun (other : T.impl_interface) ->
                 if overlap impl other then
-                  at database (Names.key_of declaration) Overlapping_impls (header_span definition)
+                  diagnostic_at database (Names.key_of declaration) Overlapping_impls
+                    (header_span definition)
                     (Printf.sprintf
                        "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at most \
                         one `impl` of a trait for each set of its arguments."
@@ -659,7 +663,7 @@ let used_packages =
               (Array.to_list resolved.names)
         | None -> []
       in
-      let called = ref (Query.demand database Infer.evidence key) in
+      let called = ref (Query.demand database Infer.evidence_packages key) in
       Option.iter
         (fun (form : Core.t) ->
           Core_walk.definition

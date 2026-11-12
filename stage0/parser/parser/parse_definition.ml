@@ -215,7 +215,11 @@ let body cursor =
       if ends_member && not cursor.after_inserted_closer then begin
         Cursor.report cursor Missing_body (Source.zero_width stop)
           "A function needs a body; write `{ todo }` for one that is not written yet."
-          ~fixes:[ Diagnostic.fix "Add `{ todo }`" [ Diagnostic.insert stop " { todo }" ] ];
+          ~fixes:
+            [
+              Diagnostic.fix "Add `{ todo }`"
+                [ Diagnostic.insert (Source.zero_width stop) " { todo }" ];
+            ];
         (* The signature parsed, so the definition keeps it, with an error
            statement at the offset where the body belongs. *)
         let at = Cursor.span cursor (Source.zero_width stop) in
@@ -246,12 +250,12 @@ let signature cursor ~name ~method_ : signature =
 let check_name cursor (name : definition_name) =
   let name = match name with Plain_name name | Member_name (_, name) -> name in
   if name.text = "old" then
-    Cursor.report cursor Reserved_name
+    Cursor.report cursor Reserved_specification_name
       (Cursor.absolute cursor name.span)
       "A function cannot be named `old`, which names a value as it was when a function was called, \
        in specifications."
   else if name.text = "identical" then
-    Cursor.report cursor Reserved_name
+    Cursor.report cursor Reserved_specification_name
       (Cursor.absolute cursor name.span)
       "A function cannot be named `identical`, which tests whether two values are the same value, \
        in specifications."

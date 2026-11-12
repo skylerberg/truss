@@ -34,7 +34,10 @@ let double_negation cursor ~(operator : Token.t) ~(operand : expression) =
   let operand_span = Cursor.absolute cursor operand.span in
   report cursor Double_negation operator.span "Truss has no `--`; to negate twice, write `-(-x)`."
     "Write `-(-x)`"
-    [ Diagnostic.replace operator.span "-(-"; Diagnostic.insert operand_span.stop ")" ]
+    [
+      Diagnostic.replace operator.span "-(-";
+      Diagnostic.insert (Source.zero_width operand_span.stop) ")";
+    ]
 
 (* [A => 1,]: arms are separated by line breaks. *)
 let match_arm_comma cursor ~(comma : Token.t) =
@@ -99,13 +102,19 @@ let closure_bars cursor ~(opening : Token.t) ~(closing : Token.t) ~(body : expre
   let edits =
     match body.kind with
     | Block _ -> edits
-    | _ -> edits @ [ Diagnostic.insert body_span.start "{ "; Diagnostic.insert body_span.stop " }" ]
+    | _ ->
+        edits
+        @ [
+            Diagnostic.insert (Source.zero_width body_span.start) "{ ";
+            Diagnostic.insert (Source.zero_width body_span.stop) " }";
+          ]
   in
   (* Before the [else] of a [let ... else], an expression cannot end with
      the lambda's [}]. *)
   let edits =
     if before_else then
-      (Diagnostic.insert opening.span.start "(" :: edits) @ [ Diagnostic.insert body_span.stop ")" ]
+      (Diagnostic.insert (Source.zero_width opening.span.start) "(" :: edits)
+      @ [ Diagnostic.insert (Source.zero_width body_span.stop) ")" ]
     else edits
   in
   report cursor Closure_bars opening.span "A lambda is written `fn(x) { x + 1 }`."
@@ -228,7 +237,7 @@ let short_declaration cursor ~(target : expression) ~(operator : Token.t) =
   | Name { modules = []; _ } ->
       report cursor Short_declaration operator.span message "Declare the name with `let`"
         [
-          Diagnostic.insert (Cursor.absolute cursor target.span).start "let ";
+          Diagnostic.insert (Source.zero_width (Cursor.absolute cursor target.span).start) "let ";
           Diagnostic.replace operator.span "=";
         ]
   | _ -> Cursor.report cursor Short_declaration operator.span message
@@ -294,12 +303,13 @@ let null_coalescing cursor ~(value : expression) ~(first : Token.t) ~(second : T
         `option.unwrap_or(default)`."
        (Cursor.text cursor (Source.span first.span.start second.span.stop)))
     "Call `unwrap_or`"
-    ((if needs_parentheses then [ Diagnostic.insert value_span.start "(" ] else [])
+    ((if needs_parentheses then [ Diagnostic.insert (Source.zero_width value_span.start) "(" ]
+      else [])
     @ [
         Diagnostic.replace
           (Source.span value_span.stop default_span.start)
           (if needs_parentheses then ").unwrap_or(" else ".unwrap_or(");
-        Diagnostic.insert default_span.stop ")";
+        Diagnostic.insert (Source.zero_width default_span.stop) ")";
       ])
 
 (* The singular of a plural English noun whose plural is regular: [items]
@@ -340,7 +350,7 @@ let trailing_lambda cursor ~(callee : expression) ~parameter ~(opening : Token.t
     (Diagnostic.replace
        (Source.span callee_stop opening.span.start)
        (Printf.sprintf "(fn(%s) " parameter)
-    :: Diagnostic.insert closing.span.stop ")"
+    :: Diagnostic.insert (Source.zero_width closing.span.stop) ")"
     :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
 
 (* [x as Int64]. *)

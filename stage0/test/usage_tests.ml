@@ -6,13 +6,7 @@ module Usage = Type_checker.For_testing.Usage
 open Harness
 open Support
 
-let check database module_ =
-  Resolve.diagnostics database module_
-  @ Interface.diagnostics database module_
-  @ Infer.diagnostics database module_
-  @ Patterns.diagnostics database module_
-  @ Usage.diagnostics database module_
-
+let check = Type_checker.through Usage
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 
@@ -37,8 +31,8 @@ let () =
            }\n");
   test "a binding in a match arm must be used" (fun () ->
       one_diagnostic
-        "fn f(found: Option[Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    Some(value) => 1\n\
         \    None => 0\n\
         \  }\n\

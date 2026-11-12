@@ -52,7 +52,9 @@ let rec head resolved (value : Syntax.expression) =
         resolved.names.(path.last.id)
   | Parenthesized inner -> head resolved inner
   | Bracket (base, items) when resolved.brackets.(value.id) = Some Type_arguments ->
-      Option.map (fun found -> { found with type_arguments = Some items }) (head resolved base)
+      Option.map
+        (fun resolved_head -> { resolved_head with type_arguments = Some items })
+        (head resolved base)
   | _ -> None
 
 (* The name a definition declares, for reporting a duplicate. *)
@@ -96,7 +98,7 @@ let resolved =
           (* No member of a definition whose own header did not parse is
              resolved, because its enclosing declaration is unknown. *)
           (match container with
-          | Some (_, around) when Parts.broken around Header -> ()
+          | Some (_, enclosing) when Parts.broken enclosing Header -> ()
           | _ -> Walk.definition state ~path:key.path ?container definition);
           (* The prelude is the same everywhere, so no definition outside the
              module that defines a prelude name may take it. *)

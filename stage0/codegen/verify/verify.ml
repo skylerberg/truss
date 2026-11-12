@@ -13,7 +13,7 @@ let each_statement (f : Lir.function_) visit =
    of a record or of one variant, or if one path is the other followed by a
    dereference, which leads to another object. Two elements are assumed to
    overlap unless their indexes are written the same way. *)
-let may_overlap (first : Lir.place) (second : Lir.place) =
+let may_alias (first : Lir.place) (second : Lir.place) =
   let rec overlap (first : Lir.projection list) (second : Lir.projection list) =
     match (first, second) with
     | [], rest | rest, [] -> not (List.mem Lir.Deref rest)
@@ -132,7 +132,7 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
                     (fun (argument : Lir.operand) ->
                       match argument with
                       | (Address { place = passed; _ } | Moved_address passed)
-                        when may_overlap written passed ->
+                        when may_alias written passed ->
                           bug "a call that writes its result to local %d, which it is also given"
                             local
                       | _ -> ())
@@ -148,10 +148,11 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
               | _ -> ());
               Option.iter
                 (fun (signature : Lir.signature) ->
-                  let given = passed env instance f target arguments result in
-                  let taken = List.length signature.parameters in
-                  if given <> taken then
-                    bug "a call that passes %d arguments to a target that takes %d" given taken)
+                  let passed_count = passed env instance f target arguments result in
+                  let arity = List.length signature.parameters in
+                  if passed_count <> arity then
+                    bug "a call that passes %d arguments to a target that takes %d" passed_count
+                      arity)
                 (target_signature instance target)
           | Region _ | Regions_end _ -> bug "a region that outlining left in place"
           | Fork { branches } ->
@@ -189,7 +190,7 @@ let links env ~find (compiled : Lir.compiled) =
   in
   let reaches key ~is what =
     match find key with
-    | Some found when is found -> ()
+    | Some unit when is unit -> ()
     | _ -> bug "the address of %s, which is not %s" (Instance.to_string key) what
   in
   let is_table = function Lir.Table _ -> true | _ -> false

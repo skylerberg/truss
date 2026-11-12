@@ -11,7 +11,7 @@ let spelled_words = List.map fst Cost_word.spellings
 
 type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnostic list }
 
-let placed parsed =
+let diagnostics_in_file parsed =
   List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base:parsed.value.base)) parsed.diagnostics
 
 (* Parses a piece with a cursor of its own, whose collector holds only the
@@ -133,7 +133,7 @@ let use_after_definition source (line : _ Syntax.item) ~destination =
       [
         Diagnostic.fix "Move it up to the other `use` lines"
           [
-            Diagnostic.insert destination (line.text ^ "\n");
+            Diagnostic.insert (Source.zero_width destination) (line.text ^ "\n");
             Diagnostic.delete (Source.span start stop);
           ];
       ]
@@ -148,7 +148,7 @@ let parse source tokens =
     | [] -> (List.rev uses, List.rev definitions, List.concat (List.rev diagnostics))
     | piece :: rest when is_use tokens piece ->
         let line = use_line source tokens piece in
-        let line_diagnostics = placed line in
+        let line_diagnostics = diagnostics_in_file line in
         let moved, destination =
           match (definitions, destination) with
           | [], _ ->
@@ -180,7 +180,8 @@ let parse source tokens =
           ~definitions:
             (List.rev_map (fun (method_ : _ parsed) -> { method_.value with container }) methods
             @ (parsed.value :: definitions))
-          ~diagnostics:(List.rev_map placed methods @ (placed parsed :: diagnostics))
+          ~diagnostics:
+            (List.rev_map diagnostics_in_file methods @ (diagnostics_in_file parsed :: diagnostics))
           ~destination
   in
   let uses, definitions, diagnostics =
@@ -213,7 +214,8 @@ let example_definition source tokens piece =
   let method_diagnostics =
     match container with
     | Some container ->
-        List.concat_map placed (methods source tokens container (List.rev !(cursor.methods)))
+        List.concat_map diagnostics_in_file
+          (methods source tokens container (List.rev !(cursor.methods)))
     | None -> []
   in
   (example, diagnostics @ method_diagnostics)

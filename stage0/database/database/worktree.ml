@@ -11,7 +11,7 @@ let skipped = Registry.Content.skipped
 (* Every manifest and module file under the root, by path relative to it,
    with its stamp, in order. *)
 let files root =
-  let found = ref [] in
+  let stamped = ref [] in
   let rec walk relative =
     let absolute = if relative = "" then root else Filename.concat root relative in
     match Sys.readdir absolute with
@@ -25,9 +25,9 @@ let files root =
             | exception Unix.Unix_error _ -> ()
             | { st_kind = S_DIR; _ } -> if not (skipped entry) then walk path
             | { st_kind = S_REG; _ } as stat ->
-                if Registry.Content.is_input entry then found := (path, stamp_of stat) :: !found
+                if Registry.Content.is_input entry then stamped := (path, stamp_of stat) :: !stamped
             | _ -> ())
           entries
   in
   walk "";
-  List.rev !found
+  List.rev !stamped

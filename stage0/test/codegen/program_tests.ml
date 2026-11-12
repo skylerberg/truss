@@ -19,7 +19,7 @@ let () =
               render_records records )
         | Error message -> failwith message
       in
-      let kept () = Hashtbl.length table in
+      let stored_count () = Hashtbl.length table in
       let source =
         {|test "passes" {
   assert 1 + 1 == 2
@@ -31,7 +31,7 @@ test "fails" {
 |}
       in
       let first = run source in
-      expect_int ~expected:1 (kept ());
+      expect_int ~expected:1 (stored_count ());
       let second = run source in
       if first <> second then fail "the report changed when kept:\n%s\n%s" (snd first) (snd second);
       expect_int ~expected:1 (fst second);
@@ -39,7 +39,7 @@ test "fails" {
   assert 2 + 2 == 4
 }
 |} in
-      expect_int ~expected:2 (kept ()))
+      expect_int ~expected:2 (stored_count ()))
 
 let () =
   test "an external test gets the real capabilities it uses, and its result is never kept"
@@ -123,8 +123,8 @@ test "fine" {
       in
       let contains text =
         let n = String.length text and m = String.length output in
-        let rec go i = i + n <= m && (String.sub output i n = text || go (i + 1)) in
-        if not (go 0) then fail "%S is not in the output:\n%s" text output
+        let rec occurs_at i = i + n <= m && (String.sub output i n = text || occurs_at (i + 1)) in
+        if not (occurs_at 0) then fail "%S is not in the output:\n%s" text output
       in
       List.iter contains
         [
@@ -459,7 +459,7 @@ fn say(text: String) uses Console {
 }
 
 fn shown(path: Option[Path]) -> String {
-  if path is Some(found) && found.text() is Some(text) { "${text}" } else { "none".copy() }
+  if path is Some(present) && present.text() is Some(text) { "${text}" } else { "none".copy() }
 }
 
 fn main(arguments: List[String]) -> ExitCode
@@ -634,14 +634,14 @@ fn main(arguments: List[String]) -> ExitCode
     .output(processes::Redirect.Pipe)
   if Processes.spawn(copier) is Ok(started) {
     var child = own started
-    if mut child.take_input() is Some(taken) {
-      var input = own taken
+    if mut child.take_input() is Some(moved) {
+      var input = own moved
       let sent: List[UInt8] = [112, 105, 112, 101, 100, 10]
       let _ = mut input.write(sent.slice())
       let _ = own input.close()
     }
-    if mut child.take_output() is Some(taken) {
-      var output = own taken
+    if mut child.take_output() is Some(moved) {
+      var output = own moved
       var received: List[UInt8] = []
       var reading = true
       while reading {
@@ -968,11 +968,11 @@ fn main(arguments: List[String]) -> ExitCode
     let at = listener.local_address()
     unused = at.port
     say("listening on a port ${at.port > 0}")
-    if NetworkClient.connect(at, timeout: Some(Duration.nanoseconds(2000000000))) is Ok(made) {
-      var client = own made
+    if NetworkClient.connect(at, timeout: Some(Duration.nanoseconds(2000000000))) is Ok(built) {
+      var client = own built
       say("connected to the port ${client.peer_address().port == at.port}")
-      if mut listener.accept() is Ok(taken) {
-        var server = own taken
+      if mut listener.accept() is Ok(moved) {
+        var server = own moved
         say("accepted from the client ${server.peer_address().port == client.local_address().port}")
         let request: List[UInt8] = [112, 105, 110, 103]
         let _ = mut client.write(request.slice())
@@ -1383,8 +1383,8 @@ fn main(arguments: List[String]) -> ExitCode
 {
   apply(fn() { Console.print_line("inside") })
   apply(shout)
-  let kept = later(fn() { Console.print_line("kept") })
-  kept()
+  let held = later(fn() { Console.print_line("kept") })
+  held()
   ExitCode(0)
 }
 |}
@@ -1397,10 +1397,7 @@ fn main(arguments: List[String]) -> ExitCode
    and each test passes or reaches a [todo]. Most blocks are excerpts,
    which do not check alone. *)
 let () =
-  let root = Harness.workspace_path "." in
-  Sys.readdir root |> Array.to_list
-  |> List.filter (fun name -> Filename.check_suffix name ".md")
-  |> List.sort compare
+  Harness.markdown_documents ()
   |> List.iter (fun name ->
       List.iteri
         (fun index text ->
@@ -1431,7 +1428,7 @@ let () =
                       | [ "test"; _; ("passed" | "incomplete") ] | [ "test"; _ ] -> ()
                       | [ "test"; _; outcome ] -> fail "a test %s" outcome
                       | _ -> ())))
-        (Documents.truss_blocks (Documents.read (Filename.concat root name))))
+        (Documents.truss_blocks (Documents.read (Harness.workspace_path name))))
 
 let () =
   test "a function value whose type uses Panic is called without evidence for Panic" (fun () ->

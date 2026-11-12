@@ -154,7 +154,7 @@ val terminates : function_type -> bool
 val same_clauses : function_type -> function_type -> bool
 (** Whether two function types have the same [uses] and the same costs, in any order. *)
 
-val costs_imply : given:cost list -> wanted:cost list -> bool
+val costs_imply : provided:cost list -> required:cost list -> bool
 (** Whether costs promise what others ask, by their constants alone: each cost asked has one given
     for the same resource that is at least as strong, where an exact count is within any bound it
     does not exceed, a count is [O(...)], and every bound is [finite]. *)

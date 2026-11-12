@@ -118,7 +118,7 @@ let collect context (definition : Core.definition) =
                   | Core.Passed { mode; value; mark = Some mark } ->
                       let origin =
                         match value with
-                        | Place found -> Core_walk.place_origin found
+                        | Place core_place -> Core_walk.place_origin core_place
                         | Value value -> value.origin
                       in
                       Hashtbl.replace context.marks origin (mode, mark)
@@ -128,8 +128,8 @@ let collect context (definition : Core.definition) =
       pattern =
         (fun (node : Core.pattern) ->
           match node.kind with
-          | Bind { local; name; mode; mutable_ } ->
-              if mutable_ then context.mutable_locals <- local :: context.mutable_locals;
+          | Bind { local; name; mode; is_var } ->
+              if is_var then context.mutable_locals <- local :: context.mutable_locals;
               Hashtbl.replace context.names local name;
               Hashtbl.replace context.kinds local (kind_of_mode mode);
               Hashtbl.replace context.types local node.type_
@@ -147,7 +147,7 @@ let copy_at context (moved : Core.origin) =
             (Syntax.Span.make (span context written).start (span context marked).start);
         ]
     | Some ((Read | Mut), _) | None -> [])
-  @ [ Diagnostic.replace (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
+  @ [ Diagnostic.insert (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
 
 (* The span of a place together with the [mut] or [own] mark before it. *)
 let with_mark context (place : Core.origin) : Syntax.span =

@@ -44,6 +44,12 @@ let line_index source offset =
 
 let line_start source offset = source.line_starts.(line_index source offset)
 
+let fragment_line_start text offset =
+  let rec back at =
+    if at > 0 && text.[at - 1] <> '\n' && text.[at - 1] <> '\r' then back (at - 1) else at
+  in
+  back (min offset (String.length text))
+
 let line_end source offset =
   let index = line_index source offset in
   if index + 1 < Array.length source.line_starts then

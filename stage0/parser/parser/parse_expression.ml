@@ -134,7 +134,7 @@ let angle_brackets cursor parse =
       in
       copy cursor.index;
       Habits.angle_brackets cursor ~angles:(List.rev !angles);
-      let value = parse (Cursor.over cursor (Dynarray.to_array rewritten)) in
+      let value = parse (Cursor.sub_cursor cursor (Dynarray.to_array rewritten)) in
       Cursor.skip_to cursor (closer + 1);
       Some value
 
@@ -1117,7 +1117,7 @@ and string_literal cursor ~start ~modules literal =
 and interpolation cursor (inner : Token.interpolation) : expression =
   (* The interpolation's tokens end with its End_of_file. *)
   let stop = Array.length inner.tokens - 1 in
-  let nested = Cursor.over cursor inner.tokens ~stop in
+  let nested = Cursor.sub_cursor cursor inner.tokens ~stop in
   (* A closed interpolation's span ends with its [}]. The span of one that
      a line break ended does not, and the lexer already reported it. *)
   let source_text = Cursor.text cursor inner.span in
@@ -1448,7 +1448,7 @@ and trailing_lambda cursor statement =
     let parameter = Habits.parameter_name callee in
     Habits.trailing_lambda cursor ~callee ~parameter ~opening ~closing ~uses;
     let renamed = rename_it block_tokens ~parameter in
-    let body = block (Cursor.over cursor renamed) in
+    let body = block (Cursor.sub_cursor cursor renamed) in
     Cursor.skip_to cursor (closer + 1);
     let at_start = Syntax.Span.make body.span.start body.span.start in
     let lambda : expression =
@@ -1493,12 +1493,12 @@ and statement cursor : statement =
       if Cursor.is_keyword cursor Mut then begin
         let mut_token = Cursor.next cursor in
         Habits.let_mut cursor ~let_token ~mut_token;
-        finish (binding cursor ~mutable_:true)
+        finish (binding cursor ~is_var:true)
       end
-      else finish (binding cursor ~mutable_:false)
+      else finish (binding cursor ~is_var:false)
   | Keyword Var ->
       Cursor.advance cursor;
-      finish (binding cursor ~mutable_:true)
+      finish (binding cursor ~is_var:true)
   | Keyword For ->
       Cursor.advance cursor;
       finish (for_loop cursor ~mode:Sequential)
@@ -1546,13 +1546,13 @@ and statement cursor : statement =
               let pattern : pattern =
                 { kind = Binding_or_constant last; span = target.span; id = Cursor.fresh_id cursor }
               in
-              finish (Let { mutable_ = false; pattern; annotation = None; value; else_ = None })
+              finish (Let { is_var = false; pattern; annotation = None; value; else_ = None })
           | _ -> finish (Assignment { target; operator = Assign; value }))
       | None, _ -> finish (Expression target))
 
 (* After [let] or [var]. The expression before a [let ... else] cannot end
    with [}], so that the [else] cannot be read as part of it. *)
-and binding cursor ~mutable_ =
+and binding cursor ~is_var =
   let pattern = Parse_pattern.pattern cursor in
   let annotation =
     if Cursor.accept_punctuation cursor Colon then Some (type_expression cursor) else None
@@ -1570,7 +1570,10 @@ and binding cursor ~mutable_ =
           ~fixes:
             [
               Diagnostic.fix "Put the expression in parentheses"
-                [ Diagnostic.insert span.start "("; Diagnostic.insert span.stop ")" ];
+                [
+                  Diagnostic.insert (Source.zero_width span.start) "(";
+                  Diagnostic.insert (Source.zero_width span.stop) ")";
+                ];
             ]
       end;
       Cursor.advance cursor;
@@ -1578,7 +1581,7 @@ and binding cursor ~mutable_ =
     end
     else None
   in
-  Let { mutable_; pattern; annotation; value; else_ }
+  Let { is_var; pattern; annotation; value; else_ }
 
 and for_loop cursor ~mode =
   let pattern = Parse_pattern.pattern cursor in

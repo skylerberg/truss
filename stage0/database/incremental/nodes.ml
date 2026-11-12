@@ -198,7 +198,7 @@ let create ?(log = false) ?(bases = []) () =
     bases;
   let all =
     List.fold_left
-      (fun found base -> if List.memq base found then found else found @ [ base ])
+      (fun distinct base -> if List.memq base distinct then distinct else distinct @ [ base ])
       []
       (bases @ List.concat_map (fun base -> base.bases) bases)
   in

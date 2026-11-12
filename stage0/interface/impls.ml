@@ -59,7 +59,7 @@ let by_type =
       List.fold_left
         (fun table ((trait, type_), impl) ->
           Path.Map.update type_
-            (fun found -> Some ((trait, impl) :: Option.value ~default:[] found))
+            (fun impls -> Some ((trait, impl) :: Option.value ~default:[] impls))
             table)
         Path.Map.empty
         (Query.demand database index package)
@@ -274,18 +274,18 @@ type through_any =
 let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
   let self : T.parameter = { owner = trait; name = "Self" } in
   let names_self type_ =
-    let found = ref false in
+    let mentions_self = ref false in
     ignore
       (T.map
          (function
            | T.Projection { base = T.Parameter base; _ } as projected when base = self ->
                Some projected
            | T.Parameter parameter as named when parameter = self ->
-               found := true;
+               mentions_self := true;
                Some named
            | _ -> None)
          type_);
-    !found
+    !mentions_self
   in
   let signature = method_.method_signature in
   let result = T.result_type signature.output in
@@ -322,17 +322,17 @@ let required (generics : T.generic list) (substitution : T.substitution) =
 
 let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true) (type_ : T.ty)
     (wanted : T.trait_reference) : evidence option =
-  let arguments_match given_arguments =
-    List.length given_arguments = List.length wanted.trait_arguments
+  let arguments_match actual_arguments =
+    List.length actual_arguments = List.length wanted.trait_arguments
     && List.for_all2
-         (fun wanted given ->
-           match (wanted, given) with
-           | T.Type wanted, T.Type given ->
-               open_type wanted || open_type given
-               || T.equal (normalize database ~bounds wanted) (normalize database ~bounds given)
-           | T.Value wanted, T.Value given -> wanted = given
+         (fun wanted actual ->
+           match (wanted, actual) with
+           | T.Type wanted, T.Type actual ->
+               open_type wanted || open_type actual
+               || T.equal (normalize database ~bounds wanted) (normalize database ~bounds actual)
+           | T.Value wanted, T.Value actual -> wanted = actual
            | _ -> false)
-         wanted.trait_arguments given_arguments
+         wanted.trait_arguments actual_arguments
   in
   (* The associated types that the [impl] defines must equal the ones that
      the wanted trait reference fixes. An associated type that the reference
@@ -344,7 +344,8 @@ let rec implements database ~(bounds : bounds) ?(depth = 0) ?(conditions = true)
         if open_type wanted_type then true
         else
           match List.assoc_opt name fixed with
-          | Some given -> open_type given || T.equal (normalize database ~bounds given) wanted_type
+          | Some defined ->
+              open_type defined || T.equal (normalize database ~bounds defined) wanted_type
           | None -> (
               match (base, wanted_type) with
               | Some base, T.Projection { base = projected; name = projected_name; _ } ->

@@ -114,7 +114,7 @@ let serve_at ~key ~alive ~idle ~keep ~handle identity path =
             let now = Unix.time () in
             Core.drop_idle ();
             idle ();
-            List.iter Core.fold (Core.all ());
+            List.iter Core.compact (Core.all ());
             if now -. !last_collection > 60. then begin
               last_collection := now;
               (* A compiler that was built again has another identity, and

@@ -1,26 +1,26 @@
 use standard::intrinsic
 use standard::system::calls
 
-internal type LineInput(unread: intrinsic::Storage[UInt8], given: USize, ended: Bool)
-  invariant given <= intrinsic::storage_length(unread)
+internal type LineInput(unread: intrinsic::Storage[UInt8], consumed: USize, ended: Bool)
+  invariant consumed <= intrinsic::storage_length(unread)
 
 internal fn LineInput.new() -> LineInput {
-  LineInput(unread: intrinsic::storage_empty(), given: 0, ended: false)
+  LineInput(unread: intrinsic::storage_empty(), consumed: 0, ended: false)
 }
 
 internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[String], Int32] {
-  var end: USize = self.given
-  var found = false
+  var end: USize = self.consumed
+  var has_newline = false
   var searching = true
   while searching
-    invariant self.given <= end
+    invariant self.consumed <= end
     invariant end <= intrinsic::storage_length(self.unread)
-    invariant found ==> end < intrinsic::storage_length(self.unread)
-    invariant found ==> !searching
+    invariant has_newline ==> end < intrinsic::storage_length(self.unread)
+    invariant has_newline ==> !searching
   {
     if end < intrinsic::storage_length(self.unread) {
       if intrinsic::view_at(intrinsic::storage_view(self.unread), index: end) == 10 {
-        found = true
+        has_newline = true
         searching = false
       } else {
         end += 1
@@ -28,18 +28,18 @@ internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[St
     } else if self.ended {
       searching = false
     } else {
-      end -= self.given
-      mut self.forget_what_was_given(65536)
+      end -= self.consumed
+      mut self.discard_consumed(65536)
       let read = calls::read_onto_end(descriptor, buffer: mut self.unread, count: 65536)?
       if read == 0 {
         self.ended = true
       }
     }
   }
-  if !found && end == self.given {
+  if !has_newline && end == self.consumed {
     Ok(None)
   } else {
-    let start = self.given
+    let start = self.consumed
     var line: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(end - start)
     for index in start..end
       invariant intrinsic::storage_length(line) == index - start
@@ -47,26 +47,26 @@ internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[St
     {
       intrinsic::storage_push(mut line, value: intrinsic::view_at(intrinsic::storage_view(self.unread), index: index))
     }
-    self.given = if found { end + 1 } else { end }
+    self.consumed = if has_newline { end + 1 } else { end }
     Ok(Some(String.from_bytes(own line)))
   }
 }
 
-fn LineInput.forget_what_was_given(mut self, room_to_read_into: USize)
-  requires self.given <= intrinsic::storage_length(self.unread)
+fn LineInput.discard_consumed(mut self, room_to_read_into: USize)
+  requires self.consumed <= intrinsic::storage_length(self.unread)
   requires room_to_read_into <= 65536
-  ensures self.given == 0
-  ensures intrinsic::storage_length(self.unread) == old(intrinsic::storage_length(self.unread)) - old(self.given)
+  ensures self.consumed == 0
+  ensures intrinsic::storage_length(self.unread) == old(intrinsic::storage_length(self.unread)) - old(self.consumed)
 {
   let length = intrinsic::storage_length(self.unread)
-  let start = self.given
-  var kept: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length - start + room_to_read_into)
+  let start = self.consumed
+  var remaining: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length - start + room_to_read_into)
   for index in start..length
-    invariant intrinsic::storage_length(kept) == index - start
-    invariant intrinsic::storage_capacity(kept) == length - start + room_to_read_into
+    invariant intrinsic::storage_length(remaining) == index - start
+    invariant intrinsic::storage_capacity(remaining) == length - start + room_to_read_into
   {
-    intrinsic::storage_push(mut kept, value: intrinsic::view_at(intrinsic::storage_view(self.unread), index: index))
+    intrinsic::storage_push(mut remaining, value: intrinsic::view_at(intrinsic::storage_view(self.unread), index: index))
   }
-  self.unread = own kept
-  self.given = 0
+  self.unread = own remaining
+  self.consumed = 0
 }

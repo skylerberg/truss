@@ -23,8 +23,8 @@ let () =
   test "a package's versions start with the number at the end of its name, or 1" (fun () ->
       List.iter
         (fun (name, major) ->
-          let found = Version.major_of_name name in
-          if found <> major then fail "%s gives %d" (Path.show_package name) found)
+          let actual = Version.major_of_name name in
+          if actual <> major then fail "%s gives %d" (Path.show_package name) actual)
         [
           ({ owner = Some "acme"; name = "geometry" }, 1);
           ({ owner = Some "acme"; name = "geometry_v2" }, 2);
@@ -82,8 +82,8 @@ let () =
   let hash = String.make 64 'a' in
   let malformed_at line text =
     match Lock.parse text with
-    | exception Lock.Malformed (found, _) when found = line -> ()
-    | exception Lock.Malformed (found, message) -> fail "at line %d: %s" found message
+    | exception Lock.Malformed (actual, _) when actual = line -> ()
+    | exception Lock.Malformed (actual, message) -> fail "at line %d: %s" actual message
     | _ -> fail "accepted"
   in
   test "a lock file without its first line is malformed" (fun () ->
@@ -101,16 +101,7 @@ let () =
 
 (* A registry's files *)
 
-let counter = ref 0
-
-let fresh name =
-  incr counter;
-  let path =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "truss-registry-tests-%d-%s-%d" (Unix.getpid ()) name !counter)
-  in
-  Unix.mkdir path 0o755;
-  path
+let fresh = scratch
 
 let () =
   let files = [ ("truss.toml", "[package]\nname = \"acme::geometry\"\n"); ("vector.truss", "") ] in
@@ -204,7 +195,7 @@ let chosen (packages, problems) =
   if problems <> [] then
     fail "problems: %s" (String.concat " " (List.map Selection.sentence problems));
   List.map
-    (fun (found : Selection.package) -> (Path.show_package found.name, found.version))
+    (fun (actual : Selection.package) -> (Path.show_package actual.name, actual.version))
     packages
 
 let () =
@@ -376,9 +367,9 @@ let () =
           { (entry "truss::http" (1, 0, 0)) with holds = [ "Clock" ] };
         ]
       and current = [ entry "acme::geometry" (1, 0, 0); entry "truss::http" (1, 0, 0) ] in
-      let found = String.concat " " (Selection.differences ~written ~current) in
+      let actual = String.concat " " (Selection.differences ~written ~current) in
       List.iter
-        (fun part -> if not (contains found part) then fail "%s is not in: %s" part found)
+        (fun part -> if not (contains actual part) then fail "%s is not in: %s" part actual)
         [
           "`acme::geometry` 1.0.0 is in the build and has no line";
           "Nothing in the build uses `acme::units`";

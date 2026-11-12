@@ -449,7 +449,7 @@ fn validate_decimal(text: StringSlice, from: USize) -> Option[core::ParseFloatEr
     end = fraction_end
   }
   if digits == 0 {
-    return Some(core::ParseFloatError.Invalid(offset: from))
+    return Some(core::ParseFloatError.InvalidCharacter(offset: from))
   }
   if end < text.length() && (text.byte(end) == 101 || text.byte(end) == 69) {
     var exponent = end + 1
@@ -458,12 +458,12 @@ fn validate_decimal(text: StringSlice, from: USize) -> Option[core::ParseFloatEr
     }
     let exponent_end = skip_digits(text, from: exponent)
     if exponent_end == exponent {
-      return Some(core::ParseFloatError.Invalid(offset: exponent))
+      return Some(core::ParseFloatError.InvalidCharacter(offset: exponent))
     }
     end = exponent_end
   }
   if end < text.length() {
-    return Some(core::ParseFloatError.Invalid(offset: end))
+    return Some(core::ParseFloatError.InvalidCharacter(offset: end))
   }
   None
 }
@@ -1058,7 +1058,7 @@ let four_over_pi: Array[UInt64, 20] = [
   0xea4f758fd7cbe2f6, 0x7a0e73ef14a525d4, 0xd7f6bf623f1aba10, 0xac06608df8f6d757,
 ]
 
-internal type Reduced(octant: UInt64, rest: Float64)
+internal type Reduced(octant: UInt64, angle: Float64)
 
 internal fn pi_bits(digit: USize, shift: USize) -> UInt64
   requires digit + 1 < 20
@@ -1080,7 +1080,7 @@ internal fn Float64.reduced_exactly(self) -> Reduced
   let field: Int64 = intrinsic::convert((bits >> 52) & 2047)
   let place = field - 1014
   if place < 0 || place >= 1088 {
-    return Reduced(octant: 0, rest: self)
+    return Reduced(octant: 0, angle: self)
   }
   let mantissa = (bits & 0x000f_ffff_ffff_ffff) | 0x0010_0000_0000_0000
   let digit: USize = intrinsic::convert(place / 64)
@@ -1099,18 +1099,18 @@ internal fn Float64.reduced_exactly(self) -> Reduced
     0.0
   } else {
     let lift = zeros + 1
-    let kept: UInt64 = match fraction.checked_shift_left(lift) {
+    let shifted: UInt64 = match fraction.checked_shift_left(lift) {
       Some(moved) => moved
       None => 0
     }
-    let top = kept | (low >> (64 - lift))
+    let top = shifted | (low >> (64 - lift))
     let exponent: UInt64 = intrinsic::convert(1023 - lift)
     Float64.from_bits((top >> 12) | (exponent << 52))
   }
   if octant % 2 == 1 {
-    Reduced(octant: (octant + 1) % 8, rest: (part - 1.0) * 0.7853981633974483)
+    Reduced(octant: (octant + 1) % 8, angle: (part - 1.0) * 0.7853981633974483)
   } else {
-    Reduced(octant: octant, rest: part * 0.7853981633974483)
+    Reduced(octant: octant, angle: part * 0.7853981633974483)
   }
 }
 
@@ -1125,7 +1125,7 @@ internal fn Float64.reduced(self) -> Reduced
   let whole: UInt64 = if intrinsic::fits[Float64, UInt64](count) { intrinsic::convert(count) } else { 0 }
   let even: UInt64 = if whole % 2 == 1 && whole < UInt64.maximum { whole + 1 } else { whole }
   let steps = even.to_float64()
-  Reduced(octant: even % 8, rest: ((self - steps * 0.7853981256484985) - steps * 3.774894707930798e-08) - steps * 2.6951514290790595e-15)
+  Reduced(octant: even % 8, angle: ((self - steps * 0.7853981256484985) - steps * 3.774894707930798e-08) - steps * 2.6951514290790595e-15)
 }
 
 internal fn sine_near_zero(rest: Float64) -> Float64
@@ -1174,8 +1174,8 @@ public fn Float64.sine(self) -> Float64
   let reduced = self.absolute().reduced()
   let flipped = reduced.octant > 3
   let octant = if flipped { reduced.octant - 4 } else { reduced.octant }
-  let found = if octant == 1 || octant == 2 { cosine_near_zero(reduced.rest) } else { sine_near_zero(reduced.rest) }
-  if (self < 0.0) != flipped { -found } else { found }
+  let result_before_sign = if octant == 1 || octant == 2 { cosine_near_zero(reduced.angle) } else { sine_near_zero(reduced.angle) }
+  if (self < 0.0) != flipped { -result_before_sign } else { result_before_sign }
 }
 
 public fn Float64.cosine(self) -> Float64
@@ -1190,8 +1190,8 @@ public fn Float64.cosine(self) -> Float64
   let reduced = self.absolute().reduced()
   let flipped = reduced.octant > 3
   let octant = if flipped { reduced.octant - 4 } else { reduced.octant }
-  let found = if octant == 1 || octant == 2 { sine_near_zero(reduced.rest) } else { cosine_near_zero(reduced.rest) }
-  if flipped != (octant > 1) { -found } else { found }
+  let result_before_sign = if octant == 1 || octant == 2 { sine_near_zero(reduced.angle) } else { cosine_near_zero(reduced.angle) }
+  if flipped != (octant > 1) { -result_before_sign } else { result_before_sign }
 }
 
 public fn Float64.tangent(self) -> Float64
@@ -1204,15 +1204,15 @@ public fn Float64.tangent(self) -> Float64
     return Float64.not_a_number
   }
   let reduced = self.absolute().reduced()
-  let rest = reduced.rest
-  let square = rest * rest
+  let angle = reduced.angle
+  let square = angle * angle
   let near = if square > 1.0e-14 {
-    rest + rest * (square * ((-13093.693918138379 * square + 1153516.6483858742) * square + -17956525.197648488) / ((((square + 13681.296347069296) * square + -1320892.3444021097) * square + 25008380.18233579) * square + -53869575.592945464))
+    angle + angle * (square * ((-13093.693918138379 * square + 1153516.6483858742) * square + -17956525.197648488) / ((((square + 13681.296347069296) * square + -1320892.3444021097) * square + 25008380.18233579) * square + -53869575.592945464))
   } else {
-    rest
+    angle
   }
-  let found = if reduced.octant % 4 >= 2 { -1.0 / near } else { near }
-  if self < 0.0 { -found } else { found }
+  let result_before_sign = if reduced.octant % 4 >= 2 { -1.0 / near } else { near }
+  if self < 0.0 { -result_before_sign } else { result_before_sign }
 }
 
 public fn Float64.arcsine(self) -> Float64
@@ -1226,12 +1226,12 @@ public fn Float64.arcsine(self) -> Float64
     return Float64.not_a_number
   }
   let other = intrinsic::square_root(1.0 - magnitude * magnitude)
-  let found = if magnitude > 0.7 {
+  let result_before_sign = if magnitude > 0.7 {
     1.5707963267948966 - arctangent_of_positive(other / magnitude)
   } else {
     arctangent_of_positive(magnitude / other)
   }
-  found.copy_sign(self)
+  result_before_sign.copy_sign(self)
 }
 
 public fn Float64.arccosine(self) -> Float64
@@ -1307,7 +1307,7 @@ public fn Float64.inverse_hyperbolic_sine(self) -> Float64
   if magnitude < 3.725290298461914e-09 {
     return self
   }
-  let found = if magnitude > 268435456.0 {
+  let result_before_sign = if magnitude > 268435456.0 {
     magnitude.logarithm() + 0.6931471805599453
   } else if magnitude > 2.0 {
     (2.0 * magnitude + 1.0 / (intrinsic::square_root(magnitude * magnitude + 1.0) + magnitude)).logarithm()
@@ -1315,7 +1315,7 @@ public fn Float64.inverse_hyperbolic_sine(self) -> Float64
     let square = magnitude * magnitude
     (magnitude + square / (1.0 + intrinsic::square_root(1.0 + square))).logarithm_one_plus()
   }
-  found.copy_sign(self)
+  result_before_sign.copy_sign(self)
 }
 
 public fn Float64.inverse_hyperbolic_cosine(self) -> Float64
@@ -1354,12 +1354,12 @@ public fn Float64.inverse_hyperbolic_tangent(self) -> Float64
     return self
   }
   let double = magnitude + magnitude
-  let found = if magnitude < 0.5 {
+  let result_before_sign = if magnitude < 0.5 {
     0.5 * (double + double * magnitude / (1.0 - magnitude)).logarithm_one_plus()
   } else {
     0.5 * (double / (1.0 - magnitude)).logarithm_one_plus()
   }
-  found.copy_sign(self)
+  result_before_sign.copy_sign(self)
 }
 
 public transparent fn Float64.to_degrees(self) -> Float64
@@ -1417,7 +1417,7 @@ public fn Float64.power(self, exponent: Float64) -> Float64
   }
   let base = self.absolute()
   let steps = exponent.absolute()
-  let found = if whole && steps <= 64.0 && intrinsic::fits[Float64, UInt64](steps) {
+  let result_before_sign = if whole && steps <= 64.0 && intrinsic::fits[Float64, UInt64](steps) {
     let raised = base.raised_to_whole(1.0, whole: intrinsic::convert(steps))
     if exponent < 0.0 {
       (1.0 / raised.fraction).scaled_by_power(-raised.exponent)
@@ -1435,7 +1435,7 @@ public fn Float64.power(self, exponent: Float64) -> Float64
       grown
     }
   }
-  if odd && self < 0.0 { -found } else { found }
+  if odd && self < 0.0 { -result_before_sign } else { result_before_sign }
 }
 
 public fn Float64.logarithm_base(self, base: Float64) -> Float64

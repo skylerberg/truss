@@ -238,15 +238,15 @@ let selection =
       let lock_fix = ref None in
       if missing = [] then begin
         List.iter
-          (fun found -> lock_problem "%s" (Registry.Selection.sentence found))
+          (fun problem -> lock_problem "%s" (Registry.Selection.sentence problem))
           selection_problems;
         List.iter
-          (fun (found : Registry.Selection.package) ->
-            match found.manifest.truss with
+          (fun (selected : Registry.Selection.package) ->
+            match selected.manifest.truss with
             | Some version when not (Manifest.toolchain_builds version) ->
                 lock_problem "`%s` %s is written for Truss %s, and this toolchain is Truss %s."
-                  (Path.show_package found.name)
-                  (Registry.Version.show found.version)
+                  (Path.show_package selected.name)
+                  (Registry.Version.show selected.version)
                   version Manifest.truss_version
             | _ -> ())
           selected;
@@ -291,24 +291,24 @@ let build =
   Query.query ~name:"project_build" ~phase:Phases.project ~saved:true
     ~show:(fun () -> "")
     (fun database () ->
-      let found = Hashtbl.create 16 in
+      let by_name = Hashtbl.create 16 in
       let add root =
         List.iter
           (fun (directory, (manifest : Manifest.package)) ->
-            if not (Hashtbl.mem found manifest.name) then
-              Hashtbl.replace found manifest.name { root; directory; manifest })
+            if not (Hashtbl.mem by_name manifest.name) then
+              Hashtbl.replace by_name manifest.name { root; directory; manifest })
           (Query.demand database layout root).packages
       in
-      let given = Option.value (Query.find database roots ()) ~default:[] in
-      if List.mem project_root given then add project_root;
-      List.iter (fun root -> if root <> project_root then add root) given;
-      if List.mem project_root given then
+      let known_roots = Option.value (Query.find database roots ()) ~default:[] in
+      if List.mem project_root known_roots then add project_root;
+      List.iter (fun root -> if root <> project_root then add root) known_roots;
+      if List.mem project_root known_roots then
         List.iter
           (fun (package : Registry.Selection.package) -> add (registry_root package.hash))
           (Query.demand database selection ()).selected;
       List.sort
         (fun (left, _) (right, _) -> Path.compare_package left right)
-        (Hashtbl.fold (fun name place found -> (name, place) :: found) found []))
+        (Hashtbl.fold (fun name place packages -> (name, place) :: packages) by_name []))
 
 let place =
   Query.query ~name:"project_place" ~phase:Phases.project ~saved:true ~show:Path.show_package
@@ -362,15 +362,15 @@ let dependency_cycle (packages : (string * Manifest.package) list) =
   let rec reaches target path name =
     if List.mem name path || Hashtbl.mem clear name then None
     else
-      let found =
+      let cycle =
         List.find_map
           (fun next ->
             if next = target then Some [ name; target ]
-            else Option.map (fun way -> name :: way) (reaches target (name :: path) next))
+            else Option.map (fun rest -> name :: rest) (reaches target (name :: path) next))
           (dependencies name)
       in
-      if found = None then Hashtbl.replace clear name ();
-      found
+      if cycle = None then Hashtbl.replace clear name ();
+      cycle
   in
   List.find_map
     (fun (directory, (package : Manifest.package)) ->
@@ -390,7 +390,7 @@ let problems =
       let named name = List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages in
       let selected_named name =
         List.find_opt
-          (fun (found : Registry.Selection.package) -> found.name = name)
+          (fun (selected : Registry.Selection.package) -> selected.name = name)
           chosen.selected
       in
       List.iter
@@ -428,7 +428,7 @@ let problems =
               if dependency.package = package.name then
                 problem directory "`%s` cannot depend on itself." (Path.show_package package.name)
               else
-                let found =
+                let dependency_manifest =
                   match (named dependency.package, selected_named dependency.package) with
                   | Some (_, other), _ -> Some other
                   | None, Some other -> Some other.manifest
@@ -440,7 +440,7 @@ let problems =
                           (Path.show_package dependency.package);
                       None
                 in
-                match found with
+                match dependency_manifest with
                 | Some other when package.usize_bits = 32 && other.usize_bits = 64 ->
                     (* A package that claims to run on every target cannot
                        rely on one that runs only on 64-bit targets. *)
@@ -464,5 +464,6 @@ let registry =
     ~show:(fun () -> "")
     (fun database () ->
       List.map
-        (fun (found : Registry.Selection.package) -> (found.name, found.version, found.hash))
+        (fun (selected : Registry.Selection.package) ->
+          (selected.name, selected.version, selected.hash))
         (Query.demand database selection ()).selected)

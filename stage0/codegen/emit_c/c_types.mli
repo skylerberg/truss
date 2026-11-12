@@ -30,7 +30,7 @@ type context = {
   mutable statics : string list;
 }
 
-val helper : context -> string -> string
+val use_helper : context -> string -> string
 val register : context -> Keys.key -> unit
 val layout : context -> Ground.ty -> Memory_layout.t
 val is_struct : context -> Ground.ty -> bool

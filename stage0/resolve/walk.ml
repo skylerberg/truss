@@ -45,12 +45,12 @@ type value =
 
 type specification = {
   active : bool;  (** In a specification or a proof, where [old] has its meaning. *)
-  result : bool;  (** In [ensures] or [cost], where [result] does. *)
+  names_result : bool;  (** In [ensures] or [cost], where [result] does. *)
   cost_bound : bool;  (** In a [cost] bound, where [time] and [calls] have their meaning. *)
-  yielded : bool;
+  names_yielded : bool;
       (** In the [ensures] of a lending or yielding method, or in the clauses of a [for] loop, where
           [yielded] is the sequence of the parts yielded so far. *)
-  finished : bool;
+  names_finished : bool;
       (** In a lending or yielding method's [ensures], where [finished] has its meaning. *)
   elements : string list;
       (** In the clauses of a [for] loop over a collection or a cursor, the names its pattern binds,
@@ -62,17 +62,17 @@ type scope = {
       (** With the kind of its binding, as diagnostics name it. *)
   types : target String_map.t;  (** Generic type and capability parameters, as names mean them. *)
   specification : specification;
-  hands_out : bool;
+  lends_or_yields : bool;
       (** In a method that lends or yields, whose [ensures] can name the yielded parts. *)
 }
 
 let no_specification =
   {
     active = false;
-    result = false;
+    names_result = false;
     cost_bound = false;
-    yielded = false;
-    finished = false;
+    names_yielded = false;
+    names_finished = false;
     elements = [];
   }
 
@@ -307,9 +307,9 @@ and clause state scope (clause : clause) =
           specification =
             {
               in_specification with
-              result = true;
-              yielded = scope.hands_out;
-              finished = scope.hands_out;
+              names_result = true;
+              names_yielded = scope.lends_or_yields;
+              names_finished = scope.lends_or_yields;
             };
         }
         value
@@ -324,7 +324,7 @@ and clause state scope (clause : clause) =
         {
           scope with
           specification =
-            { scope.specification with active = true; result = true; cost_bound = true };
+            { scope.specification with active = true; names_result = true; cost_bound = true };
         }
       in
       match cost.bound with
@@ -344,10 +344,10 @@ and local_value state scope (name : name) =
   | Some (Value_law_parameter index, _) -> set state name (Law_parameter index)
   | None ->
       if scope.specification.active && text = "old" then set state name Old
-      else if scope.specification.yielded && text = "yielded" then set state name Yielded
-      else if scope.specification.finished && text = "finished" then set state name Finished
+      else if scope.specification.names_yielded && text = "yielded" then set state name Yielded
+      else if scope.specification.names_finished && text = "finished" then set state name Finished
       else if scope.specification.active && text = "identical" then set state name Identical
-      else if scope.specification.result && text = "result" then set state name Result_value
+      else if scope.specification.names_result && text = "result" then set state name Result_value
       else if List.mem text scope.specification.elements then
         set state name
           (Unknown
@@ -804,7 +804,7 @@ and statement state scope (statement_ : statement) =
 and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop_clause) =
   let scope =
     if for_loop then
-      { scope with specification = { scope.specification with yielded = true; elements } }
+      { scope with specification = { scope.specification with names_yielded = true; elements } }
     else scope
   in
   (* [yielded] refers to the parts of the nearest loop or method: the parts
@@ -813,7 +813,8 @@ and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop
   let specification =
     {
       scope with
-      specification = { in_specification with yielded = for_loop || scope.hands_out; elements };
+      specification =
+        { in_specification with names_yielded = for_loop || scope.lends_or_yields; elements };
     }
   in
   match written.kind with
@@ -893,7 +894,7 @@ let empty_scope =
     values = String_map.empty;
     types = String_map.empty;
     specification = no_specification;
-    hands_out = false;
+    lends_or_yields = false;
   }
 
 (* The scope of a definition's head: the generic parameters of the type
@@ -912,7 +913,7 @@ let signature state scope ~owner ~(broken : bool) (signature_ : signature) =
     result state scope signature_.result;
     let scope =
       match signature_.result with
-      | Some (Yields _ | Lends _) -> { scope with hands_out = true }
+      | Some (Yields _ | Lends _) -> { scope with lends_or_yields = true }
       | _ -> scope
     in
     List.iter (clause state scope) signature_.clauses;

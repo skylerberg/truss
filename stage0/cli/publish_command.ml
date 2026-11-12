@@ -92,7 +92,7 @@ let record (project : Project.t) registry (package : Project.package) =
   and published_as name directory =
     let hash = Registry.Content.hash (files { name; directory } (closure name)) in
     List.find_map
-      (fun (version, found) -> if found = hash then Some (version, hash) else None)
+      (fun (version, version_hash) -> if version_hash = hash then Some (version, hash) else None)
       (Registry.Index.versions registry name)
   in
   let entries = closure package.name in
@@ -168,7 +168,7 @@ let decide (project : Project.t) registry (package : Project.package) =
           match Database.published name version with
           | Error message -> Refused [ message ]
           | Ok published ->
-              let found, narrowed =
+              let changes, narrowed =
                 Compatibility.compare ~before:(Database.context published) ~after:project.context
                   name
               in
@@ -187,7 +187,7 @@ let decide (project : Project.t) registry (package : Project.package) =
                              Option.map (fun text -> "\n" ^ Signatures.labeled "now:" text) now;
                            ]
                        else [])))
-                  (Compatibility.breaks found)
+                  (Compatibility.breaks changes)
                 @
                 if narrowed then
                   [
@@ -208,7 +208,7 @@ let decide (project : Project.t) registry (package : Project.package) =
                         (Path.show_package (next_name name));
                     ])
               else
-                let grows = Compatibility.grows found in
+                let grows = Compatibility.grows changes in
                 Published
                   {
                     version =
@@ -246,12 +246,12 @@ let run ~directory ~json =
   if not (Report.clean report) then refuse [ "A package is published only when it has no errors." ]
   else
     match unfinished project with
-    | _ :: _ as found ->
+    | _ :: _ as unfinished_code ->
         refuse
           (List.map
              (fun (keyword, file, line, column) ->
                Printf.sprintf "%s:%d:%d: `%s` is not finished code." file line column keyword)
-             found
+             unfinished_code
           @ [ "A package is published only when it has no `todo` and no `echo`." ])
     | [] -> (
         match failed_tests project package with

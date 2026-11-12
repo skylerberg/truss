@@ -445,7 +445,7 @@ let () =
       tokens "pair.5" [ "pair"; "."; "5"; "NL" ];
       tokens "items[0].5" [ "items"; "["; "0"; "]"; "."; "5"; "NL" ]);
   test "C++'s digit separator becomes an underscore" (fun () ->
-      error "1'000'000" ~code:Number_underscore ~at:"'" ~fixed:"1_000_000";
+      error "1'000'000" ~code:Number_digit_separator ~at:"'" ~fixed:"1_000_000";
       equal_lists Fun.id "tokens" [ "1000000"; "NL" ] (tokens_of "1'000'000"));
   test "a hexadecimal float has no fix" (fun () ->
       error "0x1p3" ~code:Number_hexadecimal_float ~at:"0";
@@ -625,7 +625,7 @@ let () =
 
 (* The documents *)
 
-let document name = Documents.read (Harness.workspace_path name)
+let document = Parse_support.document
 let truss_blocks name = Documents.truss_blocks (document name)
 let block_after = Documents.block_after
 let words = Documents.words
@@ -680,7 +680,4 @@ let () =
         (truss_blocks name))
     (* Every document at the root of the repository, so a new one is
        covered without being listed here. *)
-    (Sys.readdir (Harness.workspace_path ".")
-    |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".md")
-    |> List.sort compare)
+    (Harness.markdown_documents ())

@@ -240,7 +240,7 @@ let check context (graph : Graph.t) : task_hazard option =
   (* Whether a loan covers a place: the loan borrows the place, or it
      borrows a holder that stores a view of the place. Returns [Some viewed]
      if it does, where [viewed] is true in the second case. *)
-  let covers index (loan : loan) (place : Place.t) =
+  let loan_coverage index (loan : loan) (place : Place.t) =
     if overlaps loan.borrowed place then Some false
     else if
       List.exists
@@ -253,7 +253,7 @@ let check context (graph : Graph.t) : task_hazard option =
   let covering index (point : point) (place : Place.t) =
     List.rev
       (List.filter_map
-         (fun loan -> Option.map (fun viewed -> (loan, viewed)) (covers index loan place))
+         (fun loan -> Option.map (fun viewed -> (loan, viewed)) (loan_coverage index loan place))
          point.loans)
   in
   let is_mut ((loan : loan), _) = loan.mode = Mut in
@@ -392,7 +392,7 @@ let check context (graph : Graph.t) : task_hazard option =
               (if copyable context type_ then
                  [
                    Diagnostic.fix "Copy it."
-                     [ Diagnostic.replace (Syntax.Span.zero_width at.stop) ".copy()" ];
+                     [ Diagnostic.insert (Syntax.Span.zero_width at.stop) ".copy()" ];
                  ]
                else [])
             "This part is lent only until the statement ends, so it cannot be bound to a name. Use \
@@ -505,13 +505,13 @@ let check context (graph : Graph.t) : task_hazard option =
                     List.find_opt is_self_reference resolved,
                     List.find_opt views_borrowed_parameter resolved )
                 with
-                | Some given, _, _ ->
+                | Some stored_view, _, _ ->
                     report context View_crosses_capability at
                       (Printf.sprintf
                          "This stores a view of `%s` in a capability implementation. The caller \
                           cannot see the implementation, so it could mutate or drop what the view \
                           borrows while the implementation still stores the view. Store a copy."
-                         (show_root context given.place.root))
+                         (show_root context stored_view.place.root))
                 | None, Some _, _ ->
                     report context Self_referential at
                       (Printf.sprintf

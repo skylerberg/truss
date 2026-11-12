@@ -286,8 +286,8 @@ let () =
 let writer t =
   match t.writer with
   | Some writer when writer.size < seal_size -> writer
-  | found ->
-      if Option.is_some found then seal t;
+  | full_writer ->
+      if Option.is_some full_writer then seal t;
       let writer = new_writer t in
       t.writer <- Some writer;
       writing := t :: !writing;
@@ -330,7 +330,7 @@ let flush t =
    another record's offset. *)
 let read_from segment key location =
   match read_record (channel segment) ~offset:location.offset with
-  | Some (_, found, value) when found = key -> Some value
+  | Some (_, record_key, value) when record_key = key -> Some value
   | Some _ | None -> None
   | exception Sys_error _ -> None
 
@@ -482,7 +482,7 @@ let read pointer =
 
 (* Written beside the pointer and renamed over it, after the values it may
    name are durable, so a pointer never names a value a crash lost. *)
-let point pointer bytes =
+let write_pointer pointer bytes =
   flush pointer.store;
   File_system.write_atomically ~durable:true pointer.pointer_path (framed bytes)
 
@@ -538,7 +538,7 @@ let rewrite t candidates ~keep =
       List.iter
         (fun (key, location) ->
           match read_record (channel segment) ~offset:location.offset with
-          | Some (kind, found, value) when found = key ->
+          | Some (kind, record_key, value) when record_key = key ->
               if
                 keep segment kind key
                 && not

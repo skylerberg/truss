@@ -640,7 +640,7 @@ let () =
       let anchors =
         [ { Positions.definition = definition "entry"; path = "test.truss"; first_line = 1 } ]
       in
-      let made pushed =
+      let program_with pushed =
         [
           built_entry (fun b ->
               let storage = local b (value storage_ty) in
@@ -659,9 +659,9 @@ let () =
               status);
         ]
       in
-      expect_status ~anchors 46 (made [ 40; 5; 6 ]);
+      expect_status ~anchors 46 (program_with [ 40; 5; 6 ]);
       (* A storage of another length stops a checked build. *)
-      expect_status ~anchors 101 (made [ 40; 5 ]));
+      expect_status ~anchors 101 (program_with [ 40; 5 ]));
   test "a float fits an integer type where the whole number it is cut down to does" (fun () ->
       let open Lir_builder in
       (* Each case is a bit of the status, set where the answer is the one

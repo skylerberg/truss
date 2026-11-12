@@ -5,12 +5,7 @@
 
 open Harness
 
-let solver =
-  match Solver.find () with
-  | Ok solver -> solver
-  | Error message ->
-      prerr_endline message;
-      exit 1
+let solver = Lazy.force Support.solver
 
 let check database module_ =
   match Type_checker.diagnostics database module_ with
@@ -26,16 +21,16 @@ let () =
         \  ensures result.contains(name)\n\
         \  ensures result.length() == 1\n\
          {\n\
-        \  var made: Map[String, Int64] = [:]\n\
-        \  mut made.insert(name.copy(), value: 1)\n\
-        \  made\n\
+        \  var table: Map[String, Int64] = [:]\n\
+        \  mut table.insert(name.copy(), value: 1)\n\
+        \  table\n\
          }\n\n\
          fn numbered() -> Map[Int64, Int64]\n\
         \  ensures result.contains(7)\n\
          {\n\
-        \  var made: Map[Int64, Int64] = [:]\n\
-        \  mut made.insert(7, value: 1)\n\
-        \  made\n\
+        \  var table: Map[Int64, Int64] = [:]\n\
+        \  mut table.insert(7, value: 1)\n\
+        \  table\n\
          }\n");
   test "a password is hashed with the default cost and with a cost that meets its limits" (fun () ->
       proven
@@ -44,8 +39,8 @@ let () =
         \  cryptography::hash_password(password, salt: salt[..])\n\
          }\n\n\
          fn costly(password: Slice[UInt8], salt: Array[UInt8, 16]) -> Array[UInt8, 32] {\n\
-        \  let effort = cryptography::PasswordCost(memory_kibibytes: 65536, parallelism: 4)\n\
-        \  cryptography::hash_password(password, salt: salt[..], effort: effort)\n\
+        \  let password_cost = cryptography::PasswordCost(memory_kibibytes: 65536, parallelism: 4)\n\
+        \  cryptography::hash_password(password, salt: salt[..], password_cost: password_cost)\n\
          }\n");
   test "a map literal has its keys and its length" (fun () ->
       proven
@@ -69,7 +64,7 @@ let () =
          }\n");
   test "take and clear leave a map without the key" (fun () ->
       proven
-        "fn taken(ports: mut Map[String, Int64], name: String) -> Option[Int64]\n\
+        "fn moved(ports: mut Map[String, Int64], name: String) -> Option[Int64]\n\
         \  ensures !ports.contains(name)\n\
          {\n\
         \  mut ports.take(name)\n\

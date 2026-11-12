@@ -14,10 +14,10 @@ public type PatternErrorKind =
   | TooLarge
   derives Equal
 
-public type PatternError(kind: PatternErrorKind, offset: USize)
+public type ParseError(kind: PatternErrorKind, offset: USize)
   derives Equal
 
-impl Display for PatternError {
+impl Display for ParseError {
   fn display(self, output: mut TextBuilder) {
     match self.kind {
       UnbalancedParenthesis => mut output.write("a parenthesis has no partner")
@@ -59,8 +59,8 @@ public opaque type Captures(groups: List[Option[Match]], names: List[String])
 public fn Captures.whole(self) -> Match
   cost time O(1)
 {
-  if self.groups.length() > 0 && self.groups[0] is Some(found) {
-    return found
+  if self.groups.length() > 0 && self.groups[0] is Some(whole) {
+    return whole
   }
   Match(start: 0, end: 0)
 }
@@ -121,10 +121,10 @@ public fn escape(text: StringSlice) -> String
 
 type Builder(code: List[UInt32], ranges: List[UInt32], groups: List[USize], names: List[String], placeholders: Bool)
 
-fn failure(kind: PatternErrorKind, offset: USize) -> Option[PatternError]
+fn failure(kind: PatternErrorKind, offset: USize) -> Option[ParseError]
   cost time O(1)
 {
-  Some(PatternError(kind: kind, offset: offset))
+  Some(ParseError(kind: kind, offset: offset))
 }
 
 fn word_of(count: USize) -> UInt32
@@ -174,25 +174,25 @@ fn Builder.group_number(self, offset: USize) -> Option[USize]
   None
 }
 
-fn escape_end(text: StringSlice, from: USize, to: USize) -> Result[USize, PatternError]
+fn escape_end(text: StringSlice, from: USize, to: USize) -> Result[USize, ParseError]
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
   cost time finite
 {
   if to - from < 2 {
-    return Err(PatternError(kind: PatternErrorKind.InvalidEscape, offset: from))
+    return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
   }
   let letter = text.byte(from + 1)
   if letter == 120 {
     if to - from < 4 {
-      return Err(PatternError(kind: PatternErrorKind.InvalidEscape, offset: from))
+      return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
     }
     return Ok(from + 4)
   }
   if letter == 117 {
     if to - from < 4 || text.byte(from + 2) != 123 {
-      return Err(PatternError(kind: PatternErrorKind.InvalidEscape, offset: from))
+      return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
     }
     var index = from + 3
     while index < to && text.byte(index) != 125
@@ -203,18 +203,18 @@ fn escape_end(text: StringSlice, from: USize, to: USize) -> Result[USize, Patter
       index += 1
     }
     if index == to {
-      return Err(PatternError(kind: PatternErrorKind.InvalidEscape, offset: from))
+      return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
     }
     return Ok(index + 1)
   }
   let decoded = text.decode(from + 1)
   if decoded.length > to - from - 1 {
-    return Err(PatternError(kind: PatternErrorKind.InvalidEscape, offset: from))
+    return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
   }
   Ok(from + 1 + decoded.length)
 }
 
-fn class_end(text: StringSlice, from: USize, to: USize) -> Result[USize, PatternError]
+fn class_end(text: StringSlice, from: USize, to: USize) -> Result[USize, ParseError]
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
@@ -236,10 +236,10 @@ fn class_end(text: StringSlice, from: USize, to: USize) -> Result[USize, Pattern
       index += 1
     }
   }
-  Err(PatternError(kind: PatternErrorKind.UnbalancedBracket, offset: from))
+  Err(ParseError(kind: PatternErrorKind.UnbalancedBracket, offset: from))
 }
 
-fn group_end(text: StringSlice, from: USize, to: USize) -> Result[USize, PatternError]
+fn group_end(text: StringSlice, from: USize, to: USize) -> Result[USize, ParseError]
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
@@ -264,7 +264,7 @@ fn group_end(text: StringSlice, from: USize, to: USize) -> Result[USize, Pattern
         depth += 1
       } else if byte == 41 {
         if depth == 0 {
-          return Err(PatternError(kind: PatternErrorKind.UnbalancedParenthesis, offset: index))
+          return Err(ParseError(kind: PatternErrorKind.UnbalancedParenthesis, offset: index))
         }
         if depth == 1 {
           return Ok(index + 1)
@@ -274,10 +274,10 @@ fn group_end(text: StringSlice, from: USize, to: USize) -> Result[USize, Pattern
       index += 1
     }
   }
-  Err(PatternError(kind: PatternErrorKind.UnbalancedParenthesis, offset: from))
+  Err(ParseError(kind: PatternErrorKind.UnbalancedParenthesis, offset: from))
 }
 
-fn atom_end(text: StringSlice, from: USize, to: USize) -> Result[USize, PatternError]
+fn atom_end(text: StringSlice, from: USize, to: USize) -> Result[USize, ParseError]
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
@@ -294,16 +294,16 @@ fn atom_end(text: StringSlice, from: USize, to: USize) -> Result[USize, PatternE
     return group_end(text, from: from, to: to)
   }
   if byte == 41 {
-    return Err(PatternError(kind: PatternErrorKind.UnbalancedParenthesis, offset: from))
+    return Err(ParseError(kind: PatternErrorKind.UnbalancedParenthesis, offset: from))
   }
   let decoded = text.decode(from)
   if decoded.length > to - from {
-    return Err(PatternError(kind: PatternErrorKind.UnsupportedSyntax, offset: from))
+    return Err(ParseError(kind: PatternErrorKind.UnsupportedSyntax, offset: from))
   }
   Ok(from + decoded.length)
 }
 
-fn branch_end(text: StringSlice, from: USize, to: USize) -> Result[USize, PatternError]
+fn branch_end(text: StringSlice, from: USize, to: USize) -> Result[USize, ParseError]
   requires from <= to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end < from || end > to))
@@ -353,18 +353,18 @@ fn count_at(text: StringSlice, from: USize, to: USize) -> Option[Count]
 
 type Repetition(least: USize, most: USize, bounded: Bool, lazy: Bool, end: USize)
 
-fn repetition_at(text: StringSlice, from: USize, to: USize) -> Result[Repetition, PatternError]
+fn repetition_at(text: StringSlice, from: USize, to: USize) -> Result[Repetition, ParseError]
   requires from <= to
   requires to <= text.length()
-  ensures !(result is Ok(found) && (found.end < from || found.end > to || found.least > 1000 || found.most > 1000))
-  ensures !(result is Ok(found) && found.bounded && found.most < found.least)
+  ensures !(result is Ok(repetition) && (repetition.end < from || repetition.end > to || repetition.least > 1000 || repetition.most > 1000))
+  ensures !(result is Ok(repetition) && repetition.bounded && repetition.most < repetition.least)
   cost time finite
 {
   let once = Repetition(least: 1, most: 1, bounded: true, lazy: false, end: from)
   if from == to {
     return Ok(once)
   }
-  let wrong = PatternError(kind: PatternErrorKind.InvalidRepetition, offset: from)
+  let wrong = ParseError(kind: PatternErrorKind.InvalidRepetition, offset: from)
   let byte = text.byte(from)
   var least: USize = 1
   var most: USize = 1
@@ -379,7 +379,7 @@ fn repetition_at(text: StringSlice, from: USize, to: USize) -> Result[Repetition
     least = 0
   } else if byte == 123 {
     let first = match count_at(text, from: from + 1, to: to) {
-      Some(found) => found
+      Some(first) => first
       None => return Err(wrong)
     }
     least = first.value
@@ -391,7 +391,7 @@ fn repetition_at(text: StringSlice, from: USize, to: USize) -> Result[Repetition
         bounded = false
       } else {
         let second = match count_at(text, from: index, to: to) {
-          Some(found) => found
+          Some(second) => second
           None => return Err(wrong)
         }
         most = second.value
@@ -413,12 +413,12 @@ fn repetition_at(text: StringSlice, from: USize, to: USize) -> Result[Repetition
   Ok(Repetition(least: least, most: most, bounded: bounded, lazy: lazy, end: end))
 }
 
-fn escaped_character(text: StringSlice, from: USize, to: USize) -> Result[UInt32, PatternError]
+fn escaped_character(text: StringSlice, from: USize, to: USize) -> Result[UInt32, ParseError]
   requires from < to
   requires to <= text.length()
   cost time finite
 {
-  let wrong = PatternError(kind: PatternErrorKind.InvalidEscape, offset: from)
+  let wrong = ParseError(kind: PatternErrorKind.InvalidEscape, offset: from)
   if to - from < 2 {
     return Err(wrong)
   }
@@ -481,7 +481,7 @@ fn escaped_character(text: StringSlice, from: USize, to: USize) -> Result[UInt32
     return Ok(code)
   }
   if (49 <= letter && letter <= 57) {
-    return Err(PatternError(kind: PatternErrorKind.UnsupportedSyntax, offset: from))
+    return Err(ParseError(kind: PatternErrorKind.UnsupportedSyntax, offset: from))
   }
   if (97 <= letter && letter <= 122) || (65 <= letter && letter <= 90) {
     return Err(wrong)
@@ -552,7 +552,7 @@ fn is_shorthand(letter: UInt8) -> Bool
 
 type ClassItem(code: UInt32, end: USize, shorthand: Bool)
 
-fn Builder.class_item(mut self, text: StringSlice, from: USize, to: USize) -> Result[ClassItem, PatternError]
+fn Builder.class_item(mut self, text: StringSlice, from: USize, to: USize) -> Result[ClassItem, ParseError]
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(item) && (item.end <= from || item.end > to))
@@ -560,7 +560,7 @@ fn Builder.class_item(mut self, text: StringSlice, from: USize, to: USize) -> Re
 {
   let byte = text.byte(from)
   if self.placeholders && byte == 1 {
-    return Err(PatternError(kind: PatternErrorKind.UnsupportedSyntax, offset: from))
+    return Err(ParseError(kind: PatternErrorKind.UnsupportedSyntax, offset: from))
   }
   if byte == 92 {
     let end = escape_end(text, from: from, to: to)?
@@ -569,19 +569,19 @@ fn Builder.class_item(mut self, text: StringSlice, from: USize, to: USize) -> Re
       return Ok(ClassItem(code: 0, end: end, shorthand: true))
     }
     if to - from >= 2 && (text.byte(from + 1) == 98 || text.byte(from + 1) == 66) {
-      return Err(PatternError(kind: PatternErrorKind.InvalidEscape, offset: from))
+      return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
     }
     let code = escaped_character(text, from: from, to: to)?
     return Ok(ClassItem(code: code, end: end, shorthand: false))
   }
   let decoded = text.decode(from)
   if decoded.length > to - from {
-    return Err(PatternError(kind: PatternErrorKind.UnsupportedSyntax, offset: from))
+    return Err(ParseError(kind: PatternErrorKind.UnsupportedSyntax, offset: from))
   }
   Ok(ClassItem(code: decoded.character.code(), end: from + decoded.length, shorthand: false))
 }
 
-fn Builder.compile_class(mut self, text: StringSlice, from: USize, to: USize) -> Option[PatternError]
+fn Builder.compile_class(mut self, text: StringSlice, from: USize, to: USize) -> Option[ParseError]
   requires from < to
   requires to <= text.length()
   cost time finite
@@ -603,7 +603,7 @@ fn Builder.compile_class(mut self, text: StringSlice, from: USize, to: USize) ->
     decreases close - index
   {
     let item = match mut self.class_item(text, from: index, to: close) {
-      Ok(found) => found
+      Ok(item) => item
       Err(error) => return Some(error)
     }
     index = item.end
@@ -611,7 +611,7 @@ fn Builder.compile_class(mut self, text: StringSlice, from: USize, to: USize) ->
       var high = item.code
       if close - index >= 2 && text.byte(index) == 45 {
         let last = match mut self.class_item(text, from: index + 1, to: close) {
-          Ok(found) => found
+          Ok(last) => last
           Err(error) => return Some(error)
         }
         if last.shorthand || last.code < item.code {
@@ -628,7 +628,7 @@ fn Builder.compile_class(mut self, text: StringSlice, from: USize, to: USize) ->
   None
 }
 
-fn Builder.compile_escape(mut self, text: StringSlice, from: USize, to: USize) -> Option[PatternError]
+fn Builder.compile_escape(mut self, text: StringSlice, from: USize, to: USize) -> Option[ParseError]
   requires from < to
   requires to <= text.length()
   cost time finite
@@ -662,7 +662,7 @@ fn Builder.compile_escape(mut self, text: StringSlice, from: USize, to: USize) -
   }
 }
 
-fn Builder.compile_atom(mut self, text: StringSlice, from: USize, to: USize) -> Option[PatternError]
+fn Builder.compile_atom(mut self, text: StringSlice, from: USize, to: USize) -> Option[ParseError]
   requires from < to
   requires to <= text.length()
   decreases to - from, 1
@@ -746,7 +746,7 @@ fn Builder.compile_atom(mut self, text: StringSlice, from: USize, to: USize) -> 
   None
 }
 
-fn Builder.compile_concatenation(mut self, text: StringSlice, from: USize, to: USize) -> Option[PatternError]
+fn Builder.compile_concatenation(mut self, text: StringSlice, from: USize, to: USize) -> Option[ParseError]
   requires from <= to
   requires to <= text.length()
   decreases to - from, 2
@@ -759,11 +759,11 @@ fn Builder.compile_concatenation(mut self, text: StringSlice, from: USize, to: U
     decreases to - index
   {
     let end = match atom_end(text, from: index, to: to) {
-      Ok(found) => found
+      Ok(end) => end
       Err(error) => return Some(error)
     }
     let times = match repetition_at(text, from: end, to: to) {
-      Ok(found) => found
+      Ok(times) => times
       Err(error) => return Some(error)
     }
     var copies: USize = 0
@@ -820,7 +820,7 @@ fn Builder.compile_concatenation(mut self, text: StringSlice, from: USize, to: U
   None
 }
 
-fn Builder.compile_alternation(mut self, text: StringSlice, from: USize, to: USize) -> Option[PatternError]
+fn Builder.compile_alternation(mut self, text: StringSlice, from: USize, to: USize) -> Option[ParseError]
   requires from <= to
   requires to <= text.length()
   decreases to - from, 3
@@ -834,7 +834,7 @@ fn Builder.compile_alternation(mut self, text: StringSlice, from: USize, to: USi
     decreases to - index
   {
     let end = match branch_end(text, from: index, to: to) {
-      Ok(found) => found
+      Ok(end) => end
       Err(error) => return Some(error)
     }
     if end == to {
@@ -864,7 +864,7 @@ fn Builder.compile_alternation(mut self, text: StringSlice, from: USize, to: USi
   None
 }
 
-fn Builder.collect_groups(mut self, text: StringSlice) -> Option[PatternError]
+fn Builder.collect_groups(mut self, text: StringSlice) -> Option[ParseError]
   cost time finite
 {
   let to = text.length()
@@ -876,12 +876,12 @@ fn Builder.collect_groups(mut self, text: StringSlice) -> Option[PatternError]
     let byte = text.byte(index)
     if byte == 92 {
       index = match escape_end(text, from: index, to: to) {
-        Ok(found) => found
+        Ok(end) => end
         Err(error) => return Some(error)
       }
     } else if byte == 91 {
       index = match class_end(text, from: index, to: to) {
-        Ok(found) => found
+        Ok(end) => end
         Err(error) => return Some(error)
       }
     } else {
@@ -925,7 +925,7 @@ fn Builder.collect_groups(mut self, text: StringSlice) -> Option[PatternError]
   None
 }
 
-fn compile(text: StringSlice, placeholders: Bool) -> Result[Regex, PatternError]
+fn compile(text: StringSlice, placeholders: Bool) -> Result[Regex, ParseError]
   cost time finite
 {
   var builder = Builder(code: [], ranges: [], groups: [], names: [], placeholders: placeholders)
@@ -959,7 +959,7 @@ fn compile(text: StringSlice, placeholders: Bool) -> Result[Regex, PatternError]
   Ok(Regex(pattern: text.to_string(), program: own program, group_names: own builder.names))
 }
 
-public fn is_valid_pattern(literals: Slice[text::Literal]) -> Bool
+public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
   cost time finite
 {
   var pattern = ""
@@ -1009,7 +1009,7 @@ impl FromTemplate for Regex {
   type Part = Part
 
   fn from_template(template: Template[Part]) -> Regex
-    requires is_valid_pattern(template.literals)
+    requires is_valid_template(template.literals)
   {
     var pattern = ""
     var index: USize = 0
@@ -1335,7 +1335,7 @@ fn Regex.run(self, text: StringSlice, from: USize, whole: Bool) -> Option[List[U
 }
 
 fn match_from(slots: Slice[USize], text: StringSlice, offset: USize) -> Option[Match]
-  ensures !(result is Some(found) && (found.start < offset || found.end > text.length()))
+  ensures !(result is Some(matched) && (matched.start < offset || matched.end > text.length()))
   cost time O(1)
 {
   if slots.length() < 2 {
@@ -1353,7 +1353,7 @@ fn match_from(slots: Slice[USize], text: StringSlice, offset: USize) -> Option[M
 public fn Regex.find_from(self, text: StringSlice, offset: USize) -> Option[Match]
   requires offset <= text.length()
   ensures match result {
-    Some(found) => offset <= found.start && found.end <= text.length()
+    Some(matched) => offset <= matched.start && matched.end <= text.length()
     None => true
   }
   cost time finite
@@ -1378,7 +1378,7 @@ public fn Regex.is_full_match(self, text: StringSlice) -> Bool
 
 public fn Regex.find(self, text: StringSlice) -> Option[Match]
   ensures match result {
-    Some(found) => found.end <= text.length()
+    Some(matched) => matched.end <= text.length()
     None => !self.is_match(text)
   }
   cost time finite
@@ -1386,40 +1386,40 @@ public fn Regex.find(self, text: StringSlice) -> Option[Match]
   self.find_from(text, offset: 0)
 }
 
-fn step_after(text: StringSlice, found: Match) -> USize
-  requires found.end <= text.length()
-  ensures result >= found.end
+fn step_after(text: StringSlice, matched: Match) -> USize
+  requires matched.end <= text.length()
+  ensures result >= matched.end
   ensures result <= text.length() + 1
-  ensures result > found.start
+  ensures result > matched.start
   cost time O(1)
 {
-  if found.end > found.start {
-    return found.end
+  if matched.end > matched.start {
+    return matched.end
   }
-  if found.end < text.length() {
-    found.end + text.decode(found.end).length
+  if matched.end < text.length() {
+    matched.end + text.decode(matched.end).length
   } else {
-    found.end + 1
+    matched.end + 1
   }
 }
 
 public fn Regex.find_all(self, text: StringSlice) -> List[Match]
   cost time finite
 {
-  var found: List[Match] = []
+  var matches: List[Match] = []
   var position: USize = 0
   while position <= text.length()
     decreases text.length() + 1 - position
   {
     match self.find_from(text, offset: position) {
       Some(next) => {
-        position = step_after(text, found: next)
-        mut found.push(next)
+        position = step_after(text, matched: next)
+        mut matches.push(next)
       }
-      None => return found
+      None => return matches
     }
   }
-  found
+  matches
 }
 
 fn Regex.captures_of(self, slots: Slice[USize], text: StringSlice, offset: USize) -> Option[Captures]
@@ -1427,7 +1427,7 @@ fn Regex.captures_of(self, slots: Slice[USize], text: StringSlice, offset: USize
   cost time finite
 {
   let whole = match match_from(slots, text: text, offset: offset) {
-    Some(found) => found
+    Some(whole) => whole
     None => return None
   }
   var groups: List[Option[Match]] = [Some(whole)]
@@ -1474,10 +1474,10 @@ public fn Regex.replace_first(self, text: StringSlice, replacement: StringSlice)
   cost time finite
 {
   match self.find_from(text, offset: 0) {
-    Some(found) => {
-      var output = text.part(0, to: found.start).to_string()
+    Some(matched) => {
+      var output = text.part(0, to: matched.start).to_string()
       mut output.push(replacement)
-      mut output.push(text.part(found.end, to: text.length()))
+      mut output.push(text.part(matched.end, to: text.length()))
       output
     }
     None => text.to_string()
@@ -1488,27 +1488,27 @@ public fn Regex.replace_all(self, text: StringSlice, replacement: StringSlice) -
   cost time finite
 {
   var output = ""
-  var kept: USize = 0
+  var copied_up_to: USize = 0
   var position: USize = 0
   while position <= text.length()
-    invariant kept <= position
-    invariant kept <= text.length()
+    invariant copied_up_to <= position
+    invariant copied_up_to <= text.length()
     decreases text.length() + 1 - position
   {
     match self.find_from(text, offset: position) {
-      Some(found) => {
-        mut output.push(text.part(kept, to: found.start))
+      Some(matched) => {
+        mut output.push(text.part(copied_up_to, to: matched.start))
         mut output.push(replacement)
-        kept = found.end
-        position = step_after(text, found: found)
+        copied_up_to = matched.end
+        position = step_after(text, matched: matched)
       }
       None => {
-        mut output.push(text.part(kept, to: text.length()))
+        mut output.push(text.part(copied_up_to, to: text.length()))
         return output
       }
     }
   }
-  mut output.push(text.part(kept, to: text.length()))
+  mut output.push(text.part(copied_up_to, to: text.length()))
   output
 }
 
@@ -1520,32 +1520,32 @@ public fn Regex.replace_all_with(
   cost time finite
 {
   var output = ""
-  var kept: USize = 0
+  var copied_up_to: USize = 0
   var position: USize = 0
   while position <= text.length()
-    invariant kept <= position
-    invariant kept <= text.length()
+    invariant copied_up_to <= position
+    invariant copied_up_to <= text.length()
     decreases text.length() + 1 - position
   {
     match self.captures_from(text, offset: position) {
       Some(captures) => {
-        let found = captures.whole()
-        if found.start < position || found.end > text.length() {
-          mut output.push(text.part(kept, to: text.length()))
+        let whole = captures.whole()
+        if whole.start < position || whole.end > text.length() {
+          mut output.push(text.part(copied_up_to, to: text.length()))
           return output
         }
-        mut output.push(text.part(kept, to: found.start))
+        mut output.push(text.part(copied_up_to, to: whole.start))
         mut output.push(replace(captures).slice())
-        kept = found.end
-        position = step_after(text, found: found)
+        copied_up_to = whole.end
+        position = step_after(text, matched: whole)
       }
       None => {
-        mut output.push(text.part(kept, to: text.length()))
+        mut output.push(text.part(copied_up_to, to: text.length()))
         return output
       }
     }
   }
-  mut output.push(text.part(kept, to: text.length()))
+  mut output.push(text.part(copied_up_to, to: text.length()))
   output
 }
 
@@ -1553,28 +1553,28 @@ public fn Regex.split(self, text: StringSlice) -> List[StringSlice]
   cost time finite
 {
   var pieces: List[StringSlice] = []
-  var kept: USize = 0
+  var copied_up_to: USize = 0
   var position: USize = 0
   while position <= text.length()
-    invariant kept <= position
-    invariant kept <= text.length()
+    invariant copied_up_to <= position
+    invariant copied_up_to <= text.length()
     decreases text.length() + 1 - position
   {
     match self.find_from(text, offset: position) {
-      Some(found) => {
-        if found.end > found.start {
-          mut pieces.push(text.part(kept, to: found.start))
-          kept = found.end
+      Some(matched) => {
+        if matched.end > matched.start {
+          mut pieces.push(text.part(copied_up_to, to: matched.start))
+          copied_up_to = matched.end
         }
-        position = step_after(text, found: found)
+        position = step_after(text, matched: matched)
       }
       None => {
-        mut pieces.push(text.part(kept, to: text.length()))
+        mut pieces.push(text.part(copied_up_to, to: text.length()))
         return pieces
       }
     }
   }
-  mut pieces.push(text.part(kept, to: text.length()))
+  mut pieces.push(text.part(copied_up_to, to: text.length()))
   pieces
 }
 
@@ -1591,9 +1591,9 @@ impl Display for Regex {
 }
 
 impl text::Parse for Regex {
-  type Error = PatternError
+  type Error = ParseError
 
-  fn parse(text: StringSlice) -> Result[Regex, PatternError] {
+  fn parse(text: StringSlice) -> Result[Regex, ParseError] {
     compile(text, placeholders: false)
   }
 }

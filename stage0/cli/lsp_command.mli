@@ -1,7 +1,7 @@
 type encoding = Utf_8 | Utf_16
 
-val position : encoding -> String.t -> int -> int * int
-val offset : encoding -> String.t -> line:int -> column:int -> int
+val position : encoding -> Source.t -> int -> int * int
+val offset : encoding -> Source.t -> line:int -> column:int -> int
 val check : root:string -> encoding -> (string * string) list -> Json.t
 
 type server = {

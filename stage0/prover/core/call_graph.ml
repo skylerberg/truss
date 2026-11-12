@@ -123,8 +123,8 @@ let dispatched (called : Core.callee) =
 (* The edges of one body: each call, each function named as a value, and
    each [impl] an [any] value is made with. *)
 let edges database impls (body : Core.block) =
-  let found = ref [] in
-  let add edges = found := List.rev_append edges !found in
+  let body_edges = ref [] in
+  let add edges = body_edges := List.rev_append edges !body_edges in
   let callee (called : Core.callee) =
     match called with
     | Function { path; _ } ->
@@ -163,7 +163,7 @@ let edges database impls (body : Core.block) =
          callee;
        })
     body;
-  List.rev !found
+  List.rev !body_edges
 
 let build database package =
   let modules = Query.demand database Workspace.modules package in
@@ -244,15 +244,15 @@ let successors database ~packages (path : Path.t) =
 let reaches database ~package ~from ~target =
   let packages = reachable_packages database package in
   let visited = Hashtbl.create 16 in
-  let rec go path =
+  let rec visit path =
     Path.equal path target
     || (not (Hashtbl.mem visited path))
        && begin
          Hashtbl.replace visited path ();
-         List.exists go (successors database ~packages path)
+         List.exists visit (successors database ~packages path)
        end
   in
-  go from
+  visit from
 
 (* Whether a function can call itself again: whether something it calls
    reaches back to it. *)

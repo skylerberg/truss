@@ -66,7 +66,7 @@ val unlock : pointer -> unit
 val read : pointer -> string option
 (** What the pointer holds, or [None] if it was never written, or is cut short or damaged. *)
 
-val point : pointer -> string -> unit
+val write_pointer : pointer -> string -> unit
 (** Replaces what the pointer holds, after making every value and result added so far durable. *)
 
 val remove_pointer : pointer -> unit

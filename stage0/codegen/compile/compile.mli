@@ -111,7 +111,8 @@ val run_tests :
    by hand, in order, as [run_tests] builds one of tests in source. It is
    for testing the runner on what no source compiles to, such as a test
    that leaves a block allocated. *)
-val build_made_tests : t -> time_limit:int -> Lir.t list -> output:string -> (unit, string) result
+val build_supplied_tests :
+  t -> time_limit:int -> Lir.t list -> output:string -> (unit, string) result
 
 (* Each test's key: the hash of the code it can run, as "Test results"
    says, which changes exactly when the test's outcome may. A test that

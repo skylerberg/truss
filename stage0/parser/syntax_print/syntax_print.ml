@@ -244,9 +244,9 @@ and loop_clause (clause : loop_clause) =
 
 and statement (statement : statement) =
   match statement.kind with
-  | Let { mutable_; pattern = bound; annotation; value; else_ } ->
+  | Let { is_var; pattern = bound; annotation; value; else_ } ->
       form
-        (if mutable_ then "var" else "let")
+        (if is_var then "var" else "let")
         [
           pattern bound;
           optional (fun type_ -> ": " ^ type_expression type_) annotation;

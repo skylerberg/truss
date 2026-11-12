@@ -20,7 +20,7 @@ type NamedValues(name: String, values: List[String])
 
 public opaque type Parsed(
   switches: List[String],
-  given: List[NamedValues],
+  options: List[NamedValues],
   command_name: Option[String],
   command: List[Parsed],
 )
@@ -232,33 +232,33 @@ fn Parser.find_command(self, name: StringSlice) -> USize
 }
 
 fn Parsed.index_of(self, name: StringSlice) -> USize
-  ensures result <= self.given.length()
+  ensures result <= self.options.length()
   cost time finite
 {
   var index: USize = 0
-  while index < self.given.length()
-    invariant index <= self.given.length()
-    decreases self.given.length() - index
+  while index < self.options.length()
+    invariant index <= self.options.length()
+    decreases self.options.length() - index
   {
-    if self.given[index].name.slice() == name {
+    if self.options[index].name.slice() == name {
       return index
     }
     index += 1
   }
-  self.given.length()
+  self.options.length()
 }
 
 fn add_value(parsed: mut Parsed, name: StringSlice, value: StringSlice, repeated: Bool)
   cost time finite
 {
-  let found = parsed.index_of(name)
-  if found == parsed.given.length() {
-    mut parsed.given.push(NamedValues(name: name.to_string(), values: [value.to_string()]))
+  let position = parsed.index_of(name)
+  if position == parsed.options.length() {
+    mut parsed.options.push(NamedValues(name: name.to_string(), values: [value.to_string()]))
   } else {
     if !repeated {
-      mut parsed.given[found].values.clear()
+      mut parsed.options[position].values.clear()
     }
-    mut parsed.given[found].values.push(value.to_string())
+    mut parsed.options[position].values.push(value.to_string())
   }
 }
 
@@ -388,7 +388,7 @@ fn Parser.finalize(self, parsed: own Parsed, positional_count: USize) -> Result[
   {
     let name = self.parameters[index].name.slice()
     let kind = self.parameters[index].kind
-    if kind == Kind.Option && finished.index_of(name) == finished.given.length() {
+    if kind == Kind.Option && finished.index_of(name) == finished.options.length() {
       if self.parameters[index].default is Some(text) {
         add_value(mut finished, name: name, value: text.slice(), repeated: false)
       } else if self.parameters[index].required {
@@ -410,7 +410,7 @@ public fn Parser.parse(self, arguments: Slice[String]) -> Result[Parsed, Error]
   decreases arguments.length()
   cost time finite
 {
-  var parsed = Parsed(switches: [], given: [], command_name: None, command: [])
+  var parsed = Parsed(switches: [], options: [], command_name: None, command: [])
   var positional_count: USize = 0
   var literal = false
   var index: USize = 0
@@ -661,21 +661,21 @@ public fn Parsed.flag(self, name: StringSlice) -> Bool
 public fn Parsed.value(self, name: StringSlice) -> Option[StringSlice]
   cost time finite
 {
-  let found = self.index_of(name)
-  if found == self.given.length() {
+  let position = self.index_of(name)
+  if position == self.options.length() {
     return None
   }
-  self.given[found].values.last().map(fn(text) { text.slice() })
+  self.options[position].values.last().map(fn(text) { text.slice() })
 }
 
 public fn Parsed.values(self, name: StringSlice) -> Slice[String]
   cost time finite
 {
-  let found = self.index_of(name)
-  if found == self.given.length() {
+  let position = self.index_of(name)
+  if position == self.options.length() {
     return no_values.slice()
   }
-  self.given[found].values.slice()
+  self.options[position].values.slice()
 }
 
 public fn Parsed.value_as[Target: text::Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
@@ -691,7 +691,7 @@ public fn Parsed.value_as[Target: text::Parse](self, name: StringSlice) -> Resul
 public fn Parsed.command_name(self) -> Option[StringSlice]
   cost time O(1)
 {
-  self.command_name.map(fn(found) { found.slice() })
+  self.command_name.map(fn(name) { name.slice() })
 }
 
 public fn Parsed.command(self) lends Option[Parsed]

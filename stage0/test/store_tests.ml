@@ -3,16 +3,7 @@
 
 open Harness
 
-let counter = ref 0
-
-let fresh_directory () =
-  incr counter;
-  let directory =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "truss-store-test-%d-%d" (Unix.getpid ()) !counter)
-  in
-  if Sys.file_exists directory then ignore (Sys.command ("rm -rf " ^ Filename.quote directory));
-  directory
+let fresh_directory () = scratch "store"
 
 let segment_files directory =
   let segments = Filename.concat directory "segments" in
@@ -81,8 +72,8 @@ let () =
   test "a pointer gives back what it was last pointed at" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let pointer = Store.pointer store "session" in
-      Store.point pointer "first";
-      Store.point pointer "second";
+      Store.write_pointer pointer "first";
+      Store.write_pointer pointer "second";
       if Store.read pointer <> Some "second" then fail "another value");
   test "a pointer never pointed holds nothing" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
@@ -91,7 +82,7 @@ let () =
       let directory = fresh_directory () in
       let store = Store.open_ directory in
       let pointer = Store.pointer store "session" in
-      Store.point pointer "whole";
+      Store.write_pointer pointer "whole";
       let path = Filename.concat (Filename.concat directory "pointers") "session.pointer" in
       let contents = In_channel.with_open_bin path In_channel.input_all in
       Out_channel.with_open_bin path (fun out ->
@@ -250,11 +241,12 @@ let () =
       Engine.set engine value_input () 7;
       ignore (Engine.get engine doubled ());
       let changed = Engine.write engine in
-      let debt = Engine.debt engine in
-      if debt.depth <> 1 then fail "%d differences" debt.depth;
+      let chain_size = Engine.chain_size engine in
+      if chain_size.depth <> 1 then fail "%d differences" chain_size.depth;
       (* The input and the three results that read it, of the six nodes. *)
-      if debt.whole <> 6 then fail "the whole state holds %d nodes" debt.whole;
-      if debt.differences <> 4 then fail "the difference holds %d nodes" debt.differences;
+      if chain_size.whole <> 6 then fail "the whole state holds %d nodes" chain_size.whole;
+      if chain_size.differences <> 4 then
+        fail "the difference holds %d nodes" chain_size.differences;
       if Engine.get (opened store changed) doubled () <> 14 then fail "the change was not written";
       if Engine.get (opened store artifact) doubled () <> 8 then fail "the earlier state changed");
   test "the whole state is written again when asked" (fun () ->
@@ -263,7 +255,7 @@ let () =
       Engine.set engine value_input () 7;
       ignore (Engine.get engine doubled ());
       let whole = Engine.write ~full:true engine in
-      if (Engine.debt engine).depth <> 0 then fail "still a difference";
+      if (Engine.chain_size engine).depth <> 0 then fail "still a difference";
       let again = opened store whole in
       if Engine.get again doubled () <> 14 then fail "another result";
       if Engine.get again reads_through () <> 80 then fail "lost a result");
@@ -306,7 +298,7 @@ let () =
       let engine = opened store artifact in
       Engine.set engine value_input () 5;
       ignore (Engine.get engine doubled ());
-      Engine.record engine;
+      Engine.record_facts engine;
       Engine.clear_log engine;
       Engine.set engine value_input () 4;
       if Engine.get engine doubled () <> 8 then fail "another result";
@@ -357,7 +349,7 @@ let () =
       let shared = String.make 3 'a' in
       Engine.set first pair_input () (shared, shared);
       ignore (Engine.get first pair_length ());
-      Engine.record first;
+      Engine.record_facts first;
       let second = attached store in
       Engine.set second pair_input () (String.make 3 'a', String.make 3 'a');
       ignore (Engine.get second pair_length ());

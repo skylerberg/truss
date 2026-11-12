@@ -42,6 +42,10 @@ val line_start : t -> int -> int
 (** The offset where the line holding [offset] starts. The first line starts after a byte order
     mark. *)
 
+val fragment_line_start : string -> int -> int
+(** [fragment_line_start text offset] is the offset where the line holding [offset] starts in
+    [text], a part of a file such as one definition's text. Lines break as in {!position}. *)
+
 val line_end : t -> int -> int
 (** The offset of the line break that ends the line holding [offset], or the end of the file. *)
 

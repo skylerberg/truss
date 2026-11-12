@@ -27,6 +27,26 @@ val expect_not_recomputed :
     of them. A key that [first] does not compute fails, so the check cannot pass on a result nothing
     computes. *)
 
+val scratch : string -> string
+(** A new empty directory whose name starts with [name]. Each is inside one directory of this
+    process, which is removed when the process exits. *)
+
+val write_files : string -> (string * string) list -> unit
+(** Writes files under a directory, each a path under it and its text, making directories as needed.
+*)
+
+val git : string -> string list -> unit
+(** Runs git in a directory, with a test author, and fails the test if git fails. *)
+
+val expect_string : expected:string -> string -> unit
+(** Fails the running test unless the strings are equal. *)
+
+val expect_strings : expected:string list -> string list -> unit
+(** Fails the running test unless the lists are equal. *)
+
+val markdown_documents : unit -> string list
+(** The names of the Markdown documents at the root of the repository, in order. *)
+
 val workspace_path : string -> string
 (** The path of a file of the repository, given from the workspace root, such as ["SYNTAX.md"],
     whatever directory the executable runs in. *)
