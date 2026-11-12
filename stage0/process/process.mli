@@ -18,6 +18,12 @@ val run :
   string list ->
   int * string * string
 
+(* Runs a program and returns its exit status, as [run] gives it, and its
+   standard output, with its standard error discarded. It runs on this
+   domain alone, unlike [run], so a process that calls it can still
+   [Unix.fork], as the background process's start does. *)
+val output : ?environment:(string * string) list -> string -> string list -> int * string
+
 (* Runs a program on this process's standard input, output, and error, and
    returns its exit status, as [run] gives it. *)
 val run_attached : string -> string list -> int

@@ -145,6 +145,11 @@ let expect_errors directory count =
    build has started domains *)
 
 let () =
+  test "running git leaves the process able to start the background process" (fun () ->
+      (match Process.output "git" [ "--version" ] with
+      | 0, _ -> ()
+      | status, _ -> fail "git --version exited with %d" status);
+      match Unix.fork () with 0 -> Unix._exit 0 | child -> ignore (Unix.waitpid [] child));
   test "the background process answers requests and sees every earlier write" (fun () ->
       fresh_store ();
       let directory = package () in

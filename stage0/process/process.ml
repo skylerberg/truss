@@ -115,6 +115,24 @@ let run ?(environment = []) ?input ?on_output ?time_limit program arguments =
   Option.iter Domain.join watchdog;
   (exit_code status, output, errors)
 
+let output ?(environment = []) program arguments =
+  let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
+  let null = Unix.openfile "/dev/null" [ O_WRONLY; O_CLOEXEC ] 0 in
+  let pid =
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.close stdout_write;
+        Unix.close null)
+      (fun () ->
+        Unix.create_process_env program
+          (Array.of_list (program :: arguments))
+          (environment_with environment) Unix.stdin stdout_write null)
+  in
+  let output = read_all (Unix.in_channel_of_descr stdout_read) in
+  Unix.close stdout_read;
+  let _, status = Unix.waitpid [] pid in
+  (exit_code status, output)
+
 let run_attached program arguments =
   let pid =
     Unix.create_process program
