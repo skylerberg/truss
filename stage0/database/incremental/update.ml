@@ -151,15 +151,15 @@ and adopt :
       let was_marked = node.marked in
       let held () = cell.outcome <> None || node.fingerprint <> None in
       let had = held () in
-      let rec parts found = function
-        | [] -> Some (List.rev found)
+      let rec parts parts_so_far = function
+        | [] -> Some (List.rev parts_so_far)
         | read :: rest ->
             let read = resolve engine read in
             if read.busy || read.phase > node.phase then None
             else begin
               ensure engine read;
               match key_part engine read with
-              | Some part -> parts ((read, part) :: found) rest
+              | Some part -> parts ((read, part) :: parts_so_far) rest
               | None -> None
             end
       in
@@ -174,12 +174,12 @@ and adopt :
           else
             match store.find ~kind:"fact" ~key:(fact_key store node parts) with
             | None -> false
-            | Some found ->
-                let unchanged = had && fingerprint engine node = Some found in
+            | Some stored_fingerprint ->
+                let unchanged = had && fingerprint engine node = Some stored_fingerprint in
                 commit_reads engine node (List.map fst parts);
                 if not unchanged then begin
                   cell.outcome <- None;
-                  node.fingerprint <- Some found;
+                  node.fingerprint <- Some stored_fingerprint;
                   node.stored <- true;
                   node.opaque <- false;
                   node.changed_at <- tick engine;

@@ -8,21 +8,21 @@ internal fn entries(directory: Path) -> Result[List[files::DirectoryEntry], Syst
   let flags = intrinsic::libc_o_rdonly() | intrinsic::libc_o_directory()
   let handle = handles::with_file_error(calls::open_file(directory.text.slice().bytes, flags: flags))?
   let descriptor = intrinsic::handle_descriptor(handle)
-  var found: List[files::DirectoryEntry] = []
+  var listed: List[files::DirectoryEntry] = []
   if intrinsic::system_is_macos() {
-    handles::with_file_error(entries_on_macos(descriptor, found: mut found))?
+    handles::with_file_error(entries_on_macos(descriptor, listed: mut listed))?
   } else {
     handles::with_file_error(
-      entries_on_linux(descriptor, directory: directory.text.slice().bytes, found: mut found),
+      entries_on_linux(descriptor, directory: directory.text.slice().bytes, listed: mut listed),
     )?
   }
-  Ok(own found)
+  Ok(own listed)
 }
 
 fn entries_on_linux(
   descriptor: Int32,
   directory: intrinsic::View[UInt8],
-  found: mut List[files::DirectoryEntry],
+  listed: mut List[files::DirectoryEntry],
 ) -> Result[Unit, Int32] {
   let room: USize = 32768
   let length_at = intrinsic::libc_dirent_length_offset()
@@ -72,7 +72,7 @@ fn entries_on_linux(
         } else {
           files::FileKind.Other
         }
-        add(mut found, name: own name, kind: kind)
+        add(mut listed, name: own name, kind: kind)
         start += length
       }
     }
@@ -80,7 +80,7 @@ fn entries_on_linux(
   Ok(Unit)
 }
 
-fn entries_on_macos(descriptor: Int32, found: mut List[files::DirectoryEntry]) -> Result[Unit, Int32] {
+fn entries_on_macos(descriptor: Int32, listed: mut List[files::DirectoryEntry]) -> Result[Unit, Int32] {
   let attributes = intrinsic::libc_attr_cmn_returned_attrs()
     | intrinsic::libc_attr_cmn_name()
     | intrinsic::libc_attr_cmn_objtype()
@@ -146,7 +146,7 @@ fn entries_on_macos(descriptor: Int32, found: mut List[files::DirectoryEntry]) -
         } else {
           files::FileKind.Other
         }
-        add(mut found, name: own name, kind: kind)
+        add(mut listed, name: own name, kind: kind)
         start += length
         index += 1
       }
@@ -155,7 +155,7 @@ fn entries_on_macos(descriptor: Int32, found: mut List[files::DirectoryEntry]) -
   Ok(Unit)
 }
 
-fn add(found: mut List[files::DirectoryEntry], name: own intrinsic::Storage[UInt8], kind: files::FileKind) {
+fn add(listed: mut List[files::DirectoryEntry], name: own intrinsic::Storage[UInt8], kind: files::FileKind) {
   let bytes = intrinsic::storage_view(name)
   let length = intrinsic::view_length(bytes)
   let itself = length == 1 && intrinsic::view_at(bytes, index: 0) == 46
@@ -163,7 +163,7 @@ fn add(found: mut List[files::DirectoryEntry], name: own intrinsic::Storage[UInt
     && intrinsic::view_at(bytes, index: 0) == 46
     && intrinsic::view_at(bytes, index: 1) == 46
   if length > 0 && !itself && !parent {
-    mut found.push(files::DirectoryEntry(name: String.from_bytes(own name), kind: kind))
+    mut listed.push(files::DirectoryEntry(name: String.from_bytes(own name), kind: kind))
   }
 }
 

@@ -73,7 +73,7 @@ internal fn signed(output: mut intrinsic::Storage[UInt8], value: Int64)
   }
 }
 
-internal fn truth(output: mut intrinsic::Storage[UInt8], value: Bool)
+internal fn boolean(output: mut intrinsic::Storage[UInt8], value: Bool)
   cost time finite
 {
   if value {

@@ -27,7 +27,7 @@ let run ~directory ~position ~json =
         Source.offset Source.Scalar_values (Project.parsed project module_).source ~line:(line - 1)
           ~column:(column - 1)
       in
-      let found =
+      let symbol_at =
         List.find_map
           (fun (d : Names.declaration) ->
             let key = Names.key_of d in
@@ -49,7 +49,7 @@ let run ~directory ~position ~json =
             | _ -> None)
           (Query.demand context Names.declarations module_)
       in
-      match found with
+      match symbol_at with
       | None ->
           if json then Json.print (Json.document ~diagnostics:[] [ ("found", Json.Null) ])
           else Output.print_line "Nothing there.";

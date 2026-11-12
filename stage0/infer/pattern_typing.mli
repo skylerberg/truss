@@ -6,7 +6,7 @@ module Impls = Interface.Impls
 module Lower = Interface.Lower
 
 val binding_pattern :
-  State.state -> 'a -> Syntax.pattern -> Unify.T.ty -> mutable_:bool -> mode:State.T.mode -> unit
+  State.state -> 'a -> Syntax.pattern -> Unify.T.ty -> is_var:bool -> mode:State.T.mode -> unit
 
 val pattern : State.state -> 'a -> Syntax.pattern -> Unify.T.ty -> mode:State.T.mode -> unit
 val check_literal_fits : State.state -> Syntax.expression -> Z.t -> Unify.T.ty -> unit

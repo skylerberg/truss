@@ -75,14 +75,14 @@ fn append_decomposition(codes: mut List[UInt32], code: UInt32, compatible: Bool)
       mut codes.push(4519 + syllable % 28)
     }
   } else {
-    var found = false
+    var decomposed = false
     if compatible {
-      found = unicode_tables::append_compatibility_decomposition(mut codes, code: code)
+      decomposed = unicode_tables::append_compatibility_decomposition(mut codes, code: code)
     }
-    if !found {
-      found = unicode_tables::append_canonical_decomposition(mut codes, code: code)
+    if !decomposed {
+      decomposed = unicode_tables::append_canonical_decomposition(mut codes, code: code)
     }
-    if !found {
+    if !decomposed {
       mut codes.push(code)
     }
   }

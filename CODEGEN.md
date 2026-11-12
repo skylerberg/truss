@@ -2277,7 +2277,7 @@ a command line can hold.
   blocks the signals it waits for. A program installs a handler instead,
   and sees the signal.
 - **A cursor over a method that lends places to be changed.** `next` would
-  have to hand out a value it takes back.
+  have to yield a value it takes back.
 - **A lambda in a yielding method that is pulled,** and in a pulled method
   a default for a parameter that is passed by address or is a view.
 - **A range without both of its ends, as a value.**

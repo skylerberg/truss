@@ -51,9 +51,9 @@ let no_diagnostics files =
     (fun (name, _) ->
       match diagnostics database name with
       | [] -> ()
-      | found ->
+      | reported ->
           fail "%s: %s" name
-            (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)))
+            (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) reported)))
     files
 
 (* The one diagnostic of the file [app::main], with its code, and, if
@@ -70,7 +70,7 @@ let name_at database file text occurrence =
   let source = Workspace.(Source.text (Query.demand database file module_).source) in
   let offset = Option.get (Substring.find ~occurrence source text) in
   if offset < 0 then failwith (Printf.sprintf "no occurrence %d of %S" occurrence text);
-  let found =
+  let located =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
@@ -87,7 +87,9 @@ let name_at database file text occurrence =
         | _ -> None)
       (Query.demand database Resolve.Names.declarations module_)
   in
-  match found with Some found -> found | None -> failwith (Printf.sprintf "no name at %S" text)
+  match located with
+  | Some located -> located
+  | None -> failwith (Printf.sprintf "no name at %S" text)
 
 let describe names base (target : Resolve.target option) =
   let offset id =
@@ -142,26 +144,30 @@ let () =
         ~binding:("count", 1));
   test "a name bound by is is in scope in the if's block" (fun () ->
       refers_to_binding
-        "fn f(found: Option[Int64]) -> Int64 {\n  if found is Some(value) { value } else { 0 }\n}\n"
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  if present is Some(value) { value } else { 0 }\n\
+         }\n"
         ~use:("value", 2) ~binding:("value", 1));
   test "a name bound by is is in scope in the rest of its && chain" (fun () ->
       refers_to_binding
-        "fn f(found: Option[Int64]) -> Bool {\n  found is Some(value) && value > 0\n}\n"
+        "fn f(present: Option[Int64]) -> Bool {\n  present is Some(value) && value > 0\n}\n"
         ~use:("value", 2) ~binding:("value", 1));
   test "a name bound by is is not in scope in the else" (fun () ->
       one_diagnostic
-        "fn f(found: Option[Int64]) -> Int64 {\n  if found is Some(value) { 0 } else { value }\n}\n"
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  if present is Some(value) { 0 } else { value }\n\
+         }\n"
         "resolve.unknown_name");
   test "a name bound by is is not in scope after ||" (fun () ->
       one_diagnostic
-        "fn f(found: Option[Int64], other: Bool) -> Bool {\n\
-        \  found is Some(value) || value > 0\n\
+        "fn f(present: Option[Int64], other: Bool) -> Bool {\n\
+        \  present is Some(value) || value > 0\n\
          }\n"
         "resolve.unknown_name");
   test "a name bound by let else is in scope after it" (fun () ->
       refers_to_binding
-        "fn f(found: Option[Int64]) -> Int64 {\n\
-        \  let Some(value) = found else {\n\
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  let Some(value) = present else {\n\
         \    return 0\n\
         \  }\n\
         \  value\n\
@@ -169,8 +175,8 @@ let () =
         ~use:("value", 2) ~binding:("value", 1));
   test "a name bound in a match arm is in scope in its guard and body" (fun () ->
       refers_to_binding
-        "fn f(found: Option[Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    Some(value) if value > 0 => value\n\
         \    _ => 0\n\
         \  }\n\
@@ -247,16 +253,16 @@ let () =
         ~name:("other", 1) "binding");
   test "the alternatives of a pattern must bind the same names" (fun () ->
       one_diagnostic
-        "fn f(found: Result[Int64, Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Result[Int64, Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    Ok(value) | Err(error) => 0\n\
         \  }\n\
          }\n"
         "resolve.alternative_bindings");
   test "an alternative's name refers to the first alternative's binding" (fun () ->
       refers_to_binding
-        "fn f(found: Result[Int64, Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Result[Int64, Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    Ok(value) | Err(value) => value\n\
         \  }\n\
          }\n"
@@ -310,18 +316,18 @@ let bracket_of text written occurrence =
           Query.demand database Resolve.resolved key )
       with
       | Some definition, Some (_, base), Some resolved ->
-          let found = ref None in
+          let bracket = ref None in
           Syntax_walk.definition
             (let rec visit (value : Syntax.expression) =
                (match value.kind with
                | Bracket _ when base + value.span.start = offset ->
-                   found := resolved.brackets.(value.id)
+                   bracket := resolved.brackets.(value.id)
                | _ -> ());
                Syntax_walk.children visit value
              in
              visit)
             definition;
-          !found
+          !bracket
       | _ -> None)
     declarations
 
@@ -438,7 +444,7 @@ let () =
       let owner = Path.Top { module_ = module_of "app::main"; name = "Counter" } in
       match Query.demand database Resolve.Names.members (owner, "get") with
       | [ { path = Method { receiver = Read; _ }; _ } ] -> ()
-      | found -> fail "found %d members" (List.length found));
+      | reported -> fail "found %d members" (List.length reported));
   test "a method can be written in another file of its type's package" (fun () ->
       let database =
         setup
@@ -451,14 +457,14 @@ let () =
       let owner = Path.Top { module_ = module_of "app::main"; name = "Counter" } in
       match Query.demand database Resolve.Names.members (owner, "get") with
       | [ _ ] -> ()
-      | found -> fail "found %d members" (List.length found));
+      | reported -> fail "found %d members" (List.length reported));
   test "a body the parser could not read is not resolved" (fun () ->
       let database = setup [ ("app::main", "fn f() -> Int64 {\n  let = missing\n}\n") ] in
       let module_ = module_of "app::main" in
       if (Query.demand database Workspace.file module_).diagnostics = [] then fail "parsed";
       match Resolve.diagnostics database module_ with
       | [] -> ()
-      | found -> fail "resolved the broken body: %s" (String.concat "; " (codes found)))
+      | reported -> fail "resolved the broken body: %s" (String.concat "; " (codes reported)))
 
 (* Incremental work *)
 
@@ -500,7 +506,7 @@ let () =
       in
       match codes (diagnostics database "app::extra") with
       | [ "resolve.unknown_name" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | reported -> fail "found [%s]" (String.concat "; " reported));
   test "a definition added above another resolves nothing else again" (fun () ->
       let database =
         setup [ ("app::main", "fn a() -> Int64 { 1 }\n\nfn f() -> Int64 { a() }\n") ]
@@ -524,7 +530,7 @@ let () =
       in
       match Resolve.diagnostics database (module_of "app::main") with
       | [] -> ()
-      | found -> fail "found [%s]" (String.concat "; " (codes found)));
+      | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "an element of a field is a place" (fun () ->
       no_diagnostics
         [
@@ -552,7 +558,7 @@ let () =
       in
       match Resolve.diagnostics database (module_of "app::main") with
       | [] -> ()
-      | found -> fail "found [%s]" (String.concat "; " (codes found)));
+      | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
   test "a value generic parameter can end a range pattern" (fun () ->
       no_diagnostics
         [
@@ -595,7 +601,7 @@ let () =
       in
       (match diagnostics database "app::main" with
       | [] -> ()
-      | found -> fail "found [%s]" (String.concat "; " (codes found)));
+      | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
       match Query.demand database Resolve.Names.imports (module_of "app::main") with
       | [ ("vector", imported) ] when imported = geometry -> ()
       | _ -> fail "imported differently");
@@ -603,7 +609,7 @@ let () =
       let database = with_geometry ~dependencies:[] uses_both in
       match codes (diagnostics database "app::main") with
       | "resolve.unknown_module" :: _ -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | reported -> fail "found [%s]" (String.concat "; " reported));
   test "an owner alone names no package" (fun () ->
       let database =
         with_geometry
@@ -612,7 +618,7 @@ let () =
       in
       match codes (diagnostics database "app::main") with
       | "resolve.unknown_module" :: _ -> ()
-      | found -> fail "found [%s]" (String.concat "; " found))
+      | reported -> fail "found [%s]" (String.concat "; " reported))
 
 let () =
   test "a name used through an import of standard::intrinsic is not an error of its own" (fun () ->

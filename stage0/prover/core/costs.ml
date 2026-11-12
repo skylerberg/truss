@@ -168,12 +168,12 @@ let rec normalize term =
     | L.Integer value -> (sums, Z.add constant (Z.mul coefficient value))
     | L.Operation ("+", arguments) ->
         List.fold_left
-          (fun found argument -> linear coefficient argument found)
+          (fun sums_and_constant argument -> linear coefficient argument sums_and_constant)
           (sums, constant) arguments
     | L.Operation ("-", [ inner ]) -> linear (Z.neg coefficient) inner (sums, constant)
     | L.Operation ("-", first :: rest) ->
         List.fold_left
-          (fun found argument -> linear (Z.neg coefficient) argument found)
+          (fun sums_and_constant argument -> linear (Z.neg coefficient) argument sums_and_constant)
           (linear coefficient first (sums, constant))
           rest
     | L.Operation ("*", [ L.Integer k; inner ]) | L.Operation ("*", [ inner; L.Integer k ]) ->
@@ -282,12 +282,12 @@ let rec most_as_choices = function
    Sums, differences, products, the larger of two, [log], and [power] are
    followed; any other term that varies is a part as a whole. *)
 let varying_parts varies term =
-  let found = ref [] in
+  let parts = ref [] in
   let add part polarity =
-    match List.assoc_opt part !found with
-    | None -> found := !found @ [ (part, polarity) ]
+    match List.assoc_opt part !parts with
+    | None -> parts := !parts @ [ (part, polarity) ]
     | Some existing when existing = polarity -> ()
-    | Some _ -> found := List.map (fun (p, q) -> if p = part then (p, Both) else (p, q)) !found
+    | Some _ -> parts := List.map (fun (p, q) -> if p = part then (p, Both) else (p, q)) !parts
   in
   let rec walk polarity term =
     if varies term then
@@ -305,7 +305,7 @@ let varying_parts varies term =
       | _ -> add term polarity
   in
   walk Grows term;
-  !found
+  !parts
 
 (* Each comparison in a fact, as [(smaller, larger)]. *)
 let rec comparisons fact =
@@ -320,7 +320,7 @@ let rec comparisons fact =
 (* A literal at the end of a built-in integer type's range, which every
    value of the type is known to be within: a bound, but too loose to
    help, so the last one chosen. *)
-let type_end = function
+let is_type_end = function
   | L.Integer value ->
       List.exists
         (fun bits ->
@@ -342,13 +342,13 @@ let bound_of ~varies ~facts part polarity =
         | _ -> None)
       (List.concat_map comparisons facts)
   in
-  let rank candidate = if varies candidate then 2 else if type_end candidate then 1 else 0 in
+  let rank candidate = if varies candidate then 2 else if is_type_end candidate then 1 else 0 in
   match List.stable_sort (fun a b -> compare (rank a) (rank b)) candidates with
   | best :: _ -> Some best
   | [] -> None
 
 let bound_on ~varies ~facts cost =
-  let rec go depth cost =
+  let rec bound_within_depth depth cost =
     if not (varies cost) then Some cost
     else if depth = 0 then None
     else
@@ -364,9 +364,11 @@ let bound_on ~varies ~facts cost =
               | None -> None)
           parts
       in
-      match replaced with Some next when next <> cost -> go (depth - 1) next | _ -> None
+      match replaced with
+      | Some next when next <> cost -> bound_within_depth (depth - 1) next
+      | _ -> None
   in
-  Option.map most_as_choices (go 12 (normalize (choices_as_most cost)))
+  Option.map most_as_choices (bound_within_depth 12 (normalize (choices_as_most cost)))
 
 (* Facts' upper bounds on a term, for the number of a loop's iterations. *)
 let upper_bounds ~varies ~facts term =

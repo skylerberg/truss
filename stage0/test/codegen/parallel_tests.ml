@@ -45,10 +45,10 @@ fn main(arguments: List[String]) -> ExitCode
       mut totals.names.push(label(1))
       mut totals.names.push(label(2))
     }
-    let made = label(limit)
+    let built = label(limit)
     let scaled = [1, 2, 3].map(fn(item) { item.wrapping_multiply(limit) })
   }
-  Console.print_line("${totals.evens} ${totals.odds} ${totals.names.length()} ${made} ${scaled[2]}")
+  Console.print_line("${totals.evens} ${totals.odds} ${totals.names.length()} ${built} ${scaled[2]}")
   ExitCode.success
 }
 |});
@@ -81,13 +81,13 @@ fn main(arguments: List[String]) -> ExitCode
 {
   var pair = Pair(first: "first", second: "second")
   parallel {
-    let taken = own pair.first
+    let moved = own pair.first
     {
       mut pair.second.push("!")
     }
   }
   pair.first = "taken"
-  Console.print_line("${taken} ${pair.first} ${pair.second}")
+  Console.print_line("${moved} ${pair.first} ${pair.second}")
   ExitCode.success
 }
 |})

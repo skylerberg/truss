@@ -299,23 +299,23 @@ public trait Iterable {
     results
   }
 
-  fn count(self, matching: (fn(Self.Element) -> Bool cost time finite)) -> USize
+  fn count(self, predicate: (fn(Self.Element) -> Bool cost time finite)) -> USize
     cost time finite
   {
     var count: USize = 0
     for item in self {
-      if matching(item) {
+      if predicate(item) {
         count = count.saturating_add(1)
       }
     }
     count
   }
 
-  fn find(self, matching: (fn(Self.Element) -> Bool cost time finite)) lends Option[Self.Element]
+  fn find(self, predicate: (fn(Self.Element) -> Bool cost time finite)) lends Option[Self.Element]
     cost time finite
   {
     for item in self {
-      if matching(item) {
+      if predicate(item) {
         yield Some(item)
         return
       }
@@ -379,11 +379,11 @@ public trait Cursor {
     total
   }
 
-  fn find(mut self, matching: fn(Self.Element) -> Bool) -> Option[Self.Element]
+  fn find(mut self, predicate: fn(Self.Element) -> Bool) -> Option[Self.Element]
     uses Self.Uses
   {
     while mut self.next() is Some(item) {
-      if matching(item) {
+      if predicate(item) {
         return Some(own item)
       }
     }
@@ -549,7 +549,7 @@ impl Display for ParseIntegerError {
 
 public type ParseFloatError =
   | Empty
-  | Invalid(offset: USize)
+  | InvalidCharacter(offset: USize)
   derives Equal
 
 impl Display for ParseFloatError {
@@ -557,7 +557,7 @@ impl Display for ParseFloatError {
   {
     match self {
       Empty => mut output.write("the text is empty")
-      Invalid(offset) => {
+      InvalidCharacter(offset) => {
         mut output.write("the byte at offset ")
         offset.display(mut output)
         mut output.write(" is not part of a number")

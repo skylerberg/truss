@@ -35,7 +35,7 @@ public fn binomial(total: UInt64, chosen: UInt64) -> Option[UInt64]
     return Some(0)
   }
   let smaller = if chosen > total - chosen { total - chosen } else { chosen }
-  var found: UInt64 = 1
+  var product: UInt64 = 1
   var step: UInt64 = 1
   var fits = true
   while step <= smaller && fits
@@ -44,14 +44,14 @@ public fn binomial(total: UInt64, chosen: UInt64) -> Option[UInt64]
     decreases smaller + 1 - step
     cost time O(step)
   {
-    let shared = found.greatest_common_divisor(step)
+    let shared = product.greatest_common_divisor(step)
     let divisor = if shared == 0 { step } else { step / shared }
     if divisor == 0 {
       fits = false
     } else {
-      match (found / (if shared == 0 { 1 } else { shared })).checked_multiply((total - smaller + step) / divisor) {
+      match (product / (if shared == 0 { 1 } else { shared })).checked_multiply((total - smaller + step) / divisor) {
         Some(next) => {
-          found = next
+          product = next
         }
         None => {
           fits = false
@@ -60,7 +60,7 @@ public fn binomial(total: UInt64, chosen: UInt64) -> Option[UInt64]
     }
     step += 1
   }
-  if fits { Some(found) } else { None }
+  if fits { Some(product) } else { None }
 }
 
 public fn mean(values: Slice[Float64]) -> Option[Float64]
@@ -541,21 +541,21 @@ fn divide_digits(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivisi
     {
       let product = estimate.wrapping_multiply(scaled[index]).wrapping_add(carry)
       carry = product / half_base
-      let taken = product % half_base + borrow
+      let subtracted = product % half_base + borrow
       let target = remainder[position + index] % half_base
-      if target >= taken {
-        remainder[position + index] = target - taken
+      if target >= subtracted {
+        remainder[position + index] = target - subtracted
         borrow = 0
       } else {
-        remainder[position + index] = target + half_base - taken
+        remainder[position + index] = target + half_base - subtracted
         borrow = 1
       }
       index += 1
     }
     let top = remainder[position + count] % half_base
-    let taken = carry % half_base + borrow
-    if top >= taken {
-      remainder[position + count] = top - taken
+    let subtracted = carry % half_base + borrow
+    if top >= subtracted {
+      remainder[position + count] = top - subtracted
       quotient[position] = estimate % half_base
     } else {
       var carried: UInt64 = 0
@@ -572,7 +572,7 @@ fn divide_digits(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivisi
         carried = total / half_base
         index += 1
       }
-      remainder[position + count] = (top + half_base - taken + carried) % half_base
+      remainder[position + count] = (top + half_base - subtracted + carried) % half_base
       quotient[position] = estimate.wrapping_subtract(1) % half_base
     }
   }
@@ -1275,8 +1275,8 @@ public type Rounding =
   | HalfTowardZero
   | AwayFromZero
   | TowardZero
-  | Up
-  | Down
+  | Ceiling
+  | Floor
   derives Equal
 
 public opaque type Decimal(coefficient: BigInteger, scale: Int32)
@@ -1307,9 +1307,9 @@ fn rounded_quotient(dividend: BigInteger, divisor: BigInteger, rounding: Roundin
   var away = false
   if rounding == Rounding.AwayFromZero {
     away = true
-  } else if rounding == Rounding.Up {
+  } else if rounding == Rounding.Ceiling {
     away = !negative
-  } else if rounding == Rounding.Down {
+  } else if rounding == Rounding.Floor {
     away = negative
   } else if rounding != Rounding.TowardZero {
     let half = division.remainder.absolute()
@@ -1758,7 +1758,7 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
     index += 1
   }
   if digits == 0 {
-    return Err(core::ParseFloatError.Invalid(offset: index))
+    return Err(core::ParseFloatError.InvalidCharacter(offset: index))
   }
   var exponent: Int64 = 0
   if index < text.length() && (text.byte(index) == 101 || text.byte(index) == 69) {
@@ -1782,21 +1782,21 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
       index += 1
     }
     if index == start {
-      return Err(core::ParseFloatError.Invalid(offset: index))
+      return Err(core::ParseFloatError.InvalidCharacter(offset: index))
     }
     if exponent_negative {
       exponent = -exponent
     }
   }
   if index < text.length() {
-    return Err(core::ParseFloatError.Invalid(offset: index))
+    return Err(core::ParseFloatError.InvalidCharacter(offset: index))
   }
   if places > 2147483647 {
-    return Err(core::ParseFloatError.Invalid(offset: text.length()))
+    return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
   }
   let scale: Int64 = intrinsic::convert[USize, Int64](places) - exponent
   if scale < -2147483648 || scale > 2147483647 {
-    return Err(core::ParseFloatError.Invalid(offset: text.length()))
+    return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
   }
   Ok(Decimal(coefficient: with_sign(negative, magnitude: own limbs), scale: intrinsic::convert(scale)))
 }

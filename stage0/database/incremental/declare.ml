@@ -50,7 +50,7 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
   (match context.frame with None when not engine.frozen -> settle ~through:0 engine | _ -> ());
   match find_input engine input key with
   | Some cell ->
-      record context cell.input_node;
+      record_read context cell.input_node;
       input_value engine cell
   | None ->
       if engine.frozen then None
@@ -58,7 +58,7 @@ let read (context : context) (input : ('key, 'value) input) (key : 'key) : 'valu
         (* A read that found nothing is read too, and is part of the state. *)
         let cell = make_input engine input key ~below:None in
         Hashtbl.replace engine.unsaved cell.input_node.id cell.input_node;
-        record context cell.input_node;
+        record_read context cell.input_node;
         (* What a driver only observed is collected again. *)
         if context.frame = None && context.observing then begin
           defer_collection engine cell.input_node;
@@ -193,12 +193,12 @@ let demand (context : context) (query : ('key, 'value) query) (key : 'key) : 'va
   if node.engine == engine && not engine.frozen then begin
     if node.busy then begin
       let labels = cycle engine node in
-      record context node;
+      record_read context node;
       raise (Cycle labels)
     end;
     ensure_result engine query cell
   end;
-  record context node;
+  record_read context node;
   let result = match value engine query cell with value -> Ok value | exception e -> Error e in
   (match (context.frame, result) with
   | None, _ ->

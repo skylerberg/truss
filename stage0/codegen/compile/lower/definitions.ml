@@ -70,7 +70,7 @@ let test_key path = Instance.Code { path; type_arguments = [] }
 type code = {
   definition_key : Names.key;  (** The definition that holds the body *)
   anchor : Path.t;  (** The definition positions in the body are relative to *)
-  within : Path.t option;
+  enclosing_impl : Path.t option;
       (** The [impl] this is a method of, whether the [impl] writes it or leaves it to its trait *)
   text : string;  (** The definition's source text, for positions and messages *)
   result : T.result;
@@ -91,7 +91,7 @@ let unwritten ~definition_key ~anchor ~substitution ~result =
   {
     definition_key;
     anchor;
-    within = None;
+    enclosing_impl = None;
     text = "";
     result;
     substitution;
@@ -134,11 +134,11 @@ let written context path =
   | _ -> None
 
 let code_of context (path : Path.t) type_arguments : code =
-  let function_code ~anchor ~within (key, _, _) ~(interface : T.signature) ~substitution =
+  let function_code ~anchor ~enclosing_impl (key, _, _) ~(interface : T.signature) ~substitution =
     {
       definition_key = key;
       anchor;
-      within;
+      enclosing_impl;
       text = text_of context key;
       result = interface.output;
       substitution;
@@ -165,13 +165,13 @@ let code_of context (path : Path.t) type_arguments : code =
   | Top _ | Method _ -> (
       let interface = signature_of context path in
       let substitution = bind interface.generics type_arguments in
-      let within =
+      let enclosing_impl =
         match path with
         | Method { owner = (Impl _ | Derived _) as impl; _ } -> Some impl
         | _ -> None
       in
       match (written context path, path) with
-      | Some code, _ -> function_code ~anchor:path ~within code ~interface ~substitution
+      | Some code, _ -> function_code ~anchor:path ~enclosing_impl code ~interface ~substitution
       | None, Method { owner = (Impl _ | Derived _) as impl; name; receiver } -> (
           (* A method the [impl] leaves to its trait: the trait's own code,
              read with what the trait's [Self] and parameters stand for in
@@ -195,7 +195,7 @@ let code_of context (path : Path.t) type_arguments : code =
                   trait_signature.generics
               in
               let own = List.filteri (fun i _ -> i >= count) type_arguments in
-              function_code ~anchor:provided ~within code ~interface:trait_signature
+              function_code ~anchor:provided ~enclosing_impl code ~interface:trait_signature
                 ~substitution:(of_trait @ bind own_generics own @ substitution)
           | None -> bug "%s neither writes nor is given %s" (Path.show impl) name)
       | None, _ -> bug "%s is not a function" (Path.show path))

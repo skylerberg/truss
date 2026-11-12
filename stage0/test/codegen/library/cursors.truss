@@ -1,11 +1,11 @@
 use standard::simulation
 
-fn same_items(found: Slice[Int64], expected: Slice[Int64]) -> Bool {
-  if found.length() != expected.length() {
+fn same_items(actual: Slice[Int64], expected: Slice[Int64]) -> Bool {
+  if actual.length() != expected.length() {
     return false
   }
-  for index in 0..found.length() {
-    if found[index] != expected[index] {
+  for index in 0..actual.length() {
+    if actual[index] != expected[index] {
       return false
     }
   }
@@ -152,10 +152,10 @@ type Typed(most: USize)
 fn Typed.line_lengths(self) yields USize
   uses Console
 {
-  var given: USize = 0
-  while given < self.most && Console.read_line() is Some(line) {
+  var read_count: USize = 0
+  while read_count < self.most && Console.read_line() is Some(line) {
     yield line.length()
-    given += 1
+    read_count += 1
   }
 }
 

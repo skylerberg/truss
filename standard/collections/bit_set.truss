@@ -404,7 +404,7 @@ internal fn collections::BitSet.combine(mut self, other: collections::BitSet, ho
   }
 }
 
-public fn collections::BitSet.unite(mut self, other: collections::BitSet)
+public fn collections::BitSet.union_with(mut self, other: collections::BitSet)
   requires other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
@@ -413,7 +413,7 @@ public fn collections::BitSet.unite(mut self, other: collections::BitSet)
   mut self.combine(other, how: Combination.Union)
 }
 
-public fn collections::BitSet.intersect(mut self, other: collections::BitSet)
+public fn collections::BitSet.intersect_with(mut self, other: collections::BitSet)
   requires other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
@@ -422,7 +422,7 @@ public fn collections::BitSet.intersect(mut self, other: collections::BitSet)
   mut self.combine(other, how: Combination.Intersection)
 }
 
-public fn collections::BitSet.subtract(mut self, other: collections::BitSet)
+public fn collections::BitSet.difference_with(mut self, other: collections::BitSet)
   requires other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
@@ -431,7 +431,7 @@ public fn collections::BitSet.subtract(mut self, other: collections::BitSet)
   mut self.combine(other, how: Combination.Difference)
 }
 
-public fn collections::BitSet.invert(mut self)
+public fn collections::BitSet.complement(mut self)
   ensures self.length() == old(self.length())
   cost time O(self.length())
   cost allocations == 0

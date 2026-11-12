@@ -75,7 +75,7 @@ type context = {
       (** Static arrays and blocks that data refers to, most recent first *)
 }
 
-let helper context name =
+let use_helper context name =
   if not (List.mem name context.helpers_used) then
     context.helpers_used <- name :: context.helpers_used;
   name

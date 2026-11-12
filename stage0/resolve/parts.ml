@@ -49,14 +49,14 @@ let lies_in all (recovered : span) (part_span : span) =
       part_span.start = position
     else part_span.start <= position && position < part_span.stop
 
-let error_node (span : span) = Diagnostic.recovered span
+let recovery_report (span : span) = Diagnostic.recovered span
 
 let reported definition part =
   let all = spans definition in
   match List.assoc_opt part all with
   | None -> None
   | Some span ->
-      Option.map error_node
+      Option.map recovery_report
         (List.find_opt (fun recovered -> lies_in all recovered span) definition.recovered)
 
 let broken definition part = Option.is_some (reported definition part)

@@ -58,12 +58,12 @@ let store_of store ~version : Incremental.store =
   }
 
 let attach engine store ~version = Incremental.attach engine (store_of store ~version)
-let record = Incremental.record
+let record_facts = Incremental.record_facts
 let write = Incremental.write
 
-type debt = Incremental.debt = { whole : int; differences : int; depth : int }
+type chain_size = Incremental.chain_size = { whole : int; differences : int; depth : int }
 
-let debt = Incremental.debt
+let chain_size = Incremental.chain_size
 let unwritten = Incremental.unwritten
 let artifact = Incremental.artifact
 
@@ -79,8 +79,8 @@ let inputs_stored = Incremental.inputs_stored
 let values_in store ~version name = Incremental.values_in (store_of store ~version) name
 let forget_bases = Incremental.forget_bases
 
-let audit ?flat ?before engine =
-  Incremental.audit ?flat ?before:(Option.map Query.phase_rank before) engine
+let audit ?include_bases ?before engine =
+  Incremental.audit ?include_bases ?before:(Option.map Query.phase_rank before) engine
 
 let audit_all = Incremental.audit_all
 let auditing = Incremental.auditing

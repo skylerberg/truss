@@ -27,12 +27,12 @@ let local_type (tables : Infer.tables) id =
 
 (* The span of the expression with that id. *)
 let expression_span (definition : definition) id =
-  let found = ref None in
+  let span = ref None in
   let rec visit (value : expression) =
-    if value.id = id then found := Some value.span else Syntax_walk.children visit value
+    if value.id = id then span := Some value.span else Syntax_walk.children visit value
   in
   Syntax_walk.definition visit definition;
-  !found
+  !span
 
 (* Each [todo] of a definition, in order: the names in scope come from name
    resolution, which records them at each [todo] as it walks, and their
@@ -87,7 +87,7 @@ let describe_target (target : Resolve.target) =
   | Result_value -> ("the result, in a specification", None)
   | Old -> ("a value as it was when the function was called", None)
   | Identical -> ("identity of two values, in a specification", None)
-  | Yielded -> ("the parts handed out so far, in a specification", None)
+  | Yielded -> ("the parts yielded so far, in a specification", None)
   | Finished -> ("whether the method has ended, in a specification", None)
   | Specification_function _ -> ("a specification function", None)
   | Unknown _ -> ("nothing: the name is not known", None)

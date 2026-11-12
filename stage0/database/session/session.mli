@@ -84,7 +84,7 @@ val save : t -> unit
 val stabilize : t -> Engine.change
 (** Brings the state up to date, and saves it. *)
 
-val fold : ?waited_for:bool -> t -> unit
+val compact : ?waited_for:bool -> t -> unit
 (** Writes the state whole and opens it again, once what was written since the last whole state has
     grown to half its size; with [waited_for], in the background process, only at four times that,
     since a command is waiting. *)
@@ -100,7 +100,7 @@ val identity : unit -> string
 (** The compiler's identity: the hash of its executable, which is the version of a state whose
     client names no other. *)
 
-val trust : string -> unit
+val allow_reading : string -> unit
 (** Names a version, other than the compiler's identity, whose states this program can read, so that
     collection keeps what they hold. *)
 

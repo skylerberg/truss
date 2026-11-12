@@ -144,13 +144,14 @@ let check ~root encoding (buffers : (string * string) list) =
     List.map
       (fun (uri, path, text) ->
         let module_ = module_of (Project.normalize path) in
-        let found = Option.map (Database.diagnostics trial) module_ in
-        (uri, Source.create ~path text, module_, found))
+        let module_diagnostics = Option.map (Database.diagnostics trial) module_ in
+        (uri, Source.create ~path text, module_, module_diagnostics))
       buffers
   in
   let provable =
     List.filter_map
-      (fun (_, _, module_, found) -> if found = Some [] then module_ else None)
+      (fun (_, _, module_, module_diagnostics) ->
+        if module_diagnostics = Some [] then module_ else None)
       checked
   in
   let proofs = Proofs.checked project provable in
@@ -159,11 +160,11 @@ let check ~root encoding (buffers : (string * string) list) =
       ( "files",
         Json.List
           (List.map
-             (fun (uri, source, module_, found) ->
+             (fun (uri, source, module_, module_diagnostics) ->
                let diagnostics, states =
-                 match (module_, found) with
+                 match (module_, module_diagnostics) with
                  | Some module_, Some [] -> proofs module_
-                 | _, Some found -> (Diagnostic.shown found, [])
+                 | _, Some module_diagnostics -> (Diagnostic.shown module_diagnostics, [])
                  | _, None -> ([], [])
                in
                Json.Object

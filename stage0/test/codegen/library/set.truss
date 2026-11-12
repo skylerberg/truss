@@ -26,33 +26,33 @@ test "a set holds each element once" {
 }
 
 test "a set is walked in the order its elements were first inserted" {
-  var made = sample()
-  assert order(made) == "3 1 2 "
-  mut made.insert(1)
-  assert order(made) == "3 1 2 "
-  mut made.remove(1)
-  mut made.insert(1)
-  assert order(made) == "3 2 1 "
+  var numbers = sample()
+  assert order(numbers) == "3 1 2 "
+  mut numbers.insert(1)
+  assert order(numbers) == "3 1 2 "
+  mut numbers.remove(1)
+  mut numbers.insert(1)
+  assert order(numbers) == "3 2 1 "
   let repeated: Set[Int64] = [5, 4, 5, 4, 6]
   assert order(repeated) == "5 4 6 "
 }
 
 test "remove, take, clear, and retain take elements out of a set" {
-  var made = sample()
-  mut made.remove(9)
-  assert made.length() == 3
-  mut made.remove(3)
-  assert made.length() == 2 && !made.contains(3)
-  assert mut made.take(1) == Some(1)
-  assert mut made.take(1) is None
-  assert order(made) == "2 "
-  var kept: Set[Int64] = [1, 2, 3, 4, 5, 6]
-  mut kept.retain(fn(element) { element % 2 == 0 })
-  assert order(kept) == "2 4 6 "
-  mut kept.remove_all([4, 9, 2])
-  assert order(kept) == "6 "
-  mut kept.clear()
-  assert kept.is_empty() && !kept.contains(6)
+  var numbers = sample()
+  mut numbers.remove(9)
+  assert numbers.length() == 3
+  mut numbers.remove(3)
+  assert numbers.length() == 2 && !numbers.contains(3)
+  assert mut numbers.take(1) == Some(1)
+  assert mut numbers.take(1) is None
+  assert order(numbers) == "2 "
+  var evens: Set[Int64] = [1, 2, 3, 4, 5, 6]
+  mut evens.retain(fn(element) { element % 2 == 0 })
+  assert order(evens) == "2 4 6 "
+  mut evens.remove_all([4, 9, 2])
+  assert order(evens) == "6 "
+  mut evens.clear()
+  assert evens.is_empty() && !evens.contains(6)
 }
 
 test "sets are compared as wholes" {
@@ -81,10 +81,10 @@ test "union, intersection, and the differences make new sets" {
 
 test "a set is made from a list or a cursor, and gives its elements away" {
   let items: List[Int64] = [4, 4, 2, 4, 9]
-  let made: Set[Int64] = Set.from(items.copy())
-  assert order(made) == "4 2 9 "
+  let numbers: Set[Int64] = Set.from(items.copy())
+  assert order(numbers) == "4 2 9 "
   var collected: Set[Int64] = Set.collect(items.each())
-  assert collected == made
+  assert collected == numbers
   let more: List[Int64] = [9, 1]
   mut collected.extend(more.each())
   assert order(collected) == "4 2 9 1 "
@@ -109,11 +109,11 @@ test "equal sets hash alike, whatever order they were made in" {
 }
 
 test "a copy of a set changes on its own" {
-  var made = sample()
-  var copied = made.copy()
+  var numbers = sample()
+  var copied = numbers.copy()
   mut copied.insert(10)
-  mut made.reserve(50)
-  assert made.length() == 3 && copied.length() == 4
+  mut numbers.reserve(50)
+  assert numbers.length() == 3 && copied.length() == 4
   let roomy: Set[Int64] = Set.with_capacity(8)
   let fresh: Set[Int64] = Set.default()
   assert roomy.is_empty() && roomy == fresh

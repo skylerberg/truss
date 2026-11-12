@@ -303,7 +303,7 @@ test "nested" {
           (Type_checker.diagnostics database example)
       with
       | [ "types.constant_overflow" ] -> ()
-      | found -> fail "got [%s]" (String.concat "; " found))
+      | actual -> fail "got [%s]" (String.concat "; " actual))
 
 let () =
   test "a derived equal stops at the first field that differs" (fun () ->

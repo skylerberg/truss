@@ -57,10 +57,10 @@ let rec check_arithmetic state (value : expression) =
   | Prefix (Negate, { kind = Integer _; _ }), _ -> ()
   | (Prefix _ | Binary _), Some type_ -> (
       match (builtin_range ~usize_bits:(usize_bits state) type_, worked_out value, value.kind) with
-      | Some (low, high), Some found, _ when Z.lt found low || Z.gt found high ->
+      | Some (low, high), Some constant, _ when Z.lt constant low || Z.gt constant high ->
           report state Constant_overflow value.span
             (Printf.sprintf "This is %s, which does not fit in `%s`, which holds %s to %s."
-               (Z.to_string found) (T.show type_) (Z.to_string low) (Z.to_string high))
+               (Z.to_string constant) (T.show type_) (Z.to_string low) (Z.to_string high))
       | Some _, None, Binary { operator = Divide | Remainder; right; _ }
         when worked_out right = Some Z.zero ->
           report state Constant_overflow right.span "This divides by zero."

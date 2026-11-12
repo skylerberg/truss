@@ -13,13 +13,13 @@ let width () =
 
 (* The text cut to [limit] characters, counting each UTF-8 sequence once. *)
 let cut text limit =
-  let rec go index count =
+  let rec cut_at index count =
     if index >= String.length text then text
-    else if Char.code text.[index] land 0xC0 = 0x80 then go (index + 1) count
+    else if Char.code text.[index] land 0xC0 = 0x80 then cut_at (index + 1) count
     else if count = limit then String.sub text 0 index
-    else go (index + 1) (count + 1)
+    else cut_at (index + 1) (count + 1)
   in
-  go 0 0
+  cut_at 0 0
 
 let erase_line = "\r\027[K"
 

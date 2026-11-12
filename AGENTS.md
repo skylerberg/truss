@@ -56,9 +56,26 @@ It does not mean everyday vocabulary.
 
 7. **Name an identifier after what it is.** Prefer the standard noun:
    `scrutinee`, `callee`, `enclosing_loops`, `scope_end`, `may_alias`.
-   Avoid names that make sense only after reading the body: `around`,
-   `taken`, `within`, `found`, `made`, `turns`. A diagnostic code names the
-   error: `ownership.data_race`, not `ownership.parallel_conflict`.
+   A diagnostic code names the error: `ownership.data_race`, not
+   `ownership.parallel_conflict`. A boolean reads as a predicate:
+   `is_zero_size`, `has_break`, `may_fork`, not `zero_size` or `at_once`.
+
+   Do not use a placeholder name. A placeholder says that a value was
+   produced, not what the value is, so it fits every binding and spreads
+   from one function to the next. These are placeholders:
+
+   | Placeholder | Name the value instead |
+   |---|---|
+   | `found` | `place`, `matches`, `index`, `has_break` |
+   | `made` | `fresh`, `outlined`, `call` |
+   | `taken` | `arguments`, `arity`, `consumed` |
+   | `kept` | `retained`, `prefix_length` |
+   | `given` | `supplied_options`, `call_facts` |
+   | `within` | `with_scope`, `is_inside`, `in_range`, `parent` |
+   | `around`, `turns`, `go`, `aux` | the noun or verb for what it is, such as `scope_depth` or `scan` |
+
+   A word on this list is fine as part of a longer name that says what the
+   value is, such as `found_type` against `expected_type`.
 
 8. **Do not copy the style of existing text.** Much of this repository
    describes around standard terms in everyday words. Fix that text; do not

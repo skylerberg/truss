@@ -125,15 +125,15 @@ public fn String.find_last(self, pattern: StringSlice) -> Option[USize]
 
 public fn String.find_character(
   self,
-  matching: (fn(Character) -> Bool cost time finite),
+  predicate: (fn(Character) -> Bool cost time finite),
 ) -> Option[USize]
   ensures match result {
     Some(offset) => offset < self.length() && self.is_boundary(offset)
     None => true
   }
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
-  self.slice().find_character(matching)
+  self.slice().find_character(predicate)
 }
 
 public fn String.occurrences(self, pattern: StringSlice) -> USize
@@ -183,11 +183,11 @@ public fn String.trim_end(self) -> StringSlice
   self.slice().trim_end()
 }
 
-public fn String.trim_matching(self, matching: (fn(Character) -> Bool cost time finite)) -> StringSlice
+public fn String.trim_matching(self, predicate: (fn(Character) -> Bool cost time finite)) -> StringSlice
   ensures result.length() <= self.length()
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
-  self.slice().trim_matching(matching)
+  self.slice().trim_matching(predicate)
 }
 
 public fn String.split(self, separator: StringSlice) yields StringSlice
@@ -209,10 +209,10 @@ public fn String.split_at_most(self, separator: StringSlice, parts: USize) yield
   }
 }
 
-public fn String.split_matching(self, matching: (fn(Character) -> Bool cost time finite)) yields StringSlice
-  cost time O(self.length() * time(matching))
+public fn String.split_matching(self, predicate: (fn(Character) -> Bool cost time finite)) yields StringSlice
+  cost time O(self.length() * time(predicate))
 {
-  for part in self.slice().split_matching(matching) {
+  for part in self.slice().split_matching(predicate) {
     yield part
   }
 }

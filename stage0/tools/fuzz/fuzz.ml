@@ -87,12 +87,12 @@ let snippet text =
 
 let check_tree text (item : Syntax.definition Syntax.item) =
   let quoted = Diagnostic.quote text in
-  let within (outer : Syntax.span) (inner : Syntax.span) =
+  let contains_span (outer : Syntax.span) (inner : Syntax.span) =
     outer.start <= inner.start && inner.stop <= outer.stop
   in
   let ids = Hashtbl.create 64 in
   let rec expression (outer : Syntax.span) (value : Syntax.expression) =
-    if not (within outer value.span) then
+    if not (contains_span outer value.span) then
       fail "an expression's span is outside its parent in %s" quoted;
     if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
     Hashtbl.replace ids value.id ();
@@ -150,7 +150,8 @@ let verdict : Diagnostic.Code.t -> verdict = function
       | Misplaced_transparent | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause
       | Finite_not_time | Loop_cost_bound | Function_type_names | Misplaced_requires
       | Specification_only | Misplaced_assert | Misplaced_proof | Misplaced_yield
-      | Misplaced_loop_exit | Leaves_parallel | Echo_in_specification | Reserved_name )
+      | Misplaced_loop_exit | Leaves_parallel | Echo_in_specification | Reserved_specification_name
+        )
   | Lexer _ | Resolve _ | Package _ | Prover _ | Capabilities _ | Ownership _ | Usage _ | Patterns _
   | Types _ | Too_many_diagnostics ->
       Grammar_accepts

@@ -1,24 +1,24 @@
 use standard::random
 use standard::uuid
 
-fn same_bytes(found: Slice[UInt8], expected: Slice[UInt8]) -> Bool {
-  if found.length() != expected.length() {
+fn same_bytes(actual: Slice[UInt8], expected: Slice[UInt8]) -> Bool {
+  if actual.length() != expected.length() {
     return false
   }
-  for index in 0..found.length() {
-    if found[index] != expected[index] {
+  for index in 0..actual.length() {
+    if actual[index] != expected[index] {
       return false
     }
   }
   true
 }
 
-fn same_indexes(found: Slice[USize], expected: Slice[USize]) -> Bool {
-  if found.length() != expected.length() {
+fn same_indexes(actual: Slice[USize], expected: Slice[USize]) -> Bool {
+  if actual.length() != expected.length() {
     return false
   }
-  for index in 0..found.length() {
-    if found[index] != expected[index] {
+  for index in 0..actual.length() {
+    if actual[index] != expected[index] {
       return false
     }
   }
@@ -59,9 +59,9 @@ test "an integer in a range, an index, and a choice stay within what they are gi
   assert mut whole.integer(3..=3) == 3
   assert mut whole.index(1) == 0
   let items: List[Int64] = [10, 20, 30]
-  assert mut whole.choose(items) is Some(chosen) && chosen < 3
+  assert mut whole.choose_index(items) is Some(chosen) && chosen < 3
   let none: List[Int64] = []
-  assert mut whole.choose(none) is None
+  assert mut whole.choose_index(none) is None
 }
 
 test "a unit float is at least zero and below one" {
@@ -69,7 +69,7 @@ test "a unit float is at least zero and below one" {
   assert mut generator.unit() == 0.7005764821796896
   assert mut generator.unit() == 0.2787512294737843
   assert mut generator.unit() == 0.8396274618764198
-  let between = mut generator.fraction(10.0, high: 20.0)
+  let between = mut generator.uniform(10.0, high: 20.0)
   assert between >= 10.0 && between < 20.0
   assert mut generator.chance(1.0)
   assert !mut generator.chance(0.0)
@@ -100,8 +100,8 @@ test "a split generator goes on from here, and the first jumps far ahead" {
 
 test "the capability gives bytes and numbers below a bound" {
   provide random::SeededRandom.new(3) {
-    let found = random::bytes(11)
-    assert same_bytes(found, expected: [192, 140, 102, 229, 218, 171, 205, 176, 238, 100, 24])
+    let bytes = random::bytes(11)
+    assert same_bytes(bytes, expected: [192, 140, 102, 229, 218, 171, 205, 176, 238, 100, 24])
     assert random::bytes(0).length() == 0
   }
   provide random::SeededRandom.new(42) {
@@ -134,26 +134,26 @@ impl Clock for FixedClock {
 
 test "a random UUID and a time-ordered UUID say their version" {
   provide random::SeededRandom.new(7) {
-    let made = uuid::random()
-    assert made.version() == 4
-    assert "${made}" == "b358faf7-4ef9-465a-875c-3d964f482cd2"
-    assert !made.is_nil()
+    let uuid_value = uuid::random()
+    assert uuid_value.version() == 4
+    assert "${uuid_value}" == "b358faf7-4ef9-465a-875c-3d964f482cd2"
+    assert !uuid_value.is_nil()
   }
   provide random::SeededRandom.new(7) {
     provide FixedClock(milliseconds: 1700000000000) {
-      let made = uuid::time_ordered()
-      assert made.version() == 7
-      assert "${made}" == "018bcfe5-6800-765a-875c-3d964f482cd2"
+      let uuid_value = uuid::time_ordered()
+      assert uuid_value.version() == 7
+      assert "${uuid_value}" == "018bcfe5-6800-765a-875c-3d964f482cd2"
     }
   }
 }
 
 test "a UUID is sixteen bytes, displayed in five groups" {
   let bytes: Array[UInt8, 16] = [0, 17, 34, 51, 68, 85, 102, 119, 136, 153, 170, 187, 204, 221, 238, 255]
-  let made = uuid::Uuid.from_bytes(bytes)
-  assert "${made}" == "00112233-4455-6677-8899-aabbccddeeff"
-  assert same_bytes(made.bytes()[..], expected: bytes[..])
-  assert made.version() == 6
+  let uuid_value = uuid::Uuid.from_bytes(bytes)
+  assert "${uuid_value}" == "00112233-4455-6677-8899-aabbccddeeff"
+  assert same_bytes(uuid_value.bytes()[..], expected: bytes[..])
+  assert uuid_value.version() == 6
   assert "${uuid::Uuid.nil}" == "00000000-0000-0000-0000-000000000000"
   assert uuid::Uuid.nil.is_nil()
 }
@@ -205,7 +205,7 @@ test "normal gives numbers around the mean, spread by the deviation" {
   var squares: Float64 = 0.0
   var near: Int64 = 0
   for _ in 0..4000 {
-    let value = mut generator.normal(10.0, deviation: 2.0)
+    let value = mut generator.normal(10.0, standard_deviation: 2.0)
     total += value
     squares += (value - 10.0) * (value - 10.0)
     if value > 8.0 && value < 12.0 {
@@ -217,7 +217,7 @@ test "normal gives numbers around the mean, spread by the deviation" {
   assert mean > 9.8 && mean < 10.2
   assert variance > 3.5 && variance < 4.5
   assert near > 2500 && near < 2950
-  assert mut generator.normal(3.0, deviation: 0.0) == 3.0
+  assert mut generator.normal(3.0, standard_deviation: 0.0) == 3.0
   let standard = mut generator.normal()
   assert standard > -10.0 && standard < 10.0
 }

@@ -10,19 +10,19 @@ let is_source name =
   name = "dune"
   || List.exists (Filename.check_suffix name) [ ".ml"; ".mli"; ".mly"; ".mll"; ".c"; ".h" ]
 
-let rec files directory relative found =
+let rec files directory relative sources =
   let entries = Sys.readdir directory in
   Array.sort compare entries;
   Array.fold_left
-    (fun found entry ->
+    (fun sources entry ->
       let path = Filename.concat directory entry in
       let relative = if relative = "" then entry else relative ^ "/" ^ entry in
       if Sys.is_directory path then
-        if List.mem entry skipped_directories || entry.[0] = '.' then found
-        else files path relative found
-      else if is_source entry then (relative, path) :: found
-      else found)
-    found entries
+        if List.mem entry skipped_directories || entry.[0] = '.' then sources
+        else files path relative sources
+      else if is_source entry then (relative, path) :: sources
+      else sources)
+    sources entries
 
 let () =
   match Array.to_list Sys.argv with

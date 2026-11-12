@@ -158,16 +158,16 @@ let apply world step =
       Option.iter (fun engine -> world.other <- Some engine) (opened (Engine.write world.engine))
 
 let audit world =
-  List.concat_map (Engine.audit ~flat:true) (world.engine :: Option.to_list world.other)
+  List.concat_map (Engine.audit ~include_bases:true) (world.engine :: Option.to_list world.other)
 
 (* What is wrong after the first of the steps that leaves something wrong. *)
 let problems steps =
   let world = fresh_world () in
-  let found =
+  let reported =
     try
       List.fold_left
-        (fun found step ->
-          if found <> [] then found
+        (fun reported step ->
+          if reported <> [] then reported
           else begin
             apply world step;
             audit world
@@ -176,7 +176,7 @@ let problems steps =
     with exception_ -> [ "raised " ^ Printexc.to_string exception_ ]
   in
   discard world;
-  found
+  reported
 
 (* Leaves out each step the rest still fails without, until none can go. *)
 let rec shrink steps =
@@ -191,13 +191,13 @@ let rec shrink steps =
 let run ~seed ~steps =
   let random = Random.State.make [| seed |] in
   let world = fresh_world () in
-  let made = ref [] in
+  let applied = ref [] in
   let failed = ref false in
   (try
      for _ = 1 to steps do
        if not !failed then begin
          let step = choose world random in
-         made := step :: !made;
+         applied := step :: !applied;
          apply world step;
          failed := audit world <> []
        end
@@ -205,7 +205,7 @@ let run ~seed ~steps =
    with _ -> failed := true);
   discard world;
   if !failed then begin
-    let fewest = shrink (List.rev !made) in
+    let fewest = shrink (List.rev !applied) in
     Printf.printf "seed %d, after:\n" seed;
     List.iter (fun step -> Printf.printf "  %s\n" (show step)) fewest;
     List.iter (Printf.printf "    %s\n") (problems fewest)

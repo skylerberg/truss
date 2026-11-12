@@ -62,9 +62,9 @@ let is_bare = function
 (* Each token with its line, counting from 1. *)
 let tokens text =
   let length = String.length text in
-  let found = ref [] in
+  let lexed = ref [] in
   let line = ref 1 in
-  let add token = found := (token, !line) :: !found in
+  let add token = lexed := (token, !line) :: !lexed in
   let rec scan index =
     if index < length then
       match text.[index] with
@@ -110,7 +110,7 @@ let tokens text =
           quoted buffer (index + 1)
   in
   scan 0;
-  List.rev !found
+  List.rev !lexed
 
 type value = Text of string | Number of int | List of string list | Inline_table
 type entry = { key : string; quoted : bool; value : value; line : int; last_line : int }
@@ -162,7 +162,7 @@ let tables text =
           (Some { name; line; entries = [] })
           (end_of_line line rest)
     | (((Bare key | Quoted key) as token), line) :: (Equals, _) :: rest -> (
-        let found, rest = value line rest in
+        let parsed, rest = value line rest in
         let quoted = match token with Quoted _ -> true | _ -> false in
         let last_line = match rest with (_, last) :: _ -> last | [] -> max_int in
         match current with
@@ -171,7 +171,7 @@ let tables text =
               (Some
                  {
                    table with
-                   entries = { key; quoted; value = found; line; last_line } :: table.entries;
+                   entries = { key; quoted; value = parsed; line; last_line } :: table.entries;
                  })
               (end_of_line line rest)
         | None ->

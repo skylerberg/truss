@@ -5,10 +5,11 @@ type change =
   | Breaks of string  (** What a user of the release before could rely on and no longer can *)
   | Grows of string  (** What the release offers that the one before did not *)
 
-type found = { path : Path.t; change : change }
+type public_change = { path : Path.t; change : change }
 (** A change to a public definition, with what changed as the end of a sentence about it. *)
 
-val compare : before:Query.context -> after:Query.context -> Path.package -> found list * bool
+val compare :
+  before:Query.context -> after:Query.context -> Path.package -> public_change list * bool
 (** What a package's public definitions change from one state to another, each state holding the
     package and the packages it uses, and whether the package ran on every target and now runs only
     on 64-bit ones, which breaks every user that runs on the others.
@@ -18,5 +19,5 @@ val compare : before:Query.context -> after:Query.context -> Path.package -> fou
     other difference in one breaks. A yielding method that could be pulled as a cursor and no longer
     can breaks too, though that is worked out from its body. *)
 
-val breaks : found list -> (Path.t * string) list
-val grows : found list -> (Path.t * string) list
+val breaks : public_change list -> (Path.t * string) list
+val grows : public_change list -> (Path.t * string) list

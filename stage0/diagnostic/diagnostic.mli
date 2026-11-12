@@ -34,6 +34,7 @@ module Code : sig
     | Number_invalid_digit
     | Number_followed_by_name
     | Number_underscore
+    | Number_digit_separator
     | Number_leading_zero
     | Unterminated_string
     | Invalid_escape
@@ -100,7 +101,7 @@ module Code : sig
     | Misplaced_loop_exit
     | Leaves_parallel
     | Echo_in_specification
-    | Reserved_name
+    | Reserved_specification_name
 
   type resolve =
     | Unknown_name
@@ -120,7 +121,7 @@ module Code : sig
     | Null
 
   type types =
-    | Bad_character
+    | Character_scalar_count
     | Misplaced_self_type
     | Mismatch
     | Cannot_infer
@@ -165,6 +166,7 @@ module Code : sig
     | Not_a_capability
     | Misplaced_capability_parameter
     | Arity
+    | Argument_kind
     | Unsatisfied_bound
     | Private_in_public
     | Method_outside_package
@@ -201,7 +203,7 @@ module Code : sig
     | Self_referential
     | View_crosses_capability
     | Needs_owned
-    | Lends_count
+    | Yield_count
     | Not_pullable
     | Data_race
     | Keeps_lent_part
@@ -222,7 +224,7 @@ module Code : sig
     | Overflow
     | Division
     | Shift
-    | Fits
+    | Out_of_range
     | Requires
     | Ensures
     | Invariant

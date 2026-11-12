@@ -323,7 +323,7 @@ val functions : function_ list
 val function_name : function_ -> string
 (** The name the standard library calls it by. *)
 
-val of_the_runtime : function_ -> bool
+val is_runtime_function : function_ -> bool
 (** Whether the function is the runtime's own, written in C beside the generated code, and not the C
     library's. The standard library calls it [runtime_] and its name. *)
 

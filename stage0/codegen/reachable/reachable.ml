@@ -96,17 +96,17 @@ let bug format = Compiler_bug.bug ~stage:"Reachable" format
 (* The methods of capabilities an instance calls: each capability, with the
    method's place among its methods. *)
 let methods_called (instance : Lir.t) =
-  let in_function found (f : Lir.function_) =
+  let in_function calls (f : Lir.function_) =
     Array.fold_left
-      (fun found (block : Lir.basic_block) ->
+      (fun calls (block : Lir.basic_block) ->
         List.fold_left
-          (fun found (statement : Lir.statement) ->
+          (fun calls (statement : Lir.statement) ->
             match statement with
             | Call { target = Evidence_call { capability; slot; _ }; _ } ->
-                (capability, slot) :: found
-            | _ -> found)
-          found block.statements)
-      found f.blocks
+                (capability, slot) :: calls
+            | _ -> calls)
+          calls block.statements)
+      calls f.blocks
   in
   List.rev (Array.fold_left in_function (in_function [] instance.main) instance.nested)
 
@@ -119,7 +119,7 @@ let walk env ~lookup ~by_call roots =
   let seen = Table.create 256 in
   let queue = Queue.create () in
   List.iter (fun root -> Queue.add (root, []) queue) roots;
-  let found = ref [] in
+  let reached = ref [] in
   let tables = Hashtbl.create 16 and called = Hashtbl.create 16 in
   let entry (table : Lir.table) (slot, way) =
     match List.nth_opt table.entries slot with
@@ -132,7 +132,7 @@ let walk env ~lookup ~by_call roots =
       Table.replace seen key ();
       let compiled = lookup key in
       let way = key :: way in
-      found := (compiled, List.rev way) :: !found;
+      reached := (compiled, List.rev way) :: !reached;
       let all () =
         List.iter (fun next -> Queue.add (next, way) queue) (compiled_references env compiled)
       in
@@ -154,7 +154,7 @@ let walk env ~lookup ~by_call roots =
       | _ -> all ()
     end
   done;
-  List.rev !found
+  List.rev !reached
 
 (* The same instances in the same order, each with the first way the walk
    reached it: the keys from a root to the instance, both included. *)
@@ -216,7 +216,7 @@ let groups ~edges roots =
   let number = Table.create 1024 and low = Table.create 1024 in
   let waiting = Table.create 1024 in
   let stack = ref [] in
-  let found = ref Keys.empty in
+  let groups = ref Keys.empty in
   let work = Stack.create () in
   let enter key =
     Table.replace number key !counter;
@@ -242,7 +242,8 @@ let groups ~edges roots =
       | [] | [ _ ] -> ()
       | members ->
           let members = List.sort Instance.compare members in
-          found := List.fold_left (fun found member -> Keys.add member members found) !found members
+          groups :=
+            List.fold_left (fun groups member -> Keys.add member members groups) !groups members
     end
   in
   List.iter
@@ -263,7 +264,7 @@ let groups ~edges roots =
         done
       end)
     roots;
-  !found
+  !groups
 
 let derive_reach_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
 let key_of parts = derive_reach_key (Cbor.encode (Cbor.Array parts))
@@ -282,14 +283,14 @@ let unit_key ~own reached =
 let group_key ~link ~deep ~members start =
   let inside key = List.exists (Instance.equal key) members in
   let order = Table.create 8 in
-  let rec walk found = function
-    | [] -> List.rev found
+  let rec walk visited = function
+    | [] -> List.rev visited
     | key :: queue ->
-        if Table.mem order key then walk found queue
+        if Table.mem order key then walk visited queue
         else begin
           Table.replace order key (Table.length order);
           let own, references = link key in
-          walk ((own, references) :: found) (queue @ List.filter inside references)
+          walk ((own, references) :: visited) (queue @ List.filter inside references)
         end
   in
   let walked = walk [] [ start ] in

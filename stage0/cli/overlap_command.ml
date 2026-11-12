@@ -15,7 +15,7 @@ let sentence : Database.overlap -> string = function
         (if this_worktree then "this" else "the other")
         (describe change) (describe reads)
 
-type found = {
+type comparison = {
   other : string;  (** The other worktree, as the current directory reaches it, or the branch *)
   overlaps : Database.overlap list;
   merged : (string * string * string) list;  (** A merge's new diagnostics: file, code, message *)
@@ -41,7 +41,7 @@ let overlap_json : Database.overlap -> Json.t = function
           ("reads", place_json reads);
         ]
 
-let to_json found =
+let to_json comparisons =
   Json.List
     (List.map
        (fun f ->
@@ -62,9 +62,9 @@ let to_json found =
                     f.merged) );
              ("error", Json.option (fun e -> Json.String e) f.error);
            ])
-       found)
+       comparisons)
 
-let print found =
+let print comparisons =
   List.iter
     (fun f ->
       List.iter (fun o -> Output.printf "  %s: %s\n" f.other (sentence o)) f.overlaps;
@@ -73,7 +73,7 @@ let print found =
           Output.printf "  %s: merged: %s: %s: %s\n" f.other file code message)
         f.merged;
       Option.iter (fun e -> Output.printf "  %s: %s\n" f.other e) f.error)
-    found
+    comparisons
 
 let compare_with ~merge session (name, other) =
   let overlaps, error =
@@ -118,12 +118,13 @@ let run ~directory ~with_ ~merge ~json =
           (fun other -> (Project.shown (Database.root other), other))
           (Database.other_worktrees session)
   in
-  let found = List.map (compare_with ~merge session) others in
-  if json then Json.print (Json.document ~diagnostics:[] [ ("overlaps", to_json found) ])
+  let comparisons = List.map (compare_with ~merge session) others in
+  if json then Json.print (Json.document ~diagnostics:[] [ ("overlaps", to_json comparisons) ])
   else if others = [] then
     Output.print_line "No other worktree of this repository is open, and no branch was named."
-  else if List.for_all (fun f -> f.overlaps = [] && f.merged = [] && f.error = None) found then
+  else if List.for_all (fun f -> f.overlaps = [] && f.merged = [] && f.error = None) comparisons
+  then
     Output.print_line
       (if merge then "No overlap, and merging gives no new error." else "No overlap.")
-  else print found;
+  else print comparisons;
   0

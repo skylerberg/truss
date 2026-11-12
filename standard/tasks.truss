@@ -183,7 +183,7 @@ public fn Channel[Message: Storable].messages(self) yields own Message
   }
 }
 
-public fn within[Output, capability Granted](limit: Duration, work: (fn() -> Output uses Granted)) -> Option[Output]
+public fn with_timeout[Output, capability Granted](limit: Duration, work: (fn() -> Output uses Granted)) -> Option[Output]
   uses Tasks, Clock, Granted
 {
   concurrent {

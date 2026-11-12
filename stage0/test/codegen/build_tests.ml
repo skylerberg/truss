@@ -112,10 +112,10 @@ let () =
       if own 1 "helper" = own 2 "helper" then fail "the helper's hash is the same";
       if own 1 "start" <> own 2 "start" then fail "the caller's hash changed");
   test "instances that call each other are one group" (fun () ->
-      let found = Reachable.groups ~edges:(references (ping_pong 1)) [ key "start" ] in
-      let names key = List.map Instance.to_string (Reachable.Keys.find key found) in
+      let actual = Reachable.groups ~edges:(references (ping_pong 1)) [ key "start" ] in
+      let names key = List.map Instance.to_string (Reachable.Keys.find key actual) in
       expect_string ~expected:"test::ping test::pong" (String.concat " " (names (key "ping")));
-      if Reachable.Keys.mem (key "start") found then fail "the caller is in a group");
+      if Reachable.Keys.mem (key "start") actual then fail "the caller is in a group");
   test "an instance that calls only itself is in no group" (fun () ->
       let again =
         instance "again"
@@ -123,8 +123,8 @@ let () =
              [ local (Lir.Value int32) ]
              [ block [ call "again" [] (Some (at 0)) ] (Return (Some (copy 0))) ])
       in
-      let found = Reachable.groups ~edges:(references [ again ]) [ key "again" ] in
-      if not (Reachable.Keys.is_empty found) then fail "found a group");
+      let actual = Reachable.groups ~edges:(references [ again ]) [ key "again" ] in
+      if not (Reachable.Keys.is_empty actual) then fail "found a group");
   test "a test that reaches instances that call each other has a key" (fun () ->
       if reach_key (ping_pong 1) (key "start") = reach_key (ping_pong 2) (key "start") then
         fail "a change inside the group left the key the same");
@@ -194,7 +194,7 @@ let () =
       in
       incr counter;
       let output = Filename.concat (Lazy.force scratch) (Printf.sprintf "tests%d" !counter) in
-      match Compile.build_made_tests compile ~time_limit:300 tests ~output with
+      match Compile.build_supplied_tests compile ~time_limit:300 tests ~output with
       | Error message -> fail "%s" message
       | Ok () ->
           let status, out, _ = Process.run output [] in
@@ -235,9 +235,9 @@ let () =
       let path = objects () in
       let long_ago = Unix.time () -. (30. *. 86400.) in
       Unix.utimes path long_ago long_ago;
-      let found = objects () in
-      expect_string ~expected:path found;
-      if (Unix.stat found).st_mtime < Unix.time () -. 3600. then
+      let actual = objects () in
+      expect_string ~expected:path actual;
+      if (Unix.stat actual).st_mtime < Unix.time () -. 3600. then
         fail "an object that was found kept the time it was compiled at")
 
 let () =

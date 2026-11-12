@@ -198,7 +198,7 @@ let evidence_of st capability =
   | Some (_, operand) -> operand
   | None -> (
       let missing () = bug "no evidence for %s here" (Path.show capability) in
-      match st.frame.code.within with
+      match st.frame.code.enclosing_impl with
       | Some impl when Path.equal (impl_interface st.context impl).implements.trait capability ->
           let interface = impl_interface st.context impl in
           let self_ty =
@@ -308,7 +308,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : T.resu
     match function_type.result with Returns ty -> ty | _ -> bug "a lambda that yields"
   in
   result_slot inner (Convention.result st.context.env result_ty);
-  let taken =
+  let parameter_places =
     List.map
       (fun ((mode : Ground.mode), ty) -> (parameter inner ~owned:(mode = Own) mode ty, mode, ty))
       function_type.parameters
@@ -322,10 +322,10 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : T.resu
       bind_capture inner key
         { Lir.root = Local environment_pointer; projections = [ Deref; Field name; Deref ] })
     captured;
-  body inner (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) taken);
+  body inner (List.map (fun ((_, place), mode, ty) -> (place, mode, ty)) parameter_places);
   let function_ =
     finish_function inner ~first:[ environment_parameter ]
-      ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) taken @ evidence)
+      ~rest:(List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ evidence)
       ()
   in
   st.nested :=
@@ -409,7 +409,7 @@ let in_type_definition st (ty : Ground.ty) f =
           caller.code with
           definition_key = key;
           anchor = path;
-          within = None;
+          enclosing_impl = None;
           text = text_of st.context key;
           substitution = bind interface.type_generics arguments;
         };
@@ -426,7 +426,7 @@ let in_type_definition st (ty : Ground.ty) f =
 let echo st place ty ~site =
   let output = temporary st Glue.output_ty in
   emit st.b (Assign (output, Storage.empty Glue.output_ty));
-  let arguments = if zero_size st ty then [] else [ Lir.Address { place; writable = false } ] in
+  let arguments = if is_zero_size st ty then [] else [ Lir.Address { place; writable = false } ] in
   emit st.b
     (Call
        {
@@ -446,7 +446,7 @@ let echo st place ty ~site =
    a heap block of its own, with the method table of its type's [impl]. *)
 let any_into st ~any_ty ~inner_ty ~impl ~type_arguments ~(value : Lir.place) destination =
   let block = local st.b (Raw (Pointer Opaque)) in
-  if zero_size st inner_ty then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
+  if is_zero_size st inner_ty then emit st.b (Assign (at block, Use (Constant (Bytes ""))))
   else begin
     emit st.b
       (Call

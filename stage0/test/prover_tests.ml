@@ -23,17 +23,17 @@ let codes text =
 let only_code text code =
   match codes text with
   | [] -> fail "no diagnostics"
-  | found ->
-      if List.exists (fun other -> other <> code) found then fail "%s" (String.concat ", " found)
+  | actual ->
+      if List.exists (fun other -> other <> code) actual then fail "%s" (String.concat ", " actual)
 
 (* The message of a file's one diagnostic. *)
 let message text =
   let database = Support.setup [ ("app::main", text) ] in
   match check database (Support.module_of "app::main") with
   | [ diagnostic ] -> diagnostic.message
-  | found ->
-      Printf.sprintf "%d diagnostics: %s" (List.length found)
-        (String.concat "; " (Support.codes found))
+  | actual ->
+      Printf.sprintf "%d diagnostics: %s" (List.length actual)
+        (String.concat "; " (Support.codes actual))
 
 let contains = Substring.contains
 
@@ -43,8 +43,8 @@ let () =
   test "an addition that can overflow" (fun () ->
       not_proven "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" "prover.overflow");
   test "an overflow's counterexample names the value" (fun () ->
-      let found = message "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
-      if not (contains found "`count` is 255") then fail "message %S" found);
+      let actual = message "fn f(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
+      if not (contains actual "`count` is 255") then fail "message %S" actual);
   test "a requires rules out the overflow" (fun () ->
       proven "fn f(count: UInt8) -> UInt8\n  requires count < 255\n{\n  count + 1\n}\n");
   test "a check in an if rules out the overflow" (fun () ->
@@ -360,7 +360,7 @@ let () =
           }\n")
         "prover.overflow");
   test "a counterexample shows a variant by its name" (fun () ->
-      let found =
+      let actual =
         message
           (shape
          ^ "fn f(shape: Shape) -> Int64 {\n\
@@ -370,8 +370,8 @@ let () =
            \  }\n\
             }\n")
       in
-      if not (contains found "`shape` is Circle(radius: 9223372036854775807)") then
-        fail "message %S" found);
+      if not (contains actual "`shape` is Circle(radius: 9223372036854775807)") then
+        fail "message %S" actual);
   test "a requires can match on a parameter" (fun () ->
       proven
         (shape
@@ -745,7 +745,7 @@ let () =
            {\n\
           \  mut pair.tagged().value = 2\n\
            }\n"));
-  test "a yielding method that hands out more than it promises" (fun () ->
+  test "a yielding method that yields more than it promises" (fun () ->
       not_proven
         "type Couple(first: Int64, second: Int64)\n\n\
          fn Couple.each(self) yields Int64\n\
@@ -877,7 +877,7 @@ let () =
          \    None => 1\n\
          \  }\n\
           }\n"));
-  test "a cursor ends where its method says it has handed out all it will" (fun () ->
+  test "a cursor ends where its method says it has yielded all it will" (fun () ->
       proven
         (couple
        ^ "fn f(couple: Couple) -> Bool\n\
@@ -1499,10 +1499,10 @@ let () =
          }\n"
         "prover.ensures");
   test "a float counterexample is written as Truss writes floats" (fun () ->
-      let found =
+      let actual =
         message "fn f(value: Float32) -> Bool\n  ensures result\n{\n  value * 0.0 == 0.0\n}\n"
       in
-      if not (contains found "infinity" || contains found "NaN") then fail "message %S" found)
+      if not (contains actual "infinity" || contains actual "NaN") then fail "message %S" actual)
 
 (* Capabilities *)
 
@@ -1616,13 +1616,13 @@ let () =
        ^ "type Loaded()\n\nimpl Dice for Loaded {\n  fn roll(self) -> UInt8 {\n    9\n  }\n}\n")
         "prover.ensures");
   test "a capability's broken contract is named as the capability's" (fun () ->
-      let found =
+      let actual =
         message
           (dice
          ^ "type Loaded()\n\nimpl Dice for Loaded {\n  fn roll(self) -> UInt8 {\n    9\n  }\n}\n")
       in
-      if not (contains found "The capability's `result >= 1 && result <= 6`") then
-        fail "found: %s" found);
+      if not (contains actual "The capability's `result >= 1 && result <= 6`") then
+        fail "found: %s" actual);
   test "an implementation of a capability that keeps its contract proves" (fun () ->
       proven
         (dice
@@ -1635,8 +1635,8 @@ let () =
           }\n"));
   test "let else continues where its pattern matched" (fun () ->
       proven
-        "fn f(found: Option[UInt8]) -> UInt8 {\n\
-        \  let Some(value) = found else {\n\
+        "fn f(present: Option[UInt8]) -> UInt8 {\n\
+        \  let Some(value) = present else {\n\
         \    return 0\n\
         \  }\n\
         \  if value < 255 { value + 1 } else { value }\n\
@@ -1665,9 +1665,9 @@ let () =
 
 let swap =
   "fn exchange(first: mut Int64, second: mut Int64) {\n\
-  \  let kept = first\n\
+  \  let held = first\n\
   \  first = second\n\
-  \  second = kept\n\
+  \  second = held\n\
    }\n\n"
 
 let () =
@@ -1714,7 +1714,7 @@ let () =
         \  }\n\
          }\n"
         "prover.ensures");
-  test "what a method hands out on one path is joined with the other" (fun () ->
+  test "what a method yields on one path is joined with the other" (fun () ->
       not_proven
         "type Maybe(present: Bool)\n\n\
          fn Maybe.each(self) yields Int64\n\
@@ -2118,7 +2118,7 @@ let () =
          }\n"
         "prover.cost");
   test "a loop with no measure has no bound" (fun () ->
-      let found =
+      let actual =
         codes
           "fn f(count: UInt32)\n\
           \  cost time O(count)\n\
@@ -2129,8 +2129,8 @@ let () =
           \  }\n\
            }\n"
       in
-      if not (List.mem "prover.cost" found && List.mem "prover.termination" found) then
-        fail "%s" (String.concat ", " found));
+      if not (List.mem "prover.cost" actual && List.mem "prover.termination" actual) then
+        fail "%s" (String.concat ", " actual));
   test "a loop's cost clause that is too small" (fun () ->
       not_proven
         "fn f(count: UInt32)\n\
@@ -2191,7 +2191,7 @@ let () =
         \  })\n\
          }\n");
   test "a lambda that loops over its argument has no bound" (fun () ->
-      let found =
+      let actual =
         codes
           "fn each(items: List[UInt32], visit: (fn(UInt32) cost time finite))\n\
           \  cost time O(items.length() * time(visit))\n\
@@ -2209,7 +2209,7 @@ let () =
           \  })\n\
            }\n"
       in
-      if not (List.mem "prover.cost" found) then fail "%s" (String.concat ", " found));
+      if not (List.mem "prover.cost" actual) then fail "%s" (String.concat ", " actual));
   test "a loop's cost clause over what it has received" (fun () ->
       proven
         (constant_step
@@ -2307,7 +2307,7 @@ let () =
          \  }\n\
           }\n"));
   test "a loop that spends potential it was given is not linear in its count" (fun () ->
-      let found =
+      let actual =
         codes
           (meter
          ^ "fn f(meter: mut Meter, count: UInt32)\n\
@@ -2318,7 +2318,7 @@ let () =
            \  }\n\
             }\n")
       in
-      if found <> [ "prover.cost" ] then fail "%s" (String.concat ", " found));
+      if actual <> [ "prover.cost" ] then fail "%s" (String.concat ", " actual));
   test "a list's potential is its elements', through its model" (fun () ->
       proven (meter ^ "fn keep(meters: mut List[Meter])\n  cost amortized time O(1)\n{\n}\n"));
   let encoder = "type Encoder(bytes: List[UInt8])\n\n" in
@@ -2350,7 +2350,7 @@ let () =
   in
   test "a method that lends a part mut does not pay for what is done to it" (fun () -> proven bag);
   test "a caller that raises a lent part's potential pays for it" (fun () ->
-      let found =
+      let actual =
         codes
           (meter ^ bag
          ^ "fn raise(bag: mut Bag[Meter], credit: UInt32)\n\
@@ -2359,7 +2359,7 @@ let () =
            \  mut bag.first().credit = credit\n\
             }\n")
       in
-      if found <> [ "prover.cost" ] then fail "%s" (String.concat ", " found));
+      if actual <> [ "prover.cost" ] then fail "%s" (String.concat ", " actual));
   test "a caller that lowers a lent part's potential is paid by it" (fun () ->
       proven
         (meter ^ bag
@@ -3046,9 +3046,9 @@ let () =
         "fn built() -> Map[String, Int64]\n\
         \  ensures result.contains(\"a\")\n\
          {\n\
-        \  var made: Map[String, Int64] = [:]\n\
-        \  mut made.insert(\"a\", value: 1)\n\
-        \  made\n\
+        \  var table: Map[String, Int64] = [:]\n\
+        \  mut table.insert(\"a\", value: 1)\n\
+        \  table\n\
          }\n")
 
 (* Bitwise operations *)
@@ -3232,8 +3232,8 @@ let () =
            }\n"
       with
       | [] -> ()
-      | found ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)));
+      | actual ->
+          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
   test "a caller in another package does not read a body that is not transparent" (fun () ->
       match
         across (doubling "")
@@ -3247,14 +3247,14 @@ let () =
       | [ diagnostic ] ->
           if not (contains diagnostic.message "is not visible in this package") then
             fail "message %S" diagnostic.message
-      | found -> fail "%d diagnostics" (List.length found));
+      | actual -> fail "%d diagnostics" (List.length actual));
   test "a call in another package is not run unless its function is transparent" (fun () ->
       match
         across (doubling "")
           "fn eight() -> Int64\n  ensures result == 8\n{\n  numbers::double(4)\n}\n"
       with
       | [ _ ] -> ()
-      | found -> fail "%d diagnostics" (List.length found))
+      | actual -> fail "%d diagnostics" (List.length actual))
 (* Plain and amortized bounds together *)
 
 let () =
@@ -3278,9 +3278,9 @@ let () =
 
 let () =
   test "a callee's clause in another file is named by its file and line" (fun () ->
-      let found = message "fn first(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" in
-      if not (contains found "The clause that must hold is at `standard/list.truss:") then
-        fail "message %S" found)
+      let actual = message "fn first(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" in
+      if not (contains actual "The clause that must hold is at `standard/list.truss:") then
+        fail "message %S" actual)
 (* Collections from another package *)
 
 let () =
@@ -3326,13 +3326,13 @@ let () =
       in
       match check database (Support.module_of "app::main") with
       | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count < 100`" -> ()
-      | found ->
+      | actual ->
           fail "%s"
             (String.concat "; "
                (List.map
                   (fun (d : Diagnostic.t) ->
                     String.concat ", " (List.map (fun (f : _ Diagnostic.fix) -> f.title) d.fixes))
-                  found)))
+                  actual)))
 
 (* Facts under a quantifier *)
 
@@ -3388,8 +3388,8 @@ let () =
 
 let () =
   test "a failure that seeing hidden bodies would not fix names none of them" (fun () ->
-      let found = message "fn first(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" in
-      if contains found "is not visible in this package" then fail "message %S" found)
+      let actual = message "fn first(items: List[Int64]) -> Int64 {\n  items[0]\n}\n" in
+      if contains actual "is not visible in this package" then fail "message %S" actual)
 
 (* Early exits from concurrent loops *)
 
@@ -3435,24 +3435,24 @@ let () =
         fix_titles "fn halves(total: UInt32, parts: UInt32) -> UInt32 {\n  total / parts\n}\n"
       with
       | [ "Add `requires parts != 0`" ] -> ()
-      | found -> fail "%s" (String.concat "; " found));
+      | actual -> fail "%s" (String.concat "; " actual));
   test "a shift amount that may be too large offers a requires below the width" (fun () ->
       match fix_titles "fn shifted(value: UInt64, by: UInt64) -> UInt64 {\n  value << by\n}\n" with
       | [ "Add `requires by < 64`" ] -> ()
-      | found -> fail "%s" (String.concat "; " found));
+      | actual -> fail "%s" (String.concat "; " actual));
   test "an overflow with a literal offers the bound as a requires" (fun () ->
       let database =
         Support.setup [ ("app::main", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ]
       in
       match check database (Support.module_of "app::main") with
       | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count <= 254`" -> ()
-      | found ->
+      | actual ->
           fail "%s"
             (String.concat "; "
                (List.map
                   (fun (d : Diagnostic.t) ->
                     String.concat ", " (List.map (fun (f : _ Diagnostic.fix) -> f.title) d.fixes))
-                  found)));
+                  actual)));
   test "a failed assert about the parameters offers it as a requires" (fun () ->
       match
         fix_titles
@@ -3464,7 +3464,7 @@ let () =
            }\n"
       with
       | [ "Add `requires low < high`" ] -> ()
-      | found -> fail "%s" (String.concat "; " found));
+      | actual -> fail "%s" (String.concat "; " actual));
   test "a failed assert under an if offers the if's condition as a premise" (fun () ->
       match
         fix_titles
@@ -3478,7 +3478,7 @@ let () =
            }\n"
       with
       | [ "Add `requires (flag) ==> (count > 0)`" ] -> ()
-      | found -> fail "%s" (String.concat "; " found));
+      | actual -> fail "%s" (String.concat "; " actual));
   test "a failed assert with arithmetic offers it as a requires" (fun () ->
       match
         fix_titles
@@ -3490,15 +3490,15 @@ let () =
            }\n"
       with
       | [ "Add `requires low + 2 * high <= 100 - (high - low)`" ] -> ()
-      | found -> fail "%s" (String.concat "; " found));
+      | actual -> fail "%s" (String.concat "; " actual));
   test "an unsigned sum that may overflow offers only its upper bound" (fun () ->
       match fix_titles "fn total(count: UInt8, other: UInt8) -> UInt8 {\n  count + other\n}\n" with
       | [ "Add `requires count + other <= 255`" ] -> ()
-      | found -> fail "%s" (String.concat "; " found));
+      | actual -> fail "%s" (String.concat "; " actual));
   test "an unsigned difference that may overflow offers only its lower bound" (fun () ->
       match fix_titles "fn gap(low: UInt8, high: UInt8) -> UInt8 {\n  high - low\n}\n" with
       | [ "Add `requires 0 <= high - low`" ] -> ()
-      | found -> fail "%s" (String.concat "; " found));
+      | actual -> fail "%s" (String.concat "; " actual));
   test "a failed assert about a call's result offers no requires" (fun () ->
       let database =
         Support.setup
@@ -3514,16 +3514,16 @@ let () =
       in
       match check database (Support.module_of "app::main") with
       | [ { code; fixes = []; _ } ] when Diagnostic.Code.name code = "prover.assertion" -> ()
-      | found -> fail "%d diagnostics" (List.length found));
+      | actual -> fail "%d diagnostics" (List.length actual));
   test "an overflow names the fixes that change what the code means" (fun () ->
-      let found = message "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
-      if not (contains found "checked operation") then fail "message %S" found)
+      let actual = message "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n" in
+      if not (contains actual "checked operation") then fail "message %S" actual)
 
 (* Counterexample paths *)
 
 let () =
   test "a counterexample says which way each if on its path goes" (fun () ->
-      let found =
+      let actual =
         message
           "fn step(count: UInt8, up: Bool) -> UInt8 {\n\
           \  if up {\n\
@@ -3537,20 +3537,20 @@ let () =
           \  }\n\
            }\n"
       in
-      if not (contains found "On that path, `up` is true, `count > 100` is true.") then
-        fail "message %S" found);
+      if not (contains actual "On that path, `up` is true, `count > 100` is true.") then
+        fail "message %S" actual);
   test "a counterexample says which arm of a match its path takes" (fun () ->
-      let found =
+      let actual =
         message
-          "fn bump(found: Option[UInt8]) -> UInt8 {\n\
-          \  match found {\n\
+          "fn bump(present: Option[UInt8]) -> UInt8 {\n\
+          \  match present {\n\
           \    Some(count) => count + 1\n\
           \    None => 0\n\
           \  }\n\
            }\n"
       in
-      if not (contains found "On that path, the arm `Some(count)` is taken.") then
-        fail "message %S" found)
+      if not (contains actual "On that path, the arm `Some(count)` is taken.") then
+        fail "message %S" actual)
 
 (* Ranges under a quantifier *)
 
@@ -3576,8 +3576,8 @@ let () =
          theorem each_captured(items: List[Bool])\n\
         \  ensures forall i in 0..items.length() =>\n\
         \    apply(fn(_) {\n\
-        \      var kept = items[i]\n\
-        \      kept\n\
+        \      var held = items[i]\n\
+        \      held\n\
         \    }, value: false) == items[i]\n\
          {\n\
          }\n");
@@ -3593,8 +3593,8 @@ let () =
          theorem each_kept(items: List[Bool])\n\
         \  ensures forall i in 0..items.length() =>\n\
         \    apply(fn(x) {\n\
-        \      var kept = x\n\
-        \      kept\n\
+        \      var held = x\n\
+        \      held\n\
         \    }, value: items[i]) == items[i]\n\
          {\n\
          }\n")
@@ -3626,8 +3626,8 @@ let () =
         (applying
        ^ "theorem passes_through(value: Bool)\n\
          \  ensures apply(fn(x) {\n\
-         \      var kept = apply(fn(y) { y }, value: x)\n\
-         \      kept\n\
+         \      var held = apply(fn(y) { y }, value: x)\n\
+         \      held\n\
          \    }, value: value) == value\n\
           {\n\
           }\n"));
@@ -3636,8 +3636,8 @@ let () =
         (applying
        ^ "theorem returns_its_argument(value: Bool)\n\
          \  ensures apply(fn(x) {\n\
-         \      var kept = apply(fn(_) { x }, value: true)\n\
-         \      kept\n\
+         \      var held = apply(fn(_) { x }, value: true)\n\
+         \      held\n\
          \    }, value: value) == value\n\
           {\n\
           }\n"));
@@ -3646,11 +3646,11 @@ let () =
         (applying
        ^ "theorem wrongly_constant()\n\
          \  ensures apply(fn(x) {\n\
-         \      var kept = apply(fn(_) { x }, value: true)\n\
-         \      kept\n\
+         \      var held = apply(fn(_) { x }, value: true)\n\
+         \      held\n\
          \    }, value: true) == apply(fn(x) {\n\
-         \      var kept = apply(fn(_) { x }, value: true)\n\
-         \      kept\n\
+         \      var held = apply(fn(_) { x }, value: true)\n\
+         \      held\n\
          \    }, value: false)\n\
           {\n\
           }\n")
@@ -3878,9 +3878,9 @@ let () =
       | [ { notes = [ (span, _) ]; _ } ] ->
           let noted = String.sub text span.start (span.stop - span.start) in
           if noted <> "count > 0" then fail "the note is at `%s`" noted
-      | found -> fail "%s" (String.concat "; " (Support.codes found)));
+      | actual -> fail "%s" (String.concat "; " (Support.codes actual)));
   test "the same failure on another path is reported once" (fun () ->
-      let found =
+      let actual =
         codes
           "fn f(items: List[Int64], index: USize) -> Int64 {\n\
           \  if index > 3 {\n\
@@ -3890,7 +3890,7 @@ let () =
           \  }\n\
            }\n"
       in
-      if found <> [ "prover.requires" ] then fail "%s" (String.concat ", " found))
+      if actual <> [ "prover.requires" ] then fail "%s" (String.concat ", " actual))
 
 (* What is not proven yet *)
 
@@ -3917,8 +3917,10 @@ let () =
         \  invariant bottom > 0\n\
         \  invariant top / bottom >= 0\n");
   test "a cost clause's bound must be well defined" (fun () ->
-      let found = codes "fn f(items: List[Int64]) -> Int64\n  cost time O(items[0])\n{\n  0\n}\n" in
-      if not (List.mem "prover.requires" found) then fail "found [%s]" (String.concat "; " found));
+      let actual =
+        codes "fn f(items: List[Int64]) -> Int64\n  cost time O(items[0])\n{\n  0\n}\n"
+      in
+      if not (List.mem "prover.requires" actual) then fail "found [%s]" (String.concat "; " actual));
   test "a derived ordering of a record compares its fields in order" (fun () ->
       proven
         "type Version(major: Int64, minor: Int64)\n\
@@ -4033,7 +4035,7 @@ let () =
         \  false\n\
          }\n");
   test "the time of a bound's method is not free" (fun () ->
-      let found =
+      let actual =
         codes
           "fn contains[Element: Equal](items: List[Element], item: Element) -> Bool\n\
           \  cost time O(items.length())\n\
@@ -4051,7 +4053,7 @@ let () =
           \  false\n\
            }\n"
       in
-      if not (List.mem "prover.cost" found) then fail "found [%s]" (String.concat "; " found));
+      if not (List.mem "prover.cost" actual) then fail "found [%s]" (String.concat "; " actual));
   test "log of a number is its bit length" (fun () ->
       proven
         "fn integer_square_root(value: UInt64) -> UInt64\n\
@@ -4324,12 +4326,12 @@ let () =
             List.fold_left
               (fun most (obligation : Prover.Translate.obligation) ->
                 let text = Logic.text obligation.query in
-                let rec count from found =
+                let rec count from actual =
                   match String.index_from_opt text from '1' with
                   | Some at when at + 5 <= String.length text && String.sub text at 5 = "12345" ->
-                      count (at + 5) (found + 1)
-                  | Some at -> count (at + 1) found
-                  | None -> found
+                      count (at + 5) (actual + 1)
+                  | Some at -> count (at + 1) actual
+                  | None -> actual
                 in
                 max most (count 0 0))
               0 obligations
@@ -4693,13 +4695,13 @@ let again before after =
   in
   (match prove () with
   | [] -> ()
-  | found -> fail "before the edit: %s" (String.concat "; " (Support.codes found)));
+  | actual -> fail "before the edit: %s" (String.concat "; " (Support.codes actual)));
   Database.Testing.set_text engine module_ after;
   Engine.clear_log engine;
   let solved = Solver.solved solver in
   (match prove () with
   | [] -> ()
-  | found -> fail "after the edit: %s" (String.concat "; " (Support.codes found)));
+  | actual -> fail "after the edit: %s" (String.concat "; " (Support.codes actual)));
   let proven =
     List.filter_map
       (fun (key : Resolve.Names.key) ->
@@ -4711,10 +4713,10 @@ let again before after =
   (List.sort_uniq compare proven, Solver.solved solver - solved)
 
 let expect_again before after ~proven ~solved =
-  let found, count = again before after in
-  if found <> proven || count <> solved then
+  let actual, count = again before after in
+  if actual <> proven || count <> solved then
     fail "proven again: [%s], with %d queries solved; expected [%s], with %d"
-      (String.concat ", " found) count (String.concat ", " proven) solved
+      (String.concat ", " actual) count (String.concat ", " proven) solved
 
 let () =
   test "editing a body proves that definition again and no other" (fun () ->
@@ -4777,7 +4779,8 @@ let () =
       [ (Support.module_of "standard::probe", text) ];
     match check database (Support.module_of "standard::probe") with
     | [] -> ()
-    | found -> fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found))
+    | actual ->
+        fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual))
   in
   test "a view of a scalar ends within the address space and is not at zero" (fun () ->
       proven_in_standard

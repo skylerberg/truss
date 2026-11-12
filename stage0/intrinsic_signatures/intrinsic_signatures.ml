@@ -244,11 +244,11 @@ let signature (operation : Intrinsic.operation) : T.signature =
   | Environment_entry ->
       make
         ~output:(Returns (view (T.builtin UInt8)))
-        [ input "index" usize; input ~mode:Mut "found" bool ]
+        [ input "index" usize; input ~mode:Mut "is_present" bool ]
   | System_is_os _ | System_is_architecture _ -> make ~output:(Returns bool) []
   | Libc function_ ->
       let { Libc.parameters; result; _ } = Libc.signature function_ in
-      let found = match result with Text -> [ input ~mode:Mut "found" bool ] | _ -> [] in
+      let presence = match result with Text -> [ input ~mode:Mut "is_present" bool ] | _ -> [] in
       make
         ~output:
           (Returns
@@ -267,7 +267,7 @@ let signature (operation : Intrinsic.operation) : T.signature =
                  List.map (fun name -> input ~mode:Mut name (libc_scalar scalar)) names
              | Always _ | Fixed _ -> [])
            parameters
-        @ found)
+        @ presence)
   | Libc_number number -> make ~output:(Returns (libc_scalar (Libc.number_type number))) []
 
 type time = Constant_time | Linear_in of int | Unbounded_time

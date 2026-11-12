@@ -42,7 +42,7 @@ let newest registry name =
 
 let hash_of registry name version =
   List.find_map
-    (fun (found, hash) -> if Version.compare found version = 0 then Some hash else None)
+    (fun (listed, hash) -> if Version.compare listed version = 0 then Some hash else None)
     (versions registry name)
 
 let version_directory registry name version =

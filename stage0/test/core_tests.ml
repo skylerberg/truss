@@ -17,8 +17,8 @@ let printed_definition text name =
      @ Infer.diagnostics database module_
    with
   | [] -> ()
-  | found -> failwith (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)));
-  let found =
+  | actual -> failwith (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
+  let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
@@ -26,7 +26,7 @@ let printed_definition text name =
         else None)
       (Query.demand database Resolve.Names.declarations module_)
   in
-  match found with
+  match actual with
   | Some form -> Core_print.show form
   | None -> failwith (Printf.sprintf "`%s` has no core form" name)
 
@@ -64,13 +64,13 @@ let printed_body text name =
 
 let expect_definition what text expected =
   test what (fun () ->
-      let found = printed_definition text "g" in
-      if found <> expected then fail "found:\n%s" found)
+      let actual = printed_definition text "g" in
+      if actual <> expected then fail "found:\n%s" actual)
 
 let expect_body what text expected =
   test what (fun () ->
-      let found = printed_body text "g" in
-      if found <> expected then fail "found:\n%s" found)
+      let actual = printed_body text "g" in
+      if actual <> expected then fail "found:\n%s" actual)
 
 let meters =
   "type Meters(value: Int64)\n\n\
@@ -369,7 +369,7 @@ let () =
      Index.at for List[List[Int64]] by standard::list::impl Index for List[Element](mut place \
      rows, 0) lends mut) { cell = 0 } }";
   test "a `lends mut` method yields a mutable place" (fun () ->
-      let found =
+      let actual =
         printed_body
           "type Cell(state: Int64)\n\n\
            type Grid(cells: List[Cell])\n\n\
@@ -379,12 +379,12 @@ let () =
           "Grid.cell(mut self)"
       in
       if
-        found
+        actual
         <> "{ yield mut place lent Index.at for List[Cell] by standard::list::impl Index for \
             List[Element](mut place self.cells, place index) lends mut }"
-      then fail "found:\n%s" found);
+      then fail "found:\n%s" actual);
   test "a yielded constructor lends the places among its fields" (fun () ->
-      let found =
+      let actual =
         printed_body
           "type Shelf(books: List[String])\n\n\
            type First(title: String, rest: Slice[String])\n\n\
@@ -398,15 +398,15 @@ let () =
           "Shelf.first"
       in
       if
-        found
+        actual
         <> "{ if standard::list::List.is_empty[String](place self.books) { yield \
             Option[First].None() } else { yield Option[First].Some(value: First(title: place lent \
             Index.at for List[String] by standard::list::impl Index for List[Element](place \
             self.books, 0) lends, rest: slice standard::list::List.slice_range[String](place \
             self.books, 1, standard::list::List.length[String](place self.books)))) } }"
-      then fail "found:\n%s" found);
+      then fail "found:\n%s" actual);
   test "a constructor yielded `mut` lends the places that are marked `mut`" (fun () ->
-      let found =
+      let actual =
         printed_body
           "type Shelf(books: List[String])\n\n\
            type Numbered(index: USize, title: String)\n\n\
@@ -420,12 +420,12 @@ let () =
           "Shelf.numbered(mut self)"
       in
       if
-        found
+        actual
         <> "{ let var own index = 0; while (index < standard::list::List.length[String](place \
             self.books)) { yield mut Numbered(index: index, title: place lent Index.at for \
             List[String] by standard::list::impl Index for List[Element](mut place self.books, \
             place index) lends mut); index = add(index, 1) } }"
-      then fail "found:\n%s" found);
+      then fail "found:\n%s" actual);
   expect_definition "a quantifier over a collection calls `each` in code, and not in a contract"
     "fn g(items: List[Int64]) -> Bool\n\
     \  ensures result == (exists item in items => item < 0)\n\
@@ -623,7 +623,7 @@ let () =
         apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n"
       in
       let database = setup [ ("app::main", text) ] in
-      let found = ref [] in
+      let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
@@ -638,15 +638,16 @@ let () =
                         match node.kind with
                         | Call { callee = Function { path; _ }; uses; _ }
                           when Path.show path = "app::main::apply" ->
-                            found := ("needs " ^ Types.show_argument (Capabilities uses)) :: !found
-                        | Lambda _ -> found := Types.show node.type_ :: !found
+                            actual :=
+                              ("needs " ^ Types.show_argument (Capabilities uses)) :: !actual
+                        | Lambda _ -> actual := Types.show node.type_ :: !actual
                         | _ -> ());
                   }
                   form.definition
             | None -> fail "no core form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main"));
-      if List.sort compare !found <> [ "(fn() uses Console)"; "needs {Console}" ] then
-        fail "found [%s]" (String.concat "; " !found));
+      if List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console}" ] then
+        fail "found [%s]" (String.concat "; " !actual));
   test "a capability parameter in a result type is inferred separately for each call" (fun () ->
       let text =
         "fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {\n\
@@ -664,7 +665,7 @@ let () =
          }\n"
       in
       let database = setup [ ("app::main", text) ] in
-      let found = ref [] in
+      let actual = ref [] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
@@ -678,14 +679,14 @@ let () =
                       (fun (node : Core.pattern) ->
                         match node.kind with
                         | Bind { name; _ } ->
-                            found := (name ^ ": " ^ Types.show node.type_) :: !found
+                            actual := (name ^ ": " ^ Types.show node.type_) :: !actual
                         | _ -> ());
                   }
                   form.definition
             | None -> fail "no core form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main"));
-      if List.sort compare !found <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
-      then fail "found [%s]" (String.concat "; " !found))
+      if List.sort compare !actual <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
+      then fail "found [%s]" (String.concat "; " !actual))
 
 (* Origins *)
 
@@ -710,7 +711,7 @@ let () =
               Query.demand database Resolve.Names.text key )
           with
           | Some form, Some spans, Some written ->
-              let found = ref [] in
+              let actual = ref [] in
               Core_walk.definition
                 {
                   Core_walk.ignore_all with
@@ -719,11 +720,12 @@ let () =
                       match node.kind with
                       | Compound_assign _ ->
                           let span = spans.(node.origin) in
-                          found := String.sub written span.start (span.stop - span.start) :: !found
+                          actual :=
+                            String.sub written span.start (span.stop - span.start) :: !actual
                       | _ -> ());
                 }
                 form.definition;
-              if !found <> [ "total += item" ] then fail "found [%s]" (String.concat "; " !found)
+              if !actual <> [ "total += item" ] then fail "found [%s]" (String.concat "; " !actual)
           | _ -> fail "no core form")
         (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
@@ -854,8 +856,8 @@ let printed_derived text type_name trait name receiver =
 
 let expect_derived what text type_name trait name receiver expected =
   test what (fun () ->
-      let found = printed_derived text type_name trait name receiver in
-      if found <> expected then fail "found:\n%s" found)
+      let actual = printed_derived text type_name trait name receiver in
+      if actual <> expected then fail "found:\n%s" actual)
 
 let pair =
   "type Pair[Second](first: Int64, second: Second)\n  derives Equal, Hash, Ordered, Default\n\n"
@@ -991,7 +993,7 @@ let () =
   let core_of_method name =
     let database = setup [ ("app::main", text) ] in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
-    let bounds (found : Types.parameter) = if found = parameter then [ described ] else [] in
+    let bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
       match
         Interface.Impls.implements database ~bounds
@@ -1013,7 +1015,7 @@ let () =
   test "a method defined in an impl has its own core form" (fun () ->
       match core_of_method "describe" with
       | "{ Described.describe for Value by a bound(place self.first) }", [] -> ()
-      | found, _ -> fail "found %s" found);
+      | actual, _ -> fail "found %s" actual);
   test
     "a method inherited from a trait has the default method's core form and a substitution for Self"
     (fun () ->
@@ -1022,7 +1024,7 @@ let () =
            by a bound(place self)) }",
           [ "Self = Both[Value]" ] ) ->
           ()
-      | found, substitution -> fail "found %s with [%s]" found (String.concat "; " substitution));
+      | actual, substitution -> fail "found %s with [%s]" actual (String.concat "; " substitution));
   test "a method of a derived impl has the generated core form" (fun () ->
       let database = setup [ ("app::main", text) ] in
       let owner : Path.t = Derived { type_ = both; trait = Well_known.path Equal } in
@@ -1054,7 +1056,7 @@ let pair_ordering =
 
 let () =
   test "a law's proof has the law's parameters, with the proof's type for Self" (fun () ->
-      let found =
+      let actual =
         printed_definition
           (pair_ordering
          ^ "proof Ordered.agrees_with_equal for Pair {\n  only_equal(first, second: second)\n}\n")
@@ -1064,14 +1066,14 @@ let () =
         "proof(first: Pair, second: Pair) { app::main::only_equal(place synthetic#0, place \
          synthetic#1) }"
       in
-      if found <> expected then fail "found:\n%s" found)
+      if actual <> expected then fail "found:\n%s" actual)
 
 (* [Infer.specification] *)
 
 let () =
   let specification text name =
     let database = setup [ ("app::main", text) ] in
-    let found =
+    let actual =
       List.find_map
         (fun (declaration : Resolve.Names.declaration) ->
           let key = Resolve.Names.key_of declaration in
@@ -1082,8 +1084,8 @@ let () =
           else None)
         (Query.demand database Resolve.Names.declarations (module_of "app::main"))
     in
-    match found with
-    | Some found -> found
+    match actual with
+    | Some actual -> actual
     | None -> failwith (Printf.sprintf "`%s` has no specification" name)
   in
   let equal first second name =
@@ -1172,7 +1174,7 @@ let () =
                }\n" );
           ]
       in
-      let found =
+      let actual =
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
             match declaration.path with
@@ -1181,6 +1183,6 @@ let () =
             | _ -> None)
           (Query.demand database Resolve.Names.declarations (module_of "app::main"))
       in
-      match found with
+      match actual with
       | Some { definition = Function { body = Some _; _ }; _ } -> ()
       | _ -> fail "the provided body is not in the specification")

@@ -66,7 +66,7 @@ public fn Decoder.skip(mut self, count: USize) -> Result[Unit, DecodeError]
 
 public fn Decoder.bytes(mut self, count: USize) -> Result[Slice[UInt8], DecodeError]
   ensures match result {
-    Ok(taken) => taken.length() == count
+    Ok(chunk) => chunk.length() == count
     Err(_) => true
   }
   cost time O(1)
@@ -83,29 +83,29 @@ public fn Decoder.bytes(mut self, count: USize) -> Result[Slice[UInt8], DecodeEr
 internal fn Decoder.take_2(mut self) -> Result[Array[UInt8, 2], DecodeError]
   cost time O(1)
 {
-  let taken = mut self.bytes(2)?
-  Ok([taken[0], taken[1]])
+  let chunk = mut self.bytes(2)?
+  Ok([chunk[0], chunk[1]])
 }
 
 internal fn Decoder.take_4(mut self) -> Result[Array[UInt8, 4], DecodeError]
   cost time O(1)
 {
-  let taken = mut self.bytes(4)?
-  Ok([taken[0], taken[1], taken[2], taken[3]])
+  let chunk = mut self.bytes(4)?
+  Ok([chunk[0], chunk[1], chunk[2], chunk[3]])
 }
 
 internal fn Decoder.take_8(mut self) -> Result[Array[UInt8, 8], DecodeError]
   cost time O(1)
 {
-  let taken = mut self.bytes(8)?
-  Ok([taken[0], taken[1], taken[2], taken[3], taken[4], taken[5], taken[6], taken[7]])
+  let chunk = mut self.bytes(8)?
+  Ok([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7]])
 }
 
 public fn Decoder.uint8(mut self) -> Result[UInt8, DecodeError]
   cost time O(1)
 {
-  let taken = mut self.bytes(1)?
-  Ok(taken[0])
+  let chunk = mut self.bytes(1)?
+  Ok(chunk[0])
 }
 
 public fn Decoder.uint16(mut self, order: ByteOrder = ByteOrder.BigEndian) -> Result[UInt16, DecodeError]
@@ -204,9 +204,9 @@ public fn Decoder.variable_uint64(mut self) -> Result[UInt64, DecodeError]
 public fn Decoder.variable_int64(mut self) -> Result[Int64, DecodeError]
   cost time O(1)
 {
-  let folded = mut self.variable_uint64()?
-  let half = folded >> 1
-  if folded % 2 == 0 {
+  let zigzag = mut self.variable_uint64()?
+  let half = zigzag >> 1
+  if zigzag % 2 == 0 {
     Ok(half.to_signed_bits())
   } else {
     Ok((half ^ UInt64.maximum).to_signed_bits())
@@ -362,6 +362,6 @@ public fn Encoder.variable_int64(mut self, value: Int64)
   ensures self.length() <= old(self.length()) + 10
   cost amortized time O(1)
 {
-  let doubled = value.to_unsigned_bits() << 1
-  mut self.variable_uint64(if value < 0 { doubled ^ UInt64.maximum } else { doubled })
+  let zigzag = value.to_unsigned_bits() << 1
+  mut self.variable_uint64(if value < 0 { zigzag ^ UInt64.maximum } else { zigzag })
 }

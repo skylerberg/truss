@@ -222,8 +222,8 @@ let () =
       let text = "impl Clock for Fixed {\n  fn now(self) -> Instant {\n    todo\n  }\n}" in
       let file, _ = parse text in
       match file.definitions with
-      | [ around; method_ ] ->
-          if around.container <> None then fail "the impl is inside something";
+      | [ impl_item; method_ ] ->
+          if impl_item.container <> None then fail "the impl is inside something";
           if method_.container <> Some 0 then fail "the method is not inside the impl";
           if method_.text <> "fn now(self) -> Instant {\n    todo\n  }" then
             fail "the method's text is %S" method_.text;
@@ -246,7 +246,7 @@ let () =
       match pieces "fn g() {}\nfn f() { x = }" with
       | source, tokens, [ _; second ] -> (
           let parsed, _ = Parser.definition source tokens second in
-          match Parser.placed parsed with
+          match Parser.diagnostics_in_file parsed with
           | [ diagnostic ] ->
               if diagnostic.span.start <> 23 then fail "start %d" diagnostic.span.start
           | _ -> fail "expected one diagnostic")
@@ -268,7 +268,7 @@ let () =
         in
         match Parser.definition source tokens (List.hd pieces) with
         | _, [ method_ ] ->
-            if Parser.placed method_ = [] then fail "the method has no diagnostic";
+            if Parser.diagnostics_in_file method_ = [] then fail "the method has no diagnostic";
             (method_.value.value, method_.value.text, method_.diagnostics)
         | _ -> failwith "expected one method"
       in

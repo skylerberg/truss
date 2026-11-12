@@ -16,7 +16,7 @@ public fn Array[Element, count: USize].get(self, index: USize) lends Option[Elem
   cost time O(1)
 {
   match self.slice().get(index) {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }
@@ -28,7 +28,7 @@ public fn Array[Element, count: USize].first(self) lends Option[Element]
   cost time O(1)
 {
   match self.slice().first() {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }
@@ -40,7 +40,7 @@ public fn Array[Element, count: USize].last(self) lends Option[Element]
   cost time O(1)
 {
   match self.slice().last() {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }
@@ -51,7 +51,7 @@ public fn Array[Element, count: USize].split_first(self) lends Option[list::Spli
   cost time O(1)
 {
   match self.slice().split_first() {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }
@@ -62,7 +62,7 @@ public fn Array[Element, count: USize].split_last(self) lends Option[list::Split
   cost time O(1)
 {
   match self.slice().split_last() {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }
@@ -108,16 +108,16 @@ public fn Array[Element: Equal, count: USize].last_index_of(self, item: Element)
   self.slice().last_index_of(item)
 }
 
-public fn Array[Element, count: USize].find_index(self, matching: (fn(Element) -> Bool cost time finite)) -> Option[USize]
+public fn Array[Element, count: USize].find_index(self, predicate: (fn(Element) -> Bool cost time finite)) -> Option[USize]
 
   ensures match result {
-    Some(index) => index < self.length() && matching(self.model()[index])
-      && (forall i in 0..index => !matching(self.model()[i]))
-    None => forall i in 0..self.length() => !matching(self.model()[i])
+    Some(index) => index < self.length() && predicate(self.model()[index])
+      && (forall i in 0..index => !predicate(self.model()[i]))
+    None => forall i in 0..self.length() => !predicate(self.model()[i])
   }
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
-  self.slice().find_index(matching)
+  self.slice().find_index(predicate)
 }
 
 public fn Array[Element: Equal, count: USize].starts_with(self, prefix: Slice[Element]) -> Bool
@@ -181,7 +181,7 @@ public fn Array[Element: Ordered, count: USize].minimum(self) lends Option[Eleme
   cost time O(self.length() * time(Element.compare))
 {
   match self.slice().minimum() {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }
@@ -191,7 +191,7 @@ public fn Array[Element: Ordered, count: USize].maximum(self) lends Option[Eleme
   cost time O(self.length() * time(Element.compare))
 {
   match self.slice().maximum() {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }
@@ -455,7 +455,7 @@ public fn Array[Element, count: USize].min_by(
   cost time O(self.length() * time(compare))
 {
   match self.slice().min_by(compare) {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }
@@ -468,7 +468,7 @@ public fn Array[Element, count: USize].max_by(
   cost time O(self.length() * time(compare))
 {
   match self.slice().max_by(compare) {
-    Some(found) => yield Some(found)
+    Some(item) => yield Some(item)
     None => yield None
   }
 }

@@ -9,8 +9,8 @@ test "a string's bytes are its UTF-8 encoding" {
   assert "".bytes().length() == 0
 }
 
-fn same(found: StringSlice, expected: StringSlice) -> Bool {
-  found == expected
+fn same(actual: StringSlice, expected: StringSlice) -> Bool {
+  actual == expected
 }
 
 test "is_ascii is true only when every byte is ASCII" {

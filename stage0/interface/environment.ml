@@ -251,7 +251,9 @@ type header = {
 
 let bounds_of (context : Lower.context) =
   List.sort compare
-    (Hashtbl.fold (fun parameter bounds found -> (parameter, bounds) :: found) context.bounds [])
+    (Hashtbl.fold
+       (fun parameter bounds bounds_by_parameter -> (parameter, bounds) :: bounds_by_parameter)
+       context.bounds [])
 
 let header =
   Query.query ~name:"header" ~phase:Phases.interfaces ~show:Names.show_key (fun database key ->
@@ -336,34 +338,36 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
         Option.bind (Query.demand database Names.container key) (Query.demand database header) )
     with
     | Some report, _ | None, Some (Error report) -> (Error_interface report, context)
-    | None, Some (Ok within) -> (
+    | None, Some (Ok container) -> (
         (* A method written inside a trait, an [impl], or a capability:
            [Self], its associated types, and the generic parameters around
            it are that one's. *)
         List.iter
           (fun (parameter, bounds) -> Hashtbl.replace context.bounds parameter bounds)
-          within.header_bounds;
+          container.header_bounds;
         let context =
           {
             context with
-            self_type = within.self_type;
-            self_trait = within.self_trait;
-            self_associated = within.self_associated;
-            self_capabilities = within.self_capabilities;
+            self_type = container.self_type;
+            self_trait = container.self_trait;
+            self_associated = container.self_associated;
+            self_capabilities = container.self_capabilities;
           }
         in
         match definition.kind with
         | Function { signature; _ } | Method_declaration signature ->
             let lowered =
-              T.method_in_impl ~impl_generics:within.header_generics ~impl_uses:within.header_uses
-                (Lower.signature context ~owner:path ~head:[] ~self_type:within.self_type signature)
+              T.method_in_impl ~impl_generics:container.header_generics
+                ~impl_uses:container.header_uses
+                (Lower.signature context ~owner:path ~head:[] ~self_type:container.self_type
+                   signature)
             in
             (* An [impl]'s method ends when its trait's does, since it keeps the
                trait's [time] clause. *)
             let terminates =
               lowered.terminates
               ||
-              match (path, within.self_trait) with
+              match (path, container.self_trait) with
               | Method { name; receiver; _ }, Some (implements : T.trait_reference) -> (
                   match
                     Summary.definition database
@@ -376,11 +380,11 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
               | _ -> false
             in
             (Function_interface { lowered with terminates }, context)
-        | _ -> (Error_interface (Resolve.Parts.error_node definition.span), context))
+        | _ -> (Error_interface (Resolve.Parts.recovery_report definition.span), context))
     | None, None -> (
         match definition.kind with
         | Method_declaration _ ->
-            (Error_interface (Resolve.Parts.error_node definition.span), context)
+            (Error_interface (Resolve.Parts.recovery_report definition.span), context)
         | Function { signature; _ } ->
             let head, self_type =
               match signature.name with
@@ -511,8 +515,8 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
             | Ok trait ->
                 (Law_proof_interface { generics; trait; law = law.text; for_type }, context)
             | Error report -> (Error_interface report, context))
-        | Definition_error _ -> (Error_interface (Resolve.Parts.error_node definition.span), context)
-        )
+        | Definition_error _ ->
+            (Error_interface (Resolve.Parts.recovery_report definition.span), context))
   in
   ( {
       interface;
@@ -535,7 +539,7 @@ let rec lowered_interface =
            (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
          with
          | Some definition, Some resolved ->
-             Compiler_bug.within ~stage:"Interface" (Names.show_key key) (fun () ->
+             Compiler_bug.while_doing ~stage:"Interface" (Names.show_key key) (fun () ->
                  Some (fst (lower database key definition resolved)))
          | _ -> None))
 
@@ -592,7 +596,8 @@ let in_declared_order database path ~variant ~name fields =
       let position field =
         let rec find index = function
           | [] -> index
-          | found :: rest -> if found = name field then index else find (index + 1) rest
+          | declared_name :: rest ->
+              if declared_name = name field then index else find (index + 1) rest
         in
         find 0 declared
       in

@@ -4,12 +4,12 @@ type Trickle(received: List[UInt8], step: USize)
 
 impl streams::Writer for Trickle {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    var taken: USize = 0
-    while taken < self.step && taken < bytes.length() {
-      mut self.received.push(bytes[taken])
-      taken += 1
+    var accepted: USize = 0
+    while accepted < self.step && accepted < bytes.length() {
+      mut self.received.push(bytes[accepted])
+      accepted += 1
     }
-    Ok(taken)
+    Ok(accepted)
   }
 
   fn flush(mut self) -> Result[Unit, SystemError] {
@@ -40,13 +40,13 @@ type Drip(bytes: List[UInt8], position: USize, step: USize)
 
 impl streams::Reader for Drip {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
-    var given: USize = 0
-    while given < self.step && given < limit && self.position < self.bytes.length() {
+    var read_count: USize = 0
+    while read_count < self.step && read_count < limit && self.position < self.bytes.length() {
       mut buffer.push(self.bytes[self.position])
       self.position += 1
-      given += 1
+      read_count += 1
     }
-    Ok(given)
+    Ok(read_count)
   }
 }
 
