@@ -456,7 +456,8 @@ let serve key = Database.serve ~key ~handle
 
 (* The command's first word, and whether it is one that runs no code of a
    worktree, which the client runs itself. *)
-let command_of arguments = List.find_opt (fun a -> not (String.starts_with ~prefix:"-" a)) arguments
+let command_of arguments =
+  List.find_opt (fun argument -> not (String.starts_with ~prefix:"-" argument)) arguments
 
 let finish (outcome : Outcome.t) =
   match outcome with

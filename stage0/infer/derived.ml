@@ -86,7 +86,9 @@ let form database (path : Path.t) : Core.t option =
                 signature.parameters
           in
           let other_place () : Core.place =
-            match List.filter (fun (p : Core.parameter) -> p.local <> Self) parameters with
+            match
+              List.filter (fun (parameter : Core.parameter) -> parameter.local <> Self) parameters
+            with
             | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_; origin }
             | _ -> bug "`%s` takes one value beside its own" (Path.show path)
           in

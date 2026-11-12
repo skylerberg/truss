@@ -225,7 +225,7 @@ let rec match_type ~variables (substitution : Types.substitution) pattern type_ 
           if Types.equal bound type_ || open_type type_ then Some substitution else None
       | Some (Types.Value _ | Types.Capabilities _) -> None
       | None -> Some ((parameter, Types.Type type_) :: substitution))
-  | _, t when open_type t -> Some substitution
+  | _, argument_type when open_type argument_type -> Some substitution
   | Types.Named left, Types.Named right when Path.equal left.path right.path ->
       match_arguments ~variables substitution left.arguments right.arguments
   | _ -> if Types.equal pattern type_ then Some substitution else None

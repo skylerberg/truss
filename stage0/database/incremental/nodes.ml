@@ -183,12 +183,12 @@ let remember engine =
   if !auditing && not !within_audit then begin
     if !remembered_count = Weak.length !remembered then begin
       let live = ref [] in
-      for i = 0 to Weak.length !remembered - 1 do
-        match Weak.get !remembered i with Some e -> live := e :: !live | None -> ()
+      for index = 0 to Weak.length !remembered - 1 do
+        match Weak.get !remembered index with Some engine -> live := engine :: !live | None -> ()
       done;
       let live = List.rev !live in
       let grown = Weak.create (max 16 (2 * (List.length live + 1))) in
-      List.iteri (fun i e -> Weak.set grown i (Some e)) live;
+      List.iteri (fun index engine -> Weak.set grown index (Some engine)) live;
       remembered := grown;
       remembered_count := List.length live
     end;
@@ -376,16 +376,16 @@ let input_cells engine (input : ('key, 'value) input) : ('key, 'value) input_cel
 
 (* A result as an engine sees it: its own, or else a base's. *)
 let find_result engine (query : ('key, 'value) query) (key : 'key) =
-  let look e =
-    match find_table e query.number query.cells with
+  let look engine =
+    match find_table engine query.number query.cells with
     | Some table -> Hashtbl.find_opt table key
     | None -> None
   in
   match look engine with Some cell -> Some cell | None -> List.find_map look engine.bases
 
 let find_input engine (input : ('key, 'value) input) (key : 'key) =
-  let look e =
-    match find_table e input.input_number input.input_cells with
+  let look engine =
+    match find_table engine input.input_number input.input_cells with
     | Some table -> Hashtbl.find_opt table key
     | None -> None
   in

@@ -130,7 +130,9 @@ let shadow engine (base : node) =
    engine unless it already was, since its copy is then among the own
    readers if it still reads this. [phase] narrows to one phase. *)
 let readers_here engine (node : node) ~phase =
-  let in_phase (reader : node) = match phase with Some p -> reader.phase = p | None -> true in
+  let in_phase (reader : node) =
+    match phase with Some wanted_phase -> reader.phase = wanted_phase | None -> true
+  in
   let own =
     Hashtbl.fold
       (fun _ (reader : node) readers -> if in_phase reader then reader :: readers else readers)

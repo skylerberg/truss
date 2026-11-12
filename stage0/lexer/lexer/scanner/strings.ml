@@ -928,7 +928,7 @@ let hash_raw_string cursor ~start =
           value <> ""
           && value.[0] <> '"'
           && value.[String.length value - 1] <> '"'
-          && String.for_all (fun c -> c >= ' ' && c < '\x7F') value
+          && String.for_all (fun character -> character >= ' ' && character < '\x7F') value
           &&
           let rec no_interpolation index =
             index + 1 >= String.length value
@@ -1035,7 +1035,12 @@ let curly_quoted_string cursor ~opening_length ~closing =
       let value = String.sub cursor.text text_start (text_stop - text_start) in
       let stop = text_stop + String.length closing in
       (* Text that an ordinary string would read differently has no exact fix. *)
-      let exact = String.for_all (fun c -> c >= ' ' && c <> '"' && c <> '\\' && c <> '$') value in
+      let exact =
+        String.for_all
+          (fun character ->
+            character >= ' ' && character <> '"' && character <> '\\' && character <> '$')
+          value
+      in
       report cursor ~code:Lookalike_character
         ~fixes:
           (if exact then

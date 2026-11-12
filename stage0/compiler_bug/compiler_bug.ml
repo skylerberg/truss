@@ -5,9 +5,9 @@ exception Bug of t
 let bug ~stage format =
   Printf.ksprintf (fun message -> raise (Bug { stage; message; doing = [] })) format
 
-let while_doing ~stage doing f =
+let while_doing ~stage doing work =
   let broken message = raise (Bug { stage; message; doing = [ doing ] }) in
-  try f () with
+  try work () with
   | Bug bug -> raise (Bug { bug with doing = bug.doing @ [ doing ] })
   | Invalid_argument message -> broken ("Invalid_argument: " ^ message)
   | Failure message -> broken ("Failure: " ^ message)

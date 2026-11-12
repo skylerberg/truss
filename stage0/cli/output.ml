@@ -25,10 +25,10 @@ let local () =
 let current = ref (local ())
 
 (* Runs [f] writing to [output], and comes back to where it wrote before. *)
-let with_ output f =
+let with_ output work =
   let previous = !current in
   current := output;
-  Fun.protect ~finally:(fun () -> current := previous) f
+  Fun.protect ~finally:(fun () -> current := previous) work
 
 let print text = !current.out text
 let print_line text = print (text ^ "\n")

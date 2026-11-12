@@ -36,7 +36,8 @@ let check_property ~file ~name ~listed property =
   let expected = Array.make 0x110000 false in
   List.iter
     (function
-      | range :: value :: _ when listed value -> each_in_range range (fun c -> expected.(c) <- true)
+      | range :: value :: _ when listed value ->
+          each_in_range range (fun character -> expected.(character) <- true)
       | _ -> ())
     (records file);
   for value = 0 to 0x10FFFF do
@@ -61,7 +62,7 @@ let () =
     List.iter
       (function
         | range :: value :: _ when value = property ->
-            each_in_range range (fun c -> set.(c) <- true)
+            each_in_range range (fun character -> set.(character) <- true)
         | _ -> ())
       (records file);
     set
