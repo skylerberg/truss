@@ -3,5 +3,5 @@
 ; a driver uses, is in neither's directory.
 
 (library
- (name running)
- (libraries zarith compile prover))
+ (name evaluator)
+ (libraries zarith compile instance prover))

@@ -10,11 +10,11 @@
    solves its queries together, one for each core, as the command line
    does. *)
 
-(* What the solver said, set in the engine, as the database does for a
-   session. *)
-let tell database said =
+(* The oracles' responses, recorded in the engine, as the database does for
+   a session. *)
+let record database responses =
   let engine = Engine.of_context database in
-  List.iter (fun (key, told) -> Engine.set engine Prover.told key told) said
+  List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
 
 let () =
   let solver =
@@ -37,7 +37,7 @@ let () =
             let solved = Solver.solved solver in
             let start = Unix.gettimeofday () in
             let failed =
-              List.length (Prover.diagnostics ~tell:(tell database) database solver module_)
+              List.length (Prover.diagnostics ~record:(record database) database solver module_)
             in
             Some
               ( Path.show_module module_,

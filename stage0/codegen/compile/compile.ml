@@ -984,6 +984,7 @@ let evaluate_call ?results t ~time_limit ~function_ ~arguments =
           found)
   | _ -> bug "%s has no result to work out" (Path.show function_)
 
+let run_key t root = reporting t @@ fun () -> run_key t root
 let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"
 
 let create ?(checks = true) ?(file_name = Workspace.file_path) ?(want = no_keys)

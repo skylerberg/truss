@@ -150,6 +150,11 @@ val run_program :
   arguments:string list ->
   (int * string * string, string) result
 
+(* The key a run of code while compiling is kept under: the key of
+   everything the root can reach, with the version of code generation and
+   the target, which changes exactly when what the run gives may. *)
+val run_key : t -> Instance.key -> (string, string) result
+
 (* Works out a tagged template's check by running it: each of the tag's
    [from_template]'s clauses that can run, for a template of these literal
    texts and no parts, by its position among the clauses, with whether it

@@ -101,7 +101,7 @@ let processor_time () =
   let times = Unix.times () in
   times.tms_utime +. times.tms_stime +. times.tms_cutime +. times.tms_cstime
 
-let measure database ~tell ~is_measured =
+let measure database ~record ~is_measured =
   let measured =
     List.map
       (fun (((module_ : Path.module_), source) as entry) ->
@@ -109,7 +109,7 @@ let measure database ~tell ~is_measured =
         if is_measured name then begin
           let start = processor_time () in
           if Type_checker.diagnostics database module_ = [] then
-            ignore (Prover.diagnostics ~tell database solver module_);
+            ignore (Prover.diagnostics ~record database solver module_);
           let spent = int_of_float (Float.round ((processor_time () -. start) *. 100.)) in
           (name, max 1 spent, letters source)
         end
@@ -169,14 +169,17 @@ let () =
   let database =
     match session with Some session -> Database.context session | None -> Engine.context engine
   in
-  let tell said =
+  let record responses =
     match session with
-    | Some session -> List.iter (fun (key, told) -> Database.set session Prover.told key told) said
-    | None -> Support.tell database said
+    | Some session ->
+        List.iter
+          (fun (key, response) -> Database.set session Prover.oracle_response key response)
+          responses
+    | None -> Support.record database responses
   in
   Option.iter
     (fun is_measured ->
-      measure database ~tell ~is_measured;
+      measure database ~record ~is_measured;
       exit 0)
     measured_modules;
   let checked =
@@ -191,7 +194,7 @@ let () =
           let before = Option.map (fun _ -> Phases.proofs) session in
           List.iter (fun problem -> fail "%s" problem) (Engine.audit ?before engine)));
   timed "solving ahead" (fun () ->
-      Prover.solve_ahead ~tell database solver
+      Prover.solve_ahead ~record database solver
         (List.filter_map
            (fun (module_, errors) -> if errors = [] then Some module_ else None)
            checked));
@@ -208,7 +211,7 @@ let () =
           | [] ->
               report
                 (timed (Path.show_module module_) (fun () ->
-                     Prover.diagnostics ~tell database solver module_))
+                     Prover.diagnostics ~record database solver module_))
           | errors -> report errors))
     checked;
   timed "saving the state" (fun () -> Option.iter Database.save_session session)

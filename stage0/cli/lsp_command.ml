@@ -137,8 +137,8 @@ let lsp_diagnostic encoding ~uri text (diagnostic : Diagnostic.t) =
              diagnostic.notes) );
     ]
 
-(* An obligation's state: where it is, what it is to show, and whether it
-   is shown. *)
+(* An obligation's state: where it is, what it is to show, whether it is
+   shown, and whether its proof trusts compiled code. *)
 let lsp_state encoding text (state : Prover.state) =
   Json.Object
     [
@@ -146,6 +146,7 @@ let lsp_state encoding text (state : Prover.state) =
       ("code", Json.String (Diagnostic.Code.name (Prover state.code)));
       ("shows", Json.String state.shows);
       ("proven", Json.Bool (state.failure = None));
+      ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]
 
 (* The diagnostics of each open file, by its URI as the client writes it,

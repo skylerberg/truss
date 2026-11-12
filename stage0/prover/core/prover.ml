@@ -287,18 +287,34 @@ let within database (key : Names.key) (span : span) =
    definition says what the operation is, so the second query means what
    the first does, and its answer is as sound. *)
 (* An obligation's answer: the solver's, or what running the code that
-   decides it gave, or that it ran past its time limit, or none yet, while
-   what it asks is untold. *)
-(* [Solved_hidden] is an answer that is not a proof, where the query with
-   the definitions of the callees whose bodies are hidden here proves. *)
+   decides it gave, or that it timed out, or none yet, while a response it
+   needs is pending. [Solved_hidden] is an answer that is not a proof,
+   where the query with the definitions of the callees whose bodies are
+   hidden here proves. *)
 type answer =
   | Solved of Solver.answer
   | Solved_hidden of Solver.answer
+  | Ran_true
   | Ran_false
-  | Ran_too_long
-  | Waiting_answer
+  | Run_timed_out
+  | Pending_answer
 
-type evaluated = Holds | Fails | Too_long
+let proven = function Solved Proven | Ran_true -> true | _ -> false
+
+(* A run of compiled code that decides part of a proof: a template's
+   check, or a call whose arguments are known. *)
+type run = Template_check of Translate.evaluation | Call of Translate.known_call
+
+(* What a run gave: an integer, or a [Bool] as 0 or 1; that it timed out;
+   or that it was not run, since its code cannot be built. *)
+type run_result = Returned of Z.t | Timed_out | Not_run
+
+(* The caller gives the evaluator, since the prover does not depend on
+   code generation. [code_key] changes exactly when what a run gives may,
+   and is [None] where the code cannot be built. *)
+type evaluator = { code_key : run -> string option; run : run -> run_result }
+
+let no_evaluator = { code_key = (fun _ -> None); run = (fun _ -> Not_run) }
 
 let bitwise_operations =
   [
@@ -407,46 +423,37 @@ let exactly (query : L.query) =
   | [] -> None
   | definitions -> Some { query with facts = query.facts @ definitions }
 
-(* Each obligation's answer. One that mentions the constants of [O(...)]
-   bounds is asked with each choice of a pair for every bound in turn, the
-   same choice for all of them, since a recursive call assumes the bound
-   with the constants it is shown with; the first choice that proves them
-   all is taken, and if none does, the answers are the first choice's. *)
-(* Running compiled code, which the caller gives, since the prover does
-   not depend on code generation: a template's check, and a call whose
-   arguments are known, whose result is a [Bool] as 0 or 1. *)
-type running = {
-  template : Translate.evaluation -> evaluated option;
-  call : Translate.known_call -> Z.t option;
-}
-
-let not_running = { template = (fun _ -> None); call = (fun _ -> None) }
-
 (* Which of an obligation's queries is asked: as it was made, or with its
    bitwise operations defined exactly, either of those without its
    callees' definitions, or with the definitions of the callees whose
    bodies are hidden here. *)
 type variant = Made | Exact | Alone | Alone_exact | Revealed
 
-(* What the world outside the prover says of a definition's proof: the
-   solver, of one of its obligations' queries, by the obligation's index,
-   the choice of constants for its bounds, the variant, and whether a
-   counterexample gives the locals too, which is [None] where that query
-   does not exist; and running code, of a template's check. A definition's
-   outcome is worked out from what it is told. *)
-type teller = {
+(* The oracles a definition's proof is decided by: the solver, of one of
+   its obligations' queries, by the obligation's index, the choice of
+   constants for its bounds, the variant, and whether a counterexample
+   gives the locals too; and the evaluator, of a template's check and of
+   the values of the known calls. A definition's outcome is derived from
+   their responses. *)
+type oracles = {
   solve :
-    index:int -> choice:(string * (Z.t * Z.t)) list -> variant:variant -> with_locals:bool -> said;
-  template : Translate.evaluation -> evaluated option;
+    index:int ->
+    choice:(string * (Z.t * Z.t)) list ->
+    variant:variant ->
+    with_locals:bool ->
+    solver_response;
+  check_template : Translate.evaluation -> run_result;
+  call : Translate.known_call -> Z.t option;
 }
 
-(* What the solver said of one query: its answer; nothing yet, so a search
-   that would ask more after it waits instead; or that the query does not
-   exist. *)
-and said = Said of Solver.answer | Untold | No_query
+(* The solver's response to one query: its answer; none yet, so a search
+   that would ask more after it stops there instead; or that the query does
+   not exist. *)
+and solver_response = Answered of Solver.answer | Unanswered | No_query
 
-(* What running code gives of the calls a query mentions, as facts, which
-   are only as true as the compiled code, which the prover trusts. *)
+(* The values of the calls a query mentions that running them gave, as
+   facts, which are only as true as the compiled code, which the prover
+   trusts. *)
 let given ~call (obligation : Translate.obligation) =
   List.filter_map
     (fun (known : Translate.known_call) ->
@@ -508,38 +515,43 @@ let variant_query ~call (obligation : Translate.obligation) choice variant =
   | Alone_exact -> Option.bind obligation.contracts_alone (fun query -> exactly (made (Some query)))
   | Revealed -> Some (made None)
 
-let answers (teller : teller) (obligations : Translate.obligation list) =
+(* Each obligation's answer. One that mentions the constants of [O(...)]
+   bounds is asked with each choice of a pair for every bound in turn, the
+   same choice for all of them, since a recursive call assumes the bound
+   with the constants it is shown with; the first choice that proves them
+   all is taken, and if none does, the answers are the first choice's. *)
+let answers (oracles : oracles) (obligations : Translate.obligation list) =
   let solve index (obligation : Translate.obligation) choice =
-    (* A clause running code decides is decided so, and the solver never
-       asked. *)
-    match Option.bind obligation.evaluation teller.template with
-    | Some Holds -> Solved Proven
-    | Some Fails -> Ran_false
-    | Some Too_long -> Ran_too_long
-    | None -> (
-        (* Each question is asked only once what it depends on is told:
-           an answer still untold stops the search, which goes on when it
-           is, rather than asking what the answer may make unneeded. *)
-        let ask variant ~with_locals = teller.solve ~index ~choice ~variant ~with_locals in
+    (* A clause that running code decides is decided so, and the solver is
+       never asked. *)
+    match Option.map oracles.check_template obligation.evaluation with
+    | Some (Returned value) -> if Z.equal value Z.zero then Ran_false else Ran_true
+    | Some Timed_out -> Run_timed_out
+    | Some Not_run | None -> (
+        (* Each question is asked only once what it depends on is
+           answered: a pending response stops the search, which goes on
+           once it is answered, rather than asking what the answer may make
+           unneeded. *)
+        let ask variant ~with_locals = oracles.solve ~index ~choice ~variant ~with_locals in
         let asked made exact =
           match ask made ~with_locals:false with
-          | Said Solver.Proven -> Some Solver.Proven
-          | Said first -> (
+          | Answered Solver.Proven -> Some Solver.Proven
+          | Answered first -> (
               match ask exact ~with_locals:false with
-              | Said answer -> Some answer
-              | Untold -> None
+              | Answered answer -> Some answer
+              | Unanswered -> None
               | No_query -> Some first)
-          | Untold -> None
+          | Unanswered -> None
           | No_query -> Some Solver.Out_of_steps
         in
         match (asked Made Exact, obligation.contracts_alone) with
-        | None, _ -> Waiting_answer
+        | None, _ -> Pending_answer
         | Some Solver.Out_of_steps, Some _ -> (
             (* Without its callees' definitions, a query is about their
                contracts alone, which can be enough where unfolding is too
                much for the solver. *)
             match asked Alone Alone_exact with
-            | None -> Waiting_answer
+            | None -> Pending_answer
             | Some Solver.Proven -> Solved Proven
             | Some _ -> Solved Out_of_steps)
         | Some (Solver.Counterexample _), _
@@ -548,10 +560,10 @@ let answers (teller : teller) (obligations : Translate.obligation list) =
                asked for only now, so that a query that proves keeps its
                key. *)
             match ask Made ~with_locals:true with
-            | Said (Solver.Counterexample _ as answer) -> Solved answer
-            | Untold -> Waiting_answer
-            | Said _ | No_query -> (
-                match asked Made Exact with Some answer -> Solved answer | None -> Waiting_answer))
+            | Answered (Solver.Counterexample _ as answer) -> Solved answer
+            | Unanswered -> Pending_answer
+            | Answered _ | No_query -> (
+                match asked Made Exact with Some answer -> Solved answer | None -> Pending_answer))
         | Some answer, _ -> Solved answer)
   in
   (* Where an obligation is not proven, whether seeing the bodies hidden
@@ -560,10 +572,10 @@ let answers (teller : teller) (obligations : Translate.obligation list) =
     match solve index obligation choice with
     | Solved ((Solver.Counterexample _ | Solver.Out_of_steps) as answer)
       when obligation.hidden <> [] -> (
-        match teller.solve ~index ~choice ~variant:Revealed ~with_locals:false with
-        | Said Solver.Proven -> Solved_hidden answer
-        | Said _ | No_query -> Solved answer
-        | Untold -> Waiting_answer)
+        match oracles.solve ~index ~choice ~variant:Revealed ~with_locals:false with
+        | Answered Solver.Proven -> Solved_hidden answer
+        | Answered _ | No_query -> Solved answer
+        | Unanswered -> Pending_answer)
     | answer -> answer
   in
   let indexed = List.mapi (fun index obligation -> (index, obligation)) obligations in
@@ -571,8 +583,8 @@ let answers (teller : teller) (obligations : Translate.obligation list) =
     List.filter (fun (_, (obligation : Translate.obligation)) -> obligation.constants <> []) indexed
   in
   let all_choices = choices obligations in
-  (* The first choice that proves every bound, tried in order: one whose
-     answers are untold stops the search there, as a waiting answer does. *)
+  (* The first choice that proves every bound, tried in order: a choice
+     with a pending answer stops the search there. *)
   let chosen =
     let rec first = function
       | [] -> List.hd all_choices
@@ -580,24 +592,26 @@ let answers (teller : teller) (obligations : Translate.obligation list) =
           let answers =
             List.map (fun (index, obligation) -> solve index obligation choice) bounded
           in
-          if List.for_all (fun answer -> answer = Solved Proven) answers then choice
-          else if List.mem Waiting_answer answers then choice
+          if List.for_all (fun answer -> proven answer) answers then choice
+          else if List.mem Pending_answer answers then choice
           else first rest
     in
     first all_choices
   in
   List.map (fun (index, obligation) -> (obligation, solve index obligation chosen)) indexed
 
-(* An obligation's state: where it is, what it asks, and, where it was not
-   shown, the diagnostic that says why. *)
+(* An obligation's state: where it is, what it asks, where it was not
+   shown, the diagnostic that says why, and whether its proof trusts
+   compiled code. *)
 type state = {
   code : Diagnostic.Code.prover;
   span : Diagnostic.span;
   shows : string;
   failure : Diagnostic.t option;
+  trusts_compiled_code : bool;
 }
 
-let definition_states teller database (key : Names.key) =
+let definition_states oracles database (key : Names.key) =
   let source_span span = source_span (within database key span) in
   match Query.demand database proof key with
   | Not_proven_here -> []
@@ -612,6 +626,7 @@ let definition_states teller database (key : Names.key) =
             span = source_span span;
             shows = message;
             failure = Some (diagnostic Unsupported (source_span span) message);
+            trusts_compiled_code = false;
           },
           None );
       ]
@@ -667,9 +682,9 @@ let definition_states teller database (key : Names.key) =
               shows = obligation.message;
               failure =
                 (match answer with
-                | Solved Proven | Solved_hidden _ | Waiting_answer -> None
+                | Solved Proven | Solved_hidden _ | Ran_true | Pending_answer -> None
                 | Ran_false -> failed " Running it on this template's text gives `false`."
-                | Ran_too_long ->
+                | Run_timed_out ->
                     failed
                       " Running it on this template's text took longer than the time limit, so it \
                        is not known."
@@ -685,39 +700,62 @@ let definition_states teller database (key : Names.key) =
                             by, so an `assert` that names the term it is needed for may be enough."
                          else "")
                       ^ hidden));
+              trusts_compiled_code =
+                (match answer with
+                | Ran_true -> true
+                | Solved Proven -> given ~call:oracles.call obligation <> []
+                | _ -> false);
             },
             obligation.cited ))
-        (answers teller outcome.obligations)
+        (answers oracles outcome.obligations)
 
-(* What the prover asks the world outside, and what it was told, kept by
-   what was asked. *)
-type asked =
-  | Solve of Solver.request
-  | Run_template of Translate.evaluation
-  | Run_call of Translate.known_call
+(* A request to an oracle, and the oracle's response, kept by the
+   request's key. A run's response holds the key of the code that ran, so
+   the driver can tell when the code has changed since. *)
+type oracle_request = Solve of Solver.request | Run of run
 
-type told =
-  | Solver_said of Solver.canonical
-  | Template_ran of evaluated option
-  | Call_ran of Z.t option
+type oracle_response =
+  | Solver_response of Solver.canonical
+  | Run_response of { code_key : string option; result : run_result }
 
-let asked_key = function
+let request_key = function
   | Solve request -> "solve " ^ Solver.request_key request
-  | Run_template evaluation ->
+  | Run (Template_check evaluation) ->
       "template " ^ Digest.to_hex (Digest.string (Marshal.to_string evaluation []))
-  | Run_call call -> "call " ^ Digest.to_hex (Digest.string (Marshal.to_string call []))
+  | Run (Call call) -> "call " ^ Digest.to_hex (Digest.string (Marshal.to_string call []))
 
-let told : (string, told) Query.input = Query.input ~name:"told" ~show:Fun.id ()
+let oracle_response : (string, oracle_response) Query.input =
+  Query.input ~name:"oracle_response" ~show:Fun.id ()
 
-(* A definition's outcome: its states, once everything they ask is told,
-   or what is still to be asked. *)
-type outcome = Decided of (state * (Names.key * Syntax.span) option) list | Waiting of asked list
+(* A definition's outcome: its states, once every response they need is
+   recorded, or the requests still pending. *)
+type outcome =
+  | Decided of (state * (Names.key * Syntax.span) option) list
+  | Pending of oracle_request list
 
-(* What running code said of a call, where it was told. *)
-let call_told database call =
-  match Query.find database told (asked_key (Run_call call)) with
-  | Some (Call_ran value) -> value
-  | _ -> None
+let run_result database run =
+  match Query.find database oracle_response (request_key (Run run)) with
+  | Some (Run_response response) -> Some response.result
+  | Some (Solver_response _) | None -> None
+
+let call_value database call =
+  match run_result database (Call call) with Some (Returned value) -> Some value | _ -> None
+
+(* The runs a definition's proof needs: a saved result, so that the driver
+   finds them in a later process without translating the definition. *)
+let runs =
+  Query.query ~name:"proof_runs" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
+    (fun database key ->
+      match Query.demand database proof key with
+      | Obligations outcome ->
+          List.sort_uniq compare
+            (List.concat_map
+               (fun (obligation : Translate.obligation) ->
+                 Option.to_list
+                   (Option.map (fun evaluation -> Template_check evaluation) obligation.evaluation)
+                 @ List.map (fun call -> Call call) obligation.known_calls)
+               outcome.obligations)
+      | Not_proven_here | Unsupported _ -> [])
 
 type question = {
   definition : Names.key;
@@ -731,8 +769,8 @@ let show_question question =
   Printf.sprintf "%s #%d" (Names.show_key question.definition) question.index
 
 (* One query an obligation may ask, rendered for the solver: a result of
-   its own, found current when only what the solver said changed, so a
-   definition's outcome is worked out again without rendering anything. *)
+   its own, found current when only the solver's responses changed, so a
+   definition's outcome is derived again without rendering anything. *)
 let question_request =
   Query.query ~name:"question_request" ~phase:Phases.verdicts ~saved:true ~show:show_question
     (fun database question ->
@@ -770,83 +808,95 @@ let question_request =
               in
               Option.map
                 (fun query -> Solver.request ~values ~terms query)
-                (variant_query ~call:(call_told database) obligation question.choice
+                (variant_query ~call:(call_value database) obligation question.choice
                    question.variant)
           | None -> None)
       | Not_proven_here | Unsupported _ -> None)
 
-(* Each definition's outcome, from its obligations and what the world
-   outside was told of them: a saved result, so a definition whose reads have
-   not changed is neither translated nor told anything again. What is not
-   told yet is asked for, and the outcome waits for it. What running code
-   gives goes into the solver's queries, so while any of it is untold, only
-   it is asked: a query asked without it would be one no later round asks. *)
+(* Each definition's outcome, derived from its obligations and the oracles'
+   responses: a saved result, so a definition whose reads have not changed
+   is neither translated nor asked anything again. A request whose response
+   is not recorded is pending, and the outcome waits for it. The values of
+   runs go into the solver's queries, so while any run is pending, only
+   runs are requested: a query asked without their values would be one no
+   later round asks. *)
 let outcome =
   Query.query ~name:"proof_outcome" ~phase:Phases.verdicts ~saved:true ~show:Names.show_key
     (fun database key ->
-      let running_untold = ref [] and solver_untold = ref [] in
-      let tell asked placeholder read =
-        match Query.find database told (asked_key asked) with
-        | Some said -> read said
-        | None ->
-            let waiting = match asked with Solve _ -> solver_untold | _ -> running_untold in
-            if not (List.mem asked !waiting) then waiting := asked :: !waiting;
-            placeholder
-      in
-      (match Query.demand database proof key with
-      | Obligations outcome ->
-          List.iter
-            (fun (obligation : Translate.obligation) ->
-              List.iter
-                (fun call -> ignore (tell (Run_call call) () (fun _ -> ())))
-                obligation.known_calls)
-            outcome.obligations
-      | Not_proven_here | Unsupported _ -> ());
-      if !running_untold <> [] then Waiting (List.rev !running_untold)
-      else
-        let teller =
-          {
-            solve =
-              (fun ~index ~choice ~variant ~with_locals ->
-                match
-                  Query.demand database question_request
-                    { definition = key; index; choice; variant; with_locals }
-                with
-                | None -> No_query
-                | Some request ->
-                    tell (Solve request) Untold (function
-                      | Solver_said canonical -> Said (Solver.read request canonical)
-                      | _ -> Untold));
-            template =
-              (fun evaluation ->
-                tell (Run_template evaluation) None (function Template_ran ran -> ran | _ -> None));
-          }
-        in
-        let states = definition_states teller database key in
-        match (!running_untold, !solver_untold) with
-        | [], [] -> Decided states
-        | [], asked | asked, _ -> Waiting (List.rev asked))
+      match
+        List.filter (fun run -> run_result database run = None) (Query.demand database runs key)
+      with
+      | _ :: _ as pending -> Pending (List.map (fun run -> Run run) pending)
+      | [] -> (
+          let pending = ref [] in
+          let oracles =
+            {
+              solve =
+                (fun ~index ~choice ~variant ~with_locals ->
+                  match
+                    Query.demand database question_request
+                      { definition = key; index; choice; variant; with_locals }
+                  with
+                  | None -> No_query
+                  | Some request -> (
+                      match Query.find database oracle_response (request_key (Solve request)) with
+                      | Some (Solver_response canonical) -> Answered (Solver.read request canonical)
+                      | Some (Run_response _) | None ->
+                          if not (List.mem (Solve request) !pending) then
+                            pending := Solve request :: !pending;
+                          Unanswered));
+              check_template =
+                (fun evaluation ->
+                  Option.value (run_result database (Template_check evaluation)) ~default:Not_run);
+              call = call_value database;
+            }
+          in
+          let states = definition_states oracles database key in
+          match !pending with [] -> Decided states | pending -> Pending (List.rev pending)))
 
-(* Tells each input what the world outside says: the solver, several at
-   once, and running code. The driver sets them, so its database can save
-   them with its state. *)
-let told_of ~(running : running) solver asked =
-  let requests = List.filter_map (function Solve request -> Some request | _ -> None) asked in
-  let answers = List.combine requests (Solver.ask_all solver requests) in
+(* A run's response: its result, under the key of the code that ran. *)
+let run_response (evaluator : evaluator) run code_key =
+  Run_response
+    { code_key; result = (match code_key with None -> Not_run | Some _ -> evaluator.run run) }
+
+(* The oracles' responses to the requests, by request key: the solver's,
+   several at once, and the evaluator's. The driver records them, so its
+   database can save them with its state. *)
+let responses (evaluator : evaluator) solver requests =
+  let solver_requests =
+    List.filter_map (function Solve request -> Some request | Run _ -> None) requests
+  in
+  let answers = List.combine solver_requests (Solver.ask_all solver solver_requests) in
   List.map
-    (fun asked ->
-      ( asked_key asked,
-        match asked with
-        | Solve request -> Solver_said (List.assq request answers)
-        | Run_template evaluation -> Template_ran (running.template evaluation)
-        | Run_call call -> Call_ran (running.call call) ))
-    asked
+    (fun request ->
+      ( request_key request,
+        match request with
+        | Solve solver_request -> Solver_response (List.assq solver_request answers)
+        | Run run -> run_response evaluator run (evaluator.code_key run) ))
+    requests
 
-(* Each definition of the modules decided: their outcomes are asked for
-   together, what they wait for is asked of the world outside together, and
-   so on until none waits, which takes a round or two, since an obligation
-   asks again only after an answer such as running out of steps. *)
-let solve_ahead ?(running = not_running) ~tell database solver modules =
+(* The responses of the definitions' runs whose code has changed since they
+   ran, or that timed out, run again. The code a run reaches is not among
+   an outcome's reads, so without this a callee's new body would leave its
+   callers proven by its old result. A timeout is not kept, as code
+   generation keeps no failed run, since the same run can finish on a less
+   loaded machine. *)
+let rerun_changed (evaluator : evaluator) database keys =
+  List.sort_uniq compare (List.concat_map (Query.demand database runs) keys)
+  |> List.filter_map (fun run ->
+      let code_key = evaluator.code_key run in
+      match Query.find database oracle_response (request_key (Run run)) with
+      | Some (Run_response recorded)
+        when recorded.code_key = code_key && recorded.result <> Timed_out ->
+          None
+      | Some _ | None -> Some (request_key (Run run), run_response evaluator run code_key))
+
+(* Each definition of the modules decided: the runs whose code changed are
+   run again, the definitions' outcomes are asked for together, their
+   pending requests are sent to the oracles together, and so on until none
+   is pending, which takes a round or two, since an obligation asks again
+   only after an answer such as running out of steps. *)
+let solve_ahead ?(evaluator = no_evaluator) ~record database solver modules =
   let keys =
     List.concat_map
       (fun module_ ->
@@ -857,18 +907,19 @@ let solve_ahead ?(running = not_running) ~tell database solver modules =
           (Query.demand database Names.declarations module_))
       modules
   in
+  (match rerun_changed evaluator database keys with [] -> () | changed -> record changed);
   let rec round keys =
-    let waiting =
+    let pending =
       List.filter_map
         (fun key ->
           match Query.demand database outcome key with
           | Decided _ -> None
-          | Waiting asked -> Some (key, asked))
+          | Pending requests -> Some (key, requests))
         keys
     in
-    if waiting <> [] then begin
-      tell (told_of ~running solver (List.sort_uniq compare (List.concat_map snd waiting)));
-      round (List.map fst waiting)
+    if pending <> [] then begin
+      record (responses evaluator solver (List.sort_uniq compare (List.concat_map snd pending)));
+      round (List.map fst pending)
     end
   in
   round keys
@@ -876,12 +927,12 @@ let solve_ahead ?(running = not_running) ~tell database solver modules =
 let decided database key =
   match Query.demand database outcome key with
   | Decided states -> states
-  | Waiting _ -> Compiler_bug.bug ~stage:"Prover" "an outcome is still waiting once decided"
+  | Pending _ -> Compiler_bug.bug ~stage:"Prover" "an outcome is still pending once decided"
 
 (* Each definition's states, in the file's offsets. A failure of a clause
    that another definition of the file states has a note at that clause. *)
-let moved_states ?(running = not_running) ~tell database solver module_ =
-  solve_ahead ~running ~tell database solver [ module_ ];
+let moved_states ?evaluator ~record database solver module_ =
+  solve_ahead ?evaluator ~record database solver [ module_ ];
   List.filter_map
     (fun declaration ->
       let key = Names.key_of declaration in
@@ -947,14 +998,14 @@ let in_order list =
       compare (left.span, left.code) (right.span, right.code))
     list
 
-let states ?running ~tell database solver module_ =
-  List.concat (moved_states ?running ~tell database solver module_)
+let states ?evaluator ~record database solver module_ =
+  List.concat (moved_states ?evaluator ~record database solver module_)
   |> List.sort (fun left right -> compare (left.span, left.code) (right.span, right.code))
 
 (* The failures among the states. The same failure on another path of one
    definition, as a second index into the same list with the same index
    is, is reported once. *)
-let diagnostics ?running ~tell database solver module_ =
+let diagnostics ?evaluator ~record database solver module_ =
   List.concat_map
     (fun states ->
       List.fold_left
@@ -965,5 +1016,5 @@ let diagnostics ?running ~tell database solver module_ =
           | _ -> (reported, diagnostics))
         ([], []) states
       |> snd)
-    (moved_states ?running ~tell database solver module_)
+    (moved_states ?evaluator ~record database solver module_)
   |> in_order

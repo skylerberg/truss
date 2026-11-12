@@ -9,23 +9,26 @@ let solver =
     | Ok solver -> solver
     | Error message -> Project.cannot_run "%s" message)
 
-(* Running compiled code, through the compiler that builds programs, made
-   only if a proof asks for it, with results kept as test results are. *)
-let running (project : Project.t) =
-  Running.through ~results:(Compiler.test_results ()) (lazy (Compiler.create project Development))
+(* The evaluator, through the compiler that builds programs, made only if
+   a proof asks for a run, with results kept as test results are. *)
+let evaluator (project : Project.t) =
+  Evaluator.of_compiler ~results:(Compiler.test_results ())
+    (lazy (Compiler.create project Development))
 
 (* The proofs of each of the modules, by module, with every module's
    queries solved first, together: its diagnostics, and the state of each
    of its obligations, which a language server shows. *)
 let checked (project : Project.t) modules =
-  let solver = Lazy.force solver and running = running project in
-  let tell answers =
-    List.iter (fun (key, told) -> Database.set project.session Prover.told key told) answers
+  let solver = Lazy.force solver and evaluator = evaluator project in
+  let record responses =
+    List.iter
+      (fun (key, response) -> Database.set project.session Prover.oracle_response key response)
+      responses
   in
-  Prover.solve_ahead ~running ~tell project.context solver modules;
+  Prover.solve_ahead ~evaluator ~record project.context solver modules;
   fun module_ ->
-    ( Prover.diagnostics ~running ~tell project.context solver module_,
-      Prover.states ~running ~tell project.context solver module_ )
+    ( Prover.diagnostics ~evaluator ~record project.context solver module_,
+      Prover.states ~evaluator ~record project.context solver module_ )
 
 let diagnostics (project : Project.t) modules =
   let checked = checked project modules in

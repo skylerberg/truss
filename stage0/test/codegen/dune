@@ -80,7 +80,7 @@
   compile
   type_checker
   prover
-  running
+  evaluator
   solver
   documents)
  (deps
