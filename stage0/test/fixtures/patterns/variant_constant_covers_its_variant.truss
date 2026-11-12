@@ -5,7 +5,7 @@ type Color =
 
 let favorite: Color = Color.Red
 
-fn f(color: Color) -> Int64 {
+fn run_example(color: Color) -> Int64 {
   match color {
     favorite => 1
     Green => 2

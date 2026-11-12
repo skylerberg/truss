@@ -1,4 +1,4 @@
-fn f() -> Slice[Int64] {
+fn run_example() -> Slice[Int64] {
   let items: List[Int64] = [1, 2, 3]
   items[0..2]
 }

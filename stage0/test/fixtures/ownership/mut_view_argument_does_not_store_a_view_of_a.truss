@@ -1,4 +1,4 @@
-fn f(bytes: List[UInt8]) -> USize {
+fn run_example(bytes: List[UInt8]) -> USize {
   var reader = Reader(bytes: bytes[..], position: 0)
   var buffer: List[UInt8] = []
   let first = mut reader.read(mut buffer, limit: 1)

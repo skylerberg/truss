@@ -72,7 +72,12 @@ let () =
             result = Written (at 0);
           }
       in
-      let four = Record (List.map (fun name -> field name int64) [ "a"; "b"; "c"; "d" ]) in
+      let four =
+        Record
+          (List.map
+             (fun name -> field name int64)
+             [ "first_value"; "second_value"; "third_value"; "fourth_value" ])
+      in
       expect_bug ~saying:"writes its result to local 0, which it is also given" (fun () ->
           Verify.instance
             (shape_env ~extra:[ ("Quad", four) ] ())
@@ -121,7 +126,7 @@ let () =
     ~saying:"a lambda in a yielding method that is pulled"
     Fixtures.Failure.lambda_in_a_yielding_method_that_is_pulled_is;
   test "a compiler bug says which instance was being lowered" (fun () ->
-      let _, compile = load "type Point(x: Int64)\n" in
+      let _, compile = load "type Point(first_number: Int64)\n" in
       let not_code =
         Instance.Code { path = Top { module_ = example; name = "Point" }; type_arguments = [] }
       in

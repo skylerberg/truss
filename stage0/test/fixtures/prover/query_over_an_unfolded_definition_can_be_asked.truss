@@ -6,7 +6,7 @@ fn halved(value: Int64) -> Int64
   value / 2
 }
 
-fn f(value: Int64) -> Int64
+fn run_example(value: Int64) -> Int64
   requires value >= 0
   ensures result <= value
   cost time O(1)

@@ -1,6 +1,6 @@
 type Pair2(first: Int64, second: Int64)
 
-fn f(pair: Pair2) -> Int64 {
+fn run_example(pair: Pair2) -> Int64 {
   let (first, second) = pair
   first
 }

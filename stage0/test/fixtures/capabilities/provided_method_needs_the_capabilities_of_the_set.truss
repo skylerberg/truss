@@ -1,4 +1,4 @@
-fn f() {
+fn run_example() {
   var gauge = Gauge(last: 0)
   mut gauge.skip()
 }

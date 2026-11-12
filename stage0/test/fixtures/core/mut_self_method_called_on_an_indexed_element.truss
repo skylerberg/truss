@@ -4,6 +4,6 @@ fn Worker.reset(mut self) {
   self.count = 0
 }
 
-fn g(workers: mut List[Worker], index: USize) {
+fn second_example(workers: mut List[Worker], index: USize) {
   mut workers[index].reset()
 }

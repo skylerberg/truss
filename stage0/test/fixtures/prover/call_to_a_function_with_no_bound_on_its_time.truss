@@ -1,11 +1,11 @@
-fn g() -> Int64
+fn second_example() -> Int64
   cost time finite
 {
   0
 }
 
-fn f() -> Int64
+fn run_example() -> Int64
   cost time O(1)
 {
-  g()
+  second_example()
 }

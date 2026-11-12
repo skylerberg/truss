@@ -1,4 +1,4 @@
-fn f(holder: mut Holder) -> Result[USize, USize]
+fn run_example(holder: mut Holder) -> Result[USize, USize]
   uses Tasks, Clock
 {
   concurrent {

@@ -1,11 +1,11 @@
-fn f() -> Int64 {
-  var n: Int64 = 0
+fn run_example() -> Int64 {
+  var limit_count: Int64 = 0
   var other: Int64 = 0
-  match n {
+  match limit_count {
     0 if bump(mut other) => 1
     0 => {
-      n = 5
-      n + other
+      limit_count = 5
+      limit_count + other
     }
     _ => 3
   }

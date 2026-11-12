@@ -1,3 +1,3 @@
-fn f() {
+fn run_example() {
   let large: Float32 = 3.5e38
 }

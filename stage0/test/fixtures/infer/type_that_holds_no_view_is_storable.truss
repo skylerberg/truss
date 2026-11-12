@@ -1,4 +1,4 @@
-fn f[Element: Storable](names: own List[String], element: own Element) {
+fn run_example[Element: Storable](names: own List[String], element: own Element) {
   keep(5)
   keep(own names)
   keep(Boxed(value: "a".copy()))

@@ -1,5 +1,5 @@
 type UserId(number: UInt64)
 
-fn f() -> UserId {
+fn run_example() -> UserId {
   UserId(42)
 }

@@ -1,4 +1,4 @@
-fn f(ready: Bool) {
+fn run_example(ready: Bool) {
   var total = 0
   parallel for item in 0..10 {
     if ready {

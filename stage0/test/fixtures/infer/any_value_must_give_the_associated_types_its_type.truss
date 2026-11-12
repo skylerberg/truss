@@ -1,4 +1,4 @@
-fn f(numbers: own Numbers) -> String {
+fn run_example(numbers: own Numbers) -> String {
   let source: any Source[Item = String] = any numbers
   source.first()
 }

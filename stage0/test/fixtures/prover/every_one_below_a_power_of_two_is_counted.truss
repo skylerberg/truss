@@ -1,4 +1,4 @@
-theorem t(word: UInt64, bits: USize)
+theorem term_value(word: UInt64, bits: USize)
   requires bits <= 64
   requires bits > 0
   requires word + 1 == power(2, bits)

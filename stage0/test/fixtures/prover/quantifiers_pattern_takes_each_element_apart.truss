@@ -1,6 +1,6 @@
 type Span(low: Int64, high: Int64)
 
-fn f(spans: List[Span]) -> Bool
+fn run_example(spans: List[Span]) -> Bool
   requires forall (low, high) in spans => low <= high
   ensures result
 {

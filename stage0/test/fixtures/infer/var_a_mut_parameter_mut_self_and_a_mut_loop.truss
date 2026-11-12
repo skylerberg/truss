@@ -4,7 +4,7 @@ fn Counter.add(mut self) {
   mut self.counts.push(1)
 }
 
-fn f(rows: mut List[List[Int64]]) {
+fn run_example(rows: mut List[List[Int64]]) {
   var items: List[Int64] = [1]
   mut items.push(2)
   mut rows[0].push(3)

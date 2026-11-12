@@ -16,6 +16,6 @@ impl Second for Counter {
   fn label(own self) -> Int64 { todo }
 }
 
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   Counter(count: 3).label()
 }

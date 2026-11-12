@@ -2,8 +2,8 @@ type Shape =
   | Circle(radius: Int64)
   | Rectangle(width: Int64, height: Int64)
 
-fn f(make: fn(own Int64, own Int64) -> Shape) {}
+fn run_example(make: fn(own Int64, own Int64) -> Shape) {}
 
-fn g() {
-  f(Shape.Rectangle)
+fn second_example() {
+  run_example(Shape.Rectangle)
 }

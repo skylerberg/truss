@@ -1,5 +1,5 @@
-use a::b
+use first_value::second_value
 
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   1
 }

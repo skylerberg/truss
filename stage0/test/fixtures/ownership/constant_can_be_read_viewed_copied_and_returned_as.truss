@@ -4,7 +4,7 @@ fn first() -> Slice[Int64] {
   names[0..1]
 }
 
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   look(names)
   keep(names.copy())
   let view = names

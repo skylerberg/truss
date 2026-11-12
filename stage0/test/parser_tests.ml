@@ -17,7 +17,7 @@ let () =
       definition "fn first()\n  uses Clock\n{\n  todo\n}" "(fn first () (uses Clock) (block todo))");
   test "use lines are kept apart from definitions" (fun () ->
       let file, diagnostics =
-        parse "use standard::json\nuse weather::forecast::hourly\nfn f() {}"
+        parse "use standard::json\nuse weather::forecast::hourly\nfn run_example() {}"
       in
       no_diagnostics "" diagnostics;
       if
@@ -25,13 +25,17 @@ let () =
         <> [ "standard::json"; "weather::forecast::hourly" ]
       then fail "wrong use lines");
   test "a use line after a definition moves up" (fun () ->
-      error "use a::b\n\nfn f() {}\nuse c::d\n" ~code:Use_after_definition ~at:"use c::d"
-        ~fixed:"use a::b\nuse c::d\n\nfn f() {}\n");
+      error "use first_value::second_value\n\nfn run_example() {}\nuse third_value::fourth_value\n"
+        ~code:Use_after_definition ~at:"use third_value::fourth_value"
+        ~fixed:
+          "use first_value::second_value\nuse third_value::fourth_value\n\nfn run_example() {}\n");
   test "a use line after the first definition moves above it" (fun () ->
-      error "fn f() {}\nuse c::d\n" ~code:Use_after_definition ~at:"use c::d"
-        ~fixed:"use c::d\nfn f() {}\n");
+      error "fn run_example() {}\nuse third_value::fourth_value\n" ~code:Use_after_definition
+        ~at:"use third_value::fourth_value"
+        ~fixed:"use third_value::fourth_value\nfn run_example() {}\n");
   test "a statement at the top level is one error" (fun () ->
-      error "fn f() {}\nx = 1\nfn g() {}" ~code:Statement_at_top_level ~at:"x");
+      error "fn run_example() {}\nfirst_number = 1\nfn second_example() {}"
+        ~code:Statement_at_top_level ~at:"first_number");
   test "a definition records where the parser recovered" (fun () ->
       let recovered text =
         match (fst (parse text)).definitions with
@@ -41,14 +45,19 @@ let () =
               item.value.recovered
         | _ -> [ "wrong definitions" ]
       in
-      if recovered "fn f() {\n  x as Int64\n}" <> [ "as" ] then fail "the habit is not recorded";
-      if recovered "fn f() {\n  let x = (1 +\n}" = [] then
+      if recovered "fn run_example() {\n  first_number as Int64\n}" <> [ "as" ] then
+        fail "the habit is not recorded";
+      if recovered "fn run_example() {\n  let first_number = (1 +\n}" = [] then
         fail "the inserted closer is not recorded";
-      if recovered "fn f() {\n  assert true\n}" <> [] then
+      if recovered "fn run_example() {\n  assert true\n}" <> [] then
         fail "a rule checked after parsing is recorded";
-      if recovered "fn f(x: Int64) -> Int64" = [] then fail "the missing body is not recorded");
+      if recovered "fn run_example(first_number: Int64) -> Int64" = [] then
+        fail "the missing body is not recorded");
   test "a missing body's recovery is where the body starts" (fun () ->
-      match (fst (parse "fn f(x: Int64) -> Int64\nfn g() {}")).definitions with
+      match
+        (fst (parse "fn run_example(first_number: Int64) -> Int64\nfn second_example() {}"))
+          .definitions
+      with
       | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
           if
             List.map (fun (span : Syntax.span) -> (span.start, span.stop)) recovered
@@ -56,7 +65,10 @@ let () =
           then fail "recovered at the wrong place"
       | _ -> fail "the signature was not kept");
   test "a recovery at the end of a body lies in the body" (fun () ->
-      match (fst (parse "fn f() {\n  let x = (1 +\nfn g() {}\n")).definitions with
+      match
+        (fst (parse "fn run_example() {\n  let first_number = (1 +\nfn second_example() {}\n"))
+          .definitions
+      with
       | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
           if
             not
@@ -68,32 +80,38 @@ let () =
           then fail "no recovery inside the body"
       | _ -> fail "wrong definitions");
   test "a failed clause at the end lies in the signature" (fun () ->
-      match (fst (parse "fn f() requires")).definitions with
+      match (fst (parse "fn run_example() requires")).definitions with
       | { value = { kind = Function { body; _ }; recovered; _ }; _ } :: _ ->
           if not (List.exists (fun (span : Syntax.span) -> span.start < body.span.start) recovered)
           then fail "no recovery in the signature"
       | _ -> fail "wrong definitions");
   test "a definition whose header did not parse keeps its keyword and name" (fun () ->
-      let file, _ = parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn f() {}" in
+      let file, _ =
+        parse "fn List[Element].sort[](mut self) {}\ntype Point = 1\nfn run_example() {}"
+      in
       let printed = Syntax_print.definitions file.definitions in
-      if printed <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn f () (block))" ]
+      if
+        printed
+        <> [ "(error fn List[Element].sort)"; "(error type Point)"; "(fn run_example () (block))" ]
       then fail "got [%s]" (String.concat "; " printed));
   test "a function without a body keeps its signature" (fun () ->
-      let file, _ = parse "fn f(x: Int64) -> Int64\nfn g() {}" in
+      let file, _ = parse "fn run_example(first_number: Int64) -> Int64\nfn second_example() {}" in
       match file.definitions with
       | first :: _ ->
-          if Syntax_print.definition first.value <> "(fn f ((x: Int64)) -> Int64 (block error))"
+          if
+            Syntax_print.definition first.value
+            <> "(fn run_example ((first_number: Int64)) -> Int64 (block error))"
           then fail "got %s" (Syntax_print.definition first.value)
       | [] -> fail "no definitions");
   test "the definition after a broken one parses" (fun () ->
-      let file, diagnostics = parse "fn f() -> {\n}\nfn g() {}" in
+      let file, diagnostics = parse "fn run_example() -> {\n}\nfn second_example() {}" in
       if List.length diagnostics <> 1 then
         fail "expected one diagnostic, got [%s]" (String.concat "; " (codes diagnostics));
       match file.definitions with
       | [ _; { value = { kind = Function _; _ }; _ } ] -> ()
       | _ -> fail "g did not parse");
   test "a missing } does not swallow the next definition" (fun () ->
-      let file, diagnostics = parse "fn f() {\n  todo\nfn g() {}" in
+      let file, diagnostics = parse "fn run_example() {\n  todo\nfn second_example() {}" in
       if codes diagnostics <> [ "lexer.unclosed_bracket" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics));
       if List.length file.definitions <> 2 then fail "expected two definitions")
@@ -102,27 +120,31 @@ let () =
 
 let () =
   test "spans are relative to the definition" (fun () ->
-      match (fst (parse "fn f() {}\n\nfn g() {}")).definitions with
+      match (fst (parse "fn run_example() {}\n\nfn second_example() {}")).definitions with
       | [ _; second ] ->
-          if second.base <> 11 then fail "base %d" second.base;
-          if second.value.span.start <> 0 || second.value.span.stop <> 9 then fail "span";
-          if second.text <> "fn g() {}" then fail "text %S" second.text;
+          if second.base <> 21 then fail "base %d" second.base;
+          if second.value.span.start <> 0 || second.value.span.stop <> 22 then fail "span";
+          if second.text <> "fn second_example() {}" then fail "text %S" second.text;
           if not second.blank_line_before then fail "blank line"
       | _ -> fail "expected two definitions");
   test "moving a definition changes nothing in its tree" (fun () ->
       let text =
-        "fn f(items: List[Int64]) -> Int64 {\n\
+        "fn run_example(items: List[Int64]) -> Int64 {\n\
         \  let total = \"${items.length()}\"\n\
         \  items[0] + 1\n\
          }"
       in
       match
-        ((fst (parse text)).definitions, (fst (parse ("fn g() {}\n\n\n" ^ text))).definitions)
+        ( (fst (parse text)).definitions,
+          (fst (parse ("fn second_example() {}\n\n\n" ^ text))).definitions )
       with
       | [ alone ], [ _; moved ] -> if alone.value <> moved.value then fail "the trees differ"
       | _ -> fail "wrong definitions");
   test "interpolations are parsed with the definition's base" (fun () ->
-      match (fst (parse "fn g() {}\nfn f() { \"${x + 1}\" }")).definitions with
+      match
+        (fst (parse "fn second_example() {}\nfn run_example() { \"${first_number + 1}\" }"))
+          .definitions
+      with
       | [
        _;
        {
@@ -149,10 +171,10 @@ let () =
          _;
        };
       ] ->
-          if value.span.start <> 12 then fail "interpolation span %d" value.span.start
+          if value.span.start <> 22 then fail "interpolation span %d" value.span.start
       | _ -> fail "wrong tree");
   test "nesting deeper than the limit is one error" (fun () ->
-      let text = "fn f() { " ^ String.make 300 '(' ^ "1" ^ String.make 300 ')' ^ " }" in
+      let text = "fn run_example() { " ^ String.make 300 '(' ^ "1" ^ String.make 300 ')' ^ " }" in
       if codes (snd (parse text)) <> [ "parser.nesting_too_deep" ] then
         fail "got [%s]" (String.concat "; " (codes (snd (parse text)))))
 
@@ -160,29 +182,31 @@ let () =
   let deep text = List.filter (( = ) "parser.nesting_too_deep") (codes (snd (parse text))) in
   test "nested echo counts toward the limit" (fun () ->
       let text =
-        "fn f() {\n  let x = " ^ String.concat "" (List.init 300 (fun _ -> "echo ")) ^ "1\n}"
+        "fn run_example() {\n  let first_number = "
+        ^ String.concat "" (List.init 300 (fun _ -> "echo "))
+        ^ "1\n}"
       in
       if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
   test "nested if counts toward the limit" (fun () ->
       let text =
-        "fn f() {\n  let x = "
+        "fn run_example() {\n  let first_number = "
         ^ String.concat "" (List.init 300 (fun _ -> "if "))
-        ^ "x"
+        ^ "first_number"
         ^ String.concat "" (List.init 300 (fun _ -> " {}"))
         ^ "\n}"
       in
       if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
   test "nested loop bodies count toward the limit" (fun () ->
       let text =
-        "fn f() {\n"
-        ^ String.concat "" (List.init 300 (fun _ -> "while x {\n"))
+        "fn run_example() {\n"
+        ^ String.concat "" (List.init 300 (fun _ -> "while first_number {\n"))
         ^ String.concat "" (List.init 300 (fun _ -> "}\n"))
         ^ "}"
       in
       if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
   test "nested blocks without expressions count toward the limit" (fun () ->
       let text =
-        "fn f() {\n"
+        "fn run_example() {\n"
         ^ String.concat "" (List.init 300 (fun _ -> "parallel {\n"))
         ^ String.concat "" (List.init 300 (fun _ -> "}\n"))
         ^ "}"
@@ -192,21 +216,32 @@ let () =
     first ^ String.concat "" (List.init 10_001 (fun _ -> link)) ^ last
   in
   test "a chain of binary operators longer than the limit is one error" (fun () ->
-      let text = chain ~first:"fn f() {\n  let x = 1" ~link:" + 1" ~last:"\n}" in
+      let text =
+        chain ~first:"fn run_example() {\n  let first_number = 1" ~link:" + 1" ~last:"\n}"
+      in
       if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
   test "a chain of postfix operations longer than the limit is one error" (fun () ->
-      let text = chain ~first:"fn f() {\n  let x = a" ~link:".b" ~last:"\n}" in
+      let text =
+        chain ~first:"fn run_example() {\n  let first_number = first_value" ~link:".b" ~last:"\n}"
+      in
       if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
   test "a chain of else if branches longer than the limit is one error" (fun () ->
-      let text = chain ~first:"fn f() {\n  if a {}" ~link:" else if a {}" ~last:"\n}" in
+      let text =
+        chain ~first:"fn run_example() {\n  if first_value {}" ~link:" else if first_value {}"
+          ~last:"\n}"
+      in
       if deep text <> [ "parser.nesting_too_deep" ] then fail "no nesting error");
   test "a chain longer than the nesting limit is not nested" (fun () ->
       let text =
-        "fn f() {\n  let x = 1" ^ String.concat "" (List.init 300 (fun _ -> " + a.b")) ^ "\n}"
+        "fn run_example() {\n  let first_number = 1"
+        ^ String.concat "" (List.init 300 (fun _ -> " + first_value.second_value"))
+        ^ "\n}"
       in
       if codes (snd (parse text)) <> [] then fail "a diagnostic");
   test "an inserted closer in an inner statement leaves errors in the outer one reported" (fun () ->
-      let _, diagnostics = parse "fn f() {\n  let x = run(fn() { g( }) +\n}" in
+      let _, diagnostics =
+        parse "fn run_example() {\n  let first_number = run(fn() { second_example( }) +\n}"
+      in
       if codes diagnostics <> [ "lexer.unclosed_bracket"; "parser.unexpected_token" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics)))
 
@@ -243,23 +278,24 @@ let () =
             ^ "}")
       then fail "the trees differ");
   test "a definition's diagnostics are placed in the file by its base" (fun () ->
-      match pieces "fn g() {}\nfn f() { x = }" with
+      match pieces "fn second_example() {}\nfn run_example() { first_number = }" with
       | source, tokens, [ _; second ] -> (
           let parsed, _ = Parser.definition source tokens second in
           match Parser.diagnostics_in_file parsed with
           | [ diagnostic ] ->
-              if diagnostic.span.start <> 23 then fail "start %d" diagnostic.span.start
+              if diagnostic.span.start <> 57 then fail "start %d" diagnostic.span.start
           | _ -> fail "expected one diagnostic")
       | _ -> fail "expected two pieces");
   test "moving a definition changes neither its tree nor its diagnostics" (fun () ->
-      let text = "fn f(items: List[Int64]) {\n  let total = items[0] +\n}" in
+      let text = "fn run_example(items: List[Int64]) {\n  let total = items[0] +\n}" in
       let parsed text =
         let source, tokens, pieces = pieces text in
         let last = List.nth pieces (List.length pieces - 1) in
         let parsed, _ = Parser.definition source tokens last in
         (parsed.value.value, parsed.diagnostics)
       in
-      if parsed text <> parsed ("fn g() {}\n\n\n" ^ text) then fail "the results differ");
+      if parsed text <> parsed ("fn second_example() {}\n\n\n" ^ text) then
+        fail "the results differ");
   test "indenting a method changes neither its tree nor its diagnostics" (fun () ->
       (* The method has no body, so it has a diagnostic with a fix. *)
       let method_of ~indentation =
@@ -348,9 +384,9 @@ let () =
       match
         (fst
            (parse
-              "fn f(items: List[Int64]) -> Int64 {\n\
-              \  let x = items[0] + \"${items.length()}\"\n\
-              \  if x > 0 { x } else { 0 }\n\
+              "fn run_example(items: List[Int64]) -> Int64 {\n\
+              \  let first_number = items[0] + \"${items.length()}\"\n\
+              \  if first_number > 0 { first_number } else { 0 }\n\
                }"))
           .definitions
       with
@@ -375,7 +411,9 @@ let () =
 
 let () =
   let type_of text expected =
-    definition ("fn f(value: " ^ text ^ ") {}") ("(fn f ((value: " ^ expected ^ ")) (block))")
+    definition
+      ("fn run_example(value: " ^ text ^ ") {}")
+      ("(fn run_example ((value: " ^ expected ^ ")) (block))")
   in
   test "a path type with arguments" (fun () ->
       type_of "standard::json::Map[String, List[Int64]]" "standard::json::Map[String, List[Int64]]");
@@ -394,24 +432,26 @@ let () =
       type_of "(fn(Item) uses Clock, Random cost time finite)"
         "(fn (Item) (uses Clock Random) (cost time finite))");
   test "parentheses around a function type need clauses" (fun () ->
-      error "fn f(value: (fn(Item))) {}" ~code:Unexpected_token ~at:"(fn");
+      error "fn run_example(value: (fn(Item))) {}" ~code:Unexpected_token ~at:"(fn");
   test "a function type's requires names its inputs" (fun () ->
-      definition "fn f(visit: (fn(index: USize) requires index < 3)) {}"
-        "(fn f ((visit: (fn (index: USize) (requires (< index 3))))) (block))");
+      definition "fn run_example(visit: (fn(index: USize) requires index < 3)) {}"
+        "(fn run_example ((visit: (fn (index: USize) (requires (< index 3))))) (block))");
   test "requires in a function type needs every input named" (fun () ->
-      error "fn f(value: (fn(Item) requires true)) {}" ~code:Function_type_names ~at:"fn(Item)");
+      error "fn run_example(value: (fn(Item) requires true)) {}" ~code:Function_type_names
+        ~at:"fn(Item)");
   test "a function type without requires names no input" (fun () ->
-      error "fn f(value: fn(item: Item)) {}" ~code:Function_type_names ~at:"fn(item");
+      error "fn run_example(value: fn(item: Item)) {}" ~code:Function_type_names ~at:"fn(item");
   test "ensures in a function type" (fun () ->
-      error "fn f(value: (fn(item: Item) ensures true)) {}" ~code:Unexpected_token ~at:"ensures");
+      error "fn run_example(value: (fn(item: Item) ensures true)) {}" ~code:Unexpected_token
+        ~at:"ensures");
   test "requires on a function type that is not a parameter's" (fun () ->
-      error "type T(visit: (fn(index: USize) requires index < 3))" ~code:Misplaced_requires
+      error "type Payload(visit: (fn(index: USize) requires index < 3))" ~code:Misplaced_requires
         ~at:"requires";
-      error "fn f(visits: List[(fn(index: USize) requires index < 3)]) {}" ~code:Misplaced_requires
-        ~at:"requires");
+      error "fn run_example(visits: List[(fn(index: USize) requires index < 3)]) {}"
+        ~code:Misplaced_requires ~at:"requires");
   test "generic parameters" (fun () ->
-      definition "fn f[Key: Hash + Ordered, count: USize, capability Granted]() {}"
-        "(fn f[Key: Hash + Ordered, count: USize, capability Granted] () (block))")
+      definition "fn run_example[Key: Hash + Ordered, count: USize, capability Granted]() {}"
+        "(fn run_example[Key: Hash + Ordered, count: USize, capability Granted] () (block))")
 
 (* Patterns *)
 
@@ -448,31 +488,42 @@ let () =
       statement "match state, event {\n  Idle | Paused, Tick => todo\n}"
         "(match (state event) (=> (| Idle Paused) Tick todo))");
   test ".. must be the last field" (fun () ->
-      body_error "let (.., x) = value" ~code:Unexpected_token ~at:"..");
+      body_error "let (.., first_number) = value" ~code:Unexpected_token ~at:"..");
   test "a float literal is not a pattern" (fun () ->
-      body_error "match x {\n  0.0 => todo\n}" ~code:Float_pattern ~at:"0.0");
+      body_error "match first_number {\n  0.0 => todo\n}" ~code:Float_pattern ~at:"0.0");
   test "a range pattern needs both ends" (fun () ->
-      body_error "match x {\n  0.. => todo\n}" ~code:Unexpected_token ~at:"=>");
+      body_error "match first_number {\n  0.. => todo\n}" ~code:Unexpected_token ~at:"=>");
   test "a string in a pattern cannot interpolate" (fun () ->
-      body_error "match x {\n  \"${y}\" => todo\n}" ~code:Interpolation_not_allowed ~at:"\"${")
+      body_error "match first_number {\n  \"${y}\" => todo\n}" ~code:Interpolation_not_allowed
+        ~at:"\"${")
 
 (* Expressions *)
 
 let () =
-  let expression text expected = statement ("let x = " ^ text) ("(let x " ^ expected ^ ")") in
-  test "arithmetic precedence" (fun () -> expression "a + b * c - d" "(- (+ a (* b c)) d)");
+  let expression text expected =
+    statement ("let first_number = " ^ text) ("(let first_number " ^ expected ^ ")")
+  in
+  test "arithmetic precedence" (fun () ->
+      expression "first_value + second_value * third_value - fourth_value"
+        "(- (+ first_value (* second_value third_value)) fourth_value)");
   test "prefix binds tighter than infix" (fun () ->
-      expression "-x.abs() + !ready" "(+ (- (call (. x abs))) (! ready))");
+      expression "-first_number.abs() + !ready" "(+ (- (call (. first_number abs))) (! ready))");
   test "ranges bind more loosely than arithmetic" (fun () ->
       expression "0..count - 1" "(.. 0 (- count 1))");
   test "comparison and logic" (fun () ->
-      expression "a < b && c is Some(d)" "(&& (< a b) (is c (Some d)))");
+      expression "first_value < second_value && third_value is Some(fourth_value)"
+        "(&& (< first_value second_value) (is third_value (Some fourth_value)))");
   test "implication binds most loosely" (fun () ->
-      definition "fn f() requires a && b ==> c || d {}"
-        "(fn f () (requires (==> (&& a b) (|| c d))) (block))");
+      definition
+        "fn run_example() requires first_value && second_value ==> third_value || fourth_value {}"
+        "(fn run_example () (requires (==> (&& first_value second_value) (|| third_value \
+         fourth_value))) (block))");
   test "postfix operators" (fun () ->
-      expression "a.b[0](c, label: d)?.e with (f.g: 1, h)"
-        "(with (. (? (call ([] (. a b) 0) c (label: d))) e) (f.g: 1) h)");
+      expression
+        "first_value.second_value[0](third_value, label: fourth_value)?.fifth_value with \
+         (run_example.second_example: 1, third_example)"
+        "(with (. (? (call ([] (. first_value second_value) 0) third_value (label: fourth_value))) \
+         fifth_value) (run_example.second_example: 1) third_example)");
   test "modes and any take a postfix expression" (fun () ->
       statement "mut config.servers.sort()" "(mut (call (. (. config servers) sort)))";
       expression "any UserRoutes(users: [:])" "(any (call UserRoutes (users: (map))))");
@@ -483,36 +534,38 @@ let () =
       expression "items[..3]" "([] items (.. _ 3))";
       expression "items[..=3]" "([] items (..= _ 3))");
   test "an open range outside brackets" (fun () ->
-      body_error "for i in 0.. {}" ~code:Open_range ~at:"..");
+      body_error "for step_index in 0.. {}" ~code:Open_range ~at:"..");
   test "an open start outside brackets" (fun () ->
-      body_error "let x = ..3" ~code:Open_range ~at:"..");
+      body_error "let first_number = ..3" ~code:Open_range ~at:"..");
   test "an open range is alone in its brackets" (fun () ->
-      body_error "let x = items[1.., 4]" ~code:Open_range ~at:"..");
+      body_error "let first_number = items[1.., 4]" ~code:Open_range ~at:"..");
   test "a lambda's body may start on the next line" (fun () ->
-      statement "let f: fn(Job) -> Bool = fn(job)\n{\n  job.ready\n}"
-        "(let f : (fn (Job) -> Bool) (fn (job) (block (. job ready))))");
+      statement "let run_example: fn(Job) -> Bool = fn(job)\n{\n  job.ready\n}"
+        "(let run_example : (fn (Job) -> Bool) (fn (job) (block (. job ready))))");
   test "as at the end of a line is not read with the next line" (fun () ->
-      body_error "let n = size as\nlet m = 1" ~code:Reserved_word ~at:"as");
+      body_error "let limit_count = size as\nlet mapping_value = 1" ~code:Reserved_word ~at:"as");
   test "brackets cannot be empty" (fun () ->
-      body_error "let x = items[]" ~code:Unexpected_token ~at:"]");
+      body_error "let first_number = items[]" ~code:Unexpected_token ~at:"]");
   test "i++ is recognized only at the end of a line" (fun () ->
-      body_error "count++ x" ~code:Unexpected_token ~at:"++");
+      body_error "count++ first_number" ~code:Unexpected_token ~at:"++");
   test "type arguments and constraints in brackets" (fun () ->
       expression "List[String].with_capacity(64)" "(call (. ([] List String) with_capacity) 64)";
       expression "total[Iterable[Element = Int64]]" "([] total ([] Iterable Element = Int64))");
   test "a collection cannot mix list elements and map entries" (fun () ->
-      body_error "let x = [1, \"a\": 2]" ~code:Unexpected_token ~at:"\"a\"";
-      body_error "let x = [\"a\": 1, 2]" ~code:Unexpected_token ~at:"2]");
+      body_error "let first_number = [1, \"a\": 2]" ~code:Unexpected_token ~at:"\"a\"";
+      body_error "let first_number = [\"a\": 1, 2]" ~code:Unexpected_token ~at:"2]");
   test "a field and an update that do not parse are errors in the tree" (fun () ->
-      let file, _ = parse "type T(x: Int64, 1)" in
+      let file, _ = parse "type Payload(first_number: Int64, 1)" in
       (match file.definitions with
       | [ { value; _ } ] ->
-          if Syntax_print.definition value <> "(type T ((x: Int64) error))" then
+          if Syntax_print.definition value <> "(type Payload ((first_number: Int64) error))" then
             fail "got %s" (Syntax_print.definition value)
       | _ -> fail "wrong definitions");
-      let statements, _ = body_of "let y = x with (1)" in
-      if List.map Syntax_print.statement statements <> [ "(let y (with x error))" ] then
-        fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
+      let statements, _ = body_of "let second_number = first_number with (1)" in
+      if
+        List.map Syntax_print.statement statements
+        <> [ "(let second_number (with first_number error))" ]
+      then fail "got [%s]" (String.concat "; " (List.map Syntax_print.statement statements)));
   test "lists and maps" (fun () ->
       expression "[1, 2,]" "(list 1 2)";
       expression "[]" "(list)";
@@ -522,16 +575,19 @@ let () =
       expression "fn(sum, (value, ..)) { sum + value }"
         "(fn (sum (record value ..)) (block (+ sum value)))");
   test "if, else if, and else" (fun () ->
-      expression "if a { 1 } else if b { 2 } else { 3 }"
-        "(if a (block 1) (if b (block 2) (block 3)))");
+      expression "if first_value { 1 } else if second_value { 2 } else { 3 }"
+        "(if first_value (block 1) (if second_value (block 2) (block 3)))");
   test "provide" (fun () ->
       expression "provide mut files, DiscardLog() { run() }"
         "(provide ((mut files) (call DiscardLog)) (block (call run)))");
-  test "a block" (fun () -> expression "{\n  let y = 1\n  y\n}" "(block (let y 1) y)");
+  test "a block" (fun () ->
+      expression "{\n  let second_number = 1\n  second_number\n}"
+        "(block (let second_number 1) second_number)");
   test "return with and without a value" (fun () ->
       statement "return" "(return)";
       statement "return { 1 }" "(return (block 1))";
-      statements "if a { return }\nb" [ "(if a (block (return)))"; "b" ]);
+      statements "if first_value { return }\nsecond_value"
+        [ "(if first_value (block (return)))"; "second_value" ]);
   test "echo takes everything after it" (fun () ->
       expression "echo player.wins * 3" "(echo (* (. player wins) 3))");
   test "strings, tagged strings, and interpolations" (fun () ->
@@ -540,13 +596,17 @@ let () =
       expression "\"${names.join(\", \")}\"" "\"${(call (. names join) \", \")}\"");
   test "no missing token is reported at the end of an interpolation that a line break ended"
     (fun () ->
-      let _, diagnostics = parse "fn f() {\n  let x = \"\"\"a ${b ? c\n  \"\"\"\n}" in
+      let _, diagnostics =
+        parse "fn run_example() {\n  let first_number = \"\"\"a ${b ? c\n  \"\"\"\n}"
+      in
       if
         List.filter (fun code -> String.starts_with ~prefix:"parser." code) (codes diagnostics)
         <> []
       then fail "got [%s]" (String.concat "; " (codes diagnostics)));
   test "an error in an interpolation stays there" (fun () ->
-      let statements, diagnostics = body_of "let x = \"${a +}\"\nlet y = 1" in
+      let statements, diagnostics =
+        body_of "let first_number = \"${a +}\"\nlet second_number = 1"
+      in
       if codes diagnostics <> [ "parser.unexpected_token" ] then
         fail "got [%s]" (String.concat "; " (codes diagnostics));
       if List.length statements <> 2 then fail "expected two statements");
@@ -556,27 +616,33 @@ let () =
       expression "geometry::Shape.Circle" "(. geometry::Shape Circle)";
       expression "json::parse" "json::parse");
   test "quantifiers in a specification" (fun () ->
-      definition "fn f() requires count > 0 && forall i in 0..count => items[i] > 0 || done {}"
-        "(fn f () (requires (&& (> count 0) (forall (in i (.. 0 count)) (|| (> ([] items i) 0) \
-         done)))) (block))";
-      definition "fn f() requires forall value: Int64 => value + 0 == value {}"
-        "(fn f () (requires (forall value: Int64 (== (+ value 0) value))) (block))")
+      definition
+        "fn run_example() requires count > 0 && forall step_index in 0..count => items[step_index] \
+         > 0 || done {}"
+        "(fn run_example () (requires (&& (> count 0) (forall (in step_index (.. 0 count)) (|| (> \
+         ([] items step_index) 0) done)))) (block))";
+      definition "fn run_example() requires forall value: Int64 => value + 0 == value {}"
+        "(fn run_example () (requires (forall value: Int64 (== (+ value 0) value))) (block))")
 
 (* Statements *)
 
 let () =
   test "let and var with annotations" (fun () ->
-      statements "let a: Int64 = 1\nvar (low, high) = bounds"
-        [ "(let a : Int64 1)"; "(var (record low high) bounds)" ]);
+      statements "let first_value: Int64 = 1\nvar (low, high) = bounds"
+        [ "(let first_value : Int64 1)"; "(var (record low high) bounds)" ]);
   test "let ... else" (fun () ->
       statement "let Some(user) = find(id) else {\n  return\n}"
         "(let (Some user) (call find id) (else (block (return))))");
   test "the expression before let ... else cannot end with }" (fun () ->
-      body_error "let Some(x) = if ready { a } else { b } else { return }" ~code:Let_else_brace
-        ~at:"else { return" ~fixed:"let Some(x) = (if ready { a } else { b }) else { return }");
+      body_error
+        "let Some(first_number) = if ready { first_value } else { second_value } else { return }"
+        ~code:Let_else_brace ~at:"else { return"
+        ~fixed:
+          "let Some(first_number) = (if ready { first_value } else { second_value }) else { return \
+           }");
   test "assignments" (fun () ->
-      statements "a = 1\nitems[i] += 2\nflags |= mask"
-        [ "(= a 1)"; "(+= ([] items i) 2)"; "(|= flags mask)" ]);
+      statements "first_value = 1\nitems[step_index] += 2\nflags |= mask"
+        [ "(= first_value 1)"; "(+= ([] items step_index) 2)"; "(|= flags mask)" ]);
   test "loops and their clauses" (fun () ->
       statement
         "while low < high\n  invariant high <= length\n  decreases high - low, 1\n{\n  todo\n}"
@@ -591,11 +657,13 @@ let () =
       statement "for (index, element): Indexed[UInt8] in data.enumerate() {}"
         "(for (record index element) : Indexed[UInt8] (call (. data enumerate)) (block))");
   test "a loop has at most one decreases" (fun () ->
-      body_error "while a\n  decreases b\n  decreases c\n{}" ~code:Repeated_clause ~at:"decreases c");
+      body_error "while first_value\n  decreases second_value\n  decreases third_value\n{}"
+        ~code:Repeated_clause ~at:"decreases third_value");
   test "parallel, concurrent, proof, and yield" (fun () ->
-      statement "parallel {\n  let a = 1\n  let b = 2\n}" "(parallel (block (let a 1) (let b 2)))";
-      statement "concurrent {\n  let a = f()\n  g()\n}"
-        "(concurrent (block (let a (call f)) (call g)))";
+      statement "parallel {\n  let first_value = 1\n  let second_value = 2\n}"
+        "(parallel (block (let first_value 1) (let second_value 2)))";
+      statement "concurrent {\n  let first_value = run_example()\n  second_example()\n}"
+        "(concurrent (block (let first_value (call run_example)) (call second_example)))";
       statement "proof {\n  lemma()\n}" "(proof (block (call lemma)))");
   test "a match arm's body is a statement" (fun () ->
       statement "match event {\n  Click => clicks += 1\n  Done =>\n    finish()\n}"

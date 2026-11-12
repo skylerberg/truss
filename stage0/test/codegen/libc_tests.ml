@@ -380,7 +380,7 @@ let () =
               let read_end = local builder (value int32)
               and write_end = local builder (value int32) in
               operate builder (Libc Pipe) [ Place (at read_end); Place (at write_end) ];
-              let view = view_of builder "x" in
+              let view = view_of builder "first_number" in
               operate builder (Libc Write)
                 [ Value (Copy (at write_end)); Place (at view); Value (usize 1) ];
               let waited = local builder (value waited_ty) in

@@ -1,4 +1,4 @@
-fn f(visit: (fn(Item) cost time finite))
+fn run_example(visit: (fn(Item) cost time finite))
   cost amortized time O(items.length() * time(visit))
   cost allocations <= 1
   cost calls(visit) == 2

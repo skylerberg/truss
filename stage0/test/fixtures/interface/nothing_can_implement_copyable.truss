@@ -1,5 +1,5 @@
-type P(x: Int64)
+type Probe(first_number: Int64)
 
-impl Copyable for P {
-  fn copy(self) -> P { todo }
+impl Copyable for Probe {
+  fn copy(self) -> Probe { todo }
 }

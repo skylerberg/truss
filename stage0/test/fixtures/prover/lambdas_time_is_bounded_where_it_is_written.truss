@@ -6,7 +6,7 @@ fn each(items: List[Int64], visit: (fn(Int64) cost time finite))
   }
 }
 
-fn f(items: List[Int64])
+fn run_example(items: List[Int64])
   cost time O(items.length())
 {
   each(items, visit: fn(item) {

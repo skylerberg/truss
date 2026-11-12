@@ -3,6 +3,6 @@ trait Shape[ {
 
 type Holder[Value: Shape](value: Value)
 
-type P(x: Int64)
+type Probe(first_number: Int64)
 
-fn f(holder: Holder[P]) {}
+fn run_example(holder: Holder[Probe]) {}

@@ -3,6 +3,6 @@ fn bump(first: mut Int64, second: mut Int64) {
   second = 2
 }
 
-fn f(items: mut List[Int64]) {
+fn run_example(items: mut List[Int64]) {
   bump(mut items[0], second: mut items[1])
 }

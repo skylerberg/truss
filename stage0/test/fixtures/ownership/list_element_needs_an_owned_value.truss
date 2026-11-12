@@ -1,3 +1,3 @@
-fn f(name: String) -> List[String] {
+fn run_example(name: String) -> List[String] {
   [name]
 }

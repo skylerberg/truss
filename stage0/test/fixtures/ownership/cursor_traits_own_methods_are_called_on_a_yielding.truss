@@ -1,4 +1,4 @@
-fn f(items: List[Int64], text: String) -> USize {
+fn run_example(items: List[Int64], text: String) -> USize {
   var cursor = items.each()
   let _ = mut cursor.find(fn(item) { item > 3 })
   let _ = items.each().fold(0, combine: fn(total, item) { total + item })

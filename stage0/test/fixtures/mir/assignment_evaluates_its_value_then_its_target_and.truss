@@ -3,7 +3,7 @@ fn step(order: mut Int64, next: Int64) -> USize {
   0
 }
 
-fn g(items: mut List[USize], order: mut Int64) {
+fn second_example(items: mut List[USize], order: mut Int64) {
   items[step(mut order, next: 1)] = step(mut order, next: 2)
   items[step(mut order, next: 3)] += step(mut order, next: 4)
 }

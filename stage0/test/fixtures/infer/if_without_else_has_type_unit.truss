@@ -1,4 +1,4 @@
-fn f(ready: Bool) {
+fn run_example(ready: Bool) {
   let value = if ready { }
   let _ = value
 }

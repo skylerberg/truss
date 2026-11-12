@@ -1,4 +1,4 @@
-fn f[Value](value: Value)
+fn run_example[Value](value: Value)
   uses Value
 {
 }

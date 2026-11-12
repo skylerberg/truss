@@ -1,5 +1,5 @@
 use acme::vector
 
-fn f() -> Int64 {
+fn run_example() -> Int64 {
   vector::length(1)
 }

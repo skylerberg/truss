@@ -2,7 +2,7 @@ fn need[Value: Ordered](value: Value) -> Bool {
   true
 }
 
-fn f() {
+fn run_example() {
   let check = need[Point]
   let _ = check
 }

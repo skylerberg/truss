@@ -1,4 +1,4 @@
-fn f(value: Int64) -> Int64
+fn run_example(value: Int64) -> Int64
   cost allocations == 0
 {
   value + 0

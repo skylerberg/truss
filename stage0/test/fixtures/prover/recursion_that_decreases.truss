@@ -1,7 +1,7 @@
-fn f(steps: UInt32) -> UInt32
+fn run_example(steps: UInt32) -> UInt32
   decreases steps
   cost time finite
 {
   if steps == 0 { return 0 }
-  f(steps - 1)
+  run_example(steps - 1)
 }

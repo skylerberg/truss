@@ -81,7 +81,7 @@ let () =
               reached)));
   test "a drop reaches the type's drop function" (fun () ->
       let dropping_instance =
-        instance "f"
+        instance "run_example"
           (function_ ~parameters:[ 0 ]
              [ local (value text) ]
              [ block [ Drop (at 0) ] (Return None) ])

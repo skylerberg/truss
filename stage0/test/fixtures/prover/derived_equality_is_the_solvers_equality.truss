@@ -1,5 +1,5 @@
-fn f(point: Point) -> Bool
+fn run_example(point: Point) -> Bool
   ensures result
 {
-  Point(x: point.x, y: point.y) == point
+  Point(first_number: point.first_number, second_number: point.second_number) == point
 }

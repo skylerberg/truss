@@ -3,7 +3,7 @@ fn Pair.lengths(self) yields own USize {
   yield self.second.length()
 }
 
-fn f(pair: Pair, numbers: List[Int64])
+fn run_example(pair: Pair, numbers: List[Int64])
   uses Tasks
 {
   concurrent for length in pair.lengths() {

@@ -1,4 +1,4 @@
-fn f(slot: mut Option[Holder]) -> USize {
+fn run_example(slot: mut Option[Holder]) -> USize {
   match mut slot {
     Some(holder) => {
       let items = own holder.items

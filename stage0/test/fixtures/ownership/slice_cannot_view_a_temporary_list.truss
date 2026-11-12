@@ -1,6 +1,6 @@
 fn make() -> List[Int64] { [1, 2, 3] }
 
-fn f() -> USize {
+fn run_example() -> USize {
   let middle = make()[1..2]
   middle.length()
 }

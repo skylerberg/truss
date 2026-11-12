@@ -1,3 +1,3 @@
-fn f(items: mut List[Int64]) -> Bool {
+fn run_example(items: mut List[Int64]) -> Bool {
   exists item in items => grow(mut items) && item < 0
 }

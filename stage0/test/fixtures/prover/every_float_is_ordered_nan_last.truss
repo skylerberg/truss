@@ -1,4 +1,4 @@
-fn f(value: Float64) -> Bool
+fn run_example(value: Float64) -> Bool
   ensures result
 {
   value <= value

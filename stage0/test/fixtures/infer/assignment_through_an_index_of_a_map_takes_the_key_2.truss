@@ -1,4 +1,4 @@
-fn f(name: String) {
+fn run_example(name: String) {
   var ports: Map[String, Int64] = ["http": 80]
   ports[name] = 8080
 }

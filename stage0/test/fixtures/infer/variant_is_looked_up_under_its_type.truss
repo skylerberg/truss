@@ -2,6 +2,6 @@ type Shape =
   | Circle(radius: Float64)
   | Empty
 
-fn f() -> Shape {
+fn run_example() -> Shape {
   Shape.Circle(radius: 1.0)
 }

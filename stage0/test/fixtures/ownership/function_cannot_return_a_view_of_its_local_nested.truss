@@ -1,6 +1,6 @@
 type Holder[Value](value: Value)
 
-fn f() -> Holder[Holder[Slice[Int64]]] {
+fn run_example() -> Holder[Holder[Slice[Int64]]] {
   let items: List[Int64] = [1, 2, 3]
   Holder(Holder(items[0..2]))
 }

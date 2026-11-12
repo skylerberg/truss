@@ -1,4 +1,4 @@
-fn f(count: UInt8) -> UInt8
+fn run_example(count: UInt8) -> UInt8
   requires count < 255
 {
   count + 1

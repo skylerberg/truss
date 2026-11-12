@@ -1,4 +1,4 @@
-fn g(items: mut List[Int64]) -> USize {
+fn second_example(items: mut List[Int64]) -> USize {
   mut items.push(4)
   items.length()
 }

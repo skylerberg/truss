@@ -1,5 +1,5 @@
 fn counted(items: List[UInt32]) -> Bool
-  ensures forall i in 0..items.length() => items[i].count_ones() <= 32
+  ensures forall step_index in 0..items.length() => items[step_index].count_ones() <= 32
 {
   true
 }

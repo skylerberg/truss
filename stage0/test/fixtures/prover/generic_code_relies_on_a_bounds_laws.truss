@@ -1,5 +1,5 @@
 
-fn f[Item: Monoid](value: Item) -> Bool
+fn run_example[Item: Monoid](value: Item) -> Bool
   ensures result
 {
   Item.empty().combine(value) == value

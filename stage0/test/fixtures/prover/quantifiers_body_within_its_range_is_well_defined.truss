@@ -1,5 +1,5 @@
-fn f(items: List[Int64]) -> Int64
-  requires forall i in 0..items.length() => items[i] > 0
+fn run_example(items: List[Int64]) -> Int64
+  requires forall step_index in 0..items.length() => items[step_index] > 0
 {
   0
 }

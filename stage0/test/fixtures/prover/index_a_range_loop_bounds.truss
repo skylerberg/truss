@@ -1,7 +1,7 @@
-fn f(items: List[Int64]) -> Int64 {
+fn run_example(items: List[Int64]) -> Int64 {
   var total: Int64 = 0
-  for i in 0..items.length() {
-    total = total.saturating_add(items[i])
+  for step_index in 0..items.length() {
+    total = total.saturating_add(items[step_index])
   }
   total
 }
