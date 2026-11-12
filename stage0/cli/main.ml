@@ -62,10 +62,20 @@ let check =
             "Apply every fix that is the only fix its diagnostic offers, check again, and repeat \
              until none is left, then report what remains.")
   in
+  let no_proofs =
+    Arg.(
+      value & flag
+      & info [ "no-proofs" ]
+          ~doc:
+            "Report every diagnostic but the prover's, so the pinned solver is not needed. Only \
+             the packages' own files are checked: a dependency is checked only for the proofs that \
+             the program relies on.")
+  in
   command "check" ~doc:"Report every diagnostic in the packages."
     Term.(
-      const (fun directory fix json -> Outcome.Exit (Check_command.run ~directory ~fix ~json))
-      $ directory $ fix $ json)
+      const (fun directory fix no_proofs json ->
+          Outcome.Exit (Check_command.run ~directory ~fix ~proofs:(not no_proofs) ~json))
+      $ directory $ fix $ no_proofs $ json)
 
 let test =
   let match_ =

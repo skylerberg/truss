@@ -44,7 +44,7 @@ touches. It follows [GOALS.md](GOALS.md) and the decisions in
 
 | Command | Does |
 |---|---|
-| `truss check` | Reports every diagnostic in the packages, and where the worktree's changes meet other worktrees'; `--fix` applies the fixes that have no alternative |
+| `truss check` | Reports every diagnostic in the packages, and where the worktree's changes meet other worktrees'; `--fix` applies the fixes that have no alternative, and `--no-proofs` leaves out the prover |
 | `truss test` | Checks the packages, then runs the tests whose results are not kept |
 | `truss run` | Checks the package, builds its program for development, and runs it |
 | `truss build` | Checks the package and builds its program for release, refusing any `todo` or `echo` `main` can reach |
@@ -178,26 +178,38 @@ built.
 ## Checking
 
 ```text
-truss check [--fix] [--json]
+truss check [--fix] [--no-proofs] [--json]
 ```
 
 `truss check` runs every stage that can report a diagnostic: lexing,
 parsing, name resolution, type checking, ownership, capabilities and
 dependency grants, package-wide checks, and proofs.
-Proofs are part of checking, not a separate command, because DESIGN.md
-makes every promise in a signature something the compiler proves; a package
-whose proofs have not been checked has not been checked. Proofs are modular
-and cached, so this costs O(change) like the rest. A file is proven once it
-type-checks, since the prover reads what type checking makes. `check` needs
-the pinned solver, as `run` needs a C compiler, and without it cannot do its
-job. Code generation reports nothing, so `check` builds only the checks of
-tagged templates, which PROVER.md's "Running code while proving" runs, kept
-under the key of their code as test results are. `test` and `run` do not
-wait for proofs, as DESIGN.md's "Tests do not wait for proofs" says.
+Proofs are checked by default because DESIGN.md makes every promise in a
+signature something the compiler proves, so a package whose proofs have not
+been checked has not been checked. A dependency's proofs are the program's
+too, so `check` also checks and proves every package that the command's
+packages depend on, except the standard library. A file is proven once it
+type-checks, since the prover reads the type checker's output. Proving needs
+the pinned solver, as `run` needs a C compiler. Code generation reports
+nothing, so `check` builds only the checks of tagged templates, which
+PROVER.md's "Running code while proving" runs, kept under the key of their
+code as test results are. `test` and `run` do not wait for proofs, as
+DESIGN.md's "Tests do not wait for proofs" says.
 
-It prints each diagnostic as `Diagnostic.render` does, at most
-`Diagnostic.limit` of them in each file, and then a count. The JSON document
-is `{"format", "diagnostics"}`.
+**`--no-proofs`** stops before the prover. It reports every other stage's
+diagnostics, in the command's packages only, and needs no solver. Proofs are
+cached and modular, but a fresh session, a changed contract that many callers
+rely on, or a new dependency can still leave much to prove, and type errors
+are the first thing to fix. Dafny's `resolve` against `verify`, Verus's
+`--no-verify`, and F\*'s `--lax` give the same choice. A package is checked
+only once `check` without the flag is clean, which `build` and `publish`
+require.
+
+It prints each problem with the manifests, then each diagnostic as
+`Diagnostic.render` does, at most `Diagnostic.limit` of them in each file,
+then the prover's diagnostics, and then a count. The prover runs only after
+every other diagnostic is printed, so type errors show while the solver
+works. The JSON document is `{"format", "diagnostics"}`.
 
 **`--fix`** applies every fix that is the only fix its diagnostic offers,
 writes the files, checks again, and repeats until no such fix is left, then

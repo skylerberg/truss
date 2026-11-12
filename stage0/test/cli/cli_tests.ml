@@ -116,7 +116,7 @@ let () =
           (List.exists
              (fun (file : Report.file) ->
                file.module_.package = { Path.owner = None; name = "lib" })
-             report.files)
+             (Report.files report))
       then fail "the dependency's overflow is not reported");
   test "a package with no [project] above it is a project by itself" (fun () ->
       let root =
@@ -263,8 +263,9 @@ let () =
              (fun problem -> contains problem "app/truss.toml: Nothing in `app` uses `other`")
              report.problems)
       then fail "problems: [%s]" (String.concat "; " report.problems);
-      if quietly (fun () -> Check_command.run ~directory:app ~fix:true ~json:false) <> 0 then
-        fail "still has errors";
+      if
+        quietly (fun () -> Check_command.run ~directory:app ~fix:true ~proofs:true ~json:false) <> 0
+      then fail "still has errors";
       let manifest = read root "app/truss.toml" in
       if
         contains manifest "other" || contains manifest "Clock"
@@ -384,7 +385,9 @@ let () =
                }\n" );
           ]
       in
-      let status = quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false) in
+      let status =
+        quietly (fun () -> Check_command.run ~directory:root ~fix:true ~proofs:true ~json:false)
+      in
       if status <> 0 then fail "status %d" status;
       if not (contains (read root "main.truss") "let _ = value") then
         fail "wrote %s" (read root "main.truss"))
@@ -393,10 +396,31 @@ let () =
   test "check proves, and reports what it cannot prove" (fun () ->
       let root = package [ ("main.truss", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ] in
       let status, output =
-        captured (fun () -> Check_command.run ~directory:root ~fix:false ~json:false)
+        captured (fun () -> Check_command.run ~directory:root ~fix:false ~proofs:true ~json:false)
       in
       if status <> 1 then fail "status %d" status;
       if not (contains output "prover.overflow") then fail "%s" output);
+  test "check --no-proofs reports no obligation" (fun () ->
+      let root = package [ ("main.truss", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n") ] in
+      let status, output =
+        captured (fun () -> Check_command.run ~directory:root ~fix:false ~proofs:false ~json:false)
+      in
+      if status <> 0 then fail "status %d: %s" status output);
+  test "check prints type errors before it proves" (fun () ->
+      let root =
+        package
+          [
+            ("a.truss", "fn next(count: UInt8) -> UInt8 {\n  count + 1\n}\n");
+            ("b.truss", "fn wrong() -> Int64 {\n  true\n}\n");
+          ]
+      in
+      let status, output =
+        captured (fun () -> Check_command.run ~directory:root ~fix:false ~proofs:true ~json:false)
+      in
+      if status <> 1 then fail "status %d" status;
+      match (Substring.find output "b.truss", Substring.find output "prover.overflow") with
+      | Some type_error, Some overflow when type_error < overflow -> ()
+      | _ -> fail "%s" output);
   test "build refuses a program that can reach a hole in a proof" (fun () ->
       let root =
         package
@@ -1076,8 +1100,10 @@ let () =
         (manifest_of "demo" ^ "[dependencies]\n\"acme::geometry\" = [\"Clock\"]\n");
       expect_problem_in root
         "`acme::geometry` is said to hold nothing, and the manifests grant it Clock";
-      if quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false) <> 0 then
-        fail "still has errors";
+      if
+        quietly (fun () -> Check_command.run ~directory:root ~fix:true ~proofs:true ~json:false)
+        <> 0
+      then fail "still has errors";
       if
         not
           (List.exists
@@ -1091,8 +1117,10 @@ let () =
       rewrite root "main.truss" "";
       rewrite root "truss.toml" (manifest_of "demo");
       expect_problem_in root "Nothing in the build uses `acme::geometry`";
-      if quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false) <> 0 then
-        fail "still has errors";
+      if
+        quietly (fun () -> Check_command.run ~directory:root ~fix:true ~proofs:true ~json:false)
+        <> 0
+      then fail "still has errors";
       expect_versions root []);
   test "files in the registry that do not have the lock file's hash are not used" (fun () ->
       let registry = stocked () in
@@ -1195,7 +1223,8 @@ let () =
       ignore (add root [ "acme::geometry" ]);
       rewrite root "truss.toml"
         (manifest_of "demo" ^ "[dependencies]\n\"acme::geometry\" = [\"Clock\"]\n");
-      ignore (quietly (fun () -> Check_command.run ~directory:root ~fix:true ~json:false));
+      ignore
+        (quietly (fun () -> Check_command.run ~directory:root ~fix:true ~proofs:true ~json:false));
       publish registry "acme::geometry" (1, 1, 0)
         ~dependencies:[ ("acme::units", [ "Clock" ]) ]
         ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 0, 0)) ]
