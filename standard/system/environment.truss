@@ -17,7 +17,7 @@ impl Environment for SystemEnvironment {
     while is_present {
       let entry = intrinsic::environment_entry(index, is_present: mut is_present)
       proof {
-        assert forall k in 0..intrinsic::view_length(entry) => intrinsic::view_at(entry, index: k) != 0
+        assert forall position in 0..intrinsic::view_length(entry) => intrinsic::view_at(entry, index: position) != 0
       }
       if is_present {
         mut all.push(variable_from(entry))
