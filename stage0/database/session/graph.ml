@@ -10,75 +10,49 @@ type edge = {
 
 let part_of (subject : Query.subject) = Option.value subject.part ~default:""
 
-(* A state, with whether each node it has visited is derived from fixed
-   bases alone: a fixed base's node, or a result whose reads all are. *)
-type walk = { engine : Engine.t; derived_from_fixed : (string, bool) Hashtbl.t }
-
-let walk engine = { engine; derived_from_fixed = Hashtbl.create 256 }
-
-let rec is_derived_from_fixed walk node =
-  Engine.is_fixed node
-  ||
-  let identity = Engine.identity node in
-  match Hashtbl.find_opt walk.derived_from_fixed identity with
-  | Some is_derived -> is_derived
-  | None ->
-      let is_derived =
-        (not (Engine.is_input node))
-        && List.for_all (is_derived_from_fixed walk) (Engine.reads walk.engine node)
-      in
-      Hashtbl.replace walk.derived_from_fixed identity is_derived;
-      is_derived
-
 (* An edge runs from a node about a definition, the dependent, along a path
    of reads to the first node about another definition. The path continues
    through a node about no definition or about the dependent, but not
-   through a node derived from fixed bases alone, so that a definition does
-   not depend on everything the standard library's own queries read, even
-   where the state computed such a query itself. Without [dependent], a
-   node about a definition does not continue the path. *)
-let passes_through walk ?dependent node =
-  (not (is_derived_from_fixed walk node))
+   through a fixed base's node, so that a definition does not depend on
+   everything the standard library's own queries read. Without
+   [dependent], a node about a definition does not continue the path. *)
+let passes_through ?dependent node =
+  (not (Engine.is_fixed node))
   &&
   match (Engine.subject node, dependent) with
   | None, _ -> true
   | Some subject, Some dependent -> Path.equal subject.path dependent
   | Some _, None -> false
 
-(* A node derived from fixed bases alone is the standard library's own, and
-   no edge runs from it, as no path continues through it. *)
-let edges_of_node walk node (subject : Query.subject) =
-  if is_derived_from_fixed walk node then []
-  else
-    let dependencies = Hashtbl.create 8 in
-    let visited = Hashtbl.create 16 in
-    let rec traverse node =
-      List.iter
-        (fun read ->
-          let identity = Engine.identity read in
-          if not (Hashtbl.mem visited identity) then begin
-            Hashtbl.replace visited identity ();
-            match Engine.subject read with
-            | Some read_subject when not (Path.equal read_subject.path subject.path) ->
-                Hashtbl.replace dependencies (read_subject.path, part_of read_subject) ()
-            | Some _ | None ->
-                if passes_through walk ~dependent:subject.path read then traverse read
-          end)
-        (Engine.reads walk.engine node)
-    in
-    traverse node;
-    Hashtbl.fold
-      (fun (dependency, dependency_part) () edges ->
-        { dependent = subject.path; dependent_part = part_of subject; dependency; dependency_part }
-        :: edges)
-      dependencies []
+let edges_of_node engine node (subject : Query.subject) =
+  let dependencies = Hashtbl.create 8 in
+  let visited = Hashtbl.create 16 in
+  let rec traverse node =
+    List.iter
+      (fun read ->
+        let identity = Engine.identity read in
+        if not (Hashtbl.mem visited identity) then begin
+          Hashtbl.replace visited identity ();
+          match Engine.subject read with
+          | Some read_subject when not (Path.equal read_subject.path subject.path) ->
+              Hashtbl.replace dependencies (read_subject.path, part_of read_subject) ()
+          | Some _ | None -> if passes_through ~dependent:subject.path read then traverse read
+        end)
+      (Engine.reads engine node)
+  in
+  traverse node;
+  Hashtbl.fold
+    (fun (dependency, dependency_part) () edges ->
+      { dependent = subject.path; dependent_part = part_of subject; dependency; dependency_part }
+      :: edges)
+    dependencies []
 
 let dependencies engine paths =
-  let paths = Path.Set.of_list paths and walk = walk engine in
+  let paths = Path.Set.of_list paths in
   List.concat_map
     (fun node ->
       match Engine.subject node with
-      | Some subject when Path.Set.mem subject.path paths -> edges_of_node walk node subject
+      | Some subject when Path.Set.mem subject.path paths -> edges_of_node engine node subject
       | Some _ | None -> [])
     (Engine.nodes engine)
   |> List.sort_uniq compare
@@ -87,7 +61,7 @@ let dependencies engine paths =
    reverse, from a node about a definition through its readers. A path's
    dependent is the first reader about a definition. *)
 let dependents engine paths =
-  let paths = Path.Set.of_list paths and walk = walk engine in
+  let paths = Path.Set.of_list paths in
   let edges = Hashtbl.create 64 in
   List.iter
     (fun node ->
@@ -108,7 +82,7 @@ let dependents engine paths =
                 if
                   (not (Hashtbl.mem visited key))
                   && (not (Option.equal Path.equal dependent (Some dependency.path)))
-                  && passes_through walk ?dependent reader
+                  && passes_through ?dependent reader
                 then begin
                   Hashtbl.replace visited key ();
                   (match (subject, dependent) with
@@ -135,7 +109,6 @@ let dependents engine paths =
    A definition's dependencies do not depend on the root that reaches it,
    so roots share them. *)
 let reachable engine roots =
-  let walk = walk engine in
   let nodes_about = Hashtbl.create 1024 in
   List.iter
     (fun node ->
@@ -150,7 +123,7 @@ let reachable engine roots =
     | None ->
         let paths =
           List.concat_map
-            (fun (node, subject) -> edges_of_node walk node subject)
+            (fun (node, subject) -> edges_of_node engine node subject)
             (Hashtbl.find_all nodes_about path)
           |> List.map (fun edge -> edge.dependency)
           |> List.sort_uniq Path.compare

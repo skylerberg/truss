@@ -296,7 +296,12 @@ lookups, each definition's tree, resolved form, interface, checked body,
 diagnostics, and code generation's outputs. An unsaved result, such as a
 file's tokens, is part of a state with its fingerprint and dependencies, so a
 change stops at it in a state opened from the store; only its value is
-computed again where needed, with the fingerprint it had.
+computed again where needed, with the fingerprint it had. A fixed base is
+written once for a compiler's identity and read by every state over it, so
+it stores the value of every result whose value holds no function, unsaved
+or not: otherwise each state would compute those results again as its own.
+A driver's read of a fixed base's node makes no root in the state, since the
+node never changes and is never collected.
 
 ## States in the store
 
@@ -541,9 +546,8 @@ kept. A result a command demands is a root from then on. A graph question
 first checks every package of the sessions it reads. A part of a definition
 depends on a part of another when a node about the first reads the node about
 the second, directly or through nodes about no definition, such as lookups.
-The path does not continue through a node derived from fixed bases alone,
-such as one of the standard library's own lookups, even where the state holds
-a copy of it. `dependencies` follows reads from the definition's nodes, and
+The path does not continue through a fixed base's node, such as one of the
+standard library's own lookups. `dependencies` follows reads from the definition's nodes, and
 `dependents` follows readers from the target's nodes, by the same rule.
 
 - **Comparing two states** compares the nodes either holds itself where they
