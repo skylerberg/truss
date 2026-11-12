@@ -5,8 +5,12 @@ type ty =
   | Function of function_type
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
   | Cursor of yielding
+  | Lent of lent
   | Never
 
+and lent = { base : ty; writable : bool; fields : lent_field list }
+and lent_field = { variant : string option; field : string; holds : holds }
+and holds = Address | Nested of lent
 and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
 and function_type = { parameters : (mode * ty) list; result : result; uses : Path.t list }
 and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
@@ -26,10 +30,31 @@ let rec compare a b =
         (fun (n, t) (m, u) -> String.compare n m >>= fun () -> compare t u)
         a.associated b.associated
   | Cursor a, Cursor b -> compare_yielding a b
+  | Lent a, Lent b -> compare_lent a b
   | Never, Never -> 0
   | _ -> Int.compare (rank a) (rank b)
 
-and rank = function Named _ -> 0 | Function _ -> 1 | Any _ -> 2 | Cursor _ -> 3 | Never -> 4
+and rank = function
+  | Named _ -> 0
+  | Function _ -> 1
+  | Any _ -> 2
+  | Cursor _ -> 3
+  | Lent _ -> 4
+  | Never -> 5
+
+and compare_lent a b =
+  compare a.base b.base >>= fun () ->
+  Bool.compare a.writable b.writable >>= fun () ->
+  List.compare
+    (fun f g ->
+      Option.compare String.compare f.variant g.variant >>= fun () ->
+      String.compare f.field g.field >>= fun () ->
+      match (f.holds, g.holds) with
+      | Address, Address -> 0
+      | Nested f, Nested g -> compare_lent f g
+      | Address, Nested _ -> -1
+      | Nested _, Address -> 1)
+    a.fields b.fields
 
 (* [Z.t] is compared by [Z.compare], since the polymorphic comparison does
    not accept it. Every other part is a string, a list, or a constructor. *)
@@ -95,7 +120,20 @@ let rec to_string = function
       in
       "any " ^ path_name trait ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
   | Cursor y -> "cursor of " ^ path_name y.method_
+  | Lent lent -> lent_to_string lent
   | Never -> "Never"
+
+and lent_to_string { base; writable; fields } =
+  let field { variant; field; holds } =
+    Option.fold ~none:"" ~some:(fun variant -> variant ^ ".") variant
+    ^ field
+    ^ match holds with Address -> " by address" | Nested lent -> ": " ^ lent_to_string lent
+  in
+  "lent "
+  ^ (if writable then "mut " else "")
+  ^ to_string base ^ "("
+  ^ String.concat ", " (List.map field fields)
+  ^ ")"
 
 and argument_to_string = function
   | Type ty -> to_string ty
@@ -151,6 +189,20 @@ let rec encode ?(path = encode_path) ty =
         ]
   | Cursor yielding -> tagged 3 [ encode_yielding ~path yielding ]
   | Never -> tagged 4 []
+  | Lent lent -> tagged 5 [ encode_lent ~path lent ]
+
+and encode_lent ~path { base; writable; fields } =
+  let field { variant; field; holds } =
+    Cbor.Array
+      [
+        (match variant with Some variant -> Cbor.Text variant | None -> Cbor.Null);
+        Text field;
+        (match holds with
+        | Address -> tagged 0 []
+        | Nested lent -> tagged 1 [ encode_lent ~path lent ]);
+      ]
+  in
+  Cbor.Array [ encode ~path base; Cbor.Bool writable; Cbor.Array (List.map field fields) ]
 
 and encode_argument ?(path = encode_path) = function
   | Type ty -> tagged 0 [ encode ~path ty ]

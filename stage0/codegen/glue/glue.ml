@@ -533,6 +533,8 @@ let debug t ty =
       | Function _, _ -> text "fn"
       | Any _, _ -> text "any"
       | Cursor _, _ -> text "cursor"
+      | Lent _, _ ->
+          bug "debug glue for %s, which a lent value is copied into first" (Ground.to_string ty)
       | _, Scalar scalar -> scalar_debug t b ~output scalar value
       | Named { path; _ }, Record [] ->
           text (if Ground.path_name path = "Unit" then "Unit" else Ground.path_name path ^ "()")

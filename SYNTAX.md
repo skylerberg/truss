@@ -1424,6 +1424,12 @@ fn Slice[Element].get(self, index: USize) lends Option[Element] {
   changes to a marked field reach the place when the lend ends. A field
   without the mark is a value, and a change to it ends with the lend. Two
   places lent `mut` by one `yield` must be different places.
+- **A place lent `mut` cannot be inside a variant,** at any depth. After
+  `yield Some(mut self.second)`, the caller could change the variant, as
+  `mut pair.maybe() = None` does, and `self.second` would be left without a
+  value: a use after free. To lend an `Option` to be changed, the method
+  yields a local `Option` with `yield mut` and stores what the caller left
+  in it after the `yield`, as Swift's `_modify` accessors do.
 - **The value owns none of what it was lent.** It holds each lent place's
   value for as long as it is lent, and `self` is lent whole for that time,
   as it is when one part is lent.

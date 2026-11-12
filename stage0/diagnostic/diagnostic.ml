@@ -201,6 +201,7 @@ module Code = struct
     | Keeps_lent_part
     | Read_only_view
     | Owned_beside_lent
+    | Lent_mut_in_variant
     | Task_outlives_yield
 
   type capabilities =
@@ -463,6 +464,7 @@ module Code = struct
     | Keeps_lent_part -> "keeps_lent_part"
     | Read_only_view -> "read_only_view"
     | Owned_beside_lent -> "owned_beside_lent"
+    | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Task_outlives_yield -> "task_outlives_yield"
 
   let capabilities_name code =

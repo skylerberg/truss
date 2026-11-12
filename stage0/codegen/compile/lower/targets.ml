@@ -294,6 +294,7 @@ let nested_function st ~(function_type : Ground.function_type) ~(output : Types.
         synthetic = Hashtbl.copy st.frame.synthetic;
         on_yield = None;
         yield_into = None;
+        lent_into = None;
         exit = None;
         code =
           (match output with

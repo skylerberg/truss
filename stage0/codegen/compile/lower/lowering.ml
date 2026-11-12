@@ -5,13 +5,15 @@ open Definitions
 open Lir_builder
 
 (* What leaving a scope does: drop what a place still owns, free the heap
-   block a pointer points at, once what is in it has been dropped, give a
-   place back the value that was lent out of it to be changed, let a
-   lending method go on, or join a task group with the given call of
-   [Tasks.join]. *)
+   block a pointer points at, once what is in it has been dropped, free the
+   block of a value whose variant is one of [variants] without dropping
+   what is in it, give a place back the value that was lent out of it to be
+   changed, let a lending method go on, or join a task group with the given
+   call of [Tasks.join]. *)
 type cleanup =
   | Drop_value of Lir.place
   | Free_pointed of Lir.place
+  | Free_blocks of { place : Lir.place; variants : string list }
   | Give_back of { lent : Lir.place; source : Lir.place; ty : Ground.ty }
   | Finish_lend of lend
   | Join_group of Lir.statement
@@ -62,6 +64,9 @@ type frame = {
   yield_into : Lir.place option;
       (** In an inlined lending method with a [yield] on each of several paths, where a value the
           method makes to lend is put, so that one owner drops it whichever [yield] is reached *)
+  lent_into : (Lir.place * Ground.lent) option;
+      (** In an inlined lending or yielding method that yields a constructor of places, the local
+          that every [yield] builds its lent value in, and the value's type *)
   inlined : Path.t list;  (** The methods inlined around this frame, to refuse recursion *)
   reported : Lir.site option;
       (** In the standard library's code that is inlined into a program's, the position of the
@@ -142,6 +147,7 @@ let frame_of code ~inlined =
     self_place = None;
     on_yield = None;
     yield_into = None;
+    lent_into = None;
     inlined;
     reported = None;
     exit = None;
@@ -322,6 +328,20 @@ let drop_scope st (scope : scope) =
       | Free_pointed pointer ->
           emit st.b
             (Call { target = Intrinsic Free; arguments = [ Copy pointer ]; result = Discarded })
+      | Free_blocks { place; variants } ->
+          let after = block st.b in
+          let cases =
+            List.map
+              (fun variant ->
+                let case = block st.b in
+                in_block st.b case (fun () ->
+                    emit st.b (Free_block { place; variant });
+                    finish st.b (Goto after));
+                (variant, case))
+              variants
+          in
+          finish st.b (Switch_variant { place; cases; default = Some after });
+          start st.b after
       | Give_back { lent; source; ty } ->
           emit st.b (Assign (source, Use (if trivial st ty then Copy lent else Move lent)))
       | Finish_lend lend ->
@@ -453,6 +473,45 @@ let looping st ~continue_ ~break_ ~depth f =
 let replace st place ty ~by =
   if not (trivial st ty) then emit st.b (Drop place);
   emit st.b (Assign (place, Use (owned st by ty)))
+
+(* The type of a place in the function being written, or [None] where it has
+   zero size or is reached through a lambda's environment. *)
+let place_type st (place : Lir.place) =
+  let environment _ = bug "a place in an environment, whose type lowering does not track" in
+  let rec projected (ty : Lir.ty) = function
+    | [] -> Some ty
+    | _ :: _ when match ty with Environment _ | Evidence _ -> true | _ -> false -> None
+    | projection :: rest ->
+        Option.bind (Lir.projection_type st.context.env ~environment ty projection) (fun ty ->
+            projected ty rest)
+  in
+  let root : Lir.ty =
+    match place.root with Local local -> local_type st.b local | Static { ty; _ } -> Value ty
+  in
+  if Lir.erased st.context.env root then None else projected root place.projections
+
+(* The lent value at a place, if the place holds one. *)
+let lent_at st place =
+  match place_type st place with Some (Value (Lent lent)) -> Some lent | _ -> None
+
+(* A field or a variant's field of a place. A field of a lent value that
+   holds an address is the place it points at. *)
+let project st (place : Lir.place) (projection : Lir.projection) =
+  let projected = place / projection in
+  let variant, field =
+    match projection with
+    | Field field -> (None, field)
+    | Variant_field { variant; field } -> (Some variant, field)
+    | Index _ | Deref -> (None, "")
+  in
+  match lent_at st place with
+  | Some lent
+    when List.exists
+           (fun (lent : Ground.lent_field) ->
+             lent.variant = variant && lent.field = field && lent.holds = Address)
+           lent.fields ->
+      projected / Deref
+  | _ -> projected
 
 let constant_int integer value = Lir.Constant (Integer (integer, value))
 

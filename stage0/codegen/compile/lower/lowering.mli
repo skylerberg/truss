@@ -1,6 +1,7 @@
 type cleanup =
   | Drop_value of Lir.place
   | Free_pointed of Lir.place
+  | Free_blocks of { place : Lir.place; variants : string list }
   | Give_back of { lent : Lir.place; source : Lir.place; ty : Ground.ty }
   | Finish_lend of lend
   | Join_group of Lir.statement
@@ -24,6 +25,7 @@ type frame = {
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> stop:Lir.block -> unit) option;
   yield_into : Lir.place option;
+  lent_into : (Lir.place * Ground.lent) option;
   inlined : Path.t list;
   reported : Lir.site option;
   exit : (Lir.block * int) option;
@@ -132,5 +134,7 @@ val looping :
   state -> continue_:Lir.block -> break_:Lir.block -> depth:int -> (unit -> unit) -> unit
 
 val replace : state -> Lir.place -> Ground.ty -> by:Lir.place -> unit
+val lent_at : state -> Lir.place -> Ground.lent option
+val project : state -> Lir.place -> Lir.projection -> Lir.place
 val constant_int : Memory_layout.integer -> Z.t -> Lir.operand
 val scalar_of : state -> Ground.ty -> Memory_layout.scalar
