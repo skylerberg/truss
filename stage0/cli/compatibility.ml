@@ -237,7 +237,8 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
           Some
             (Breaks
                (Printf.sprintf
-                  "has the method `%s` without a body, which every `impl` of it would have to add"
+                  "gained the method `%s` without a default body, which every `impl` must then \
+                   define"
                   now.method_name)))
       after.methods
   in
