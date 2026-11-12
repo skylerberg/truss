@@ -2256,11 +2256,16 @@ effect: code that does it declares `uses Tasks`.
   mutex, as an update of a Clojure atom does. A pure function cannot wait,
   use another cell, or do I/O, so two updates cannot deadlock, and no task
   holds the mutex across a call that can wait. Updating a cell requires
-  `Tasks`, because which task updates first differs from run to run. Only
-  the standard library can name the cell, and a channel's queue is one. A
-  public cell, for state that one implementation's mutual exclusion is too
-  coarse for, such as a cache in many parts, is added when a program needs
-  it.
+  `Tasks`, because which task updates first differs from run to run. A
+  channel's queue is one.
+- **`tasks::Cell` is that cell for programs,** for state that one
+  implementation's mutual exclusion is too coarse for, such as a cache in
+  many parts or a server's request counters. `cell.update(change)` runs
+  `change` on the value while it holds the cell's mutex, and `change` is a
+  function that uses no capability, so the rules above hold for it.
+  `cell.copy()` is another reference to the same value. `tasks::Counter`
+  is a cell that holds an `Int64`. A counter does what Go's `atomic.Int64`
+  and Java's `AtomicLong` do, through the cell's mutex.
 - **Data races cannot happen, and waiting forever can.** A task can wait
   for a message that no task will send. Go, Rust, and Erlang do not rule
   that out either.
