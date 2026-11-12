@@ -488,7 +488,7 @@ let add_requires context frame required =
   let edit =
     match brace with
     | Some at when at > 0 && text.[at - 1] = '\n' ->
-        Some (Diagnostic.replace (Syntax.Span.zero_width at) ("  requires " ^ required ^ "\n"))
+        Some (Diagnostic.insert (Syntax.Span.zero_width at) ("  requires " ^ required ^ "\n"))
     | Some at when at > 0 && text.[at - 1] = ' ' ->
         Some (Diagnostic.replace (Syntax.Span.make (at - 1) at) ("\n  requires " ^ required ^ "\n"))
     | _ -> None

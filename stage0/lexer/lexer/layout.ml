@@ -170,7 +170,9 @@ let closing_edits source tokens ~closers ~is_unterminated_string openers =
                 "\n" ^ indentation_of source opener.span.start ^ closer
               else closer
             in
-            edits position (Diagnostic.insert position replacement :: reversed) outer)
+            edits position
+              (Diagnostic.insert (Source.zero_width position) replacement :: reversed)
+              outer)
   in
   edits 0 [] openers
 

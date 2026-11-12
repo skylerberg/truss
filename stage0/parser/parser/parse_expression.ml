@@ -1570,7 +1570,10 @@ and binding cursor ~mutable_ =
           ~fixes:
             [
               Diagnostic.fix "Put the expression in parentheses"
-                [ Diagnostic.insert span.start "("; Diagnostic.insert span.stop ")" ];
+                [
+                  Diagnostic.insert (Source.zero_width span.start) "(";
+                  Diagnostic.insert (Source.zero_width span.stop) ")";
+                ];
             ]
       end;
       Cursor.advance cursor;

@@ -147,7 +147,7 @@ let copy_at context (moved : Core.origin) =
             (Syntax.Span.make (span context written).start (span context marked).start);
         ]
     | Some ((Read | Mut), _) | None -> [])
-  @ [ Diagnostic.replace (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
+  @ [ Diagnostic.insert (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
 
 (* The span of a place together with the [mut] or [own] mark before it. *)
 let with_mark context (place : Core.origin) : Syntax.span =

@@ -16,16 +16,12 @@ type encoding = Utf_8 | Utf_16
 
 let encoding_name = function Utf_8 -> "utf-8" | Utf_16 -> "utf-16"
 let units = function Utf_8 -> Source.Bytes | Utf_16 -> Source.Utf_16_code_units
+let position encoding source offset = Source.location (units encoding) source offset
+let offset encoding source ~line ~column = Source.offset (units encoding) source ~line ~column
 
-let position encoding text offset =
-  Source.location (units encoding) (Source.create ~path:"" text) offset
-
-let offset encoding text ~line ~column =
-  Source.offset (units encoding) (Source.create ~path:"" text) ~line ~column
-
-let range encoding text (span : Diagnostic.span) =
+let range encoding source (span : Diagnostic.span) =
   let point offset =
-    let line, character = position encoding text offset in
+    let line, character = position encoding source offset in
     Json.Object [ ("line", Json.Int line); ("character", Json.Int character) ]
   in
   Json.Object [ ("start", point span.start); ("end", point span.stop) ]
@@ -70,10 +66,10 @@ let path_of_uri uri =
 
 (* A diagnostic as the protocol states it, with its notes as related
    information in the same file. *)
-let lsp_diagnostic encoding ~uri text (diagnostic : Diagnostic.t) =
+let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
   Json.Object
     [
-      ("range", range encoding text diagnostic.span);
+      ("range", range encoding source diagnostic.span);
       ("severity", Json.Int 1);
       ("code", Json.String (Diagnostic.Code.name diagnostic.code));
       ("source", Json.String "truss");
@@ -85,7 +81,7 @@ let lsp_diagnostic encoding ~uri text (diagnostic : Diagnostic.t) =
                Json.Object
                  [
                    ( "location",
-                     Json.Object [ ("uri", Json.String uri); ("range", range encoding text span) ]
+                     Json.Object [ ("uri", Json.String uri); ("range", range encoding source span) ]
                    );
                    ("message", Json.String message);
                  ])
@@ -94,10 +90,10 @@ let lsp_diagnostic encoding ~uri text (diagnostic : Diagnostic.t) =
 
 (* An obligation's state: where it is, what it is to show, whether it is
    shown, and whether its proof trusts compiled code. *)
-let lsp_state encoding text (state : Diagnostic.span Prover.state) =
+let lsp_state encoding source (state : Diagnostic.span Prover.state) =
   Json.Object
     [
-      ("range", range encoding text state.span);
+      ("range", range encoding source state.span);
       ("code", Json.String (Diagnostic.Code.name (Prover state.code)));
       ("shows", Json.String state.shows);
       ("proven", Json.Bool (state.failure = None));
@@ -149,7 +145,7 @@ let check ~root encoding (buffers : (string * string) list) =
       (fun (uri, path, text) ->
         let module_ = module_of (Project.normalize path) in
         let found = Option.map (Database.diagnostics trial) module_ in
-        (uri, text, module_, found))
+        (uri, Source.create ~path text, module_, found))
       buffers
   in
   let provable =
@@ -163,7 +159,7 @@ let check ~root encoding (buffers : (string * string) list) =
       ( "files",
         Json.List
           (List.map
-             (fun (uri, text, module_, found) ->
+             (fun (uri, source, module_, found) ->
                let diagnostics, states =
                  match (module_, found) with
                  | Some module_, Some [] -> proofs module_
@@ -174,8 +170,8 @@ let check ~root encoding (buffers : (string * string) list) =
                  [
                    ("uri", Json.String uri);
                    ( "diagnostics",
-                     Json.List (List.map (lsp_diagnostic encoding ~uri text) diagnostics) );
-                   ("states", Json.List (List.map (lsp_state encoding text) states));
+                     Json.List (List.map (lsp_diagnostic encoding ~uri source) diagnostics) );
+                   ("states", Json.List (List.map (lsp_state encoding source) states));
                  ])
              checked) );
     ]
@@ -314,12 +310,13 @@ let changed encoding text changes =
       match (Json.field "range" change, Json.field "text" change) with
       | Json.Null, Json.String whole -> whole
       | range, Json.String replacement ->
+          let source = Source.create ~path:"" text in
           let point name =
             match
               ( Json.field "line" (Json.field name range),
                 Json.field "character" (Json.field name range) )
             with
-            | Json.Int line, Json.Int column -> offset encoding text ~line ~column
+            | Json.Int line, Json.Int column -> offset encoding source ~line ~column
             | _ -> 0
           in
           let start = point "start" and stop = point "end" in

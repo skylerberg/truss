@@ -20,7 +20,7 @@ type verdict =
 let verdict context (place : Place.t) ~type_ ~returned ~captured : verdict =
   let copy title type_ (at : Syntax.span) =
     if copyable context type_ then
-      [ Diagnostic.fix title [ Diagnostic.replace (Syntax.Span.zero_width at.stop) ".copy()" ] ]
+      [ Diagnostic.fix title [ Diagnostic.insert (Syntax.Span.zero_width at.stop) ".copy()" ] ]
     else []
   in
   let shown = show context place in
@@ -187,7 +187,7 @@ let check context (graph : Graph.t) =
               (if copyable context type_ then
                  [
                    Diagnostic.fix "Copy it."
-                     [ Diagnostic.replace (Syntax.Span.zero_width at.stop) ".copy()" ];
+                     [ Diagnostic.insert (Syntax.Span.zero_width at.stop) ".copy()" ];
                  ]
                else [])
             "This part is lent, so it cannot be moved: the loan ends when the statement ends. Copy \

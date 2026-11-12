@@ -133,7 +133,7 @@ let use_after_definition source (line : _ Syntax.item) ~destination =
       [
         Diagnostic.fix "Move it up to the other `use` lines"
           [
-            Diagnostic.insert destination (line.text ^ "\n");
+            Diagnostic.insert (Source.zero_width destination) (line.text ^ "\n");
             Diagnostic.delete (Source.span start stop);
           ];
       ]

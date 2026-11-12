@@ -117,8 +117,8 @@ let fix cursor (whole : span) edits =
 
 let parentheses cursor (first : span) (last : span) =
   [
-    Diagnostic.insert (Cursor.absolute cursor first).start "(";
-    Diagnostic.insert (Cursor.absolute cursor last).stop ")";
+    Diagnostic.insert (Source.zero_width (Cursor.absolute cursor first).start) "(";
+    Diagnostic.insert (Source.zero_width (Cursor.absolute cursor last).stop) ")";
   ]
 
 let is_name_or_literal (value : expression) =
@@ -240,7 +240,9 @@ let report_problem cursor ?context (whole : expression) (operand : expression) ~
             [
               fix cursor whole.span
                 [
-                  Diagnostic.insert (Cursor.absolute cursor middle.span).stop (" && " ^ middle_text);
+                  Diagnostic.insert
+                    (Source.zero_width (Cursor.absolute cursor middle.span).stop)
+                    (" && " ^ middle_text);
                 ];
             ]
         | _ -> []
@@ -273,7 +275,10 @@ let rec expression ?context cursor (value : expression) =
              the value is negated."
             [
               fix cursor value.span
-                [ Diagnostic.insert (whole.start + 1) "("; Diagnostic.insert whole.stop ")" ];
+                [
+                  Diagnostic.insert (Source.zero_width (whole.start + 1)) "(";
+                  Diagnostic.insert (Source.zero_width whole.stop) ")";
+                ];
               fix cursor value.span (parentheses cursor left.span left.span);
             ]
       | _ -> ());

@@ -347,7 +347,7 @@ let check_recursion database (declaration : Names.declaration) (definition : def
                   ~fixes:
                     [
                       Diagnostic.fix "Mark the variant `indirect`."
-                        [ Diagnostic.replace (Span.zero_width span.start) "indirect " ];
+                        [ Diagnostic.insert (Span.zero_width span.start) "indirect " ];
                     ]
                   "This type contains itself in place, so it would be infinitely large. Mark the \
                    variant `indirect` to keep its fields on the heap."

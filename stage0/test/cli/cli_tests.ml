@@ -1525,11 +1525,12 @@ let () =
       | _ -> fail "not read");
   test "a position counts UTF-16 code units, and an offset is its inverse" (fun () ->
       let text = "a\n\xf0\x9f\x98\x80b" in
+      let source = Source.create ~path:"" text in
       let offset = String.length text - 1 in
-      (match Lsp_command.position Utf_16 text offset with
+      (match Lsp_command.position Utf_16 source offset with
       | 1, 2 -> ()
       | line, column -> fail "line %d, column %d" line column);
-      if Lsp_command.offset Utf_16 text ~line:1 ~column:2 <> offset then fail "not the inverse");
+      if Lsp_command.offset Utf_16 source ~line:1 ~column:2 <> offset then fail "not the inverse");
   test "an open file's text is checked in place of the file on disk" (fun () ->
       let root =
         package

@@ -367,9 +367,7 @@ and check_provide checking scope implementations body =
       if is_place && mutates && not marked_mut then
         report checking Provide_mark implementation.origin
           ~fixes:
-            [
-              Diagnostic.fix "Mark it `mut`." [ Diagnostic.replace (Span.zero_width start) "mut " ];
-            ]
+            [ Diagnostic.fix "Mark it `mut`." [ Diagnostic.insert (Span.zero_width start) "mut " ] ]
           "This implementation changes its own state, so the place is provided `mut`."
       else if marked_mut && not mutates then
         report checking Provide_mark implementation.origin
