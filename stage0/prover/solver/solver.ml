@@ -41,20 +41,6 @@ let header =
 let key_of_text text = Logic.hash (Printf.sprintf "z3 %s\n%s%s" version header text)
 let key query = key_of_text (Logic.text query)
 
-(* A query's text, its symbols' canonical names, and its key, made once for
-   each query asked, which a run asks again: once ahead with the others,
-   and again for its answer. *)
-module Asked = Hashtbl.Make (struct
-  type t = Logic.query
-
-  let equal = ( == )
-  let hash = Hashtbl.hash
-end)
-
-type rendered = { text : string; named : (Logic.symbol * string) list; text_key : string }
-
-let rendered_queries : rendered Asked.t = Asked.create 1024
-
 (* A small reader of the s-expressions [get-value] prints. *)
 type sexp = Atom of string | List of sexp list
 
@@ -102,11 +88,12 @@ let rec show_sexp = function
   | Atom atom -> atom
   | List items -> "(" ^ String.concat " " (List.map show_sexp items) ^ ")"
 
-(* A query as the solver is asked it: its canonical text, its key, and for
-   each symbol whose value a counterexample should give, the canonical
-   name the text calls it by. *)
+(* A query as the solver is asked it: its key, and for each symbol whose
+   value a counterexample should give, the canonical name the text calls it
+   by. It holds no text: a query's text is about 100 KB, and a run keeps
+   every request it makes, so the text is rendered again from the query
+   when the solver must be run. *)
 type request = {
-  text : string;
   key : string;
   requested : (Logic.symbol * string) list;
   asked : string list;  (** The [get-value] argument for each of [requested], in order. *)
@@ -122,18 +109,11 @@ let cache : (string, canonical) Hashtbl.t = Hashtbl.create 256
    and the count of solved queries. *)
 let lock = Mutex.create ()
 let locked work = Mutex.protect lock work
-
-let render query =
-  match locked (fun () -> Asked.find_opt rendered_queries query) with
-  | Some rendered -> rendered
-  | None ->
-      let text = Logic.text query in
-      let rendered = { text; named = Logic.symbols query; text_key = key_of_text text } in
-      locked (fun () -> Asked.replace rendered_queries query rendered);
-      rendered
+let key_of_asked text asked = key_of_text text ^ String.concat "," asked
 
 let request ?(values = []) ?(terms = []) query =
-  let { text; named; text_key } = render query in
+  let rendering = Logic.render query in
+  let named = Logic.symbols rendering in
   let symbols =
     List.filter_map
       (fun symbol ->
@@ -145,12 +125,12 @@ let request ?(values = []) ?(terms = []) query =
      spaces and the solver may print it back otherwise. *)
   let terms =
     List.filter_map
-      (fun (name, term) -> Logic.term_text query term |> Option.map (fun text -> (name, text)))
+      (fun (name, term) -> Logic.term_text rendering term |> Option.map (fun text -> (name, text)))
       terms
     |> List.mapi (fun index (name, text) -> ((name, Printf.sprintf "#%d" index), text))
   in
   let requested = List.map fst (symbols @ terms) and asked = List.map snd (symbols @ terms) in
-  { text; key = text_key ^ String.concat "," asked; requested; asked }
+  { key = key_of_asked (Logic.rendered_text rendering) asked; requested; asked }
 
 let request_key request = request.key
 
@@ -164,8 +144,9 @@ let read request = function
              Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
            request.requested)
 
-(* Runs one request, or reads its answer from a cache. *)
-let ask solver request =
+(* Runs one request, or reads its answer from a cache. The query is the
+   one the request was made from, and is rendered only to be run. *)
+let ask solver (request, query) =
   let file = Option.map (fun directory -> Filename.concat directory request.key) solver.cache in
   let stored =
     match file with
@@ -194,8 +175,11 @@ let ask solver request =
   match (locked (fun () -> Hashtbl.find_opt cache request.key), stored) with
   | Some answer, _ | None, Some answer -> answer
   | None, None ->
+      let text = Logic.text query in
+      if key_of_asked text request.asked <> request.key then
+        invalid_arg "Solver.ask_all: the query is not the one its request was made from";
       let input =
-        header ^ request.text
+        header ^ text
         ^
         if request.requested = [] then ""
         else Printf.sprintf "(get-value (%s))\n" (String.concat " " request.asked)
@@ -246,7 +230,7 @@ let ask solver request =
 
 let solve solver ?(values = []) query =
   let request = request ~values query in
-  read request (ask solver request)
+  read request (ask solver (request, query))
 
 let ask_all solver requests =
   let requests = Array.of_list requests in
