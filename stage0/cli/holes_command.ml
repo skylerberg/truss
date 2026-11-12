@@ -13,7 +13,6 @@ type hole = {
   mutable blocks : string list;
 }
 
-(* The holes of one definition, in order. *)
 let of_definition (project : Project.t) source (declaration : Names.declaration) =
   let context = project.context in
   let key = Names.key_of declaration in

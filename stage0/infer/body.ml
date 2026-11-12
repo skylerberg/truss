@@ -250,7 +250,6 @@ let core_parameters state (written : parameter list) (signature : T.signature) :
       | Parameter_error -> None)
     written
 
-(* Checks a function or a method against its signature. *)
 let check_function state ~broken_body (written : signature) (body_block : block option)
     (signature : T.signature) =
   let env : env =

@@ -150,7 +150,6 @@ let consume_line_break cursor =
   cursor.position <- start + length;
   span start cursor.position
 
-(* Records a line break between tokens. *)
 let note_line_break cursor line_break =
   if cursor.first_line_break <> None && cursor.line_is_blank then cursor.blank_line <- true;
   if cursor.first_line_break = None then cursor.first_line_break <- Some line_break;

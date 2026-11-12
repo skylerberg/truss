@@ -15,15 +15,14 @@ type interface =
       trait : T.trait_reference;
       law : string;
       for_type : T.ty;
-    }  (** The subject of a law's proof: a law of a trait, for a type's [impl]. *)
+    }
   | Error_interface of Diagnostic.reported
-      (** A definition whose header did not parse: everything is accepted of it. *)
 
 type lowered_interface = {
   interface : interface;
   diagnostics : Syntax.diagnostic list;
-  named : (span * T.ty) list;  (** Each named type written, for checking its bounds. *)
-  bounds : (T.parameter * T.trait_reference list) list;  (** The generic parameters' bounds. *)
+  named : (span * T.ty) list;
+  bounds : (T.parameter * T.trait_reference list) list;
 }
 
 (* The type a head names, and the generic parameters it declares, which
@@ -603,8 +602,6 @@ let in_declared_order database path ~variant ~name fields =
       in
       List.stable_sort (fun left right -> compare (position left) (position right)) fields
   | None -> fields
-
-(* Built-in types *)
 
 let builtin_shape builtin : T.type_interface =
   let element : T.parameter = { owner = Intrinsic.builtin_path builtin; name = "Element" } in

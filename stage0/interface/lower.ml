@@ -6,12 +6,11 @@ type context = {
   resolved : Resolve.resolved;
   bounds : (T.parameter, T.trait_reference list) Hashtbl.t;
   self_type : T.ty option;  (** What [Self] means here. *)
-  self_trait : T.trait_reference option;  (** In a trait, the trait [Self] implements. *)
-  self_associated : (string * T.ty) list;  (** In an [impl], its associated types. *)
+  self_trait : T.trait_reference option;
+  self_associated : (string * T.ty) list;
   self_capabilities : (string * T.capability list) list;
-      (** In an [impl], each associated capability set that its trait declares. *)
-  diagnostics : Syntax.diagnostic list ref;  (** Shared by every copy of the context. *)
-  named : (span * T.ty) list ref;  (** Each named type lowered, for checking its bounds. *)
+  diagnostics : Syntax.diagnostic list ref;
+  named : (span * T.ty) list ref;
 }
 
 let create database resolved =
@@ -48,8 +47,6 @@ let parameter_of context (name : name) =
               name.text))
   | Some (Unknown report) -> Error report
   | _ -> bug "`%s` is not resolved as a generic parameter" name.text
-
-(* Types *)
 
 let show_path (path : path) = Resolve.Names.spell_path path
 

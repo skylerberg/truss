@@ -27,10 +27,7 @@ let written (path : Path.t) =
   | Top { module_; name } when Resolve.Prelude.find_type name = Some module_ -> name
   | _ -> Path.show path
 
-type grant = {
-  capabilities : Path.t list;
-  unknown : string list;  (** The entries that name no capability *)
-}
+type grant = { capabilities : Path.t list; unknown : string list }
 
 let granted =
   Query.query ~name:"granted" ~phase:Phases.interfaces ~saved:true

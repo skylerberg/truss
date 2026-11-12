@@ -23,8 +23,6 @@ let declarations database package = Query.demand database Names.package_declarat
 let definition database declaration =
   Query.demand database Names.definition (Names.key_of declaration)
 
-(* Contracts, as written *)
-
 let written kind (clauses : clause list) =
   List.filter_map
     (fun (clause : clause) ->
@@ -56,8 +54,6 @@ let contract ~(before : clause list) ~(after : clause list) =
        else if missing_from cost_before cost_after <> [] then [ Grows "promises a cost more" ]
        else []);
     ]
-
-(* Signatures *)
 
 let uses_more : T.capability -> change = function
   | Capability path -> Breaks (Printf.sprintf "uses `%s`, which it did not" (Path.show path))
@@ -146,8 +142,6 @@ let clauses_of (definition : definition option) =
   | Some { kind = Theorem { clauses; _ }; _ } -> clauses
   | _ -> []
 
-(* Types *)
-
 let type_clauses (definition : definition option) select =
   match definition with
   | Some { kind = Type_definition { clauses; _ }; _ } ->
@@ -180,8 +174,6 @@ let type_ ~(before : T.type_interface) ~(after : T.type_interface) ~before_defin
        else if missing_from before.derives after.derives <> [] then [ Grows "derives a trait more" ]
        else []);
     ]
-
-(* Traits and capabilities *)
 
 (* The clauses of a method written inside a trait or a capability, which
    is a definition of its own. *)
@@ -260,8 +252,6 @@ let trait ~(before : T.trait_interface) ~(after : T.trait_interface) ~before_def
       gained;
     ]
 
-(* Constants *)
-
 let constant_value database path (definition : definition option) =
   match Query.demand database Interface.Constants.value_of path with
   | Some _ as value -> `Value value
@@ -269,8 +259,6 @@ let constant_value database path (definition : definition option) =
       match definition with
       | Some { kind = Constant { value; _ }; _ } -> `Written (Syntax_print.expression value)
       | _ -> `Value None)
-
-(* [impl]s *)
 
 let impls database package =
   List.filter_map

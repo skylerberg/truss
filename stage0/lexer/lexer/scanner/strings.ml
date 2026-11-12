@@ -9,7 +9,6 @@
 open Token
 open Cursor
 
-(* Interpolations may nest at most this deep. *)
 let maximum_nesting = 32
 
 type scan = Cursor.t -> inline:bool -> nesting:int -> Cursor.item

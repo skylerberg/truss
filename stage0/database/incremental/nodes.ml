@@ -51,9 +51,9 @@ type t = {
   mutable waiting : int;  (** How many seeds and marks there are *)
   mutable candidates : node list;  (** Nodes to collect, if still unnecessary, once no query runs *)
   logging : bool;
-  mutable log : node list;  (** The results computed since the log was cleared, newest first *)
-  mutable computed : node list;  (** Newest first *)
-  mutable changed : node list;  (** Newest first *)
+  log : node Dynarray.t;  (** The results computed since the log was cleared *)
+  computed : node Dynarray.t;
+  changed : node Dynarray.t;
   tally : tally;
   mutable store : store option;
   unsaved : (int, node) Hashtbl.t;  (** Saved nodes made or changed since the last write *)
@@ -138,7 +138,7 @@ and 'value outcome = Value of 'value | Raised of exn
 
 and frame = {
   owner : node;
-  mutable read : node list;  (** Newest first *)
+  read : node Dynarray.t;
   seen : (int, unit) Hashtbl.t;
   mutable cyclic : string list option;
 }
@@ -220,9 +220,9 @@ let create ?(log = false) ?(bases = []) () =
       waiting = 0;
       candidates = [];
       logging = log;
-      log = [];
-      computed = [];
-      changed = [];
+      log = Dynarray.create ();
+      computed = Dynarray.create ();
+      changed = Dynarray.create ();
       tally =
         {
           marks = 0;

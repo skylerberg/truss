@@ -62,8 +62,6 @@ let variant_shapes t ty =
   | Shape (Sum variants) -> variants
   | _ -> bug "%s is not a sum type" (Ground.to_string ty)
 
-(* Drop *)
-
 let droppable t : Memory_layout.member -> bool = function
   | Typed ty -> not (trivial t ty)
   | Raw _ -> false
@@ -209,14 +207,11 @@ let any_drop t ty =
   finish b (Return None);
   instance (Any_drop ty) (build b ~parameters:[ untyped ] ~result:None)
 
-(* Copy *)
-
 let copy_signature t ty : Lir.signature =
   Convention.signature
     (Option.to_list (Convention.parameter t.env Read ty))
     (Convention.result t.env ty)
 
-(* Copies [source] into [destination], both of type [ty]. *)
 let copy_into t b ~destination ~source ty =
   if trivial t ty then emit b (Assign (destination, Use (Copy source)))
   else
@@ -388,10 +383,6 @@ let copy t ty =
        ~result:
          (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None))
 
-(* Debug output *)
-
-(* What a debug or an encode function appends to: storage of bytes, which
-   its caller owns and passes to be changed. *)
 let builtin builtin : Ground.ty = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
 let output_ty = Storage.of_elements (builtin UInt8)
 let bytes_ty = Storage.view_of_elements (builtin UInt8)
@@ -566,8 +557,6 @@ let debug t ty =
           start b after));
   finish b (Return None);
   instance (Debug ty) (build b ~parameters:(Option.to_list parameter @ [ out ]) ~result:None)
-
-(* Encoding *)
 
 (* A value's binary form, which code run while compiling writes its result
    in and the compiler reads back as static data: a scalar as its bytes, a

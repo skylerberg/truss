@@ -8,8 +8,6 @@
    with the open files' texts in place of what is on disk. Nothing is
    written to a file. *)
 
-(* Positions *)
-
 (* An LSP position counts columns in UTF-16 code units unless the client
    accepts UTF-8, which is the file's bytes. *)
 type encoding = Utf_8 | Utf_16
@@ -25,8 +23,6 @@ let range encoding source (span : Diagnostic.span) =
     Json.Object [ ("line", Json.Int line); ("character", Json.Int character) ]
   in
   Json.Object [ ("start", point span.start); ("end", point span.stop) ]
-
-(* File names in URIs *)
 
 let hex_digit c =
   match c with
@@ -61,8 +57,6 @@ let path_of_uri uri =
     in
     decode 0;
     Some (Buffer.contents buffer)
-
-(* Checking the open files *)
 
 (* A diagnostic as the protocol states it, with its notes as related
    information in the same file. *)
@@ -176,8 +170,6 @@ let check ~root encoding (buffers : (string * string) list) =
                  ])
              checked) );
     ]
-
-(* The protocol *)
 
 (* One message's body from a stream of messages, each after a header that
    gives its length, or [None] at the stream's end. *)

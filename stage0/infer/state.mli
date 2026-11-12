@@ -133,6 +133,7 @@ val unify : state -> Unify.T.ty -> Unify.T.ty -> bool
 val unify_as_hint : state -> Unify.T.ty -> Unify.T.ty -> unit
 val implements : state -> Unify.T.ty -> T.trait_reference -> Impls.evidence option
 val plain : state -> Unify.T.ty -> bool
+val copyable : state -> Unify.T.ty -> bool
 val associated : state -> Unify.T.ty -> T.trait_reference -> string -> at:Syntax.span -> T.ty
 val evidence_of : Impls.evidence -> C.evidence
 val trait_reference : ?arguments:T.argument list -> Path.t -> T.trait_reference
@@ -145,6 +146,7 @@ val target : state -> Syntax.name -> Resolve.target option
 val default_literal : state -> Unify.T.ty -> Unify.T.ty
 val head : state -> Syntax.expression -> Resolve.head option
 val names_variant : Syntax.name -> bool
+val is_member_constant : state -> Syntax.expression -> bool
 val show : state -> Unify.T.ty -> string
 
 val mismatched :
@@ -155,11 +157,6 @@ val is_place : state -> Syntax.expression -> bool
 val marked_call : state -> Syntax.expression -> Syntax.id option
 val called : Syntax.expression -> Syntax.expression option
 val check_resource : state -> Syntax.resource -> unit
-
-type static_ =
-  | Static_type of T.ty
-  | Static_trait of Path.t * T.argument list option
-  | Static_capability of Path.t
 
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
@@ -172,44 +169,3 @@ val convert :
   actual:Unify.T.ty ->
   expected:Unify.T.ty ->
   unit
-
-val require :
-  state ->
-  at:Syntax.span ->
-  Unify.T.ty ->
-  T.trait_reference ->
-  unmet:(Types.ty -> (string * Types.ty) option -> unit) ->
-  unit
-
-val fresh_arguments : state -> Path.t -> T.argument list
-val instantiate_type : state -> Syntax.span -> Path.t -> T.argument list
-val static_ : state -> Syntax.expression -> static_ option
-val named_type : state -> Syntax.expression -> Path.t -> Syntax.bracket_item list option -> T.ty
-val type_argument_of_expression : state -> Syntax.expression -> T.argument
-
-type instance = {
-  signature : T.signature;
-  substitution : T.substitution;
-  type_arguments : T.argument list;
-}
-
-val instantiate :
-  state -> Syntax.span -> ?extra:(T.parameter * T.argument) list -> T.signature -> instance
-
-val function_signature : state -> Path.t -> (Types.signature, Diagnostic.reported) result option
-val note_lending : state -> Syntax.expression -> T.result -> unit
-val lent : state -> Syntax.expression -> T.mode option
-val borrowed : state -> Syntax.expression -> bool
-val scrutinee_mode : state -> Syntax.expression -> T.mode
-
-type immutable = Read_only of string | Captured of string | Lent_read_only | Not_a_place
-type mutation = Assignment | Mut_mark
-
-val mutate : state -> env -> by:mutation -> Syntax.expression -> unit
-
-type argument_form = Marked of T.mode * Syntax.expression | Place | Lent of T.mode | Temporary
-
-val lent_field : state -> Syntax.expression -> Unify.T.ty -> T.mode option
-val check_mode : state -> env -> Syntax.expression -> T.parameter_info -> Unify.T.ty -> unit
-val check_lent_value : state -> env -> Syntax.expression -> unit
-val check_owned : state -> env -> Syntax.expression -> Unify.T.ty -> unit

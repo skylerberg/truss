@@ -13,7 +13,6 @@ let check database module_ =
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
 let not_proven text code = Support.one_diagnostic ~check text code
 
-(* The codes of a file's diagnostics. *)
 let codes text =
   let database = Support.setup [ ("app::main", text) ] in
   Support.codes (check database (Support.module_of "app::main"))

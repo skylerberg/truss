@@ -1,8 +1,7 @@
 (* The state of the type checker while it checks one definition, and the
    helpers that every part of the checker uses: reporting diagnostics,
-   recording types, unification, places, instantiation of signatures, and
-   argument modes. [Expressions]
-   describes the checking algorithm. *)
+   recording types, unification, places, and instantiation of signatures.
+   [Expressions] describes the checking algorithm. *)
 
 open Syntax
 module T = Types
@@ -11,8 +10,6 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
-
-(* State *)
 
 type local = { type_ : T.ty; is_var : bool; mode : T.mode }
 
@@ -168,8 +165,6 @@ let source state (span : span) =
   if span.stop <= String.length state.text then
     String.sub state.text span.start (span.stop - span.start)
   else ""
-
-(* The core form *)
 
 let fresh_node_id state =
   let id = state.form.next_node_id in
@@ -468,18 +463,6 @@ let implements state type_ trait =
   Impls.implements state.database ~bounds:(bounds state) (normalize state type_)
     (normalize_trait state trait)
 
-(* A bound that an [impl] satisfies makes this definition depend on the
-   [impl]'s code. Checks that the capabilities the [impl] uses are granted
-   to its package, and records the package. *)
-let check_evidence_grants state (span : span) evidence =
-  let impls = Interface.Grants.evidence_uses state.database ~bounds:(bounds state) evidence in
-  state.evidence <- List.map (fun (impl, _, _) -> Path.package impl) impls @ state.evidence;
-  List.iter
-    (fun message ->
-      state.diagnostics <-
-        Diagnostic.make ~code:(Capabilities Not_granted) span message :: state.diagnostics)
-    (Interface.Grants.messages state.database ~package:state.package impls)
-
 let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) (zonk state type_)
 let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk state type_)
 
@@ -513,8 +496,6 @@ let trait_reference ?(arguments = []) trait : T.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
 let string_type = T.Named { path = Well_known.path String; arguments = [] }
-
-(* Statements *)
 
 (* Finishes the inference of a statement. An unsolved literal variable
    takes its default type. Any other unsolved variable that the statement
@@ -680,8 +661,6 @@ let build_block state (written : block) : Core.block =
   let statements, value = build_statements written.statements in
   { statements; value }
 
-(* Locals *)
-
 let declare state (name : name) type_ ~is_var ~mode =
   Hashtbl.replace state.locals name.id { type_; is_var; mode };
   state.tables.local_types.(name.id) <- Some type_;
@@ -711,8 +690,6 @@ let head state (value : expression) = Resolve.head state.resolved value
 let names_variant (member : name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
-(* Showing types and fixes *)
-
 let show state type_ = T.show (zonk state type_)
 
 let mismatched state (span : span) ~expected ~actual =
@@ -728,8 +705,6 @@ let mismatched state (span : span) ~expected ~actual =
         (Printf.sprintf "Expected `%s`, found `%s`." (T.show expected) (T.show actual))
 
 let mismatch state span ~expected ~actual = ignore (mismatched state span ~expected ~actual)
-
-(* Places *)
 
 (* Whether an expression is a constant that a type declares, such as
    [UInt8.maximum]. *)
@@ -775,14 +750,6 @@ let rec called (value : expression) =
   | Mode (_, inner) | Parenthesized inner -> called inner
   | _ -> None
 
-(* The error type for an expression that is not valid where it is used.
-   If resolution already reported the expression's name as unknown, this
-   reuses that report instead of adding a second one. *)
-let error_at state ?fixes code (value : expression) message =
-  match head state value with
-  | Some { target = Unknown report; _ } -> T.Error report
-  | _ -> error state ?fixes code value.span message
-
 (* Checks the target of a [calls] clause: a function-typed parameter, a
    capability, or a method of a capability. *)
 let check_resource state (resource : Syntax.resource) =
@@ -825,14 +792,6 @@ let check_resource state (resource : Syntax.resource) =
                "`calls` counts the calls through a parameter that is a function, or of a \
                 capability, and `%s` is neither."
                name.text))
-
-(* An expression before a [.] or a [(] that names a type, a trait, or a
-   capability instead of a value. *)
-type static_ =
-  | Static_type of T.ty
-  | Static_trait of Path.t * T.argument list option
-      (** The trait's type arguments, if they are written. *)
-  | Static_capability of Path.t
 
 type conversion = From_never | Owned_to_view | Function_widening | To_integer | From_integer
 
@@ -970,578 +929,3 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
       end
       else refused ()
   | _ -> if Unify.unify state.unifier wanted actual_type then None else refused ()
-
-(* Bounds *)
-
-(* Requires a type to satisfy a trait bound. The check is deferred until
-   the type is inferred. The type must implement the trait, and each
-   associated type that the bound fixes must unify with the one the [impl]
-   defines, which can infer other types of the statement.
-
-   [unmet] reports a failure: with [None] if the type does not implement
-   the trait, and with the name of an associated type and the type the
-   [impl] defines if those differ. A capability that the [impl] uses and
-   that its package is not granted is reported at [at]. *)
-let require state ~(at : span) type_ (bound : T.trait_reference) ~unmet =
-  let trait = { bound with associated = [] } in
-  defer state (fun () ->
-      let type_ = normalize state type_ in
-      if Unify.unknowns state.unifier type_ <> [] then false
-      else begin
-        (match implements state type_ trait with
-        | None -> unmet type_ None
-        | Some evidence ->
-            check_evidence_grants state at evidence;
-            List.iter
-              (fun (name, wanted) ->
-                match
-                  Impls.associated_type state.database ~bounds:(bounds state) type_ trait name
-                with
-                | Some associated_type when not (unify state associated_type wanted) ->
-                    unmet type_ (Some (name, associated_type))
-                | _ -> ())
-              bound.associated);
-        true
-      end)
-
-(* Requires the type arguments of an instantiation to satisfy the bounds
-   of their generic parameters. [of_type] is the type that declares the
-   parameters. Without it, the parameters are a callee's. *)
-let require_bounds state (span : span) ?of_type generics substitution =
-  List.iter
-    (fun (argument, bound) ->
-      require state ~at:span argument bound ~unmet:(fun argument other ->
-          let bound = Unify.zonk_trait state.unifier bound in
-          let reported =
-            match current_frame state with
-            | Some frame ->
-                let reported = List.mem (argument, bound) frame.unmet in
-                frame.unmet <- (argument, bound) :: frame.unmet;
-                reported
-            | None -> false
-          in
-          if not reported then
-            let needs =
-              Printf.sprintf "%s needs `%s: %s`"
-                (match of_type with
-                | Some type_ -> Printf.sprintf "`%s`" (show state type_)
-                | None -> "This")
-                (T.show argument) (T.show_trait bound)
-            in
-            report state Unsatisfied_bound span
-              (match other with
-              | None -> needs ^ ", which does not hold."
-              | Some (name, associated_type) ->
-                  Printf.sprintf "%s, and its `%s` is `%s`." needs name (show state associated_type))))
-    (Impls.required generics substitution)
-
-(* Instantiating types *)
-
-let fresh_arguments state (path : Path.t) =
-  match Query.demand state.database Environment.type_interface path with
-  | Some interface ->
-      List.map
-        (fun (generic : T.generic) ->
-          match generic.kind with
-          | Value_generic -> T.Value (Unify.fresh_value state.unifier)
-          | Type_generic _ -> T.Type (fresh state)
-          | Capability_generic -> T.Capabilities (Unify.fresh_capability_variable state.unifier))
-        interface.type_generics
-  | None -> []
-
-let require_type_bounds state span path arguments =
-  match Query.demand state.database Environment.type_interface path with
-  | Some interface ->
-      Option.iter
-        (require_bounds state span ~of_type:(T.Named { path; arguments }) interface.type_generics)
-        (T.substitution_of interface.type_generics arguments)
-  | None -> ()
-
-(* Fresh inference variables for the generic parameters of a type, each
-   required to satisfy the bounds of its parameter. *)
-let instantiate_type state span path =
-  let arguments = fresh_arguments state path in
-  require_type_bounds state span path arguments;
-  arguments
-
-let rec static_ state (value : expression) : static_ option =
-  match (value.kind, head state value) with
-  | Self_type_value, _ -> Option.map (fun self -> Static_type self) state.context.self_type
-  | _, Some { target = Definition (Type, path); type_arguments; _ } ->
-      Some (Static_type (named_type state value path type_arguments))
-  | _, Some { target = Type_parameter parameter; name; type_arguments } ->
-      if Option.is_some type_arguments then
-        report state Arity value.span
-          (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name.text);
-      Some (Static_type (T.Parameter parameter))
-  | _, Some { target = Definition (Trait, path); type_arguments; _ } ->
-      Some (Static_trait (path, Option.map (written_arguments state) type_arguments))
-  | _, Some { target = Definition (Capability, path); _ } -> Some (Static_capability path)
-  | Parenthesized inner, None -> static_ state inner
-  | _ -> None
-
-(* A type named in an expression, with the type arguments written after
-   it, or with fresh inference variables if none are written. *)
-and named_type state (value : expression) path type_arguments =
-  let type_ arguments =
-    match Intrinsic.builtin_of_path path with
-    | Some Never -> T.Never
-    | Some Integer -> T.Integer
-    | _ -> T.Named { path; arguments }
-  in
-  match type_arguments with
-  | None -> type_ (instantiate_type state value.span path)
-  | Some items ->
-      let arguments = written_arguments state items in
-      (match Query.demand state.database Interface.Summary.generics_of path with
-      | Some expected when List.length expected <> List.length arguments ->
-          report state Arity value.span
-            (Printf.sprintf "`%s` takes %d %s, and %d %s given."
-               (T.show (Named { path; arguments = [] }))
-               (List.length expected)
-               (if List.length expected = 1 then "argument" else "arguments")
-               (List.length arguments)
-               (if List.length arguments = 1 then "is" else "are"))
-      | _ -> require_type_bounds state value.span path arguments);
-      type_ arguments
-
-(* Type arguments written in an expression, as in [List[String].new()]. *)
-and written_arguments state items =
-  List.filter_map
-    (function
-      | Item item -> Some (type_argument_of_expression state item)
-      | Item_constraint (name, _) ->
-          report state Arity name.span
-            "An associated type is fixed where a type is written, as in `any Trait[Name = Type]`, \
-             not among type arguments in an expression.";
-          None)
-    items
-
-and type_argument_of_expression state (value : expression) : T.argument =
-  match (value.kind, head state value) with
-  | Integer value, _ -> T.Value (Known value)
-  | _, Some { target = Value_parameter parameter; _ } -> T.Value (Value_parameter parameter)
-  | _, Some { target = Definition (Constant, path); name; _ } -> (
-      match Query.demand state.database Interface.Constants.value_of path with
-      | Some value -> T.Value (Known value)
-      | None ->
-          T.Type
-            (error state Arity value.span
-               (Printf.sprintf
-                  "The value of `%s` cannot be worked out: a constant used in a type cannot refer \
-                   to itself, and is made of literals, arithmetic, and other such constants."
-                  name.text)))
-  | _ -> (
-      match static_ state value with
-      | Some (Static_type type_) -> T.Type type_
-      | Some (Static_trait _ | Static_capability _) | None ->
-          T.Type (error_at state Not_a_type value "A type argument is a type, or a `USize` value."))
-
-(* Instantiating signatures *)
-
-type instance = {
-  signature : T.signature;
-  substitution : T.substitution;
-  type_arguments : T.argument list;
-}
-
-(* Instantiates a signature at a use: its generic parameters are replaced
-   by fresh inference variables, each required to satisfy its bounds. *)
-let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
-  let substitution =
-    List.map
-      (fun (generic : T.generic) ->
-        ( generic.generic,
-          match generic.kind with
-          | Value_generic -> T.Value (Unify.fresh_value state.unifier)
-          | Type_generic _ -> T.Type (fresh state)
-          | Capability_generic -> T.Capabilities (Unify.fresh_capability_variable state.unifier) ))
-      signature.generics
-    @ extra
-  in
-  require_bounds state span signature.generics substitution;
-  {
-    signature = T.substitute_signature substitution signature;
-    substitution;
-    type_arguments =
-      List.map
-        (fun (generic : T.generic) -> List.assoc generic.generic substitution)
-        signature.generics;
-  }
-
-let intrinsic_signature path =
-  Option.map Intrinsic_signatures.signature (Intrinsic.operation_of_path path)
-
-(* The signature of a function. [Error] with the report if the function's
-   header did not parse. *)
-let function_signature state (path : Path.t) =
-  match intrinsic_signature path with
-  | Some signature -> Some (Ok signature)
-  | None -> Environment.signature_or_report state.database path
-
-(* Lending *)
-
-(* Records that a call is a call of a lending method, with the mode it
-   lends with. The result of such a call is a part of the receiver, lent
-   for the rest of the caller's statement. It is not a temporary: it is
-   never moved. *)
-let note_lending state (value : expression) (output : T.result) =
-  match output with
-  | Lends (mode, _) -> state.tables.lend_modes.(value.id) <- Some mode
-  | Returns _ | Yields _ -> ()
-
-(* The mode with which an expression is lent, if it is the result of a
-   lending call, or a field or an element of one. A mark before the
-   expression belongs to the receiver of the lending call. *)
-let rec lent state (value : expression) : T.mode option =
-  match value.kind with
-  | Call _ -> state.tables.lend_modes.(value.id)
-  | Member (base, _) | Parenthesized base -> lent state base
-  | Bracket (base, _) when state.resolved.brackets.(value.id) <> Some Type_arguments ->
-      lent state base
-  | Mode (_, inner) when Option.is_some (marked_call state inner) -> lent state inner
-  | _ -> None
-
-(* Whether an expression is a slice, such as [items[1..3]]. A slice is
-   written like an index, but it is a value: a view of part of its base. *)
-let rec is_slice (value : expression) =
-  match value.kind with
-  | Bracket (_, [ Item { kind = Range _; _ } ]) -> true
-  | Parenthesized inner | Mode (_, inner) -> is_slice inner
-  | _ -> false
-
-(* Whether a [let], [match], or [is] borrows the expression: it denotes a
-   place, or a part that a lending call lends. The bindings then borrow
-   parts of that place. A slice is a value, so it is not borrowed. *)
-let borrowed state (value : expression) =
-  (is_place state value || Option.is_some (lent state value)) && not (is_slice value)
-
-(* The mode in which a pattern's bindings bind the parts of the scrutinee of
-   a [match] or an [is]. A scrutinee marked [own] or [mut] has that mode. An
-   unmarked place or lent part is borrowed, so the bindings are [Read]. Any
-   other scrutinee is a value that the match consumes, so the bindings are
-   [Own]. A mark that belongs to the receiver of a method call, as in [mut
-   cursor.next()], is not a mark on the scrutinee. *)
-let scrutinee_mode state (scrutinee : expression) : T.mode =
-  match scrutinee.kind with
-  | Mode (Own, inner) when Option.is_none (marked_call state inner) -> Own
-  | Mode (Mut, inner) when Option.is_none (marked_call state inner) && not (is_slice inner) -> Mut
-  | _ -> if borrowed state scrutinee then Read else Own
-
-(* Mutation *)
-
-(* Why a place cannot be mutated. *)
-type immutable =
-  | Read_only of string
-      (** The place is, or is part of, a [let] binding, a parameter that is not [mut], a constant,
-          or [self] in a method that does not take [mut self]. *)
-  | Captured of string  (** Inside a lambda, the place belongs to the enclosing function. *)
-  | Lent_read_only  (** The place is a part that a lending call lent read-only. *)
-  | Not_a_place
-
-(* Why a place cannot be mutated, or [None] if it can. Only a [var], a
-   [mut] parameter, the variable of a [mut] loop, [mut self], a part of one
-   of these, and a part that a call lends [mut] can be mutated. *)
-let rec immutable state env (value : expression) : immutable option =
-  match value.kind with
-  | Name path -> (
-      match target state path.last with
-      | Some (Local id) -> (
-          let captured =
-            match (state.lambdas, Hashtbl.find_opt state.binding_spans id) with
-            | (lambda : span) :: _, Some (binding : span) ->
-                binding.start < lambda.start || binding.start >= lambda.stop
-            | _ -> false
-          in
-          match Hashtbl.find_opt state.locals id with
-          | _ when captured -> Some (Captured path.last.text)
-          | Some local ->
-              if local.is_var || local.mode = Mut then None else Some (Read_only path.last.text)
-          | None -> None)
-      | Some (Definition _ | Law_parameter _) -> Some (Read_only path.last.text)
-      | _ -> None)
-  | Self_value ->
-      if state.lambdas <> [] then Some (Captured "self")
-      else if env.self_mode = T.Mut then None
-      else Some (Read_only "self")
-  | Member (base, _) | Bracket (base, _) | Parenthesized base -> immutable state env base
-  | Mode (Mut, inner) when Option.is_some (marked_call state inner) -> immutable state env inner
-  | Call _ -> (
-      match lent state value with
-      | Some T.Mut -> None
-      | Some _ -> Some Lent_read_only
-      | None -> Some Not_a_place)
-  | _ -> Some Not_a_place
-
-(* Records that a place is mutated: every index expression in the place
-   uses the [mut self] version of [at], which lends its element [mut]. *)
-let rec use_mutable_indexes state (value : expression) =
-  match value.kind with
-  | Member (base, _) | Parenthesized base | Mode (_, base) -> use_mutable_indexes state base
-  | Bracket (base, _) ->
-      (match state.tables.calls.(value.id) with
-      | Some ({ callee = Trait_method ({ name = "at"; _ } as method_); arguments; _ } as call) ->
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                call with
-                callee = Trait_method { method_ with receiver = Mut };
-                arguments =
-                  List.map
-                    (fun (argument : C.argument) ->
-                      if argument.parameter_index = 0 then { argument with mode = T.Mut }
-                      else argument)
-                    arguments;
-              }
-      | _ -> ());
-      use_mutable_indexes state base
-  | _ -> ()
-
-type mutation =
-  | Assignment
-  | Mut_mark  (** The place is passed [mut], is a [mut] receiver, or is lent or yielded [mut]. *)
-
-(* Checks that a place may be mutated, and records that it is. Every
-   construct that mutates a place calls this. *)
-let mutate state env ~(by : mutation) (value : expression) =
-  let code : Diagnostic.Code.types =
-    match by with Assignment -> Not_assignable | Mut_mark -> Wrong_mark
-  in
-  (match (immutable state env value, by) with
-  | None, _ -> ()
-  | Some (Captured name), _ ->
-      report state code value.span
-        (Printf.sprintf
-           "A lambda cannot change what it captures, and `%s` is from outside it. Return the new \
-            value instead, or use a loop."
-           name)
-  | Some (Read_only name), _ ->
-      report state code value.span
-        (Printf.sprintf
-           "`%s` cannot change here: only a `var`, a `mut` parameter, or `mut self`, and their \
-            parts, can be %s."
-           name
-           (match by with Assignment -> "assigned" | Mut_mark -> "marked `mut`"))
-  | Some Lent_read_only, Assignment ->
-      report state code value.span
-        ~fixes:[ fix "Mark it `mut`." [ insert value.span.start "mut " ] ]
-        "This part is lent read-only, so it cannot change. Mark the place it is lent from `mut`, \
-         so that it is lent `mut`."
-  | Some Not_a_place, Assignment ->
-      report state code value.span
-        "Only a place, such as a variable, a field, or an element, can be assigned."
-  (* The check of the mark or of the receiver reports these. *)
-  | Some (Lent_read_only | Not_a_place), Mut_mark -> ());
-  use_mutable_indexes state value
-
-(* Arguments and modes *)
-
-(* Whether a place is a constant, or a field or an element of one. *)
-let rec is_part_of_constant state (value : expression) =
-  match value.kind with
-  | Name path -> (
-      match target state path.last with Some (Definition (Constant, _)) -> true | _ -> false)
-  | Member (base, _) -> is_member_constant state value || is_part_of_constant state base
-  | Bracket (base, _) | Parenthesized base -> is_part_of_constant state base
-  | _ -> false
-
-type argument_form = Marked of T.mode * expression | Place | Lent of T.mode | Temporary
-
-let argument_form state (value : expression) =
-  match value.kind with
-  | Mode (mode, inner) when Option.is_none (marked_call state inner) ->
-      Marked ((match mode with Mut -> Mut | Own -> Own), inner)
-  | _ -> (
-      match lent state value with
-      | Some mode -> Lent mode
-      | None -> if is_place state value then Place else Temporary)
-
-(* The mode with which a field of a yielded constructor lends a place to
-   the value that is built, or [None] if the field takes its value, as a
-   field of any other constructor does. [type_] is the type of [value]. A
-   method that yields read-only lends every place read-only, except a
-   [Plain] place, which is copied. A method that yields [mut] lends the
-   places that are marked [mut]. A slice is a value, so it is taken. *)
-let lent_field state (value : expression) type_ : T.mode option =
-  match (Hashtbl.find_opt state.yielded value.id, argument_form state value) with
-  | _ when is_slice value -> None
-  | Some Read, Marked (Mut, _) -> Some Read
-  | Some Read, (Place | Lent _) when not (plain state type_) -> Some Read
-  | Some Mut, Marked (Mut, _) -> Some Mut
-  | _ -> None
-
-let mark_span (value : expression) (inner : expression) =
-  Span.make value.span.start inner.span.start
-
-let check_mode state env (value : expression) (parameter : T.parameter_info) type_ =
-  let name = parameter.name in
-  match (parameter.mode, argument_form state value) with
-  | Read, (Place | Temporary | Lent _) -> ()
-  | Read, Marked (_, inner) ->
-      report state Redundant_mark value.span
-        ~fixes:
-          [
-            fix "Remove the mark."
-              [ Diagnostic.delete (Span.make value.span.start inner.span.start) ];
-          ]
-        (Printf.sprintf "`%s` only reads its argument, so it takes no mark." name)
-  | Mut, Marked (Mut, inner) -> mutate state env ~by:Mut_mark inner
-  | Mut, Place ->
-      report state Missing_mark value.span
-        ~fixes:[ fix "Mark it `mut`." [ insert value.span.start "mut " ] ]
-        (Printf.sprintf "`%s` may change its argument, so the call marks it `mut`." name)
-  | Mut, Lent Mut -> mutate state env ~by:Mut_mark value
-  | Mut, Lent (Read | Own) ->
-      report state Wrong_mark value.span
-        (Printf.sprintf
-           "`%s` may change its argument, and this part is lent read-only. Mark the place it is \
-            lent from `mut`, so that it is lent `mut`."
-           name)
-  | Own, Lent _ ->
-      if not (plain state type_) then
-        report state Missing_mark value.span
-          ~fixes:
-            (if copyable state type_ then
-               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
-             else [])
-          (Printf.sprintf
-             "`%s` takes ownership of its argument, and a part that is lent cannot be given up. \
-              Pass a copy."
-             name)
-  | Mut, (Temporary | Marked (Own, _)) ->
-      report state Wrong_mark value.span
-        (Printf.sprintf "`%s` changes its argument in place, so it must be a place marked `mut`."
-           name)
-  | Own, Marked (Own, inner) ->
-      if plain state type_ then
-        report state Redundant_mark value.span
-          ~fixes:[ fix "Remove the mark." [ Diagnostic.delete (mark_span value inner) ] ]
-          (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (show state type_))
-  | Own, Temporary -> ()
-  | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
-      if not (plain state type_) then
-        report state Missing_mark value.span
-          ~fixes:
-            (fix "Lend it `mut`." [ insert value.span.start "mut " ]
-            ::
-            (if copyable state type_ then
-               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
-             else []))
-          (Printf.sprintf
-             "`%s` is a field of a value that is lent `mut`. Mark the place `mut` to lend it too, \
-              or pass a copy."
-             name)
-  | Own, Place when is_part_of_constant state value ->
-      if not (plain state type_) then
-        report state Missing_mark value.span
-          ~fixes:
-            (if copyable state type_ then
-               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
-             else [])
-          (Printf.sprintf
-             "`%s` takes ownership of its argument, and a constant cannot be given up. Pass a copy."
-             name)
-  | Own, Place ->
-      if not (plain state type_) then
-        report state Missing_mark value.span
-          ~fixes:
-            (fix "Give it up with `own`." [ insert value.span.start "own " ]
-            ::
-            (if copyable state type_ then
-               [ fix "Pass a copy." [ insert value.span.stop ".copy()" ] ]
-             else []))
-          (Printf.sprintf
-             "`%s` takes ownership of its argument. Give the place up with `own`, or pass a copy."
-             name)
-  | Own, Marked (Mut, _) ->
-      report state Wrong_mark value.span
-        (Printf.sprintf "`%s` takes ownership of its argument, so it is marked `own`, not `mut`."
-           name)
-  | (Mut | Own), Marked (Read, _) -> ()
-
-(* A yielded constructor that lends a place owns nothing, so nothing drops
-   it when the lend ends. Each of its other fields must then have nothing
-   to drop: the field is a constructor too, or its type is [Plain].
-   [operand] is the operand of the [yield]. *)
-let check_lent_value state env (operand : expression) =
-  let has_lent_field = ref false and owned_values = ref [] in
-  let rec fields (value : expression) =
-    match (value.kind, state.tables.calls.(value.id)) with
-    | Call (_, arguments), Some { callee = Constructor _; arguments = checked; _ } ->
-        List.iter
-          (fun (argument : argument) ->
-            match
-              List.find_opt
-                (fun (checked_argument : C.argument) ->
-                  checked_argument.expression = argument.value.id)
-                checked
-            with
-            | Some { mode = Read | Mut; _ } -> has_lent_field := true
-            | _ -> fields argument.value)
-          arguments
-    | _ -> owned_values := value :: !owned_values
-  in
-  fields operand;
-  if !has_lent_field && runs env then
-    List.iter
-      (fun (value : expression) ->
-        defer state (fun () ->
-            match Option.map (normalize state) state.tables.types.(value.id) with
-            | None -> true
-            | Some type_ when T.contains_unsolved type_ -> false
-            | Some type_ ->
-                let fieldless_variant =
-                  match (state.tables.resolutions.(value.id), type_) with
-                  | Some (Variant_value _), T.Function _ -> false
-                  | Some (Variant_value _), _ -> true
-                  | _ -> false
-                in
-                if not (plain state type_ || fieldless_variant) then
-                  state.diagnostics <-
-                    Diagnostic.make ~code:(Ownership Owned_beside_lent) value.span
-                      "This value is owned, but the value that is yielded lends a place, so it \
-                       owns nothing. Bind this value to a name first, and pass the name."
-                    :: state.diagnostics;
-                true))
-      !owned_values
-
-(* Checks a value where an owned value is required and no parameter
-   receives it: the initializer of a [var], the value of an assignment, an
-   element of a collection literal, or a part of a tagged string. A place
-   there must be marked [own] or copied, unless its type is [Plain]. This
-   is a rule of ownership. The type checker reports it because only the
-   syntax tree has the marks. *)
-let check_owned state env (value : expression) type_ =
-  if runs env then
-    defer state (fun () ->
-        let type_ = normalize state type_ in
-        if T.contains_unsolved type_ then false
-        else begin
-          (match argument_form state value with
-          | Place when not (plain state type_) ->
-              let place = source state value.span in
-              let copy =
-                if copyable state type_ then [ fix "Copy it." [ insert value.span.stop ".copy()" ] ]
-                else []
-              in
-              let fixes, message =
-                if is_part_of_constant state value then
-                  ( copy,
-                    Printf.sprintf "An owned value is needed here, and `%s` is %s. Copy it." place
-                      (match value.kind with
-                      | Name _ -> "a constant"
-                      | _ when is_member_constant state value -> "a constant"
-                      | _ -> "part of a constant") )
-                else
-                  ( fix "Give it up with `own`." [ insert value.span.start "own " ] :: copy,
-                    Printf.sprintf
-                      "An owned value is needed here, and `%s` is a place. Mark it `own` to give \
-                       it up, or copy it."
-                      place )
-              in
-              state.diagnostics <-
-                Diagnostic.make ~fixes ~code:(Ownership Needs_owned) value.span message
-                :: state.diagnostics
-          | _ -> ());
-          true
-        end)

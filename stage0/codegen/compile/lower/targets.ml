@@ -6,8 +6,6 @@ open Definitions
 open Lowering
 open Lir_builder
 
-(* Calls *)
-
 (* The [impl] that evidence stands for in this instance, with the type
    arguments for the [impl]'s generic parameters. *)
 let resolve_impl st ~(trait : T.trait_reference) ~self_type ~(evidence : Core.evidence) =
@@ -532,8 +530,6 @@ let call_instance st key ~(signature : T.signature) ~substitution
     (Call { target; arguments = passed @ mask; result = Convention.destination result destination });
   if not lir_signature.returns then unreachable_block st
 
-(* Expressions *)
-
 (* A number literal's value. *)
 type literal = Integer_value of Z.t | Float_value of float
 
@@ -570,7 +566,6 @@ let static_constant st path : Lir.place =
   | Some ty -> { root = Static { key = Constant path; ty = ground st ty }; projections = [] }
   | None -> bug "no type for the constant %s" (Path.show path)
 
-(* A [List]'s storage field, the storage's type, and the element type. *)
 let list_parts monomorphic ty =
   match Monomorphic.shape monomorphic ty with
   | Record [ (field, Typed storage) ] -> (

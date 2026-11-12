@@ -207,8 +207,6 @@ let trait_substitution database (impl : Path.t) =
           Properties.trait_substitution trait ~self:interface.for_type interface.implements)
         (Query.demand database Environment.trait_interface interface.implements.trait))
 
-(* Matching *)
-
 let open_type = function T.Error _ | T.Variable _ | T.Hole -> true | _ -> false
 
 let rec match_type ~variables (substitution : T.substitution) pattern type_ =
@@ -245,31 +243,14 @@ and match_arguments ~variables substitution patterns arguments =
             | _ -> None))
       (Some substitution) patterns arguments
 
-(* Evidence *)
-
 type evidence =
   | From_impl of { impl : Path.t; substitution : T.substitution }
   | From_bound
-      (** A bound in scope, on a generic parameter or on an associated type of one, or a trait such
-          a bound requires: the [impl] is found when the code is instantiated. *)
-  | From_any  (** [any Trait] implements its trait. *)
-  | Built_in  (** [Copyable] and [Plain], which the compiler implements. *)
+  | From_any
+  | Built_in
   | Accepted of T.ty
-      (** This type satisfies every bound: it is an [Error], a [Hole], or a type that the statement
-          has not inferred yet. A trait whose definition did not parse is satisfied by every type,
-          with the [Error] of its report. *)
 
-(* Whether a trait's method can be called through an [any] value, and if
-   not, why. An [any] value has one compiled version of each method, for
-   the type that it hides. *)
-type through_any =
-  | Callable
-  | Has_generics
-      (** The method has generic parameters of its own, so it has a version for each set of type
-          arguments. *)
-  | Names_self
-      (** A parameter's type or the result's type names [Self], the hidden type, at any depth. An
-          associated type of [Self] does not count: the [any] type fixes it. *)
+type through_any = Callable | Has_generics | Names_self
 
 let through_any ~(trait : Path.t) (method_ : T.trait_method) : through_any =
   let self : T.parameter = { owner = trait; name = "Self" } in
@@ -307,8 +288,6 @@ let cursor_element database (method_ : Path.t) arguments =
 let copyable_path = Properties.copyable_trait
 let plain_path = Properties.plain_trait
 
-(* The bounds in scope where a question is asked: each generic parameter's
-   bounds, as the definition asking declares them. *)
 type bounds = T.parameter -> T.trait_reference list
 
 let required (generics : T.generic list) (substitution : T.substitution) =

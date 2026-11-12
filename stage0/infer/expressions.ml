@@ -24,6 +24,8 @@ module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 open Lookups
 open Pattern_typing
 open Methods

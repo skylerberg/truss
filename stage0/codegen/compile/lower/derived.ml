@@ -6,8 +6,6 @@ open Lowering
 open Targets
 open Lir_builder
 
-(* Derived implementations *)
-
 (* The fields of a variant, or of a record, with their ground types. *)
 let shape_fields st ty variant =
   match (Monomorphic.shape st.context.monomorphic ty, variant) with

@@ -1,9 +1,6 @@
 module Tables = Unicode_tables
 
 let version = Tables.unicode_version
-
-(* UTF-8 *)
-
 let decoded_code_point packed = packed lsr 3
 let decoded_length packed = packed land 7
 
@@ -49,8 +46,6 @@ let of_code_points values =
   let buffer = Buffer.create 16 in
   List.iter (encode buffer) values;
   Buffer.contents buffer
-
-(* Tables *)
 
 (* Binary search in a flat array of ranges with [stride] entries per range,
    [first; last; ...]. Returns the index of the range holding [value], or -1. *)

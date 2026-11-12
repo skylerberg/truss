@@ -100,8 +100,6 @@ let proof = Query.query ~phase:Phases.proofs ~name:"proof" ~show:Names.show_key 
 let revealed_proof =
   Query.query ~phase:Phases.proofs ~name:"revealed_proof" ~show:Names.show_key (prove ~reveal:true)
 
-(* Messages *)
-
 (* A value from the solver's model, written as Truss writes it: a negative
    number with its sign, and a datatype's value as its variant or record,
    with its fields in parentheses. *)
@@ -298,12 +296,7 @@ type answer =
 
 let proven = function Solved Proven | Ran_true -> true | _ -> false
 
-(* A run of compiled code that decides part of a proof: a template's
-   check, or a call whose arguments are known. *)
 type run = Template_check of Translate.evaluation | Call of Translate.known_call
-
-(* What a run gave: an integer, or a [Bool] as 0 or 1; that it timed out;
-   or that it was not run, since its code cannot be built. *)
 type run_result = Returned of Z.t | Timed_out | Not_run
 
 (* The caller gives the evaluator, since the prover does not depend on

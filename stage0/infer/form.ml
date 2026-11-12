@@ -8,6 +8,7 @@ module C = Tables
 module Impls = Interface.Impls
 module Properties = Interface.Properties
 open State
+open Instantiation
 
 let build_expression_by_id state (id : id) : Core.expression =
   match state.form.expression_builders.(id) with
@@ -298,11 +299,9 @@ let self_type state (env : env) =
   | Some type_ -> final_type state type_
   | None -> bug "`self` is used outside a method"
 
-(* The place of [self]. *)
 let self_local state (env : env) ~origin : Core.place =
   Local { local = Self; type_ = self_type state env; origin }
 
-(* The place of a constant's static data. *)
 let constant_place state ~origin (path : Path.t) : Core.place =
   match Query.demand state.database Environment.constant_type path with
   | Some type_ -> Constant { path; type_; origin }
@@ -368,8 +367,6 @@ let provide state (implementations : expression list) (body : block) : Core.kind
       implementations
   in
   Provide { implementations; body = build_block state body }
-
-(* Strings *)
 
 let builder_method name receiver : Core.callee =
   Function
@@ -630,8 +627,6 @@ let tagged_string state (value : expression) (literal : string_literal) ~(part :
              });
     }
 
-(* Patterns *)
-
 let pattern_type state (id : id) =
   match state.tables.scrutinee_types.(id) with
   | Some type_ -> type_
@@ -687,8 +682,6 @@ let pattern_fields state (fields : T.field list) (matched : (string * pattern) l
         (fun written -> (field.field_name, build_pattern state written))
         (List.assoc_opt field.field_name matched))
     fields
-
-(* Operators *)
 
 (* Converts a built-in integer to [Integer]. An expression of any other
    type is returned unchanged. *)
@@ -876,7 +869,6 @@ let compound_assign state (written : statement) (target : expression) (value : e
       value = synthetic_expression state ~origin:written.id target_type kind;
     }
 
-(* The cursor type that a call of a yielding method returns. *)
 let cursor_type (call : C.call) : T.ty =
   match call.callee with
   | Function { path; type_arguments } -> T.Cursor { method_ = path; arguments = type_arguments }

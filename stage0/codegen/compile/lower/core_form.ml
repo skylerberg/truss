@@ -58,8 +58,6 @@ let binary : Core.comparison -> Lir.binary = function
   | Greater -> Greater
   | Greater_equal -> Greater_equal
 
-(* Patterns *)
-
 let rec binds_name (pattern : Core.pattern) =
   match pattern.kind with
   | Bind _ -> true
@@ -951,7 +949,6 @@ and construct_lending st (built : Core.expression) ~borrowed ~lent ~destination 
       emit st.b (Assign (destination, Build { ty; variant; fields }))
   | _ -> bug "a value that lends places and is no construct"
 
-(* The type that the current frame's method yields. *)
 and yielded_type_of_frame st =
   match st.frame.code.result with
   | Yields (_, ty) | Lends (_, ty) -> ground st ty

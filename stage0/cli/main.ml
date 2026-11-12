@@ -10,8 +10,6 @@
 
 open Cmdliner
 
-(* Options many commands share *)
-
 let directory =
   Arg.(
     value & opt dir "."
@@ -50,8 +48,6 @@ let exits =
   ]
 
 let command name ~doc ?(man = []) term = Cmd.v (Cmd.info name ~doc ~man ~exits) term
-
-(* The commands *)
 
 let check =
   let fix =
@@ -369,8 +365,6 @@ let truss =
       clean;
       lsp;
     ]
-
-(* Evaluating a command line *)
 
 (* Parses the arguments and runs the command, writing as [Output] says. A
    reason the command cannot run, or a bug in the compiler with what the

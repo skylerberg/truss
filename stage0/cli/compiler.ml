@@ -55,7 +55,6 @@ let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
     (Build.cache (Database.objects_directory ()))
     settings
 
-(* Kept test results, in the store. *)
 let test_results () : Compile.results =
   let find, add = Database.results ~kind:"tests" in
   { find; add }

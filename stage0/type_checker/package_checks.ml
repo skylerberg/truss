@@ -39,8 +39,6 @@ let header_span (definition : definition) =
   | Type_definition { name; _ } -> name.span
   | _ -> definition.span
 
-(* Where an [impl] may live *)
-
 let outer_packages (impl : T.impl_interface) =
   Path.package impl.implements.trait
   :: (match impl.for_type with T.Named { path; _ } -> [ Path.package path ] | _ -> [])
@@ -59,8 +57,6 @@ let check_location database (declaration : Names.declaration) (definition : defi
          "This `impl` must be in the package of `%s`, of `%s`, or of a type its trait's arguments \
           name, so that only one place can hold it."
          (T.show_trait impl.implements) (T.show impl.for_type))
-
-(* Overlap *)
 
 (* Whether two [impl]s' heads unify, each [impl]'s generic parameters as
    variables of their own. *)
@@ -109,8 +105,6 @@ let overlap (first : T.impl_interface) (second : T.impl_interface) =
   unify first.for_type second.for_type
   && List.length first.implements.trait_arguments = List.length second.implements.trait_arguments
   && List.for_all2 argument first.implements.trait_arguments second.implements.trait_arguments
-
-(* Method names *)
 
 (* A method is its name and how it takes [self]. An [impl] in a type's own
    package may write another version of a method the type has: one name,
@@ -167,8 +161,6 @@ let check_method_names database (declaration : Names.declaration) (definition : 
           else None)
         trait.methods
   | _ -> []
-
-(* Recursive types *)
 
 (* A type definition's generic parameters, and its fields, each with the
    variant that it is in. *)
@@ -294,7 +286,6 @@ let not_strictly_positive_message =
    function with a `time` clause might not terminate. Remove the `time` clause from the function \
    type, or pass the function the fields that it needs instead of the whole value."
 
-(* Where a field of a type definition is written. *)
 let field_span (body : type_body) ((variant : T.variant option), (field : T.field)) =
   let among (fields : Syntax.field list) =
     List.find_map
@@ -428,8 +419,6 @@ let check_associated_types database (declaration : Names.declaration) (definitio
               (Interface.Impls.contents database ~bounds type_).recursions)))
     impl.implements.associated
 
-(* Instantiation cycles *)
-
 (* A generic definition's calls to generic definitions of the same package,
    each with whether a type argument puts one of the caller's parameters
    inside a type constructor, which makes the arguments grow around a
@@ -500,8 +489,6 @@ let check_instantiation database (package : Path.package) =
         | None -> None
       else None)
     edges
-
-(* Tests *)
 
 (* Two tests with one name in one file are already a duplicate definition;
    this is for two in different files of the package. *)
@@ -643,8 +630,6 @@ let check =
       @ check_instantiation database package
       @ check_tests database package)
 
-(* The manifest *)
-
 (* The packages a definition uses: those it names in a path, those with a
    trait whose method it calls with a dot, and those with an [impl] that
    answers a call or meets a bound in it. *)
@@ -693,10 +678,8 @@ let code_packages =
              | _ -> Query.demand database used_packages (Names.key_of declaration))
            (declarations database package)))
 
-(* What only a package's code shows to be wrong with its manifest. *)
 type manifest_problem =
   | Not_a_capability of { dependency : Path.package; name : string }
-      (** A grant's entry that names no capability *)
   | Unused of Path.package  (** A dependency that nothing in the package uses *)
 
 let manifest_sentence ~package = function

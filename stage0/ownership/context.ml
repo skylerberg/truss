@@ -12,7 +12,6 @@ type context = {
   bounds : T.parameter -> T.trait_reference list;
   spans : Syntax.span array;
   marks : (Core.origin, Types.mode * Core.mark) Hashtbl.t;
-      (** Each argument written with a [mut] or [own], by the origin of the value passed. *)
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, T.ty) Hashtbl.t;

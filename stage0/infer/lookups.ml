@@ -11,6 +11,8 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 
 (* One version of a method: a method of the type, or a trait method. *)
 type version = Own_version of Path.t | Trait_version of T.trait_reference * T.trait_method

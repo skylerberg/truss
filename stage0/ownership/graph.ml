@@ -183,8 +183,6 @@ let operand_type : Core.operand -> T.ty = function
   | Place core_place -> Core_walk.place_type core_place
   | Value value -> value.type_
 
-(* Views *)
-
 (* Whether a call's result may be a view of an argument: the argument is
    borrowed and is not [Plain], or the argument is itself a view. The
    callee's body is not inspected, so this is the conservative answer. *)
@@ -360,8 +358,6 @@ let operand_borrows builder (core_operand : Core.operand) : Place.t list =
   | Value value when builder.is_view value.type_ ->
       List.map (fun (view : view) -> view.place) (views_of builder value)
   | Value _ -> []
-
-(* The graph *)
 
 (* Starts a read-only [Operand_evaluation] loan on each place. *)
 let add_operand_loans builder (places : Place.t list) : loan list =
@@ -760,7 +756,6 @@ and evaluate_operand builder frontier (mode : T.mode) (core_operand : Core.opera
       | _ -> frontier)
   | Value value -> expression builder frontier value
 
-(* The [mut] borrow of an operand. *)
 and borrow_mut builder frontier (core_operand : Core.operand) =
   match core_operand with
   | Place core_place -> (

@@ -70,8 +70,6 @@ let standard_base () =
    changed. *)
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
-(* Sessions *)
-
 (* What a session's files are, for what is asked of git. *)
 type kind =
   | Worktree of string  (** A project's root *)
@@ -135,8 +133,6 @@ let own_layout session = demand session Project.layout Project.project_root
 (* The project's files that are inputs now. *)
 let held_files session =
   Option.value (Query.find (Session.observer session) Project.tree Project.project_root) ~default:[]
-
-(* Registry packages *)
 
 (* A published package's directory in the store, fetched into it from the
    registry if it is not there yet. *)
@@ -519,8 +515,6 @@ let base_commit session base =
 
 let open_commit_of session commit = open_commit ~repository:(root session) commit
 
-(* Parallel work *)
-
 type place = Session.Graph.place = { path : Path.t option; part : string option; label : string }
 
 type overlap = Session.Graph.overlap =
@@ -542,11 +536,9 @@ let git_place root =
       Hashtbl.replace git_places root place;
       place
 
-(* The sessions of the same project in the other worktrees of its
-   repository: those open in this process, and for each other worktree that
-   a background process serves, a snapshot of the state that process saves,
-   brought up to date with the worktree's files. The same project in another
-   worktree is at the same place under its worktree's top. *)
+(* A snapshot is of the state the background process saves, brought up to
+   date with the worktree's files. The same project in another worktree is
+   at the same place under its worktree's top. *)
 let other_worktrees session =
   let root = root session in
   let common, prefix = git_place root in
@@ -657,8 +649,6 @@ let open_library ?(modules = Standard_library.modules) name =
       update session;
       Ok session
 
-(* Choosing versions *)
-
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
 
 let project_manifests session =
@@ -755,10 +745,8 @@ let plan_lock session ~set ~all =
             in
             Ok { text = Registry.Lock.print after; before; after })
 
-(* A published package at a version, as a session of its own with the
-   packages it was published with, for comparing a release with it. Its
-   files in the store are a project of one package, whose lock file names
-   those packages. *)
+(* The package's files in the store are a project of one package, whose
+   lock file names the packages it was published with. *)
 let published name version =
   match
     Option.bind (Registry.Index.current ()) (fun registry ->
@@ -828,8 +816,6 @@ let merge_preview session other =
 let recovering = Session.recovering
 let reset = Session.reset
 
-(* The background process *)
-
 (* Watching: each open worktree's file stamps are checked every second while
    no request is waiting, so that results are current before they are asked
    for. A request scans again before it is answered, so it always sees every
@@ -872,8 +858,6 @@ let call ?program ?start_server ?key ~progress request =
 let servers = Session.Server.serving
 let stop = Session.Server.stop
 let store_directory = Session.Server.store_directory
-
-(* For tests *)
 
 module Testing = struct
   (* Gives one module of a package given by itself another text. *)

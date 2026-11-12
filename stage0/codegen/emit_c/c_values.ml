@@ -4,8 +4,6 @@
 open C_runtime
 open C_types
 
-(* Places and operands *)
-
 type function_context = { symbol : string; f : Lir.function_ }
 
 let local_name (f : Lir.function_) local =

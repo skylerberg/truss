@@ -4,8 +4,6 @@
 open Definitions
 open Lir_builder
 
-(* Lowering one function *)
-
 (* What leaving a scope does: drop what a place still owns, free the heap
    block a pointer points at, once what is in it has been dropped, give a
    place back the value that was lent out of it to be changed, let a
