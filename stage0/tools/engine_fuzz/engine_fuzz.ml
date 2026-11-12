@@ -114,7 +114,7 @@ let fresh_world () =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "truss-engine-fuzz-%d-%d" (Unix.getpid ()) !counter)
   in
-  ignore (Sys.command ("rm -rf " ^ Filename.quote directory));
+  File_system.remove directory;
   let store = Store.open_ directory in
   let engine = Engine.create () in
   Engine.attach engine store ~version;
@@ -122,7 +122,7 @@ let fresh_world () =
 
 let discard world =
   Store.close world.store;
-  ignore (Sys.command ("rm -rf " ^ Filename.quote (Store.directory world.store)))
+  File_system.remove (Store.directory world.store)
 
 let choose world random =
   let second = world.other <> None && Random.State.int random 4 = 0 in

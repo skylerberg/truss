@@ -721,7 +721,7 @@ let members query =
     numbering.datatypes []
   |> List.sort compare
 
-let hash text = "smt1-blake3-" ^ Blake3.to_hex (Blake3.hash text)
+let hash text = "smt1-blake3-" ^ Blake3.hex_digest text
 
 let show_term term =
   let rec show = function

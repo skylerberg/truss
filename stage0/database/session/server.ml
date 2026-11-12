@@ -1,18 +1,12 @@
 (* The background process: one per user and compiler, which holds sessions
    between commands. *)
 
-let rec make_directory path =
-  if not (Sys.file_exists path) then begin
-    make_directory (Filename.dirname path);
-    try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
 (* Only the user may reach the background process: what travels over its
    socket is marshaled, and reading marshaled bytes from another user would
    let that user run code as this one. *)
 let servers_directory () =
   let directory = Filename.concat (Store.default_directory ()) "servers" in
-  make_directory directory;
+  File_system.make_directory directory;
   (try Unix.chmod directory 0o700 with Unix.Unix_error _ -> ());
   directory
 
@@ -37,15 +31,14 @@ let private_temporary_directory () =
    would have been. *)
 let server_path identity key =
   Filename.concat (servers_directory ())
-    (Identity.short identity ^ "-" ^ String.sub (Blake3.to_hex (Blake3.hash key)) 0 16)
+    (Identity.short identity ^ "-" ^ Blake3.hex_digest ~digits:16 key)
 
 let socket_path identity key =
   let path = server_path identity key ^ ".socket" in
   if String.length path < 100 then Ok path
   else
     Result.map
-      (fun directory ->
-        Filename.concat directory (String.sub (Blake3.to_hex (Blake3.hash path)) 0 16 ^ ".socket"))
+      (fun directory -> Filename.concat directory (Blake3.hex_digest ~digits:16 path ^ ".socket"))
       (private_temporary_directory ())
 
 (* Whether a process holds a lock file's lock. *)
@@ -79,7 +72,7 @@ let serving () =
   |> List.filter_map (fun entry ->
       if String.starts_with ~prefix entry && Filename.check_suffix entry ".key" then
         let path = Filename.concat directory entry in
-        match In_channel.with_open_bin path In_channel.input_all with
+        match File_system.read path with
         | key when running key -> Some key
         | _ | (exception Sys_error _) -> None
       else None)

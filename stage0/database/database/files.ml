@@ -9,7 +9,7 @@ type t = {
   read : string -> string option;  (** A file's text; [None] for one that cannot be read *)
 }
 
-let stamp_of_text text = Blake3.to_hex (Blake3.hash text)
+let stamp_of_text text = Blake3.hex_digest text
 
 let of_directory root =
   {

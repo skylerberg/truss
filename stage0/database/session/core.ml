@@ -446,12 +446,9 @@ let prune state =
   let live, dead = List.partition (fun (home, _) -> Sys.file_exists home) known in
   if dead <> [] then begin
     List.iter (fun (_, name) -> Store.remove_pointer (Store.pointer state.store name)) dead;
-    let file = homes_file state in
-    let partial = file ^ ".partial" in
     try
-      Out_channel.with_open_bin partial (fun out ->
-          List.iter (fun (home, name) -> Printf.fprintf out "%s\t%s\n" home name) live);
-      Sys.rename partial file
+      File_system.write_atomically (homes_file state)
+        (String.concat "" (List.map (fun (home, name) -> Printf.sprintf "%s\t%s\n" home name) live))
     with Sys_error _ -> ()
   end
 

@@ -17,9 +17,6 @@ type change = {
       (** What reads its changed signature: each reader, its part, and the part it reads *)
 }
 
-(* The parts a definition's callers read. *)
-let signature_parts = [ "interface"; "signature"; "shape" ]
-
 let declarations context packages =
   List.concat_map
     (fun (_, name) ->
@@ -33,11 +30,6 @@ let declarations context packages =
             package.modules
       | None -> [])
     packages
-
-let signature context path =
-  match Query.demand context Interface.Summary.key path with
-  | Some key -> Signatures.text context ~body:false ~opaque:false key
-  | None -> None
 
 (* Each definition that changed, was added, or was removed, in order. *)
 let changes (project : Project.t) base =
@@ -66,14 +58,20 @@ let changes (project : Project.t) base =
       (fun path ->
         let parts = Hashtbl.find changed path in
         if not (List.exists (Path.equal path) old_paths) then
-          { path; status = `Added; before = None; after = signature context path; read_by = [] }
+          {
+            path;
+            status = `Added;
+            before = None;
+            after = Signatures.of_path context path;
+            read_by = [];
+          }
         else
-          let signature_changed = List.exists (fun p -> List.mem p signature_parts) parts in
+          let signature_changed = List.exists (fun p -> List.mem p Signatures.parts) parts in
           {
             path;
             status = `Changed parts;
-            before = (if signature_changed then signature old_context path else None);
-            after = (if signature_changed then signature context path else None);
+            before = (if signature_changed then Signatures.of_path old_context path else None);
+            after = (if signature_changed then Signatures.of_path context path else None);
             read_by =
               (if signature_changed then
                  List.filter
@@ -92,7 +90,7 @@ let changes (project : Project.t) base =
             {
               path;
               status = `Removed;
-              before = signature old_context path;
+              before = Signatures.of_path old_context path;
               after = None;
               read_by = [];
             })
@@ -156,22 +154,13 @@ let change_json c =
       ("read_by", readers_json c.read_by);
     ]
 
-let print_signature label text =
-  match String.split_on_char '\n' text with
-  | first :: rest ->
-      Output.printf "    %s %s\n" label first;
-      List.iter
-        (fun line -> Output.printf "    %s %s\n" (String.make (String.length label) ' ') line)
-        rest
-  | [] -> ()
-
 let print_change c =
   Output.printf "  %s: %s\n" (Path.show c.path)
     (match c.status with
     | `Changed parts -> String.concat ", " parts
     | status -> status_word status);
-  Option.iter (print_signature "was:") c.before;
-  Option.iter (print_signature "now:") c.after;
+  Option.iter (fun text -> Output.print_line (Signatures.labeled "was:" text)) c.before;
+  Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) c.after;
   if c.read_by <> [] then
     Output.printf "    read by: %s\n"
       (String.concat ", "

@@ -48,18 +48,12 @@ let hash_of registry name version =
 let version_directory registry name version =
   Filename.concat (package_directory registry name) (Version.show version)
 
-let rec make_directory path =
-  if not (Sys.file_exists path) then begin
-    make_directory (Filename.dirname path);
-    try Sys.mkdir path 0o755 with Sys_error _ when Sys.file_exists path -> ()
-  end
-
 let write_files directory files =
   List.iter
     (fun (path, bytes) ->
       let path = Filename.concat directory path in
-      make_directory (Filename.dirname path);
-      Out_channel.with_open_bin path (fun channel -> output_string channel bytes))
+      File_system.make_directory (Filename.dirname path);
+      File_system.write path bytes)
     files
 
 let add registry name version files =
@@ -67,14 +61,6 @@ let add registry name version files =
   Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ]
     0o644 (versions_file registry name) (fun channel ->
       Printf.fprintf channel "%s %s\n" (Version.show version) (Content.hash files))
-
-let rec remove path =
-  match (Unix.lstat path).st_kind with
-  | exception Unix.Unix_error _ -> ()
-  | S_DIR -> (
-      Array.iter (fun entry -> remove (Filename.concat path entry)) (Sys.readdir path);
-      try Sys.rmdir path with Sys_error _ -> ())
-  | _ -> ( try Sys.remove path with Sys_error _ -> ())
 
 let fetch registry ~into name version ~hash =
   let target = Filename.concat into hash in
@@ -94,8 +80,8 @@ let fetch registry ~into name version ~hash =
       (* Written beside itself and renamed, so that a package in the store
          is always whole. *)
       let partial = Printf.sprintf "%s.%d.partial" target (Unix.getpid ()) in
-      remove partial;
+      File_system.remove partial;
       write_files partial files;
-      (try Sys.rename partial target with Sys_error _ -> remove partial);
+      (try Sys.rename partial target with Sys_error _ -> File_system.remove partial);
       if Sys.file_exists target then Ok target else Error (Printf.sprintf "cannot write %s" target)
     end

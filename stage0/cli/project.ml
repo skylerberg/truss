@@ -197,10 +197,7 @@ let shown_workspace_path t workspace_path =
   | Some (_, file) -> shown file
   | None -> workspace_path
 
-let write_file path text =
-  let temporary = Printf.sprintf "%s.%d.tmp" path (Unix.getpid ()) in
-  Out_channel.with_open_bin temporary (fun channel -> output_string channel text);
-  Sys.rename temporary path
+let write_file = File_system.write_atomically ~durable:false
 
 (* Every definition [start] reads, directly or not. *)
 let reachable dependencies start =
