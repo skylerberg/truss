@@ -279,12 +279,17 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
                   | _ -> ())
                 fields
           | Cursor_next cursor -> mutable_place "a `Cursor_next`" cursor
-          | Slice { base; call } -> (
-              place base;
+          | Slice { call } -> (
               match call.kind with
-              | Call { arguments = Passed { value = Place first; _ } :: _; _ } when first == base ->
-                  ()
-              | _ -> wrong "the call of a `Slice` does not take the base as its first argument")
+              | Call
+                  {
+                    arguments =
+                      Passed { value = Place base; _ } :: Passed { value = Value _; _ } :: rest;
+                    _;
+                  }
+                when List.length rest <= 1 ->
+                  place base
+              | _ -> wrong "the call of a `Slice` does not take its base and then its bounds")
           | Matches { value; pattern } -> binds_own "an `is`" value pattern
           | Match { scrutinees; arms; _ } ->
               List.iter
@@ -318,7 +323,27 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
               (match call.callee with Indirect function_value -> operand function_value | _ -> ());
               List.iter
                 (function
-                  | Core.Passed { mode = Mut; value = Value { kind = Slice { base; _ }; _ }; _ } ->
+                  | Core.Passed
+                      {
+                        mode = Mut;
+                        value =
+                          Value
+                            {
+                              kind =
+                                Slice
+                                  {
+                                    call =
+                                      {
+                                        kind =
+                                          Call
+                                            { arguments = Passed { value = Place base; _ } :: _; _ };
+                                        _;
+                                      };
+                                  };
+                              _;
+                            };
+                        _;
+                      } ->
                       mutable_place "a slice passed `mut`" base
                   | Core.Passed { mode = Mut; value = Value _; _ } ->
                       wrong "a `mut` parameter receives a value that is not a slice"
