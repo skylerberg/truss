@@ -1,10 +1,13 @@
 # Truss Design Decisions
 
-This document records the semantics of Truss code and the reasons for them. For how code is written,
-see [SYNTAX.md](SYNTAX.md). For the goals behind these decisions, see
-[GOALS.md](GOALS.md). It describes the language, not a compiler. The documents of stage0's
-stages, which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists, say how much of
-it stage0 builds.
+This document gives the reasons for Truss's design: why the language has its
+rules, and the choices of the toolchain and the standard library that the
+language depends on. [SPECIFICATION.md](SPECIFICATION.md) states the rules
+of the language, and [PACKAGES.md](PACKAGES.md) the rules of packages; this
+document states a rule only as far as its reason needs. For the goals behind
+these decisions, see [GOALS.md](GOALS.md). The documents of stage0's stages,
+which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists, say how much of the
+language stage0 builds.
 
 ## Source code
 
@@ -213,20 +216,13 @@ the line before, since none of those can begin a statement. Inside `(` and
   no type information and no parser state, and
   indentation never matters, unlike in Haskell or Python.
 
-## Syntax from other languages
+## Rejected sequences
 
 LLMs have seen far more Rust, TypeScript, Python, Go, and C than Truss, so
-they will often write those languages' syntax by habit. Truss treats this as
-a design input rather than user error:
+they will often write those languages' syntax by habit. The lexer rejects
+the commonest of those sequences (see
+[SPECIFICATION.md](SPECIFICATION.md#rejected-sequences)):
 
-- **Each common habit gets its own error and an exact fix.** `i++`, `&mut x`,
-  `let mut`, `|x|` closures, `;`, and `// comments` each produce a message
-  that names the Truss form and a replacement that tools can apply
-  directly. With fast inference, the time an agent spends in a confusing
-  edit-compile loop dominates, so a precise fix saves more than any
-  other diagnostic. This follows Rust, Swift, and Elm, which give targeted
-  errors for syntax from other languages, rather than Go and Zig, which
-  mostly do not.
 - **Foreign sequences are rejected, not reinterpreted.** `--x` could mean
   `-(-x)`, and `//` could lex as two divisions; both are errors instead, so
   that a habit never compiles to something unintended. This also keeps those
@@ -473,11 +469,6 @@ the type.
   the package can call, and Eiffel, whose invariants bind only calls on
   another object. Truss draws the line at the narrowest place: methods
   private to a file, and only for the value they change.
-- **`with` is checked after all of its updates,** so several fields can change
-  together.
-- **Values from outside the program come in through constructors** that check
-  or establish the invariant, such as `Port.try_from(number)`, which returns a
-  `Result`.
 - **Functions called in an invariant must be pure and have a `time` clause.**
   An invariant is a logical statement, and a function that might never return
   has no well-defined result. If such functions were allowed, the prover could
@@ -588,11 +579,6 @@ two variables never refer to the same changeable data.
   `BitwiseCopyable` for the same reason. Other types show their fields, so
   changing those is visibly a change to the API already, and their copying
   stays inferred.
-- To keep a value while passing it to an `own` parameter, pass `value.copy()`.
-- Record updates (`own config with (server.port: 443)`) follow the same
-  rules. An owned base is reused in place, so the update costs one write per
-  field. Updating a nested field takes a single path, as it does with
-  assignment.
 
 ### Views
 
@@ -645,13 +631,6 @@ views are *second-class*, as in Hylo:
 - **The compiler checks each function on its own.** The rules involve only
   one function body plus the signatures it calls, which keeps checking fast
   and incremental.
-- **Owned values are explicit.** A `var`, an `own` parameter, a record field, a
-  collection element, or a return value needs an owned value, so a place there
-  must be marked `own` or copied with `copy()`. A `let` of a place needs
-  neither.
-- **The only implicit conversion is from an owned collection to its view.** A
-  `List` becomes a `Slice` and a `String` becomes a `StringSlice` when passed to
-  a parameter of the view type.
 
 String literals are `String`s in static memory. Creating one costs nothing,
 and the first change copies it to the heap. Only methods that write bytes,
@@ -710,19 +689,12 @@ Hylo also keep accessors apart from sequences, and Python's
   Rust, which offer `swapAt` and `split_at_mut` for it.
 - **`List`, `Slice`, and `Array` lend two parts side by side.** Their
   elements are places the compiler knows, and their `at` has nothing left to
-  do after its `yield`, so two indexes or two slices of one of them can be
-  lent together, `mut` or not, when the prover shows they are apart.
-- **A part that is lent is not the caller's to keep.** It cannot be given
-  up, and a name cannot hold it past the statement, though a `Plain` part
-  is copied as any `Plain` value is. A part lent `mut` is changed with no
-  mark of its own, since the mark is already on the place it is lent from:
-  `mut grid.cell(position).visit()`.
+  do after its `yield`, so nothing is waiting to resume that two parts could
+  disturb.
 - **A lending method yields exactly once on every path, and always
   continues afterward,** even if the caller's statement leaves early, so a
-  type can update values that depend on the part, such as a cached total. The
-  compiler checks that there is exactly one `yield` on every path, as Swift
-  does for its accessors. A lending method cannot drive a `for` loop or be
-  pulled.
+  type can update values that depend on the part, such as a cached total.
+  Swift checks its accessors for exactly one `yield` in the same way.
 - **A loop can stop at any `yield`, and the method does not continue.** Python
   generators run `finally` blocks when a loop stops early; Truss has no
   `finally`, and continuing to the next `yield` would do unasked-for work,
@@ -732,26 +704,17 @@ Hylo also keep accessors apart from sequences, and Python's
   elements in a way that changing one would break, such as a sorted list or a
   cached total, offers read-only and owned loops, and changes single
   elements through a lending method.
-- **The contract describes the yielded parts.** In a lending or yielding
-  method's `ensures`, `result` names the part being yielded, so a clause
-  that mentions it holds at each `yield`, and the caller's statement or
-  loop body may assume it: `List`'s `each` promises
-  `ensures identical(result, self[yielded.length()])`, and a range's promises that
-  each value lies within it. Clauses that do not mention `result` hold
-  wherever the method ends. `yielded` names the parts yielded so far, as
-  a `Sequence`, each as the caller left it, and `finished` is `true` when the
-  method ran to its end rather than stopping at a `yield`. So
-  `ensures finished ==> yielded.length() == self.length()` is how a loop over
-  a list is known to run once per element, and a `lends mut` method states
-  how `self` takes back the part with `yielded[0]`. A `for` loop's
-  clauses may name `yielded` too, for the values of the iterations
-  before. Dafny's iterators work the same way, with clauses for each
-  `yield` and a ghost history of the yielded values, and Creusot calls the
-  history `produced`. The facts of `for item in items` come from the
-  contract of the list's `each`, so a user's collection gets exactly the
-  same facts as a `List`. A range of integers is the one loop the prover
-  knows itself, and in its clauses the loop variable names the next index,
-  as in Dafny's and Why3's `for` loops: `kept <= index` in place of
+- **The contract describes the yielded parts.** A clause that mentions
+  `result` holds at each `yield`, and the others wherever the method ends,
+  with `yielded` and `finished` to name the history (see
+  [SPECIFICATION.md](SPECIFICATION.md#contracts-of-lending-and-yielding-methods)).
+  Dafny's iterators work the same way, with clauses for each `yield` and a
+  ghost history of the yielded values, and Creusot calls the history
+  `produced`. The facts of `for item in items` then come from the contract
+  of the list's `each`, so a user's collection gets exactly the same facts
+  as a `List`. A range of integers is the one loop the prover knows itself,
+  and in its clauses the loop variable names the next index, as in Dafny's
+  and Why3's `for` loops: `kept <= index` reads better than
   `kept <= yielded.length() + 1`.
 - **Read-only and owned yields can be pulled.** Internal iteration alone, as
   in Ruby's `each`, cannot advance two sequences together, so it cannot
@@ -964,8 +927,6 @@ choices below keep method calls predictable:
   adds names is still a compatible one (see [Versions](#versions)), as in
   Go's compatibility promise and Rust's rules for minor releases: otherwise
   no type could ever gain a method.
-- **Each type has at most one implementation of a trait,** for each set of
-  the trait's arguments.
 - **An `impl` lives with its trait or with a type it names.** It must be in
   the package of the trait, of the implementing type, or of the outermost
   type of one of the trait's arguments. So `impl Multiply[Vector] for
@@ -1035,13 +996,8 @@ choices below keep method calls predictable:
   derived,** as Rust's serde, Swift's `Codable`, and Kotlin's
   `@Serializable` are. Their methods are generic over a `Serializer` or a
   `Deserializer`, so one derived implementation writes to and reads from
-  every format: JSON, TOML, and any that a package adds. A record is
-  written as its fields by name, in declaration order. A variant with no
-  fields is written as its name, and a variant with fields as a record of
-  them under its name, which is serde's default form. A field with a
-  default may be missing when it is read, and a missing field of type
-  `Option` reads as `None`. A format may rename every field, as
-  `serialization::Names.CamelCase` does. A type that needs other names
+  every format: JSON, TOML, and any that a package adds. The derived form
+  of a variant is serde's default form. A type that needs other names
   writes its `impl`, since Truss has no attributes to rename one field.
 - **A format whose values form a tree implements `serialization::Tree`,**
   as `json::Value` and `toml::Value` do. `serialization::TreeWriter`
@@ -1201,7 +1157,6 @@ comparisons over `&&`. Every other combination needs parentheses.
   Verus allows with `global size_of usize == 8`. Building such a package for
   a 32-bit target is an error, and a package that does not say so cannot
   depend on one that does, so a package that claims to run everywhere does.
-- **Integer types never convert implicitly.**
 - **Literals take their type from context, with no suffixes.** `3` can be any
   integer type, so there is one way to write it, and `let small: UInt8 = 3`
   needs no `3u8`. When nothing decides the type, it defaults to `Int64` or
@@ -1241,10 +1196,8 @@ comparisons over `&&`. Every other combination needs parentheses.
   generic code over one is proven once for each built-in type that does,
   and each proof sees that type's range and bits (see PROVER.md). A type of
   one's own that behaves like an integer is a record over a built-in one.
-- **A literal of a type that an integer trait bounds must fit every type
-  that implements it:** -128 to 127 under `SignedInteger`, 0 to 255 under
-  `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`. A type's own
-  bounds are `minimum_value()`, `maximum_value()`, and `bit_width()`.
+  For the same reason, a literal under an integer trait's bound must fit
+  every type that implements the trait.
 - The standard library provides APIs that avoid index arithmetic, such as
   `items.last()`, `enumerate`, `zip`, and reverse ranges.
 
@@ -2079,8 +2032,6 @@ gives the same result as running its parts one after another.
 - **Tests run branches in order.** The test runner already runs one test on
   each core, so a test gains nothing from more threads. In order, a check
   that fails is the same check on every run.
-- **Panics end the program, as anywhere else.** If more than one branch could
-  panic, which message is printed may vary.
 - **Early exit is not allowed.** A branch uses no capabilities, so it cannot
   be asked to stop. Leaving with `return` or `?` would have to abandon the
   other branches partway, or wait for work whose result is thrown away.
@@ -2094,160 +2045,98 @@ Hylo, which also uses mutable value semantics.
 
 Concurrency means doing several things whose order is not fixed, such as
 serving a server's connections, or waiting for a reply and a timer at once.
-The behavior of such code can depend on the order of events, so concurrency is an
-effect: code that does it declares `uses Tasks`.
+The behavior of such code can depend on the order of events, so concurrency
+is an effect: code that does it declares `uses Tasks`. The rules are in
+[SPECIFICATION.md](SPECIFICATION.md#concurrency).
 
-- **`concurrent` runs its branches as tasks.** A `concurrent` block runs
-  each of its statements as a task and ends when every one has ended. A
-  `concurrent for` runs each iteration as a task. They are written as
-  `parallel` and `parallel for` are, and differ in one way: a branch may
-  use the capabilities of the code around it, which is why the function
-  needs `Tasks`.
-- **No data races, by the same rule as `parallel`.** Any branch may read any
-  place, and a place that one branch changes cannot be used by another. A
-  branch hands its result to the code after the block through a `let`, or
-  through its own element of the collection it loops over.
-- **A branch leaves each place whole.** When a branch leaves early, the
-  code after the block does not run. So a branch that moves a value out of
-  a place that outlives the block reinitializes the place itself, where a
-  `parallel` branch may leave that to the code after the block.
+- **A `concurrent` branch differs from a `parallel` one in one way:** it may
+  use the capabilities of the code around it. So the rule about places that
+  rules out data races in `parallel` rules them out here too, with nothing
+  added.
 - **A task never outlives the block that started it,** as with Trio's
   nurseries, Kotlin's `coroutineScope`, Swift's task groups, and Java's
-  `StructuredTaskScope`. This lets a branch read the places around
-  it without lifetimes, and use the capabilities provided around it, whose
+  `StructuredTaskScope`. This lets a branch read the places around it
+  without lifetimes, and use the capabilities provided around it, whose
   implementations are the enclosing code's variables. A task started with
   Go's `go` can outlive everything it was given, so in Truss it could be
   given neither.
 - **A task borrows only places that outlive the loop.** An iteration of a
-  `concurrent for` outlives the `yield` that started it. A place inside a
-  parameter that the method takes read-only cannot change or be freed
-  while the method runs, so a task may borrow it: `concurrent for item in
-  items` lends each element for the whole loop. A value that the method
-  yields `own`, or computes for the `yield`, goes to the task, and a
-  `Plain` value is copied. A place in a local of the method or in a `mut`
-  parameter could change or be freed when the method resumes, so yielding
-  it to a task is rejected: it would be a use after free. A method that
-  yields `mut` access can drive a `concurrent for` only if its body is one
-  loop over a range that yields at each index. Each task then runs one
-  iteration of that loop and changes its own element. Rust draws the same
-  line between an iterator, whose items outlive the step that produced
-  them, and a lending iterator, whose items do not.
-- **`yield` is not allowed in concurrent code.** It would run the caller's
-  loop body as a task, at the same time as the method's other tasks, and
-  the caller's loop body is checked as sequential code.
+  `concurrent for` outlives the `yield` that started it, so a place that
+  could change or be freed when the method resumes cannot be yielded to a
+  task: that would be a use after free. Rust draws the same line between an
+  iterator, whose items outlive the step that produced them, and a lending
+  iterator, whose items do not.
 - **It is a construct, not a function that is passed a function.** A
   `spawn(work)` would have to keep `work` until the task runs, and only a
   function that captures nothing can be kept (see [Closures](#closures)).
   Such a task could read nothing around it, and would hand its result back
   through a handle for the caller to join. A branch needs no handle and no
-  join, and the one rule about places covers it.
+  join.
 - **Blocking calls, no async.** Code waits by calling a capability method
   that returns when the result is ready, as in Go, Java's virtual threads,
-  and Zig's `Io` interface. There is no `async` or `await`. `uses` already
-  separates the code that can wait from the code that cannot, and a second
-  mark for the same fact would split functions into two kinds that can't
-  easily call each other. This fits the rule that a capability method
-  always returns.
+  and Zig's `Io` interface. `uses` already separates the code that can wait
+  from the code that cannot, and a second mark for the same fact, such as
+  `async`, would split functions into two kinds that can't easily call each
+  other. This fits the rule that a capability method always returns.
 - **How a task waits can change without any code changing.** Truss has no
   foreign code, so every call that waits is in the standard library's real
   capability implementations. They can give each task a thread of the
   operating system, or run many tasks on the pool's few threads and switch
   between them where a task waits, and no caller can tell which. Go and
   Java cannot switch away from a task that waits inside foreign code.
-- **Leaving early cancels the other branches.** A `?`, `return`, or `break`
-  that leaves a `concurrent` block or loop cancels every other branch,
-  waits for each to end, and then leaves. A branch that has not started
-  does not start. The first branch to leave decides where control goes and
-  with which value; a later one's is dropped. Kotlin, Swift, Trio, and
-  Java's scopes cancel sibling tasks the same way.
-- **Cancellation is an error value.** In a cancelled task, the standard
-  library's implementation of a call that would wait returns at once with
-  the value that says it did not finish: `SystemError.Cancelled` where the
-  method returns a `Result`, and `None` where it returns an `Option`. A
-  method that returns nothing, such as `Clock.sleep`, returns early. `?`
-  carries the error out like any other, so a cancelled task ends by
-  returning, along a path that is written in its code. `Tasks.cancelled()`
-  tells a loop that calls nothing that waits.
-- **Cancellation breaks no contract.** The cancelled value is returned by
-  an implementation, which is proven against its method's `ensures` like
-  any other result, so a caller's proof holds whether or not the task was
-  cancelled. An implementation written on calls that wait passes their
-  error on. A cancelled task that is blocked on the mutex of a `mut`
-  implementation stays blocked until it acquires the mutex, since the call
-  has no other result to return.
-  This is Go's `Context` without the parameter, since whatever provides
-  `Tasks` knows which task is calling. Trio and Kotlin raise an exception
-  at the call instead, and Rust drops a future at whichever `await` it had
-  reached, which abandons a computation partway. Truss has neither
-  exceptions nor abandoned computations (see
-  [Capabilities](#capabilities)).
-- **A time limit and a race are ordinary code.** `tasks::with_timeout(limit,
-  work)` runs `work` in one branch and a timer in another, and each branch
-  returns from `with_timeout` when it finishes, which cancels the other. Nothing
-  like Go's `select` is needed for either.
-- **A channel is how one task waits for another.** A `Channel[Message]` is
-  a queue with a fixed capacity: `send` waits while it is full, `receive`
-  waits while it is empty, and `close` ends the loops of the tasks that
-  receive from it. A channel of capacity 0 holds no message, and its
-  `send` returns when a task has received the message, as on Go's
-  unbuffered channels and Kotlin's rendezvous channels. The messages of
-  one sender are received in the order it sent them, as on Go's and
-  Rust's channels; the messages of two senders interleave in any order. A message is
-  owned, so sending one moves it and copies nothing. Its type is `Storable`, so never a view type, since a view's original
-  could be gone before the message is received. A function type does not
-  reveal a closure's captures, and neither does an `any` type whose trait
-  does not require `Storable`, so they are view types too (see
-  [Views](#views)). A message is a record or a sum type of owned data, or
-  an `any` of a trait that requires `Storable`.
-  A channel is a reference to its queue. `channel.copy()` makes another
-  reference to the same queue, and the queue is freed when the last
-  reference is dropped, so a channel can be stored in a record or held by
-  a capability implementation that outlives the function that made it. A
-  channel's methods take `self` read-only, so every branch can also use
-  one channel that is declared before the block. A task that waits for
-  several kinds of message receives one sum type from one channel, as an
-  Erlang process reads one mailbox.
-- **How many tasks run at once is bounded by a value, not by syntax.** A
-  `tasks::Limiter` holds a number of permits, and `limiter.hold(work)`
-  runs `work` once it has one. This is Kotlin's `Semaphore.withPermit` and
-  Trio's `CapacityLimiter`, and it is written with a channel of permits, as
-  in Go.
+- **Leaving early cancels the other branches,** as Kotlin, Swift, Trio, and
+  Java's scopes cancel sibling tasks.
+- **Cancellation is an error value.** A cancelled task's calls that would
+  wait return the value that says they did not finish, and `?` carries it
+  out like any other error, so a cancelled task ends by returning, along a
+  path that is written in its code. The value is returned by an
+  implementation proven against its method's `ensures`, so a caller's proof
+  holds whether or not the task was cancelled. This is Go's `Context`
+  without the parameter, since whatever provides `Tasks` knows which task
+  is calling. Trio and Kotlin raise an exception at the call instead, and
+  Rust drops a future at whichever `await` it had reached, which abandons a
+  computation partway. Truss has neither exceptions nor abandoned
+  computations (see [Capabilities](#capabilities)).
+- **A time limit and a race are ordinary code.** `tasks::with_timeout` runs
+  the work in one branch and a timer in another, and whichever returns first
+  cancels the other. Nothing like Go's `select` is needed.
+- **A channel is how one task waits for another,** as in Go, with Go's
+  unbuffered channel and Kotlin's rendezvous channel as capacity 0. A
+  message is owned, so sending one copies nothing, and `Storable`, since a
+  view's original could be gone before the message is received. A function
+  type does not reveal a closure's captures, and neither does an `any` type
+  whose trait does not require `Storable`, so they are view types too (see
+  [Views](#views)). A channel is a reference to its queue, so it can be
+  stored in a record or held by a capability implementation that outlives
+  the function that made it. A task that waits for several kinds of message
+  receives one sum type from one channel, as an Erlang process reads one
+  mailbox.
+- **How many tasks run at once is bounded by a value, not by syntax.**
+  `tasks::Limiter` is Kotlin's `Semaphore.withPermit` and Trio's
+  `CapacityLimiter`, written with a channel of permits, as in Go.
 - **State that tasks share lives in a capability implementation.** Whatever
   changes lives in a variable, a parameter, or a capability implementation
   (see [Memory](#memory)), and two tasks cannot share a variable that
-  either changes. So state that several tasks change is an
-  implementation's: a table of sessions is a type that holds a `Map` and
-  implements a `Sessions` capability, provided `mut` around the code that
-  serves requests. `uses Sessions` then marks every function that can touch
-  the table.
-- **Calls into a `mut` implementation are mutually exclusive.** Where the
-  code inside a `provide mut` can use `Tasks`, the implementation has a
-  mutex. Each call of its methods holds the mutex from start to end, and a
-  task that calls meanwhile blocks. This is a monitor: Ada's protected
-  objects, Java's `synchronized` methods, and an Erlang `gen_server` work
-  the same way. A check and the change that depends on it therefore go in
-  one method. Within a call nothing else changes the state, and between
-  two calls anything may. No task is left holding a view of the state,
-  since a method returns none. An implementation provided without `mut` is
-  only read, so it has no mutex.
+  either changes. A table of sessions is then a type that implements a
+  `Sessions` capability, and `uses Sessions` marks every function that can
+  touch the table.
+- **A `mut` implementation is a monitor,** as Ada's protected objects,
+  Java's `synchronized` methods, and an Erlang `gen_server` are. Within a
+  call nothing else changes the state, and between two calls anything may.
+  No task is left holding a view of the state, since a method returns none.
 - **Proofs already allow for it.** The prover never models an
   implementation's state: a capability call gives a value of which only
-  the method's `ensures` is known. No proof ever assumed that the state
-  stays the same from one call to the next, so every proof still holds when
-  other tasks' calls come between.
-- **These mutexes cannot deadlock.** An implementation's methods can call
-  only capabilities provided outside it, so every task acquires the
-  mutexes in one order, from the innermost implementation outward. One
-  rule keeps this true: an implementation with a mutex has no method with
-  a parameter that can hold a function, or an `any` value, that uses a
-  capability, since calling it could acquire the mutex of a nested
-  implementation out of order.
+  the method's `ensures` is known. No proof assumed that the state stays the
+  same from one call to the next, so every proof still holds when other
+  tasks' calls come between.
+- **These mutexes cannot deadlock.** An implementation's methods call only
+  capabilities provided outside it, so every task acquires the mutexes in
+  one order, from the innermost implementation outward. A callback that uses
+  a capability could acquire a nested implementation's mutex out of order,
+  which is why a `mut` implementation's methods take none.
 - **Mutual exclusion costs nothing where there are no tasks.** Whether the
-  code inside a `provide mut` can use `Tasks` is known where the `provide`
-  is written, from the signatures of its callees. Code that uses a
-  capability parameter of the enclosing function counts, since the
-  parameter may be instantiated with `Tasks`. Only such a `provide` gets a
-  mutex.
+  code inside a `provide mut` can use `Tasks` is known from the signatures
+  of its callees, so only such a `provide` gets a mutex.
 - **A mutex is not a value.** Rust's `Mutex` and Go's `sync.Mutex` change
   the value of a read-only place, which mutable value semantics rules out,
   and two tasks that take two of them in different orders deadlock. A task
@@ -2256,41 +2145,31 @@ effect: code that does it declares `uses Tasks`.
   and waits behind every other use. Erlang added shared tables and atomic
   counters for that reason.
 - **A channel is built on a cell with a pure update.** The cell,
-  `intrinsic::Shared`, holds a value behind a reference count and a mutex.
-  Its one operation runs a pure function on the value while it holds the
-  mutex, as an update of a Clojure atom does. A pure function cannot wait,
-  use another cell, or do I/O, so two updates cannot deadlock, and no task
-  holds the mutex across a call that can wait. Updating a cell requires
-  `Tasks`, because which task updates first differs from run to run. A
-  channel's queue is one.
-- **`tasks::Cell` is that cell for programs,** for state that one
+  `intrinsic::Shared`, holds a value behind a reference count and a mutex,
+  and its one operation runs a pure function on the value while it holds
+  the mutex, as an update of a Clojure atom does. A pure function cannot
+  wait, use another cell, or do I/O, so two updates cannot deadlock, and no
+  task holds the mutex across a call that can wait. Updating a cell
+  requires `Tasks`, because which task updates first differs from run to
+  run. `tasks::Cell` is that cell for programs, for state that one
   implementation's mutual exclusion is too coarse for, such as a cache in
-  many parts or a server's request counters. `cell.update(change)` runs
-  `change` on the value while it holds the cell's mutex, and `change` is a
-  function that uses no capability, so the rules above hold for it.
-  `cell.copy()` is another reference to the same value. `tasks::Counter`
-  is a cell that holds an `Int64`. A counter does the job of Go's `atomic.Int64`
-  and Java's `AtomicLong`, through the cell's mutex.
+  many parts. `tasks::Counter` does the job of Go's `atomic.Int64` and
+  Java's `AtomicLong`, through the cell's mutex.
 - **Data races cannot happen, and waiting forever can.** A task can wait
   for a message that no task will send. Go, Rust, and Erlang do not rule
   that out either.
-- **Tests stay deterministic.** A test provides a `Tasks` implementation
-  that runs one task at a time and chooses by a seed which runs next. It
-  switches tasks only at capability calls. Tasks share no memory that
-  changes, so nothing a task does between two capability calls is visible
-  to another, and the orders of those calls are all the orders there are. A
-  race is then a failure that one seed repeats, not a rare, flaky one.
-  FoundationDB, TigerBeetle, and AWS's Shuttle test this way.
-- **A test's clock moves when every task waits.** Time then jumps to the
-  next timer, as in Go's `testing/synctest` and Trio's test clock. A test
-  of a timeout takes no real time, and its result can be cached.
-- **A test that deadlocks fails,** and reports the event each task
-  was waiting for.
+- **Tests stay deterministic.** A test's `Tasks` runs one task at a time,
+  chosen by a seed, and switches only at capability calls. Tasks share no
+  memory that changes, so nothing a task does between two capability calls
+  is visible to another, and the orders of those calls are all the orders
+  there are. A race is then a failure that one seed repeats, not a rare,
+  flaky one. FoundationDB, TigerBeetle, and AWS's Shuttle test this way.
+- **A test's clock moves when every task waits,** as in Go's
+  `testing/synctest` and Trio's test clock, so a test of a timeout takes no
+  real time, and its result can be cached.
 - **Tasks and `parallel` branches run on one pool.** A program has one set
   of threads, as Go and Java have, so code that computes and code that
   waits do not compete with two pools for the same cores.
-- **Waiting may never end.** A function that waits on a channel cannot be
-  proven to terminate, so it has no `time` clause.
 
 ## Collections
 
@@ -2575,19 +2454,17 @@ package may want those names for its own types. They are `core::Pair`,
 
 ## Visibility
 
-- **Private (the default):** visible only within the file.
-- **`internal`:** visible anywhere in the package.
-- **`public`:** visible to other packages.
-
-Defaulting to private makes keeping code modular the easiest option.
+A definition is visible only within its file unless it says `internal` or
+`public`. Defaulting to private makes keeping code modular the easiest
+option.
 
 A public signature cannot mention a private or `internal` type, and neither
 can a public type's visible fields, as in Rust and Swift. Code in other
 packages could never name such a type.
 
-A `public opaque type` exposes its name but not its contents. Only code in its
-package can read, build, update, or match on it. Visibility is set for the type
-as a whole, never per field. Truss uses opaque types for three things:
+A `public opaque type` exposes its name but not its contents, and visibility
+is set for the type as a whole, never per field. Truss uses opaque types for
+three things:
 
 - **Control over where values come from.** Some types are only safe if outside
   code cannot build them, such as `SqlQuery`, whose text must come from source
@@ -2629,14 +2506,9 @@ builds one program.
   package is split only where someone wants a boundary checked.
 - **Every kind of package works one way.** A package is named by a path
   that is the same in every file of every project, and where its code comes
-  from follows from the name:
-
-  | Kind | Named | Its code | Its version |
-  |---|---|---|---|
-  | The standard library | `standard` | Part of the toolchain | The toolchain's |
-  | A project's own | Its manifest's name | Under the project's directory | None |
-  | From the registry | `owner::name` | Fetched, and kept by the hash of its content | In the project's lock file |
-
+  from follows from the name: the toolchain for `standard`, the project's
+  directory for the project's own packages, and the registry for the rest
+  (see [PACKAGES.md](PACKAGES.md#packages)).
 - **A package's program starts at the `main` of its `main` module,** so
   finding it is one lookup and not a search of the package, as with Cargo's
   `src/main.rs`. A package builds at most one program, so a project with
@@ -2718,27 +2590,13 @@ nothing more than its own manifest.
   routine.
 - **The registry checks it, from the signatures.** GOALS.md has the
   signature say everything important about a definition, so whether a
-  release keeps its promises can be read from the two releases. A release
-  is compatible with the one before when:
-  - every public definition is still there, at the same path
-  - a function, method, or theorem has the same parameters and result, no
-    capability more in its `uses`, a `requires` that the old one implies,
-    an `ensures` that implies the old one, and no cost greater than before,
-    which is how an `impl`'s method may differ from its trait's (see
-    [Traits that require other traits](#traits-that-require-other-traits)),
-    and a method that could be pulled still can be
-  - a type that shows its fields has the same fields, variants, and
-    invariant; an opaque type may change everything inside it
-  - a trait or capability has the same methods, associated types, required
-    traits, and laws, and at most gains methods that have bodies, since
-    anything else it gained would have to be added to every `impl` in
-    another package
-  - every `impl` is still there
-  - a constant has the same type and value, since a constant's value
-    reaches the types and patterns of its users
-  - a package that ran on every target still does (see
-    [Integers](#integers))
-
+  release keeps its promises can be read from the two releases (see
+  [PACKAGES.md](PACKAGES.md#versions)). A contract may change only as an
+  `impl`'s method may differ from its trait's (see
+  [Traits that require other traits](#traits-that-require-other-traits)). A
+  trait gains only methods with bodies, since anything else would have to
+  be added to every `impl` in another package, and a constant keeps its
+  value, since the value reaches the types and patterns of its users.
   Elm's registry checks releases the same way, from types alone, and
   `cargo-semver-checks` and Go's `gorelease` run weaker checks outside
   their registries. Truss's signatures hold more, so the check covers more.
@@ -2750,14 +2608,9 @@ nothing more than its own manifest.
   that leaned on one is checked again after an upgrade, and may need
   repair. Any guarantee a package's users are meant to rely on goes in an `ensures`,
   where it is promised.
-- **The registry gives each release its number.** The first is 1.0.0. After
-  that, a release whose public signatures are all unchanged gets the next
-  patch number, and one that added to them gets the next minor number, as
-  Elm's tools derive a release's number from its changes. The first part
-  is the number in the
-  package's name, 1 where the name has none, so `acme::geometry_v2` starts
-  at 2.0.0. An author never chooses a number, so a number is never wrong
-  about the changes.
+- **The registry gives each release its number,** from its changes, as
+  Elm's tools derive a release's number. An author never chooses a number,
+  so a number is never wrong about the changes.
 - **There are no 0.x versions,** as in Elm. A version that may break at any
   release cannot be the one version of its name in a build. A package whose
   shape is still changing publishes `_v2`, then `_v3`, and its users move

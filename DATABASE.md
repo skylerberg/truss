@@ -137,7 +137,7 @@ keeps every edge in both directions:
 - **A read that found nothing is an edge too.** Asking for the constants
   named `count` in a file, and finding none, depends on that answer. Adding
   such a constant later changes the answer, and so reaches the reader, as
-  DESIGN.md requires for patterns.
+  SPECIFICATION.md requires for patterns.
 - **A change follows the edges in from readers.** The edges out name the
   dependencies to check when a result may have changed, and answer "why does this
   depend on that?"
@@ -654,7 +654,7 @@ the machine. It holds:
 | Results of expensive steps | Their kind and exactly the input that made them, hashed as a store result (see [Exact keys](#exact-keys)) | `segments/` |
 | A package's artifact | The key of its sources | `segments/` |
 | Object files | Their key, as CODEGEN.md describes | `objects/`, one file each, since a linker reads them by path |
-| A registry package's files | The hash of the files, as SYNTAX.md's "The lock file" defines it | `packages/`, one directory each |
+| A registry package's files | The hash of the files, as PACKAGES.md's "The lock file" defines it | `packages/`, one directory each |
 | A solver's answers | Their key, as PROVER.md describes | `proofs/`, one file each |
 | Pointers | A worktree's session, or a named state of the standard library | `pointers/` |
 | The compiler's identity, the list of worktrees, and the background process's lock and log | | the top, and `servers/` |
@@ -788,7 +788,7 @@ that input:
 
 A *session* is one project's state, in one worktree, with the context a command
 needs: its engine, the pointer that names its state in the store,
-and the problems its manifests have. A project is as SYNTAX.md's
+and the problems its manifests have. A project is as PACKAGES.md's
 "Projects" defines it: the directory tree under a manifest with a `[project]`
 table, or a single package with no such manifest above it. A session is a
 project's, and not a worktree's, because a state names every definition by
@@ -817,7 +817,7 @@ in one repository may each have a package called `tools`.
 ### Registry packages
 
 A session's build is its project's packages and the registry packages they
-use, at the versions SYNTAX.md's "The lock file" and DESIGN.md's "Choosing
+use, at the versions PACKAGES.md's "The lock file" and "Choosing
 versions" give. Which those are is a query, `Project.selection`, over the
 lock file and the records of the packages it names. The database never
 chooses a version itself.
@@ -835,7 +835,7 @@ chooses a version itself.
 - **A registry package is a package like any other to the stages.** Its
   results are computed when something reads them, so a project pays only for
   the parts of a package it uses.
-- **A project's package of the same name takes its place,** as DESIGN.md's
+- **A project's package of the same name takes its place,** as PACKAGES.md's
   "Projects" decides: the name is then the project's package, and no line
   of the lock file is for it.
 - **Each error is a problem of the session:** a lock file that cannot be
@@ -1120,7 +1120,7 @@ with the same inputs.
   GOALS.md sets out to stop. So a result from another machine will be used
   only when it is signed by a key the user trusts, as Nix accepts
   substitutes only with `trusted-public-keys`. The registry's key is trusted
-  unless a project says otherwise, as DESIGN.md's "The registry" decides,
+  unless a project says otherwise, as PACKAGES.md's "The registry" decides,
   for the results it computed of the packages it holds. Every result is a function of
   its key, so a signed result can also be checked by computing it again.
 - **A specified encoding for values.** A fingerprint is the hash of

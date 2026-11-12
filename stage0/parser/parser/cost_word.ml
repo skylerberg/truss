@@ -4,7 +4,7 @@
 type t = Amortized | Time | Allocations | Allocated_bytes | Calls | O | Finite | Potential
 
 (* The only place each word is spelled. A test checks the list against
-   GRAMMAR.md. *)
+   SPECIFICATION.md. *)
 let spellings =
   [
     ("amortized", Amortized);

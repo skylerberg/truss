@@ -3,7 +3,7 @@
 This document describes name resolution and type checking in stage0, in
 [`stage0/`](stage0): every step between the parser's syntax trees and the core
 form that the prover and code generation read. It follows the decisions in
-[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and [GRAMMAR.md](GRAMMAR.md).
+[SPECIFICATION.md](SPECIFICATION.md) and [DESIGN.md](DESIGN.md).
 Its input is the trees described in [PARSER.md](PARSER.md). Its output is the
 core form that [CODEGEN.md](CODEGEN.md) and [PROVER.md](PROVER.md) consume. Its
 queries run on the code database, which [DATABASE.md](DATABASE.md) describes.
@@ -518,7 +518,7 @@ value's core node in the conversion:
 | Conversion | Where |
 |---|---|
 | `Never` to any type | Wherever an expression of type `Never` meets an expected type, such as `None => return Err(error)` in a `match` whose value is an `Int64` |
-| `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type, and the key of an index, which is the argument of `at`. This is DESIGN.md's only implicit conversion. |
+| `List[Element]` to `Slice[Element]`, `String` to `StringSlice` | An argument passed to a parameter of the view type, and the key of an index, which is the argument of `at`. This is SPECIFICATION.md's only implicit conversion. |
 | A function value to a function type with more `uses` or weaker costs | Where a value is passed, bound, returned, assigned, or stored, and where it is the tail expression of a branch of an `if` or a `match`. A pure function can be passed as `(fn(Item) uses Clock)`, and a `cost time O(1)` function as `cost time finite`. |
 | A built-in integer to `Integer`, and back | An argument or the key of an index, in specifications only (see [Specifications](#specifications)) |
 
@@ -664,7 +664,7 @@ from them.
   `internal` type in a visible field of a public type, as in Rust and Swift.
   Callers in other packages could not name the type.
 - **Clauses are checked in source order,** each with the earlier clauses in
-  scope, as SYNTAX.md describes. `requires`, `ensures`, and `decreases` are
+  scope, as SPECIFICATION.md describes. `requires`, `ensures`, and `decreases` are
   specifications (see [Specifications](#specifications)). `uses` names
   capabilities or capability parameters. The bound of each `cost` clause is an
   `Integer` expression. `calls(target)` names a parameter of a function type, a
@@ -752,7 +752,7 @@ written inside it, and neither check depends on the other:
   names must match because they are part of how a method is called, as Swift
   requires of protocol requirements. Defaults are written only in the trait. A
   method can add `ensures` and `cost` clauses, and can state a `requires`. The
-  prover shows that its clauses are no weaker than the trait's, as DESIGN.md
+  prover shows that its clauses are no weaker than the trait's, as SPECIFICATION.md
   describes. The `impl`'s clauses are part of its contract, on which a call
   that resolves to the `impl` depends.
 - **The traits that a trait requires** must be implemented for the same type,
@@ -839,7 +839,7 @@ an associated type's definition on the cycle names that constructor.
 
 A generic type that contains itself with different arguments, as in `type
 Nested[Element] = Leaf(value: Element) | indirect Node(inner:
-Nested[List[Element]])`, is `package.growing_type`, as DESIGN.md requires:
+Nested[List[Element]])`, is `package.growing_type`, as SPECIFICATION.md requires:
 the type has no fixed set of instances, and generic code is compiled once
 for each. A traversal of its own finds it, as in Go's check. Its graph has
 the parameters of generic types as nodes. An edge goes from a parameter to
@@ -872,8 +872,8 @@ a whole body, as in Rust, OCaml, and Haskell:
   statement, so its cost follows the size of the statement.
 - **The cost is a few annotations.** `var names = []` needs
   `var names: List[String] = []`, and `var best = None` needs a type, as in
-  Swift and Kotlin. SYNTAX.md already writes them this way, and
-  `var best = 0` is an `Int64`, as SYNTAX.md says.
+  Swift and Kotlin. SPECIFICATION.md already writes them this way, and
+  `var best = 0` is an `Int64`, as SPECIFICATION.md says.
 
 A statement here is the innermost statement. The statements inside a block that
 is part of a larger expression are inferred separately, and the block's tail
@@ -902,7 +902,7 @@ decided in this order:
    A literal shift amount is a `USize`, as Go's is a `uint`.
 
 This never looks at which `impl`s exist, so adding an `impl` never changes
-an existing call's meaning, as DESIGN.md requires. Once a literal's type is
+an existing call's meaning, as SPECIFICATION.md requires. Once a literal's type is
 known:
 
 - **An integer literal must fit** its type, after negation: a `-` applied
@@ -911,7 +911,7 @@ known:
   type that an integer trait bounds is an integer type here, and a literal of
   it must fit every built-in type that implements the trait. A `USize` or `ISize` literal
   must fit in 32 bits unless the package's manifest says
-  `usize_bits = 64`, as DESIGN.md requires. The standard library, which
+  `usize_bits = 64`, as SPECIFICATION.md requires. The standard library, which
   holds the code for each platform, is checked with its target's width.
 - **A float literal is rounded once,** from its exact decimal value to its
   type, with ties to even. A literal that rounds to infinity is an error, as
@@ -979,7 +979,7 @@ The arguments must then appear in parameter order; otherwise the call is an
 error with a fix that reorders them. An argument for a parameter with a default
 can be omitted, and the core form passes `Default` for each omitted parameter,
 for the default-presence mask that CODEGEN.md describes. Records and variants differ in
-two ways, as SYNTAX.md says: their arguments can come in any order, and only a
+two ways, as SPECIFICATION.md says: their arguments can come in any order, and only a
 record or a variant with exactly one field takes a bare value.
 
 **Lambda arguments are checked last.** The other arguments of a call are
@@ -1014,7 +1014,7 @@ statement has inferred the type that it constrains:
 
 **An `impl` is never chosen from the expected type.** A trait method's
 `impl` is chosen by `Self` and by the trait's type arguments, and those come
-from the receiver, a type name, or the arguments, as DESIGN.md requires.
+from the receiver, a type name, or the arguments, as SPECIFICATION.md requires.
 `Int64.from(count)` chooses `From[UInt32]` by the type of `count`. Type
 arguments written after the trait, as in `Add[Int64].add(left, right)`,
 are the ones the call uses.
@@ -1035,7 +1035,7 @@ The keyword at a call site must agree with the parameter:
   also chooses the method's version, as below, so it is never redundant
   there.
 - **A mark covers the longest place it can,** and the first method call
-  after it takes that place as its receiver, as SYNTAX.md describes.
+  after it takes that place as its receiver, as SPECIFICATION.md describes.
 - **A `mut` mark needs a mutable place.** The place in `mut place`, the
   receiver of a `mut self` method, and the collection of a `for` loop over
   `mut place` must be mutable, by the rule for the left side of an
@@ -1113,7 +1113,7 @@ type of a bound.
   first, so it never goes through `assign`.
 - **A block's value is its last expression.** Every other statement must
   have type `Unit` or `Never`; any other value is an error with a fix that
-  writes `let _ =`, as DESIGN.md requires. An `if` without an `else` has type
+  writes `let _ =`, as SPECIFICATION.md requires. An `if` without an `else` has type
   `Unit`. The arms of an `if` or `match` are unified, ignoring arms of type
   `Never`.
 - **Loop clauses** are specifications: an `invariant` is a `Bool`, and a
@@ -1121,7 +1121,7 @@ type of a bound.
 - **`while`** takes a `Bool`. A `while` whose condition is the literal
   `true`, and which no `break` leaves, has type `Never`, as Java and Kotlin
   treat it. Any other loop is a statement of type `Unit`.
-- **`for pattern in expression`** has three forms, as SYNTAX.md describes.
+- **`for pattern in expression`** has three forms, as SPECIFICATION.md describes.
   If the expression is a call of a `yields` method, the loop iterates over
   that call, and the loop variable has the mode that the method yields
   with. If it is a cursor, the loop advances the cursor until it is
@@ -1149,7 +1149,7 @@ when every branch has.
 ### `todo`, `echo`, and `unreachable`
 
 - **`todo` takes the expected type,** and the hole is reported with that type
-  and the names in scope, as SYNTAX.md describes. With no expected type, as in
+  and the names in scope, as SPECIFICATION.md describes. With no expected type, as in
   `let body = todo`, it has the `Hole` type. Every operation on a `Hole` is
   accepted, and its result is a `Hole`, so the rest of the body is still
   checked as far as possible. Its diagnostic states that the type is
@@ -1179,7 +1179,7 @@ when every branch has.
 
 A pattern is checked against the type of the value it matches:
 
-- **A variant** is looked up in the matched type, as SYNTAX.md describes,
+- **A variant** is looked up in the matched type, as SPECIFICATION.md describes,
   and a record pattern takes the matched type's only shape. The fields of an
   opaque type from another package cannot be matched.
 - **Fields** are matched by name: `field: pattern`, a bare name that is a
@@ -1230,7 +1230,7 @@ generation read, including the patterns that `?` desugars to:
 
 ## Ownership: moves, loans, and views
 
-`Ownership` enforces DESIGN.md's rules on modes, moves, and views within each
+`Ownership` enforces SPECIFICATION.md's rules on modes, moves, and views within each
 function. It prevents use after move, dangling views, mutation of a borrowed
 place, and data races. It reads the definition's [core form](#the-core-form)
 and the interfaces of the definition's callees.
@@ -1266,7 +1266,7 @@ Two places *overlap* when one is a prefix of the other. `config.servers` and
 `config.clients` are disjoint. `items[i]` and `items[j]` may overlap, and so
 may two slices of one collection. Where that matters, the checker reports no
 error. It emits a `Disjoint` obligation instead, which the prover discharges,
-as DESIGN.md requires for `sort(mut items[..middle])` next to `sort(mut
+as SPECIFICATION.md requires for `sort(mut items[..middle])` next to `sort(mut
 items[middle..])`.
 
 ### Moves
@@ -1280,7 +1280,7 @@ copied instead.
   move, and a fix that inserts `.copy()` at the move when the type is
   `Copyable`.
 - **A field can be moved out by itself.** The other fields stay usable, and the
-  whole record is usable again once the field is assigned, as DESIGN.md
+  whole record is usable again once the field is assigned, as SPECIFICATION.md
   describes. The checker tracks moved places by field path.
 - **Only an owned place can be moved.** Moving out of a read-only parameter, a
   view, a constant, or an element, as in `own items[i]`, is an error, as in
@@ -1334,7 +1334,7 @@ analysis computes, as in Rust's non-lexical lifetimes. While a shared loan of a
 place is live, no code can assign, move, or `mut`-borrow an overlapping place.
 While a `mut` loan is live, no other code can use an overlapping place at all.
 So `swap(mut first, second: mut first)` is an error, and `mut items.push(9)` is
-allowed once `middle` is dead, as in SYNTAX.md's example. A loan of a view is
+allowed once `middle` is dead, as in SPECIFICATION.md's example. A loan of a view is
 also a loan of the places that the view views.
 
 The operands of one operation are evaluated in the order written, and a later
@@ -1621,11 +1621,11 @@ fixes.
   `self[index]`, can create a cursor only where its element is `Plain`, which
   is copied implicitly in any case. Any named place counts: a field, an
   element, a parameter, or a local. An element of any other type would be
-  copied implicitly, which DESIGN.md rules out, so creating the cursor is an
+  copied implicitly, which SPECIFICATION.md rules out, so creating the cursor is an
   error that suggests a `for` loop or a method that yields owned values. A
   method that yields only temporaries, such as the results of calls, yields
   owned values, which a pull moves.
-- **Whether a method can be pulled is derived from its body,** as DESIGN.md
+- **Whether a method can be pulled is derived from its body,** as SPECIFICATION.md
   says. A `yields` method cannot be pulled if it yields recursively: through a
   `for` loop over a method in its own call cycle. Whether a method yields views
   of places is derived from the body too. Callers read two facts from a
@@ -1839,7 +1839,7 @@ runs to completion before the next call starts.
 
 ### Dependency grants
 
-DESIGN.md says that a dependency can use only the capabilities that its
+PACKAGES.md says that a dependency can use only the capabilities that its
 manifest entry grants, and that a grant is checked wherever the dependency's
 code is referenced. The type checker enforces this from the signatures of the
 dependency's code, never from its bodies. Every capability in those `uses`
@@ -1914,7 +1914,7 @@ type constructor overlap when their trait arguments unify, where each `impl`'s
 generic parameters are unification variables. So `impl Add[Element] for
 Vector[Element]` and `impl Add[Int64] for Vector[Element]` together are an
 error. A blanket `impl`, for a bare generic parameter, would cover every type
-that satisfies a bound, and is not allowed, as DESIGN.md says.
+that satisfies a bound, and is not allowed, as SPECIFICATION.md says.
 
 ### Finding an `impl`
 
@@ -1939,7 +1939,7 @@ method of a trait the type implements cannot be the same one. A trait's
 method may be another version of a type's own only when an `impl` in the
 type's package writes it: one left to the trait's provided body, or given
 by an `impl` in another package, cannot use a name the type's methods have
-at all, as DESIGN.md says. Neither can share a name with a constant of the
+at all, as SPECIFICATION.md says. Neither can share a name with a constant of the
 type. The error is reported at the `impl`, wherever it is.
 
 ### `any`
@@ -1964,7 +1964,7 @@ type. The error is reported at the `impl`, wherever it is.
 ### Instantiation cycles
 
 Generic code is compiled once for each set of type arguments, so generic
-code may not instantiate itself with growing arguments, as DESIGN.md says.
+code may not instantiate itself with growing arguments, as SPECIFICATION.md says.
 Each checked body records its *instantiation edges*: each generic definition
 it calls, with type arguments written in terms of its own type parameters.
 A package check builds the graph of these edges and reports a cycle in which
@@ -1996,7 +1996,7 @@ checks them like code, with these differences:
 - **Everything is pure.** No capability is available, not even `Panic`, and
   `echo` is not allowed.
 - **Every function called must be pure and have a `time` clause,** so that
-  it is known to terminate, as DESIGN.md requires. Both are facts of the
+  it is known to terminate, as SPECIFICATION.md requires. Both are facts of the
   callee's interface.
 - **`forall` and `exists`** bind a pattern over a range or a collection, or a
   name over a type. Their bodies, and `==>`, are `Bool`. A quantifier over a
@@ -2422,12 +2422,12 @@ whenever the intent is unambiguous:
   parser alone (see [Broken definitions](#broken-definitions)).
 - **The interpretation of `f[X]` is stated.** An error in `f[X]` states which
   interpretation applied, such as "`parse` is a generic function, and `[Int64]`
-  is its type argument", as DESIGN.md asks.
+  is its type argument", as SPECIFICATION.md asks.
 - **Habits from other languages** that need types are reported with fixes,
   such as `pair.0` and a tuple `(a, b)`, which say that Truss has no tuples
   and point to the record types in the standard library.
 - **Holes are not errors.** A `todo` is reported to the tools with its type
-  and the names in scope, as SYNTAX.md describes, and builds refuse programs
+  and the names in scope, as SPECIFICATION.md describes, and builds refuse programs
   that can reach one.
 
 ## Interfaces to other stages

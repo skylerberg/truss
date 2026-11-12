@@ -75,7 +75,7 @@ session in the code database, as described in DATABASE.md's "Sessions". The
 project root is the nearest directory, at or above the current directory,
 whose `truss.toml` has a `[project]` table. If there is none, the root is the
 nearest directory that contains a `truss.toml`; that package is a project by
-itself, as described in SYNTAX.md's "Projects". Cargo finds a workspace the
+itself, as described in PACKAGES.md's "Projects". Cargo finds a workspace the
 same way. A directory without a manifest at or above it belongs to no
 project, and a command there cannot run.
 
@@ -88,7 +88,7 @@ and report an error when there are several. `-C DIRECTORY`, as in `git` and
 before or after the command. The positional arguments are left to each
 command.
 
-A package's modules are the `.truss` files under its directory, as SYNTAX.md
+A package's modules are the `.truss` files under its directory, as SPECIFICATION.md
 says, with two exceptions:
 
 - **A directory with its own `truss.toml` is another package,** and none of
@@ -227,8 +227,8 @@ other cannot loop forever. A diagnostic with several fixes is a choice for
 the person or agent, so `--fix` reports it and leaves it. A possible
 overflow, for example, has four fixes. An unused dependency has one fix,
 which deletes its manifest entry, and `--fix` applies it. A capability that
-is not granted has no fix: `--fix` never widens a grant, as DESIGN.md's
-"Dependencies" decides. An agent that has chosen a fix applies its edits
+is not granted has no fix: `--fix` never widens a grant, as PACKAGES.md's
+"Grants" says. An agent that has chosen a fix applies its edits
 from the JSON. `ruff check --fix` and `eslint --fix` also put fixing on the
 checking command; Cargo's separate `cargo fix` would load and check the
 package exactly as `check` does. The JSON document adds `"fixed"`, the
@@ -250,12 +250,12 @@ truss test [--match TEXT] [--timings] [--rerun] [--json] [FILE_OR_DIRECTORY...]
 the tests as described in CODEGEN.md's "Tests": one test program, a worker
 per core, and each result cached by the key of the code the test can reach.
 A test with a cached result is not built or run again. External tests, the
-tests with `uses`, run every time, as SYNTAX.md requires.
+tests with `uses`, run every time, as SPECIFICATION.md requires.
 
 - **Selection.** All tests run by default, which is cheap because results
   are cached. File and directory arguments select the tests defined in them,
   and `--match TEXT` selects the tests whose names contain the text. There is
-  no way to skip external tests: DESIGN.md requires them to run every time
+  no way to skip external tests: SPECIFICATION.md requires them to run every time
   the suite runs.
 - **Progress.** While the tests build and run, a status line on standard
   error shows the number of tests finished, the number that did not pass,
@@ -332,7 +332,7 @@ truss build [--output PATH] [--json]
 ```
 
 A package's program starts at the `main` function of its `main` module, as
-described in DESIGN.md's "Packages", and a package compiles to one program or
+described in PACKAGES.md's "Packages", and a package compiles to one program or
 one library, as IMPLEMENTATION.md says. A package without that `main` is a
 library and has no program, so `run` and `build` exit with 2. A function
 named `main` in another module is an ordinary function.
@@ -343,7 +343,7 @@ so the program can prompt and read input. It then exits with the program's
 status. When the background process builds the program, the program is
 written to the store, and the command runs it on the client's terminal,
 since the background process has none. `echo` writes to standard error, as
-SYNTAX.md says. `run` rejects a program whose `main` reaches a `todo`, as
+SPECIFICATION.md says. `run` rejects a program whose `main` reaches a `todo`, as
 `build` does. DESIGN.md rules out a `todo` that panics when reached, since
 that failure would not appear in the signature, and the rule holds for
 development runs too. The first argument that is not an option starts the
@@ -567,7 +567,7 @@ and replacement.
 ## Registry packages
 
 A package whose name has an owner and that is not a package of the project
-comes from the registry, as described in DESIGN.md's "Packages".
+comes from the registry, as described in PACKAGES.md's "Packages".
 
 - **The registry is a directory,** named by `TRUSS_REGISTRY`. For each
   package it holds `owner/name/versions`, one line per version with the hash
@@ -576,8 +576,8 @@ comes from the registry, as described in DESIGN.md's "Packages".
   `TRUSS_REGISTRY` to the background process, so the result does not depend
   on the environment the process was started in.
 - **A build's versions come from `truss.lock`** at the project root, and from
-  the records of the packages it names, as described in SYNTAX.md's "The lock
-  file" and DESIGN.md's "Choosing versions". Each package gets the highest
+  the records of the packages it names, as described in PACKAGES.md's "The lock
+  file" and "Choosing versions". Each package gets the highest
   version that the lock file or any package of the build names. Only `add`
   and `upgrade` choose versions.
 - **Every command fetches a package's files if the store lacks them,** from
@@ -668,7 +668,7 @@ truss publish [--json]
 ```
 
 Publishes the package the command runs in to the registry, as described in
-DESIGN.md's "Versions" and "The registry". The package's name must have an
+PACKAGES.md's "Versions" and "The registry". The package's name must have an
 owner. `publish` requires:
 
 - **No errors,** including unproven obligations, and no manifest or lock
@@ -683,7 +683,7 @@ owner. `publish` requires:
   Any other such dependency must be published first.
 - **Compatibility with its newest version** (below).
 
-The published files are the package's files as SYNTAX.md's "The lock file"
+The published files are the package's files as PACKAGES.md's "The lock file"
 lists them: its manifest as written, its modules, and the Markdown files
 beside them. The project's lock file is replaced by one with a line for each
 registry package that the package's non-test code uses, transitively, at
@@ -691,7 +691,8 @@ the build's versions. A dependency used only by tests is left out, so a
 project that uses the package does not inherit it. Files identical to the
 newest version are not published again.
 
-**The registry assigns the version number,** as DESIGN.md decides. The first
+**The registry assigns the version number,** as PACKAGES.md's "Versions"
+says. The first
 version is 1.0.0, or 2.0.0 for a name that ends in `_v2`. After that, the
 package is compared with its newest version, which is loaded into a session
 of its own with the packages it was published with:
@@ -845,7 +846,7 @@ omitted from each command's help.
 
 ## Not built
 
-- **Comparing contracts semantically.** DESIGN.md has a release keep a
+- **Comparing contracts semantically.** PACKAGES.md has a release keep a
   `requires` that the old one implies and an `ensures` that implies the old
   one, which the prover would show. `truss publish` compares a contract's
   clauses syntactically: a reworded clause is incompatible, and a clause
@@ -853,7 +854,7 @@ omitted from each command's help.
   definition it names changed, is not detected.
 - **The registry checking a release itself.** `truss publish` checks the
   package on the publisher's machine and writes to the registry's directory.
-- **A registry that is not a directory.** DESIGN.md's registry is served
+- **A registry that is not a directory.** PACKAGES.md's registry is served
   over a network, keeps a public log of every version's hash, signs the
   proofs it checked, has owners who alone publish under their names, and can
   mark a release as one not to use. Stage0's registry is a directory that
@@ -866,7 +867,7 @@ omitted from each command's help.
   version of Truss, so `truss` only checks that the toolchain is new enough.
 - **`truss fmt [--check] [FILE...]`,** which waits for the formatter. It will
   rewrite the package's files, or the named ones, into the one layout
-  SYNTAX.md describes, and print the names of the files it changed, with no
+  SPECIFICATION.md describes, and print the names of the files it changed, with no
   style options. `--check` changes nothing, lists the unformatted files, and
   exits with 1, for CI, as `gofmt -l` and `cargo fmt --check` do. A file with
   a syntax error is reported and left unchanged. Formatting changes no

@@ -1,5 +1,5 @@
 (* The tokens the lexer produces. Each list below is the single place its
-   items are spelled; a test checks the lists against GRAMMAR.md. *)
+   items are spelled; a test checks the lists against SPECIFICATION.md. *)
 
 type span = Source.span = private { start : int; stop : int }
 
