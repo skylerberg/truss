@@ -133,7 +133,10 @@ jobs:
   # entry in the list.
   proofs:
     runs-on: ubuntu-latest
+    # Each share reports its own failures, so one that fails does not
+    # cancel the others.
     strategy:
+      fail-fast: false
       matrix:
         share: [0, 1, 2, 3]
     steps:
