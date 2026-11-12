@@ -48,7 +48,7 @@ val observer : t -> Query.context
 (** For a driver's reads that make no root. *)
 
 val engine : t -> Engine.t
-(** For the client that says what the session's inputs are, and for tests. *)
+(** For the client that sets the session's inputs, and for tests. *)
 
 val set : t -> ('key, 'value) Query.input -> 'key -> 'value -> unit
 val remove : t -> ('key, 'value) Query.input -> 'key -> unit
@@ -67,7 +67,7 @@ val note_file : t -> string -> string option -> unit
 
 val trial : t -> t
 (** A session that starts from another's state and changes on its own. The two share everything but
-    what the trial changes. It is never saved, and has no attachment. *)
+    the trial's changes. It is never saved, and has no attachment. *)
 
 val snapshot :
   key:string -> pointer:string -> version:string -> bases:(unit -> Engine.t list) -> t option
@@ -102,7 +102,7 @@ val identity : unit -> string
 
 val allow_reading : string -> unit
 (** Names a version, other than the compiler's identity, whose states this program can read, so that
-    collection keeps what they hold. *)
+    collection keeps their nodes. *)
 
 val directory : string -> string
 (** A directory of the store, for results that must be files. *)

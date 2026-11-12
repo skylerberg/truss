@@ -12,8 +12,8 @@ let () =
 
 (* CI proves the library in several processes at once, one for each core
    of several runners. [TRUSS_PROOF_SHARE] names this process's share as
-   [index/count], and the process checks and proves only its own modules:
-   what they use of the others is worked out as it is needed. The modules
+   [index/count], and the process checks and proves only its own modules,
+   and computes the parts of other modules they use on demand. The modules
    are dealt out by weight, heaviest first, each to the share with the
    least so far, so that the shares take about as long as each other. A
    module's weight is what proving it was measured to cost, which
@@ -143,9 +143,9 @@ let timed label work =
   result
 
 (* [TRUSS_PROOF_STATE] names a state of the library in the code database's
-   store. A run that names one starts from what the last such run saved,
-   works out only what an edit to the library changed, and saves the
-   result. A run that names none starts from the sources. *)
+   store. A run that names one starts from the state the last such run
+   saved, recomputes only the dependents of an edit to the library, and
+   saves the result. A run that names none starts from the sources. *)
 let session =
   match Sys.getenv_opt "TRUSS_PROOF_STATE" with
   | None | Some "" -> None

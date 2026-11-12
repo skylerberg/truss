@@ -1,0 +1,33 @@
+use standard::collections
+
+test "an LRU cache evicts the entry used least recently" {
+  var cache: collections::LruCache[String, Int64] = collections::LruCache.new(2)
+  assert mut cache.insert("a", value: 1) is None
+  assert mut cache.insert("b", value: 2) is None
+  assert mut cache.get("a") == Some(1)
+  assert mut cache.insert("c", value: 3) is Some(evicted) && evicted.key == "b" && evicted.value == 2
+  assert cache.length() == 2 && cache.contains("a") && cache.contains("c") && !cache.contains("b")
+}
+
+test "replacing a key's value does not evict, and peek does not count as a use" {
+  var cache: collections::LruCache[String, Int64] = collections::LruCache.new(2)
+  let _ = mut cache.insert("a", value: 1)
+  let _ = mut cache.insert("b", value: 2)
+  assert mut cache.insert("a", value: 10) is None
+  assert cache.peek("b") == Some(2)
+  assert mut cache.insert("c", value: 3) is Some(evicted) && evicted.key == "b"
+  assert cache.peek("a") == Some(10)
+}
+
+test "remove and clear take entries out, and many uses keep the cache to its capacity" {
+  var cache: collections::LruCache[Int64, Int64] = collections::LruCache.new(3)
+  for number in 0..100 {
+    let _ = mut cache.insert(number, value: number * 2)
+    assert mut cache.get(number) == Some(number * 2)
+  }
+  assert cache.length() == 3 && cache.contains(99) && cache.contains(97) && !cache.contains(96)
+  assert mut cache.remove(98) == Some(196) && cache.length() == 2
+  assert mut cache.remove(98) is None
+  mut cache.clear()
+  assert cache.is_empty() && cache.capacity() == 3
+}

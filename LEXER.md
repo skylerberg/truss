@@ -4,8 +4,6 @@ This document describes the stage0 lexer, in [`stage0/`](stage0). It
 implements the lexical grammar in [GRAMMAR.md](GRAMMAR.md), and the rules in
 [SYNTAX.md](SYNTAX.md) and [DESIGN.md](DESIGN.md) behind it.
 
-## What the lexer does
-
 The lexer takes the bytes of one source file and returns an array of tokens and
 a list of diagnostics. It always returns tokens, even for a file with errors,
 so that later stages can report more than the first error.
@@ -647,8 +645,8 @@ type t = {
 - Applying any fix must remove its diagnostic without adding another from the
   lexer. Each fix has a focused test, and the fuzzer checks this for a
   mistake inserted into each document example. Fixes are not checked while
-  lexing: that could only show that a fix lexes cleanly, not that it is
-  what the author meant, and every change to the lexer would have to
+  lexing: that could only show that a fix lexes cleanly, not that it
+  matches the author's intent, and every change to the lexer would have to
   preserve a subtle invariant. A fix offered for an error that arises only
   where two recoveries interact may leave an error; lexing the fixed text
   reports it.

@@ -1,4 +1,4 @@
-(* What the codegen tests share: building types, shapes, and LIR by hand,
+(* Helpers for the codegen tests: building types, shapes, and LIR by hand,
    compiling and running C, and compiling Truss source with the standard
    library and running it. *)
 

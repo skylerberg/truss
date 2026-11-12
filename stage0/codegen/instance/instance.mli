@@ -17,9 +17,9 @@ type key =
   | Encode of Ground.ty
       (** A value's binary form, which code run while compiling writes its result in *)
   | Evaluator of Path.t
-      (** Code run while compiling: works out a constant's value and writes its binary form *)
+      (** Code run while compiling: computes a constant's value and writes its binary form *)
   | Template_check of { from_template : Path.t; texts : string list }
-      (** Code run while compiling: a tag's [from_template] clauses that can run, worked out for a
+      (** Code run while compiling: a tag's [from_template] clauses that can run, evaluated for a
           template of these literal texts and no parts, each written out as a [Bool] *)
   | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
       (** Code run while compiling: a call of a function that is not generic, with each argument a

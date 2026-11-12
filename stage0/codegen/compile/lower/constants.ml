@@ -1,5 +1,5 @@
 (* Constants: a constant's value folded exactly from its expression, or
-   worked out by running its evaluator. *)
+   computed by running its evaluator. *)
 
 open Definitions
 open Lowering
@@ -119,9 +119,9 @@ let compared (comparison : Core.comparison) (left : Lir.static_value) (right : L
    run. *)
 let call_depth = 8
 
-(* A constant expression's value, where it can be worked out here exactly as
+(* A constant expression's value, where folding gives exactly what
    running it would. For anything else there is none, and the value is
-   worked out by running the constant's evaluator. Running is what a
+   computed by running the constant's evaluator. Running is what a
    constant's value means; folding only saves the run.
 
    What folds: literals, operators on numbers and on [Bool], other constants
@@ -315,7 +315,7 @@ let constant_state context path =
   (st, value, ty)
 
 (* A constant's static data, where its value folds, and otherwise the type
-   of the value its evaluator works out. *)
+   of the value its evaluator computes. *)
 type constant = Folded of Lir.data | Run of Ground.ty
 
 let constant context path =
@@ -324,7 +324,7 @@ let constant context path =
   | Some value -> Folded { data_key = Constant path; ty; value }
   | None -> Run ty
 
-(* Code run while compiling appends what it works out, in its binary form,
+(* Code run while compiling appends its results, in their binary form,
    to an output it owns, and writes that to standard output as it ends, with
    the standard library's function that writes every byte. *)
 let begin_output st =
@@ -358,7 +358,7 @@ let write_output st output =
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
     ~destination:(temporary st result) ()
 
-(* Code run while compiling: works out a constant's value and writes its
+(* Code run while compiling: computes a constant's value and writes its
    binary form to standard output. *)
 let evaluator context path : Lir.t =
   let st, value, ty = constant_state context path in

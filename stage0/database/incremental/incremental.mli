@@ -12,7 +12,7 @@ exception Cycle of string list
 
 exception Lost of string
 (** The store no longer has the value of an input that a state holds, which names the input. The
-    state cannot be used: an input is what the database gave it, and cannot be computed again. It is
+    state cannot be used: an input's value comes from the database and cannot be recomputed. It is
     never a query's outcome. *)
 
 type subject = { path : Path.t; part : string option }
@@ -108,7 +108,7 @@ val engine_of : context -> t
 (** The engine a context reads from. *)
 
 val set : t -> ('key, 'value) input -> 'key -> 'value -> unit
-(** Sets an input. If the value differs from what the engine sees, what read it is brought up to
+(** Sets an input. If the value differs from the engine's, the input's dependents are brought up to
     date at the next read or {!stabilize}. Raises [Invalid_argument] while a query runs, and for a
     frozen engine. *)
 
@@ -214,8 +214,8 @@ val record_facts : t -> unit
     {!write} does this too. *)
 
 val write : ?full:bool -> t -> string
-(** Writes the state as an artifact in the store, and returns its name. The artifact holds what the
-    engine itself holds and changed since the last write, as a difference over the artifact the
+(** Writes the state as an artifact in the store, and returns its name. The artifact holds the
+    engine's own nodes that changed since the last write, as a difference over the artifact the
     engine was opened from or last wrote; with [~full:true], or when there is no such artifact, it
     holds the whole state apart from its fixed bases. *)
 

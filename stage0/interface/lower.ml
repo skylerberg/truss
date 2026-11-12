@@ -184,9 +184,8 @@ and count_name context (name : name) : Types.argument =
             Types.Type
               (error context Arity name.span
                  (Printf.sprintf
-                    "The value of `%s` cannot be worked out: a constant used in a type cannot \
-                     refer to itself, and is made of literals, arithmetic, and other such \
-                     constants."
+                    "The value of `%s` cannot be computed: a constant used in a type cannot refer \
+                     to itself, and is made of literals, arithmetic, and other such constants."
                     name.text)))
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> bug "`%s` is not resolved as a type argument" name.text

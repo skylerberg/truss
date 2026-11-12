@@ -27,8 +27,8 @@ let forget engine (node : node) =
       | None -> ())
   | Unfilled -> ()
 
-(* A result is collectable, and an input only while it is not set: one that
-   is set holds what the database gave it. *)
+(* A result is collectable, and an input only while it is not set: the value of
+   a set input comes from the database and cannot be recomputed. *)
 let collectable (node : node) =
   match node.cell with
   | Input (_, { slot = Unset; _ }) | Result _ -> true
@@ -86,9 +86,9 @@ let commit_reads engine (node : node) (reads : node list) =
     old
 
 (* Copies a base's node into an engine, where a change may have reached it.
-   The copy holds the same result and reads what the base's node read, as
-   the engine sees each, and what the engine's own nodes read of the base's
-   node they now read of the copy. *)
+   The copy holds the same result and has the base node's dependencies, as
+   the engine sees each, and the engine's own nodes that depended on the
+   base's node now depend on the copy. *)
 let shadow engine (base : node) =
   match Hashtbl.find_opt engine.shadows base.id with
   | Some own -> own

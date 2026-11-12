@@ -187,7 +187,7 @@ let () =
 |}
 
 let () =
-  passes "constants are static data, worked out exactly"
+  passes "constants are static data, computed exactly"
     {|type Point(x: Int64, y: Int64)
   derives Equal
 
@@ -281,7 +281,7 @@ test "compared" {
   assert is_small
 }
 |};
-  passes "a constant made of one that is worked out by running is worked out by running too"
+  passes "a constant made of one that is computed by running is computed by running too"
     {|let table: Map[String, Int64] = ["a": 1]
 let tables: List[Map[String, Int64]] = [table]
 

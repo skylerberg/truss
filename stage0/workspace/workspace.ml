@@ -31,7 +31,7 @@ let file =
 let package database name = Query.demand database Project.package name
 
 (* What a package's manifest says, one thing at a time: a result that reads
-   only a package's modules is not worked out again when its dependencies
+   only a package's modules is not recomputed when its dependencies
    change, and the other way round. *)
 let modules =
   Query.query ~name:"package_modules" ~phase:Phases.syntax ~show:Path.show_package

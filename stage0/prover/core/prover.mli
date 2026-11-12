@@ -1,7 +1,7 @@
 (** The prover's entry point: the obligations of each definition, proven one query at a time.
 
-    A definition that uses what the prover cannot read yet is reported as [prover.unsupported], and
-    none of its obligations count as proven. *)
+    A definition that uses a construct the prover does not support yet is reported as
+    [prover.unsupported], and none of its obligations count as proven. *)
 
 module Translate = Translate
 
@@ -27,7 +27,7 @@ type run_result = Returned of Z.t | Timed_out | Not_run
 type evaluator = { code_key : run -> string option; run : run -> run_result }
 (** Runs compiled code, through code generation, which the caller gives, since the prover does not
     depend on code generation. [code_key] is the key of everything a run's code can reach, which
-    changes exactly when what the run gives may, and [None] where the code cannot be built. *)
+    changes exactly when the run's result may, and [None] where the code cannot be built. *)
 
 type oracle_response
 (** An oracle's response to a request: the solver's to a query, or the evaluator's to a run, with
@@ -56,7 +56,7 @@ val solve_ahead :
 type 'span state = {
   code : Diagnostic.Code.prover;
   span : 'span;
-  shows : string;  (** What the obligation is to show, as its diagnostic first says it. *)
+  shows : string;  (** The obligation's goal, as the first sentence of its diagnostic states it. *)
   failure : 'span Diagnostic.diagnostic option;
       (** Why it was not shown, or [None] where it was. *)
   trusts_compiled_code : bool;

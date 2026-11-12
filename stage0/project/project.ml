@@ -250,8 +250,8 @@ let selection =
                   version Manifest.truss_version
             | _ -> ())
           selected;
-        (* The lock file is written one way: what the manifests and the
-           versions in it give. Another is a problem whose fix is to write
+        (* The lock file has one canonical form, derived from the manifests
+           and its versions. Another is a problem whose fix is to write
            that one. *)
         match written with
         | Some written when selection_problems = [] ->
