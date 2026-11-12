@@ -355,6 +355,14 @@ let () =
       proven Fixtures.Prover.checked_addition_is_none_exactly_when_it_overflows);
   test "a conversion succeeds exactly when the value fits" (fun () ->
       proven Fixtures.Prover.conversion_succeeds_exactly_when_the_value_fits);
+  test "a widening conversion keeps the value" (fun () ->
+      proven Fixtures.Prover.widening_conversion_keeps_the_value);
+  test "a widening conversion costs constant time" (fun () ->
+      proven Fixtures.Prover.widening_conversion_costs_constant_time);
+  test "a widening conversion keeps a range from a type's invariant" (fun () ->
+      proven Fixtures.Prover.widening_keeps_a_range_from_an_invariant);
+  test "unwrap_or gives the held value or the default" (fun () ->
+      proven Fixtures.Prover.unwrap_or_gives_the_held_value_or_the_default);
   test "wrapping is not exact arithmetic" (fun () ->
       not_proven Fixtures.Prover.wrapping_is_not_exact_arithmetic "prover.ensures")
 
@@ -1037,7 +1045,23 @@ let () =
 let () =
   test "a failure that seeing hidden bodies would not fix names none of them" (fun () ->
       let actual = message Fixtures.Prover.failure_that_seeing_hidden_bodies_would_not_fix in
-      if contains actual "is not visible in this package" then fail "message %S" actual)
+      if contains actual "is not visible in this package" then fail "message %S" actual);
+  test "a note about several hidden bodies says some may not be needed" (fun () ->
+      match
+        across Fixtures.Prover.two_hidden_bodies
+          Fixtures.Prover.note_names_every_hidden_body_it_revealed
+      with
+      | [ diagnostic ] ->
+          if
+            not
+              (contains diagnostic.message
+                 "The bodies of `lib::numbers::double`, `lib::numbers::identity` are not visible"
+              && contains diagnostic.message "some may not be needed")
+          then fail "message %S" diagnostic.message
+      | actual ->
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)))
 
 (* Early exits from concurrent loops *)
 

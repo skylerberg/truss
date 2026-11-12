@@ -744,29 +744,42 @@ let definition_states oracles database (key : Names.key) =
           in
           (* A body that would have defined a callee is hidden from another
              package's proofs unless the callee is [transparent]: named where
-             seeing it would prove the obligation. *)
+             seeing it would prove the obligation. The bodies are revealed
+             together, so with several callees the proof may need only some
+             of them, and the note says so. *)
           let answer, hidden_helps =
             match answer with
             | Solved_hidden answer -> (Solved answer, true)
             | answer -> (answer, false)
           in
           let hidden =
-            if not hidden_helps then ""
-            else
-              let sentence markable =
-                match List.filter (fun (_, can) -> can = markable) obligation.hidden with
-                | [] -> ""
-                | callees ->
-                    Printf.sprintf
-                      " The body of %s is not visible in this package, and with it this would be \
-                       proven: give it %s."
-                      (String.concat ", " (List.map (fun (name, _) -> "`" ^ name ^ "`") callees))
-                      (if markable then
-                         "an `ensures` that states the needed fact, or make it a `public \
-                          transparent fn`"
-                       else "an `ensures` that states the needed fact")
-              in
-              sentence true ^ sentence false
+            let quoted callees = List.map (fun (name, _) -> "`" ^ name ^ "`") callees in
+            let transparent_fix callees =
+              match List.filter snd callees with
+              | [] -> ""
+              | markable when List.length markable = List.length callees ->
+                  if List.length callees = 1 then ", or make it a `public transparent fn`"
+                  else ", or make them `public transparent fn`s"
+              | markable ->
+                  Printf.sprintf ", or make %s a `public transparent fn`"
+                    (String.concat " or " (quoted markable))
+            in
+            match obligation.hidden with
+            | _ when not hidden_helps -> ""
+            | [] -> ""
+            | [ callee ] ->
+                Printf.sprintf
+                  " The body of %s is not visible in this package, and with it this would be \
+                   proven: give it an `ensures` that states the needed fact%s."
+                  (List.hd (quoted [ callee ]))
+                  (transparent_fix [ callee ])
+            | callees ->
+                Printf.sprintf
+                  " The bodies of %s are not visible in this package, and with all of them this \
+                   would be proven, though some may not be needed: give the needed ones an \
+                   `ensures` that states the needed fact%s."
+                  (String.concat ", " (quoted callees))
+                  (transparent_fix callees)
           in
           ( {
               code = obligation.code;

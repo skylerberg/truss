@@ -431,7 +431,9 @@ decides when a body is a definition. In the solver:
   proves, the message says that the callee's body is not visible and that
   with it the obligation would be proven, and names the fixes: an
   `ensures` that states the needed fact, or, for a function,
-  `public transparent fn`.
+  `public transparent fn`. The translation reveals every such callee at
+  once, so where it names several, the message says that the proof may
+  need only some of them.
 - **Called on a quantifier's bound values,** a definition with no
   `requires` is stated once, for every argument, since a fact about one
   call would name the bound values. So `forall a: Pair => forall b: Pair

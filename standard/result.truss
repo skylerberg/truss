@@ -86,6 +86,8 @@ public fn Result[Value, Error].or_else[Other, capability Granted](
 }
 
 public fn Result[Value, Error].unwrap_or(own self, default: own Value) -> Value
+  ensures !(self is Ok(held) && !identical(result, held))
+  ensures !(self is Err(_) && !identical(result, default))
   cost time O(1)
 {
   match own self {

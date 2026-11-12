@@ -408,7 +408,10 @@ public let Int16.minimum: Int16 = -32768
 public let Int16.maximum: Int16 = 32767
 
 impl From[Int8] for Int16 {
-  fn from(value: own Int8) -> Int16 {
+  fn from(value: own Int8) -> Int16
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -450,7 +453,10 @@ impl TryFrom[ISize] for Int16 {
 }
 
 impl From[UInt8] for Int16 {
-  fn from(value: own UInt8) -> Int16 {
+  fn from(value: own UInt8) -> Int16
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -653,13 +659,19 @@ public let Int32.minimum: Int32 = -2147483648
 public let Int32.maximum: Int32 = 2147483647
 
 impl From[Int8] for Int32 {
-  fn from(value: own Int8) -> Int32 {
+  fn from(value: own Int8) -> Int32
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[Int16] for Int32 {
-  fn from(value: own Int16) -> Int32 {
+  fn from(value: own Int16) -> Int32
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -689,13 +701,19 @@ impl TryFrom[ISize] for Int32 {
 }
 
 impl From[UInt8] for Int32 {
-  fn from(value: own UInt8) -> Int32 {
+  fn from(value: own UInt8) -> Int32
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt16] for Int32 {
-  fn from(value: own UInt16) -> Int32 {
+  fn from(value: own UInt16) -> Int32
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -886,43 +904,64 @@ public let Int64.minimum: Int64 = -9223372036854775808
 public let Int64.maximum: Int64 = 9223372036854775807
 
 impl From[Int8] for Int64 {
-  fn from(value: own Int8) -> Int64 {
+  fn from(value: own Int8) -> Int64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[Int16] for Int64 {
-  fn from(value: own Int16) -> Int64 {
+  fn from(value: own Int16) -> Int64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[Int32] for Int64 {
-  fn from(value: own Int32) -> Int64 {
+  fn from(value: own Int32) -> Int64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[ISize] for Int64 {
-  fn from(value: own ISize) -> Int64 {
+  fn from(value: own ISize) -> Int64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt8] for Int64 {
-  fn from(value: own UInt8) -> Int64 {
+  fn from(value: own UInt8) -> Int64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt16] for Int64 {
-  fn from(value: own UInt16) -> Int64 {
+  fn from(value: own UInt16) -> Int64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt32] for Int64 {
-  fn from(value: own UInt32) -> Int64 {
+  fn from(value: own UInt32) -> Int64
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -1101,19 +1140,28 @@ public let ISize.minimum: ISize = -9223372036854775808
 public let ISize.maximum: ISize = 9223372036854775807
 
 impl From[Int8] for ISize {
-  fn from(value: own Int8) -> ISize {
+  fn from(value: own Int8) -> ISize
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[Int16] for ISize {
-  fn from(value: own Int16) -> ISize {
+  fn from(value: own Int16) -> ISize
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[Int32] for ISize {
-  fn from(value: own Int32) -> ISize {
+  fn from(value: own Int32) -> ISize
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
@@ -1130,13 +1178,19 @@ impl TryFrom[Int64] for ISize {
 }
 
 impl From[UInt8] for ISize {
-  fn from(value: own UInt8) -> ISize {
+  fn from(value: own UInt8) -> ISize
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }
 
 impl From[UInt16] for ISize {
-  fn from(value: own UInt16) -> ISize {
+  fn from(value: own UInt16) -> ISize
+    ensures result == value
+    cost time O(1)
+  {
     intrinsic::convert(value)
   }
 }

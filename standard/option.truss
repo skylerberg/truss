@@ -26,7 +26,9 @@ public transparent fn Option[Value: Equal].contains(self, value: Value) -> Bool
   }
 }
 
-public transparent fn Option[Value].unwrap_or(own self, default: own Value) -> Value
+public fn Option[Value].unwrap_or(own self, default: own Value) -> Value
+  ensures !(self is Some(held) && !identical(result, held))
+  ensures !(self is None && !identical(result, default))
   cost time O(1)
 {
   match own self {
