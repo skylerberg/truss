@@ -124,10 +124,10 @@ develop as well as make it easier to bootstrap the compiler in parts.
 
 Each document has one job, and a fact is stated in one of them:
 
-- **[DESIGN.md](DESIGN.md), [SYNTAX.md](SYNTAX.md), and
-  [GRAMMAR.md](GRAMMAR.md) define Truss:** its semantics and their reasons,
-  how it is written, and its exact grammar. They describe the language, whether
-  or not stage0 builds all of it yet.
+- **[SPECIFICATION.md](SPECIFICATION.md) and [PACKAGES.md](PACKAGES.md)
+  define Truss,** its grammar and the rules of the language and of
+  packages, **and [DESIGN.md](DESIGN.md) says why.** They describe the
+  language, whether or not stage0 builds all of it yet.
 - **[LEXER.md](LEXER.md), [PARSER.md](PARSER.md),
   [TYPECHECKER.md](TYPECHECKER.md), [MIR.md](MIR.md), [PROVER.md](PROVER.md),
   [CODEGEN.md](CODEGEN.md), [DATABASE.md](DATABASE.md), and
@@ -216,7 +216,7 @@ Every stage of stage0 is tested the same way:
   a function of its reads, or a result the database left stale, fails
   whichever test met it.
 - **Checks against the documents are tests,** as long as each one states a
-  single property, such as "GRAMMAR.md's keyword list matches the lexer's",
+  single property, such as "SPECIFICATION.md's keyword list matches the lexer's",
   or "every example in the documents lexes cleanly".
 - **One test can be run alone.** With `TRUSS_TEST` set, a test executable
   runs only the tests whose names contain it, for working on one:

@@ -52,12 +52,12 @@ let () =
 let lock_block () =
   String.concat "\n"
     (Documents.block_after
-       (Documents.read (Harness.workspace_path "SYNTAX.md"))
-       "### The lock file")
+       (Documents.read (Harness.workspace_path "PACKAGES.md"))
+       "## The lock file")
   ^ "\n"
 
 let () =
-  test "SYNTAX.md's lock file is read, and is written back as it is" (fun () ->
+  test "PACKAGES.md's lock file is read, and is written back as it is" (fun () ->
       let text = lock_block () in
       match Lock.parse text with
       | [

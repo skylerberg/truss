@@ -3,7 +3,7 @@
 This document describes stage0's code generation, in
 [`stage0/codegen/`](stage0/codegen): everything between the type checker's
 output and a program that runs. It follows the decisions in
-[DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md), reads the core form
+[SPECIFICATION.md](SPECIFICATION.md) and [DESIGN.md](DESIGN.md), reads the core form
 that [TYPECHECKER.md](TYPECHECKER.md) describes, and relies on the proofs
 that [PROVER.md](PROVER.md) describes.
 
@@ -251,7 +251,7 @@ its code different from another:
   checker's substitution has fully decided. A method's are its type's and
   then its own, and an `impl` method's are the `impl`'s and then its own.
   Generic code is compiled once for
-  each set of them, as DESIGN.md says, and the type checker has already
+  each set of them, as SPECIFICATION.md says, and the type checker has already
   rejected instantiation cycles.
 - the capability sets bound to its capability parameters, such as
   `Granted = {FileRead, Clock}`, since the hidden evidence parameters differ
@@ -376,7 +376,7 @@ no pointers, no `size_of`, and no foreign code.
   fields in the source never changes the layout, as DESIGN.md's
   promise that "reordering fields rebuilds nothing" needs. A derived
   `Ordered` compares in declaration order regardless of layout.
-- **A record with one field is laid out as that field,** as DESIGN.md
+- **A record with one field is laid out as that field,** as SPECIFICATION.md
   promises for `UserId(number: UInt64)`: it has the field's size, alignment,
   and spare values. In C it is a `struct` of that one field, which compilers
   pass and store exactly as the field.
@@ -459,7 +459,7 @@ code that fills a table for an `impl` and the code that calls through the
 `any` type agree on it.
 
 `any value` allocates the block and moves the value in, which is the one
-allocation DESIGN.md says it costs.
+allocation SPECIFICATION.md says it costs.
 
 ### Shared values
 
@@ -563,14 +563,14 @@ fills in each missing argument from its constant. A call that has an
 argument for every parameter sets every bit: a call through a function
 value, an entry of a table, a call the compiler writes itself, and a call
 that is run while compiling are all such calls. Only a call written in
-source can leave an argument out. This keeps DESIGN.md's rule that defaults
+source can leave an argument out. This keeps SPECIFICATION.md's rule that defaults
 are applied by the function, so changing one compiles only the function
 again. It avoids Kotlin's separate `$default` method, which costs an extra
 call.
 
 Where the default must be owned, for a record field or an `own` parameter,
 filling it in copies the constant: free for numbers, strings, and empty
-collections, one allocation for a non-empty one. That is how DESIGN.md counts
+collections, one allocation for a non-empty one. That is how SPECIFICATION.md counts
 it.
 
 A capability method is the exception: its caller evaluates the defaults of
@@ -623,7 +623,7 @@ places, may own a value and which may not. Then each `drop(place)` becomes:
 - **a drop of the whole place,** where nothing in it was moved out
 - **a drop of each remaining field,** where a field was moved out with
   `own config.name`, so the rest of `config` is dropped field by field. Once
-  `config.name` is assigned again, `config` is whole again, as DESIGN.md
+  `config.name` is assigned again, `config` is whole again, as SPECIFICATION.md
   describes, and is dropped whole. When the fields of an `indirect`
   variant are moved out, the remaining fields are dropped and the variant's
   block is freed. A sum type's value is asked which variant it holds
@@ -729,7 +729,7 @@ so they are compiled once and shared:
 ### Updates in place
 
 - **`with` on an owned base** writes the new fields into the base's memory,
-  so `own config with (port: 443)` costs one write per field, as DESIGN.md
+  so `own config with (port: 443)` costs one write per field, as SPECIFICATION.md
   says.
 - **Compound assignment** moves the old value into the operator. When the
   operator's trait has an `own self` version, it reuses the old value's
@@ -751,7 +751,7 @@ declares them through traits so that typing and proofs see ordinary
 - `?`, `is`, `match`, `with`, building values, reading fields, and turning a
   `List` into a `Slice`
 
-Float comparisons follow DESIGN.md's lawful rules:
+Float comparisons follow SPECIFICATION.md's lawful rules:
 
 | Truss | C |
 |---|---|
@@ -862,7 +862,7 @@ and its siblings. Full-width multiplication, used by hashing and
   too, and its evaluator copies that one's static data, since nothing is
   moved out of a constant.
 - **A list or map literal in a function body** allocates its buffer and
-  fills it, which is the one allocation DESIGN.md counts. A literal whose
+  fills it, which is the one allocation SPECIFICATION.md counts. A literal whose
   parts are all constant, and which is only read, can be static data
   instead.
 - **A `Set` or `Map` literal** makes the collection empty and inserts each
@@ -963,7 +963,7 @@ loop ended:
   frame, and return `t_stop`. After the method returns, the caller checks
   the slot and returns too.
 
-A lending method always continues after its `yield`, as DESIGN.md promises,
+A lending method always continues after its `yield`, as SPECIFICATION.md promises,
 even if the caller's statement leaves early. So for a lending call, the
 statement's early exits are recorded the same way, but the method runs to its
 end before the caller acts on them.
@@ -984,7 +984,7 @@ loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then reads the
 method's body, and depends on it.
 
-A lending method resumes after the caller's statement, as DESIGN.md has
+A lending method resumes after the caller's statement, as SPECIFICATION.md has
 it, and its own values live until then, so it may lend one it made. The
 LIR is a graph of blocks, so this needs no function for the rest of the
 statement:
@@ -1113,12 +1113,12 @@ loop owns each value it gives.
 
 A cursor's drop function runs the `stop` path of the `yield` it is stopped
 at, which drop elaboration has already filled with the drops of the
-method's owned values there. That is DESIGN.md's meaning of a dropped cursor ending
+method's owned values there. That is SPECIFICATION.md's meaning of a dropped cursor ending
 the method at its last `yield`. Before the method starts, it drops the
 owned parameters, such as the receiver of an `own self` method, and after
 the end it drops nothing. A method whose yields go through a recursive call has
 no fixed-size state, so the type checker reports any pull of it, as
-DESIGN.md says.
+SPECIFICATION.md says.
 
 A cursor of a yielding method implements the prelude's `Cursor` trait, by
 an `impl` that the compiler derives for the yielding function. A call of
@@ -1653,7 +1653,7 @@ copying it.
 
 The libc functions used are declared by the compiler for each target, so the
 generated C still includes no headers. Allocation failure ends the process
-with a message, as DESIGN.md allows for running out of memory.
+with a message, as SPECIFICATION.md allows for running out of memory.
 
 ### The C library
 
@@ -1886,7 +1886,7 @@ the standard library gives it, which Truss then reads. Its row is in the
 table with the C library's, so the prover holds the call to its room in
 the same way, and the standard library calls it `runtime_` and its name.
 A handle's is the only drop that does more
-than free memory, and it runs no Truss code, as DESIGN.md requires.
+than free memory, and it runs no Truss code, as SPECIFICATION.md requires.
 Standard-library types such as `File` hold one in a field, so their drop
 functions release the resource by dropping that field.
 

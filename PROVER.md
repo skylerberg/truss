@@ -4,7 +4,7 @@ This document describes stage0's prover, in
 [`stage0/prover/`](stage0/prover): everything between the core form the
 type checker gives each definition and the knowledge that every promise a
 program makes holds. It
-follows the decisions in [DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md),
+follows the decisions in [SPECIFICATION.md](SPECIFICATION.md) and [DESIGN.md](DESIGN.md),
 reads the output [TYPECHECKER.md](TYPECHECKER.md) describes, and states the
 guarantees [CODEGEN.md](CODEGEN.md) relies on. `truss check` and `truss build` run it,
 as [CLI.md](CLI.md) describes, and its queries run on the code database,
@@ -297,11 +297,11 @@ and `reads` clauses):
   and the second query is equivalent to the first: an integer that
   is never in its type's range, which recoding every integer as a
   bit-vector would wrap, cannot make it prove something false.
-- **Floats follow IEEE 754 exactly,** as DESIGN.md requires, through the
+- **Floats follow IEEE 754 exactly,** as SPECIFICATION.md requires, through the
   solver's floating-point theory: literals bit for bit, and `+`, `-`, `*`,
   `/`, and negation rounding to nearest, ties to even. `==` on floats is
   `fp.eq` or both NaN, and `<` puts NaN last, which is the lawful
-  comparison DESIGN.md defines. A float `%` is known only by its type.
+  comparison SPECIFICATION.md defines. A float `%` is known only by its type.
 - **Datatypes stay datatypes** within the package that can see their
   fields. Outside it, an opaque type is a sort with no structure, so a
   proof in another package can rely only on the contracts of its methods and
@@ -362,7 +362,7 @@ unstable proofs.
 ### Equality
 
 - **Structural equality is the solver's equality.** For a type with
-  structural equality (see DESIGN.md, "Equality, ordering, and deriving"),
+  structural equality (see SPECIFICATION.md, "Equality"),
   `a == b` is the solver's `=`, which the solver substitutes through
   everywhere.
 - **Every other `==`, and each ordering, is a function of its operands,**
@@ -402,7 +402,7 @@ have. An obligation that fails names its instance, as in "Where `Self` is
 
 ## Functions in the logic
 
-DESIGN.md's [Bodies and contracts in proofs](DESIGN.md#bodies-and-contracts-in-proofs)
+SPECIFICATION.md's [Bodies and contracts in proofs](SPECIFICATION.md#bodies-and-contracts-in-proofs)
 decides when a body is a definition. In the solver:
 
 - **A function used in specifications is a function symbol.** A pure
@@ -698,7 +698,7 @@ invariants and the validity of its fields.
 - **Validity is assumed** of each parameter on entry, each result of a
   call, each value a call left in a `mut` argument, and each value received
   from a `yield`.
-- **Validity is asserted** where DESIGN.md says an invariant must hold:
+- **Validity is asserted** where SPECIFICATION.md says an invariant must hold:
   where a value is built or updated with `with`, where it is passed to a
   call or returned, for each `mut` parameter where its function ends, for
   each part a `yield` yields and for `self` at each `yield` where a
@@ -936,7 +936,7 @@ cycle can only be seen across definitions:
 
 - **Edges are every way a function can reach another:** a call, naming a
   function as a value, and, inside an `impl`'s methods, using that `impl`,
-  as DESIGN.md's [Termination](DESIGN.md#termination) describes. An `impl`
+  as SPECIFICATION.md's [Termination](SPECIFICATION.md#termination) describes. An `impl`
   used where a bound needs it is an edge from the code that uses it to every
   method of that `impl`.
 - **A trait's method is a node.** A call through `any`, or through a
@@ -1013,7 +1013,7 @@ The prover adds a ghost counter for each resource that has a cost clause:
   as everything else. Where paths join, a counter is the cost of the path
   taken.
 - **A callee's cost is the bound of its cost clause,** never its body's
-  cost, as DESIGN.md requires, read with its parameters as they were passed
+  cost, as SPECIFICATION.md requires, read with its parameters as they were passed
   and with `result`. A callee with no clause about a resource may spend any
   amount of it, so a bound that depends on it cannot be proven.
 - **The steps between calls and iterations are not counted one by one.**
@@ -1021,7 +1021,7 @@ The prover adds a ghost counter for each resource that has a cost clause:
   at most its own length, so counting them changes only a constant, which
   an `O(...)` bound's constants absorb. A `time` bound is always
   asymptotic, so nothing is lost.
-- **Allocations are counted where DESIGN.md says they happen:** building an
+- **Allocations are counted where SPECIFICATION.md says they happen:** building an
   `indirect` variant is one allocation, of a fixed size that is not known
   to the prover, and so is any callee's allocation.
 - **The intrinsic module's operations** each take a fixed number of steps,
@@ -1096,7 +1096,7 @@ definition that mentions them is asked with the same pair, and the first
 pair that proves all of them is taken. So binary search's
 `1 + c' * log(n / 2) + d' <= c' * log(n) + d'` holds because
 `log(n / 2) == log(n) - 1` for every `n` at least 1, one of the facts the
-prover gives the solver about `log`. That fact is exact because DESIGN.md
+prover gives the solver about `log`. That fact is exact because SPECIFICATION.md
 rounds `log(n)` as it does. `log` of a number is its bit length, `power`
 of two numbers is their power, and `log` of a value of a bounded integer
 type is at most the bit length of the type's largest value, so a bound of
@@ -1153,7 +1153,7 @@ plus the costs before and after it:
 ### Amortized bounds
 
 - **A value's potential** is its type's `cost potential` plus the
-  potentials of its parts, as DESIGN.md defines it, and a type with no
+  potentials of its parts, as SPECIFICATION.md defines it, and a type with no
   `cost potential` holds none of its own. A record's potential is its
   parts', and a part of a record built here is the value it was built
   from, so a push into `self.bytes` changes the potential of `self` by its
@@ -1307,7 +1307,7 @@ It also decides a tagged template's checks by running them, as
 ## Holes
 
 A `todo` in a theorem, a `proof` block, or a `proof` definition is the one
-gap a proof may have, as DESIGN.md says. Its goal is not a
+gap a proof may have, as SPECIFICATION.md says. Its goal is not a
 failure: the `todo` is recorded as a hole, with its position, so the tools
 can list it as a task. A build of a program refuses one that can reach a
 hole, as it refuses one that can reach a `todo` in code. Tests run
@@ -1512,7 +1512,7 @@ test the prover itself:
   result beyond its row of the table is known only by its type,
   and so is the address of a view of any type but a built-in scalar, whose
   size is the code generator's and may be zero.
-- **Proofs for a 32-bit `USize`.** DESIGN.md verifies a package that does
+- **Proofs for a 32-bit `USize`.** SPECIFICATION.md verifies a package that does
   not say `usize_bits = 64` for both widths of `USize` and `ISize`, but the
   prover reads them as 64 bits in every package. A package that claims to
   run everywhere can therefore rely on 64 bits, as `n * n` on a `USize`
