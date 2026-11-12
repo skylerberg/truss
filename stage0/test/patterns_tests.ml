@@ -134,26 +134,7 @@ let () =
         \    limit => true\n\
         \    _ => false\n\
         \  }\n\
-         }\n");
-  test "a match whose guards are covered by unreachable is marked for the prover" (fun () ->
-      let text =
-        "fn f(count: Int64) -> Int64 {\n\
-        \  match count {\n\
-        \    value if value > 0 => 1\n\
-        \    value if value <= 0 => 2\n\
-        \    _ => unreachable\n\
-        \  }\n\
-         }\n"
-      in
-      if
-        not
-          (List.exists
-             (fun (node : Core.expression) ->
-               match node.kind with
-               | Match { guards_exhaustive; _ } -> guards_exhaustive
-               | _ -> false)
-             (first_core_nodes text).expressions)
-      then fail "the match is not marked for the prover")
+         }\n")
 
 (* Constants in patterns *)
 

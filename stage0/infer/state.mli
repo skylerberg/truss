@@ -46,7 +46,7 @@ type form = {
   pattern_builders : (unit -> Core.pattern) option array;
   mutable definition_builder : (unit -> Core.definition) option;
   mutable next_node_id : int;
-  mutable synthetic_local_count : int;
+  mutable next_synthetic_local : int;
   mutable tables_with_holes : C.t option;
 }
 

@@ -494,7 +494,7 @@ let check_definition state (lowered : Environment.lowered_interface) =
                     })
                   state.law_parameters
               in
-              state.form.synthetic_local_count <- List.length parameters;
+              state.form.next_synthetic_local <- List.length parameters;
               Law_proof { parameters; body = build_block state written });
         if not (broken Body) then
           body state { no_output with specification = true; output = Some (Returns T.unit) } written
@@ -616,7 +616,7 @@ let check database (key : Names.key) =
               pattern_builders = Array.make (definition.id + 1) None;
               definition_builder = None;
               next_node_id = 0;
-              synthetic_local_count = 0;
+              next_synthetic_local = 0;
               tables_with_holes = None;
             };
           diagnostics = [];
@@ -702,7 +702,7 @@ let check database (key : Names.key) =
       in
       let build () : Core.t =
         state.form.next_node_id <- 0;
-        state.form.synthetic_local_count <- 0;
+        state.form.next_synthetic_local <- 0;
         (* The core form has no hole type. If the definition has one, the
            builders read a copy of the tables in which every hole is
            [Never]. The tables themselves keep their holes for the stages
@@ -718,11 +718,7 @@ let check database (key : Names.key) =
         in
         state.tables <- checked;
         state.form.tables_with_holes <- None;
-        {
-          definition;
-          node_count = state.form.next_node_id;
-          synthetic_local_count = state.form.synthetic_local_count;
-        }
+        { definition }
       in
       (* The capability check runs on the core form, and it solves the
          capability variables. Without a core form, every capability

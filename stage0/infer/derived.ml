@@ -48,9 +48,7 @@ let form database (path : Path.t) : Core.t option =
           let node type_ kind : Core.expression = { id = id (); origin; type_; kind } in
           let pattern type_ kind : Core.pattern = { id = id (); origin; type_; kind } in
           let statement kind : Core.statement = { id = id (); origin; kind } in
-          let giving value : Core.block =
-            { statements = []; value = Some value; diverges = false }
-          in
+          let giving value : Core.block = { statements = []; value = Some value } in
           let arm pattern body : Core.arm =
             { patterns = [ pattern ]; guard = None; body; origin }
           in
@@ -199,7 +197,6 @@ let form database (path : Path.t) : Core.t option =
                                 let mine = bound Fun.id fields in
                                 arm (binding variant mine) (each (Some variant) index (parts mine)))
                               variants;
-                          guards_exhaustive = false;
                         }))
           in
           (* Matches [other]. If [other] is the same variant as [self], the
@@ -219,7 +216,6 @@ let form database (path : Path.t) : Core.t option =
                          ::
                          (if alone then []
                           else [ arm (pattern self_type Wildcard) (giving (different ())) ]);
-                       guards_exhaustive = false;
                      })
           in
           let bool = T.bool and unit = T.unit in
@@ -309,7 +305,6 @@ let form database (path : Path.t) : Core.t option =
                                       unit)))
                             mine;
                       value = None;
-                      diverges = false;
                     })
             | "Ordered", "compare" -> (
                 let other = other_place () in
@@ -357,7 +352,6 @@ let form database (path : Path.t) : Core.t option =
                                              (Use
                                                 (Local { local = decided; type_ = result; origin }))));
                                    ];
-                                 guards_exhaustive = false;
                                }))
                 in
                 let number = T.builtin UInt32 in
@@ -385,7 +379,6 @@ let form database (path : Path.t) : Core.t option =
                                    arm (is variant)
                                      (giving (node number (Integer (Z.of_int index)))))
                                  variants;
-                             guards_exhaustive = false;
                            })
                     in
                     let by_number index =
@@ -462,8 +455,6 @@ let form database (path : Path.t) : Core.t option =
                     contract = { requires = []; ensures = []; decreases = []; costs = [] };
                     body = Some body;
                   };
-              node_count = !nodes;
-              synthetic_local_count = !locals;
             }
       | _ -> None)
   | _ -> None

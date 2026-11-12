@@ -105,7 +105,7 @@ type form = {
   pattern_builders : (unit -> Core.pattern) option array;
   mutable definition_builder : (unit -> Core.definition) option;
   mutable next_node_id : int;
-  mutable synthetic_local_count : int;
+  mutable next_synthetic_local : int;
   mutable tables_with_holes : C.t option;
       (** Set while the builders run, if a type in the definition is a hole. The core form has no
           hole type: a [todo] whose type is not inferred has the type [Never] there. So while the
@@ -277,8 +277,7 @@ let rec build_expression state (value : expression) : Core.expression =
     in
     let statements = List.filter_map evaluate evaluated in
     let todo = synthetic_expression state ~origin:value.id T.Never Todo in
-    synthetic_expression state ~origin:value.id T.Never
-      (Block { statements; value = Some todo; diverges = true })
+    synthetic_expression state ~origin:value.id T.Never (Block { statements; value = Some todo })
   end
   else
     match state.form.expression_builders.(value.id) with
@@ -345,8 +344,8 @@ let place_of (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
 let fresh_synthetic_local state : Core.local =
-  let number = state.form.synthetic_local_count in
-  state.form.synthetic_local_count <- number + 1;
+  let number = state.form.next_synthetic_local in
+  state.form.next_synthetic_local <- number + 1;
   Synthetic number
 
 let fix title edits = Diagnostic.fix title edits
@@ -679,14 +678,7 @@ let build_block state (written : block) : Core.block =
         (first :: rest, value)
   in
   let statements, value = build_statements written.statements in
-  {
-    statements;
-    value;
-    diverges =
-      (match List.rev written.statements with
-      | last :: _ -> statement_diverges state last
-      | [] -> false);
-  }
+  { statements; value }
 
 (* Locals *)
 

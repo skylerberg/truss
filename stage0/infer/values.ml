@@ -301,7 +301,7 @@ and if_ state env ?expected (value : expression) (test : expression) then_ else_
                 | Else block -> build_block state block
                 | Else_if branch ->
                     let branch = build_expression state branch in
-                    { Core.statements = []; value = Some branch; diverges = branch.type_ = T.Never })
+                    { Core.statements = []; value = Some branch })
               else_;
         });
   match else_ with
@@ -353,16 +353,6 @@ and join state env ~expected branches =
       first
 
 and match_ state env ?expected (value : expression) scrutinees arms =
-  (* A [match] whose guards cover every case ends with [_ => unreachable].
-     The prover shows that this arm is never reached. *)
-  let guards_exhaustive =
-    match List.rev arms with
-    | { patterns; guard = None; body = { kind = Expression { kind = Unreachable; _ }; _ }; _ }
-      :: earlier ->
-        List.for_all (fun (written : pattern) -> written.kind = Wildcard) patterns
-        && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier
-    | _ -> false
-  in
   (* The types of the scrutinees are inferred before the arms are checked. *)
   let types =
     List.map
@@ -394,7 +384,6 @@ and match_ state env ?expected (value : expression) scrutinees arms =
                   origin = arm.id;
                 })
               arms;
-          guards_exhaustive;
         });
   let branch_types =
     List.map

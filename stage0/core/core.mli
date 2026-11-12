@@ -61,8 +61,8 @@ type callee =
           inherits the trait's default. *)
   | Capability_method of { capability : Path.t; name : string }
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
-      (** A direct call of a [standard::intrinsic] operation. Unlike {!Operator}, the prover does
-          not generate overflow or division checks for it. *)
+      (** A direct call of a [standard::intrinsic] operation. An integer operation such as [add] or
+          [divide] has the obligations of its operator: no overflow and no division by zero. *)
   | Indirect of operand
       (** A call through a function value. If the function value is stored in a place, the operand
           is that place: calling it does not move it. *)
@@ -222,13 +222,7 @@ and kind =
           type. *)
   (* Control flow *)
   | If of { condition : expression; then_ : block; else_ : block option }
-  | Match of {
-      scrutinees : operand list;
-      arms : arm list;
-      guards_exhaustive : bool;
-          (** True if the last arm is [_ => unreachable] and an earlier arm has a guard. The prover
-              must then show that the guards cover every case. *)
-    }
+  | Match of { scrutinees : operand list; arms : arm list }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
   | Return of expression option
@@ -319,9 +313,6 @@ and provided = { capability : Path.t; impl : Path.t; arguments : Types.substitut
 and block = {
   statements : statement list;
   value : expression option;  (** The block's final expression, which is the block's value. *)
-  diverges : bool;
-      (** True if control never reaches the end of the block: it always returns, breaks, continues,
-          or loops forever. *)
 }
 
 and statement = { id : id; origin : origin; kind : statement_kind }
@@ -485,13 +476,9 @@ type definition =
           that desugaring makes are numbered after them. *)
   | Empty  (** An [impl] or a capability. Its methods are separate definitions. *)
 
-type t = {
-  definition : definition;
-  node_count : int;  (** Every node id is less than this. *)
-  synthetic_local_count : int;  (** Every [Synthetic] local's number is less than this. *)
-}
+type t = { definition : definition }
 (** The core form of one definition.
 
     Three kinds of node carry a proof obligation that the type checker created: a {!From_integer}
-    conversion (the value must fit), a {!Widen} conversion (the costs must imply), and a {!Match}
-    with [guards_exhaustive] (the guards must cover every case). *)
+    conversion (the value must fit), a {!Widen} conversion (the costs must imply), and the
+    [_ => unreachable] arm that ends a {!Match} whose guards must cover every case. *)

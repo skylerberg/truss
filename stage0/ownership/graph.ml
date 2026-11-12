@@ -546,7 +546,7 @@ and quantified builder frontier (node : Core.expression) (binder : Core.binder)
     (body : Core.expression) =
   let run frontier (pattern : Core.pattern) ~views ~loan =
     loop builder frontier ~bound:(pattern_locals pattern) ~views ~loan ~condition:None
-      { statements = []; value = Some body; diverges = false }
+      { statements = []; value = Some body }
       node.origin ~fork_join:None
   in
   match binder with

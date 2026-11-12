@@ -203,8 +203,8 @@ let () =
     \  Ok(value)\n\
      }\n"
     "{ let own value = match app::main::parse(place text) { Ok(value: own value) => { value } \
-     Err(error: own error) => { return Result[Int64, String].Err(error: error) } diverges }; \
-     Result[Int64, String].Ok(value: value) }";
+     Err(error: own error) => { return Result[Int64, String].Err(error: error) } }; Result[Int64, \
+     String].Ok(value: value) }";
   expect_body "a match on a place borrows the place"
     (shape
    ^ "fn g(shape: Shape) -> Int64 {\n\
@@ -231,13 +231,13 @@ let () =
     \  }\n\
      }\n"
     "{ if (app::main::Queue.take(mut self)(mut place queue) is Some(value: own first)) { return \
-     standard::list::List.length[Int64](place first) } diverges; match app::main::Queue.take(mut \
-     self)(mut place queue) { Some(value: own second) => { \
-     standard::list::List.length[Int64](place second) } None => { 0 } } }";
-  expect_body "`is` becomes a Matches, and a block that returns diverges"
+     standard::list::List.length[Int64](place first) }; match app::main::Queue.take(mut self)(mut \
+     place queue) { Some(value: own second) => { standard::list::List.length[Int64](place second) \
+     } None => { 0 } } }";
+  expect_body "`is` becomes a Matches"
     (shape
    ^ "fn g(shape: Shape) -> Int64 {\n  if shape is Circle(radius) { return radius }\n  0\n}\n")
-    "{ if (place shape is Circle(radius: radius)) { return radius } diverges; 0 }";
+    "{ if (place shape is Circle(radius: radius)) { return radius }; 0 }";
   expect_body
     "a `for` loop over a collection calls `each`, and one over a range is an Integer_range"
     "fn g(items: List[Int64]) -> Int64 {\n\
@@ -484,12 +484,12 @@ let () =
     "{ for item in yielding_call standard::list::impl Iterable for List[Element].each[Int64](place \
      items) { concurrent #1 { let own first = match app::main::fetch(place item) { Ok(value: own \
      value) => { value } Err(error: own error) => { task_exit branch 0 of #1 { return \
-     Result[Int64, Int64].Err(error: error) } } diverges }; if (item > 3) { task_exit branch 1 of \
-     #1 { break } } diverges }; let _ = place first }; concurrent #2 for item in yielding_call \
+     Result[Int64, Int64].Err(error: error) } } }; if (item > 3) { task_exit branch 1 of #1 { \
+     break } } }; let _ = place first }; concurrent #2 for item in yielding_call \
      standard::list::impl Iterable for List[Element].each[Int64](place items) { if (item > 5) { \
-     task_exit an iteration of #2 { break } } diverges; if (item > 4) { continue } diverges; if \
-     (item > 3) { task_exit an iteration of #2 { return Result[Int64, Int64].Err(error: item) } } \
-     diverges }; Result[Int64, Int64].Ok(value: 0) }";
+     task_exit an iteration of #2 { break } }; if (item > 4) { continue }; if (item > 3) { \
+     task_exit an iteration of #2 { return Result[Int64, Int64].Err(error: item) } } }; \
+     Result[Int64, Int64].Ok(value: 0) }";
   expect_body "an assignment through an index calls `assign` where the type has it"
     "fn g(name: own String) {\n\
     \  var ports: Map[String, Int64] = [\"http\": 80]\n\
@@ -547,10 +547,10 @@ let () =
 let () =
   expect_body
     "a use of a local whose type is a hole is a Todo, and a pattern on a hole is a Wildcard"
-    "fn g() -> Int64 {\n  let value = todo\n  value\n}\n" "{ let _ = todo; todo } diverges";
+    "fn g() -> Int64 {\n  let value = todo\n  value\n}\n" "{ let _ = todo; todo }";
   expect_body "an operation on a hole evaluates its operands and ends in a Todo"
     "fn g(count: Int64) -> Int64 {\n  let value = todo\n  value.method(count) + 1\n}\n"
-    "{ let _ = todo; { let _ = todo; let _ = place count; let _ = 1; todo } diverges } diverges";
+    "{ let _ = todo; { let _ = todo; let _ = place count; let _ = 1; todo } }";
   List.iter
     (fun statement ->
       test (Printf.sprintf "`%s` on a hole has a core form" statement) (fun () ->

@@ -86,8 +86,8 @@ let rec expression names (node : expression) =
   | If { condition; then_; else_ } ->
       Printf.sprintf "if %s %s%s" (expression condition) (block names then_)
         (match else_ with Some else_ -> " else " ^ block names else_ | None -> "")
-  | Match { scrutinees; arms; guards_exhaustive } ->
-      Printf.sprintf "match %s {%s }%s" (list operand scrutinees)
+  | Match { scrutinees; arms } ->
+      Printf.sprintf "match %s {%s }" (list operand scrutinees)
         (String.concat ""
            (List.map
               (fun (arm : arm) ->
@@ -96,7 +96,6 @@ let rec expression names (node : expression) =
                   (match arm.guard with Some guard -> " if " ^ expression guard | None -> "")
                   (block names arm.body))
               arms))
-        (if guards_exhaustive then " guards exhaustive" else "")
   | Block body -> block names body
   | Provide { implementations; body } ->
       Printf.sprintf "provide %s %s"
@@ -188,7 +187,7 @@ and block names (body : block) =
     List.map (statement names) body.statements
     @ match body.value with Some value -> [ expression names value ] | None -> []
   in
-  Printf.sprintf "{ %s }%s" (String.concat "; " parts) (if body.diverges then " diverges" else "")
+  Printf.sprintf "{ %s }" (String.concat "; " parts)
 
 and statement names (node : statement) =
   match node.kind with

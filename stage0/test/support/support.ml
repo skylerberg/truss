@@ -40,7 +40,7 @@ let checked ~check database name =
 (* Fails the test if a core form breaks one of the invariants every core
    form has:
 
-   - node ids are unique and less than [node_count];
+   - node ids are unique;
    - no type contains an inference variable, a hole, or an error;
    - every generic parameter that appears is declared by the definition
      or by its enclosing type, trait, or impl, and never by a callee;
@@ -127,7 +127,6 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   in
   let seen = Hashtbl.create 64 in
   let unique id =
-    if id < 0 || id >= form.node_count then wrong "the node id %d is out of range" id;
     if Hashtbl.mem seen id then wrong "the node id %d is used twice" id;
     Hashtbl.replace seen id ()
   in

@@ -2201,9 +2201,6 @@ The core form records these decisions:
   `assert` is executable if it can be evaluated at run time: it contains no
   quantifier, no `Integer` value, no `old` or `result`, and no call of a
   specification-only function.
-- **A block records whether it diverges.** A block diverges if control never
-  reaches its end. The code after a `return`, or after a loop without an exit,
-  is then known to be unreachable without inspecting types.
 - **A definition's core form holds its checked parts.** For a function:
   the parameters, with their defaults and the `requires` clauses of a
   function-typed parameter, the contract, and the body. For a type: the
@@ -2320,8 +2317,8 @@ Most proof obligations come from the program itself: every index, every
 arithmetic operation, every `requires` at a call, every invariant. The
 prover finds those in the core form. A few come from decisions the type
 checker made. The core form marks the second with a conversion node and the
-third with a flag on the `match`, and the ownership check's result lists
-the first:
+third with the `match`'s last arm, `_ => unreachable`, which the prover shows
+is never reached. The ownership check's result lists the first:
 
 | Obligation | From |
 |---|---|
