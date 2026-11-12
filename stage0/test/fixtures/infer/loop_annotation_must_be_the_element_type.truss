@@ -1,0 +1,4 @@
+fn f(values: List[UInt16]) {
+  for value: UInt8 in values {
+  }
+}

@@ -940,7 +940,8 @@ fn f(count: UInt8) -> Bool {
   mismatch of the same local reuses that report, so one decision is one
   error, however many uses follow. When a method call gave the local its
   default type, the error has a fix that writes the needed type on the
-  `let`, such as `let base: UInt8 = 1`.
+  `let` or the `for`, such as `let base: UInt8 = 1` or
+  `for index: UInt8 in 0..10`.
 
 This never looks at which `impl`s exist, so adding an `impl` never changes
 an existing call's meaning, as SPECIFICATION.md requires. Once a literal's type is
@@ -1168,7 +1169,12 @@ type of a bound.
   with. If it is a cursor, the loop advances the cursor until it is
   exhausted. For any other value, the loop calls the value's `each` with
   the loop's mode; `each` must be a `yields` method. The pattern is checked
-  against the yielded type.
+  against the yielded type. An annotation, as in `for index: UInt8 in 0..10`,
+  must unify with the element type while the header is checked, so it
+  decides the literals of a range. An annotation that differs from the
+  element type is an error, never a conversion: C# converts each element of
+  a `foreach` to the written type, and that hidden cast can throw or lose
+  data.
 - **`return`, `?`, `break`, and `continue`** have type `Never`. `return` and
   `?` belong to the innermost function or lambda: `return` checks its value
   against that result type, and `?` takes a `Result` whose error type is the

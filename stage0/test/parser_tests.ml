@@ -586,7 +586,10 @@ let () =
       statement "parallel for player in mut players {}"
         "(parallel-for player (mut players) (block))";
       statement "concurrent for connection in listener.connections() {}"
-        "(concurrent-for connection (call (. listener connections)) (block))");
+        "(concurrent-for connection (call (. listener connections)) (block))";
+      statement "for index: UInt8 in 0..10 {}" "(for index : UInt8 (.. 0 10) (block))";
+      statement "for (index, element): Indexed[UInt8] in data.enumerate() {}"
+        "(for (record index element) : Indexed[UInt8] (call (. data enumerate)) (block))");
   test "a loop has at most one decreases" (fun () ->
       body_error "while a\n  decreases b\n  decreases c\n{}" ~code:Repeated_clause ~at:"decreases c");
   test "parallel, concurrent, proof, and yield" (fun () ->
