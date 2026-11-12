@@ -1,0 +1,482 @@
+use standard::intrinsic
+
+let low_mask: UInt64 = 4294967295
+
+internal type Field(modulus: List[UInt64], inverse: UInt64, r_squared: List[UInt64], one: List[UInt64])
+  invariant modulus.length() > 0
+  invariant r_squared.length() == modulus.length()
+  invariant one.length() == modulus.length()
+
+internal fn Field.length(self) -> USize {
+  self.modulus.length()
+}
+
+internal fn Field.montgomery_one(self) -> List[UInt64] {
+  self.one.copy()
+}
+
+internal fn Field.zero(self) -> List[UInt64] {
+  List.filled(0, count: self.modulus.length())
+}
+
+internal fn limb_at(limbs: Slice[UInt64], index: USize) -> UInt64 {
+  if index < limbs.length() { limbs[index] } else { 0 }
+}
+
+internal fn limbs_from_bytes(bytes: Slice[UInt8], count: USize) -> List[UInt64] {
+  var limbs: List[UInt64] = List.filled(0, count: count)
+  for index in 0..bytes.length() {
+    let from_end = bytes.length() - 1 - index
+    let limb = from_end / 4
+    if limb < limbs.length() {
+      let byte: UInt64 = intrinsic::convert(bytes[index])
+      limbs[limb] = limbs[limb] | (byte << (8 * (from_end % 4)))
+    }
+  }
+  limbs
+}
+
+internal fn limbs_to_bytes(limbs: Slice[UInt64], length: USize) -> List[UInt8] {
+  var bytes: List[UInt8] = List.with_capacity(length)
+  for index in 0..length {
+    let from_end = length - 1 - index
+    let limb = limb_at(limbs, index: from_end / 4)
+    mut bytes.push(intrinsic::convert((limb >> (8 * (from_end % 4))) & 255))
+  }
+  bytes
+}
+
+fn negated_inverse(low: UInt64) -> UInt64 {
+  let two: UInt64 = 2
+  let zero: UInt64 = 0
+  var inverse: UInt64 = 1
+  let rounds: USize = 5
+  for _ in 0..rounds {
+    inverse = inverse.wrapping_multiply(two.wrapping_subtract(low.wrapping_multiply(inverse) & low_mask)) & low_mask
+  }
+  zero.wrapping_subtract(inverse) & low_mask
+}
+
+internal fn is_less(first: Slice[UInt64], second: Slice[UInt64]) -> Bool {
+  var less = false
+  var decided = false
+  var index = first.length()
+  while index > 0 {
+    index -= 1
+    let a = limb_at(first, index: index)
+    let b = limb_at(second, index: index)
+    if !decided && a != b {
+      less = a < b
+      decided = true
+    }
+  }
+  less
+}
+
+fn subtract_in_place(value: mut List[UInt64], amount: Slice[UInt64]) -> UInt64
+  ensures value.length() == old(value.length())
+{
+  var borrow: UInt64 = 0
+  let length = value.length()
+  for index in 0..length
+    invariant value.length() == length
+  {
+    let difference = value[index].wrapping_subtract(limb_at(amount, index: index)).wrapping_subtract(borrow)
+    borrow = (difference >> 32) & 1
+    value[index] = difference & low_mask
+  }
+  borrow
+}
+
+fn add_in_place(value: mut List[UInt64], amount: Slice[UInt64]) -> UInt64
+  ensures value.length() == old(value.length())
+{
+  var carry: UInt64 = 0
+  let length = value.length()
+  for index in 0..length
+    invariant value.length() == length
+  {
+    let sum = value[index].wrapping_add(limb_at(amount, index: index)).wrapping_add(carry)
+    carry = sum >> 32
+    value[index] = sum & low_mask
+  }
+  carry
+}
+
+internal fn select(choose_second: Bool, first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
+  let mask: UInt64 = if choose_second { UInt64.maximum } else { 0 }
+  var chosen: List[UInt64] = List.with_capacity(first.length())
+  for index in 0..first.length() {
+    let a = first[index]
+    let b = limb_at(second, index: index)
+    mut chosen.push(a ^ ((a ^ b) & mask))
+  }
+  chosen
+}
+
+fn reduce_once(field: Field, value: own List[UInt64], carry: UInt64) -> List[UInt64] {
+  var reduced = value.copy()
+  let borrow = subtract_in_place(mut reduced, amount: field.modulus.slice())
+  select(carry == 0 && borrow == 1, first: reduced.slice(), second: value.slice())
+}
+
+internal fn Field.new(modulus: own List[UInt64]) -> Option[Field] {
+  if modulus.is_empty() || modulus[0] % 2 == 0 {
+    return None
+  }
+  if modulus.length() > 1024 {
+    return None
+  }
+  let inverse = negated_inverse(modulus[0])
+  let count = modulus.length()
+  var square: List[UInt64] = List.filled(0, count: count)
+  square[0] = 1
+  let doublings = 64 * count
+  for _ in 0..doublings
+    invariant square.length() == count
+  {
+    let doubled = square.copy()
+    let carry = add_in_place(mut square, amount: doubled.slice())
+    var reduced = square.copy()
+    let borrow = subtract_in_place(mut reduced, amount: modulus.slice())
+    if carry == 1 || borrow == 0 {
+      square = own reduced
+    }
+  }
+  var field = Field(modulus: own modulus, inverse: inverse, r_squared: own square, one: List.filled(0, count: count))
+  var plain_one: List[UInt64] = List.filled(0, count: count)
+  plain_one[0] = 1
+  let one = field.multiply(field.r_squared.slice(), second: plain_one.slice())
+  if one.length() == count {
+    field.one = own one
+  }
+  Some(own field)
+}
+
+internal fn Field.multiply(self, first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
+  let count = self.modulus.length()
+  var total: List[UInt64] = List.filled(0, count: count + 2)
+  for outer in 0..count
+    invariant total.length() == count + 2
+  {
+    let factor = limb_at(second, index: outer)
+    var carry: UInt64 = 0
+    for inner in 0..count
+      invariant total.length() == count + 2
+    {
+      let sum = total[inner].wrapping_add(limb_at(first, index: inner).wrapping_multiply(factor)).wrapping_add(carry)
+      total[inner] = sum & low_mask
+      carry = sum >> 32
+    }
+    let high = total[count].wrapping_add(carry)
+    total[count] = high & low_mask
+    total[count + 1] = high >> 32
+    let reducer = total[0].wrapping_multiply(self.inverse) & low_mask
+    var shift_carry = (total[0].wrapping_add(reducer.wrapping_multiply(self.modulus[0]))) >> 32
+    for inner in 1..count
+      invariant total.length() == count + 2
+    {
+      let sum = total[inner].wrapping_add(reducer.wrapping_multiply(self.modulus[inner])).wrapping_add(shift_carry)
+      total[inner - 1] = sum & low_mask
+      shift_carry = sum >> 32
+    }
+    let top = total[count].wrapping_add(shift_carry)
+    total[count - 1] = top & low_mask
+    total[count] = total[count + 1].wrapping_add(top >> 32)
+  }
+  let carry = total[count]
+  mut total.truncate(count)
+  reduce_once(self, value: own total, carry: carry)
+}
+
+internal fn Field.square(self, value: Slice[UInt64]) -> List[UInt64] {
+  self.multiply(value, second: value)
+}
+
+internal fn Field.add(self, first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
+  var sum = first.to_list()
+  let carry = add_in_place(mut sum, amount: second)
+  reduce_once(self, value: own sum, carry: carry)
+}
+
+internal fn Field.subtract(self, first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
+  var difference = first.to_list()
+  let borrow = subtract_in_place(mut difference, amount: second)
+  var wrapped = difference.copy()
+  let _ = add_in_place(mut wrapped, amount: self.modulus.slice())
+  select(borrow == 1, first: difference.slice(), second: wrapped.slice())
+}
+
+internal fn Field.to_montgomery(self, value: Slice[UInt64]) -> List[UInt64] {
+  self.multiply(value, second: self.r_squared.slice())
+}
+
+internal fn Field.from_montgomery(self, value: Slice[UInt64]) -> List[UInt64] {
+  var plain_one: List[UInt64] = List.filled(0, count: self.modulus.length())
+  plain_one[0] = 1
+  self.multiply(value, second: plain_one.slice())
+}
+
+internal fn Field.power(self, base: Slice[UInt64], exponent: Slice[UInt64]) -> List[UInt64] {
+  var result = self.one.copy()
+  var index = exponent.length()
+  while index > 0
+    invariant index <= exponent.length()
+  {
+    index -= 1
+    let limb = exponent[index]
+    var bit: UInt64 = 32
+    while bit > 0
+      invariant bit <= 32
+    {
+      bit -= 1
+      result = self.square(result.slice())
+      if ((limb >> bit) & 1) == 1 {
+        result = self.multiply(result.slice(), second: base)
+      }
+    }
+  }
+  result
+}
+
+internal fn Field.invert(self, value: Slice[UInt64]) -> List[UInt64] {
+  var exponent = self.modulus.copy()
+  var two: List[UInt64] = List.filled(0, count: exponent.length())
+  two[0] = 2
+  let _ = subtract_in_place(mut exponent, amount: two.slice())
+  self.power(value, exponent: exponent.slice())
+}
+
+internal fn Field.is_zero(self, value: Slice[UInt64]) -> Bool {
+  var bits: UInt64 = 0
+  for limb in value {
+    bits = bits | limb
+  }
+  bits == 0
+}
+
+internal fn Field.equal(self, first: Slice[UInt64], second: Slice[UInt64]) -> Bool {
+  var difference: UInt64 = 0
+  for index in 0..first.length() {
+    difference = difference | (first[index] ^ limb_at(second, index: index))
+  }
+  difference == 0
+}
+
+internal fn Field.modulus_limbs(self) -> Slice[UInt64] {
+  self.modulus.slice()
+}
+
+internal type Point(x: List[UInt64], y: List[UInt64], z: List[UInt64])
+
+internal type Curve(field: Field, scalars: Field, b: List[UInt64], base: Point, size: USize)
+  invariant size <= 64
+
+fn hex_limbs(text: StringSlice, count: USize) -> List[UInt64] {
+  var bytes: List[UInt8] = []
+  var index: USize = 0
+  while index < text.length() && text.length() - index >= 2
+    invariant index <= text.length()
+  {
+    let high = text.byte(index).digit_value()
+    let low = text.byte(index + 1).digit_value()
+    mut bytes.push(if high < 16 && low < 16 { high * 16 + low } else { 0 })
+    index += 2
+  }
+  limbs_from_bytes(bytes.slice(), count: count)
+}
+
+fn make_curve(
+  prime: StringSlice,
+  order: StringSlice,
+  b: StringSlice,
+  x: StringSlice,
+  y: StringSlice,
+  size: USize,
+) -> Option[Curve]
+  requires size <= 64
+{
+  let count = size / 4
+  let field = Field.new(hex_limbs(prime, count: count))?
+  let scalars = Field.new(hex_limbs(order, count: count))?
+  let base = Point(
+    x: field.to_montgomery(hex_limbs(x, count: count).slice()),
+    y: field.to_montgomery(hex_limbs(y, count: count).slice()),
+    z: field.montgomery_one(),
+  )
+  let curve_b = field.to_montgomery(hex_limbs(b, count: count).slice())
+  Some(Curve(field: own field, scalars: own scalars, b: own curve_b, base: own base, size: size))
+}
+
+internal fn Curve.p256() -> Option[Curve] {
+  make_curve(
+    "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+    order: "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+    b: "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b",
+    x: "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296",
+    y: "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+    size: 32,
+  )
+}
+
+internal fn Curve.p384() -> Option[Curve] {
+  make_curve(
+    "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff",
+    order: "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973",
+    b: "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef",
+    x: "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7",
+    y: "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f",
+    size: 48,
+  )
+}
+
+internal fn Curve.size(self) -> USize
+  ensures result <= 64
+{
+  self.size
+}
+
+internal fn Curve.scalars(self) -> Field {
+  self.scalars.copy()
+}
+
+internal fn Curve.order(self) -> List[UInt64] {
+  self.scalars.modulus_limbs().to_list()
+}
+
+internal fn Curve.identity(self) -> Point {
+  Point(x: self.field.zero(), y: self.field.montgomery_one(), z: self.field.zero())
+}
+
+internal fn Curve.base(self) -> Point {
+  self.base.copy()
+}
+
+internal fn Curve.add(self, first: Point, second: Point) -> Point {
+  let field = self.field
+  let b = self.b.slice()
+  var t0 = field.multiply(first.x.slice(), second: second.x.slice())
+  var t1 = field.multiply(first.y.slice(), second: second.y.slice())
+  var t2 = field.multiply(first.z.slice(), second: second.z.slice())
+  var t3 = field.add(first.x.slice(), second: first.y.slice())
+  var t4 = field.add(second.x.slice(), second: second.y.slice())
+  t3 = field.multiply(t3.slice(), second: t4.slice())
+  t4 = field.add(t0.slice(), second: t1.slice())
+  t3 = field.subtract(t3.slice(), second: t4.slice())
+  t4 = field.add(first.y.slice(), second: first.z.slice())
+  var x3 = field.add(second.y.slice(), second: second.z.slice())
+  t4 = field.multiply(t4.slice(), second: x3.slice())
+  x3 = field.add(t1.slice(), second: t2.slice())
+  t4 = field.subtract(t4.slice(), second: x3.slice())
+  x3 = field.add(first.x.slice(), second: first.z.slice())
+  var y3 = field.add(second.x.slice(), second: second.z.slice())
+  x3 = field.multiply(x3.slice(), second: y3.slice())
+  y3 = field.add(t0.slice(), second: t2.slice())
+  y3 = field.subtract(x3.slice(), second: y3.slice())
+  var z3 = field.multiply(b, second: t2.slice())
+  x3 = field.subtract(y3.slice(), second: z3.slice())
+  z3 = field.add(x3.slice(), second: x3.slice())
+  x3 = field.add(x3.slice(), second: z3.slice())
+  z3 = field.subtract(t1.slice(), second: x3.slice())
+  x3 = field.add(t1.slice(), second: x3.slice())
+  y3 = field.multiply(b, second: y3.slice())
+  t1 = field.add(t2.slice(), second: t2.slice())
+  t2 = field.add(t1.slice(), second: t2.slice())
+  y3 = field.subtract(y3.slice(), second: t2.slice())
+  y3 = field.subtract(y3.slice(), second: t0.slice())
+  t1 = field.add(y3.slice(), second: y3.slice())
+  y3 = field.add(t1.slice(), second: y3.slice())
+  t1 = field.add(t0.slice(), second: t0.slice())
+  t0 = field.add(t1.slice(), second: t0.slice())
+  t0 = field.subtract(t0.slice(), second: t2.slice())
+  t1 = field.multiply(t4.slice(), second: y3.slice())
+  t2 = field.multiply(t0.slice(), second: y3.slice())
+  y3 = field.multiply(x3.slice(), second: z3.slice())
+  y3 = field.add(y3.slice(), second: t2.slice())
+  x3 = field.multiply(t3.slice(), second: x3.slice())
+  x3 = field.subtract(x3.slice(), second: t1.slice())
+  z3 = field.multiply(t4.slice(), second: z3.slice())
+  t1 = field.multiply(t3.slice(), second: t0.slice())
+  z3 = field.add(z3.slice(), second: t1.slice())
+  Point(x: own x3, y: own y3, z: own z3)
+}
+
+fn swap_points(first: mut Point, second: mut Point, bit: Bool) {
+  let x = select(bit, first: first.x.slice(), second: second.x.slice())
+  let y = select(bit, first: first.y.slice(), second: second.y.slice())
+  let z = select(bit, first: first.z.slice(), second: second.z.slice())
+  second.x = select(bit, first: second.x.slice(), second: first.x.slice())
+  second.y = select(bit, first: second.y.slice(), second: first.y.slice())
+  second.z = select(bit, first: second.z.slice(), second: first.z.slice())
+  first.x = own x
+  first.y = own y
+  first.z = own z
+}
+
+internal fn Curve.multiply(self, scalar: Slice[UInt8], point: Point) -> Point {
+  var low = self.identity()
+  var high = point.copy()
+  for byte in scalar {
+    var bit: UInt8 = 8
+    while bit > 0
+      invariant bit <= 8
+    {
+      bit -= 1
+      let set = ((byte >> bit) & 1) == 1
+      swap_points(mut low, second: mut high, bit: set)
+      high = self.add(low, second: high)
+      low = self.add(low, second: low)
+      swap_points(mut low, second: mut high, bit: set)
+    }
+  }
+  low
+}
+
+internal type Affine(x: List[UInt64], y: List[UInt64])
+
+internal fn Curve.affine(self, point: Point) -> Option[Affine] {
+  if self.field.is_zero(point.z.slice()) {
+    return None
+  }
+  let inverse = self.field.invert(point.z.slice())
+  let x = self.field.from_montgomery(self.field.multiply(point.x.slice(), second: inverse.slice()).slice())
+  let y = self.field.from_montgomery(self.field.multiply(point.y.slice(), second: inverse.slice()).slice())
+  Some(Affine(x: own x, y: own y))
+}
+
+internal fn Curve.encode(self, affine: Affine) -> List[UInt8] {
+  var bytes: List[UInt8] = [4]
+  mut bytes.append(limbs_to_bytes(affine.x.slice(), length: self.size))
+  mut bytes.append(limbs_to_bytes(affine.y.slice(), length: self.size))
+  bytes
+}
+
+internal fn Curve.decode(self, bytes: Slice[UInt8]) -> Option[Point] {
+  let size = self.size
+  let first: USize = 1
+  if bytes.length() != first + 2 * size || bytes[0] != 4 {
+    return None
+  }
+  let count = self.field.length()
+  let x = limbs_from_bytes(bytes[first..first + size], count: count)
+  let y = limbs_from_bytes(bytes[first + size..], count: count)
+  if !is_less(x.slice(), second: self.field.modulus_limbs()) || !is_less(y.slice(), second: self.field.modulus_limbs()) {
+    return None
+  }
+  let field = self.field
+  let mx = field.to_montgomery(x.slice())
+  let my = field.to_montgomery(y.slice())
+  let left = field.square(my.slice())
+  let x_squared = field.square(mx.slice())
+  let x_cubed = field.multiply(x_squared.slice(), second: mx.slice())
+  let three_x = field.add(field.add(mx.slice(), second: mx.slice()).slice(), second: mx.slice())
+  let right = field.add(field.subtract(x_cubed.slice(), second: three_x.slice()).slice(), second: self.b.slice())
+  if !field.equal(left.slice(), second: right.slice()) {
+    return None
+  }
+  Some(Point(x: own mx, y: own my, z: field.montgomery_one()))
+}
+
+internal fn Curve.is_valid_scalar(self, scalar: Slice[UInt64]) -> Bool {
+  !self.scalars.is_zero(scalar) && is_less(scalar, second: self.scalars.modulus_limbs())
+}

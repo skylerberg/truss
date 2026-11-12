@@ -1,0 +1,79 @@
+use standard::cryptography
+use standard::hex
+
+fn bytes_of(text: StringSlice) -> List[UInt8] {
+  match hex::decode(text) {
+    Ok(bytes) => own bytes
+    Err(_) => []
+  }
+}
+
+fn hex_of(bytes: Slice[UInt8]) -> String {
+  hex::encode(bytes)
+}
+
+let p256_private: String = "9e34f618e845afe11f45e1fb28d11e4691924a261da5bc5d1e76f3af489104a5"
+
+let p256_public: String = "0458eb4a2a8055a899f0087455bfb2ce5ce419e4fcd38bc6a91e314e51c85cc5ac24856d8563edeb6519b9f053bf256d70a3b7f95c78722ba2d628dae906a2fb43"
+
+let p256_peer_private: String = "f70d98343646b32cfe243fbe5b93047c9d38bd09d4882b1a69f858194bbc802f"
+
+let p256_peer_public: String = "04ef42f95a88c697e117535feb398233f0dc3ea3b17fa67a82313fa2063b45916a7b50f11bd8c151f889a91deded3324b2d441b08c4049240ff7b4dab59295741a"
+
+let p384_private: String = "ac5456dc8b63b1f8e684fecd4b43cd526c4f0add43b207cb382ba4ef7dbc14ebc517c9d0017ab3a5e4fdbe77f63e96f9"
+
+let p384_public: String = "046bbd818a239e18acf5ab997a27d6eac96c8a5f7b071fd7661b530974f9a34ba3d0ba884705750b7c722b52b4fe49977306bc311c2e6e2271c14d7164cb9a0bd295f01060314d8640fb75c42a53959fc598992bfd7e2ad175fff64a80c6eccfb7"
+
+let p384_peer_public: String = "044f0279f2a7023e9deab16842384b452917bd3dc3c6c39d2fac465c0fd06bd7e09e8c7d3728ed828551ec27effab7d3b41c6d3a46277d7e02a2db892b1f1c84f45593201d0de4d0bf735b4291493bd198e5371a7b591c1990cda64be7e0d5ce40"
+
+test "a P-256 and a P-384 public key is the private scalar times the base point" {
+  let p256 = cryptography::EcdsaSigningKey.from_scalar(cryptography::Curve.P256, bytes: bytes_of(p256_private.slice())).expect("a scalar")
+  assert hex_of(p256.verifying_key().sec1()) == p256_public
+  let p384 = cryptography::EcdsaSigningKey.from_scalar(cryptography::Curve.P384, bytes: bytes_of(p384_private.slice())).expect("a scalar")
+  assert hex_of(p384.verifying_key().sec1()) == p384_public
+}
+
+test "signatures OpenSSL made verify, and a changed message or signature does not" {
+  let message = "hello truss".bytes()
+  let p256 = cryptography::EcdsaVerifyingKey.from_sec1(cryptography::Curve.P256, bytes: bytes_of(p256_public.slice())).expect("a point")
+  let p256_signature = bytes_of("0ddd551cdbbd731f065ec99a75a15b8643ee1c973bcbed98da4e07b21d6848461b691e69d1c439ce56263f3401c8e7732feafdbec12805d0f66c59dc4b06bfec")
+  assert p256.verify(message, signature: p256_signature)
+  assert !p256.verify("hello trust".bytes(), signature: p256_signature)
+  var changed = p256_signature.copy()
+  changed[40] = changed[40] ^ 1
+  assert !p256.verify(message, signature: changed)
+  let p384 = cryptography::EcdsaVerifyingKey.from_sec1(cryptography::Curve.P384, bytes: bytes_of(p384_public.slice())).expect("a point")
+  let p384_signature = bytes_of("1837afb8ab5ffcfc25744a4d49461148eb56c9bc3b4b29ed7348e05c03ee3171d69d7d3c6351f146394d234a3129c71b8424cd1e2c439f5fbda52249ad754b77336bb0be03894e77ac2fc4713cf9e951aa6a5e15f7a558b81f65097bd8ca2c25")
+  assert p384.verify(message, signature: p384_signature)
+  assert !p384.verify(message, signature: p256_signature)
+}
+
+test "signing is RFC 6979's deterministic ECDSA, and a signature verifies" {
+  let key = cryptography::EcdsaSigningKey.from_scalar(
+    cryptography::Curve.P256,
+    bytes: bytes_of("c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721"),
+  ).expect("a scalar")
+  let signature = key.sign("sample".bytes())
+  assert hex_of(signature)
+    == "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"
+  assert key.verifying_key().verify("sample".bytes(), signature: signature)
+  let p384 = cryptography::EcdsaSigningKey.from_scalar(cryptography::Curve.P384, bytes: bytes_of(p384_private.slice())).expect("a scalar")
+  let signed = p384.sign("anything".bytes())
+  assert signed == p384.sign("anything".bytes()) && p384.verifying_key().verify("anything".bytes(), signature: signed)
+}
+
+test "ECDH on P-256 and P-384 agrees with OpenSSL, and a point off the curve is refused" {
+  let p256 = cryptography::EcdhKey.from_scalar(cryptography::Curve.P256, bytes: bytes_of(p256_private.slice())).expect("a scalar")
+  assert own p256.agree(bytes_of(p256_peer_public.slice())) is Some(shared)
+    && hex_of(shared) == "d74d065d1f1a146d8cf358f6b9ea15ca33c5b00da25422e5d3edba6f501319dc"
+  let peer = cryptography::EcdhKey.from_scalar(cryptography::Curve.P256, bytes: bytes_of(p256_peer_private.slice())).expect("a scalar")
+  assert hex_of(peer.public_key()) == p256_peer_public
+  let p384 = cryptography::EcdhKey.from_scalar(cryptography::Curve.P384, bytes: bytes_of(p384_private.slice())).expect("a scalar")
+  assert own p384.agree(bytes_of(p384_peer_public.slice())) is Some(shared384)
+    && hex_of(shared384) == "6534ca00bc36e6e6a5c772082ae527004e50f6791d936c4436aabdc25b73e1d3a756fafeb0021eb6607a84e5a8c01de3"
+  var off_curve = bytes_of(p256_peer_public.slice())
+  off_curve[64] = off_curve[64] ^ 1
+  let refusing = cryptography::EcdhKey.from_scalar(cryptography::Curve.P256, bytes: bytes_of(p256_private.slice())).expect("a scalar")
+  assert own refusing.agree(off_curve) is None
+  assert cryptography::EcdsaVerifyingKey.from_sec1(cryptography::Curve.P256, bytes: off_curve) is None
+}
