@@ -271,7 +271,7 @@ let real_implementations st ~user capabilities =
         match Interface.Impls.impl_interface st.context.database impl with
         | Some interface -> Monomorphic.ground st.context.monomorphic [] interface.for_type
         | None ->
-            Compiler_bug.unsupported "%s uses %s, which has no real implementation" user
+            unsupported "%s uses %s, which has no real implementation" user
               (Ground.path_name capability)
       in
       let implementation =

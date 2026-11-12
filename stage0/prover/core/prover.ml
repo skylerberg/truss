@@ -876,7 +876,7 @@ let solve_ahead ?(running = not_running) ~tell database solver modules =
 let decided database key =
   match Query.demand database outcome key with
   | Decided states -> states
-  | Waiting _ -> invalid_arg "Prover.decided: an outcome still waits"
+  | Waiting _ -> Compiler_bug.bug ~stage:"Prover" "an outcome is still waiting once decided"
 
 (* Each definition's states, in the file's offsets. A failure of a clause
    that another definition of the file states has a note at that clause. *)

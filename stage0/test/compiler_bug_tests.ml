@@ -29,15 +29,14 @@ let () =
         (fun bug ->
           if bug.stage <> "Compile" || bug.doing <> [ "lowering f" ] then
             fail "got %s" (Compiler_bug.to_string bug)));
-  test "a program the compiler cannot build yet is not a bug" (fun () ->
-      match
-        Compiler_bug.within ~stage:"Compile" "lowering f" (fun () ->
-            Compiler_bug.unsupported "a quantifier in code that runs")
-      with
-      | () -> fail "expected it to be raised"
-      | exception Compiler_bug.Unsupported { what; at = None } ->
-          if what <> "a quantifier in code that runs" then fail "got %s" what
-      | exception Compiler_bug.Unsupported _ -> fail "expected no position");
+  test "a failed assert is a bug of the stage that ran" (fun () ->
+      expect_bug
+        (fun () -> Compiler_bug.within ~stage:"Prover" "translating f" (fun () -> assert false))
+        (fun bug ->
+          if
+            bug.stage <> "Prover" || bug.doing <> [ "translating f" ]
+            || not (String.starts_with ~prefix:"Assert_failure at " bug.message)
+          then fail "got %s" (Compiler_bug.to_string bug)));
   test "a bug reads as its stage, what it found, and each thing being done" (fun () ->
       let text =
         Compiler_bug.to_string

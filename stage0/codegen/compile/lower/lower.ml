@@ -22,6 +22,10 @@ open Targets
 open Derived
 open Generated
 
+type unsupported = Lowering.unsupported = { what : string; at : Lir.site option }
+
+exception Unsupported = Lowering.Unsupported
+
 type context = Definitions.context = {
   database : Query.context;
   env : Memory_layout.env;

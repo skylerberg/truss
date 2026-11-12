@@ -7,6 +7,13 @@
    scope, on every path. It writes a [drop] wherever an owned value leaves
    its scope; drop elaboration then decides what each still owns. *)
 
+(* A valid program stage0 cannot lower yet: what it is, and its position
+   if one is known. It is not a compiler bug: the driver reports it as a
+   limit of stage0. *)
+type unsupported = { what : string; at : Lir.site option }
+
+exception Unsupported of unsupported
+
 (* What lowering reads, each one of the type checker's queries or code
    generation's own tables. *)
 type context = {

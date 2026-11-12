@@ -92,7 +92,7 @@ type session = Session.t
 let project session =
   match Session.attachment session with
   | Project project -> project
-  | _ -> invalid_arg "Database: a session with no project"
+  | _ -> Compiler_bug.bug ~stage:"Database" "a session with no project"
 
 (* A package whose sources never change is checked once, written whole, and
    found from then on by the key of its sources: for the standard library,

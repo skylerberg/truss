@@ -2,6 +2,7 @@
  (name prover)
  (libraries
   source
+  compiler_bug
   logic
   solver
   query
