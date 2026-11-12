@@ -18,6 +18,7 @@ let types =
       [
         ([ "option" ], [ "Option" ]);
         ([ "result" ], [ "Result" ]);
+        ([ "numbers"; "integers" ], [ "FixedWidthInteger"; "SignedInteger"; "UnsignedInteger" ]);
         ( [ "core" ],
           [
             "Equal";

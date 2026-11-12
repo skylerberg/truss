@@ -124,6 +124,14 @@ val defer : state -> (unit -> bool) -> unit
 val resolve : state -> Unify.T.ty -> Unify.T.ty
 val zonk : state -> Unify.T.ty -> Unify.T.ty
 val fresh : state -> Unify.T.ty
+
+val integer_type : state -> Types.ty -> bool
+(** Whether a type is a built-in integer type, or a type parameter that an integer trait bounds. *)
+
+val signed_type : state -> Types.ty -> bool
+(** Whether a type is a signed integer type, a built-in one or a parameter that [SignedInteger]
+    bounds. *)
+
 val bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Unify.T.ty -> Types.ty
 val final : state -> Unify.T.ty -> T.ty

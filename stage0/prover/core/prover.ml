@@ -2,6 +2,7 @@
 
 open Syntax
 module Translate = Translate
+module T = Types
 module Names = Resolve.Names
 module L = Logic
 module S = Logic.Symbol
@@ -55,6 +56,70 @@ let declaration database (key : Names.key) =
   Names.Declaration_map.find_opt (key.path, key.ordinal)
     (Query.demand database Names.declaration_index key.module_)
 
+(* The built-in types a type parameter can be, when one of its bounds is an
+   integer trait. Only the built-in integer types implement those traits,
+   so a definition generic over one is proven once for each type. *)
+let integer_implementors (bounds : T.trait_reference list) =
+  let signed = Intrinsic.[ Int8; Int16; Int32; Int64; ISize ]
+  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64; USize ] in
+  List.fold_left
+    (fun found (bound : T.trait_reference) ->
+      let these =
+        if Well_known.is Signed_integer bound.trait then Some signed
+        else if Well_known.is Unsigned_integer bound.trait then Some unsigned
+        else if Well_known.is Fixed_width_integer bound.trait then Some (signed @ unsigned)
+        else None
+      in
+      match (found, these) with
+      | Some found, Some these -> Some (List.filter (fun builtin -> List.mem builtin these) found)
+      | None, these | these, None -> these)
+    None bounds
+
+(* Each assignment of built-in types to a definition's type parameters that
+   integer traits bound, with its description, as in [`Number` is `Int8`].
+   A provided method of an integer trait has [Self] among them. *)
+let integer_instances database (path : Path.t) =
+  let generics =
+    match Interface.Impls.signature database path with
+    | Some signature ->
+        List.filter_map
+          (fun (generic : T.generic) ->
+            match generic.kind with
+            | Type_generic bounds -> Some (generic.generic, bounds)
+            | Value_generic | Capability_generic -> None)
+          signature.generics
+    | None -> []
+  in
+  let self =
+    match path with
+    | Method { owner; _ } ->
+        [
+          ( { T.owner; name = "Self" },
+            [ { T.trait = owner; trait_arguments = []; associated = [] } ] );
+        ]
+    | _ -> []
+  in
+  List.fold_left
+    (fun instances ((parameter : T.parameter), bounds) ->
+      match integer_implementors bounds with
+      | None -> instances
+      | Some builtins ->
+          List.concat_map
+            (fun (shown, substitution) ->
+              List.map
+                (fun builtin ->
+                  ( shown
+                    @ [
+                        Printf.sprintf "`%s` is `%s`" parameter.name
+                          (Intrinsic.builtin_name builtin);
+                      ],
+                    (parameter, T.Type (T.builtin builtin)) :: substitution ))
+                builtins)
+            instances)
+    [ ([], []) ]
+    (self @ generics)
+  |> List.filter (fun (shown, _) -> shown <> [])
+
 let prove ?reveal database (key : Names.key) =
   match (declaration database key, Translate.source_at_key database key) with
   | _ when specification key -> Not_proven_here
@@ -68,11 +133,39 @@ let prove ?reveal database (key : Names.key) =
         | (Function | Method), Function { body = None; _ } -> Not_proven_here
         | Theorem, Function _ ->
             Obligations (Translate.theorem ?reveal database source ~path:key.path)
-        | (Function | Method), Function { body = Some _; _ } ->
-            Obligations
-              (Translate.function_ ?reveal
-                 ~updating_helper:(Translate.is_updating_helper database key.path)
-                 ?inherited:(inherited database key.path) database source ~path:key.path)
+        | (Function | Method), Function { body = Some _; _ } -> (
+            let prove_with substitution =
+              Translate.function_ ?reveal
+                ~updating_helper:(Translate.is_updating_helper database key.path)
+                ?inherited:(inherited database key.path) ~substitution database source
+                ~path:key.path
+            in
+            match integer_instances database key.path with
+            | [] -> Obligations (prove_with [])
+            | instances ->
+                let outcomes =
+                  List.map
+                    (fun (shown, substitution) ->
+                      let outcome = prove_with substitution in
+                      let prefix = "Where " ^ String.concat " and " shown ^ ": " in
+                      {
+                        outcome with
+                        Translate.obligations =
+                          List.map
+                            (fun (obligation : Translate.obligation) ->
+                              { obligation with message = prefix ^ obligation.message })
+                            outcome.obligations;
+                      })
+                    instances
+                in
+                Obligations
+                  {
+                    obligations =
+                      List.concat_map (fun (o : Translate.outcome) -> o.obligations) outcomes;
+                    holes =
+                      List.sort_uniq compare
+                        (List.concat_map (fun (o : Translate.outcome) -> o.holes) outcomes);
+                  })
         | Test, Test _ -> Obligations (Translate.test ?reveal database source ~path:key.path)
         | Constant, Constant _ ->
             Obligations (Translate.constant ?reveal database source ~path:key.path)

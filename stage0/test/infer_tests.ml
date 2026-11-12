@@ -134,6 +134,17 @@ let () =
       has_type "fn f(count: UInt16) -> UInt16 {\n  count + (60 * 60)\n}\n" "60" "UInt16");
   test "a literal that does not fit its type is an error" (fun () ->
       one_diagnostic "fn f() {\n  let small: UInt8 = 300\n}\n" "types.literal_out_of_range");
+  test "a literal of a type an integer trait bounds is an integer of that type" (fun () ->
+      fine "fn f[Number: SignedInteger](value: Number) -> Bool {\n  value < -1\n}\n");
+  test "a literal of a type an integer trait bounds must fit every type that implements it"
+    (fun () ->
+      one_diagnostic "fn f[Number: SignedInteger](value: Number) -> Bool {\n  value < 200\n}\n"
+        "types.literal_out_of_range";
+      one_diagnostic "fn f[Number: FixedWidthInteger](value: Number) -> Bool {\n  value < 128\n}\n"
+        "types.literal_out_of_range");
+  test "a literal of a type UnsignedInteger bounds cannot be negated" (fun () ->
+      one_diagnostic "fn f[Number: UnsignedInteger](value: Number) -> Bool {\n  value < -1\n}\n"
+        "types.negated_unsigned");
   test "a USize literal must fit in 32 bits, so that the code holds on every target" (fun () ->
       one_diagnostic "fn f() {\n  let size: USize = 5_000_000_000\n}\n" "types.literal_out_of_range");
   test "a package that runs only on 64-bit targets may use 64-bit USize literals" (fun () ->

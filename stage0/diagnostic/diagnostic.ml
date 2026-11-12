@@ -228,6 +228,7 @@ module Code = struct
 
   type package =
     | Impl_location
+    | Sealed_trait_impl
     | Overlapping_impls
     | Method_name_clash
     | Needs_indirect
@@ -475,6 +476,7 @@ module Code = struct
   let package_name code =
     match code with
     | Impl_location -> "impl_location"
+    | Sealed_trait_impl -> "sealed_trait_impl"
     | Overlapping_impls -> "overlapping_impls"
     | Method_name_clash -> "method_name_clash"
     | Needs_indirect -> "needs_indirect"

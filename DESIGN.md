@@ -1204,6 +1204,22 @@ comparisons over `&&`. Every other combination needs parentheses.
   overflow must be proven safe. Otherwise the code must use an explicit
   alternative: `checked_add` (returns an `Option`), `wrapping_add`, or
   `saturating_add`.
+- **Code for every width is written once, against the integer traits.**
+  `FixedWidthInteger` is implemented by every built-in integer type,
+  `SignedInteger` by `Int8` through `ISize`, and `UnsignedInteger` by `UInt8`
+  through `USize`. A provided method such as `checked_power` is then a method
+  of every width, as a Swift extension of `FixedWidthInteger` is. Rust's
+  standard library writes each width's methods with a macro, which Truss
+  does not have. Zig's `i8` is one width of `iN`, but naming `Int8` as
+  `Int[8]` would need a type alias, which Truss does not have either.
+- **The integer traits are sealed.** No other type can implement them, so
+  generic code over one is proven once for each built-in type that does,
+  and each proof sees that type's range and bits (see PROVER.md). A type of
+  one's own that behaves like an integer is a record over a built-in one.
+- **A literal of a type that an integer trait bounds must fit every type
+  that implements it:** -128 to 127 under `SignedInteger`, 0 to 255 under
+  `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`. A type's own
+  bounds are `minimum_value()`, `maximum_value()`, and `bit_width()`.
 - The standard library provides APIs that avoid index arithmetic, such as
   `items.last()`, `enumerate`, `zip`, and reverse ranges.
 

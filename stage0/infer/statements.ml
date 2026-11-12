@@ -149,13 +149,14 @@ and statement state env (written : statement) ~last : unit =
                   match (normalize state target_type, normalize state right_type) with
                   | (T.Literal _ | T.Variable _), _ | _, (T.Literal _ | T.Variable _) -> false
                   | left, right ->
-                      if not (T.is_integer_type left || T.is_error left) then
+                      if not (integer_type state left || T.is_error left) then
                         report state No_impl written_target.span
                           (Printf.sprintf "Shifts work on built-in integers, not `%s`."
                              (T.show left));
                       if
                         not
-                          ((T.is_integer_type right && not (T.is_signed right)) || T.is_error right)
+                          ((integer_type state right && not (signed_type state right))
+                          || T.is_error right)
                       then
                         report state Mismatch value.span
                           (Printf.sprintf "A shift amount is an unsigned integer, not `%s`."
@@ -168,7 +169,7 @@ and statement state env (written : statement) ~last : unit =
                   match normalize state target_type with
                   | T.Literal _ | T.Variable _ -> false
                   | resolved ->
-                      if not (T.is_integer_type resolved || T.is_error resolved) then
+                      if not (integer_type state resolved || T.is_error resolved) then
                         report state No_impl written_target.span
                           (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                              (T.show resolved));
@@ -376,7 +377,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
               let element = normalize state element in
               if T.contains_unsolved element then false
               else begin
-                if T.is_integer_type element || T.is_builtin Character element then
+                if integer_type state element || T.is_builtin Character element then
                   state.tables.loops.(written.id) <- Some (Integer_range { element; inclusive })
                 else if not (T.is_error element) then
                   report state Not_indexable iterable.span

@@ -60,6 +60,34 @@ let check_location database (declaration : Names.declaration) (definition : defi
           name, so that only one place can hold it."
          (T.show_trait impl.implements) (T.show impl.for_type))
 
+(* Sealed traits *)
+
+(* Only the built-in integer types implement the integer traits, each the
+   traits of its own signedness. Generic code over one is proven for each
+   built-in type, which would be unsound if any other type could implement
+   it. *)
+let check_sealed database (declaration : Names.declaration) (definition : definition)
+    (impl : T.impl_interface) =
+  let implementors =
+    if Well_known.is Signed_integer impl.implements.trait then
+      Some Intrinsic.[ Int8; Int16; Int32; Int64; ISize ]
+    else if Well_known.is Unsigned_integer impl.implements.trait then
+      Some Intrinsic.[ UInt8; UInt16; UInt32; UInt64; USize ]
+    else if Well_known.is Fixed_width_integer impl.implements.trait then
+      Some (List.filter (fun builtin -> T.is_integer_type (T.builtin builtin)) Intrinsic.builtins)
+    else None
+  in
+  match (implementors, T.builtin_of impl.for_type) with
+  | Some builtins, Some builtin when List.mem builtin builtins -> None
+  | Some _, _ ->
+      at database (Names.key_of declaration) Sealed_trait_impl (header_span definition)
+        (Printf.sprintf
+           "Only the built-in integer types implement `%s`, so `%s` cannot: generic code over the \
+            trait is proven for each of them."
+           (T.show_trait { impl.implements with associated = [] })
+           (T.show impl.for_type))
+  | None, _ -> None
+
 (* Overlap *)
 
 (* Whether two [impl]s' heads unify, each [impl]'s generic parameters as
@@ -551,6 +579,11 @@ let check =
             check_location database declaration definition impl)
           impls
       in
+      let sealed =
+        List.filter_map
+          (fun (declaration, definition, impl) -> check_sealed database declaration definition impl)
+          impls
+      in
       (* An impl in the wrong place reports that alone. *)
       let placed =
         List.filter
@@ -635,7 +668,7 @@ let check =
               check_associated_types database declaration definition impl)
             impls
       in
-      location @ names @ overlaps @ recursion
+      location @ sealed @ names @ overlaps @ recursion
       @ check_instantiation database package
       @ check_tests database package)
 

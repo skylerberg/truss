@@ -17,6 +17,20 @@ let () =
   test "an impl must live with its trait, its type, or a type its trait names" (fun () ->
       one_diagnostic "impl Display for Int64 {\n  fn display(self, output: mut TextBuilder) {}\n}\n"
         "package.impl_location");
+  test "only the built-in integer types implement the integer traits" (fun () ->
+      let database =
+        setup
+          [
+            ( "app::main",
+              "type Count(value: Int64)\n\n\
+               impl SignedInteger for Count {\n\
+              \  type Unsigned = UInt64\n\
+               }\n" );
+          ]
+      in
+      let found = codes (check database (module_of "app::main")) in
+      if not (List.mem "package.sealed_trait_impl" found) then
+        fail "found [%s]" (String.concat "; " found));
   test "an impl may live with a type its trait's arguments name" (fun () ->
       fine
         "type UserId(number: Int64)\n\n\

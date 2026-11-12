@@ -909,7 +909,9 @@ known:
 
 - **An integer literal must fit** its type, after negation: a `-` applied
   directly to a literal negates the value, so `-128` fits an `Int8`. Negating
-  a literal of an unsigned type is an error. A `USize` or `ISize` literal
+  a literal of an unsigned type is an error. A type parameter or associated
+  type that an integer trait bounds is an integer type here, and a literal of
+  it must fit every built-in type that implements the trait. A `USize` or `ISize` literal
   must fit in 32 bits unless the package's manifest says
   `usize_bits = 64`, as DESIGN.md requires. The standard library, which
   holds the code for each platform, is checked with its target's width.

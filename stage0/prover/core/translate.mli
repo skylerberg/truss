@@ -214,10 +214,13 @@ val function_ :
   ?proof:bool ->
   ?updating_helper:bool ->
   ?inherited:part * T.substitution * Core.block option ->
+  ?substitution:T.substitution ->
   Query.context ->
   source ->
   path:Path.t ->
   outcome
+(** The obligations of a function. With [substitution], its type parameters are those types, for a
+    function proven once for each type a bound allows. *)
 
 val laws :
   ?reveal:bool ->
