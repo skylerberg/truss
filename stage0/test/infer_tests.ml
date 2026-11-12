@@ -186,8 +186,7 @@ let () =
       match core_call_at text "length + extra" 1 with
       | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ ->
           let shown = Path.show impl in
-          if Documents.find shown "Add[Int64]" ~occurrence:1 < 0 then
-            fail "the impl chosen is %s" shown
+          if not (Substring.contains shown "Add[Int64]") then fail "the impl chosen is %s" shown
       | _ -> fail "no impl recorded");
   test "an ordering on Self in a trait's law is its compare" (fun () ->
       let text =
