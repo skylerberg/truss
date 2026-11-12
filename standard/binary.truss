@@ -256,7 +256,7 @@ public fn Encoder.bytes(mut self, bytes: Slice[UInt8])
 {
   mut self.bytes.reserve(bytes.length())
   for index in 0..bytes.length()
-    invariant self.length() == old(self.length()) + yielded.length()
+    invariant self.length() == old(self.length()) + index
   {
     mut self.bytes.push(bytes[index])
   }

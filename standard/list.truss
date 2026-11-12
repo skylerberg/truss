@@ -385,10 +385,10 @@ public fn List[Element: Copyable].filled(value: Element, count: USize) -> List[E
   cost time O(count * time(Element.copy))
 {
   var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
-  for _ in 0..count
-    invariant intrinsic::storage_length(elements) == yielded.length()
+  for index in 0..count
+    invariant intrinsic::storage_length(elements) == index
     invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..yielded.length() => identical(intrinsic::storage_model(elements)[i], value)
+    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], value)
   {
     intrinsic::storage_push(mut elements, value: value.copy())
   }
@@ -406,9 +406,9 @@ public fn List[Element].generate(
 {
   var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
   for index in 0..count
-    invariant intrinsic::storage_length(elements) == yielded.length()
+    invariant intrinsic::storage_length(elements) == index
     invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..yielded.length() => identical(intrinsic::storage_model(elements)[i], make(i))
+    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], make(i))
   {
     intrinsic::storage_push(mut elements, value: make(index))
   }
@@ -545,10 +545,10 @@ public fn List[Element].split_off(mut self, at: USize) -> List[Element]
   proof {
     assert identical(intrinsic::storage_model(tail), Sequence[Element].empty())
   }
-  for _ in 0..count
-    invariant intrinsic::storage_length(tail) == yielded.length()
+  for index in 0..count
+    invariant intrinsic::storage_length(tail) == index
     invariant intrinsic::storage_capacity(tail) == count
-    invariant self.length() == old(self.length()) - yielded.length()
+    invariant self.length() == old(self.length()) - index
     invariant intrinsic::storage_capacity(self.storage) == old(intrinsic::storage_capacity(self.storage))
     invariant forall measure: (fn(Element) -> Integer cost time finite) =>
       self.model().sum(measure) + intrinsic::storage_model(tail).sum(measure) == old(self.model()).sum(measure)
@@ -569,13 +569,13 @@ public fn List[Element].append(mut self, other: own List[Element])
   let count = rest.length()
   growth::reserve(mut self.storage, additional: count)
   let capacity = intrinsic::storage_capacity(self.storage)
-  for _ in 0..count
-    invariant rest.length() == count - yielded.length()
+  for index in 0..count
+    invariant rest.length() == count - index
     invariant forall i in 0..rest.length() => identical(rest.model()[i], other.model()[count - 1 - i])
-    invariant self.model().length() == old(self.model()).length() + yielded.length()
+    invariant self.model().length() == old(self.model()).length() + index
     invariant forall i in 0..old(self.model()).length() =>
       identical(self.model()[i], old(self.model())[i])
-    invariant forall i in 0..yielded.length() =>
+    invariant forall i in 0..index =>
       identical(self.model()[old(self.model()).length() + i], other.model()[i])
     invariant intrinsic::storage_capacity(self.storage) == capacity
     invariant capacity >= old(self.model()).length() + count
@@ -590,10 +590,10 @@ public fn List[Element: Copyable].append_slice(mut self, items: Slice[Element])
   cost amortized time O(items.length() * (1 + time(Element.copy)))
 {
   for index in 0..items.length()
-    invariant self.model().length() == old(self.model()).length() + yielded.length()
+    invariant self.model().length() == old(self.model()).length() + index
     invariant forall i in 0..old(self.model()).length() =>
       identical(self.model()[i], old(self.model())[i])
-    invariant forall i in 0..yielded.length() =>
+    invariant forall i in 0..index =>
       identical(self.model()[old(self.model()).length() + i], items.model()[i])
   {
     mut self.push(items[index].copy())
@@ -617,7 +617,7 @@ public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time fi
   var kept: USize = 0
   for index in 0..count
     invariant self.length() == count
-    invariant kept <= yielded.length()
+    invariant kept <= index
   {
     if keep(self[index]) {
       intrinsic::storage_swap(mut self.storage, first: kept, second: index)
@@ -648,7 +648,7 @@ public fn List[Element: Equal].deduplicate(mut self)
   for index in 1..count
     invariant self.length() == count
     invariant 1 <= kept
-    invariant kept <= yielded.length() + 1
+    invariant kept <= index
   {
     if !(self[index] == self[kept - 1]) {
       intrinsic::storage_swap(mut self.storage, first: kept, second: index)

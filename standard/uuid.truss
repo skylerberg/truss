@@ -131,7 +131,7 @@ impl text::Parse for Uuid {
     var low: UInt64 = 0
     var digits: USize = 0
     for index in 0..text.length()
-      invariant digits <= yielded.length()
+      invariant digits <= index
     {
       let byte = text.byte(index)
       if hyphenated && is_hyphen_place(index) {

@@ -8685,12 +8685,14 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let frame, low = value context frame start in
       let frame, high = value context frame stop in
       let outer_yielded = frame.yielded in
-      check_invariants context
-        { frame with yielded = Some (empty_parts context frame element) }
-        clauses ~when_:"on entry to the loop";
+      (* In the loop's clauses, the pattern names the next index: [low] plus
+         the iterations so far. *)
+      let at_index (f : frame) next = snd (pattern_match context f pattern next element) in
+      let entry = at_index { frame with yielded = Some (empty_parts context frame element) } low in
+      check_invariants context entry clauses ~when_:"on entry to the loop";
       let changed = changed_places frame body in
       let costs = loop_costs context frame clauses ~held:(held_by context frame changed) in
-      loop_entry context frame costs;
+      loop_entry context entry costs;
       let mark = context.fresh and facts_mark = List.length context.facts in
       let kept = kept_validity context frame changed in
       let head = havoc context frame changed in
@@ -8723,11 +8725,13 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
                     &&& Operation ("<", [ Symbol position; iterations ])
                     ==> equal found (Operation ("+", [ low; Symbol position ]))) ))
        | None -> ());
+      let index = Costs.plus low iterations in
       let head =
-        loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
+        loop_head context
+          (at_index { head with yielded = Some before } index)
+          costs ~iterations:(Some iterations)
       in
       assume_invariants context head clauses;
-      let index = Costs.plus low iterations in
       let exits = { breaks = []; continues = [] } in
       let inside =
         { (restrict head (L.Operation ("<", [ iterations; count ]))) with loop = Some exits }
@@ -8740,7 +8744,9 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let ends =
         (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues
       in
-      let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
+      let with_through (f : frame) =
+        at_index { f with loop = frame.loop; yielded = Some through } (Costs.plus index (L.int 1))
+      in
       loop_iterations context node head costs ~mark
         ~facts:(facts_since context facts_mark @ [ inside.condition ])
         ~ends:(List.map with_through ends)

@@ -359,7 +359,7 @@ internal fn ended_with_zero_byte(bytes: intrinsic::View[UInt8]) -> Result[intrin
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length + 1)
   for index in 0..length
-    invariant intrinsic::storage_length(copy) == yielded.length()
+    invariant intrinsic::storage_length(copy) == index
     invariant intrinsic::storage_capacity(copy) == length + 1
   {
     let byte = intrinsic::view_at(bytes, index: index)
@@ -412,8 +412,8 @@ internal fn current_directory() -> Result[intrinsic::Storage[UInt8], Int32] {
 internal fn host_name() -> intrinsic::Storage[UInt8] {
   let room: USize = 256
   var name: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
-  for _ in 0..room
-    invariant intrinsic::storage_length(name) == yielded.length()
+  for index in 0..room
+    invariant intrinsic::storage_length(name) == index
     invariant intrinsic::storage_capacity(name) == room
   {
     intrinsic::storage_push(mut name, value: 0)
@@ -459,8 +459,8 @@ internal fn add_number(bytes: mut intrinsic::Storage[UInt8], number: UInt64, siz
 {
   let before = intrinsic::storage_length(bytes)
   var left = number
-  for _ in 0..size
-    invariant intrinsic::storage_length(bytes) == before + yielded.length()
+  for index in 0..size
+    invariant intrinsic::storage_length(bytes) == before + index
   {
     growth::push(mut bytes, value: intrinsic::convert(left & 255))
     left = left >> 8
@@ -471,7 +471,7 @@ internal fn copy_of(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] 
   let length = intrinsic::view_length(bytes)
   var copy: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
   for index in 0..length
-    invariant intrinsic::storage_length(copy) == yielded.length()
+    invariant intrinsic::storage_length(copy) == index
     invariant intrinsic::storage_capacity(copy) == length
   {
     intrinsic::storage_push(mut copy, value: intrinsic::view_at(bytes, index: index))

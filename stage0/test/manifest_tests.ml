@@ -4,7 +4,7 @@ open Harness
 module Manifest = Manifest
 
 let manifest_block () =
-  let text = Documents.read "../../SYNTAX.md" in
+  let text = Documents.read (Harness.workspace_path "SYNTAX.md") in
   String.concat "\n" (Documents.block_after text "### Package manifest")
 
 let contains text part = Substring.contains text part
@@ -41,7 +41,7 @@ let () =
           ()
       | _ -> fail "read differently");
   test "SYNTAX.md's project manifest is a project with a time limit, and no package" (fun () ->
-      let text = Documents.read "../../SYNTAX.md" in
+      let text = Documents.read (Harness.workspace_path "SYNTAX.md") in
       match Manifest.parse (String.concat "\n" (Documents.block_after text "### Projects")) with
       | { package = None; project = true; time_limit = Some 10 } -> ()
       | _ -> fail "read differently");
@@ -226,5 +226,3 @@ let () =
       let text = "[package]\nname = \"a\"\n[dependencies]\njson = [\"Clock\"]\n" in
       if Manifest.with_dependency text { Path.owner = None; name = "json" } <> text then
         fail "changed")
-
-let () = finish ()

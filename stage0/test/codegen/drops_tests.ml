@@ -300,5 +300,3 @@ let () =
                "b6: return";
              ])
         outlined)
-
-let () = Harness.finish ()

@@ -79,8 +79,8 @@ internal fn longest_zero_run(octets: Array[UInt8, 16]) -> ZeroRun
   var length: USize = 0
   let groups: USize = 8
   for index in 0..groups
-    invariant length <= yielded.length()
-    invariant length > 0 ==> start + length == yielded.length()
+    invariant length <= index
+    invariant length > 0 ==> start + length == index
     invariant best.start + best.length <= 8
   {
     if group(octets, index: index) == 0 {

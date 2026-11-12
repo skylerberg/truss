@@ -24,7 +24,7 @@ let inputs database (key : Resolve.Names.key) =
   match
     ( Query.demand database Infer.core key,
       Query.demand database Resolve.Names.spans key,
-      Query.demand database Interface.Environment.lowered key )
+      Query.demand database Interface.Environment.lowered_interface key )
   with
   | Some form, Some spans, Some lowered ->
       let context : Context.context =

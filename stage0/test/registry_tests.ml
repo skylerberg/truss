@@ -50,7 +50,10 @@ let () =
 (* The lock file *)
 
 let lock_block () =
-  String.concat "\n" (Documents.block_after (Documents.read "../../SYNTAX.md") "### The lock file")
+  String.concat "\n"
+    (Documents.block_after
+       (Documents.read (Harness.workspace_path "SYNTAX.md"))
+       "### The lock file")
   ^ "\n"
 
 let () =
@@ -381,5 +384,3 @@ let () =
           "Nothing in the build uses `acme::units`";
           "`truss::http` is said to hold Clock, and the manifests grant it nothing";
         ])
-
-let () = finish ()

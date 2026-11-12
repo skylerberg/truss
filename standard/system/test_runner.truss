@@ -401,7 +401,7 @@ fn descriptors_to_wait_for(workers: List[Worker]) -> intrinsic::Storage[Int32]
   let width = workers.length()
   var waited_for: intrinsic::Storage[Int32] = intrinsic::storage_empty()
   for index in 0..width
-    invariant intrinsic::storage_length(waited_for) == yielded.length() * 2
+    invariant intrinsic::storage_length(waited_for) == index * 2
   {
     let process = workers[index].process
     let reports = workers[index].reports
@@ -482,8 +482,8 @@ internal fn run(count: UInt32, time_limit: UInt32) -> Int32 {
     width = tests
   }
   var workers: List[Worker] = List.with_capacity(width)
-  for _ in 0..width
-    invariant workers.length() == yielded.length()
+  for index in 0..width
+    invariant workers.length() == index
   {
     mut workers.push(no_worker())
   }

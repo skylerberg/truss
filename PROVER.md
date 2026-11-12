@@ -641,7 +641,10 @@ call uses the capability method's contract.
   out.
 - **A range of integers is the one loop the prover knows itself.** In
   `for i in 0..count`, `i` starts at the range's start, each iteration has
-  the next index, and `i < count`.
+  the next index, and `i < count`. In the loop's clauses, `i` is the next
+  index, the start plus the length of `yielded`: the start on entry, one
+  more after each iteration, and the end, or one past an inclusive range's
+  end, where the loop ends.
 - **Nothing else about loops is built in.** A loop over a list runs once
   per element because `List.each` promises
   `ensures finished ==> yielded.length() == self.length()`. A user's

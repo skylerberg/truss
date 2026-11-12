@@ -1376,5 +1376,3 @@ fn through(feed: mut any Feed) -> Option[Int64] {
 }
 |})
         "types.no_impl")
-
-let () = finish ()

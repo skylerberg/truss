@@ -744,13 +744,15 @@ Hylo also keep accessors apart from sequences, and Python's
   `ensures finished ==> yielded.length() == self.length()` is how a loop over
   a list is known to run once per element, and a `lends mut` method states
   how `self` takes back the part with `yielded[0]`. A `for` loop's
-  `invariant` may name `yielded` too, for the values of the iterations
+  clauses may name `yielded` too, for the values of the iterations
   before. Dafny's iterators work the same way, with clauses for each
   `yield` and a ghost history of what was yielded, and Creusot calls the
-  history `produced`. Nothing about loops is special to the prover: the
-  facts of `for i in 0..count` and `for item in items` come from the
-  contracts of the range's and the list's `each`, so a user's collection
-  gets exactly the same facts as a `List`.
+  history `produced`. The facts of `for item in items` come from the
+  contract of the list's `each`, so a user's collection gets exactly the
+  same facts as a `List`. A range of integers is the one loop the prover
+  knows itself, and in its clauses the loop variable names the next index,
+  as in Dafny's and Why3's `for` loops: `kept <= index` in place of
+  `kept <= yielded.length() + 1`.
 - **Read-only and owned yields can be pulled.** Internal iteration alone, as
   in Ruby's `each`, cannot advance two sequences together, so it cannot
   write `zip`, merge, `peek`, or pause and resume. Pulling a yielding method

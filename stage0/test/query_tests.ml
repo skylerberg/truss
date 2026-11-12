@@ -645,7 +645,7 @@ let () =
       Engine.clear_log engine;
       Engine.set engine files "a" "four";
       ignore (Engine.stabilize engine);
-      if not (List.mem "total()" (Engine.executed engine)) then
+      if not (List.mem () (Engine.computed engine total)) then
         fail "the root was not brought up to date");
   test "comparing with another engine makes no root in it" (fun () ->
       let build = build () in
@@ -680,5 +680,3 @@ let () =
       if Engine.audit ~before:Phases.proofs engine <> [] then
         fail "the audit computed a result of a later phase";
       if Engine.audit engine = [] then fail "the whole audit found nothing")
-
-let () = finish ()

@@ -556,5 +556,3 @@ let () =
       in
       if status <> 101 || not (contains errors "conversion out of range") then
         fail "expected a panic about the conversion, got status %d (%s)" status errors)
-
-let () = Harness.finish ()

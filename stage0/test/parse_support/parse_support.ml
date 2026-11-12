@@ -1,6 +1,6 @@
 open Harness
 
-let document name = Documents.read (Filename.concat "../.." name)
+let document name = Documents.read (Harness.workspace_path name)
 let source text = Source.create ~path:"test.truss" text
 
 let parse text =

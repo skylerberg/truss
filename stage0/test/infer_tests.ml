@@ -925,7 +925,8 @@ let () =
         ~again:(fun () ->
           Database.Testing.set_text engine module_ (text "2");
           ignore (Infer.diagnostics database module_))
-        [ "type_check_result(app::main::caller)" ]);
+        Infer.type_check_result
+        [ top_key "app::main" "caller" ]);
   test "checking twice gives the same result" (fun () ->
       let text =
         "fn f(items: List[Int64]) -> Int64 {\n\
@@ -1836,5 +1837,3 @@ let () =
       fine
         (helper "internal "
        ^ "public fn hidden(value: Int64) -> Int64\n  cost time O(1)\n{\n  half(value)\n}\n"))
-
-let () = finish ()

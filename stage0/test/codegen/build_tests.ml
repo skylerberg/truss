@@ -246,5 +246,3 @@ let () =
       let status, _, _ = Process.run ~time_limit:100 "/bin/sleep" [ "5" ] in
       if status <> 137 then fail "status %d" status;
       if Unix.gettimeofday () -. started > 2. then fail "it was not stopped")
-
-let () = Harness.finish ()

@@ -17,4 +17,4 @@ type scope = {
   implemented_capability : State.T.capability option;
 }
 
-val check : State.state -> State.Environment.lowered -> Core.t -> unit
+val check : State.state -> State.Environment.lowered_interface -> Core.t -> unit

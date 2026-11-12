@@ -937,7 +937,7 @@ internal fn push_output_block(output: mut intrinsic::Storage[UInt8], words: Arra
     invariant intrinsic::storage_capacity(output) == length
     invariant intrinsic::storage_length(output) <= length
     invariant intrinsic::storage_length(output) >= old(intrinsic::storage_length(output))
-    invariant yielded.length() > 0 ==> intrinsic::storage_length(output) > old(intrinsic::storage_length(output))
+    invariant offset > 0 ==> intrinsic::storage_length(output) > old(intrinsic::storage_length(output))
     cost allocations == 0
   {
     if intrinsic::storage_length(output) < length {
@@ -1133,8 +1133,8 @@ internal fn append_prefix(output: mut intrinsic::Storage[UInt8], block: Array[UI
   let width: USize = 32
   for position in 0..width
     invariant intrinsic::storage_length(output) <= limit
-    invariant intrinsic::storage_length(output) == limit || intrinsic::storage_length(output) == start + yielded.length()
-    invariant intrinsic::storage_length(output) <= start + yielded.length()
+    invariant intrinsic::storage_length(output) == limit || intrinsic::storage_length(output) == start + position
+    invariant intrinsic::storage_length(output) <= start + position
     invariant intrinsic::storage_capacity(output) == limit
     cost allocations == 0
   {
@@ -1160,7 +1160,7 @@ public fn hkdf_sha256(
   let most: USize = 255
   for index in 0..most
     invariant intrinsic::storage_length(output) <= length
-    invariant intrinsic::storage_length(output) == length || intrinsic::storage_length(output) == 32 * yielded.length()
+    invariant intrinsic::storage_length(output) == length || intrinsic::storage_length(output) == 32 * index
     invariant intrinsic::storage_capacity(output) == length
   {
     if intrinsic::storage_length(output) < length {
@@ -1215,7 +1215,7 @@ public fn pbkdf2_hmac_sha256(
     for position in 0..width
       invariant output.length() <= length
       invariant output.length() >= start
-      invariant yielded.length() > 0 ==> output.length() > start
+      invariant position > 0 ==> output.length() > start
     {
       if output.length() < length {
         mut output.push(total[position])
@@ -1341,7 +1341,7 @@ internal fn blake2b(input: Slice[UInt8], output_length: USize) -> List[UInt8]
   )
   var output: List[UInt8] = []
   for index in 0..output_length
-    invariant output.length() == yielded.length()
+    invariant output.length() == index
   {
     mut output.push(intrinsic::convert((state[index / 8] >> (8 * (index % 8))) & 255))
   }
@@ -1434,7 +1434,7 @@ internal fn argon2_block_to_bytes(block: Array[UInt64, 128]) -> List[UInt8]
   var bytes: List[UInt8] = []
   let count: USize = 1024
   for position in 0..count
-    invariant bytes.length() == yielded.length()
+    invariant bytes.length() == position
   {
     mut bytes.push(intrinsic::convert((block[position / 8] >> (8 * (position % 8))) & 255))
   }
@@ -1874,7 +1874,7 @@ internal fn chacha20_xor(
   let capacity = intrinsic::storage_capacity(output)
   var block: Array[UInt32, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   for index in 0..input.length()
-    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_length(output) == start + index
     invariant intrinsic::storage_capacity(output) == capacity
     cost allocations == 0
   {
@@ -2123,7 +2123,7 @@ internal fn push_tag(output: mut intrinsic::Storage[UInt8], tag: Array[UInt8, 16
   let capacity = intrinsic::storage_capacity(output)
   let count: USize = 16
   for index in 0..count
-    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_length(output) == start + index
     invariant intrinsic::storage_capacity(output) == capacity
     cost allocations == 0
   {
@@ -2512,7 +2512,7 @@ internal fn aes_gcm_xor(
   let capacity = intrinsic::storage_capacity(output)
   var block: Array[UInt8, 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   for index in 0..input.length()
-    invariant intrinsic::storage_length(output) == start + yielded.length()
+    invariant intrinsic::storage_length(output) == start + index
     invariant intrinsic::storage_capacity(output) == capacity
     cost allocations == 0
   {

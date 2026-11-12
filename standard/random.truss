@@ -245,7 +245,7 @@ public fn bytes(count: USize) -> List[UInt8]
   mut output.reserve(count)
   var word: UInt64 = 0
   for index in 0..count
-    invariant output.length() == yielded.length()
+    invariant output.length() == index
   {
     if index % 8 == 0 {
       word = Random.next()

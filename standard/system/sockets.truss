@@ -374,8 +374,8 @@ fn room_for_an_address() -> intrinsic::Storage[UInt8]
   ensures intrinsic::storage_length(result) == 28
 {
   var room: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(28)
-  for _ in 0..28
-    invariant intrinsic::storage_length(room) == yielded.length()
+  for index in 0..28
+    invariant intrinsic::storage_length(room) == index
     invariant intrinsic::storage_capacity(room) == 28
   {
     intrinsic::storage_push(mut room, value: 0)

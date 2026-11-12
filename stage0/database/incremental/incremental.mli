@@ -129,7 +129,14 @@ val unroot : t -> ('key, 'value) query -> 'key -> unit
 
 val executed : t -> string list
 (** With [~log:true], the queries computed since the log was last cleared, as ["name(key)"], in the
-    order they started. *)
+    order they started: for a check that nothing was computed, and for messages. *)
+
+val computed : t -> ('key, 'value) query -> 'key list
+(** With [~log:true], the keys whose results of the query were computed since the log was last
+    cleared, in the order they started. *)
+
+val result_label : ('key, 'value) query -> 'key -> string
+(** A result's label in {!executed}: ["name(key)"]. *)
 
 val clear_log : t -> unit
 

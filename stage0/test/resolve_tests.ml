@@ -227,6 +227,14 @@ let () =
   test "a lambda's parameter is in scope in its body" (fun () ->
       refers_to_binding "fn f() -> fn(Int64) -> Int64 {\n  fn(item) { item }\n}\n" ~use:("item", 2)
         ~binding:("item", 1));
+  test "a range loop's index is in scope in its clauses" (fun () ->
+      refers_to_binding
+        "fn f(count: USize) {\n  for index in 0..count\n    invariant index <= count\n  {\n  }\n}\n"
+        ~use:("index", 2) ~binding:("index", 1));
+  test "a loop's element is not in scope in its clauses" (fun () ->
+      one_diagnostic
+        "fn f(items: List[Int64]) {\n  for item in items\n    invariant item > 0\n  {\n  }\n}\n"
+        "resolve.unknown_name");
   test "a local is not in scope after its block" (fun () ->
       one_diagnostic "fn f() -> Int64 {\n  {\n    let inner = 1\n  }\n  inner\n}\n"
         "resolve.unknown_name")
@@ -490,13 +498,9 @@ let () =
       Database.Testing.set_text (Engine.of_context database) module_ (text "3");
       Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      let resolved =
-        List.filter
-          (String.starts_with ~prefix:"resolved(")
-          (Engine.executed (Engine.of_context database))
-      in
-      if resolved <> [ "resolved(app::main::second)" ] then
-        fail "resolved again: %s" (String.concat "; " resolved));
+      let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
+      if resolved <> [ Support.top_key "app::main" "second" ] then
+        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "moving a definition down resolves nothing again" (fun () ->
       let database = setup [ ("app::main", "fn first() -> Int64 { 1 }\n") ] in
       let engine = Engine.of_context database in
@@ -506,7 +510,8 @@ let () =
         ~again:(fun () ->
           Database.Testing.set_text engine module_ "\n\nfn first() -> Int64 { 1 }\n";
           ignore (Resolve.diagnostics database module_))
-        [ "resolved(app::main::first)" ])
+        Resolve.resolved
+        [ Support.top_key "app::main" "first" ])
 
 (* What the review of resolution found *)
 
@@ -533,13 +538,9 @@ let () =
         "fn z() {}\n\nfn a() -> Int64 { 1 }\n\nfn f() -> Int64 { a() }\n";
       Engine.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      let resolved =
-        List.filter
-          (String.starts_with ~prefix:"resolved(")
-          (Engine.executed (Engine.of_context database))
-      in
-      if resolved <> [ "resolved(app::main::z)" ] then
-        fail "resolved again: %s" (String.concat "; " resolved));
+      let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
+      if resolved <> [ Support.top_key "app::main" "z" ] then
+        fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "an import used only in a part the parser could not read is not unused" (fun () ->
       let database =
         setup
@@ -645,5 +646,3 @@ let () =
       one_diagnostic
         "use standard::intrinsic\n\nfn f(left: Int64) -> Int64 {\n  intrinsic::add(left, left)\n}\n"
         "resolve.intrinsic_import")
-
-let () = finish ()
