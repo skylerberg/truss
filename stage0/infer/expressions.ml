@@ -6,7 +6,9 @@
    A type that is not known yet is an inference variable. At the end of a
    statement, unsolved literal variables take their default types, every
    other variable that the statement created must be solved, and the
-   recorded types are final. Variables are numbered across the definition,
+   recorded types are final. The exception is a literal variable in the type
+   of a local that the statement declares: later statements may decide it,
+   and the enclosing statement gives it its default type. Variables are numbered across the definition,
    so a statement inside a lambda leaves the variables of the enclosing
    statement for that statement to solve. *)
 

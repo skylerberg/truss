@@ -860,20 +860,21 @@ statement are inference variables, solved by unification.
 inference variable in it must be solved. A literal whose type is still
 undetermined takes its default type, and any other unsolved variable is an
 error that asks for an annotation, with a fix that adds one to the `let`. The
-type of a local is then fixed for the rest of the body. This is local type
-inference, as in Swift, Kotlin, Scala, and C#, in contrast to inference across
-a whole body, as in Rust, OCaml, and Haskell:
+type of a local is then fixed for the rest of the body. The one exception is
+a literal type in the type of a local, described under Literals below. This
+is local type inference, as in Swift, Kotlin, Scala, and C#, in contrast to
+inference across a whole body, as in Rust, OCaml, and Haskell:
 
 - **The type of a variable is determined by its declaration,** which is the
   line that a reader, an LLM, and a hover in the language server see. An error
   is reported at the statement that caused it, never at a distant use that
   happened to fix the type of a variable.
-- **Checking is local and fast.** Unification never spans more than one
-  statement, so its cost follows the size of the statement.
+- **Checking is local and fast.** Unification spans more than one statement
+  only for the literal type of a local, so its cost follows the size of the
+  statement.
 - **The cost is a few annotations.** `var names = []` needs
   `var names: List[String] = []`, and `var best = None` needs a type, as in
-  Swift and Kotlin. SPECIFICATION.md already writes them this way, and
-  `var best = 0` is an `Int64`, as SPECIFICATION.md says.
+  Swift and Kotlin. SPECIFICATION.md already writes them this way.
 
 A statement here is the innermost statement. The statements inside a block that
 is part of a larger expression are inferred separately, and the block's tail
@@ -882,7 +883,9 @@ expression is checked against the block's expected type.
 The scrutinee of a `match` or an `is` is inferred before the patterns are
 checked, as if it were a statement of its own, because a pattern needs the type
 of its scrutinee. So in `second / 0 is None`, the `0` takes its default type
-and the operator's `impl` is selected before `None` is looked up.
+and the operator's `impl` is selected before `None` is looked up. A scrutinee
+that is a local of undecided literal type stays undecided, and an integer
+pattern is checked against it once a later statement decides it.
 
 ### Literals
 
@@ -900,6 +903,44 @@ decided in this order:
    whole, so `count + (60 * 60)` works.
 3. **By the default,** `Int64` or `Float64`, at the end of the statement.
    A literal shift amount is a `USize`, as Go's is a `uint`.
+
+**A literal type in the type of a local outlives the local's declaration.**
+In `let limit = 10`, `var best = 0`, and `for index in 0..10`, nothing in
+the declaration decides the local's type. The first later statement that
+constrains it decides it, as Rust's `{integer}` does. Here `count < limit`
+decides that `limit` is a `UInt8`:
+
+```truss
+fn f(count: UInt8) -> Bool {
+  let limit = 10
+  count < limit
+}
+```
+
+- **The statement that encloses the declaration gives the default.** For a
+  local of a block, that is the statement that holds the block. For the
+  variable of a `for` loop, it is the loop. For a local of a body, it is the
+  end of the body. An undecided type cannot leak past the local's scope.
+- **A use that needs the type takes the default.** A method call on the
+  local takes the default type, as a method call on a literal does, because
+  method lookup needs the type of the receiver. An integer pattern does not
+  need the type: it is checked once the type is decided.
+- **A specification converts the local to `Integer`.** A local of code with
+  an undecided literal type converts to `Integer` in a specification, as a
+  built-in integer does, so a loop invariant such as `index + 1 <= 11` does
+  not decide that `index` is an `Integer`, a type that code cannot have.
+- **Only literal types outlive the statement.** A literal type can only
+  become a built-in number type, so the local's declaration still says that
+  it is a number. Unification for it spans statements, at the cost of one
+  variable per such local. Every other unsolved type still needs its
+  annotation at the declaration.
+- **A conflict is one error, with the deciding statement.** When a use
+  needs a type other than the one an earlier statement decided, the error
+  is at the use, with a note at the statement that decided it. Every later
+  mismatch of the same local reuses that report, so one decision is one
+  error, however many uses follow. When a method call gave the local its
+  default type, the error has a fix that writes the needed type on the
+  `let`, such as `let base: UInt8 = 1`.
 
 This never looks at which `impl`s exist, so adding an `impl` never changes
 an existing call's meaning, as SPECIFICATION.md requires. Once a literal's type is

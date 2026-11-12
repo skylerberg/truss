@@ -1,5 +1,0 @@
-fn f() {
-  for i in 0..10 {
-    let small: UInt8 = i
-  }
-}

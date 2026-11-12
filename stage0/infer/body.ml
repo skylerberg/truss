@@ -36,7 +36,9 @@ let no_output : env =
 let constant_expression : env = { no_output with compile_time = true }
 
 (* Checks a body. Types are inferred one statement at a time, and the last
-   expression is checked against the result type. *)
+   expression is checked against the result type. The body is a statement
+   too, which gives each literal type that its statements leave undecided
+   its default type. *)
 let body state env (written : block) =
   let rec check_statements = function
     | [] -> (
@@ -67,7 +69,7 @@ let body state env (written : block) =
         in_statement state env first.span (fun () -> statement state env first ~last:false);
         check_statements rest
   in
-  check_statements written.statements
+  in_statement state env written.span (fun () -> check_statements written.statements)
 
 let declare_parameters state (written : parameter list) (signature : Types.signature) =
   List.iter
@@ -671,6 +673,9 @@ let check database (key : Names.key) =
           capability_constraints = [];
           capability_solution = None;
           evidence = [];
+          undecided = [];
+          decisions = Hashtbl.create 4;
+          annotatable = Hashtbl.create 8;
         }
       in
       (* Diagnostics about the types in the signature belong to the

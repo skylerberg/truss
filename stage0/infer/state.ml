@@ -76,8 +76,10 @@ type subset_constraint = {
 type frame = {
   start : int;  (** The first inference variable created for the statement. *)
   mutable nodes : int list;  (** The expressions whose types were recorded for the statement. *)
-  mutable bindings : int list;  (** The locals that the statement binds. *)
-  mutable patterns : int list;  (** The patterns whose types were recorded for the statement. *)
+  mutable bindings : int list;
+      (** The locals whose types the statement finishes: those it declares, and those of inner
+          statements whose types were not solved there. *)
+  mutable declared : int list;  (** The locals that the statement itself declares. *)
   mutable pending : (unit -> bool) list;
       (** Deferred checks that need a type that is not inferred yet. Each returns whether it is
           done. *)
@@ -86,6 +88,31 @@ type frame = {
           reported once per statement. *)
   frame_specification : bool;
   span : span;
+}
+
+(* A literal type in the type of a local that the local's declaration left
+   undecided, as in [let limit = 10]. It is undecided past the declaration,
+   so a later statement may decide it, as in [count < limit] with a [UInt8]
+   count. The enclosing statement of the declaration owns it, and gives it
+   its default type if no statement in between decides it. *)
+type undecided_literal = {
+  index : int;  (** The index of the [Literal] variable. *)
+  kind : Types.literal_kind;
+  local : id;
+  owner : frame;
+}
+
+(* How a statement after a local's declaration decided the literal type of
+   the local. *)
+type literal_decision = {
+  decided_local : id;
+  decided_type : Types.ty;
+  decided_at : span;  (** The statement that decided it. *)
+  is_default : bool;
+      (** A method call on the local gave it its default type, because method lookup needs the type
+          of the receiver. *)
+  mutable decision_report : Diagnostic.reported option;
+      (** The mismatch reported for the decision. Every later mismatch of the local reuses it. *)
 }
 
 (* The core form under construction. Each array is indexed by syntax id
@@ -141,10 +168,16 @@ type state = {
       (** The set each capability variable was solved to. [None] until the constraints are solved. A
           variable with no entry is the empty set. *)
   mutable evidence : Path.package list;  (** The packages whose [impl]s met a bound here. *)
+  mutable undecided : undecided_literal list;
+  decisions : (int, literal_decision) Hashtbl.t;
+      (** Keyed by the [index] of the [undecided_literal]. *)
+  annotatable : (id, unit) Hashtbl.t;
+      (** The locals that an unannotated [let] declares by a plain name, where a fix can add a type
+          after the name. *)
 }
 
-let reported state ?(fixes = []) code (span : span) message =
-  let diagnostic = Diagnostic.make ~fixes ~code:(Types code) span message in
+let reported state ?notes ?(fixes = []) code (span : span) message =
+  let diagnostic = Diagnostic.make ?notes ~fixes ~code:(Types code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
 
@@ -514,11 +547,34 @@ let trait_reference ?(arguments = []) trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
 let string_type = Types.Named { path = Well_known.path String; arguments = [] }
+let undecided_type (undecided : undecided_literal) = Types.Literal (undecided.kind, undecided.index)
+
+(* Records the decision of each undecided literal that a statement, or a
+   method call at [at], has decided since the last check. *)
+let decide_literals state ~(at : span) ~is_default =
+  state.undecided <-
+    List.filter
+      (fun (undecided : undecided_literal) ->
+        match Unify.resolve state.unifier (undecided_type undecided) with
+        | Types.Literal _ -> true
+        | _ ->
+            Hashtbl.replace state.decisions undecided.index
+              {
+                decided_local = undecided.local;
+                decided_type = Unify.zonk state.unifier (undecided_type undecided);
+                decided_at = at;
+                is_default;
+                decision_report = None;
+              };
+            false)
+      state.undecided
 
 (* Finishes the inference of a statement. An unsolved literal variable
-   takes its default type. Any other unsolved variable that the statement
-   created is an error. A type that mentions a variable of an enclosing
-   statement is left for that statement. *)
+   takes its default type, except one in the type of a local that the
+   statement declares: that one is left for later statements to decide, and
+   the enclosing statement gives it its default type. Any other unsolved
+   variable that the statement created is an error. A type that mentions a
+   variable of an enclosing statement is left for that statement. *)
 let settle state frame =
   (* Unification deferred these equalities between capability sets because
      one side had a capability variable. An equality is two subset
@@ -547,6 +603,8 @@ let settle state frame =
     frame.pending <- loop frame.pending
   in
   run_pending ();
+  let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
+  decide_literals state ~at:frame.span ~is_default:false;
   let types_of ids table = List.filter_map (fun id -> table.(id)) ids in
   let all_types () =
     types_of frame.nodes state.tables.types @ types_of frame.bindings state.tables.local_types
@@ -574,11 +632,44 @@ let settle state frame =
     List.concat_map (Unify.unknowns state.unifier) (all_types ())
     @ List.concat_map (Unify.argument_unknowns state.unifier) (call_arguments ())
   in
-  (* An unsolved literal variable of the statement takes its default type:
-     [Int64] or [Float64], or [Integer] in a specification. *)
+  (* A literal variable in the type of a local that the statement declares
+     stays undecided, for a later statement to decide. A specification
+     defaults a literal to [Integer] and code to [Int64], so a literal stays
+     undecided only within one or the other. *)
+  (match parent with
+  | Some parent when parent.frame_specification = frame.frame_specification ->
+      List.iter
+        (fun local ->
+          match state.tables.local_types.(local) with
+          | Some type_ ->
+              List.iter
+                (function
+                  | Unify.Unknown_literal (kind, index) when index >= frame.start ->
+                      if not frame.frame_specification then
+                        Hashtbl.replace state.unifier.code_literals index ();
+                      state.undecided <- { index; kind; local; owner = parent } :: state.undecided
+                  | _ -> ())
+                (Unify.unknowns state.unifier type_)
+          | None -> ())
+        frame.declared
+  | _ -> ());
+  (* The literal variables that an enclosing statement owns. *)
+  let undecided =
+    List.filter_map
+      (fun (undecided : undecided_literal) ->
+        if undecided.owner == frame then None
+        else
+          match Unify.resolve state.unifier (undecided_type undecided) with
+          | Types.Literal (_, root) -> Some root
+          | _ -> None)
+      state.undecided
+  in
+  let is_undecided index = List.mem index undecided in
+  (* Any other unsolved literal variable of the statement takes its default
+     type: [Int64] or [Float64], or [Integer] in a specification. *)
   List.iter
     (function
-      | Unify.Unknown_literal (kind, index) when index >= frame.start ->
+      | Unify.Unknown_literal (kind, index) when index >= frame.start && not (is_undecided index) ->
           Hashtbl.replace state.unifier.types index
             (match kind with
             | Integer_literal ->
@@ -590,10 +681,13 @@ let settle state frame =
   let unsolved =
     List.filter
       (function
-        | Unify.Unknown_type index | Unknown_value index | Unknown_literal (_, index) ->
-            index >= frame.start)
+        | Unify.Unknown_type index | Unknown_value index -> index >= frame.start
+        | Unknown_literal (_, index) -> index >= frame.start && not (is_undecided index))
       (unknowns ())
   in
+  (* The literals that the statement owns now have their types. *)
+  state.undecided <-
+    List.filter (fun (undecided : undecided_literal) -> undecided.owner != frame) state.undecided;
   if unsolved <> [] then begin
     let report =
       reported state Cannot_infer frame.span
@@ -613,7 +707,12 @@ let settle state frame =
        dropped. *)
     frame.pending <- []
   end;
-  let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
+  (* A type that mentions a variable of an enclosing statement, or an
+     undecided literal, is finished again by the enclosing statement. *)
+  let is_open = function
+    | Unify.Unknown_type index | Unknown_value index -> index < frame.start
+    | Unknown_literal (_, index) -> index < frame.start || is_undecided index
+  in
   let finish table ids keep =
     List.iter
       (fun id ->
@@ -621,7 +720,7 @@ let settle state frame =
         | Some type_ -> (
             let type_ = Impls.normalize state.database ~bounds:(bounds state) (zonk state type_) in
             table.(id) <- Some type_;
-            if Types.contains_unsolved type_ then
+            if List.exists is_open (Unify.unknowns state.unifier type_) then
               match parent with Some parent -> keep parent id | None -> ())
         | None -> ())
       ids
@@ -637,7 +736,7 @@ let in_statement state env (span : span) body =
       start = state.unifier.next + 1;
       nodes = [];
       bindings = [];
-      patterns = [];
+      declared = [];
       pending = [];
       unmet = [];
       frame_specification = env.specification;
@@ -684,17 +783,25 @@ let declare state (name : name) type_ ~is_var ~mode =
   Hashtbl.replace state.locals name.id { type_; is_var; mode };
   state.tables.local_types.(name.id) <- Some type_;
   match current_frame state with
-  | Some frame -> frame.bindings <- name.id :: frame.bindings
+  | Some frame ->
+      frame.bindings <- name.id :: frame.bindings;
+      frame.declared <- name.id :: frame.declared
   | None -> ()
 
 let target state (name : name) = state.resolved.names.(name.id)
 
 (* A literal used as a receiver takes its default type, as in
    [5.wrapping_add(3)], because the method lookup needs the receiver's
-   type. *)
-let default_literal state type_ =
+   type. So does a local whose type is an undecided literal, and the
+   method call at [at] decides it. The literals that the statement decided
+   before the call are recorded first, as decided by their uses. *)
+let default_literal state ~at type_ =
   let decide default =
+    (match current_frame state with
+    | Some frame -> decide_literals state ~at:frame.span ~is_default:false
+    | None -> ());
     ignore (Unify.unify state.unifier type_ default);
+    decide_literals state ~at ~is_default:true;
     default
   in
   match Unify.resolve state.unifier type_ with
@@ -711,7 +818,79 @@ let names_variant (member : name) =
 
 let show state type_ = Types.show (zonk state type_)
 
+(* The decision of the literal type of a local that a type is, if an
+   earlier statement decided it. The type is the local's type as declared,
+   before it is resolved. *)
+let literal_decision state type_ =
+  let rec follow (type_ : Types.ty) =
+    match type_ with
+    | Literal (_, index) | Variable index -> (
+        match Hashtbl.find_opt state.decisions index with
+        | Some decision -> Some decision
+        | None -> Option.bind (Hashtbl.find_opt state.unifier.types index) follow)
+    | _ -> None
+  in
+  follow type_
+
+(* Reports a mismatch. If one side, [decided], is a local whose literal type
+   an earlier statement decided, the report names that statement, because
+   the mistake is the decision rather than this use. Each later mismatch of
+   the local reuses the report, so one decision is one error. [wanted] is
+   the type that the other side needs, which a fix can give the local. *)
+let reported_mismatch state ?(fixes = []) code (span : span) ~(sides : (Types.ty * Types.ty) list)
+    message =
+  let other_fixes = fixes in
+  match
+    List.find_map
+      (fun (decided, wanted) ->
+        Option.map (fun decision -> (decision, wanted)) (literal_decision state decided))
+      sides
+  with
+  | None -> reported state ~fixes code span message
+  | Some ({ decision_report = Some report; _ }, _) -> report
+  | Some (decision, wanted) ->
+      let name =
+        match Hashtbl.find_opt state.binding_spans decision.decided_local with
+        | Some name -> Some (name, source state name)
+        | None -> None
+      in
+      let local = match name with Some (_, text) -> Printf.sprintf "`%s`" text | None -> "it" in
+      let decided = Types.show decision.decided_type and wanted = zonk state wanted in
+      let explanation, note =
+        if decision.is_default then
+          ( Printf.sprintf "%s took its default type, `%s`, at an earlier method call." local decided,
+            Printf.sprintf
+              "Method lookup needs the type of %s, so %s takes its default type `%s` here." local
+              local decided )
+        else
+          ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." local decided,
+            Printf.sprintf "This statement decides that the type of %s is `%s`." local decided )
+      in
+      let fixes =
+        match name with
+        | Some (name, text)
+          when decision.is_default
+               && Hashtbl.mem state.annotatable decision.decided_local
+               && not (Types.contains_unsolved wanted || Types.is_error wanted) ->
+            [
+              fix
+                (Printf.sprintf "Declare `%s` as a `%s`." text (Types.show wanted))
+                [ insert name.stop (": " ^ Types.show wanted) ];
+            ]
+            @ other_fixes
+        | _ -> other_fixes
+      in
+      let report =
+        reported state code span
+          ~notes:[ (decision.decided_at, note) ]
+          ~fixes
+          (message ^ " " ^ explanation)
+      in
+      decision.decision_report <- Some report;
+      report
+
 let mismatched state (span : span) ~expected ~actual =
+  let sides = [ (actual, expected); (expected, actual) ] in
   let expected = zonk state expected and actual = zonk state actual in
   match (resolve state actual, expected) with
   | Types.Literal (Integer_literal, _), _ when Types.is_float_type expected ->
@@ -720,7 +899,7 @@ let mismatched state (span : span) ~expected ~actual =
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
            (Types.show expected))
   | _ ->
-      reported state Mismatch span
+      reported_mismatch state Mismatch span ~sides
         (Printf.sprintf "Expected `%s`, found `%s`." (Types.show expected) (Types.show actual))
 
 let mismatch state span ~expected ~actual = ignore (mismatched state span ~expected ~actual)
@@ -911,6 +1090,11 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
       Some Owned_to_view
   | Types.Integer, _, Some _ when argument && env.specification && integer_type state wanted ->
       Some From_integer
+  (* A local of code whose literal type is undecided converts to [Integer]
+     as a built-in integer does. *)
+  | Types.Literal (Integer_literal, index), Types.Integer, _
+    when env.specification && Hashtbl.mem state.unifier.code_literals index ->
+      Some To_integer
   (* In a specification, a built-in integer converts to [Integer]. *)
   | _, Types.Integer, _ when env.specification && integer_type state actual_type -> Some To_integer
   | Types.Function actual_function, Types.Function wanted_function, _

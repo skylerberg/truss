@@ -1162,6 +1162,15 @@ comparisons over `&&`. Every other combination needs parentheses.
   needs no `3u8`. When nothing decides the type, it defaults to `Int64` or
   `Float64`, which keeps simple local variables free of annotations. An
   integer literal is never a float, so `1` and `1.0` always look different.
+- **A local declared from literals takes its type from its first use,** as
+  in Rust. After `let limit = 10`, `count < limit` makes `limit` the type of
+  `count`, and a loop `for index in 0..10` takes its type from the body.
+  Otherwise the declaration would fix the type at `Int64`, and code on
+  `UInt8` or `USize` would need an annotation on every such local, or every
+  use would be an error. Only a literal type outlives its statement: it can
+  only become a number type, so the declaration still tells the reader that
+  the local is a number. A use that disagrees with the first is one error,
+  with a note at the statement that decided the type.
 - **A literal in an operator takes the other operand's type,** as Go's
   untyped constants do. In `count + 1`, `index == 0`, and `0..count`, the
   literal has the type of the other side, when it can be that type. When it
