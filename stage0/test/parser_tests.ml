@@ -1,8 +1,8 @@
 module Layout = Lexer.For_testing.Layout
 
-(* The parser's tests of each piece of the grammar. Each test gives an input
-   and states exactly what the parser must do with it: the tree, printed
-   compactly, or the one diagnostic with its code, position, and fixes. *)
+(* Each test gives an input and the parser's exact output: the tree,
+   printed compactly, or the one diagnostic with its code, position, and
+   fixes. *)
 
 open Harness
 open Parse_support

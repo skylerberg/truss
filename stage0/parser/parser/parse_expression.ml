@@ -1604,8 +1604,8 @@ and loop_clauses cursor =
         if cost.amortized || cost.bound = Finite then
           Cursor.report cursor Loop_cost_bound keyword.span
             (Printf.sprintf
-               "A loop's `cost` states what the loop has spent so far, so it takes `O(...)`, `<=`, \
-                or `==`%s. %s"
+               "A loop's `cost` bounds the loop's cost so far, so it takes `O(...)`, `<=`, or \
+                `==`%s. %s"
                (if cost.bound = Finite then "" else ", and is never `amortized`")
                (if cost.bound = Finite then
                   "A loop shows that it ends with `decreases`, not with `time finite`."

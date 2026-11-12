@@ -43,13 +43,13 @@ val instance : context -> Instance.key -> Lir.t
 (* A constant's static data, where its value folds: literals, operators on
    numbers and on [Bool], other constants that fold, and records, variants,
    strings, lists, and arrays of parts that fold. Otherwise the type of the
-   value its [Evaluator] works out. Folding gives exactly what running
+   value its [Evaluator] computes. Folding gives exactly what running
    would, and anything it does not know is run. *)
 type constant = Folded of Lir.data | Run of Ground.ty
 
 val constant : context -> Path.t -> constant
 
-(* The [Evaluator] of a constant: its value worked out and written out in
+(* The [Evaluator] of a constant: its value computed and written out in
    its binary form. *)
 val evaluator : context -> Path.t -> Lir.t
 
@@ -59,7 +59,7 @@ val evaluator : context -> Path.t -> Lir.t
 val pulled :
   context -> Ground.yielding -> Lir.function_ * (Lir.local * (Lir.local * int) option) list
 
-(* What a cursor's [next] returns: an [Option] of what the method yields. *)
+(* A cursor's [next] result type: an [Option] of the method's yield type. *)
 val cursor_result : context -> Ground.yielding -> Ground.ty
 
 (* The parameters of the pulled version that are evidence, which are its
@@ -81,13 +81,13 @@ val test_key : Path.t -> Instance.key
 
 (* Code run while compiling, for a tagged template's check: a template of
    the literal texts and no parts, given to the tag's [from_template]'s
-   clauses that can run, each worked out and written out as a [Bool], in
+   clauses that can run, each evaluated and written out as a [Bool], in
    order. A clause that reads the template's parts is not asked of it; the
    prover asks only those that read its literals. *)
 val template_check : context -> Instance.key -> from_template:Path.t -> texts:string list -> Lir.t
 
 (* The positions, among a tag's [from_template]'s clauses, of those a
-   template check works out, in order. *)
+   template check evaluates, in order. *)
 val template_checked : context -> Path.t -> int list
 
 (* Code run while compiling, for a call whose arguments are known: the

@@ -1,14 +1,14 @@
 module Names = Resolve.Names
 
-(* Lowering is a query: what each instance compiles to, for a target and
-   whether the program checks what the prover would prove, kept current by
-   the code database like any other result.
+(* Lowering is a query: each instance's LIR, for a target and whether the
+   build has run-time checks, kept current by the code database like any
+   other result.
 
    Each computation makes a lowering context of its own from the query's
-   reads, so a layout or a piece of glue worked out on the way is read
+   reads, so a layout or a piece of glue computed on the way is read
    through this query and never cached where another could miss the
    dependency. A pulled method's cursor is a query too. A constant whose value
-   must be worked out by running code is the one result a query cannot make,
+   must be computed by running code is the one result a query cannot make,
    since running code is not a function of reads: the query says so, and the
    driver runs its [Evaluator], whose own code is lowered by the query. *)
 
@@ -19,8 +19,8 @@ let show_lowering lowering =
     (Libc.system_name lowering.target.system)
     (if lowering.checks then ", checked" else "")
 
-(* The target as part of a key: a result that depends on what the code was
-   built for is kept under all of it. *)
+(* The target as part of a key: a result that depends on the target is
+   keyed by all of it. *)
 let target_key (target : Memory_layout.target) =
   Cbor.Array
     [
@@ -163,9 +163,9 @@ and lowered =
 let () = ignore (Lazy.force pulled, Lazy.force lowered)
 let show_instance (lowering, key) = show_lowering lowering ^ " " ^ Instance.to_string key
 
-(* What an instance refers to, and the hash of its own code. A constant
-   worked out by running code refers to the evaluator that works it out,
-   whose code is what decides its value. *)
+(* An instance's references, and the hash of its own code. A constant
+   computed by running code refers to its evaluator, whose code determines
+   its value. *)
 let evaluated_own_hash =
   Blake3.derive_key ~context:"truss 2026-11-12 evaluated constant own hash" ""
 
@@ -194,16 +194,15 @@ let references =
 let roots : (lowering, Instance.key list) Query.input =
   Query.input ~name:"roots" ~show:show_lowering ()
 
-(* The groups of instances that reach each other, among what the roots
-   reach. It reads what every such instance refers to, and comes out the
-   same unless a group forms or changes, so only then does it cost anything
-   after it. *)
 (* The roots with more wanted: what a driver sets the input to before it
    asks for those instances' keys. *)
 let add_roots database lowering wanted =
   List.sort_uniq Instance.compare
     (wanted @ Option.value (Query.find database roots lowering) ~default:[])
 
+(* The recursive groups among the instances the roots reach. It reads
+   every such instance's references, and is unchanged unless a group forms
+   or changes, so only then does it invalidate anything after it. *)
 let recursion =
   Query.query ~name:"recursion" ~phase:Phases.recursion ~show:show_lowering
     ~equal:(Reachable.Keys.equal (List.equal Instance.equal))
@@ -270,7 +269,7 @@ type t = {
   lowering : lowering;
   want : lowering -> Instance.key list -> unit;
       (** Says which instances' keys are about to be asked for *)
-  context : Lower.context;  (** For laying out and emitting what the queries lowered *)
+  context : Lower.context;  (** For laying out and emitting the lowered instances *)
   toolchain : Toolchain.t;
   cache : Build.cache;
   settings : Build.settings;
@@ -279,11 +278,11 @@ type t = {
       (** Whether a package is one of the project's own, whose code a development build never copies
           into another's file *)
   mutable evaluated : (Path.t * Lir.static_value) list;
-      (** Each constant worked out by running code, in this build *)
+      (** Each constant computed by running code, in this build *)
   checked : (string, template_check) Hashtbl.t;
       (** Each template check done in this build, by the key of the code that ran *)
   called : (string, evaluated_call) Hashtbl.t;
-      (** Each call worked out in this build, by the key of the code that ran *)
+      (** Each call evaluated in this build, by the key of the code that ran *)
 }
 
 let bug format = Compiler_bug.bug ~stage:"Compile" format
@@ -354,8 +353,8 @@ let decode compiler ty text : Lir.static_value =
     if Memory_layout.has_zero_size env ty then empty ty
     else
       match Monomorphic.representation monomorphic ty with
-      | Handle -> bug "a handle worked out while compiling"
-      | Shared _ -> bug "a shared value worked out while compiling"
+      | Handle -> bug "a handle computed while compiling"
+      | Shared _ -> bug "a shared value computed while compiling"
       | Storage element ->
           let count = Z.to_int (integer USize) in
           Static_storage
@@ -372,7 +371,7 @@ let decode compiler ty text : Lir.static_value =
       (fun (name, (member : Memory_layout.member)) ->
         match member with
         | Typed field_ty -> (name, value field_ty)
-        | Raw _ -> bug "a raw field worked out while compiling")
+        | Raw _ -> bug "a raw field computed while compiling")
       members
   and scalar_value (scalar : Memory_layout.scalar) : Lir.constant =
     match scalar with
@@ -381,7 +380,7 @@ let decode compiler ty text : Lir.static_value =
     | Float64 -> Float64 (Z.to_int64_unsigned (unsigned (take 8)))
     | Bool -> Bool (unsigned (take 1) <> Z.zero)
     | Character -> Character (Z.to_int (unsigned (take 4)))
-    | _ -> bug "a pointer worked out while compiling"
+    | _ -> bug "a pointer computed while compiling"
   (* A value of zero size, which is written as nothing. *)
   and empty ty : Lir.static_value =
     match Monomorphic.shape monomorphic ty with
@@ -447,7 +446,7 @@ let small_callees ~find ~worked_on (instance : Lir.t) =
    calls. *)
 let test_runner : Instance.key = Code { path = Well_known.path Run_tests; type_arguments = [] }
 
-(* Builds what the roots reach into a program at [output], with the given
+(* Builds the instances the roots reach into a program at [output], with the given
    startup code, once the instances agree with one another. An instance
    among [supplied] is itself, and no query's. *)
 let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~startup ~output =
@@ -500,7 +499,7 @@ and build_test_program ?progress ?supplied compiler ~time_limit ~roots ~output =
          (List.map Instance.symbol roots))
     ~output
 
-(* Builds what the roots reach into a temporary program and runs it with
+(* Builds the instances the roots reach into a temporary program and runs it with
    [arguments], then removes it. *)
 and build_and_run ?input ?time_limit ?(in_order = true) compiler ~roots ~startup ~arguments =
   let output =
@@ -524,11 +523,10 @@ and evaluate compiler path ty =
   with
   | 0, output, _ -> decode compiler ty output
   | status, _, errors ->
-      cannot_build "Working out %s ended with status %d: %s" (Path.show path) status errors
+      cannot_build "Evaluating %s ended with status %d: %s" (Path.show path) status errors
 
-(* What an instance compiles to, which is what the query lowered, or for a
-   constant it could not fold, the value its evaluator works out, once in a
-   build. *)
+(* An instance's LIR from the query, or, for a constant the query could
+   not fold, the value its evaluator computes, once per build. *)
 and compiled compiler key =
   let compiled =
     match Query.demand compiler.database (Lazy.force lowered) (compiler.lowering, key) with
@@ -922,7 +920,7 @@ let run_key compiler root =
             Bytes (Query.demand compiler.database (Lazy.force reach) (compiler.lowering, root));
           ]))
 
-(* Works out a tagged template's check: each of the tag's [from_template]'s
+(* Evaluates a tagged template's check: each of the tag's [from_template]'s
    clauses that can run, for a template of these literal texts, by its
    position among the clauses, with whether it holds. Results are kept for
    the compiler's run, and, with [results], under the key of the code that
@@ -961,7 +959,7 @@ let check_template ?results compiler ~time_limit ~from_template ~texts =
           Hashtbl.replace compiler.checked key checked;
           checked)
 
-(* Works out a call whose arguments are known, by running it: its result as
+(* Evaluates a call whose arguments are known, by running it: its result as
    static data, or that it ran past [time_limit]. *)
 let evaluate_call ?results compiler ~time_limit ~function_ ~arguments =
   reporting compiler @@ fun () ->
@@ -991,12 +989,12 @@ let evaluate_call ?results compiler ~time_limit ~function_ ~arguments =
                 (* Killed at its time limit. *)
                 Call_ran_too_long
             | status ->
-                cannot_build "Working out a call of %s ended with status %d: %s"
+                cannot_build "Evaluating a call of %s ended with status %d: %s"
                   (Path.show function_) status errors
           in
           Hashtbl.replace compiler.called key evaluated;
           evaluated)
-  | _ -> bug "%s has no result to work out" (Path.show function_)
+  | _ -> bug "%s has no result to evaluate" (Path.show function_)
 
 let run_key compiler root = reporting compiler @@ fun () -> run_key compiler root
 let no_keys _ _ = bug "keys were asked for, and nothing was given to say which are wanted"

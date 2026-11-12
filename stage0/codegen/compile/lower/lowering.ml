@@ -4,12 +4,11 @@
 open Definitions
 open Lir_builder
 
-(* What leaving a scope does. *)
 type cleanup =
-  | Drop_value of Lir.place  (** Drops what the place still owns. *)
+  | Drop_value of Lir.place  (** Drops the place's value, if the place still owns it. *)
   | Free_pointed of Lir.place
-      (** Frees the heap block that the pointer at the place points at, after what is in the block
-          has been dropped. *)
+      (** Frees the heap block that the pointer at the place points to, after the block's contents
+          are dropped. *)
   | Free_blocks of { place : Lir.place; variants : string list }
       (** Frees the block of the value at [place] where its variant is one of [variants], without
           dropping what is in the block. *)
@@ -39,7 +38,7 @@ and lend = {
   selector : Lir.local;
   mutable ways : Lir.block list;  (** Most recent first, numbered from the first *)
   owned : Lir.place list;
-      (** What the method's own scopes owned at a [yield] that the caller continued from *)
+      (** The places the method's own scopes owned at each [yield] the caller resumed from *)
 }
 
 (* A scope owns what is dropped as it ends: the scope of a block's names,
@@ -315,7 +314,7 @@ let returned_type st =
       | _ -> None)
   | No_result -> None
 
-(* Drops what the result's slot holds, before it is written again: an early
+(* Drops the result slot's value before it is written again: an early
    [return] can come after part of the result was written. *)
 let clear_result st =
   match (returned_type st, result_place st) with
@@ -474,9 +473,8 @@ let looping st ~continue_ ~break_ ~depth body =
   body ();
   st.loops <- List.tl st.loops
 
-(* Replaces the value at a place the program names with one worked out
-   beforehand: what the place still owns is dropped, and the new value moved
-   in. *)
+(* Replaces the value at a place with one computed beforehand: the old
+   value is dropped, and the new value moved in. *)
 let replace st place ty ~by =
   if not (trivial st ty) then emit st.builder (Drop place);
   emit st.builder (Assign (place, Use (owned st by ty)))

@@ -1061,8 +1061,8 @@ let () =
       let registry = stocked () in
       let root = package [ uses_geometry ] in
       ignore (add root [ "acme::geometry" ]);
-      (* A package published with a newer version of what the build has
-         brings that version with it. *)
+      (* A package published with a newer version of a dependency of the
+         build brings that version with it. *)
       publish registry "acme::shapes" (1, 0, 0)
         ~dependencies:[ ("acme::units", []) ]
         ~record:[ ({ Path.owner = Some "acme"; name = "units" }, (1, 1, 0)) ]

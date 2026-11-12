@@ -101,7 +101,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
           register_expression state value (fun () ->
               match !part_type with
               | Some part -> Form.tagged_string state value literal ~part:(final_type state part)
-              | None -> bug "a tagged string's part type was not worked out");
+              | None -> bug "a tagged string's part type was not inferred");
           defer state (fun () ->
               let tag_type = normalize state tag_type in
               if Types.contains_unsolved tag_type then false

@@ -291,8 +291,7 @@ let apply analysis state statement =
   Option.iter (set_init analysis state) ownership.init;
   Option.iter (set_uninit analysis state) ownership.dropped
 
-(* At the start, what the parameters hold has a value, except where the
-   result is to be written. *)
+(* On entry, every parameter is initialized, except the result slot. *)
 let holds_at_entry analysis path_index =
   let path = analysis.paths.(path_index) in
   List.mem path.local analysis.function_.parameters

@@ -10,8 +10,8 @@
 
 type t
 
-(* How instances are lowered: for which target, and whether the program
-   checks what the prover would prove. *)
+(* How instances are lowered: for which target, and whether the build has
+   run-time checks. *)
 type lowering
 
 (* The instances whose keys have been asked for, for each way of lowering.
@@ -74,7 +74,7 @@ type record = {
    it cannot be read. *)
 val parse_report : string -> (record list, string) result
 
-(* How a test run is getting on: lowering what the tests reach, compiling
+(* How a test run is getting on: lowering the instances the tests reach, compiling
    the C files that are not cached, out of how many, running the tests that
    have no kept result, and each test's start and end, by its place in the
    list given. A test with a kept result is reported as ended before any
@@ -152,10 +152,10 @@ val run_program :
 
 (* The key a run of code while compiling is kept under: the key of
    everything the root can reach, with the version of code generation and
-   the target, which changes exactly when what the run gives may. *)
+   the target, which changes exactly when the run's result may. *)
 val run_key : t -> Instance.key -> (string, string) result
 
-(* Works out a tagged template's check by running it: each of the tag's
+(* Evaluates a tagged template's check by running it: each of the tag's
    [from_template]'s clauses that can run, for a template of these literal
    texts and no parts, by its position among the clauses, with whether it
    holds. The prover asks it only of clauses that read the template's
@@ -172,7 +172,7 @@ val check_template :
   texts:string list ->
   (template_check, string) result
 
-(* Works out a call of a function that is not generic, whose arguments are
+(* Evaluates a call of a function that is not generic, whose arguments are
    known integers, or [Bool]s as 0 or 1, by running it: its result as static
    data, or that it ran past [time_limit], in milliseconds. With [results],
    results are kept under the key of the code that ran. *)

@@ -116,7 +116,7 @@ type signature = {
   read_by : Path.t list;
 }
 
-(* What the new versions change that the project's code reads, found in a
+(* The changes in the new versions that the project's code depends on, found in a
    session that has them, before any file is written: each changed signature
    with the definitions that read it, and the diagnostics the project would
    have that it does not have now. *)

@@ -66,9 +66,10 @@ type selection = {
 }
 
 val selection : (unit, selection) Query.query
-(** The registry packages of the build: what the project's packages depend on that is no package of
-    the project, at the versions the lock file and their own records give. A package whose files are
-    not inputs is missing: the database fetches it and sets them, which reaches this result. *)
+(** The registry packages of the build: the dependencies of the project's packages that are not
+    packages of the project, at the versions the lock file and their own records give. A package
+    whose files are not inputs is missing: the database fetches it and sets them, which reaches this
+    result. *)
 
 type place = { root : string; directory : string; manifest : Manifest.package }
 
