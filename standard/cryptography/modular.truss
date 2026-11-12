@@ -266,3 +266,97 @@ internal fn Field.equal(self, first: Slice[UInt64], second: Slice[UInt64]) -> Bo
 internal fn Field.modulus_limbs(self) -> Slice[UInt64] {
   self.modulus.slice()
 }
+
+fn swap_values(first: mut List[UInt64], second: mut List[UInt64], bit: Bool) {
+  let chosen_first = select(bit, first: first.slice(), second: second.slice())
+  let chosen_second = select(bit, first: second.slice(), second: first.slice())
+  first = own chosen_first
+  second = own chosen_second
+}
+
+internal fn Field.power_secret(self, base: Slice[UInt64], exponent: Slice[UInt8]) -> List[UInt64] {
+  var low = self.one.copy()
+  var high = base.to_list()
+  for byte in exponent {
+    var bit: UInt8 = 8
+    while bit > 0
+      invariant bit <= 8
+    {
+      bit -= 1
+      let set = ((byte >> bit) & 1) == 1
+      swap_values(mut low, second: mut high, bit: set)
+      high = self.multiply(low.slice(), second: high.slice())
+      low = self.square(low.slice())
+      swap_values(mut low, second: mut high, bit: set)
+    }
+  }
+  low
+}
+
+internal fn Field.reduce(self, value: Slice[UInt64]) -> List[UInt64] {
+  let count = self.modulus.length()
+  var reduced = self.zero()
+  var end = value.length()
+  var chunks: List[List[UInt64]] = []
+  while end > 0 {
+    let start = if end > count { end - count } else { 0 }
+    var chunk: List[UInt64] = List.filled(0, count: count)
+    for index in start..end {
+      if index - start < chunk.length() && index < value.length() {
+        chunk[index - start] = value[index]
+      }
+    }
+    mut chunks.push(own chunk)
+    end = start
+  }
+  for index in 0..chunks.length() {
+    let shifted = self.multiply(reduced.slice(), second: self.r_squared.slice())
+    let part = self.multiply(chunks[index].slice(), second: self.r_squared.slice())
+    reduced = self.add(shifted.slice(), second: part.slice())
+  }
+  reduced
+}
+
+internal fn multiply_plain(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt64] {
+  var product: List[UInt64] = List.filled(0, count: first.length() + second.length())
+  for outer in 0..second.length() {
+    var carry: UInt64 = 0
+    for inner in 0..first.length() {
+      let at = inner + outer
+      if at < product.length() {
+        let sum = product[at].wrapping_add(first[inner].wrapping_multiply(second[outer])).wrapping_add(carry)
+        product[at] = sum & low_mask
+        carry = sum >> 32
+      }
+    }
+    let top = outer + first.length()
+    if top < product.length() {
+      product[top] = carry
+    }
+  }
+  product
+}
+
+internal fn add_plain(value: mut List[UInt64], amount: Slice[UInt64]) {
+  let _ = add_in_place(mut value, amount: amount)
+}
+
+internal fn bit_length(limbs: Slice[UInt64]) -> USize {
+  var index = limbs.length()
+  while index > 0
+    invariant index <= limbs.length()
+  {
+    index -= 1
+    let limb = limbs[index]
+    if limb != 0 {
+      var bits: USize = 0
+      var rest = limb
+      while rest != 0 && bits < 64 {
+        rest = rest >> 1
+        bits += 1
+      }
+      return index.saturating_multiply(32).saturating_add(bits)
+    }
+  }
+  0
+}
