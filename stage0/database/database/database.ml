@@ -467,13 +467,6 @@ let sessions = Session.sessions
 
 let check_all session = ignore (diagnostics_of session (packages session))
 
-type edge = Session.Graph.edge = {
-  dependent : Path.t;
-  dependent_part : string;
-  dependency : Path.t;
-  dependency_part : string;
-}
-
 let after_checking question session paths =
   check_all session;
   question (Session.engine session) paths
@@ -520,8 +513,6 @@ let find_definitions session name =
 
 (* Comparing a session with another, such as its base commit's *)
 
-type difference = Session.Graph.difference = Changed | Added | Same
-
 let changes mine theirs =
   check_all mine;
   Session.Graph.changes (Session.engine mine) (Session.engine theirs)
@@ -537,12 +528,6 @@ let base_commit session base =
       | None, _ -> None)
 
 let open_commit_of session commit = open_commit ~repository:(root session) commit
-
-type place = Session.Graph.place = { path : Path.t option; part : string option; label : string }
-
-type overlap = Session.Graph.overlap =
-  | Both_change of place
-  | Reads of { this_worktree : bool; change : place; reads : place }
 
 (* A commit of a worktree's files as they are, for merging. *)
 let commit_of_worktree root = Git.snapshot ~directory:root

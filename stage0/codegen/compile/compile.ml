@@ -1022,7 +1022,9 @@ module For_testing = struct
     type context = Lower.context
     type constant = Lower.constant = Folded of Lir.data | Run of Ground.ty
 
-    let context ?checks ?constant database target = Lower.context ?checks ?constant database target
+    let context ?checks ~cursor_fields ~constant database target =
+      Lower.context ?checks ~cursor_fields ~constant database target
+
     let constant = Lower.constant
     let constant_value = Lower.For_testing.constant_value
   end

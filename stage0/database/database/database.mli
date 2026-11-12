@@ -125,17 +125,10 @@ val store_directory : unit -> string
     about a whole package, such as its impls, is an edge to every definition that result read. No
     read is missing. *)
 
-type edge = {
-  dependent : Path.t;
-  dependent_part : string;
-  dependency : Path.t;
-  dependency_part : string;
-}
-
-val dependencies : session -> Path.t list -> edge list
+val dependencies : session -> Path.t list -> Graph_types.edge list
 (** The edges from the definitions' parts. *)
 
-val dependents : session -> Path.t list -> edge list
+val dependents : session -> Path.t list -> Graph_types.edge list
 (** The edges to the definitions' parts. *)
 
 val reachable : session -> Path.t list -> Path.Set.t list
@@ -147,27 +140,17 @@ val find_definitions : session -> string -> Path.t list
 
 (** {1 Comparing} *)
 
-type difference = Changed | Added | Same
-
-val changes : session -> session -> (Path.t * string option * difference) list
+val changes : session -> session -> (Path.t * string option * Graph_types.difference) list
 (** Every part of a definition that a change between the two could reach, in the first, with how it
     compares with the same part in the second. *)
 
 (** {1 Parallel work} *)
 
-type place = { path : Path.t option; part : string option; label : string }
-(** A result, by the definition and part it is about, if any, and its label. *)
-
-type overlap =
-  | Both_change of place
-  | Reads of { this_worktree : bool; change : place; reads : place }
-      (** One worktree's change depends on a change of the other *)
-
 val other_worktrees : session -> session list
 (** The sessions of the same project in the other worktrees of its repository: those open in this
     process, and a snapshot of each that a background process serves. *)
 
-val overlap_with : session -> session -> (overlap list, string) result
+val overlap_with : session -> session -> (Graph_types.overlap list, string) result
 (** Where two sessions' changes from their common commit meet. *)
 
 val merge_preview : session -> session -> ((string * string * string) list, string) result
