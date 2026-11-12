@@ -1,5 +1,4 @@
 open Syntax
-module T = Types
 module Names = Resolve.Names
 
 type state = {

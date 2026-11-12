@@ -1,5 +1,3 @@
-module S = Syntax
-module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 
@@ -31,9 +29,9 @@ type code = {
   anchor : Path.t;
   enclosing_impl : Path.t option;
   text : string;
-  result : T.result;
-  substitution : T.substitution;
-  uses : T.capability list;
+  result : Types.result;
+  substitution : Types.substitution;
+  uses : Types.capability list;
   real : Path.t list;
   has_defaults : bool;
 }
@@ -43,8 +41,8 @@ val demand : context -> ('a, 'b) Query.query -> 'a -> 'b
 val unwritten :
   definition_key:Names.key ->
   anchor:Path.t ->
-  substitution:T.substitution ->
-  result:T.result ->
+  substitution:Types.substitution ->
+  result:Types.result ->
   code
 
 val key_of : context -> Path.t -> Resolve.Names.key
@@ -57,16 +55,16 @@ val written : context -> Path.t -> (Resolve.Names.key * Syntax.signature * Synta
 val code_of : context -> Path.t -> Ground.argument list -> code
 val panic_path : Path.t
 val evidence_for : context -> Types.substitution -> Types.capability list -> Path.t list
-val result_of : context -> Types.substitution -> T.result -> Convention.result * bool
+val result_of : context -> Types.substitution -> Types.result -> Convention.result * bool
 
 val lir_signature :
   context ->
   Types.substitution ->
-  parameters:(T.mode * T.ty) list ->
+  parameters:(Types.mode * Types.ty) list ->
   has_defaults:bool ->
   ?uses:Types.capability list ->
-  T.result ->
+  Types.result ->
   Lir.signature * Convention.result
 
-val has_defaults : T.signature -> bool
-val interface_parameters : T.signature -> (T.mode * T.ty) list
+val has_defaults : Types.signature -> bool
+val interface_parameters : Types.signature -> (Types.mode * Types.ty) list

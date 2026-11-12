@@ -1,6 +1,4 @@
-module T = Types
-module L = Logic
-module S = Logic.Symbol
+module Symbol = Logic.Symbol
 module Names = Resolve.Names
 module Code = Diagnostic.Code
 module Span = Syntax.Span
@@ -13,7 +11,13 @@ exception Unsupported of span * string
 exception Foreign_unsupported of string
 
 type evaluation = { from_template : Path.t; texts : string list; clause : int }
-type known_call = { function_ : Path.t; arguments : Z.t list; term : L.term; result_is_bool : bool }
+
+type known_call = {
+  function_ : Path.t;
+  arguments : Z.t list;
+  term : Logic.term;
+  result_is_bool : bool;
+}
 
 type obligation = {
   code : Code.prover;
@@ -21,14 +25,14 @@ type obligation = {
   message : string;
   cited : (Names.key * span) option;
   fixes : Syntax.span Diagnostic.fix list;
-  query : L.query;
-  contracts_alone : L.query option;
-  values : (L.symbol * string) list;
-  locals : (L.symbol * string) list;
+  query : Logic.query;
+  contracts_alone : Logic.query option;
+  values : (Logic.symbol * string) list;
+  locals : (Logic.symbol * string) list;
   constants : Costs.constants list;
   evaluation : evaluation option;
   known_calls : known_call list;
-  decisions : (string * string option * L.term * L.term) list;
+  decisions : (string * string option * Logic.term * Logic.term) list;
   hidden : (string * bool) list;
 }
 
@@ -61,70 +65,70 @@ type contract = {
 
 type loop_exits = { mutable breaks : frame list; mutable continues : frame list }
 and leaving = { tasks : Core.task list; at : frame; exit : exit_ }
-and exit_ = Returning of L.term option | Breaking | Continuing
+and exit_ = Returning of Logic.term option | Breaking | Continuing
 
 and frame = {
   source : source;
-  locals : L.term Locals.t;
-  types : T.ty Locals.t;
-  old_locals : L.term Locals.t;
-  self : L.term option;
-  old_self : L.term option;
-  result : L.term option;
-  condition : L.term;
+  locals : Logic.term Locals.t;
+  types : Types.ty Locals.t;
+  old_locals : Logic.term Locals.t;
+  self : Logic.term option;
+  old_self : Logic.term option;
+  result : Logic.term option;
+  condition : Logic.term;
   checking : bool;
-  bound : L.symbol list;
-  binders : (L.symbol * L.sort * L.term) list;
+  bound : Logic.symbol list;
+  binders : (Logic.symbol * Logic.sort * Logic.term) list;
   loop : loop_exits option;
-  substitution : T.substitution;
-  self_type : T.ty option;
-  yielded : L.term option;
-  finished : L.term option;
-  yielded_so_far : L.term option;
-  updating : L.term option;
-  spent : (Costs.counter * L.term) list;
+  substitution : Types.substitution;
+  self_type : Types.ty option;
+  yielded : Logic.term option;
+  finished : Logic.term option;
+  yielded_so_far : Logic.term option;
+  updating : Logic.term option;
+  spent : (Costs.counter * Logic.term) list;
 }
 
 type changed = { changed_locals : Core.local list; changes_self : bool }
 
 type loop_rule =
   | Clause_bound of Core.cost * Costs.constants option
-  | Per_iteration of { per : L.term; per_held : (L.term * L.term) option }
+  | Per_iteration of { per : Logic.term; per_held : (Logic.term * Logic.term) option }
 
 type loop_cost = {
   counter : Costs.counter;
-  entry : L.term;
+  entry : Logic.term;
   rule : loop_rule;
-  held : (frame -> L.term) option;
+  held : (frame -> Logic.term) option;
 }
 
-type place_value = One of L.term | Run of L.term * L.term
-type cursor = { method_frame : frame; own : part; element : T.ty }
+type place_value = One of Logic.term | Run of Logic.term * Logic.term
+type cursor = { method_frame : frame; own : part; element : Types.ty }
 
 type received = {
-  has_another : L.term;
-  element : L.term;
-  through : L.term;
+  has_another : Logic.term;
+  element : Logic.term;
+  through : Logic.term;
   advance : frame -> frame;
 }
 
 type passed = {
   position : int;
-  mode : T.mode;
+  mode : Types.mode;
   operand : Core.operand option;
-  type_ : T.ty;
-  term : L.term;
-  run : (L.term * L.term) option;
+  type_ : Types.ty;
+  term : Logic.term;
+  run : (Logic.term * Logic.term) option;
 }
 
 type stated =
-  | In_range of L.symbol
-  | Value_of of L.symbol
-  | Definition_of of L.symbol
-  | Contract_of of L.symbol
-  | Exclusive of L.symbol
-  | Array_length of L.symbol
-  | Ranked_model of L.symbol
+  | In_range of Logic.symbol
+  | Value_of of Logic.symbol
+  | Definition_of of Logic.symbol
+  | Contract_of of Logic.symbol
+  | Exclusive of Logic.symbol
+  | Array_length of Logic.symbol
+  | Ranked_model of Logic.symbol
   | Ranked_elements of string
 
 type context = {
@@ -133,24 +137,24 @@ type context = {
   mutable terminates : bool;
   mutable parameters : Core.parameter list;
   measures : Core.expression list;
-  mutable declarations : L.declaration list;
-  declared : (L.symbol, unit) Hashtbl.t;
+  mutable declarations : Logic.declaration list;
+  declared : (Logic.symbol, unit) Hashtbl.t;
   datatypes : (string, unit) Hashtbl.t;
   stated : (stated, unit) Hashtbl.t;
-  mutable facts : L.term list;
-  unfolded : (L.term, unit) Hashtbl.t;
+  mutable facts : Logic.term list;
+  unfolded : (Logic.term, unit) Hashtbl.t;
   mutable obligations : obligation list;
   mutable fresh : int;
-  mutable values : (L.symbol * string) list;
+  mutable values : (Logic.symbol * string) list;
   local_names : (Core.local, string) Hashtbl.t;
-  mutable returns : (frame * L.term option) list;
+  mutable returns : (frame * Logic.term option) list;
   mutable leaving : leaving list;
-  mutable lent_back : (T.ty * L.term * L.term) list;
+  mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
   disjoint : (int * int) list;
   mutable indexes : (int * (place_value * span)) list;
-  mutable evaluated_keys : (Core.id * L.term) list;
-  mutable yielded_part : (T.ty * [ `Lends | `Yields ]) option;
+  mutable evaluated_keys : (Core.id * Logic.term) list;
+  mutable yielded_part : (Types.ty * [ `Lends | `Yields ]) option;
   mutable yield_ensures : (Core.expression list * Core.expression list) option;
   home : Names.key;
   mutable laws_assumed : string list;
@@ -158,35 +162,35 @@ type context = {
   mutable own_constants : (Costs.counter * Costs.constants) list;
   mutable groups : Costs.constants list;
   counter_numbers : (Costs.counter, int) Hashtbl.t;
-  fresh_order : (L.symbol, int) Hashtbl.t;
-  mutable logs : (L.term * bool) list;
-  mutable powers : (L.term * L.term) list;
-  mutable lambda_times : (L.term * (L.term * obligation list)) list;
-  mutable lambda_captures : (L.term * Core.local list) list;
-  lambda_definitions : (L.symbol, L.term) Hashtbl.t;
-  mutable potentials : L.term list;
-  models : (string, (L.term -> L.term) option) Hashtbl.t;
+  fresh_order : (Logic.symbol, int) Hashtbl.t;
+  mutable logs : (Logic.term * bool) list;
+  mutable powers : (Logic.term * Logic.term) list;
+  mutable lambda_times : (Logic.term * (Logic.term * obligation list)) list;
+  mutable lambda_captures : (Logic.term * Core.local list) list;
+  lambda_definitions : (Logic.symbol, Logic.term) Hashtbl.t;
+  mutable potentials : Logic.term list;
+  models : (string, (Logic.term -> Logic.term) option) Hashtbl.t;
   holds_potential : (string, bool) Hashtbl.t;
-  buffers : (string, (T.ty * (L.term -> L.term)) option) Hashtbl.t;
-  mutable equalities : L.term list;
+  buffers : (string, (Types.ty * (Logic.term -> Logic.term)) option) Hashtbl.t;
+  mutable equalities : Logic.term list;
   mutable known_calls : known_call list;
-  mutable decisions : (string * string option * L.term * L.term) list;
-  mutable iteration_returns : (Core.origin * T.ty option) list;
+  mutable decisions : (string * string option * Logic.term * Logic.term) list;
+  mutable iteration_returns : (Core.origin * Types.ty option) list;
   reveal : bool;
-  mutable entry : L.symbol list;
-  mutable hidden_bodies : (L.symbol * (string * bool)) list;
-  mutable cursors : (L.term * cursor) list;
+  mutable entry : Logic.symbol list;
+  mutable hidden_bodies : (Logic.symbol * (string * bool)) list;
+  mutable cursors : (Logic.term * cursor) list;
   mutable proving : bool;
   mutable holes : (Names.key * span) list;
-  mutable unfinished : L.term list;
-  mutable call_targets : (L.term * Core.local) list;
+  mutable unfinished : Logic.term list;
+  mutable call_targets : (Logic.term * Core.local) list;
   mutable passed_values : int list;
   mutable reading_callback : bool;
   ranking : bool;
-  mutable scopes : (L.symbol * L.term list ref) list;
-  quantifier_facts : (L.term, L.term list) Hashtbl.t;
-  mutable quantifier_symbols : L.symbol list;
-  mutable validating : T.ty list;
+  mutable scopes : (Logic.symbol * Logic.term list ref) list;
+  quantifier_facts : (Logic.term, Logic.term list) Hashtbl.t;
+  mutable quantifier_symbols : Logic.symbol list;
+  mutable validating : Types.ty list;
 }
 
 val quote : source -> int -> string
@@ -197,8 +201,8 @@ type form_origin = Written | Derived | Provided
 val law_proofs :
   Query.context ->
   Path.package ->
-  T.trait_reference ->
-  T.ty ->
+  Types.trait_reference ->
+  Types.ty ->
   (string * (source * Types.substitution * Core.parameter list * Core.block)) list
 
 val impl_unfinished : Query.context -> Names.key -> bool
@@ -220,7 +224,7 @@ val function_ :
   ?reveal:bool ->
   ?proof:bool ->
   ?updating_helper:bool ->
-  ?inherited:part * T.substitution * Core.block option ->
+  ?inherited:part * Types.substitution * Core.block option ->
   Query.context ->
   source ->
   path:Path.t ->
@@ -231,9 +235,9 @@ val laws :
   Query.context ->
   source ->
   impl:Path.t ->
-  trait:T.trait_reference ->
-  for_type:T.ty ->
-  proofs:(string * (source * T.substitution * Core.parameter list * Core.block)) list ->
+  trait:Types.trait_reference ->
+  for_type:Types.ty ->
+  proofs:(string * (source * Types.substitution * Core.parameter list * Core.block)) list ->
   at:span ->
   outcome
 

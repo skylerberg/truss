@@ -62,7 +62,7 @@ let derived context ~(key : Instance.key) ~type_path ~trait ~name ~type_argument
   in
   let parameter_places =
     List.map
-      (fun (mode, t) -> parameter st ~owned:(mode = T.Own) (Monomorphic.mode mode) t)
+      (fun (mode, t) -> parameter st ~owned:(mode = Types.Own) (Monomorphic.mode mode) t)
       ground_parameters
   in
   let places = List.map snd parameter_places in

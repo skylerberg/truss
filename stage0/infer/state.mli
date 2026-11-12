@@ -1,22 +1,20 @@
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 
-type local = { type_ : T.ty; is_var : bool; mode : T.mode }
+type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 type enclosing = Loop | Task of Core.task
 type exit = Return_exit | Break_exit | Continue_exit
 
 val tasks_exited_by : exit -> enclosing list -> Core.task list
 
 type env = {
-  output : T.result option;
+  output : Types.result option;
   specification : bool;
-  self : T.ty option;
-  self_mode : T.mode;
-  loop_element : T.ty option;
+  self : Types.ty option;
+  self_mode : Types.mode;
+  loop_element : Types.ty option;
   compile_time : bool;
   enclosing : enclosing list;
 }
@@ -24,9 +22,9 @@ type env = {
 val runs : env -> bool
 
 type subset_constraint = {
-  subset : T.capability list;
-  superset : T.capability list;
-  report_missing : T.capability list -> unit;
+  subset : Types.capability list;
+  superset : Types.capability list;
+  report_missing : Types.capability list -> unit;
 }
 
 type frame = {
@@ -35,7 +33,7 @@ type frame = {
   mutable bindings : int list;
   mutable patterns : int list;
   mutable pending : (unit -> bool) list;
-  mutable unmet : (T.ty * T.trait_reference) list;
+  mutable unmet : (Types.ty * Types.trait_reference) list;
   frame_specification : bool;
   span : Syntax.span;
 }
@@ -47,7 +45,7 @@ type form = {
   mutable definition_builder : (unit -> Core.definition) option;
   mutable next_node_id : int;
   mutable next_synthetic_local : int;
-  mutable tables_with_holes : C.t option;
+  mutable tables_with_holes : Tables.t option;
 }
 
 type state = {
@@ -58,21 +56,21 @@ type state = {
   resolved : Resolve.resolved;
   context : Lower.context;
   text : string;
-  mutable tables : C.t;
+  mutable tables : Tables.t;
   form : form;
   mutable diagnostics : Syntax.diagnostic list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
-  mutable law_parameters : (string * T.ty) list;
+  mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable references : Syntax.id list;
-  mutable receiver_modes : (Syntax.id * T.mode) list;
-  yielded : (Syntax.id, T.mode) Hashtbl.t;
+  mutable receiver_modes : (Syntax.id * Types.mode) list;
+  yielded : (Syntax.id, Types.mode) Hashtbl.t;
   binding_spans : (Syntax.id, Syntax.span) Hashtbl.t;
   mutable lambdas : Syntax.span list;
   mutable unsolved : Diagnostic.reported option;
   mutable capability_constraints : subset_constraint list;
-  mutable capability_solution : (int, T.capability list) Hashtbl.t option;
+  mutable capability_solution : (int, Types.capability list) Hashtbl.t option;
   mutable evidence : Path.package list;
 }
 
@@ -100,13 +98,13 @@ val error :
   Diagnostic.Code.types ->
   Syntax.span ->
   string ->
-  T.ty
+  Types.ty
 
 val source : state -> Syntax.span -> string
 val fresh_node_id : state -> int
 val synthetic_expression : state -> origin:Core.origin -> Types.ty -> Core.kind -> Core.expression
 val register_expression : state -> Syntax.expression -> (unit -> Core.kind) -> unit
-val was_hole : state -> (C.t -> T.ty option array) -> Syntax.id -> bool
+val was_hole : state -> (Tables.t -> Types.ty option array) -> Syntax.id -> bool
 val build_expression : state -> Syntax.expression -> Core.expression
 val register_statement : state -> Syntax.statement -> (unit -> Core.statement_kind) -> unit
 val build_statement : state -> Syntax.statement -> Core.statement
@@ -121,38 +119,35 @@ val insert : int -> string -> Syntax.span Diagnostic.edit
 val current_frame : state -> frame option
 val record : state -> Syntax.expression -> Types.ty -> unit
 val defer : state -> (unit -> bool) -> unit
-val resolve : state -> Unify.T.ty -> Unify.T.ty
-val zonk : state -> Unify.T.ty -> Unify.T.ty
-val fresh : state -> Unify.T.ty
+val resolve : state -> Types.ty -> Types.ty
+val zonk : state -> Types.ty -> Types.ty
+val fresh : state -> Types.ty
 val bounds : state -> Types.parameter -> Types.trait_reference list
-val normalize : state -> Unify.T.ty -> Types.ty
-val final_type : state -> Unify.T.ty -> T.ty
-val final_capabilities : state -> T.capability list -> T.capability list
-val final_argument : state -> T.argument -> T.argument
-val unify : state -> Unify.T.ty -> Unify.T.ty -> bool
-val unify_as_hint : state -> Unify.T.ty -> Unify.T.ty -> unit
-val implements : state -> Unify.T.ty -> T.trait_reference -> Impls.evidence option
-val plain : state -> Unify.T.ty -> bool
-val copyable : state -> Unify.T.ty -> bool
-val associated : state -> Unify.T.ty -> T.trait_reference -> string -> at:Syntax.span -> T.ty
-val evidence_of : Impls.evidence -> C.evidence
-val trait_reference : ?arguments:T.argument list -> Path.t -> T.trait_reference
-val string_type : T.ty
+val normalize : state -> Types.ty -> Types.ty
+val final_type : state -> Types.ty -> Types.ty
+val final_capabilities : state -> Types.capability list -> Types.capability list
+val final_argument : state -> Types.argument -> Types.argument
+val unify : state -> Types.ty -> Types.ty -> bool
+val unify_as_hint : state -> Types.ty -> Types.ty -> unit
+val implements : state -> Types.ty -> Types.trait_reference -> Impls.evidence option
+val plain : state -> Types.ty -> bool
+val copyable : state -> Types.ty -> bool
+val associated : state -> Types.ty -> Types.trait_reference -> string -> at:Syntax.span -> Types.ty
+val evidence_of : Impls.evidence -> Tables.evidence
+val trait_reference : ?arguments:Types.argument list -> Path.t -> Types.trait_reference
+val string_type : Types.ty
 val in_statement : state -> env -> Syntax.span -> (unit -> 'a) -> 'a
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
-val declare : state -> Syntax.name -> T.ty -> is_var:bool -> mode:T.mode -> unit
+val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
 val target : state -> Syntax.name -> Resolve.target option
-val default_literal : state -> Unify.T.ty -> Unify.T.ty
+val default_literal : state -> Types.ty -> Types.ty
 val head : state -> Syntax.expression -> Resolve.head option
 val names_variant : Syntax.name -> bool
 val is_member_constant : state -> Syntax.expression -> bool
-val show : state -> Unify.T.ty -> string
-
-val mismatched :
-  state -> Syntax.span -> expected:Unify.T.ty -> actual:Unify.T.ty -> Diagnostic.reported
-
-val mismatch : state -> Syntax.span -> expected:Unify.T.ty -> actual:Unify.T.ty -> unit
+val show : state -> Types.ty -> string
+val mismatched : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> Diagnostic.reported
+val mismatch : state -> Syntax.span -> expected:Types.ty -> actual:Types.ty -> unit
 val is_place : state -> Syntax.expression -> bool
 val marked_call : state -> Syntax.expression -> Syntax.id option
 val called : Syntax.expression -> Syntax.expression option
@@ -166,6 +161,6 @@ val convert :
   ?argument:bool ->
   ?expression:Core.origin ->
   Syntax.span ->
-  actual:Unify.T.ty ->
-  expected:Unify.T.ty ->
+  actual:Types.ty ->
+  expected:Types.ty ->
   unit

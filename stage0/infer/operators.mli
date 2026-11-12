@@ -1,11 +1,9 @@
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 
-val try_ : State.state -> State.env -> Syntax.expression -> Syntax.expression -> Pattern_typing.T.ty
+val try_ : State.state -> State.env -> Syntax.expression -> Syntax.expression -> Types.ty
 
 val with_ :
   State.state ->
@@ -18,38 +16,38 @@ val with_ :
 val prefix :
   State.state ->
   State.env ->
-  ?expected:State.T.ty ->
+  ?expected:Types.ty ->
   Syntax.expression ->
   Syntax.prefix ->
   Syntax.expression ->
-  Pattern_typing.T.ty
+  Types.ty
 
 val operator_call :
-  ?operands:State.C.argument list ->
+  ?operands:Tables.argument list ->
   State.state ->
   Syntax.expression ->
   trait:Path.t ->
   method_:string ->
-  left:State.T.ty ->
-  right:Pattern_typing.T.ty option ->
-  Pattern_typing.T.ty
+  left:Types.ty ->
+  right:Types.ty option ->
+  Types.ty
 
-val literal_operands : State.state -> left:Unify.T.ty -> right:Unify.T.ty -> unit
+val literal_operands : State.state -> left:Types.ty -> right:Types.ty -> unit
 
 val binary :
   State.state ->
   State.env ->
-  ?expected:State.T.ty ->
+  ?expected:Types.ty ->
   Syntax.expression ->
   Syntax.binary ->
   Syntax.expression ->
   Syntax.expression ->
-  Pattern_typing.T.ty
+  Types.ty
 
 val any_ :
   State.state ->
   State.env ->
-  ?expected:Unify.T.ty ->
+  ?expected:Types.ty ->
   Syntax.expression ->
   Syntax.expression ->
-  Pattern_typing.T.ty
+  Types.ty

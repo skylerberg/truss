@@ -4,14 +4,12 @@
    [Expressions] describes the checking algorithm. *)
 
 open Syntax
-module T = Types
-module C = Tables
 module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 
-type local = { type_ : T.ty; is_var : bool; mode : T.mode }
+type local = { type_ : Types.ty; is_var : bool; mode : Types.mode }
 
 (* The context of the code that is being checked. *)
 (* An enclosing construct that an early exit can leave: a loop, or a task
@@ -36,15 +34,15 @@ let tasks_exited_by (exit : exit) (enclosing : enclosing list) : Core.task list 
       exited_in_loop enclosing
 
 type env = {
-  output : T.result option;
+  output : Types.result option;
       (** The result of the enclosing function or lambda. [return] and [yield] are checked against
           it. *)
   specification : bool;
       (** The code is a specification: a contract, a [proof] block, or the body of a function for
           specifications only. *)
-  self : T.ty option;  (** The type of [self]. *)
-  self_mode : T.mode;  (** The mode of [self]. Only [mut self] can be mutated. *)
-  loop_element : T.ty option;
+  self : Types.ty option;  (** The type of [self]. *)
+  self_mode : Types.mode;  (** The mode of [self]. Only [mut self] can be mutated. *)
+  loop_element : Types.ty option;
       (** In the clauses of a [for] loop: the type of the loop's elements. [yielded] is a sequence
           of them. *)
   compile_time : bool;
@@ -69,9 +67,9 @@ let runs (env : env) = not (env.specification || env.compile_time)
    solving (because its [superset] has no variable to grow), the solver
    calls [report_missing] with the capabilities that [superset] lacks. *)
 type subset_constraint = {
-  subset : T.capability list;
-  superset : T.capability list;
-  report_missing : T.capability list -> unit;
+  subset : Types.capability list;
+  superset : Types.capability list;
+  report_missing : Types.capability list -> unit;
 }
 
 (* The state of the check of one statement. Types are inferred one
@@ -84,7 +82,7 @@ type frame = {
   mutable pending : (unit -> bool) list;
       (** Deferred checks that need a type that is not inferred yet. Each returns whether it is
           done. *)
-  mutable unmet : (T.ty * T.trait_reference) list;
+  mutable unmet : (Types.ty * Types.trait_reference) list;
       (** The trait bounds already reported as not satisfied, with their types, so that each is
           reported once per statement. *)
   frame_specification : bool;
@@ -103,7 +101,7 @@ type form = {
   mutable definition_builder : (unit -> Core.definition) option;
   mutable next_node_id : int;
   mutable next_synthetic_local : int;
-  mutable tables_with_holes : C.t option;
+  mutable tables_with_holes : Tables.t option;
       (** Set while the builders run, if a type in the definition is a hole. The core form has no
           hole type: a [todo] whose type is not inferred has the type [Never] there. So while the
           builders run, [state.tables] is a copy in which every hole is [Never], and this field
@@ -118,18 +116,19 @@ type state = {
   resolved : Resolve.resolved;
   context : Lower.context;
   text : string;  (** The definition's source text, for fixes. *)
-  mutable tables : C.t;
+  mutable tables : Tables.t;
   form : form;
   mutable diagnostics : Syntax.diagnostic list;
   unifier : Unify.t;
   locals : (id, local) Hashtbl.t;
-  mutable law_parameters : (string * T.ty) list;
+  mutable law_parameters : (string * Types.ty) list;
       (** In a law's proof, the law's parameters, with [Self] and the trait's parameters replaced by
           the proof's type and trait arguments. *)
   mutable frames : frame list;
   mutable references : id list;  (** Locals read, newest first, for lambdas' captures. *)
-  mutable receiver_modes : (id * T.mode) list;  (** Method calls whose receiver a mark covers. *)
-  yielded : (id, T.mode) Hashtbl.t;
+  mutable receiver_modes : (id * Types.mode) list;
+      (** Method calls whose receiver a mark covers. *)
+  yielded : (id, Types.mode) Hashtbl.t;
       (** The operand of each [yield], and each field of a constructor that is in this table, with
           the mode of the [yield]. A field in this table that is a place is lent to the yielded
           value instead of moved into it. *)
@@ -139,7 +138,7 @@ type state = {
   mutable unsolved : Diagnostic.reported option;
       (** The report of the first statement whose types could not be inferred. *)
   mutable capability_constraints : subset_constraint list;
-  mutable capability_solution : (int, T.capability list) Hashtbl.t option;
+  mutable capability_solution : (int, Types.capability list) Hashtbl.t option;
       (** The set each capability variable was solved to. [None] until the constraints are solved. A
           variable with no entry is the empty set. *)
   mutable evidence : Path.package list;  (** The packages whose [impl]s met a bound here. *)
@@ -159,7 +158,7 @@ let bug format = Compiler_bug.bug ~stage:"Infer" format
 (* Reports a diagnostic and returns the error type that carries the
    report. Every operation on an error type is accepted, so one mistake is
    reported once. *)
-let error state ?fixes code span message = T.Error (reported state ?fixes code span message)
+let error state ?fixes code span message = Types.Error (reported state ?fixes code span message)
 
 let source state (span : span) =
   if span.stop <= String.length state.text then
@@ -207,9 +206,9 @@ let register_expression state (value : expression) kind =
 
 (* Whether the checker recorded a hole as the type of an entry of one of
    its tables. *)
-let was_hole state (table : C.t -> T.ty option array) (id : id) =
+let was_hole state (table : Tables.t -> Types.ty option array) (id : id) =
   match state.form.tables_with_holes with
-  | Some tables -> (table tables).(id) = Some T.Hole
+  | Some tables -> (table tables).(id) = Some Types.Hole
   | None -> false
 
 (* The sub-expressions that an expression evaluates before it does
@@ -271,8 +270,9 @@ let rec build_expression state (value : expression) : Core.expression =
             }
     in
     let statements = List.filter_map evaluate evaluated in
-    let todo = synthetic_expression state ~origin:value.id T.Never Todo in
-    synthetic_expression state ~origin:value.id T.Never (Block { statements; value = Some todo })
+    let todo = synthetic_expression state ~origin:value.id Types.Never Todo in
+    synthetic_expression state ~origin:value.id Types.Never
+      (Block { statements; value = Some todo })
   end
   else
     match state.form.expression_builders.(value.id) with
@@ -321,7 +321,7 @@ let register_pattern state (written : pattern) kind =
 
 let build_pattern state (written : pattern) : Core.pattern =
   if was_hole state (fun t -> t.scrutinee_types) written.id then
-    { id = fresh_node_id state; origin = written.id; type_ = T.Never; kind = Wildcard }
+    { id = fresh_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
   else
     match state.form.pattern_builders.(written.id) with
     | Some build -> build ()
@@ -371,7 +371,7 @@ let normalize state type_ = Impls.normalize state.database ~bounds:(bounds state
    so an unsolved type is never stored without a diagnostic. *)
 let unsolved state =
   match state.unsolved with
-  | Some report -> T.Error report
+  | Some report -> Types.Error report
   | None ->
       let report =
         reported state Cannot_infer
@@ -380,17 +380,17 @@ let unsolved state =
            arguments."
       in
       state.unsolved <- Some report;
-      T.Error report
+      Types.Error report
 
 (* Replaces each capability variable in a set by its solution. Returns
    the set unchanged if the variables are not solved yet. *)
-let resolve_capabilities state (capabilities : T.capability list) =
+let resolve_capabilities state (capabilities : Types.capability list) =
   match state.capability_solution with
-  | Some solution when T.has_capability_variable capabilities ->
+  | Some solution when Types.has_capability_variable capabilities ->
       List.sort_uniq compare
         (List.concat_map
            (function
-             | T.Capability_variable variable ->
+             | Types.Capability_variable variable ->
                  Option.value ~default:[] (Hashtbl.find_opt solution variable)
              | capability -> [ capability ])
            capabilities)
@@ -401,10 +401,10 @@ let resolve_capabilities state (capabilities : T.capability list) =
    by their solutions. An unsolved inference variable becomes an error.
    While the core form is built, a hole becomes [Never]. *)
 let rec final_type state type_ =
-  T.map ~capabilities:(final_capabilities state)
+  Types.map ~capabilities:(final_capabilities state)
     (function
-      | T.Variable _ | T.Literal _ -> Some (unsolved state)
-      | T.Hole when Option.is_some state.form.tables_with_holes -> Some T.Never
+      | Types.Variable _ | Types.Literal _ -> Some (unsolved state)
+      | Types.Hole when Option.is_some state.form.tables_with_holes -> Some Types.Never
       | _ -> None)
     (normalize state type_)
 
@@ -416,20 +416,20 @@ and final_capabilities state capabilities =
     (Impls.normalize_capabilities state.database ~bounds:(bounds state)
        (List.map
           (function
-            | T.Capability_projection { base; trait; name } ->
-                T.Capability_projection { base = final_type state base; trait; name }
+            | Types.Capability_projection { base; trait; name } ->
+                Types.Capability_projection { base = final_type state base; trait; name }
             | capability -> capability)
           capabilities))
 
 let final_argument state = function
-  | T.Type type_ -> T.Type (final_type state type_)
-  | T.Value value -> (
+  | Types.Type type_ -> Types.Type (final_type state type_)
+  | Types.Value value -> (
       match Unify.resolve_value state.unifier value with
-      | T.Value_variable _ -> T.Type (unsolved state)
-      | value -> T.Value value)
-  | T.Capabilities capabilities -> T.Capabilities (final_capabilities state capabilities)
+      | Types.Value_variable _ -> Types.Type (unsolved state)
+      | value -> Types.Value value)
+  | Types.Capabilities capabilities -> Types.Capabilities (final_capabilities state capabilities)
 
-(* Unifies two types. Projections are normalized first, so [C.Key] unifies
+(* Unifies two types. Projections are normalized first, so [Tables.Key] unifies
    with the type that the [impl] assigns to [Key]. *)
 let unify state left right =
   let normalize type_ =
@@ -449,12 +449,12 @@ let unify_as_hint state actual expected =
 
 (* Normalizes the type arguments and the associated types of a trait
    reference, as [normalize] does for a type. *)
-let normalize_trait state (trait : T.trait_reference) : T.trait_reference =
+let normalize_trait state (trait : Types.trait_reference) : Types.trait_reference =
   {
     trait with
     trait_arguments =
       List.map
-        (function T.Type type_ -> T.Type (normalize state type_) | other -> other)
+        (function Types.Type type_ -> Types.Type (normalize state type_) | other -> other)
         (Unify.zonk_trait state.unifier trait).trait_arguments;
     associated = List.map (fun (name, type_) -> (name, normalize state type_)) trait.associated;
   }
@@ -469,7 +469,7 @@ let plain state type_ = Impls.plain state.database ~bounds:(bounds state) (zonk 
 (* The associated type [name] of a trait for a type. If the [impl] does
    not define it, the [impl] already has a diagnostic, and this returns an
    error type that carries that report. *)
-let associated state type_ (trait : T.trait_reference) name ~(at : span) =
+let associated state type_ (trait : Types.trait_reference) name ~(at : span) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
   match Impls.associated_type state.database ~bounds:(bounds state) type_ trait name with
   | Some associated_type -> associated_type
@@ -480,22 +480,22 @@ let associated state type_ (trait : T.trait_reference) name ~(at : span) =
         | _ -> None
       in
       match of_impl with
-      | Some report -> T.Error report
+      | Some report -> Types.Error report
       | None ->
           error state Unknown_associated_type at
-            (Printf.sprintf "`%s` gives no `%s` as a `%s`." (T.show type_) name (T.show_trait trait))
-      )
+            (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
+               (Types.show_trait trait)))
 
 let evidence_of = function
-  | Impls.From_impl { impl; substitution } -> C.Impl { impl; arguments = substitution }
-  | Impls.From_bound -> C.Bound
-  | Impls.From_any -> C.Dynamic
-  | Impls.Built_in | Impls.Accepted _ -> C.Built_in
+  | Impls.From_impl { impl; substitution } -> Tables.Impl { impl; arguments = substitution }
+  | Impls.From_bound -> Tables.Bound
+  | Impls.From_any -> Tables.Dynamic
+  | Impls.Built_in | Impls.Accepted _ -> Tables.Built_in
 
-let trait_reference ?(arguments = []) trait : T.trait_reference =
+let trait_reference ?(arguments = []) trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }
 
-let string_type = T.Named { path = Well_known.path String; arguments = [] }
+let string_type = Types.Named { path = Well_known.path String; arguments = [] }
 
 (* Finishes the inference of a statement. An unsolved literal variable
    takes its default type. Any other unsolved variable that the statement
@@ -512,8 +512,8 @@ let settle state frame =
           (Printf.sprintf
              "Two function types here must use the same capabilities, and one uses `%s` where the \
               other uses `%s`."
-             (T.show_argument (T.Capabilities (resolve_capabilities state left)))
-             (T.show_argument (T.Capabilities (resolve_capabilities state right))))
+             (Types.show_argument (Types.Capabilities (resolve_capabilities state left)))
+             (Types.show_argument (Types.Capabilities (resolve_capabilities state right))))
       in
       state.capability_constraints <-
         { subset = left; superset = right; report_missing }
@@ -563,8 +563,9 @@ let settle state frame =
       | Unify.Unknown_literal (kind, index) when index >= frame.start ->
           Hashtbl.replace state.unifier.types index
             (match kind with
-            | Integer_literal -> if frame.frame_specification then T.Integer else T.builtin Int64
-            | Float_literal -> T.builtin Float64)
+            | Integer_literal ->
+                if frame.frame_specification then Types.Integer else Types.builtin Int64
+            | Float_literal -> Types.builtin Float64)
       | _ -> ())
     (unknowns ());
   run_pending ();
@@ -587,7 +588,7 @@ let settle state frame =
     List.iter
       (function
         | Unify.Unknown_type index | Unknown_literal (_, index) ->
-            Hashtbl.replace state.unifier.types index (T.Error report)
+            Hashtbl.replace state.unifier.types index (Types.Error report)
         | Unknown_value _ -> ())
       unsolved;
     (* The deferred checks wait on types that are now errors, so they are
@@ -602,7 +603,7 @@ let settle state frame =
         | Some type_ -> (
             let type_ = Impls.normalize state.database ~bounds:(bounds state) (zonk state type_) in
             table.(id) <- Some type_;
-            if T.contains_unsolved type_ then
+            if Types.contains_unsolved type_ then
               match parent with Some parent -> keep parent id | None -> ())
         | None -> ())
       ids
@@ -637,7 +638,7 @@ let rec statement_diverges state (written : statement) =
   match written.kind with
   | Expression value -> (
       match state.tables.types.(value.id) with
-      | Some type_ -> resolve state type_ = T.Never
+      | Some type_ -> resolve state type_ = Types.Never
       | None -> false)
   | While { condition = { kind = True; _ }; body; _ } -> not (Syntax_walk.contains_break body)
   (* A [parallel] or [concurrent] block ends only when every branch does. *)
@@ -679,8 +680,8 @@ let default_literal state type_ =
     default
   in
   match Unify.resolve state.unifier type_ with
-  | T.Literal (Integer_literal, _) -> decide (T.builtin Int64)
-  | T.Literal (Float_literal, _) -> decide (T.builtin Float64)
+  | Types.Literal (Integer_literal, _) -> decide (Types.builtin Int64)
+  | Types.Literal (Float_literal, _) -> decide (Types.builtin Float64)
   | _ -> type_
 
 (* The referent of a name expression, as name resolution decided. *)
@@ -690,19 +691,19 @@ let head state (value : expression) = Resolve.head state.resolved value
 let names_variant (member : name) =
   member.text <> "" && member.text.[0] >= 'A' && member.text.[0] <= 'Z'
 
-let show state type_ = T.show (zonk state type_)
+let show state type_ = Types.show (zonk state type_)
 
 let mismatched state (span : span) ~expected ~actual =
   let expected = zonk state expected and actual = zonk state actual in
   match (resolve state actual, expected) with
-  | T.Literal (Integer_literal, _), _ when T.is_float_type expected ->
+  | Types.Literal (Integer_literal, _), _ when Types.is_float_type expected ->
       reported state Integer_for_float span
         ~fixes:[ fix "Write it as a float." [ insert span.stop ".0" ] ]
         (Printf.sprintf "An integer literal is never a float, and `%s` is expected here."
-           (T.show expected))
+           (Types.show expected))
   | _ ->
       reported state Mismatch span
-        (Printf.sprintf "Expected `%s`, found `%s`." (T.show expected) (T.show actual))
+        (Printf.sprintf "Expected `%s`, found `%s`." (Types.show expected) (Types.show actual))
 
 let mismatch state span ~expected ~actual = ignore (mismatched state span ~expected ~actual)
 
@@ -780,11 +781,11 @@ let check_resource state (resource : Syntax.resource) =
               (fun (local : local) -> resolve state local.type_)
               (Hashtbl.find_opt state.locals id)
           with
-          | Some (T.Function _ | T.Error _ | T.Hole) | None -> ()
+          | Some (Types.Function _ | Types.Error _ | Types.Hole) | None -> ()
           | Some other ->
               report state Not_callable name.span
                 (Printf.sprintf "`calls` counts the calls through a function, and `%s` is a `%s`."
-                   name.text (T.show other)))
+                   name.text (Types.show other)))
       | Some (Unknown _) -> ()
       | _ ->
           report state Not_callable name.span
@@ -832,14 +833,15 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
               | From_never -> inner
               (* If the value's type equals the expected type after the
                  capability variables are solved, there is no widening. *)
-              | Function_widening -> if T.equal inner.type_ expected then inner else convert Widen
+              | Function_widening ->
+                  if Types.equal inner.type_ expected then inner else convert Widen
               | To_integer -> convert To_integer
               | From_integer -> convert From_integer
               (* An owned collection converts to its view by a call of its
                  [slice], which borrows the collection. *)
               | Owned_to_view -> (
                   match inner.type_ with
-                  | T.Named { path; arguments } ->
+                  | Types.Named { path; arguments } ->
                       synthetic_expression state ~origin:id expected
                         (Call
                            {
@@ -864,7 +866,7 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
                              lends = None;
                              uses = [];
                            })
-                  | other -> bug "`%s` is viewed and has no view" (T.show other)))
+                  | other -> bug "`%s` is viewed and has no view" (Types.show other)))
             before
     | _ -> ()
   in
@@ -876,8 +878,8 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
     None
   in
   match (actual_type, wanted, expression) with
-  | T.Never, _, _ -> Some From_never
-  | T.Named actual_named, T.Named wanted_named, _
+  | Types.Never, _, _ -> Some From_never
+  | Types.Named actual_named, Types.Named wanted_named, _
     when argument
          && List.exists
               (fun (owned, view) ->
@@ -889,12 +891,13 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
       if not (Unify.unify_arguments state.unifier wanted_named.arguments actual_named.arguments)
       then mismatch state span ~expected ~actual;
       Some Owned_to_view
-  | T.Integer, _, Some _ when argument && env.specification && T.is_integer_type wanted ->
+  | Types.Integer, _, Some _ when argument && env.specification && Types.is_integer_type wanted ->
       Some From_integer
   (* In a specification, a built-in integer converts to [Integer]. *)
-  | _, T.Integer, _ when env.specification && T.is_integer_type actual_type -> Some To_integer
-  | T.Function actual_function, T.Function wanted_function, _
-    when not (T.same_clauses actual_function wanted_function) ->
+  | _, Types.Integer, _ when env.specification && Types.is_integer_type actual_type ->
+      Some To_integer
+  | Types.Function actual_function, Types.Function wanted_function, _
+    when not (Types.same_clauses actual_function wanted_function) ->
       let unlisted =
         List.filter
           (fun capability -> not (List.mem capability wanted_function.uses))
@@ -904,12 +907,15 @@ let convert state env ?(argument = false) ?expression (span : span) ~actual ~exp
          definition is checked: a subset constraint requires the value's
          [uses] to be within the expected type's. *)
       let unknown =
-        T.capabilities_unsolved actual_function.uses || T.capabilities_unsolved wanted_function.uses
+        Types.capabilities_unsolved actual_function.uses
+        || Types.capabilities_unsolved wanted_function.uses
       in
-      let proven = T.costs_imply ~provided:actual_function.costs ~required:wanted_function.costs in
+      let proven =
+        Types.costs_imply ~provided:actual_function.costs ~required:wanted_function.costs
+      in
       if
         Unify.unify state.unifier wanted
-          (T.Function
+          (Types.Function
              { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
         && (unlisted = [] || unknown)
         && (proven || argument || Option.is_some expression)

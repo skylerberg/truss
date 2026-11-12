@@ -15,9 +15,6 @@
    A lambda's body is a separate entry point: it runs when the lambda is
    called, not where the lambda is created. Contracts and [proof] blocks are
    not in the graph, because they are not executed. *)
-
-module T = Types
-
 (* A loan: a borrow of a place that lasts for a region of code. While a
    read-only loan is live, the place cannot be mutated. While a [mut] loan
    is live, the place cannot be used at all.
@@ -29,7 +26,7 @@ module T = Types
    - [Operand_evaluation]: an evaluated operand stays borrowed until its
      operation runs, so that a later operand cannot mutate it. *)
 type duration = Loop_body | Provide_body | Rest_of_statement | Operand_evaluation
-type loan = { borrowed : Place.t; mode : T.mode; duration : duration }
+type loan = { borrowed : Place.t; mode : Types.mode; duration : duration }
 
 (* A place that a view-typed value may borrow from. *)
 type view = {
@@ -42,7 +39,7 @@ type view = {
 
 (* An argument that is a place: the place, the parameter's mode, the
    argument's origin, and its position in the argument list. *)
-type borrowed_argument = { place : Place.t; mode : T.mode; at : Core.origin; position : int }
+type borrowed_argument = { place : Place.t; mode : Types.mode; at : Core.origin; position : int }
 
 type action =
   | Enter  (** The start of a function's body, a test's body, or a lambda's body. *)
@@ -50,12 +47,12 @@ type action =
   | Move of {
       place : Place.t;
       use : Core.id;  (** The [Use] node that moves the value. *)
-      type_ : T.ty;
+      type_ : Types.ty;
       returned : bool;  (** The moved value is the function's return value. *)
       captured : bool;
           (** The place is a local of an enclosing function, which the current lambda captures. *)
     }  (** A value that is not [Plain] is moved out of the place. *)
-  | Move_out_of_lent of T.ty
+  | Move_out_of_lent of Types.ty
       (** A value that is not [Plain] is moved out of a part that a lending call lent. *)
   | Mutate of Place.t  (** The place is borrowed [mut]. *)
   | Assign of Place.t
@@ -68,7 +65,7 @@ type action =
           another branch exits the block early, the code after the block does not run. So by this
           point the branch must have reinitialized every place that it moved out of a [mut] borrow.
       *)
-  | Yield_point of { mode : T.mode; lent : Place.t option list; views : view list }
+  | Yield_point of { mode : Types.mode; lent : Place.t option list; views : view list }
       (** A [yield]. The caller's loop may [break] here, in which case the method never resumes.
           [lent] is the places that the yield lends, where [None] is a place that the check does not
           track. [views] is the views of the yielded value, if it has a view type. *)
@@ -83,7 +80,7 @@ type action =
       (** A dangling view: a temporary is dropped when the statement ends, but a view of it is bound
           by the statement ([None]) or stored in the given place. The point's origin is the
           temporary. *)
-  | Bind_lent_part of T.ty
+  | Bind_lent_part of Types.ty
       (** A [let] binds a part that a lending call lent. The loan ends with the statement. *)
   | Pass_owned_function of view list
       (** A function value that has these views is passed to an [own] parameter. The callee may
@@ -138,9 +135,9 @@ type builder = {
   mutable loans : loan list;
   mutable fork_join_blocks : fork_join_block list;
   mutable fork_join_loops : fork_join_loop list;
-  plain : T.ty -> bool;
-  is_view : T.ty -> bool;
-  holds_function : T.ty -> bool;
+  plain : Types.ty -> bool;
+  is_view : Types.ty -> bool;
+  holds_function : Types.ty -> bool;
   stores_function : Core.callee -> int -> bool;
       (** Whether the callee declares the parameter at a position as an [own] parameter of a
           function type. *)
@@ -179,14 +176,14 @@ let rec pattern_locals (pattern : Core.pattern) : Core.local list =
   | Alternatives (first :: _) -> pattern_locals first
   | Alternatives [] | Wildcard | Literal _ | Range _ | Equal_to _ -> []
 
-let operand_type : Core.operand -> T.ty = function
+let operand_type : Core.operand -> Types.ty = function
   | Place core_place -> Core_walk.place_type core_place
   | Value value -> value.type_
 
 (* Whether a call's result may be a view of an argument: the argument is
    borrowed and is not [Plain], or the argument is itself a view. The
    callee's body is not inspected, so this is the conservative answer. *)
-let result_may_view builder (mode : T.mode) type_ =
+let result_may_view builder (mode : Types.mode) type_ =
   (mode <> Own && not (builder.plain type_)) || builder.is_view type_
 
 (* The tail expressions of an [if], a [match], or a block. The expression's
@@ -362,7 +359,7 @@ let operand_borrows builder (core_operand : Core.operand) : Place.t list =
 (* Starts a read-only [Operand_evaluation] loan on each place. *)
 let add_operand_loans builder (places : Place.t list) : loan list =
   let added =
-    List.map (fun borrowed -> { borrowed; mode = T.Read; duration = Operand_evaluation }) places
+    List.map (fun borrowed -> { borrowed; mode = Types.Read; duration = Operand_evaluation }) places
   in
   builder.loans <- added @ builder.loans;
   added
@@ -505,7 +502,7 @@ let rec expression builder frontier (node : Core.expression) : int list =
    lent to the constructed value, with the mode of the enclosing [yield]. A
    [mut] loan starts at the [yield], after every field is evaluated, as an
    argument's [mut] borrow starts at the call. *)
-and construct builder frontier (mode : T.mode) fields =
+and construct builder frontier (mode : Types.mode) fields =
   evaluate_in_order builder frontier (List.filter_map snd fields)
     ~evaluate:(fun frontier (field : Core.operand) ->
       match field with
@@ -652,7 +649,7 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
      so it can store that argument only in a type that holds a function. *)
   let can_store_in target (other : Core.operand) =
     match operand_type other with
-    | T.Function { output = Returns output; _ } when not (builder.is_view output) ->
+    | Types.Function { output = Returns output; _ } when not (builder.is_view output) ->
         builder.holds_function target
     | _ -> true
   in
@@ -689,7 +686,7 @@ and call_ builder frontier (node : Core.expression) (call : Core.call) =
     List.fold_left
       (fun frontier (position, (argument : Core.argument)) ->
         match argument with
-        | Passed { mode = Own; value = Value ({ type_ = T.Function _; _ } as value); _ }
+        | Passed { mode = Own; value = Value ({ type_ = Types.Function _; _ } as value); _ }
           when builder.stores_function call.callee position ->
             emit builder frontier (Pass_owned_function (views_of builder value)) value.origin
         | _ -> frontier)
@@ -736,17 +733,17 @@ and arguments builder frontier (call_arguments : Core.argument list) =
   in
   List.fold_left
     (fun frontier (mode, value) ->
-      if mode = T.Mut then borrow_mut builder frontier value else frontier)
+      if mode = Types.Mut then borrow_mut builder frontier value else frontier)
     frontier passed
 
 (* An operand: a place that is borrowed with the given mode, or a value. *)
-and operand builder frontier (mode : T.mode) (core_operand : Core.operand) =
+and operand builder frontier (mode : Types.mode) (core_operand : Core.operand) =
   let frontier = evaluate_operand builder frontier mode core_operand in
   if mode = Mut then borrow_mut builder frontier core_operand else frontier
 
 (* Evaluates an operand. [borrow_mut] emits the [mut] borrow of the operand
    separately. *)
-and evaluate_operand builder frontier (mode : T.mode) (core_operand : Core.operand) =
+and evaluate_operand builder frontier (mode : Types.mode) (core_operand : Core.operand) =
   match core_operand with
   | Place core_place -> (
       let frontier = place_subexpressions builder frontier core_place in
@@ -1050,7 +1047,9 @@ and let_ builder frontier (node : Core.statement) (pattern : Core.pattern) (valu
       emit builder frontier (Bind_lent_part type_) origin
     else frontier
   in
-  let holds_views = builder.is_view type_ || match type_ with T.Cursor _ -> true | _ -> false in
+  let holds_views =
+    builder.is_view type_ || match type_ with Types.Cursor _ -> true | _ -> false
+  in
   (* A local that is bound to a place aliases the place, so it views it. A
      local that is bound to a value of a view type has the value's views. A
      local that takes ownership of a moved value has no views. *)

@@ -10,7 +10,6 @@
    [transparent] body, since a change to the field is a change to the body. *)
 
 open Syntax
-module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 open State
@@ -50,7 +49,7 @@ let called_from_other_packages (state : state) =
           visible_to_other_packages state.database impl.implements.trait
           &&
           match impl.for_type with
-          | T.Named { path; _ } -> visible_to_other_packages state.database path
+          | Types.Named { path; _ } -> visible_to_other_packages state.database path
           | _ -> true)
       | _ -> false)
 

@@ -1,12 +1,11 @@
 module Names = Resolve.Names
-module T = Types
 
 type edge = Calls of Path.t | Uses_impl of Path.t
 type t = (Path.t * edge list) list
 
 val traits_with_required : Query.context -> Path.t -> Path.t list
 val package_impls : (Path.package, (Path.t * Path.t * Path.t option * Path.t list) list) Query.query
-val impls_for : ('a * Path.t * Path.t option * 'b) list -> Path.t list -> T.ty -> 'a list
+val impls_for : ('a * Path.t * Path.t option * 'b) list -> Path.t list -> Types.ty -> 'a list
 val impls_used : Query.context -> ('a * Path.t * Path.t option * 'b) list -> Core.callee -> 'a list
 val dispatched : Core.callee -> bool
 val impl_methods : Query.context -> Path.t -> Path.t list

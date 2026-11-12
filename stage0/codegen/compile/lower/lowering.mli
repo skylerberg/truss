@@ -20,7 +20,7 @@ type loop = { continue_ : Lir.block; continue_depth : int; break_ : Lir.block; b
 
 type frame = {
   code : Definitions.code;
-  bindings : (Definitions.S.id, Lir.place) Hashtbl.t;
+  bindings : (Syntax.id, Lir.place) Hashtbl.t;
   synthetic : (int, Lir.place) Hashtbl.t;
   mutable self_place : Lir.place option;
   on_yield : (Lir.place -> owned:bool -> resume:Lir.block -> stop:Lir.block -> unit) option;
@@ -84,14 +84,14 @@ val new_early_exits : state -> early_exits
 val ground : state -> Types.ty -> Ground.ty
 val trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool
-val site : state -> Definitions.S.span -> Lir.site
+val site : state -> Syntax.span -> Lir.site
 
 type unsupported = { what : string; at : Lir.site option }
 
 exception Unsupported of unsupported
 
 val unsupported : ?at:Lir.site -> ('a, unit, string, 'b) format4 -> 'a
-val source : state -> Definitions.S.span -> string
+val source : state -> Syntax.span -> string
 val innermost_scope : state -> scope
 val own_in_scope : state -> Lir.place -> unit
 val free_in_scope : state -> Lir.place -> unit

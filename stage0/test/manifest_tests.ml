@@ -27,9 +27,8 @@ let () =
              dependencies =
                [
                  { package = { Path.owner = None; name = "forecast" }; capabilities = [] };
-                 { package = { Path.owner = Some "truss"; name = "toml" }; capabilities = [] };
                  {
-                   package = { Path.owner = Some "truss"; name = "http" };
+                   package = { Path.owner = Some "truss"; name = "postgres" };
                    capabilities = [ "NetworkClient"; "Handles"; "Clock" ];
                  };
                ];

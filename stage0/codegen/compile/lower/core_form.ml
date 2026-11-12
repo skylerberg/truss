@@ -46,7 +46,7 @@ let bind_local st (local : Core.local) place =
   | Synthetic number -> Hashtbl.replace st.frame.synthetic number place
   | Self -> st.frame.self_place <- Some place
 
-let operand_type : Core.operand -> T.ty = function
+let operand_type : Core.operand -> Types.ty = function
   | Place place -> Core_walk.place_type place
   | Value value -> value.type_
 
@@ -99,7 +99,7 @@ let rec expand_alternatives (pattern : Core.pattern) : Core.pattern list =
 type bound_name = {
   local : Core.local;
   name : string;
-  mode : T.mode;
+  mode : Types.mode;
   ty : Ground.ty;
   part : Lir.place;
 }
@@ -336,7 +336,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
       in
       let added =
         List.concat_map
-          (fun ((mode : T.mode), evidence) ->
+          (fun ((mode : Types.mode), evidence) ->
             match tasks with
             | Some tasks when mode = Mut && not (List.exists is_tasks evidence) ->
                 locked_evidence st ~tasks evidence
@@ -367,7 +367,7 @@ and into st (value : Core.expression) (destination : Lir.place) =
         match ty with Function f -> f | _ -> bug "a lambda of %s" (Ground.to_string ty)
       in
       nested_function st ~function_type
-        ~output:(match value.type_ with T.Function f -> Some f.output | _ -> None)
+        ~output:(match value.type_ with Types.Function f -> Some f.output | _ -> None)
         ~captures:
           (List.map
              (fun (capture : Core.capture) ->
@@ -436,7 +436,8 @@ and into st (value : Core.expression) (destination : Lir.place) =
    temporary, which the callee fills with the default. The returned mask has
    one bit for each parameter with a default, set where the call passes an
    argument. *)
-and evaluate_arguments st (signature : T.signature) substitution (arguments : Core.argument list) =
+and evaluate_arguments st (signature : Types.signature) substitution
+    (arguments : Core.argument list) =
   let parameters = interface_parameters signature in
   if List.length parameters <> List.length arguments then
     bug "a call with %d arguments for %d parameters" (List.length arguments)
@@ -540,9 +541,9 @@ and call_into st (value : Core.expression) (call : Core.call) destination =
   | None, Trait_method { trait; name; self_type; _ } -> (
       (* Through an [any] value, which is the receiver. *)
       let any_type =
-        match T.substitute st.frame.code.substitution self_type with
-        | T.Any reference -> reference
-        | receiver -> bug "a call through any on %s" (T.show receiver)
+        match Types.substitute st.frame.code.substitution self_type with
+        | Types.Any reference -> reference
+        | receiver -> bug "a call through any on %s" (Types.show receiver)
       in
       match List.map (argument_place st) call.arguments with
       | (_, _, any) :: arguments ->
@@ -576,7 +577,7 @@ and capability_defaults st ~capability ~name (arguments : Core.argument list) ev
       match demand st.context Environment.trait_interface capability with
       | Some interface -> (
           match
-            List.find_opt (fun (m : T.trait_method) -> m.method_name = name) interface.methods
+            List.find_opt (fun (m : Types.trait_method) -> m.method_name = name) interface.methods
           with
           | Some declared -> declared.method_receiver
           | None -> bug "%s has no method %s" (Path.show capability) name)
@@ -1242,7 +1243,8 @@ and intrinsic_operation st operation ~type_arguments (arguments : Core.argument 
             (* An intrinsic takes storage and views by place. *)
             if Storage.elements_of ty <> None || Storage.viewed ty <> None then
               Intrinsics.Place evaluated
-            else Intrinsics.Value (if mode = T.Own then owned st evaluated ty else Copy evaluated)
+            else
+              Intrinsics.Value (if mode = Types.Own then owned st evaluated ty else Copy evaluated)
         | Default -> bug "an intrinsic called with an omitted argument")
       arguments
   in

@@ -1,4 +1,3 @@
-module T = Types
 module Names = Resolve.Names
 module Environment = Interface.Environment
 

@@ -8,8 +8,6 @@
    each holder may store at each point. A backward liveness analysis
    computes the locals that are live after each point. A place cannot be
    mutated or moved while a live holder stores a view of it. *)
-
-module T = Types
 open Graph
 open Context
 open Moves
