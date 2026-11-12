@@ -31,15 +31,15 @@ let form database (path : Path.t) : Core.t option =
       (* A type whose definition is [todo] has no fields to derive from. *)
       | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
-          let nodes = ref 0 and made = ref 0 in
+          let nodes = ref 0 and locals = ref 0 in
           let id () =
             let id = !nodes in
             incr nodes;
             id
           in
           let local () : Core.local =
-            let local = !made in
-            incr made;
+            let local = !locals in
+            incr locals;
             Synthetic local
           in
           (* Generated code has no source text, so every node has the origin
@@ -48,10 +48,10 @@ let form database (path : Path.t) : Core.t option =
           let node type_ kind : Core.expression = { id = id (); origin; type_; kind } in
           let pattern type_ kind : Core.pattern = { id = id (); origin; type_; kind } in
           let statement kind : Core.statement = { id = id (); origin; kind } in
-          let giving value : Core.block =
-            { statements = []; value = Some value; diverges = false }
+          let giving value : Core.block = { statements = []; value = Some value } in
+          let arm pattern body : Core.arm =
+            { patterns = [ pattern ]; guard = None; body; origin }
           in
-          let arm found body : Core.arm = { patterns = [ found ]; guard = None; body; origin } in
           let self_type = interface.for_type in
           let bounds = T.bounds_of interface.impl_generics in
           let result =
@@ -85,7 +85,7 @@ let form database (path : Path.t) : Core.t option =
                   })
                 signature.parameters
           in
-          let given () : Core.place =
+          let other_place () : Core.place =
             match List.filter (fun (p : Core.parameter) -> p.local <> Self) parameters with
             | [ parameter ] -> Local { local = parameter.local; type_ = parameter.type_; origin }
             | _ -> bug "`%s` takes one value beside its own" (Path.show path)
@@ -166,7 +166,7 @@ let form database (path : Path.t) : Core.t option =
                        (fun ((field : T.field), local, name) ->
                          ( field.field_name,
                            pattern field.field_type
-                             (Bind { local; name; mutable_ = false; mode = Read }) ))
+                             (Bind { local; name; is_var = false; mode = Read }) ))
                        bound;
                  })
           in
@@ -197,7 +197,6 @@ let form database (path : Path.t) : Core.t option =
                                 let mine = bound Fun.id fields in
                                 arm (binding variant mine) (each (Some variant) index (parts mine)))
                               variants;
-                          guards_exhaustive = false;
                         }))
           in
           (* Matches [other]. If [other] is the same variant as [self], the
@@ -217,7 +216,6 @@ let form database (path : Path.t) : Core.t option =
                          ::
                          (if alone then []
                           else [ arm (pattern self_type Wildcard) (giving (different ())) ]);
-                       guards_exhaustive = false;
                      })
           in
           let bool = T.bool and unit = T.unit in
@@ -225,7 +223,7 @@ let form database (path : Path.t) : Core.t option =
           let body : Core.block =
             match (trait_name, name) with
             | "Equal", "equal" ->
-                let other = given () in
+                let other = other_place () in
                 let each_equal mine theirs =
                   List.fold_left2
                     (fun so_far ((field : T.field), mine) (_, theirs) ->
@@ -307,10 +305,9 @@ let form database (path : Path.t) : Core.t option =
                                       unit)))
                             mine;
                       value = None;
-                      diverges = false;
                     })
             | "Ordered", "compare" -> (
-                let other = given () in
+                let other = other_place () in
                 let ordering name = node result (Construct { variant = Some name; fields = [] }) in
                 let declared variant fields =
                   Environment.in_declared_order database type_ ~variant
@@ -347,7 +344,7 @@ let form database (path : Path.t) : Core.t option =
                                              {
                                                local = decided;
                                                name = "decided";
-                                               mutable_ = false;
+                                               is_var = false;
                                                mode = Own;
                                              }))
                                        (giving
@@ -355,7 +352,6 @@ let form database (path : Path.t) : Core.t option =
                                              (Use
                                                 (Local { local = decided; type_ = result; origin }))));
                                    ];
-                                 guards_exhaustive = false;
                                }))
                 in
                 let number = T.builtin UInt32 in
@@ -383,7 +379,6 @@ let form database (path : Path.t) : Core.t option =
                                    arm (is variant)
                                      (giving (node number (Integer (Z.of_int index)))))
                                  variants;
-                             guards_exhaustive = false;
                            })
                     in
                     let by_number index =
@@ -425,7 +420,7 @@ let form database (path : Path.t) : Core.t option =
                                         {
                                           local = theirs;
                                           name = "theirs";
-                                          mutable_ = false;
+                                          is_var = false;
                                           mode = Own;
                                         });
                                  value = Value numbered;
@@ -460,8 +455,6 @@ let form database (path : Path.t) : Core.t option =
                     contract = { requires = []; ensures = []; decreases = []; costs = [] };
                     body = Some body;
                   };
-              node_count = !nodes;
-              synthetic_local_count = !made;
             }
       | _ -> None)
   | _ -> None

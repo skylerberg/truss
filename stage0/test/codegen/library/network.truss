@@ -2,14 +2,14 @@ use standard::network
 
 fn ip(text: StringSlice) -> network::IpAddress {
   match network::IpAddress.parse(text) {
-    Ok(found) => found
+    Ok(address) => address
     Err(_) => network::IpAddress.unspecified
   }
 }
 
 fn reads(text: StringSlice, expected: StringSlice) -> Bool {
   match network::IpAddress.parse(text) {
-    Ok(found) => "${found}" == expected.to_string()
+    Ok(address) => "${address}" == expected.to_string()
     Err(_) => false
   }
 }
@@ -91,7 +91,7 @@ test "text that is not an address says where it stops being one" {
 
 fn reads_socket(text: StringSlice, expected: StringSlice) -> Bool {
   match network::SocketAddress.parse(text) {
-    Ok(found) => "${found}" == expected.to_string()
+    Ok(address) => "${address}" == expected.to_string()
     Err(_) => false
   }
 }
@@ -123,7 +123,7 @@ fn network_of(text: StringSlice, prefix_length: UInt8) -> Option[network::IpNetw
 
 fn contains(text: StringSlice, prefix_length: UInt8, inside: StringSlice) -> Bool {
   match network_of(text, prefix_length: prefix_length) {
-    Some(found) => found.contains(ip(inside))
+    Some(network) => network.contains(ip(inside))
     None => false
   }
 }
@@ -157,8 +157,8 @@ test "a network forgets the bits past its prefix, and its prefix fits its addres
 }
 
 test "a network is read as an address, a slash, and a prefix length" {
-  assert network::IpNetwork.parse("10.1.2.3/8") is Ok(found) && Some(found) == network_of("10.0.0.0", prefix_length: 8)
-  assert network::IpNetwork.parse("2001:db8::/32") is Ok(found) && found.contains(ip("2001:db8::7"))
+  assert network::IpNetwork.parse("10.1.2.3/8") is Ok(network) && Some(network) == network_of("10.0.0.0", prefix_length: 8)
+  assert network::IpNetwork.parse("2001:db8::/32") is Ok(network) && network.contains(ip("2001:db8::7"))
   assert network::IpNetwork.parse("10.0.0.0") == Err(network::AddressError(offset: 8))
   assert network::IpNetwork.parse("10.0.0.0/33") == Err(network::AddressError(offset: 9))
   assert network::IpNetwork.parse("10.0.0.0/x") == Err(network::AddressError(offset: 9))

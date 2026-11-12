@@ -79,8 +79,8 @@ test "a float gives its fraction and its sign" {
   assert Float64.negative_infinity.sign() == -1.0
 }
 
-fn close(found: Float64, expected: Float64) -> Bool {
-  (found - expected).absolute() <= expected.absolute() * 1.0e-15
+fn close(actual: Float64, expected: Float64) -> Bool {
+  (actual - expected).absolute() <= expected.absolute() * 1.0e-15
 }
 
 test "degrees and radians convert both ways" {
@@ -614,18 +614,18 @@ test "text is read as the nearest float" {
 
 test "text that is not a number says where it stops being one" {
   assert Float64.parse("") == Err(core::ParseFloatError.Empty)
-  assert Float64.parse("abc") == Err(core::ParseFloatError.Invalid(offset: 0))
-  assert Float64.parse("-") == Err(core::ParseFloatError.Invalid(offset: 1))
-  assert Float64.parse(".") == Err(core::ParseFloatError.Invalid(offset: 0))
-  assert Float64.parse("1.2.3") == Err(core::ParseFloatError.Invalid(offset: 3))
-  assert Float64.parse("1e") == Err(core::ParseFloatError.Invalid(offset: 2))
-  assert Float64.parse("1e+") == Err(core::ParseFloatError.Invalid(offset: 3))
-  assert Float64.parse("12 ") == Err(core::ParseFloatError.Invalid(offset: 2))
-  assert Float64.parse(" 12") == Err(core::ParseFloatError.Invalid(offset: 0))
-  assert Float64.parse("0x10") == Err(core::ParseFloatError.Invalid(offset: 1))
-  assert Float64.parse("inf") == Err(core::ParseFloatError.Invalid(offset: 0))
-  assert Float64.parse("nan") == Err(core::ParseFloatError.Invalid(offset: 0))
-  assert Float64.parse("1_000") == Err(core::ParseFloatError.Invalid(offset: 1))
+  assert Float64.parse("abc") == Err(core::ParseFloatError.InvalidCharacter(offset: 0))
+  assert Float64.parse("-") == Err(core::ParseFloatError.InvalidCharacter(offset: 1))
+  assert Float64.parse(".") == Err(core::ParseFloatError.InvalidCharacter(offset: 0))
+  assert Float64.parse("1.2.3") == Err(core::ParseFloatError.InvalidCharacter(offset: 3))
+  assert Float64.parse("1e") == Err(core::ParseFloatError.InvalidCharacter(offset: 2))
+  assert Float64.parse("1e+") == Err(core::ParseFloatError.InvalidCharacter(offset: 3))
+  assert Float64.parse("12 ") == Err(core::ParseFloatError.InvalidCharacter(offset: 2))
+  assert Float64.parse(" 12") == Err(core::ParseFloatError.InvalidCharacter(offset: 0))
+  assert Float64.parse("0x10") == Err(core::ParseFloatError.InvalidCharacter(offset: 1))
+  assert Float64.parse("inf") == Err(core::ParseFloatError.InvalidCharacter(offset: 0))
+  assert Float64.parse("nan") == Err(core::ParseFloatError.InvalidCharacter(offset: 0))
+  assert Float64.parse("1_000") == Err(core::ParseFloatError.InvalidCharacter(offset: 1))
 }
 
 fn reads_single(text: StringSlice, bits: UInt32) -> Bool {
@@ -646,5 +646,5 @@ test "text is read as the nearest Float32, rounding once" {
   assert reads_single("-0.0", bits: 2147483648)
   assert Float32.parse("-infinity") == Ok(Float32.negative_infinity)
   assert Float32.parse("NaN") is Ok(value) && value.is_nan()
-  assert Float32.parse("1.5f") == Err(core::ParseFloatError.Invalid(offset: 3))
+  assert Float32.parse("1.5f") == Err(core::ParseFloatError.InvalidCharacter(offset: 3))
 }

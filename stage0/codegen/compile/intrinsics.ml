@@ -36,8 +36,9 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
   let into intrinsic = call ?result:destination intrinsic (List.map operand arguments) in
   let usize_local name = local b ~name (Value types.usize) in
   let element () = type_argument 0 in
-  let element_layout ?element:given () =
-    Memory_layout.of_type env (match given with Some element -> element | None -> element ())
+  let element_layout ?element:element_type () =
+    Memory_layout.of_type env
+      (match element_type with Some element -> element | None -> element ())
   in
   let length storage = Lir.Copy (Storage.length storage) in
   let view_length view = Lir.Copy (Storage.view_length view) in
@@ -250,16 +251,16 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
         Constant (Integer (integer, Z.of_int (Libc.value (Memory_layout.target env).system number)))
       in
       (* The text at an address that may be null: the bytes up to a zero
-         byte, as a view, with [found] saying whether the address was
+         byte, as a view, with [is_present] saying whether the address was
          there. A view's address is never null, so text that is not there
          is an empty view of static bytes. *)
-      let text_at address ~found =
-        emit b (Assign (found, Binary (Not_equal, Copy (at address), Constant Null)));
+      let text_at address ~is_present =
+        emit b (Assign (is_present, Binary (Not_equal, Copy (at address), Constant Null)));
         let elements = local b (Raw (Pointer (Data byte))) in
         let count = usize_local "length" in
         emit b (Assign (at elements, Use (Constant (Bytes ""))));
         emit b (Assign (at count, Use (usize 0)));
-        when_ b (Copy found) (fun () ->
+        when_ b (Copy is_present) (fun () ->
             emit b (Assign (at elements, Use (Copy (at address))));
             call ~result:(at count) Terminated_length [ Copy (at address) ]);
         set
@@ -424,9 +425,9 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                  the standard library relies on, as where it hashes a
                  negative number. *)
               if checks then begin
-                let within = local b (Raw Bool) in
-                emit b (Assign (at within, fits ()));
-                panic_if (Unary (Not, Copy (at within))) "conversion out of range"
+                let in_range = local b (Raw Bool) in
+                emit b (Assign (at in_range, fits ()));
+                panic_if (Unary (Not, Copy (at in_range))) "conversion out of range"
               end;
               set (Convert (value 0, scalar env (type_argument 1)))
           | _ -> set (Convert (value 0, scalar env (type_argument 1))))
@@ -583,25 +584,30 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                 arguments = [ Type (element ()); Value count ];
               }
           in
-          let taken = at (local b ~borrowed:true (Value (Storage.of_elements (element ())))) in
-          emit b (Assign (taken, Use (Move (place (argument 0)))));
+          let moved_storage =
+            at (local b ~borrowed:true (Value (Storage.of_elements (element ()))))
+          in
+          emit b (Assign (moved_storage, Use (Move (place (argument 0)))));
           if checks then begin
             let other = local b (Raw Bool) in
             emit b
-              (Assign (at other, Binary (Not_equal, length taken, Constant (Integer (USize, count)))));
+              (Assign
+                 ( at other,
+                   Binary (Not_equal, length moved_storage, Constant (Integer (USize, count))) ));
             panic_when (Copy (at other)) "a storage made into an array of another length"
           end;
           if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
             let untyped = local b (Raw (Pointer Opaque)) in
-            emit b (Assign (at untyped, Use (Copy (Storage.buffer taken))));
+            emit b (Assign (at untyped, Use (Copy (Storage.buffer moved_storage))));
             let typed = local b (Pointer { target = Value array_ty; writable = true }) in
             emit b (Assign (at typed, Use (Copy (at untyped))));
             set (Use (Move { root = Local typed; projections = [ Deref ] }))
           end;
           (* Static elements have no buffer to free. *)
           let owns = local b (Raw Bool) in
-          emit b (Assign (at owns, Binary (Greater, Copy (Storage.capacity taken), usize 0)));
-          when_ b (Copy (at owns)) (fun () -> call Free [ Copy (Storage.buffer taken) ])
+          emit b
+            (Assign (at owns, Binary (Greater, Copy (Storage.capacity moved_storage), usize 0)));
+          when_ b (Copy (at owns)) (fun () -> call Free [ Copy (Storage.buffer moved_storage) ])
       | Array_view ->
           (* An array's elements are one after another from its start. An
              array with no bytes has no address, and its view is of
@@ -797,7 +803,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           emit b (Assign (at position, Binary (Add, Copy (at position), usize 1)));
           finish b (Goto test);
           start b after;
-          text_at entry ~found:(place (argument 1))
+          text_at entry ~is_present:(place (argument 1))
       | Libc function_ when not (Libc.available (Memory_layout.target env).system function_) ->
           (* The standard library asks which system it is built for before
              it calls a function that only some have. *)
@@ -823,22 +829,22 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
              arguments they were written for. *)
           let after = ref [] in
           let next = ref 0 in
-          let taken () =
+          let next_argument () =
             let index = !next in
             incr next;
             index
           in
-          let given =
+          let call_arguments =
             List.map
               (fun (_, (passes : Libc.passes)) : Lir.operand ->
                 match passes with
-                | Value _ -> value (taken ())
-                | Elements _ -> Copy (Storage.view_elements (place (argument (taken ()))))
+                | Value _ -> value (next_argument ())
+                | Elements _ -> Copy (Storage.view_elements (place (argument (next_argument ()))))
                 | Room _ ->
-                    let storage = place (argument (taken ())) in
+                    let storage = place (argument (next_argument ())) in
                     Address { place = element_at storage (length storage); writable = true }
                 | Elements_to_change (scalar, _) ->
-                    let storage = argument (taken ()) in
+                    let storage = argument (next_argument ()) in
                     own ~element:(ground scalar) storage;
                     Copy (Storage.buffer (place storage))
                 | Written (scalar, names) ->
@@ -854,7 +860,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
                     in
                     List.iteri
                       (fun index _ ->
-                        let written = place (argument (taken ())) in
+                        let written = place (argument (next_argument ())) in
                         emit b (Assign (at structure / Index (usize index), Use (Copy written)));
                         after :=
                           (fun () ->
@@ -967,7 +973,7 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           in
           let call result =
             bracket Blocking_begin;
-            emit b (Call { target; arguments = given; result });
+            emit b (Call { target; arguments = call_arguments; result });
             bracket Blocking_end;
             List.iter (fun write -> write ()) (List.rev !after)
           in
@@ -985,6 +991,6 @@ let lower ?(checks = false) ?(value_arguments = []) env b types operation ~type_
           | Text ->
               let address = local b (Raw (Nullable_pointer (Data byte))) in
               call (Returned (at address));
-              text_at address ~found:(place (argument (taken ()))))
+              text_at address ~is_present:(place (argument (next_argument ()))))
       | Libc_number number -> set (Use (number_constant number)));
       None

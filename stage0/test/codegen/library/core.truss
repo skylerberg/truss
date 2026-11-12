@@ -59,15 +59,15 @@ test "the errors of parsing and converting say what went wrong" {
   assert "${core::ParseIntegerError.Empty}" == "the text has no digits"
   assert "${core::ParseIntegerError.InvalidDigit(offset: 3)}" == "the byte at offset 3 is not a digit"
   assert "${core::ParseIntegerError.OutOfRange}" == "the number does not fit the type"
-  assert "${core::ParseFloatError.Invalid(offset: 0)}" == "the byte at offset 0 is not part of a number"
+  assert "${core::ParseFloatError.InvalidCharacter(offset: 0)}" == "the byte at offset 0 is not part of a number"
   assert "${core::ConversionError()}" == "the value does not fit the type"
 }
 
 test "take empties an option and replace fills it, each giving what was there" {
   var held: Option[String] = Some("a${1}")
-  let taken = mut held.take()
+  let removed = mut held.take()
   assert held is None
-  assert taken == Some("a1")
+  assert removed == Some("a1")
   assert mut held.take() is None
   let previous = mut held.replace("b${2}")
   assert previous is None
@@ -79,7 +79,7 @@ test "take empties an option and replace fills it, each giving what was there" {
 
 test "find lends the first element that matches" {
   let items: List[Int64] = [1, 2, 3, 4]
-  assert items.find(fn(item) { item > 2 }) is Some(found) && found == 3
+  assert items.find(fn(item) { item > 2 }) is Some(item) && item == 3
   assert items.find(fn(item) { item > 9 }) is None
   let words: List[String] = ["a${1}", "bb${2}", "cc${3}"]
   assert words.find(fn(word) { word.length() == 3 }) is Some(word) && word == "bb2"

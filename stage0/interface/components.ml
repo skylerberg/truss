@@ -4,7 +4,7 @@
    [successors] returns only nodes of the graph. *)
 let of_graph ~compare ~successors nodes =
   let index = Hashtbl.create 64 and low = Hashtbl.create 64 and on_stack = Hashtbl.create 64 in
-  let stack = ref [] and next = ref 0 and found = ref [] in
+  let stack = ref [] and next = ref 0 and components = ref [] in
   let lower node other = Hashtbl.replace low node (min (Hashtbl.find low node) other) in
   let rec visit node =
     Hashtbl.replace index node !next;
@@ -29,8 +29,8 @@ let of_graph ~compare ~successors nodes =
             if compare top node = 0 then top :: members else pop (top :: members)
         | [] -> members
       in
-      found := List.sort compare (pop []) :: !found
+      components := List.sort compare (pop []) :: !components
     end
   in
   List.iter (fun node -> if not (Hashtbl.mem index node) then visit node) nodes;
-  List.rev !found
+  List.rev !components

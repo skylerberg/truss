@@ -5,7 +5,7 @@ module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 
-type local = { type_ : T.ty; mutable_ : bool; mode : T.mode }
+type local = { type_ : T.ty; is_var : bool; mode : T.mode }
 type enclosing = Loop | Task of Core.task
 type exit = Return_exit | Break_exit | Continue_exit
 
@@ -46,7 +46,7 @@ type form = {
   pattern_builders : (unit -> Core.pattern) option array;
   mutable definition_builder : (unit -> Core.definition) option;
   mutable next_node_id : int;
-  mutable synthetic_local_count : int;
+  mutable next_synthetic_local : int;
   mutable tables_with_holes : C.t option;
 }
 
@@ -134,7 +134,7 @@ val signed_type : state -> Types.ty -> bool
 
 val bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Unify.T.ty -> Types.ty
-val final : state -> Unify.T.ty -> T.ty
+val final_type : state -> Unify.T.ty -> T.ty
 val final_capabilities : state -> T.capability list -> T.capability list
 val final_argument : state -> T.argument -> T.argument
 val unify : state -> Unify.T.ty -> Unify.T.ty -> bool
@@ -146,9 +146,9 @@ val evidence_of : Impls.evidence -> C.evidence
 val trait_reference : ?arguments:T.argument list -> Path.t -> T.trait_reference
 val string_type : T.ty
 val in_statement : state -> env -> Syntax.span -> (unit -> 'a) -> 'a
-val statement_never : state -> Syntax.statement -> bool
+val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
-val declare : state -> Syntax.name -> T.ty -> mutable_:bool -> mode:T.mode -> unit
+val declare : state -> Syntax.name -> T.ty -> is_var:bool -> mode:T.mode -> unit
 val target : state -> Syntax.name -> Resolve.target option
 val default_literal : state -> Unify.T.ty -> Unify.T.ty
 val head : state -> Syntax.expression -> Resolve.head option
@@ -156,9 +156,9 @@ val names_variant : Syntax.name -> bool
 val show : state -> Unify.T.ty -> string
 
 val mismatched :
-  state -> Syntax.span -> expected:Unify.T.ty -> found:Unify.T.ty -> Diagnostic.reported
+  state -> Syntax.span -> expected:Unify.T.ty -> actual:Unify.T.ty -> Diagnostic.reported
 
-val mismatch : state -> Syntax.span -> expected:Unify.T.ty -> found:Unify.T.ty -> unit
+val mismatch : state -> Syntax.span -> expected:Unify.T.ty -> actual:Unify.T.ty -> unit
 val is_place : state -> Syntax.expression -> bool
 val marked_call : state -> Syntax.expression -> Syntax.id option
 val called : Syntax.expression -> Syntax.expression option
@@ -177,7 +177,7 @@ val convert :
   ?argument:bool ->
   ?expression:Core.origin ->
   Syntax.span ->
-  found:Unify.T.ty ->
+  actual:Unify.T.ty ->
   expected:Unify.T.ty ->
   unit
 

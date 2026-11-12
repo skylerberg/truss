@@ -152,23 +152,23 @@ public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[USi
   None
 }
 
-public fn Slice[Element].find_index(self, matching: (fn(Element) -> Bool cost time finite)) -> Option[USize]
+public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost time finite)) -> Option[USize]
 
   ensures match result {
-    Some(index) => index < self.length() && matching(self.model()[index])
-      && (forall i in 0..index => !matching(self.model()[i]))
-    None => forall i in 0..self.length() => !matching(self.model()[i])
+    Some(index) => index < self.length() && predicate(self.model()[index])
+      && (forall i in 0..index => !predicate(self.model()[i]))
+    None => forall i in 0..self.length() => !predicate(self.model()[i])
   }
-  cost time O(self.length() * time(matching))
+  cost time O(self.length() * time(predicate))
 {
   var index: USize = 0
   while index < self.length()
     invariant index <= self.length()
-    invariant forall i in 0..index => !matching(self.model()[i])
+    invariant forall i in 0..index => !predicate(self.model()[i])
     decreases self.length() - index
-    cost time O(index * time(matching))
+    cost time O(index * time(predicate))
   {
-    if matching(self[index]) {
+    if predicate(self[index]) {
       return Some(index)
     }
     index += 1
@@ -300,27 +300,27 @@ fn find_with_table[Element: Equal](haystack: Slice[Element], needle: Slice[Eleme
   }
   cost time O(haystack.length() * time(Element.equal))
 {
-  var found = false
+  var has_match = false
   var first: USize = 0
   var matched: USize = 0
   var index: USize = 0
-  while index < haystack.length() && !found
+  while index < haystack.length() && !has_match
     invariant index <= haystack.length()
     invariant matched < needle.length()
     invariant matched <= index
-    invariant found ==> first + needle.length() <= haystack.length()
+    invariant has_match ==> first + needle.length() <= haystack.length()
     decreases haystack.length() - index
     cost time O((4 * index - matched) * time(Element.equal))
   {
     matched = matched_after(haystack, needle: needle, table: table, matched: matched, index: index)
     index += 1
     if matched == needle.length() {
-      found = true
+      has_match = true
       first = index - matched
       matched = table[matched - 1]
     }
   }
-  if found { Some(first) } else { None }
+  if has_match { Some(first) } else { None }
 }
 
 public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Option[USize]
@@ -581,17 +581,17 @@ public fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost 
   ensures forall i in 0..result.length() => keep(result.model()[i])
   cost time O(self.length() * (time(keep) + time(Element.copy)))
 {
-  var kept: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
+  var retained: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(kept) <= index
-    invariant intrinsic::storage_capacity(kept) == self.length()
-    invariant forall i in 0..intrinsic::storage_length(kept) => keep(intrinsic::storage_model(kept)[i])
+    invariant intrinsic::storage_length(retained) <= index
+    invariant intrinsic::storage_capacity(retained) == self.length()
+    invariant forall i in 0..intrinsic::storage_length(retained) => keep(intrinsic::storage_model(retained)[i])
   {
     if keep(self[index]) {
-      intrinsic::storage_push(mut kept, value: self[index].copy())
+      intrinsic::storage_push(mut retained, value: self[index].copy())
     }
   }
-  List(storage: own kept)
+  List(storage: own retained)
 }
 
 public fn Slice[Element: Ordered + Copyable].sorted(self) -> List[Element]

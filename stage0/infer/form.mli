@@ -83,7 +83,7 @@ val try_ :
   Syntax.expression ->
   Syntax.expression ->
   output:State.T.ty ->
-  leaves:Core.task list ->
+  exited_tasks:Core.task list ->
   Core.kind
 
 val slice :

@@ -8,5 +8,5 @@ val shadow : Nodes.t -> Nodes.node -> Nodes.node
 val readers_here : Nodes.t -> Nodes.node -> phase:int option -> Nodes.node list
 val mark : ?every_phase:bool -> Nodes.t -> Nodes.node -> unit
 val seed : Nodes.t -> Nodes.node -> unit
-val record : Nodes.context -> Nodes.node -> unit
+val record_read : Nodes.context -> Nodes.node -> unit
 val cycle : Nodes.t -> Nodes.node -> string list

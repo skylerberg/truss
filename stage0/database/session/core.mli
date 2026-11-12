@@ -30,14 +30,14 @@ val touch : t -> unit
 val set : t -> ('a, 'b) Query.input -> 'a -> 'b -> unit
 val remove : t -> ('a, 'b) Query.input -> 'a -> unit
 val find : string -> t option
-val trust : string -> unit
+val allow_reading : string -> unit
 
 type record = { version : string; artifact : string; files : (string * string) list }
 
 val save : t -> unit
 val stabilize : t -> Engine.change
 val serving : bool ref
-val fold : ?waited_for:bool -> t -> unit
+val compact : ?waited_for:bool -> t -> unit
 val fingerprint : string -> string
 val note_file : t -> string -> string option -> unit
 

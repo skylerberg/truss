@@ -292,7 +292,7 @@ let () =
         ~dependencies:[ { package = { owner = None; name = "clock_library" }; capabilities = [] } ];
       match codes (check database (module_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found))
+      | actual -> fail "found [%s]" (String.concat "; " actual))
 
 let () =
   let with_grant files granted =
@@ -340,7 +340,7 @@ let () =
           []
       with
       | "capabilities.not_granted" :: _ -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | actual -> fail "found [%s]" (String.concat "; " actual));
   test "a dependency's trait method can use a granted capability" (fun () ->
       match
         with_grant
@@ -357,7 +357,7 @@ let () =
           [ "Clock" ]
       with
       | [] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | actual -> fail "found [%s]" (String.concat "; " actual));
   test "providing a dependency's type checks the grants for the capabilities of its impls"
     (fun () ->
       match
@@ -377,7 +377,7 @@ let () =
           []
       with
       | [ "capabilities.not_granted" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found))
+      | actual -> fail "found [%s]" (String.concat "; " actual))
 
 let () =
   test "an implementation of a capability may not call the capability directly" (fun () ->
@@ -417,9 +417,9 @@ let codes_with_grants files grants =
       (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants);
   (database, codes (check database (module_of "app::main")))
 
-let expect_codes ~expected (_, found) =
-  if found <> expected then
-    fail "found [%s], expected [%s]" (String.concat "; " found) (String.concat "; " expected)
+let expect_codes ~expected (_, actual) =
+  if actual <> expected then
+    fail "found [%s], expected [%s]" (String.concat "; " actual) (String.concat "; " expected)
 
 let time =
   ("clock_library::time", "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n")
@@ -532,10 +532,10 @@ let () =
         (codes_with_grants [ pays; ledger ]
            [ ({ owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]));
   test "a capability's name alone grants only one of the prelude" (fun () ->
-      let database, found =
+      let database, actual =
         codes_with_grants [ pays; ledger ] [ ({ owner = None; name = "store" }, [ "Ledger" ]) ]
       in
-      expect_codes ~expected:[ "capabilities.not_granted" ] (database, found);
+      expect_codes ~expected:[ "capabilities.not_granted" ] (database, actual);
       match problems database with
       | [ Not_a_capability { dependency = { Path.owner = None; name = "store" }; name = "Ledger" } ]
         ->
@@ -565,7 +565,7 @@ let () =
       in
       if problems database <> [] then fail "reported");
   test "a dependency whose trait's method is called with a dot is used" (fun () ->
-      let database, found =
+      let database, actual =
         codes_with_grants
           [
             ("app::main", "fn f(side: Int64) -> Int64 {\n  side.doubled()\n}\n");
@@ -581,10 +581,10 @@ let () =
           ]
           [ ({ Path.owner = None; name = "shapes" }, []) ]
       in
-      expect_codes ~expected:[] (database, found);
+      expect_codes ~expected:[] (database, actual);
       if problems database <> [] then fail "reported");
   test "an unused dependency is reported for every kind of definition in the package" (fun () ->
-      let database, found =
+      let database, actual =
         codes_with_grants
           [
             ( "app::main",
@@ -615,7 +615,7 @@ let () =
           ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
-      expect_codes ~expected:[] (database, found);
+      expect_codes ~expected:[] (database, actual);
       match problems database with
       | [ Unused { Path.owner = None; name = "clock_library" } ] -> ()
       | _ -> fail "not reported");
@@ -798,35 +798,35 @@ let () =
   test "a call's result has the capabilities that were passed for the capability parameter"
     (fun () ->
       one_diagnostic
-        (later ^ "fn f() -> Instant {\n  let kept = later(tick)\n  kept()\n}\n")
+        (later ^ "fn f() -> Instant {\n  let held = later(tick)\n  held()\n}\n")
         "capabilities.not_available";
-      fine (later ^ "fn f() -> Instant\n  uses Clock\n{\n  let kept = later(tick)\n  kept()\n}\n");
-      fine (later ^ "fn f() -> Instant {\n  let kept = later(still)\n  kept()\n}\n"));
+      fine (later ^ "fn f() -> Instant\n  uses Clock\n{\n  let held = later(tick)\n  held()\n}\n");
+      fine (later ^ "fn f() -> Instant {\n  let held = later(still)\n  held()\n}\n"));
   test "a call's result must fit the function type that it is checked against" (fun () ->
       one_diagnostic
         (later
-       ^ "fn f()\n  uses Clock\n{\n  let kept: fn() -> Instant = later(tick)\n  let _ = kept\n}\n")
+       ^ "fn f()\n  uses Clock\n{\n  let held: fn() -> Instant = later(tick)\n  let _ = held\n}\n")
         "types.mismatch";
       fine
         (later
        ^ "fn f()\n\
          \  uses Clock\n\
           {\n\
-         \  let kept: (fn() -> Instant uses Clock) = later(tick)\n\
-         \  let _ = kept\n\
+         \  let held: (fn() -> Instant uses Clock) = later(tick)\n\
+         \  let _ = held\n\
           }\n"));
   test "a variable that is assigned a second function has the capabilities of both" (fun () ->
       one_diagnostic
-        (later ^ "fn f() -> Instant {\n  var kept = later(still)\n  kept = tick\n  kept()\n}\n")
+        (later ^ "fn f() -> Instant {\n  var held = later(still)\n  held = tick\n  held()\n}\n")
         "capabilities.not_available";
       fine
         (later
        ^ "fn f() -> Instant\n\
          \  uses Clock\n\
           {\n\
-         \  var kept = later(still)\n\
-         \  kept = tick\n\
-         \  kept()\n\
+         \  var held = later(still)\n\
+         \  held = tick\n\
+         \  held()\n\
           }\n"));
   test "a type and a trait cannot take a capability parameter" (fun () ->
       one_diagnostic "type Holder[capability Granted](action: (fn() -> Instant uses Granted))\n"
@@ -860,7 +860,7 @@ let () =
            }\n"
       with
       | 1 -> ()
-      | found -> fail "%d conversions" found);
+      | actual -> fail "%d conversions" actual);
   test "a function that promises to end can be bound as one that does" (fun () ->
       fine
         "fn f() -> Int64 {\n\

@@ -34,8 +34,9 @@ let evidence : C.evidence -> Core.evidence = function
 let callee (callee : C.callee) : Core.callee =
   match callee with
   | Function { path; type_arguments } -> Function { path; type_arguments }
-  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = found } ->
-      Trait_method { trait; name; receiver; self_type; type_arguments; evidence = evidence found }
+  | Trait_method { trait; name; receiver; self_type; type_arguments; evidence = inferred } ->
+      Trait_method
+        { trait; name; receiver; self_type; type_arguments; evidence = evidence inferred }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
   | Constructor _ | Indirect | Built_in_operator -> bug "this callee has no core callee"
@@ -242,7 +243,7 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                   id = fresh_node_id state;
                   origin = value.id;
                   type_ = field.field_type;
-                  kind = Bind { local; name = field.field_name; mutable_ = false; mode = Own };
+                  kind = Bind { local; name = field.field_name; is_var = false; mode = Own };
                 })
               fields;
           captures = [];
@@ -271,7 +272,6 @@ let variant_value state (value : expression) type_path variant : Core.kind =
                                                 })))) ))
                               fields;
                         }));
-              diverges = false;
             };
           result = variant_type;
         }
@@ -295,7 +295,7 @@ let local_use state ~origin (id : id) : Core.kind =
 
 let self_type state (env : env) =
   match env.self with
-  | Some type_ -> final state type_
+  | Some type_ -> final_type state type_
   | None -> bug "`self` is used outside a method"
 
 (* The place of [self]. *)
@@ -403,7 +403,7 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                    id = fresh_node_id state;
                    origin;
                    type_ = builder_type;
-                   kind = Bind { local = builder; name = "builder"; mutable_ = true; mode = Own };
+                   kind = Bind { local = builder; name = "builder"; is_var = true; mode = Own };
                  };
                value = Value (make builder_type (call (builder_method "new" Static) []));
                else_ = None;
@@ -476,7 +476,6 @@ let untagged_string state ~origin (literal : string_literal) : Core.kind =
                           mark = None;
                         };
                     ]));
-          diverges = false;
         }
 
 (* A list literal, desugared to a block: allocate storage with capacity for
@@ -509,7 +508,7 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                id = fresh_node_id state;
                origin;
                type_ = storage_type;
-               kind = Bind { local = storage; name = "storage"; mutable_ = true; mode = Own };
+               kind = Bind { local = storage; name = "storage"; is_var = true; mode = Own };
              };
            value =
              Value
@@ -571,7 +570,6 @@ let list_literal state ~origin (element : T.ty) (elements : Core.expression list
                   lends = None;
                   uses = [];
                 }));
-      diverges = false;
     }
 
 (* A tagged string, desugared to a call of the tag type's [from_template]
@@ -648,7 +646,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
   else
     let equal = trait_reference (Well_known.path Equal) in
     match implements state type_ equal with
-    | Some found ->
+    | Some implementation ->
         Equal_to
           {
             value;
@@ -660,7 +658,7 @@ let equal_to_pattern state ~origin type_ (value : Core.kind) : Core.pattern_kind
                   receiver = Read;
                   self_type = type_;
                   type_arguments = [];
-                  evidence = evidence (evidence_of found);
+                  evidence = evidence (evidence_of implementation);
                 };
           }
     | None ->
@@ -822,21 +820,29 @@ let is_executable state (condition : Core.expression) =
     condition;
   !executable
 
-(* A compound assignment. Its [value] computes the new value from
-   [Current_target] (the target's value before the assignment) and the
-   right-hand side. If the operator is a trait method, the checker recorded
-   the call under the statement's id. *)
+(* A compound assignment. The right operand is bound to a synthetic local,
+   and [value] computes the new value from [Current_target] (the target's
+   value before the assignment) and that local. If the operator is a trait
+   method, the checker recorded the call under the statement's id. *)
 let compound_assign state (written : statement) (target : expression) (value : expression) operator
     : Core.statement_kind =
   let place = place_of (build_expression state target) in
   let target_type = type_of state target in
   let current = synthetic_expression state ~origin:written.id target_type Core.Current_target in
   let right = build_expression state value in
-  let kind : Core.kind =
+  let bound = fresh_synthetic_local state in
+  let bound_value =
+    synthetic_expression state ~origin:value.id right.type_
+      (Use (Local { local = bound; type_ = right.type_; origin = value.id }))
+  in
+  let built_in operation : Core.kind * Core.operand =
+    (Operator { operation; arguments = [ current; bound_value ] }, Value right)
+  in
+  let kind, right_operand =
     match state.tables.calls.(written.id) with
     | Some ({ callee = Trait_method { trait; name; self_type; _ }; _ } as recorded) -> (
         match built_in_operation trait name self_type with
-        | Some operation -> Operator { operation; arguments = [ current; right ] }
+        | Some operation -> built_in operation
         | None ->
             let mode index =
               match
@@ -847,22 +853,28 @@ let compound_assign state (written : statement) (target : expression) (value : e
               | Some argument -> argument.mode
               | None -> T.Read
             in
-            Call
-              {
-                callee = callee recorded.callee;
-                arguments =
-                  [
-                    Passed { mode = mode 0; value = Value current; mark = None };
-                    Passed { mode = mode 1; value = operand (mode 1) right; mark = None };
-                  ];
-                lends = None;
-                uses = recorded.uses;
-              })
+            ( Call
+                {
+                  callee = callee recorded.callee;
+                  arguments =
+                    [
+                      Passed { mode = mode 0; value = Value current; mark = None };
+                      Passed { mode = mode 1; value = operand (mode 1) bound_value; mark = None };
+                    ];
+                  lends = None;
+                  uses = recorded.uses;
+                },
+              operand (mode 1) right ))
     | Some _ -> bug "a compound assignment's call is not a trait method call"
-    | None -> Operator { operation = operation_of operator; arguments = [ current; right ] }
+    | None -> built_in (operation_of operator)
   in
   Compound_assign
-    { target = place; value = synthetic_expression state ~origin:written.id target_type kind }
+    {
+      target = place;
+      operand = right_operand;
+      bound;
+      value = synthetic_expression state ~origin:written.id target_type kind;
+    }
 
 (* The cursor type that a call of a yielding method returns. *)
 let cursor_type (call : C.call) : T.ty =
@@ -907,7 +919,7 @@ let iteration state (written : statement) (iterable : expression) : Core.iterati
         | _ -> (
             let trait = trait_reference Impls.cursor_trait in
             match implements state cursor trait with
-            | Some found ->
+            | Some implementation ->
                 Some
                   (Trait_method
                      {
@@ -916,7 +928,7 @@ let iteration state (written : statement) (iterable : expression) : Core.iterati
                        receiver = Mut;
                        self_type = cursor;
                        type_arguments = [];
-                       evidence = evidence (evidence_of found);
+                       evidence = evidence (evidence_of implementation);
                      })
             | None ->
                 bug "a loop iterates over `%s`, which does not implement `Cursor`" (T.show cursor))
@@ -972,8 +984,8 @@ let early_exit (tasks : Core.task list) state ~origin (exit : Core.kind) : Core.
    is the success variant: its arm evaluates to the variant's field. The
    second is the failure variant: its arm returns the failure variant of
    the function's result type, with the same fields. *)
-let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leaves : Core.task list)
-    : Core.kind =
+let try_ state (value : expression) (inner : expression) ~(output : T.ty)
+    ~(exited_tasks : Core.task list) : Core.kind =
   let scrutinee = build_expression state inner in
   let variants (type_ : T.ty) =
     match type_ with
@@ -1010,7 +1022,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leav
                         id = fresh_node_id state;
                         origin = value.id;
                         type_ = field.field_type;
-                        kind = Bind { local; name = field.field_name; mutable_ = false; mode = Own };
+                        kind = Bind { local; name = field.field_name; is_var = false; mode = Own };
                       } ))
                   fields;
             };
@@ -1034,7 +1046,6 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leav
             {
               statements = [];
               value = (match success_fields with [ (_, field) ] -> Some field | _ -> None);
-              diverges = false;
             };
           arm [ failure_pattern ]
             {
@@ -1042,7 +1053,7 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leav
               value =
                 Some
                   (make T.Never
-                     (early_exit leaves state ~origin:value.id
+                     (early_exit exited_tasks state ~origin:value.id
                         (Return
                            (Some
                               (make output
@@ -1056,10 +1067,8 @@ let try_ state (value : expression) (inner : expression) ~(output : T.ty) ~(leav
                                           (Option.value ~default:[] returned_failure.fields)
                                           failure_fields;
                                     }))))));
-              diverges = true;
             };
         ];
-      guards_exhaustive = false;
     }
 
 (* A slice expression, [base[start..stop]]. The node holds the call of the
@@ -1151,7 +1160,7 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
                    id = fresh_node_id state;
                    origin;
                    type_;
-                   kind = Bind { local; name; mutable_ = true; mode = Own };
+                   kind = Bind { local; name; is_var = true; mode = Own };
                  };
                value = Value created;
                else_ = None;
@@ -1171,12 +1180,7 @@ let inserted_literal state ~origin (type_ : T.ty) ~name ~insert
                     T.unit)))
           entries
       in
-      Block
-        {
-          statements = bind :: inserts;
-          value = Some (make type_ (Use collection));
-          diverges = false;
-        }
+      Block { statements = bind :: inserts; value = Some (make type_ (Use collection)) }
 
 (* A list, set, or array literal, or a specification's sequence or set.
    A list or a set literal is desugared to calls. *)

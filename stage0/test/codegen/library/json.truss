@@ -27,28 +27,28 @@ fn written_text_parses_to_the_same_value(text: StringSlice) -> Bool {
 
 test "parse reads each kind of value" {
   assert json::parse("null") == Ok(json::Value.Null)
-  assert json::parse(" true ") is Ok(yes) && yes.to_bool() == Some(true)
-  assert json::parse("false") is Ok(no) && no.to_bool() == Some(false)
-  assert json::parse("42") is Ok(whole) && whole.to_int64() == Some(42)
-  assert json::parse("-0.5e1") is Ok(real) && real.to_float64() == Some(-5.0)
-  assert json::parse("\"plain\"") is Ok(text) && text.text() == Some("plain")
+  assert json::parse(" true ") is Ok(yes) && yes.as_bool() == Some(true)
+  assert json::parse("false") is Ok(no) && no.as_bool() == Some(false)
+  assert json::parse("42") is Ok(whole) && whole.as_int64() == Some(42)
+  assert json::parse("-0.5e1") is Ok(real) && real.as_float64() == Some(-5.0)
+  assert json::parse("\"plain\"") is Ok(text) && text.as_text() == Some("plain")
   assert json::parse("[1, [2, 3], {}]") is Ok(array)
-    && array.items() is Some(items)
+    && array.as_items() is Some(items)
     && items.length() == 3
-    && items[0].to_int64() == Some(1)
+    && items[0].as_int64() == Some(1)
   assert json::parse("{\"a\": 1, \"b\": {\"c\": [true]}}") is Ok(object)
     && object.get("a") is Some(first)
-    && first.to_int64() == Some(1)
+    && first.as_int64() == Some(1)
     && object.get("missing") is None
     && object.get_index(0) is None
   assert json::parse_bytes("[null]".bytes()) is Ok(from_bytes) && from_bytes.to_text() == "[null]"
 }
 
 test "parse decodes the escapes of a string" {
-  assert json::parse("\"a\\nb\\tc\\\"d\\\\e\\/f\"") is Ok(escaped) && escaped.text() == Some("a\nb\tc\"d\\e/f")
-  assert json::parse("\"\\u00e9\\u4e2d\"") is Ok(unicode) && unicode.text() == Some("é中")
-  assert json::parse("\"\\ud83d\\ude00\"") is Ok(pair) && pair.text() == Some("😀")
-  assert json::parse("\"é中😀\"") is Ok(direct) && direct.text() == Some("é中😀")
+  assert json::parse("\"a\\nb\\tc\\\"d\\\\e\\/f\"") is Ok(escaped) && escaped.as_text() == Some("a\nb\tc\"d\\e/f")
+  assert json::parse("\"\\u00e9\\u4e2d\"") is Ok(unicode) && unicode.as_text() == Some("é中")
+  assert json::parse("\"\\ud83d\\ude00\"") is Ok(pair) && pair.as_text() == Some("😀")
+  assert json::parse("\"é中😀\"") is Ok(direct) && direct.as_text() == Some("é中😀")
   assert kind_of("\"\\x\"") == Some(json::ParseErrorKind.InvalidEscape)
   assert kind_of("\"\\ud83d\"") == Some(json::ParseErrorKind.InvalidUnicode)
   assert kind_of("\"\\ude00\"") == Some(json::ParseErrorKind.InvalidUnicode)
@@ -79,15 +79,15 @@ test "parse rejects text that is not JSON and says where" {
 }
 
 test "a number keeps a whole value exact and any other value as a float" {
-  assert json::parse("9007199254740993") is Ok(large) && large.to_int64() == Some(9007199254740993)
-  assert json::parse("-9223372036854775808") is Ok(least) && least.to_int64() == Some(Int64.minimum)
-  assert json::parse("1.5") is Ok(half) && half.to_int64() is None && half.to_float64() == Some(1.5)
-  assert json::parse("1e3") is Ok(thousand) && thousand.to_float64() == Some(1000.0)
+  assert json::parse("9007199254740993") is Ok(large) && large.as_int64() == Some(9007199254740993)
+  assert json::parse("-9223372036854775808") is Ok(least) && least.as_int64() == Some(Int64.minimum)
+  assert json::parse("1.5") is Ok(half) && half.as_int64() is None && half.as_float64() == Some(1.5)
+  assert json::parse("1e3") is Ok(thousand) && thousand.as_float64() == Some(1000.0)
   assert json::Number.from_float64(3.0) is Some(three) && three.is_whole() && three.to_int64() == Some(3)
   assert json::Number.from_float64(0.25) is Some(quarter) && !quarter.is_whole() && quarter.to_float64() == 0.25
   assert json::Number.from_float64(Float64.not_a_number) is None
   assert json::Number.from_float64(Float64.infinity) is None
-  assert json::Value.number(Float64.not_a_number) is None
+  assert json::Value.from_float64(Float64.not_a_number) is None
   assert round_trip("[0,-1,1.5,0.1,-0.25]")
   assert written_text_parses_to_the_same_value("[1e300,-2.5e-7,1.7976931348623157e308,5e-324,123456789012345680000]")
 }
@@ -163,7 +163,7 @@ test "a value is read from a reader and written to a writer" {
     assert json::read_from(mut source) is Ok(value)
       && value.get("items") is Some(items)
       && items.get_index(2) is Some(last)
-      && last.to_int64() == Some(3)
+      && last.as_int64() == Some(3)
     var sink = streams::ByteWriter.new()
     assert json::parse("[1, \"two\"]") is Ok(written) && json::write_to(written, sink: mut sink) is Ok(_)
     assert sink.written() == "[1,\"two\"]".bytes()
@@ -176,7 +176,7 @@ fn pointed(text: StringSlice, path: StringSlice) -> Option[String] {
   match json::parse(text) {
     Ok(document) => {
       match document.pointer(path) {
-        Some(found) => Some(found.to_text())
+        Some(value) => Some(value.to_text())
         None => None
       }
     }
@@ -216,7 +216,7 @@ test "a template builds a value around the values written in it" {
   let members: Map[String, json::Value] = [:]
   let outer = json::Value"""[${own inner}, ${own members}]"""
   assert outer.to_text() == "[{\"id\":3},{}]"
-  assert whole.to_int64() == Some(3)
+  assert whole.as_int64() == Some(3)
   let plain = json::Value" [1, 2] "
   assert plain.to_text() == "[1,2]"
 }

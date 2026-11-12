@@ -798,10 +798,10 @@ internal fn DateTime.instant(self, offset_seconds: Int64) -> Option[Instant]
   cost time O(1)
 {
   let days: Int64 = intrinsic::convert(self.date.days_since_epoch)
-  let within: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
+  let nanoseconds_of_day: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
   let near: Int64 = if days < -2 { -2 } else if days > 2 { 2 } else { days }
   let whole = (days - near).checked_multiply(86400000000000)?
-  Some(Instant(nanoseconds: whole.checked_add(near * 86400000000000 + within - offset_seconds * 1000000000)?))
+  Some(Instant(nanoseconds: whole.checked_add(near * 86400000000000 + nanoseconds_of_day - offset_seconds * 1000000000)?))
 }
 
 internal fn write_fraction(output: mut TextBuilder, value: UInt64, digits: USize)
@@ -1589,8 +1589,8 @@ public fn DateTime.plus(self, duration: Duration) -> Option[DateTime]
 {
   let days = duration.nanoseconds.floor_divide(86400000000000)
   let rest = duration.nanoseconds.floor_modulo(86400000000000)
-  let within: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
-  let total = within + rest
+  let nanoseconds_of_day: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
+  let total = nanoseconds_of_day + rest
   let carried: Int64 = if total >= 86400000000000 { 1 } else { 0 }
   let date = self.date.plus_days(intrinsic::convert(days + carried))?
   Some(DateTime(
@@ -2045,7 +2045,7 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
     return Err(ZoneError.MalformedRules)
   }
   var header = match read_header(rules, at: 0, time_width: 4) {
-    Some(found) => found
+    Some(header) => header
     None => return Err(ZoneError.MalformedRules)
   }
   var start: USize = 44
@@ -2054,7 +2054,7 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
     start = 44 + header.block + 44
     time_width = 8
     header = match read_header(rules, at: 44 + header.block, time_width: 8) {
-      Some(found) => found
+      Some(wide_header) => wide_header
       None => return Err(ZoneError.MalformedRules)
     }
   }
@@ -2073,7 +2073,7 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
     decreases header.time_count - index
   {
     let raw = match big_endian(rules, at: start + index * time_width, width: time_width) {
-      Some(found) => found
+      Some(raw) => raw
       None => return Err(ZoneError.MalformedRules)
     }
     let time: Int64 = if time_width == 8 {
@@ -2092,7 +2092,7 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
       return Err(ZoneError.MalformedRules)
     }
     let offset = match big_endian(rules, at: types_start + kind * 6, width: 4) {
-      Some(found) => found
+      Some(offset) => offset
       None => return Err(ZoneError.MalformedRules)
     }
     mut transitions.push(time)
@@ -2100,7 +2100,7 @@ public fn TimeZone.from_rules(name: StringSlice, rules: Slice[UInt8]) -> Result[
     index += 1
   }
   let first = match big_endian(rules, at: types_start, width: 4) {
-    Some(found) => found
+    Some(first) => first
     None => return Err(ZoneError.MalformedRules)
   }
   var rule: Option[ZoneRule] = None
@@ -2133,10 +2133,10 @@ public fn TimeZone.to_local(self, instant: Instant) -> DateTime
 {
   let seconds = instant.unix_seconds()
   let local = seconds + self.offset_seconds(seconds)
-  let within = local.floor_modulo(86400) * 1000000000 + instant.nanoseconds.floor_modulo(1000000000)
+  let nanoseconds_of_day = local.floor_modulo(86400) * 1000000000 + instant.nanoseconds.floor_modulo(1000000000)
   DateTime(
     date: Date(days_since_epoch: intrinsic::convert(local.floor_divide(86400))),
-    time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(within)),
+    time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(nanoseconds_of_day)),
   )
 }
 
@@ -2152,12 +2152,12 @@ public fn TimeZone.to_instant(self, local: DateTime) -> Option[LocalInstant]
   cost time O(log(self.transitions.length()))
 {
   let days: Int64 = intrinsic::convert(local.date.days_since_epoch)
-  let within: Int64 = intrinsic::convert(local.time.nanoseconds_since_midnight)
+  let nanoseconds_of_day: Int64 = intrinsic::convert(local.time.nanoseconds_since_midnight)
   if days < -110000 || days > 110000 {
     return None
   }
-  let seconds = days * 86400 + within / 1000000000
-  let fraction = within % 1000000000
+  let seconds = days * 86400 + nanoseconds_of_day / 1000000000
+  let fraction = nanoseconds_of_day % 1000000000
   let before = self.offset_seconds(seconds - 86400)
   let after = self.offset_seconds(seconds + 86400)
   let first = seconds - before
@@ -2220,7 +2220,7 @@ public fn local_zone() -> TimeZone
 {
   match Environment.local_zone() {
     Some(name) => match zone(name.slice()) {
-      Ok(found) => found
+      Ok(named_zone) => named_zone
       Err(_) => TimeZone.utc()
     }
     None => TimeZone.utc()
@@ -2329,8 +2329,8 @@ public fn DateTime.format(self, layout: Layout) -> String
   cost time finite
 {
   let civil = self.date.civil()
-  let within: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
-  let seconds = within / 1000000000
+  let nanoseconds_of_day: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
+  let seconds = nanoseconds_of_day / 1000000000
   var output = TextBuilder.new()
   var index: USize = 0
   while index < layout.parts.length()
@@ -2352,7 +2352,7 @@ public fn DateTime.format(self, layout: Layout) -> String
       Minute => write_two_digits(mut output, value: (seconds % 3600) / 60)
       Second => write_two_digits(mut output, value: seconds % 60)
       Fraction(digits) => {
-        let padded = (within % 1000000000).format(minimum_digits: 9)
+        let padded = (nanoseconds_of_day % 1000000000).format(minimum_digits: 9)
         let shown: USize = intrinsic::convert(digits)
         if shown <= padded.length() {
           mut output.write(padded.slice().part(0, to: shown))
@@ -2480,14 +2480,14 @@ public fn Layout.parse_date_time(self, text: StringSlice) -> Result[DateTime, Pa
     return Err(ParseTimeError.OutOfRange)
   }
   let date = match checked_date(fields.year, month: fields.month, day: fields.day) {
-    Some(found) => found
+    Some(date) => date
     None => return Err(ParseTimeError.OutOfRange)
   }
   if weekday is Some(name) && name != "${date.weekday()}" {
     return Err(ParseTimeError.OutOfRange)
   }
-  let within = (fields.hour * 3600 + fields.minute * 60 + fields.second) * 1000000000 + fields.nanosecond
-  Ok(DateTime(date: date, time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(within))))
+  let nanoseconds_of_day = (fields.hour * 3600 + fields.minute * 60 + fields.second) * 1000000000 + fields.nanosecond
+  Ok(DateTime(date: date, time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(nanoseconds_of_day))))
 }
 
 public opaque type Stopwatch(started: Duration)

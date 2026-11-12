@@ -76,14 +76,14 @@ test "ASCII case conversion changes only ASCII letters" {
 }
 
 test "a character is a digit in a radix, and a digit is a character" {
-  assert Character"7".digit_value() == Some(7)
-  assert Character"a".digit_value() is None
-  assert Character"a".digit_value(radix: 16) == Some(10)
-  assert Character"F".digit_value(radix: 16) == Some(15)
-  assert Character"g".digit_value(radix: 16) is None
-  assert Character"z".digit_value(radix: 36) == Some(35)
-  assert Character"2".digit_value(radix: 2) is None
-  assert Character"-".digit_value() is None
+  assert Character"7".to_digit() == Some(7)
+  assert Character"a".to_digit() is None
+  assert Character"a".to_digit(radix: 16) == Some(10)
+  assert Character"F".to_digit(radix: 16) == Some(15)
+  assert Character"g".to_digit(radix: 16) is None
+  assert Character"z".to_digit(radix: 36) == Some(35)
+  assert Character"2".to_digit(radix: 2) is None
+  assert Character"-".to_digit() is None
   assert Character.from_digit(7) == Some(Character"7")
   assert Character.from_digit(10) is None
   assert Character.from_digit(10, radix: 16) == Some(Character"a")

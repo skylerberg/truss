@@ -16,7 +16,7 @@ let expression_at text written occurrence =
   let database = setup [ ("app::main", text) ] in
   let module_ = module_of "app::main" in
   let offset = Option.get (Substring.find ~occurrence text written) in
-  let found =
+  let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
         let key = Resolve.Names.key_of declaration in
@@ -49,8 +49,8 @@ let expression_at text written occurrence =
         | _ -> None)
       (Query.demand database Resolve.Names.declarations module_)
   in
-  match found with
-  | Some found -> found
+  match actual with
+  | Some actual -> actual
   | None -> failwith (Printf.sprintf "no expression at %S" written)
 
 (* Whether the core form of the first definition has an integer literal
@@ -58,7 +58,7 @@ let expression_at text written occurrence =
 let has_integer text value =
   List.exists
     (fun (node : Core.expression) ->
-      match node.kind with Integer found -> Z.equal found (Z.of_int value) | _ -> false)
+      match node.kind with Integer actual -> Z.equal actual (Z.of_int value) | _ -> false)
     (first_core_nodes text).expressions
 
 (* The core nodes built from the [occurrence]th appearance of [written]. *)
@@ -154,7 +154,7 @@ let () =
         [ (module_of "app::main", "fn f() {\n  let size: USize = 5_000_000_000\n}\n") ];
       match check (Engine.context engine) (module_of "app::main") with
       | [] -> ()
-      | found -> fail "%s" (String.concat "; " (codes found)));
+      | actual -> fail "%s" (String.concat "; " (codes actual)));
   test "a negated literal is checked after the negation" (fun () ->
       fine "fn f() {\n  let small: Int8 = -128\n}\n");
   test "an integer literal where a float is expected is an error with a fix" (fun () ->
@@ -441,8 +441,8 @@ let () =
       one_diagnostic "fn f() -> Int64 {\n  true\n}\n" "types.mismatch");
   test "an arm of type Never does not contribute to the type of the match" (fun () ->
       fine
-        "fn f(found: Option[Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    Some(value) => value\n\
         \    None => return 0\n\
         \  }\n\
@@ -574,8 +574,8 @@ let () =
 let () =
   test "an unknown variant in a pattern is an error" (fun () ->
       one_diagnostic
-        "fn f(found: Option[Int64]) -> Int64 {\n\
-        \  match found {\n\
+        "fn f(present: Option[Int64]) -> Int64 {\n\
+        \  match present {\n\
         \    Sone(value) => value\n\
         \    _ => 0\n\
         \  }\n\
@@ -866,8 +866,8 @@ let () =
           (first_core_nodes text).expressions
       with
       | [ [ _ ] ] -> ()
-      | [ found ] -> fail "%d captures" (List.length found)
-      | found -> fail "%d lambdas" (List.length found))
+      | [ actual ] -> fail "%d captures" (List.length actual)
+      | actual -> fail "%d lambdas" (List.length actual))
 
 (* Strings and collections *)
 
@@ -994,7 +994,7 @@ let () =
       in
       match codes (check database (module_of "app::main")) with
       | [ "types.unsatisfied_bound"; "types.unsatisfied_bound" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | actual -> fail "found [%s]" (String.concat "; " actual));
   test "a type written in a body that is not a type is an error" (fun () ->
       one_diagnostic "fn f() {\n  let value: Display = 3\n}\n" "types.not_a_type");
   test "an operator's result must be the type expected of it" (fun () ->
@@ -1089,10 +1089,10 @@ let () =
          fn f(counter: mut Counter) -> Int64 {\n\
         \  let read = counter.label()\n\
         \  let cleared = mut counter.label()\n\
-        \  let made = Counter(count: 3).label()\n\
+        \  let built = Counter(count: 3).label()\n\
         \  let in_full = Counter.label(mut counter)\n\
         \  let through_trait = Shown.label(counter)\n\
-        \  read.max(cleared).max(made).max(in_full).max(through_trait)\n\
+        \  read.max(cleared).max(built).max(in_full).max(through_trait)\n\
          }\n");
   test "two traits that give one version of a name are ambiguous at the call" (fun () ->
       one_diagnostic
@@ -1272,9 +1272,9 @@ let () =
   test "a UInt8 literal holds its ASCII character's value" (fun () ->
       if not (has_integer "fn f() -> UInt8 {\n  UInt8\"\\n\"\n}\n" 10) then fail "no value");
   test "a Character literal of two scalar values is an error" (fun () ->
-      one_diagnostic "fn f() -> Character {\n  Character\"ab\"\n}\n" "types.bad_character");
+      one_diagnostic "fn f() -> Character {\n  Character\"ab\"\n}\n" "types.character_scalar_count");
   test "a UInt8 literal of a character that is not ASCII is an error" (fun () ->
-      one_diagnostic "fn f() -> UInt8 {\n  UInt8\"é\"\n}\n" "types.bad_character");
+      one_diagnostic "fn f() -> UInt8 {\n  UInt8\"é\"\n}\n" "types.character_scalar_count");
   test "a negated literal of an unsigned type is one error" (fun () ->
       one_diagnostic "fn f() {\n  let value: UInt8 = -1\n}\n" "types.negated_unsigned");
   test "explicit type arguments give exactly the function's own" (fun () ->
@@ -1450,9 +1450,9 @@ let () =
   test "`Self` in the body of a method without `self` is the method's type" (fun () ->
       fine
         "type Box(value: Int64)\n\n\
-         fn Box.made() -> Box {\n\
-        \  let made: Self = Box(value: 1)\n\
-        \  made\n\
+         fn Box.built() -> Box {\n\
+        \  let built: Self = Box(value: 1)\n\
+        \  built\n\
          }\n");
   test "a pattern that does not fit its type still gives its bindings a type" (fun () ->
       one_diagnostic

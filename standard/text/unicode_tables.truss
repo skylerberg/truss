@@ -67,105 +67,105 @@ fn expansion_of(expansions: Slice[UInt32], code: UInt32) -> Option[Expansion]
 internal fn is_alphabetic(code: UInt32) -> Bool
   cost time O(1)
 {
-  var found = ranges_contain(unicode_data::alphabetic_ranges[..], code: code)
-  found
+  var contained = ranges_contain(unicode_data::alphabetic_ranges[..], code: code)
+  contained
 }
 
 internal fn is_numeric(code: UInt32) -> Bool
   cost time O(1)
 {
-  var found = ranges_contain(unicode_data::numeric_ranges[..], code: code)
-  found
+  var contained = ranges_contain(unicode_data::numeric_ranges[..], code: code)
+  contained
 }
 
 internal fn is_uppercase(code: UInt32) -> Bool
   cost time O(1)
 {
-  var found = ranges_contain(unicode_data::uppercase_ranges[..], code: code)
-  found
+  var contained = ranges_contain(unicode_data::uppercase_ranges[..], code: code)
+  contained
 }
 
 internal fn is_lowercase(code: UInt32) -> Bool
   cost time O(1)
 {
-  var found = ranges_contain(unicode_data::lowercase_ranges[..], code: code)
-  found
+  var contained = ranges_contain(unicode_data::lowercase_ranges[..], code: code)
+  contained
 }
 
 internal fn is_cased(code: UInt32) -> Bool
   cost time O(1)
 {
-  var found = ranges_contain(unicode_data::cased_ranges[..], code: code)
-  found
+  var contained = ranges_contain(unicode_data::cased_ranges[..], code: code)
+  contained
 }
 
 internal fn is_case_ignorable(code: UInt32) -> Bool
   cost time O(1)
 {
-  var found = ranges_contain(unicode_data::case_ignorable_ranges[..], code: code)
-  found
+  var contained = ranges_contain(unicode_data::case_ignorable_ranges[..], code: code)
+  contained
 }
 
 internal fn is_wide(code: UInt32) -> Bool
   cost time O(1)
 {
-  var found = ranges_contain(unicode_data::wide_ranges[..], code: code)
-  found
+  var contained = ranges_contain(unicode_data::wide_ranges[..], code: code)
+  contained
 }
 
 internal fn is_zero_width(code: UInt32) -> Bool
   cost time O(1)
 {
-  var found = ranges_contain(unicode_data::zero_width_ranges[..], code: code)
-  found
+  var contained = ranges_contain(unicode_data::zero_width_ranges[..], code: code)
+  contained
 }
 
 internal fn uppercase_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var found = mapping_of(unicode_data::uppercase_mappings[..], code: code)
-  found
+  var mapped = mapping_of(unicode_data::uppercase_mappings[..], code: code)
+  mapped
 }
 
 internal fn lowercase_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var found = mapping_of(unicode_data::lowercase_mappings[..], code: code)
-  found
+  var mapped = mapping_of(unicode_data::lowercase_mappings[..], code: code)
+  mapped
 }
 
 internal fn folded_of(code: UInt32) -> UInt32
   cost time O(1)
 {
-  var found = mapping_of(unicode_data::fold_mappings[..], code: code)
-  found
+  var mapped = mapping_of(unicode_data::fold_mappings[..], code: code)
+  mapped
 }
 
 internal fn uppercase_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  var found = expansion_of(unicode_data::uppercase_expansions[..], code: code)
-  found
+  var expanded = expansion_of(unicode_data::uppercase_expansions[..], code: code)
+  expanded
 }
 
 internal fn lowercase_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  var found = expansion_of(unicode_data::lowercase_expansions[..], code: code)
-  found
+  var expanded = expansion_of(unicode_data::lowercase_expansions[..], code: code)
+  expanded
 }
 
 internal fn fold_expansion_of(code: UInt32) -> Option[Expansion]
   cost time O(1)
 {
-  var found = expansion_of(unicode_data::fold_expansions[..], code: code)
-  found
+  var expanded = expansion_of(unicode_data::fold_expansions[..], code: code)
+  expanded
 }
 
 fn range_value(ranges: Slice[UInt32], code: UInt32) -> Option[UInt32]
   cost time O(1)
 {
-  let found = search(ranges.length() / 3, compare: fn(row) {
+  let matching_row = search(ranges.length() / 3, compare: fn(row) {
     if code < ranges[3 * row] {
       Ordering.Less
     } else if code > ranges[3 * row + 1] {
@@ -174,7 +174,7 @@ fn range_value(ranges: Slice[UInt32], code: UInt32) -> Option[UInt32]
       Ordering.Equal
     }
   })
-  match found {
+  match matching_row {
     Some(row) => Some(ranges[3 * row + 2])
     None => None
   }
@@ -185,8 +185,8 @@ internal fn category_number_of(code: UInt32) -> UInt32
 {
   var number: UInt32 = 10
   match range_value(unicode_data::category_ranges[..], code: code) {
-    Some(found) => {
-      number = found
+    Some(value) => {
+      number = value
     }
     None => {}
   }
@@ -198,8 +198,8 @@ internal fn combining_class_of(code: UInt32) -> UInt32
 {
   var class: UInt32 = 0
   match range_value(unicode_data::combining_class_ranges[..], code: code) {
-    Some(found) => {
-      class = found
+    Some(value) => {
+      class = value
     }
     None => {}
   }
@@ -258,14 +258,14 @@ internal fn append_compatibility_decomposition(output: mut List[UInt32], code: U
 fn pair_value(pairs: Slice[UInt32], first: UInt32, second: UInt32) -> Option[UInt32]
   cost time O(1)
 {
-  let found = search(pairs.length() / 3, compare: fn(row) {
+  let matching_row = search(pairs.length() / 3, compare: fn(row) {
     if first != pairs[3 * row] {
       first.compare(pairs[3 * row])
     } else {
       second.compare(pairs[3 * row + 1])
     }
   })
-  match found {
+  match matching_row {
     Some(row) => Some(pairs[3 * row + 2])
     None => None
   }
@@ -286,8 +286,8 @@ internal fn grapheme_properties_of(code: UInt32) -> UInt32
     properties = if (code - 44032) % 28 == 0 { 12 } else { 13 }
   } else if code < 32 || code >= 127 {
     match range_value(unicode_data::grapheme_ranges[..], code: code) {
-      Some(found) => {
-        properties = found
+      Some(value) => {
+        properties = value
       }
       None => {}
     }

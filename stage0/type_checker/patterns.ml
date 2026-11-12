@@ -118,8 +118,8 @@ and compared context (value : Core.expression) : space =
 
 and literal (value : Core.expression) : space option =
   match value.kind with
-  | Boolean found -> Some (Constructed (Boolean found, []))
-  | Integer found -> Some (Constructed (Interval (found, found), []))
+  | Boolean value -> Some (Constructed (Boolean value, []))
+  | Integer value -> Some (Constructed (Interval (value, value), []))
   | String text -> Some (Constructed (Text text, []))
   | _ -> None
 
@@ -173,7 +173,7 @@ and constant_value context seen (value : Core.expression) : space option =
    constant whose value is not evaluated here. *)
 and range_end context (value : Core.expression) =
   match value.kind with
-  | Integer found -> Ok found
+  | Integer value -> Ok value
   | Use (Constant { path; _ }) -> (
       match Query.demand context.database Interface.Constants.value_of path with
       | Some value -> Ok value
@@ -251,8 +251,8 @@ let rec specialize context type_ constructor (rows : row list) =
       match row with
       | [] -> []
       | Wild :: rest -> [ List.init width (fun _ -> Wild) @ rest ]
-      | Constructed (found, arguments) :: rest ->
-          if covers found constructor then [ arguments @ rest ] else []
+      | Constructed (head_constructor, arguments) :: rest ->
+          if covers head_constructor constructor then [ arguments @ rest ] else []
       | Alternatives alternatives :: rest ->
           specialize context type_ constructor
             (List.map (fun alternative -> alternative :: rest) alternatives))
@@ -306,7 +306,7 @@ let rec missing context (types : T.ty list) (rows : row list) : space list optio
       | _, Some all
         when all <> []
              && List.for_all
-                  (fun constructor -> List.exists (fun found -> covers found constructor) present)
+                  (fun constructor -> List.exists (fun other -> covers other constructor) present)
                   all ->
           List.find_map try_constructor all
       | _, signature -> (
@@ -318,7 +318,7 @@ let rec missing context (types : T.ty list) (rows : row list) : space list optio
                 | Some all ->
                     List.find_opt
                       (fun constructor ->
-                        not (List.exists (fun found -> covers found constructor) present))
+                        not (List.exists (fun other -> covers other constructor) present))
                       all
                 | None -> None
               in
@@ -331,14 +331,14 @@ let rec missing context (types : T.ty list) (rows : row list) : space list optio
 (* Whether a row is useful after the rows before it: whether some value it
    matches matches none of them. *)
 let useful context types rows (row : row) =
-  let rec go (types : T.ty list) (rows : row list) (row : row) =
+  let rec is_useful (types : T.ty list) (rows : row list) (row : row) =
     match (types, row) with
     | [], [] -> rows = []
     | type_ :: rest_types, first :: rest -> (
         let field_types = field_types context type_ in
         match first with
         | Alternatives alternatives ->
-            List.exists (fun alternative -> go types rows (alternative :: rest)) alternatives
+            List.exists (fun alternative -> is_useful types rows (alternative :: rest)) alternatives
         | Constructed (constructor, arguments) -> (
             match (constructor, integer_range type_) with
             | Interval _, Some range ->
@@ -346,12 +346,12 @@ let useful context types rows (row : row) =
                 List.exists
                   (fun part ->
                     covers constructor part
-                    && go rest_types (specialize context type_ part rows) rest)
+                    && is_useful rest_types (specialize context type_ part rows) rest)
                   (split_intervals range
                      (first
                      :: List.filter_map (function first :: _ -> Some first | [] -> None) rows))
             | _ ->
-                go
+                is_useful
                   (field_types constructor @ rest_types)
                   (specialize context type_ constructor rows)
                   (arguments @ rest))
@@ -363,20 +363,20 @@ let useful context types rows (row : row) =
                    && List.for_all
                         (fun constructor ->
                           List.exists
-                            (fun found -> covers found constructor)
+                            (fun other -> covers other constructor)
                             (List.concat_map head_constructors column))
                         all ->
                 List.exists
                   (fun constructor ->
-                    go
+                    is_useful
                       (field_types constructor @ rest_types)
                       (specialize context type_ constructor rows)
                       (List.init (List.length (field_types constructor)) (fun _ -> Wild) @ rest))
                   all
-            | _ -> go rest_types (default_matrix rows) rest))
+            | _ -> is_useful rest_types (default_matrix rows) rest))
     | _ -> false
   in
-  go types rows row
+  is_useful types rows row
 
 (* Showing a missing value as a pattern *)
 
@@ -421,22 +421,22 @@ let show_row context types row = String.concat ", " (List.map2 (show context) ty
 (* Checking *)
 
 let operand_type : Core.operand -> T.ty = function
-  | Place found -> Core_walk.place_type found
+  | Place core_place -> Core_walk.place_type core_place
   | Value value -> value.type_
 
 (* Whether a type, or a type it is built from, failed to check or parse:
    matching on it is accepted silently, since its error is reported where it
    is written. *)
 let has_error context type_ =
-  let rec go seen = function
+  let rec contains_error seen = function
     | T.Error _ | T.Hole -> true
     | T.Named { path; arguments } -> (
-        List.exists (function T.Type type_ -> go seen type_ | _ -> false) arguments
+        List.exists (function T.Type type_ -> contains_error seen type_ | _ -> false) arguments
         || (not (List.exists (Path.equal path) seen))
            &&
            let seen = path :: seen in
            let fields_fail fields =
-             List.exists (fun (field : T.field) -> go seen field.field_type) fields
+             List.exists (fun (field : T.field) -> contains_error seen field.field_type) fields
            in
            match Members.shape context.database path with
            | Some (Error_shape _) -> true
@@ -454,7 +454,7 @@ let has_error context type_ =
            | _ -> false)
     | _ -> false
   in
-  go [] type_
+  contains_error [] type_
 
 let indentation text (position : int) =
   let line_start = Source.fragment_line_start text position in
@@ -517,16 +517,16 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                     let prior = if before = [] then !rows else !rows @ [ row_with before ] in
                     if not (useful context types prior (row_with [ alternative ])) then
                       let at (pattern : Core.pattern) = span context pattern.origin in
-                      let found = at alternative in
+                      let alternative_span = at alternative in
                       let deleted =
                         match if index > 0 then List.nth_opt alternatives (index - 1) else None with
-                        | Some previous -> Syntax.Span.make (at previous).stop found.stop
+                        | Some previous -> Syntax.Span.make (at previous).stop alternative_span.stop
                         | None -> (
                             match List.nth_opt alternatives 1 with
-                            | Some next -> Syntax.Span.make found.start (at next).start
-                            | None -> found)
+                            | Some next -> Syntax.Span.make alternative_span.start (at next).start
+                            | None -> alternative_span)
                       in
-                      report context Unreachable_alternative found
+                      report context Unreachable_alternative alternative_span
                         ~fixes:
                           [ Diagnostic.fix "Delete the alternative." [ Diagnostic.delete deleted ] ]
                         (if before = [] then
@@ -540,12 +540,12 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
       arms;
     (* The cases no arm covers, one witness after another, so the fix can
        add an arm for each. *)
-    let rec witnesses rows found =
-      if List.length found >= witness_limit then List.rev found
+    let rec witnesses rows witnesses_so_far =
+      if List.length witnesses_so_far >= witness_limit then List.rev witnesses_so_far
       else
         match missing context types rows with
-        | Some witness -> witnesses (rows @ [ witness ]) (witness :: found)
-        | None -> List.rev found
+        | Some witness -> witnesses (rows @ [ witness ]) (witness :: witnesses_so_far)
+        | None -> List.rev witnesses_so_far
     in
     match witnesses !rows [] with
     | [] -> ()

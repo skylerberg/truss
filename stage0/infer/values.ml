@@ -94,7 +94,7 @@ let rec string_literal state env ?expected (value : expression) (literal : strin
           let part_type = ref None in
           register_expression state value (fun () ->
               match !part_type with
-              | Some part -> Form.tagged_string state value literal ~part:(final state part)
+              | Some part -> Form.tagged_string state value literal ~part:(final_type state part)
               | None -> bug "a tagged string's part type was not worked out");
           defer state (fun () ->
               let tag_type = normalize state tag_type in
@@ -228,7 +228,7 @@ and lambda state env ?expected (value : expression) parameters body =
         let output = T.result_type function_type.output in
         let lambda_env = { env with output = Some (Returns output); enclosing = [] } in
         let body_type = block_value state lambda_env ~expected:output body in
-        convert state lambda_env ?expression:(block_end body) body.span ~found:body_type
+        convert state lambda_env ?expression:(block_value_id body) body.span ~actual:body_type
           ~expected:output;
         T.Function function_type
     | Some (T.Function function_type) ->
@@ -287,7 +287,7 @@ and lambda state env ?expected (value : expression) parameters body =
 
 and if_ state env ?expected (value : expression) (test : expression) then_ else_ =
   let condition_type = in_statement state env test.span (fun () -> expression state env test) in
-  coerce state env test ~found:condition_type ~expected:T.bool;
+  coerce state env test ~actual:condition_type ~expected:T.bool;
   register_expression state value (fun () ->
       let condition = build_expression state test in
       let then_ = build_block state then_ in
@@ -301,7 +301,7 @@ and if_ state env ?expected (value : expression) (test : expression) then_ else_
                 | Else block -> build_block state block
                 | Else_if branch ->
                     let branch = build_expression state branch in
-                    { Core.statements = []; value = Some branch; diverges = branch.type_ = T.Never })
+                    { Core.statements = []; value = Some branch })
               else_;
         });
   match else_ with
@@ -311,23 +311,23 @@ and if_ state env ?expected (value : expression) (test : expression) then_ else_
       | T.Never -> ()
       | _ ->
           if not (unify state then_type T.unit) then
-            mismatch state then_.span ~expected:T.unit ~found:then_type);
+            mismatch state then_.span ~expected:T.unit ~actual:then_type);
       T.unit
   | Some branch ->
       let then_type = block_value state env ?expected then_ in
       let else_type, else_span, else_end =
         match branch with
-        | Else block -> (block_value state env ?expected block, block.span, block_end block)
+        | Else block -> (block_value state env ?expected block, block.span, block_value_id block)
         | Else_if branch_expression ->
             ( expression state env ?expected branch_expression,
               branch_expression.span,
               Some branch_expression.id )
       in
       join state env ~expected
-        [ (then_type, then_.span, block_end then_); (else_type, else_span, else_end) ]
+        [ (then_type, then_.span, block_value_id then_); (else_type, else_span, else_end) ]
 
 (* The last expression of a block, which is the block's value. *)
-and block_end (written : block) =
+and block_value_id (written : block) =
   match List.rev written.statements with
   | { kind = Expression value; _ } :: _ -> Some value.id
   | _ -> None
@@ -342,27 +342,17 @@ and join state env ~expected branches =
   | [], _ -> T.Never
   | _, Some expected ->
       List.iter
-        (fun (found, span, expression) -> convert state env ?expression span ~found ~expected)
+        (fun (actual, span, expression) -> convert state env ?expression span ~actual ~expected)
         live;
       expected
   | (first, _, _) :: rest, None ->
       List.iter
         (fun (type_, span, _) ->
-          if not (unify state first type_) then mismatch state span ~expected:first ~found:type_)
+          if not (unify state first type_) then mismatch state span ~expected:first ~actual:type_)
         rest;
       first
 
 and match_ state env ?expected (value : expression) scrutinees arms =
-  (* A [match] whose guards cover every case ends with [_ => unreachable].
-     The prover shows that this arm is never reached. *)
-  let guards_exhaustive =
-    match List.rev arms with
-    | { patterns; guard = None; body = { kind = Expression { kind = Unreachable; _ }; _ }; _ }
-      :: earlier ->
-        List.for_all (fun (written : pattern) -> written.kind = Wildcard) patterns
-        && List.exists (fun (arm : arm) -> Option.is_some arm.guard) earlier
-    | _ -> false
-  in
   (* The types of the scrutinees are inferred before the arms are checked. *)
   let types =
     List.map
@@ -394,7 +384,6 @@ and match_ state env ?expected (value : expression) scrutinees arms =
                   origin = arm.id;
                 })
               arms;
-          guards_exhaustive;
         });
   let branch_types =
     List.map

@@ -28,7 +28,7 @@ val finish : t -> Lir.terminator -> unit
 (* Writes [block] with [f], then goes back to the block that was current,
    with its statements so far, so a case of a switch can be written before
    the switch itself ends its block. *)
-val aside : t -> Lir.block -> (unit -> unit) -> unit
+val in_block : t -> Lir.block -> (unit -> unit) -> unit
 
 (* Runs [then_] when [condition] is true, then goes on in a new block. *)
 val branch : t -> Lir.operand -> yes:Lir.block -> no:Lir.block -> unit

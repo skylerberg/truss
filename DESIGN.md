@@ -499,7 +499,7 @@ two variables never refer to the same changeable data.
   as in Rust and Swift, so `?` and `return` need no cleanup code. Releasing
   one never runs Truss code: only the standard library's real capability
   implementations create such handles, since there is no foreign code, and a
-  test's fake implementation hands out plain values. Types cannot define
+  test's fake implementation returns plain values. Types cannot define
   destructors.
 - **What can fail is explicit, and buffered data is never lost silently.**
   Closing a file that was only read, or a socket, loses nothing, so it
@@ -624,8 +624,8 @@ views are *second-class*, as in Hylo:
   view only of what reached it through its parameters, never of its own
   locals. The caller then treats the result as viewing everything its
   read-only and view-typed arguments view, so it needs no annotation.
-  `text.trim()` views `text`, and `found.unwrap_or(default: backup[..])`
-  views both `found` and `backup`. Rust instead names which input a result
+  `text.trim()` views `text`, and `cached.unwrap_or(default: backup[..])`
+  views both `cached` and `backup`. Rust instead names which input a result
   borrows from with lifetimes, and Swift with lifetime-dependence
   annotations. Truss's rule is coarser but needs neither, and arguments of
   plain data, such as indexes, lend nothing, so it rarely holds more than it
@@ -732,13 +732,13 @@ Hylo also keep accessors apart from sequences, and Python's
   elements in a way that changing one would break, such as a sorted list or a
   cached total, offers read-only and owned loops, and changes single
   elements through a lending method.
-- **The contract says what is handed out.** In a lending or yielding
-  method's `ensures`, `result` names the part being handed out, so a clause
+- **The contract says what is yielded.** In a lending or yielding
+  method's `ensures`, `result` names the part being yielded, so a clause
   that mentions it holds at each `yield` and is what the caller's statement
   or loop body may rely on: `List`'s `each` promises
   `ensures identical(result, self[yielded.length()])`, and a range's promises that
   each value lies within it. Clauses that do not mention `result` hold
-  wherever the method ends. `yielded` names the parts handed out so far, as
+  wherever the method ends. `yielded` names the parts yielded so far, as
   a `Sequence`, each as the caller left it, and `finished` is `true` when the
   method ran to its end rather than stopping at a `yield`. So
   `ensures finished ==> yielded.length() == self.length()` is how a loop over
@@ -758,7 +758,7 @@ Hylo also keep accessors apart from sequences, and Python's
   write `zip`, merge, `peek`, or pause and resume. Pulling a yielding method
   through a cursor gives those, as C#'s iterators and Python's generators
   do. The same rule covers both uses: a method may end at any `yield`.
-- **A pull hands out an owned value.** So a read-only yield of a place,
+- **A pull yields an owned value.** So a read-only yield of a place,
   such as a list's element, is pulled only where the element is `Plain`.
   Anything else would be copied unasked, and is looped over with `for`
   instead, or pulled from a method that yields owned values.
@@ -1157,6 +1157,14 @@ comparisons over `&&`. Every other combination needs parentheses.
   handed to the operator as owned, and an `own self` version of the
   operator's method can reuse its memory. `truss fmt` writes `x = x + y` as
   `x += y`, so code converges on one form.
+- **An assignment evaluates its right side before its target,** as Rust does
+  for `=` and for compound assignment of built-in types. The operator of a
+  compound assignment takes the target's old value as owned, so the target
+  holds no value until the result is stored. Evaluating the operand first
+  keeps every other piece of code out of that window: a `?` in the operand
+  cannot return with the target moved out, and the operand cannot read or
+  mutate a moved-out target. Java, C#, and Go evaluate the target first. For
+  `=` either order is sound, and Truss uses one rule for both forms.
 - **Integer division rounds toward zero, and `>>` on a signed integer copies
   the sign bit,** as in C, Rust, Go, and Swift and as the hardware does.
   Rounding down is available as a method, as Rust's `rem_euclid` is.
@@ -2156,9 +2164,9 @@ effect: code that does it declares `uses Tasks`.
   reached, which abandons a computation partway. Truss has neither
   exceptions nor abandoned computations (see
   [Capabilities](#capabilities)).
-- **A time limit and a race are ordinary code.** `tasks::within(limit,
+- **A time limit and a race are ordinary code.** `tasks::with_timeout(limit,
   work)` runs `work` in one branch and a timer in another, and each branch
-  returns from `within` when it finishes, which cancels the other. Nothing
+  returns from `with_timeout` when it finishes, which cancels the other. Nothing
   like Go's `select` is needed for either.
 - **A channel is how one task waits for another.** A `Channel[Message]` is
   a queue with a fixed capacity: `send` waits while it is full, `receive`
@@ -2915,7 +2923,7 @@ prelude, which holds only `UpperCamelCase` names, and would read less clearly
 from another module.
 
 **Malformed literal text is a compile error.** A tag states what valid text
-looks like with `requires`, such as `is_valid_pattern(template.literals)`. The
+looks like with `requires`, such as `is_valid_template(template.literals)`. The
 literal text is a constant, so the compiler proves the clause by running the
 check on it, as compiled code, the way a test runs. This is possible because
 functions used in specifications are pure and must terminate, so a check

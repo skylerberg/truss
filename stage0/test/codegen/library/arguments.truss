@@ -11,7 +11,7 @@ fn tool() -> arguments::Parser {
     .rest("extra", help: "More files.")
 }
 
-fn given(parser: arguments::Parser, text: StringSlice) -> Result[arguments::Parsed, arguments::Error] {
+fn parse_text(parser: arguments::Parser, text: StringSlice) -> Result[arguments::Parsed, arguments::Error] {
   var words: List[String] = []
   for word in text.split_whitespace() {
     mut words.push(word.to_string())
@@ -20,7 +20,7 @@ fn given(parser: arguments::Parser, text: StringSlice) -> Result[arguments::Pars
 }
 
 fn fails(parser: arguments::Parser, text: StringSlice, expected: arguments::Error) -> Bool {
-  match given(parser, text: text) {
+  match parse_text(parser, text: text) {
     Ok(_) => false
     Err(error) => error == expected
   }
@@ -36,7 +36,7 @@ fn joined(values: Slice[String]) -> String {
 }
 
 test "flags, options, and positional arguments are read in any order" {
-  assert given(tool(), text: "in.txt") is Ok(parsed)
+  assert parse_text(tool(), text: "in.txt") is Ok(parsed)
     && !parsed.flag("verbose")
     && !parsed.flag("force")
     && parsed.value("input") == Some("in.txt")
@@ -44,7 +44,7 @@ test "flags, options, and positional arguments are read in any order" {
     && parsed.value("level") is None
     && parsed.values("include").length() == 0
     && parsed.values("extra").length() == 0
-  assert given(tool(), text: "--verbose --output result.bin in.txt --level=3 a b") is Ok(parsed)
+  assert parse_text(tool(), text: "--verbose --output result.bin in.txt --level=3 a b") is Ok(parsed)
     && parsed.flag("verbose")
     && !parsed.flag("force")
     && parsed.value("output") == Some("result.bin")
@@ -54,30 +54,30 @@ test "flags, options, and positional arguments are read in any order" {
 }
 
 test "short options are read alone, in a cluster, and with a value attached" {
-  assert given(tool(), text: "-v -f in.txt") is Ok(parsed) && parsed.flag("verbose") && parsed.flag("force")
-  assert given(tool(), text: "-vf in.txt") is Ok(parsed) && parsed.flag("verbose") && parsed.flag("force")
-  assert given(tool(), text: "-o x.bin in.txt") is Ok(parsed) && parsed.value("output") == Some("x.bin")
-  assert given(tool(), text: "-ox.bin in.txt") is Ok(parsed) && parsed.value("output") == Some("x.bin")
-  assert given(tool(), text: "-vfo x.bin in.txt") is Ok(parsed)
+  assert parse_text(tool(), text: "-v -f in.txt") is Ok(parsed) && parsed.flag("verbose") && parsed.flag("force")
+  assert parse_text(tool(), text: "-vf in.txt") is Ok(parsed) && parsed.flag("verbose") && parsed.flag("force")
+  assert parse_text(tool(), text: "-o x.bin in.txt") is Ok(parsed) && parsed.value("output") == Some("x.bin")
+  assert parse_text(tool(), text: "-ox.bin in.txt") is Ok(parsed) && parsed.value("output") == Some("x.bin")
+  assert parse_text(tool(), text: "-vfo x.bin in.txt") is Ok(parsed)
     && parsed.flag("verbose")
     && parsed.flag("force")
     && parsed.value("output") == Some("x.bin")
 }
 
 test "a repeated option keeps every value and any other keeps its last" {
-  assert given(tool(), text: "-I a --include b --include=c in.txt") is Ok(parsed)
+  assert parse_text(tool(), text: "-I a --include b --include=c in.txt") is Ok(parsed)
     && joined(parsed.values("include")) == "a,b,c,"
     && parsed.value("include") == Some("c")
-  assert given(tool(), text: "--level 1 --level 2 in.txt") is Ok(parsed)
+  assert parse_text(tool(), text: "--level 1 --level 2 in.txt") is Ok(parsed)
     && joined(parsed.values("level")) == "2,"
 }
 
 test "everything after `--` is positional, and so is a negative number" {
-  assert given(tool(), text: "-- --verbose -f") is Ok(parsed)
+  assert parse_text(tool(), text: "-- --verbose -f") is Ok(parsed)
     && !parsed.flag("verbose")
     && parsed.value("input") == Some("--verbose")
     && joined(parsed.values("extra")) == "-f,"
-  assert given(tool(), text: "in.txt -5 -.5 -") is Ok(parsed) && joined(parsed.values("extra")) == "-5,-.5,-,"
+  assert parse_text(tool(), text: "in.txt -5 -.5 -") is Ok(parsed) && joined(parsed.values("extra")) == "-5,-.5,-,"
 }
 
 test "arguments that do not fit say what is wrong" {
@@ -97,10 +97,10 @@ test "arguments that do not fit say what is wrong" {
 }
 
 test "a value is read as the type that is asked for" {
-  assert given(tool(), text: "--level 12 in.txt") is Ok(parsed)
+  assert parse_text(tool(), text: "--level 12 in.txt") is Ok(parsed)
     && parsed.value_as[Int64]("level") == Ok(Some(12))
     && parsed.value_as[Int64]("output") == Err(arguments::Error.InvalidValue(name: "output", value: "out.txt"))
-  assert given(tool(), text: "in.txt") is Ok(parsed) && parsed.value_as[Int64]("level") == Ok(None)
+  assert parse_text(tool(), text: "in.txt") is Ok(parsed) && parsed.value_as[Int64]("level") == Ok(None)
 }
 
 fn version_control() -> arguments::Parser {
@@ -115,18 +115,18 @@ fn version_control() -> arguments::Parser {
 }
 
 test "a command takes the arguments after its name" {
-  assert given(version_control(), text: "-q commit -a -m fix") is Ok(parsed)
+  assert parse_text(version_control(), text: "-q commit -a -m fix") is Ok(parsed)
     && parsed.flag("quiet")
     && parsed.command_name() == Some("commit")
     && parsed.command() is Some(inner)
     && inner.flag("all")
     && inner.value("message") == Some("fix")
     && inner.command_name() is None
-  assert given(version_control(), text: "log") is Ok(parsed)
+  assert parse_text(version_control(), text: "log") is Ok(parsed)
     && parsed.command_name() == Some("log")
     && parsed.command() is Some(inner)
     && inner.value("path") is None
-  assert given(version_control(), text: "") is Ok(parsed) && parsed.command_name() is None && parsed.command() is None
+  assert parse_text(version_control(), text: "") is Ok(parsed) && parsed.command_name() is None && parsed.command() is None
   assert fails(version_control(), text: "push", expected: arguments::Error.UnknownCommand(name: "push"))
   assert fails(version_control(), text: "commit -a", expected: arguments::Error.MissingRequired(name: "message"))
 }

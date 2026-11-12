@@ -154,33 +154,33 @@ type unknown =
    variables, and [USize] value variables. The end of a statement's
    inference uses only this function to find them. *)
 let unknowns unifier (type_ : T.ty) =
-  let found = ref [] in
-  let rec go (type_ : T.ty) =
+  let unknowns = ref [] in
+  let rec collect (type_ : T.ty) =
     match resolve unifier type_ with
-    | Variable index -> found := Unknown_type index :: !found
-    | Literal (kind, index) -> found := Unknown_literal (kind, index) :: !found
+    | Variable index -> unknowns := Unknown_type index :: !unknowns
+    | Literal (kind, index) -> unknowns := Unknown_literal (kind, index) :: !unknowns
     | Named { arguments; _ } | Cursor { arguments; _ } -> List.iter argument arguments
     | Projection { base; trait = reference; _ } ->
-        go base;
+        collect base;
         trait reference
     | Function { inputs; output; _ } ->
-        List.iter (fun (_, type_) -> go type_) inputs;
-        go (T.result_type output)
+        List.iter (fun (_, type_) -> collect type_) inputs;
+        collect (T.result_type output)
     | Any reference -> trait reference
     | Parameter _ | Never | Integer | Hole | Error _ -> ()
   and argument = function
-    | T.Type type_ -> go type_
+    | T.Type type_ -> collect type_
     | T.Value value -> (
         match resolve_value unifier value with
-        | Value_variable index -> found := Unknown_value index :: !found
+        | Value_variable index -> unknowns := Unknown_value index :: !unknowns
         | _ -> ())
     | T.Capabilities _ -> ()
   and trait (reference : T.trait_reference) =
     List.iter argument reference.trait_arguments;
-    List.iter (fun (_, type_) -> go type_) reference.associated
+    List.iter (fun (_, type_) -> collect type_) reference.associated
   in
-  go type_;
-  List.sort_uniq compare !found
+  collect type_;
+  List.sort_uniq compare !unknowns
 
 let argument_unknowns unifier = function
   | T.Type type_ -> unknowns unifier type_

@@ -6,8 +6,7 @@
 
     - every call names its callee, and lists one argument per parameter, in parameter order;
     - every operator is either a built-in operation or a call of a trait method;
-    - syntactic sugar is desugared ([?], compound assignment, [for] over a collection, list
-      literals);
+    - syntactic sugar is desugared ([?], [for] over a collection, list literals);
     - every expression says whether it denotes a place or a value;
     - every type is fully inferred and normalized.
 
@@ -62,8 +61,8 @@ type callee =
           inherits the trait's default. *)
   | Capability_method of { capability : Path.t; name : string }
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
-      (** A direct call of a [standard::intrinsic] operation. Unlike {!Operator}, the prover does
-          not generate overflow or division checks for it. *)
+      (** A direct call of a [standard::intrinsic] operation. An integer operation such as [add] or
+          [divide] has the obligations of its operator: no overflow and no division by zero. *)
   | Indirect of operand
       (** A call through a function value. If the function value is stored in a place, the operand
           is that place: calling it does not move it. *)
@@ -223,13 +222,7 @@ and kind =
           type. *)
   (* Control flow *)
   | If of { condition : expression; then_ : block; else_ : block option }
-  | Match of {
-      scrutinees : operand list;
-      arms : arm list;
-      guards_exhaustive : bool;
-          (** True if the last arm is [_ => unreachable] and an earlier arm has a guard. The prover
-              must then show that the guards cover every case. *)
-    }
+  | Match of { scrutinees : operand list; arms : arm list }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
   | Return of expression option
@@ -253,9 +246,9 @@ and kind =
   | Result  (** [result] in an [ensures] clause: the function's return value. *)
   | Old of expression  (** [old(e)]: the value of [e] when the function was called. *)
   | Current_target
-      (** The value of the target of the enclosing {!Compound_assign} before the assignment. It
-          appears exactly once, as a direct argument of the {!Call} or {!Operator} that computes the
-          new value. *)
+      (** The value of the target of the enclosing {!Compound_assign} before the assignment, which
+          the operator takes as owned. It appears exactly once, as the first argument of the {!Call}
+          or {!Operator} that computes the new value. *)
   | Quantified of { quantifier : Syntax.quantifier; binder : binder; body : expression }
   | Yielded  (** [yielded]: the sequence of values a yielding method has yielded so far. *)
   | Finished  (** [finished]: whether a yielding method has returned. *)
@@ -320,9 +313,6 @@ and provided = { capability : Path.t; impl : Path.t; arguments : Types.substitut
 and block = {
   statements : statement list;
   value : expression option;  (** The block's final expression, which is the block's value. *)
-  diverges : bool;
-      (** True if control never reaches the end of the block: it always returns, breaks, continues,
-          or loops forever. *)
 }
 
 and statement = { id : id; origin : origin; kind : statement_kind }
@@ -333,10 +323,19 @@ and statement_kind =
           always diverges. *)
   | Evaluate of expression
   | Assign of { target : place; value : expression }
-  | Compound_assign of { target : place; value : expression }
-      (** A compound assignment such as [total += step]. [value] computes the new value; inside it,
-          {!Current_target} is the target's value before the assignment. The target place is
-          evaluated once. *)
+      (** [value] is evaluated first, then the index keys of [target], and then the new value
+          replaces the old one. *)
+  | Compound_assign of { target : place; operand : operand; bound : local; value : expression }
+      (** A compound assignment such as [total += step]. [operand] is the right operand. It is
+          evaluated first, and [bound] is bound to it: to its value, or to the place, which stays
+          borrowed until the assignment ends. Then the index keys of [target] are evaluated, once.
+          Then [value] computes the new value from {!Current_target} and [bound], and the new value
+          replaces the old one.
+
+          The operator takes the old value as owned, so the target holds no value while [value]
+          runs. Evaluating the operand first means that no code but the operator runs in that
+          window: an early exit in the operand, such as a [?], leaves the target initialized, and
+          the operand cannot read or mutate a target that was moved out. *)
   | For of {
       pattern : pattern;
       iteration : iteration;
@@ -415,7 +414,7 @@ and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind 
 
 and pattern_kind =
   | Wildcard
-  | Bind of { local : local; name : string; mutable_ : bool; mode : Types.mode }
+  | Bind of { local : local; name : string; is_var : bool; mode : Types.mode }
       (** Binds the matched value to a local. [mode] is [Own] if the binding owns the value, and
           [Read] or [Mut] if it borrows part of the scrutinee. *)
   | Variant of { variant : string; fields : (string * pattern) list }
@@ -477,13 +476,9 @@ type definition =
           that desugaring makes are numbered after them. *)
   | Empty  (** An [impl] or a capability. Its methods are separate definitions. *)
 
-type t = {
-  definition : definition;
-  node_count : int;  (** Every node id is less than this. *)
-  synthetic_local_count : int;  (** Every [Synthetic] local's number is less than this. *)
-}
+type t = { definition : definition }
 (** The core form of one definition.
 
     Three kinds of node carry a proof obligation that the type checker created: a {!From_integer}
-    conversion (the value must fit), a {!Widen} conversion (the costs must imply), and a {!Match}
-    with [guards_exhaustive] (the guards must cover every case). *)
+    conversion (the value must fit), a {!Widen} conversion (the costs must imply), and the
+    [_ => unreachable] arm that ends a {!Match} whose guards must cover every case. *)

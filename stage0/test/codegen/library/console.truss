@@ -1,7 +1,7 @@
 use standard::console
 
-fn same(found: StringSlice, expected: StringSlice) -> Bool {
-  found == expected
+fn same(actual: StringSlice, expected: StringSlice) -> Bool {
+  actual == expected
 }
 
 test "styles are stripped from text" {

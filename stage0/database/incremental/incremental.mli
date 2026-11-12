@@ -208,7 +208,7 @@ type store = {
 
 val attach : t -> store -> unit
 
-val record : t -> unit
+val record_facts : t -> unit
 (** Keeps a fact for each saved result computed since the last call: its value under the key of what
     it read. Another state whose reads have the same fingerprints finds it instead of computing.
     {!write} does this too. *)
@@ -219,11 +219,11 @@ val write : ?full:bool -> t -> string
     engine was opened from or last wrote; with [~full:true], or when there is no such artifact, it
     holds the whole state apart from its fixed bases. *)
 
-type debt = { whole : int; differences : int; depth : int }
+type chain_size = { whole : int; differences : int; depth : int }
 (** How many nodes the whole state an engine's artifact chain starts from holds, how many the
     differences after it hold, and how many differences there are. *)
 
-val debt : t -> debt
+val chain_size : t -> chain_size
 
 val unwritten : t -> bool
 (** Whether the engine holds anything {!write} has not written. *)
@@ -253,10 +253,10 @@ val forget_bases : unit -> unit
 
 (** {1 Checking the engine} *)
 
-val audit : ?flat:bool -> ?before:int -> t -> string list
+val audit : ?include_bases:bool -> ?before:int -> t -> string list
 (** Brings the engine up to date, then computes every result it holds in a new engine with the same
-    inputs, and returns a line for each that differs. With [~flat:true] the new engine has no bases
-    and is given their inputs too, which checks the bases' results as well as its own. With
+    inputs, and returns a line for each that differs. With [~include_bases:true] the new engine has
+    no bases and is given their inputs too, which checks the bases' results as well as its own. With
     [before], only the results of the phases before that one are computed again. An empty list means
     every result is what a fresh computation gives. *)
 

@@ -85,15 +85,15 @@ public trait FixedWidthInteger:
     }
   }
 
-  fn total(items: Slice[Self]) -> Integer
+  fn exact_sum(items: Slice[Self]) -> Integer
     cost time finite
   {
     items.model().sum(fn(item) { item })
   }
 
   fn sum(items: Slice[Self]) -> Self
-    requires Self.minimum_value() <= Self.total(items) && Self.total(items) <= Self.maximum_value()
-    ensures result == Self.total(items)
+    requires Self.minimum_value() <= Self.exact_sum(items) && Self.exact_sum(items) <= Self.maximum_value()
+    ensures result == Self.exact_sum(items)
     cost time O(items.length())
   {
     Self.wrapping_sum(items)
@@ -120,7 +120,7 @@ public trait FixedWidthInteger:
   }
 
   fn wrapping_sum(items: Slice[Self]) -> Self
-    ensures (Self.total(items) - result) % (Self.maximum_value() - Self.minimum_value() + 1) == 0
+    ensures (Self.exact_sum(items) - result) % (Self.maximum_value() - Self.minimum_value() + 1) == 0
     cost time O(items.length())
   {
     var total: Self = 0

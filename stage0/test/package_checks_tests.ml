@@ -148,7 +148,7 @@ let () =
       in
       match codes (check database (module_of "app::other")) with
       | [ "package.duplicate_test" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found))
+      | actual -> fail "found [%s]" (String.concat "; " actual))
 
 (* Recursive types, at scale *)
 
@@ -192,7 +192,7 @@ let () =
         \  type Part = Tree\n\
          }\n\n\
          type Kept[Source: Shown](part: Source.Part)\n\n\
-         type Tree(kept: Kept[Marker], count: Int64)\n"
+         type Tree(held: Kept[Marker], count: Int64)\n"
         "package.needs_indirect");
   test "a type held through a generic type's collection needs no indirect" (fun () ->
       fine
@@ -213,21 +213,21 @@ let () =
       in
       match codes (check database (module_of "app::main")) with
       | [ "package.growing_type"; "package.growing_type" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | actual -> fail "found [%s]" (String.concat "; " actual));
   test "a generic type that swaps its arguments is not growing" (fun () ->
       fine "type Swap[First, Second] =\n  | Stop\n  | indirect Next(next: Swap[Second, First])\n")
 
 (* Strict positivity *)
 
 let shown = "trait Shown {\n  type Part\n}\n\ntype Marker()\n\n"
-let kept = "type Kept[Source: Shown](part: Source.Part)\n\n"
+let holder = "type Kept[Source: Shown](part: Source.Part)\n\n"
 
 let () =
-  let found text = codes (check (setup [ ("app::main", text) ]) (module_of "app::main")) in
+  let actual text = codes (check (setup [ ("app::main", text) ]) (module_of "app::main")) in
   let expect expected text =
-    match found text with
-    | found when found = expected -> ()
-    | found -> fail "found [%s]" (String.concat "; " found)
+    match actual text with
+    | actual when actual = expected -> ()
+    | actual -> fail "found [%s]" (String.concat "; " actual)
   in
   test "a type cannot occur in the input of a function type that has a time clause" (fun () ->
       one_diagnostic "type Knot(run: (fn(Knot) -> Bool cost time finite))\n"
@@ -276,25 +276,25 @@ let () =
   test "a type cannot occur in such an input through an associated type" (fun () ->
       one_diagnostic
         (shown ^ "impl Shown for Marker {\n  type Part = (fn(Knot) -> Bool cost time finite)\n}\n\n"
-       ^ kept ^ "type Knot(kept: Kept[Marker])\n")
+       ^ holder ^ "type Knot(held: Kept[Marker])\n")
         "package.not_strictly_positive");
   test "an associated type cannot put a type in such an input of itself" (fun () ->
       one_diagnostic
         (shown
        ^ "impl Shown for Marker {\n  type Part = (fn(Kept[Marker]) -> Bool cost time finite)\n}\n\n"
-       ^ kept)
+       ^ holder)
         "package.not_strictly_positive");
   test "an associated type cannot make a type contain itself in place" (fun () ->
       one_diagnostic
-        (shown ^ "impl Shown for Marker {\n  type Part = Kept[Marker]\n}\n\n" ^ kept)
+        (shown ^ "impl Shown for Marker {\n  type Part = Kept[Marker]\n}\n\n" ^ holder)
         "package.needs_indirect");
   test "an associated type may make a type contain itself in a collection" (fun () ->
-      fine (shown ^ "impl Shown for Marker {\n  type Part = List[Kept[Marker]]\n}\n\n" ^ kept));
+      fine (shown ^ "impl Shown for Marker {\n  type Part = List[Kept[Marker]]\n}\n\n" ^ holder));
   test "only the impl that makes a type contain itself is an error" (fun () ->
       one_diagnostic
         (shown
        ^ "impl Shown for Marker {\n  type Part = (fn(Kept[Marker]) -> Bool cost time finite)\n}\n\n"
-       ^ kept
+       ^ holder
        ^ "type Outer(inner: Kept[Marker])\n\n\
           type Other()\n\n\
           impl Shown for Other {\n\
@@ -304,7 +304,7 @@ let () =
   test "an associated type may put the associated type of its impl's parameter in such an input"
     (fun () ->
       fine
-        (shown ^ kept
+        (shown ^ holder
        ^ "type Box[Inner](inner: Inner)\n\n\
           impl Shown for Box[Inner: Shown] {\n\
          \  type Part = (fn(Kept[Inner]) -> Bool cost time finite)\n\
@@ -312,10 +312,10 @@ let () =
           impl Shown for Marker {\n\
          \  type Part = Int64\n\
           }\n\n\
-          type Holder(kept: Kept[Box[Box[Marker]]])\n"));
+          type Holder(held: Kept[Box[Box[Marker]]])\n"));
   test "an associated type cannot make a type contain itself through another impl's type" (fun () ->
       one_diagnostic
-        (shown ^ kept
+        (shown ^ holder
        ^ "type Box[Inner](inner: Inner)\n\n\
           impl Shown for Box[Inner: Shown] {\n\
          \  type Part = Kept[Inner]\n\
@@ -327,13 +327,13 @@ let () =
   test "the arguments of an impl's type are generic parameters, as the recursive type check assumes"
     (fun () ->
       one_diagnostic
-        (shown ^ kept
+        (shown ^ holder
        ^ "type Box[Inner](inner: Inner)\n\nimpl Shown for Box[Marker] {\n  type Part = Int64\n}\n")
         "resolve.hides_name");
   test "an associated type cannot make a type contain itself through another impl's definition"
     (fun () ->
       one_diagnostic
-        (shown ^ kept
+        (shown ^ holder
        ^ "type Box[Inner](inner: Inner)\n\n\
           impl Shown for Box[Inner: Shown] {\n\
          \  type Part = Inner.Part\n\
@@ -374,7 +374,7 @@ let () =
         ];
       match codes (Package_checks.diagnostics database (module_of "app::main")) with
       | [ "package.overlapping_impls" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | actual -> fail "found [%s]" (String.concat "; " actual));
   test "an impl in another package cannot give a type another version of its method" (fun () ->
       let database = Engine.context (Engine.create ()) in
       Database.load_standard (Engine.of_context database);
@@ -399,7 +399,7 @@ let () =
         ];
       match codes (Package_checks.diagnostics database (module_of "app::main")) with
       | [ "package.method_name_clash" ] -> ()
-      | found -> fail "found [%s]" (String.concat "; " found));
+      | actual -> fail "found [%s]" (String.concat "; " actual));
   test "impls whose heads unify only through an infinite type do not overlap" (fun () ->
       fine
         "type Box[Element](value: Element)\n\n\

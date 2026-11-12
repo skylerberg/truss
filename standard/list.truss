@@ -614,26 +614,26 @@ public fn List[Element].retain(mut self, keep: (fn(Element) -> Bool cost time fi
   cost time O(old(self.length()) * time(keep))
 {
   let count = self.length()
-  var kept: USize = 0
+  var retained_count: USize = 0
   for index in 0..count
     invariant self.length() == count
-    invariant kept <= index
+    invariant retained_count <= index
   {
     if keep(self[index]) {
-      intrinsic::storage_swap(mut self.storage, first: kept, second: index)
-      kept += 1
+      intrinsic::storage_swap(mut self.storage, first: retained_count, second: index)
+      retained_count += 1
     }
   }
-  mut self.truncate(kept)
+  mut self.truncate(retained_count)
 }
 
 public fn List[Element].filter(own self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
   ensures result.length() <= self.length()
   cost time O(self.length() * time(keep))
 {
-  var kept = own self
-  mut kept.retain(keep)
-  kept
+  var retained = own self
+  mut retained.retain(keep)
+  retained
 }
 
 public fn List[Element: Equal].deduplicate(mut self)
@@ -644,18 +644,18 @@ public fn List[Element: Equal].deduplicate(mut self)
   if count == 0 {
     return
   }
-  var kept: USize = 1
+  var unique_count: USize = 1
   for index in 1..count
     invariant self.length() == count
-    invariant 1 <= kept
-    invariant kept <= index
+    invariant 1 <= unique_count
+    invariant unique_count <= index
   {
-    if !(self[index] == self[kept - 1]) {
-      intrinsic::storage_swap(mut self.storage, first: kept, second: index)
-      kept += 1
+    if !(self[index] == self[unique_count - 1]) {
+      intrinsic::storage_swap(mut self.storage, first: unique_count, second: index)
+      unique_count += 1
     }
   }
-  mut self.truncate(kept)
+  mut self.truncate(unique_count)
 }
 
 impl Default for List[Element] {

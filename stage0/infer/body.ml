@@ -40,7 +40,7 @@ let constant_expression : env = { no_output with compile_time = true }
 (* Checks a body. Types are inferred one statement at a time, and the last
    expression is checked against the result type. *)
 let body state env (written : block) =
-  let rec go = function
+  let rec check_statements = function
     | [] -> (
         match env.output with
         | Some (Returns output) ->
@@ -60,16 +60,16 @@ let body state env (written : block) =
             | Expression value, Some (Returns output) -> check state env value output
             | _, Some (Returns output) ->
                 statement state env last ~last:true;
-                if not (statement_never state last || unify state output T.unit) then
+                if not (statement_diverges state last || unify state output T.unit) then
                   report state Mismatch last.span
                     (Printf.sprintf "This body must end with a value of type `%s`."
                        (show state output))
             | _ -> statement state env last ~last:false)
     | (first : statement) :: rest ->
         in_statement state env first.span (fun () -> statement state env first ~last:false);
-        go rest
+        check_statements rest
   in
-  go written.statements
+  check_statements written.statements
 
 let declare_parameters state (written : parameter list) (signature : T.signature) =
   List.iter
@@ -81,7 +81,7 @@ let declare_parameters state (written : parameter list) (signature : T.signature
               (fun (info : T.parameter_info) -> info.name = name.text)
               signature.parameters
           with
-          | Some info -> declare state name info.type_ ~mutable_:false ~mode:info.mode
+          | Some info -> declare state name info.type_ ~is_var:false ~mode:info.mode
           | None -> ())
       | Self_parameter _ | Parameter_error -> ())
     written
@@ -132,8 +132,7 @@ let check_function_type_requires state env (written : parameter list) (signature
           | Some { type_ = T.Function lowered; _ }
             when List.length lowered.inputs = List.length input_names ->
               List.iter2
-                (fun (input : name) (mode, type_) ->
-                  declare state input type_ ~mutable_:false ~mode)
+                (fun (input : name) (mode, type_) -> declare state input type_ ~is_var:false ~mode)
                 input_names lowered.inputs;
               List.iter
                 (fun (clause : clause) ->
@@ -161,8 +160,8 @@ let check_defaults state env (written : parameter list) (signature : T.signature
                  parameter out, so it converts as an argument does: an owned
                  collection becomes its view. *)
               in_statement state env value.span (fun () ->
-                  let found = expression state env ~expected:info.type_ value in
-                  Lookups.coerce state env ~argument:true value ~found ~expected:info.type_);
+                  let actual = expression state env ~expected:info.type_ value in
+                  Lookups.coerce state env ~argument:true value ~actual ~expected:info.type_);
               Constant.check state ~default:true value
           | None -> ())
       | _ -> ())
@@ -432,7 +431,7 @@ let check_definition state (lowered : Environment.lowered_interface) =
                     (fun (parameter : parameter) ->
                       match parameter.kind with
                       | Named_parameter { name; type_; _ } ->
-                          declare state name (Lower.type_ state.context type_) ~mutable_:false
+                          declare state name (Lower.type_ state.context type_) ~is_var:false
                             ~mode:T.Read
                       | _ -> ())
                     law.parameters;
@@ -489,13 +488,13 @@ let check_definition state (lowered : Environment.lowered_interface) =
                       local = Synthetic index;
                       name;
                       mode = Read;
-                      type_ = final state type_;
+                      type_ = final_type state type_;
                       default = None;
                       callback_contract = None;
                     })
                   state.law_parameters
               in
-              state.form.synthetic_local_count <- List.length parameters;
+              state.form.next_synthetic_local <- List.length parameters;
               Law_proof { parameters; body = build_block state written });
         if not (broken Body) then
           body state { no_output with specification = true; output = Some (Returns T.unit) } written
@@ -512,12 +511,12 @@ let check_definition state (lowered : Environment.lowered_interface) =
    checked, such as a call's type arguments, is final only after the
    statement's inference finished. *)
 let finalize (state : state) =
-  let final = final state and argument = final_argument state in
+  let final_type = final_type state and argument = final_argument state in
   let trait (reference : T.trait_reference) =
     {
       reference with
       trait_arguments = List.map argument reference.trait_arguments;
-      associated = List.map (fun (name, type_) -> (name, final type_)) reference.associated;
+      associated = List.map (fun (name, type_) -> (name, final_type type_)) reference.associated;
     }
   in
   let evidence : C.evidence -> C.evidence = function
@@ -541,7 +540,7 @@ let finalize (state : state) =
               {
                 method_ with
                 trait = trait method_.trait;
-                self_type = final method_.self_type;
+                self_type = final_type method_.self_type;
                 type_arguments = List.map argument method_.type_arguments;
                 evidence = evidence method_.evidence;
               }
@@ -552,30 +551,31 @@ let finalize (state : state) =
             Intrinsic { intrinsic with type_arguments = List.map argument intrinsic.type_arguments }
         | other -> other);
       uses = final_capabilities state written.uses;
-      callee_result = final written.callee_result;
+      callee_result = final_type written.callee_result;
     }
   in
   let tables = state.tables in
   let update table f = Array.iteri (fun index entry -> table.(index) <- Option.map f entry) table in
-  update tables.types final;
-  update tables.local_types final;
-  update tables.scrutinee_types final;
+  update tables.types final_type;
+  update tables.local_types final_type;
+  update tables.scrutinee_types final_type;
   update tables.calls call;
   update tables.resolutions (function
     | C.Global { path; type_arguments } ->
         C.Global { path; type_arguments = List.map argument type_arguments }
-    | Field_access { type_; field } -> Field_access { type_ = final type_; field }
-    | Variant_value { type_; variant } -> Variant_value { type_ = final type_; variant }
-    | Type_name type_ -> Type_name (final type_)
+    | Field_access { type_; field } -> Field_access { type_ = final_type type_; field }
+    | Variant_value { type_; variant } -> Variant_value { type_ = final_type type_; variant }
+    | Type_name type_ -> Type_name (final_type type_)
     | other -> other);
   update tables.loops (function
     | C.Integer_range { element; inclusive } ->
-        C.Integer_range { element = final element; inclusive }
+        C.Integer_range { element = final_type element; inclusive }
     | Yielding { call = written; mode } -> Yielding { call = call written; mode }
-    | Pulled { cursor } -> Pulled { cursor = final cursor });
+    | Pulled { cursor } -> Pulled { cursor = final_type cursor });
   update tables.patterns (function
-    | C.Variant_pattern { type_; variant } -> C.Variant_pattern { type_ = final type_; variant }
-    | Record_pattern { type_ } -> Record_pattern { type_ = final type_ }
+    | C.Variant_pattern { type_; variant } ->
+        C.Variant_pattern { type_ = final_type type_; variant }
+    | Record_pattern { type_ } -> Record_pattern { type_ = final_type type_ }
     | other -> other);
   update tables.templates (fun (template : C.template) ->
       {
@@ -645,7 +645,7 @@ let check database (key : Names.key) =
               pattern_builders = Array.make (definition.id + 1) None;
               definition_builder = None;
               next_node_id = 0;
-              synthetic_local_count = 0;
+              next_synthetic_local = 0;
               tables_with_holes = None;
             };
           diagnostics = [];
@@ -688,14 +688,14 @@ let check database (key : Names.key) =
           Array.exists
             (function
               | Some type_ ->
-                  let found = ref false in
+                  let has_unwanted = ref false in
                   ignore
                     (T.map
                        (fun part ->
-                         if unwanted part then found := true;
+                         if unwanted part then has_unwanted := true;
                          None)
                        type_);
-                  !found
+                  !has_unwanted
               | None -> false)
             table
         in
@@ -735,7 +735,7 @@ let check database (key : Names.key) =
       in
       let build () : Core.t =
         state.form.next_node_id <- 0;
-        state.form.synthetic_local_count <- 0;
+        state.form.next_synthetic_local <- 0;
         (* The core form has no hole type. If the definition has one, the
            builders read a copy of the tables in which every hole is
            [Never]. The tables themselves keep their holes for the stages
@@ -751,11 +751,7 @@ let check database (key : Names.key) =
         in
         state.tables <- checked;
         state.form.tables_with_holes <- None;
-        {
-          definition;
-          node_count = state.form.next_node_id;
-          synthetic_local_count = state.form.synthetic_local_count;
-        }
+        { definition }
       in
       (* The capability check runs on the core form, and it solves the
          capability variables. Without a core form, every capability
@@ -792,7 +788,7 @@ let type_check_result =
   Query.query ~name:"type_check_result" ~phase:Phases.bodies ~show:Names.show_key ~saved:true
     ~about:(fun (key : Names.key) -> Some { Query.path = key.path; part = Some "body" })
     (fun database key ->
-      Compiler_bug.within ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
+      Compiler_bug.while_doing ~stage:"Infer" (Names.show_key key) (fun () -> check database key))
 
 (* The diagnostics of every body in a file, in file offsets and in order. *)
 let diagnostics database module_ =

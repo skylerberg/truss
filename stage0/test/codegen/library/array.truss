@@ -1,9 +1,9 @@
-fn same_items(found: Slice[Int64], expected: Slice[Int64]) -> Bool {
-  if found.length() != expected.length() {
+fn same_items(actual: Slice[Int64], expected: Slice[Int64]) -> Bool {
+  if actual.length() != expected.length() {
     return false
   }
-  for index in 0..found.length() {
-    if found[index] != expected[index] {
+  for index in 0..actual.length() {
+    if actual[index] != expected[index] {
       return false
     }
   }

@@ -55,12 +55,12 @@ let () =
           fn narrow(window: mut Window, count: USize) {\n\
          \  window.rest = window.rest[..count]\n\
           }\n\n\
-          fn f(given: mut List[Int64]) -> USize {\n\
+          fn f(supplied: mut List[Int64]) -> USize {\n\
          \  var items: List[Int64] = [3, 1, 2]\n\
          \  var part = items.slice()\n\
          \  bump(mut part)\n\
          \  part[1] = 4\n\
-         \  var other = given.slice()\n\
+         \  var other = supplied.slice()\n\
          \  bump(mut other)\n\
          \  items.length()\n\
           }\n"))
@@ -476,24 +476,24 @@ let () =
     "fn f(data: mut List[Int64], other: List[Int64]) -> USize {\n\
     \  var parts: List[Slice[Int64]] = []\n\
     \  mut parts.push(data[..])\n\
-    \  var kept: Slice[Int64] = other[..]\n\
+    \  var held: Slice[Int64] = other[..]\n\
     \  for part in parts {\n\
-    \    kept = part\n\
+    \    held = part\n\
     \  }\n\
     \  mut data.push(1)\n\
-    \  kept.length()\n\
+    \  held.length()\n\
      }\n"
     "ownership.changed_while_viewed";
   accepted "a `Plain` loop variable is a copy, so the collection can be mutated after the loop"
     "fn f(data: List[Int64], other: List[Int64]) -> USize {\n\
     \  var parts: List[Slice[Int64]] = []\n\
     \  mut parts.push(data[..])\n\
-    \  var kept: Slice[Int64] = other[..]\n\
+    \  var held: Slice[Int64] = other[..]\n\
     \  for part in parts {\n\
-    \    kept = part\n\
+    \    held = part\n\
     \  }\n\
     \  mut parts.clear()\n\
-    \  kept.length()\n\
+    \  held.length()\n\
      }\n";
   rejected "a place cannot be mutated while a `match` binding of it is live"
     "fn f() -> USize {\n\
@@ -558,11 +558,11 @@ let () =
      "a view from one iteration of a loop that borrows `mut` cannot be used in a later iteration"
      (chunks
     ^ "fn f(reader: mut Reader, other: List[Int64]) -> USize {\n\
-      \  var kept: Slice[Int64] = other[..]\n\
+      \  var held: Slice[Int64] = other[..]\n\
       \  for chunk in mut reader.chunks() {\n\
-      \    kept = chunk\n\
+      \    held = chunk\n\
       \  }\n\
-      \  kept.length()\n\
+      \  held.length()\n\
        }\n")
      "ownership.changed_while_viewed";
    accepted "a view from an iteration of a loop that borrows `mut` can be used in that iteration"
@@ -581,11 +581,11 @@ let () =
     \  yield self.buffer[1..]\n\
      }\n\n\
      fn f(reader: Reader, other: List[Int64]) -> USize {\n\
-    \  var kept: Slice[Int64] = other[..]\n\
+    \  var held: Slice[Int64] = other[..]\n\
     \  for window in reader.windows() {\n\
-    \    kept = window\n\
+    \    held = window\n\
     \  }\n\
-    \  kept.length()\n\
+    \  held.length()\n\
      }\n"
 
 (* A place given to a [provide] block *)
@@ -752,8 +752,8 @@ let () =
         \  let _ = mut cursor.find(fn(item) { item > 3 })\n\
         \  let _ = items.each().fold(0, combine: fn(total, item) { total + item })\n\
         \  let skipped = items.each().skip(1).count()\n\
-        \  let taken = items.each().take(1).count()\n\
-        \  skipped + taken + text.characters().skip(1).count()\n\
+        \  let moved = items.each().take(1).count()\n\
+        \  skipped + moved + text.characters().skip(1).count()\n\
          }\n");
   test "a cursor that would copy its elements cannot be passed to generic code" (fun () ->
       one_diagnostic
@@ -773,13 +773,13 @@ let () =
   in
   let rejected name body code = test name (fun () -> one_diagnostic (journal ^ body) code) in
   rejected "a capability's implementation cannot store a view argument"
-    "type Keeper(kept: StringSlice)\n\n\
+    "type Keeper(held: StringSlice)\n\n\
      impl Journal for Keeper {\n\
     \  fn write(mut self, text: StringSlice) {\n\
-    \    self.kept = text\n\
+    \    self.held = text\n\
     \  }\n\n\
     \  fn last(self) -> StringSlice {\n\
-    \    self.kept\n\
+    \    self.held\n\
     \  }\n\
      }\n"
     "ownership.view_crosses_capability";
@@ -811,9 +811,9 @@ let () =
     "a method outside a capability's `impl` can store a view argument and return a view of `self`"
     (fun () ->
       fine
-        "type Keeper(kept: StringSlice, text: String)\n\n\
+        "type Keeper(held: StringSlice, text: String)\n\n\
          fn Keeper.keep(mut self, text: StringSlice) {\n\
-        \  self.kept = text\n\
+        \  self.held = text\n\
          }\n\n\
          fn Keeper.all(self) -> StringSlice {\n\
         \  self.text.slice()\n\
@@ -827,14 +827,14 @@ let () =
   accepted "a view of a `match` binding of a parameter can be returned"
     "fn Url.user(self) -> Option[StringSlice] {\n\
     \  match self.user {\n\
-    \    Some(found) => Some(found.slice())\n\
+    \    Some(present) => Some(present.slice())\n\
     \    None => None\n\
     \  }\n\
      }\n";
   accepted "a view of an `is` binding of a parameter can be returned"
     "fn Url.user(self) -> Option[StringSlice] {\n\
-    \  if self.user is Some(found) {\n\
-    \    Some(found.slice())\n\
+    \  if self.user is Some(present) {\n\
+    \    Some(present.slice())\n\
     \  } else {\n\
     \    None\n\
     \  }\n\
@@ -853,7 +853,7 @@ let () =
         "fn f() -> Option[StringSlice] {\n\
         \  let user: Option[String] = Some(\"a\".copy())\n\
         \  match user {\n\
-        \    Some(found) => Some(found.slice())\n\
+        \    Some(present) => Some(present.slice())\n\
         \    None => None\n\
         \  }\n\
          }\n"
@@ -863,8 +863,8 @@ let () =
         "fn f() -> USize {\n\
         \  var user: Option[String] = Some(\"a\".copy())\n\
         \  match user {\n\
-        \    Some(found) => {\n\
-        \      let name = found.slice()\n\
+        \    Some(present) => {\n\
+        \      let name = present.slice()\n\
         \      user = None\n\
         \      name.length()\n\
         \    }\n\
@@ -916,10 +916,10 @@ let () =
     \  uses Tasks, Clock\n\
      {\n\
     \  concurrent {\n\
-    \    let taken = own holder.items\n\
+    \    let moved = own holder.items\n\
     \    let waited = wait(1)?\n\
     \  }\n\
-    \  holder.items = own taken\n\
+    \  holder.items = own moved\n\
     \  Ok(waited)\n\
      }\n"
     "ownership.not_reinitialized";
@@ -941,12 +941,12 @@ let () =
     "fn f(holder: mut Holder) -> Result[USize, USize]\n\
     \  uses Tasks, Clock\n\
      {\n\
-    \  let taken = own holder.items\n\
+    \  let moved = own holder.items\n\
     \  concurrent {\n\
     \    let first = wait(1)?\n\
     \    let second = wait(2)?\n\
     \  }\n\
-    \  holder.items = own taken\n\
+    \  holder.items = own moved\n\
     \  Ok(first + second)\n\
      }\n"
     "ownership.not_reinitialized";
@@ -1142,7 +1142,41 @@ let () =
          \  var count = limit\n\
          \  count += 1\n\
          \  count\n\
-          }\n"))
+          }\n"));
+  let bag =
+    "type Bag(items: List[Int64])\n\n\
+     impl Add[Bag] for Bag {\n\
+    \  type Output = Bag\n\n\
+    \  fn add_is_defined(self, right: Bag) -> Bool {\n\
+    \    true\n\
+    \  }\n\n\
+    \  fn add(self, right: Bag) -> Bag {\n\
+    \    Bag(items: self.items.copy())\n\
+    \  }\n\
+     }\n\n"
+  in
+  test "a compound assignment's operand may change the target, because it runs first" (fun () ->
+      fine
+        (bag
+       ^ "fn grow(bag: mut Bag) -> Bag {\n\
+         \  mut bag.items.push(1)\n\
+         \  Bag(items: [])\n\
+          }\n\n\
+          fn f(bag: mut Bag) {\n\
+         \  bag += grow(mut bag)\n\
+          }\n"));
+  test "a compound assignment's borrowed operand cannot be changed by the target's index keys"
+    (fun () ->
+      one_diagnostic
+        (bag
+       ^ "fn spoil(others: mut List[Bag]) -> USize {\n\
+         \  mut others.push(Bag(items: []))\n\
+         \  0\n\
+          }\n\n\
+          fn f(bags: mut List[Bag], others: mut List[Bag]) {\n\
+         \  bags[spoil(mut others)] += others[0]\n\
+          }\n")
+        "ownership.changed_while_viewed")
 
 let () =
   test "the default of a parameter of a view type views a value that lasts for the call" (fun () ->
@@ -1227,28 +1261,28 @@ let () =
       fine
         "fn f(first: own List[Int64]) -> List[Int64] {\n\
         \  var items = own first\n\
-        \  let taken = own items\n\
+        \  let moved = own items\n\
         \  items = [1]\n\
         \  mut items.push(2)\n\
-        \  taken\n\
+        \  moved\n\
          }\n");
   (let holder = "type Holder(items: List[Int64], count: USize)\n\n" in
    let accepted name body = test name (fun () -> fine (holder ^ body)) in
    let rejected name body code = test name (fun () -> one_diagnostic (holder ^ body) code) in
    accepted "a field of a `mut` borrow can be moved out and reinitialized"
      "fn Holder.take_items(mut self) -> List[Int64] {\n\
-     \  let taken = own self.items\n\
+     \  let moved = own self.items\n\
      \  self.items = []\n\
-     \  taken\n\
+     \  moved\n\
       }\n";
    rejected "a field moved out of `mut self` must be reinitialized"
-     "fn Holder.take_items(mut self) -> List[Int64] {\n  let taken = own self.items\n  taken\n}\n"
+     "fn Holder.take_items(mut self) -> List[Int64] {\n  let moved = own self.items\n  moved\n}\n"
      "ownership.not_reinitialized";
    accepted "a `mut` borrow can be moved out whole and reinitialized"
      "fn take[Value](slot: mut Option[Value]) -> Option[Value] {\n\
-     \  let taken = own slot\n\
+     \  let moved = own slot\n\
      \  slot = None\n\
-     \  taken\n\
+     \  moved\n\
       }\n\n\
       fn replace[Value](slot: mut Option[Value], value: own Value) -> Option[Value] {\n\
      \  let previous = own slot\n\
@@ -1256,22 +1290,22 @@ let () =
      \  previous\n\
       }\n";
    rejected "a `mut` borrow that is moved out whole must be reinitialized"
-     "fn f(holder: mut Holder) -> Holder {\n  let taken = own holder\n  taken\n}\n"
+     "fn f(holder: mut Holder) -> Holder {\n  let moved = own holder\n  moved\n}\n"
      "ownership.not_reinitialized";
    rejected "a `mut` borrow must be reinitialized on every path"
      "fn f(holder: mut Holder, keep: Bool) -> List[Int64] {\n\
-     \  let taken = own holder.items\n\
+     \  let moved = own holder.items\n\
      \  if keep {\n\
      \    holder.items = []\n\
      \  }\n\
-     \  taken\n\
+     \  moved\n\
       }\n"
      "ownership.not_reinitialized";
    rejected "a `mut` borrow cannot be used while it is moved out"
      "fn f(holder: mut Holder) -> USize {\n\
-     \  let taken = own holder\n\
+     \  let moved = own holder\n\
      \  let count = holder.count\n\
-     \  holder = own taken\n\
+     \  holder = own moved\n\
      \  count\n\
       }\n"
      "ownership.use_after_move";
@@ -1415,7 +1449,7 @@ let () =
         \    yield self.cells[0]\n\
         \  }\n\
          }\n"
-        "ownership.lends_count");
+        "ownership.yield_count");
   (let bag =
      "type Bag(items: List[String])\n\n\
       fn Bag.each(self) yields String {\n\
@@ -1444,7 +1478,7 @@ let () =
           \    return\n\
           \  }\n\
            }\n")
-         "ownership.lends_count");
+         "ownership.yield_count");
    test "a lending method cannot yield after a loop that yields and breaks" (fun () ->
        one_diagnostic
          (bag
@@ -1455,7 +1489,7 @@ let () =
           \  }\n\
           \  yield None\n\
            }\n")
-         "ownership.lends_count");
+         "ownership.yield_count");
    test "a lending method cannot yield on each iteration of a loop" (fun () ->
        one_diagnostic
          (bag
@@ -1464,7 +1498,7 @@ let () =
           \    yield Some(item)\n\
           \  }\n\
            }\n")
-         "ownership.lends_count"));
+         "ownership.yield_count"));
   (let grid = "type Grid(cells: List[Int64], count: USize)\n\n" in
    test "a lending method can yield in one branch of a `parallel` block" (fun () ->
        fine
@@ -1484,7 +1518,7 @@ let () =
           \    yield self.cells[1]\n\
           \  }\n\
            }\n")
-         "ownership.lends_count"));
+         "ownership.yield_count"));
   test "a method that yields recursively cannot be pulled" (fun () ->
       one_diagnostic
         "type Tree =\n\
@@ -1803,7 +1837,7 @@ let () =
          }\n");
   test "a let of a marked call's result binds it owned" (fun () ->
       fine
-        "fn keep(found: own Option[List[Int64]]) {}\n\n\
+        "fn keep(present: own Option[List[Int64]]) {}\n\n\
          fn f(source: mut List[List[Int64]]) {\n\
         \  let last = mut source.pop()\n\
         \  keep(own last)\n\
@@ -1811,8 +1845,8 @@ let () =
   test "is on a place binds views of its parts" (fun () ->
       one_diagnostic
         "fn keep(text: own String) {}\n\n\
-         fn f(found: Option[String]) {\n\
-        \  if found is Some(text) {\n\
+         fn f(present: Option[String]) {\n\
+        \  if present is Some(text) {\n\
         \    keep(own text)\n\
         \  }\n\
          }\n"
@@ -1825,11 +1859,11 @@ let () =
         (make
        ^ "fn f(ready: Bool) {\n\
          \  while ready {\n\
-         \    let found = make()\n\
-         \    keep_found(own found)\n\
+         \    let present = make()\n\
+         \    keep_found(own present)\n\
          \  }\n\
           }\n\n\
-          fn keep_found(found: own Option[String]) {}\n"));
+          fn keep_found(present: own Option[String]) {}\n"));
   test "an `is` binding of a `while` condition may be moved in every iteration" (fun () ->
       fine (make ^ "fn f() {\n  while make() is Some(text) {\n    keep(own text)\n  }\n}\n"));
   test "an is binding in an if inside a loop may be moved" (fun () ->
@@ -1870,16 +1904,16 @@ let disjoint_obligations text =
 
 let () =
   test "two slices of one list borrowed by one call produce a `Disjoint` obligation" (fun () ->
-      let found =
+      let actual =
         disjoint_obligations
           "fn both(first: mut Slice[Int64], second: mut Slice[Int64]) {}\n\n\
            fn f(items: mut List[Int64], middle: USize) {\n\
           \  both(mut items[..middle], second: mut items[middle..])\n\
            }\n"
       in
-      if found <> 1 then fail "%d obligations" found);
+      if actual <> 1 then fail "%d obligations" actual);
   test "`parallel` branches that mutate two elements produce a `Disjoint` obligation" (fun () ->
-      let found =
+      let actual =
         disjoint_obligations
           "fn f(items: mut List[Int64], first: USize, second: USize) {\n\
           \  parallel {\n\
@@ -1888,27 +1922,27 @@ let () =
           \  }\n\
            }\n"
       in
-      if found <> 1 then fail "%d obligations" found);
+      if actual <> 1 then fail "%d obligations" actual);
   test "a `mut` slice argument that may alias a view argument produces a `Disjoint` obligation"
     (fun () ->
-      let found =
+      let actual =
         disjoint_obligations
           "fn f(first: mut Slice[Int64], other: Slice[Int64]) {}\n\n\
            fn g(items: mut List[Int64]) {\n\
           \  f(mut items[0..2], other: items[0..2])\n\
            }\n"
       in
-      if found <> 1 then fail "%d obligations" found);
+      if actual <> 1 then fail "%d obligations" actual);
   test "a `mut` element argument that may alias a view argument produces a `Disjoint` obligation"
     (fun () ->
-      let found =
+      let actual =
         disjoint_obligations
           "fn f(first: mut Int64, other: Slice[Int64]) {}\n\n\
            fn g(items: mut List[Int64]) {\n\
           \  f(mut items[0], other: items[1..2])\n\
            }\n"
       in
-      if found <> 1 then fail "%d obligations" found)
+      if actual <> 1 then fail "%d obligations" actual)
 
 (* Lending: a call of a lending method is a part, lent for the rest of the
    statement, and the place it is lent from is lent whole for as long. *)
@@ -1982,8 +2016,8 @@ let () =
         (grid
        ^ "fn look(cell: Cell) {}\n\n\
           fn f(grid: Grid) {\n\
-         \  let kept = grid.cell(0)\n\
-         \  look(kept)\n\
+         \  let held = grid.cell(0)\n\
+         \  look(held)\n\
           }\n")
         "ownership.keeps_lent_part");
   test "a `let` copies a `Plain` lent part" (fun () ->
@@ -2076,8 +2110,8 @@ let () =
          }\n");
   test "a `mut` argument of a function stores the function's view arguments" (fun () ->
       one_diagnostic
-        "fn keep(kept: mut List[Slice[Int64]], view: Slice[Int64]) {\n\
-        \  mut kept.push(view)\n\
+        "fn keep(held: mut List[Slice[Int64]], view: Slice[Int64]) {\n\
+        \  mut held.push(view)\n\
          }\n\n\
          fn f() -> USize {\n\
         \  var data: List[Int64] = [1, 2, 3]\n\
@@ -2124,28 +2158,28 @@ let () =
         "ownership.views_temporary");
   test "a view of a local cannot be stored in a `mut` parameter" (fun () ->
       one_diagnostic
-        "fn f(kept: mut List[Slice[Int64]]) {\n\
+        "fn f(held: mut List[Slice[Int64]]) {\n\
         \  let local: List[Int64] = [1, 2, 3]\n\
-        \  mut kept.push(local[0..2])\n\
+        \  mut held.push(local[0..2])\n\
          }\n"
         "ownership.view_escapes");
   test "a view argument can be stored in a `mut` parameter" (fun () ->
       fine
-        "fn f(kept: mut List[Slice[Int64]], source: Slice[Int64]) {\n\
-        \  mut kept.push(source[0..2])\n\
+        "fn f(held: mut List[Slice[Int64]], source: Slice[Int64]) {\n\
+        \  mut held.push(source[0..2])\n\
          }\n");
   test "a view of a borrowed parameter that is not a view cannot be stored in a `mut` parameter"
     (fun () ->
       one_diagnostic
-        "fn f(kept: mut List[Slice[Int64]], source: List[Int64]) {\n\
-        \  mut kept.push(source[0..2])\n\
+        "fn f(held: mut List[Slice[Int64]], source: List[Int64]) {\n\
+        \  mut held.push(source[0..2])\n\
          }\n"
         "ownership.view_escapes");
   test "a place that a `mut` parameter views cannot be mutated in the rest of the function"
     (fun () ->
       one_diagnostic
-        "fn f(kept: mut List[Slice[Int64]], source: mut Slice[Int64]) {\n\
-        \  mut kept.push(source[0..2])\n\
+        "fn f(held: mut List[Slice[Int64]], source: mut Slice[Int64]) {\n\
+        \  mut held.push(source[0..2])\n\
         \  source = source[1..]\n\
          }\n"
         "ownership.changed_while_viewed");
@@ -2215,7 +2249,7 @@ let () =
   test "a function can return a record that views its parameter" (fun () ->
       fine
         (window
-       ^ "fn f(items: List[Int64]) -> Window {\n  let made = Window(items[0..2])\n  made\n}\n"));
+       ^ "fn f(items: List[Int64]) -> Window {\n  let built = Window(items[0..2])\n  built\n}\n"));
   test "a function cannot return a local that views its local" (fun () ->
       one_diagnostic
         "fn f() -> Slice[Int64] {\n\

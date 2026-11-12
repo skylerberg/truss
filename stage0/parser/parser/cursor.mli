@@ -27,7 +27,7 @@ val create :
   stop:int ->
   t
 
-val over : ?stop:int -> t -> Token.t array -> t
+val sub_cursor : ?stop:int -> t -> Token.t array -> t
 val restarted : t -> t
 val fresh_id : t -> int
 val token_at : t -> int -> Token.t

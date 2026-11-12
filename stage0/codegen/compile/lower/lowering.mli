@@ -76,12 +76,12 @@ val frame_of : Definitions.code -> inlined:Path.t list -> frame
 val enter :
   Definitions.context -> ?pulling:bool -> ?nested:Lir.function_ option list ref -> frame -> state
 
-val at_once : state -> bool
+val may_fork : state -> bool
 val fresh_fork : state -> int
 val new_early_exits : state -> early_exits
 val ground : state -> Types.ty -> Ground.ty
 val trivial : state -> Ground.ty -> bool
-val zero_size : state -> Ground.ty -> bool
+val is_zero_size : state -> Ground.ty -> bool
 val site : state -> Definitions.S.span -> Lir.site
 
 type unsupported = { what : string; at : Lir.site option }

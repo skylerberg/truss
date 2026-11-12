@@ -105,7 +105,7 @@ val attach : t -> Store.t -> version:string -> unit
 (** Keeps the engine's values and facts in the store. [version] names what computed them, and is
     part of every key. *)
 
-val record : t -> unit
+val record_facts : t -> unit
 (** Keeps a fact for each saved result computed since the last call. *)
 
 val write : ?full:bool -> t -> string
@@ -113,9 +113,9 @@ val write : ?full:bool -> t -> string
     from or last wrote, or with [~full:true], or when there is none, the whole state apart from its
     fixed bases. *)
 
-type debt = Incremental.debt = { whole : int; differences : int; depth : int }
+type chain_size = Incremental.chain_size = { whole : int; differences : int; depth : int }
 
-val debt : t -> debt
+val chain_size : t -> chain_size
 (** How many nodes the artifact chain's whole state holds, how many its differences hold, and how
     many differences there are, for deciding when to write the whole state again. *)
 
@@ -150,7 +150,7 @@ val forget_bases : unit -> unit
 
 (** {1 Checking the engine} *)
 
-val audit : ?flat:bool -> ?before:Query.phase -> t -> string list
+val audit : ?include_bases:bool -> ?before:Query.phase -> t -> string list
 (** A line for each result that differs from what a new engine with the same inputs computes. With
     [before], only the results of the phases before that one are computed again, which leaves out
     what is costly to compute and audited elsewhere, such as proofs. *)

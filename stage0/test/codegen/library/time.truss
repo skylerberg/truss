@@ -18,7 +18,7 @@ test "an instant is made from seconds and milliseconds, unless they do not fit" 
 
 fn date(year: Int32, month: UInt8, day: UInt8) -> time::Date {
   match time::Date.new(year, month: month, day: day) {
-    Some(found) => found
+    Some(valid) => valid
     None => date(1970, month: 1, day: 1)
   }
 }
@@ -184,7 +184,7 @@ test "a date is read from the text it is displayed as" {
 
 fn clock(hour: UInt8, minute: UInt8, second: UInt8, nanosecond: UInt32) -> time::TimeOfDay {
   match time::TimeOfDay.new(hour, minute: minute, second: second, nanosecond: nanosecond) {
-    Some(found) => found
+    Some(valid) => valid
     None => time::TimeOfDay.midnight
   }
 }
@@ -347,14 +347,14 @@ fn at(seconds: Int64) -> time::Instant {
 
 fn local(text: StringSlice) -> time::DateTime {
   match time::DateTime.parse(text) {
-    Ok(found) => found
+    Ok(parsed) => parsed
     Err(_) => time::TimeZone.utc().to_local(time::Instant.epoch)
   }
 }
 
 fn zone_of(name: StringSlice, rules: List[UInt8]) -> time::TimeZone {
   match time::TimeZone.from_rules(name, rules: rules.slice()) {
-    Ok(found) => found
+    Ok(zone) => zone
     Err(_) => time::TimeZone.utc()
   }
 }
@@ -507,7 +507,7 @@ test "a zone is found by name, and the local zone is the environment's" {
   let rules: List[UInt8] = [84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 85, 84, 67, 0, 84, 90, 105, 102, 50, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 3, 0, 0, 0, 12, 255, 255, 255, 255, 94, 3, 240, 144, 0, 0, 0, 0, 92, 132, 181, 240, 0, 0, 0, 0, 93, 190, 108, 224, 0, 0, 0, 0, 94, 100, 151, 240, 0, 0, 0, 0, 95, 158, 78, 224, 0, 0, 0, 0, 96, 77, 180, 112, 0, 0, 0, 0, 97, 135, 107, 96, 1, 2, 1, 2, 1, 2, 1, 255, 255, 186, 158, 0, 0, 255, 255, 185, 176, 0, 4, 255, 255, 199, 192, 1, 8, 76, 77, 84, 0, 69, 83, 84, 0, 69, 68, 84, 0, 10, 69, 83, 84, 53, 69, 68, 84, 44, 77, 51, 46, 50, 46, 48, 44, 77, 49, 49, 46, 49, 46, 48, 10]
   let known = environment::FixedEnvironment.new(zone_platform(), current_directory: Path.new("/")).with_zone("America/New_York", rules: own rules, local: true)
   provide known {
-    assert time::zone("America/New_York") is Ok(found) && shows_local(found, seconds: 1593604800, expected: "2020-07-01T08:00:00", offset: -14400)
+    assert time::zone("America/New_York") is Ok(zone) && shows_local(zone, seconds: 1593604800, expected: "2020-07-01T08:00:00", offset: -14400)
     assert time::zone("Mars/Olympus") is Err(UnknownZone)
     assert named(time::local_zone(), expected: "America/New_York")
   }

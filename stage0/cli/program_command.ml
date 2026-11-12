@@ -54,11 +54,11 @@ let refuse_unshippable ~json ~echo (project : Project.t) compile main =
   match Compile.unshippable compile ~main ~echo with
   | Error message -> Project.cannot_run "%s" message
   | Ok [] -> ()
-  | Ok found ->
+  | Ok unshippable ->
       if json then
         Json.print
           (Json.document ~diagnostics:[]
-             [ ("unshippable", Json.List (List.map (unshippable_json project) found)) ])
+             [ ("unshippable", Json.List (List.map (unshippable_json project) unshippable)) ])
       else
         List.iter
           (fun (u : Compile.unshippable) ->
@@ -67,7 +67,7 @@ let refuse_unshippable ~json ~echo (project : Project.t) compile main =
               (Project.shown_workspace_path project u.file)
               u.line u.column (what u.failure)
               (String.concat " -> " (List.map Path.show u.way)))
-          found;
+          unshippable;
       raise (Stop 1)
 
 (* Refuses a program whose [main] can reach a definition whose proofs have
@@ -75,7 +75,7 @@ let refuse_unshippable ~json ~echo (project : Project.t) compile main =
 let refuse_holes ~json (project : Project.t) main =
   match Proofs.holes_reached project main with
   | [] -> ()
-  | found ->
+  | holes ->
       if json then
         Json.print
           (Json.document ~diagnostics:[]
@@ -89,7 +89,7 @@ let refuse_holes ~json (project : Project.t) main =
                             ("kind", Json.String "proof hole");
                             ("definition", Json.String (Path.show path));
                           ])
-                      found) );
+                      holes) );
              ])
       else
         List.iter
@@ -98,7 +98,7 @@ let refuse_holes ~json (project : Project.t) main =
               "`%s` has a `todo` in a proof and can be reached from `main`, so the program cannot \
                be built.\n"
               (Path.show path))
-          found;
+          holes;
       raise (Stop 1)
 
 let catching f = try f () with Stop status -> Outcome.Exit status

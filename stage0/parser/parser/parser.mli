@@ -17,7 +17,7 @@ type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnost
 (** A piece's diagnostics are relative to its base, so that a piece that only moved has the same
     ones. *)
 
-val placed : _ parsed -> Diagnostic.t list
+val diagnostics_in_file : _ parsed -> Diagnostic.t list
 (** A piece's diagnostics, moved by its base to their place in the file. *)
 
 val definition :

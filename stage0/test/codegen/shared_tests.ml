@@ -300,7 +300,7 @@ let () =
         (Standard_library.modules @ [ (checks, checks_source) ]);
       let database = Engine.context engine in
       let text = Source.text (Query.demand database Workspace.file checks).source in
-      let found =
+      let actual =
         List.map
           (fun (d : Diagnostic.t) ->
             (Diagnostic.Code.name d.code, String.sub text d.span.start (d.span.stop - d.span.start)))
@@ -314,7 +314,7 @@ let () =
         ]
       in
       let show = List.map (fun (code, excerpt) -> code ^ " at " ^ excerpt) in
-      if found <> expected then
+      if actual <> expected then
         fail "expected [%s], got [%s]"
           (String.concat "; " (show expected))
-          (String.concat "; " (show found)))
+          (String.concat "; " (show actual)))

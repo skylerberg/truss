@@ -44,7 +44,7 @@ let finish b terminator =
   b.blocks.(b.current) <- { statements = List.rev b.statements; terminator };
   b.statements <- []
 
-let aside b block f =
+let in_block b block f =
   let current = b.current and statements = b.statements in
   start b block;
   f ();

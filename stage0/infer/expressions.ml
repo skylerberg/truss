@@ -37,8 +37,8 @@ let rec expression state env ?expected (value : expression) : T.ty =
   type_
 
 and check state env (value : expression) (expected : T.ty) =
-  let found = expression state env ~expected value in
-  coerce state env value ~found ~expected
+  let actual = expression state env ~expected value in
+  coerce state env value ~actual ~expected
 
 and expression_kind state env ?expected (value : expression) : T.ty =
   match value.kind with
@@ -109,7 +109,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
         "`Self` is a type. Build a value of it, or call one of its methods."
   | Name path -> (
       match head state value with
-      | Some found -> named state env value found
+      | Some resolution -> named state env value resolution
       | None -> bug "the name `%s` is not resolved" path.last.text)
   | Member (base, member) -> member_value state env value base member
   | Bracket (base, items) -> bracket state env ?expected value base items
@@ -153,7 +153,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
             let stop_type = expression state env ~expected:element stop in
             literal_operands state ~left:element ~right:stop_type;
             if not (unify state element stop_type) then
-              mismatch state stop.span ~expected:element ~found:stop_type;
+              mismatch state stop.span ~expected:element ~actual:stop_type;
             element
         | Some only, None | None, Some only -> expression state env only
         | None, None -> fresh state
@@ -171,7 +171,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
             report state Specification_only value.span
               "A quantifier over a whole type cannot run, so it is only for specifications and the \
                bodies of functions for specifications only. Quantify over a range or a collection.";
-          declare state bound (Lower.type_ state.context written) ~mutable_:false ~mode:T.Read);
+          declare state bound (Lower.type_ state.context written) ~is_var:false ~mode:T.Read);
       check state env body T.bool;
       register_expression state value (fun () ->
           let binder : Core.binder =
@@ -212,7 +212,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
       | Some inner, Some (Returns output) -> check state env inner output
       | None, Some (Returns output) ->
           if not (unify state output T.unit) then
-            mismatch state value.span ~expected:output ~found:T.unit
+            mismatch state value.span ~expected:output ~actual:T.unit
       | Some inner, _ -> ignore (expression state env inner)
       | None, _ -> ());
       T.Never
@@ -232,7 +232,7 @@ and expression_kind state env ?expected (value : expression) : T.ty =
   | Block body ->
       register_expression state value (fun () -> Block (build_block state body));
       block_value state env ?expected body
-  | Expression_error -> T.Error (Resolve.Parts.error_node value.span)
+  | Expression_error -> T.Error (Resolve.Parts.recovery_report value.span)
 
 (* [receiver.name] used as a value: a field, or a static member of a type. *)
 and member_value state env (value : expression) (base : expression) (member : name) =
@@ -262,7 +262,7 @@ and bracket state env ?expected (value : expression) (base : expression) items =
   | Some Type_arguments -> (
       (* A name with type arguments, used as a value. *)
       match head state value with
-      | Some found -> named state env value found
+      | Some resolution -> named state env value resolution
       | None -> bug "type arguments are written after what is not a name")
   | Some Method_bracket -> (
       (* Name resolution cannot tell a field from a method before the dot. A
@@ -339,8 +339,8 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                 let associated name = associated state base_type index_trait name ~at:value.span in
                 let key_type = associated "Key" and output = associated "Output" in
                 (* The key is an argument for the parameter of [at]. *)
-                let found = expression state env ~expected:key_type key in
-                coerce state env ~argument:true key ~found ~expected:key_type;
+                let actual = expression state env ~expected:key_type key in
+                coerce state env ~argument:true key ~actual ~expected:key_type;
                 state.tables.calls.(value.id) <-
                   Some
                     {

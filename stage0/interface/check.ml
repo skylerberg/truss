@@ -604,7 +604,7 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
             @ state.diagnostics
         in
         state.diagnostics <- List.map snd missing_associated @ state.diagnostics;
-        let given =
+        let written_methods =
           List.filter_map
             (fun (member : Names.key) ->
               match member.path with
@@ -617,14 +617,14 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
            have no bodies. *)
         List.iter
           (fun (method_ : T.trait_method) ->
-            let given =
+            let is_written =
               List.exists
                 (fun (name, receiver) ->
                   name = method_.method_name
                   && (trait.is_capability || receiver = method_.method_receiver))
-                given
+                written_methods
             in
-            if (not given) && not method_.provided then
+            if (not is_written) && not method_.provided then
               report state Missing_member trait_path.span
                 (Printf.sprintf "This `impl` must give `%s%s`, which `%s` declares."
                    method_.method_name
@@ -698,7 +698,7 @@ let check_impl state (written_members : impl_member line list) (impl : T.impl_in
 
 (* A method written inside an [impl], against the method its trait
    declares. *)
-let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.signature)
+let check_impl_method state (name : name) (receiver : Path.receiver) (written : T.signature)
     (impl : T.impl_interface) (trait_path : path_type) =
   match impl_view state.database ~bounds:(bounds state) impl trait_path with
   | None -> ()
@@ -736,17 +736,17 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
           else begin
             (* The method's own generic parameters and [uses], after the
                [impl]'s, which every method written inside it has. *)
-            let given =
+            let written =
               {
-                given with
+                written with
                 generics =
                   List.filteri
                     (fun index _ -> index >= List.length impl.impl_generics)
-                    given.generics;
+                    written.generics;
                 uses =
                   List.filter
                     (fun capability -> not (List.mem capability impl.impl_uses))
-                    given.uses;
+                    written.uses;
               }
             in
             (* The trait method's own generic parameters are substituted by
@@ -756,26 +756,27 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
                 (T.substitute_signature
                    (Option.value ~default:[]
                       (T.substitution_of declared.method_signature.generics
-                         (Types.generic_arguments given.generics)))
+                         (Types.generic_arguments written.generics)))
                    declared.method_signature)
             in
             let expected =
-              if trait.is_capability then { expected with receiver = given.receiver } else expected
+              if trait.is_capability then { expected with receiver = written.receiver }
+              else expected
             in
             let expected = { expected with uses = normalize_capabilities expected.uses } in
             let parameters_agree =
-              List.length expected.parameters = List.length given.parameters
+              List.length expected.parameters = List.length written.parameters
               && List.for_all2
                    (fun (left : T.parameter_info) (right : T.parameter_info) ->
                      left.name = right.name && left.mode = right.mode
                      && agrees left.type_ right.type_)
-                   expected.parameters given.parameters
+                   expected.parameters written.parameters
             in
             let receivers_agree =
-              Option.map fst expected.receiver = Option.map fst given.receiver
+              Option.map fst expected.receiver = Option.map fst written.receiver
             in
             let generics_agree =
-              List.length expected.generics = List.length given.generics
+              List.length expected.generics = List.length written.generics
               && List.for_all2
                    (fun (expected_generic : T.generic) (given_generic : T.generic) ->
                      match (expected_generic.kind, given_generic.kind) with
@@ -789,12 +790,12 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
                                expected_bounds)
                            given_bounds
                      | left, right -> left = right)
-                   expected.generics given.generics
+                   expected.generics written.generics
             in
             if
               not
                 (parameters_agree && receivers_agree && generics_agree
-                && agrees_result expected.output given.output)
+                && agrees_result expected.output written.output)
             then
               report state Signature_mismatch name.span
                 (Printf.sprintf "`%s` must have the signature `%s%s` that `%s` declares." name.text
@@ -808,7 +809,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (given : T.
                 not
                   (List.for_all
                      (fun capability -> List.mem capability allowed)
-                     (normalize_capabilities given.uses))
+                     (normalize_capabilities written.uses))
               then
                 report state Impl_uses name.span
                   (if trait.is_capability then
@@ -839,7 +840,7 @@ let check state =
            the method that the enclosing declaration inherits or implements. *)
         | ( Some container,
             (Function { signature; _ } | Method_declaration signature),
-            Function_interface given ) -> (
+            Function_interface written ) -> (
             let name = Names.signature_name signature in
             match
               ( Query.demand database Names.definition container,
@@ -852,7 +853,9 @@ let check state =
                   (Names.receiver signature.parameters)
                   ~trait_path:container.path trait
             | Some { kind = Impl { trait_; _ }; _ }, Some (Impl_interface impl) ->
-                check_impl_method state name (Names.receiver signature.parameters) given impl trait_
+                check_impl_method state name
+                  (Names.receiver signature.parameters)
+                  written impl trait_
             | _ -> ())
         | Some _, _, _ -> ()
         | None, Function { signature; _ }, Function_interface lowered ->

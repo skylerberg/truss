@@ -564,7 +564,7 @@ public fn collections::SortedMap[Key: Ordered, Value].after(self, key: Key) lend
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].within(self, range: Range[Key]) yields map::Entry[Key, Value]
+public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Range[Key]) yields map::Entry[Key, Value]
   ensures range.contains(result.key)
   cost time O(self.length() + log(self.length()) * time(Key.compare))
 {
@@ -591,23 +591,23 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
 {
   var entries = map::exchange(mut self.entries, value: [])
   let count = entries.length()
-  var kept: USize = 0
+  var retained: USize = 0
   for index in 0..count
     invariant entries.length() == count
-    invariant kept <= index
-    invariant forall i in 0..kept => forall j in 0..kept =>
+    invariant retained <= index
+    invariant forall i in 0..retained => forall j in 0..retained =>
       i < j ==> entries.model()[i].key < entries.model()[j].key
-    invariant forall i in 0..kept => forall j in index..count =>
+    invariant forall i in 0..retained => forall j in index..count =>
       entries.model()[i].key < entries.model()[j].key
     invariant forall i in index..count => forall j in index..count =>
       i < j ==> entries.model()[i].key < entries.model()[j].key
   {
     if keep(entries[index]) {
-      mut entries.swap(kept, second: index)
-      kept += 1
+      mut entries.swap(retained, second: index)
+      retained += 1
     }
   }
-  mut entries.truncate(kept)
+  mut entries.truncate(retained)
   self.entries = own entries
 }
 

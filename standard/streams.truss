@@ -190,12 +190,12 @@ impl Writer for ByteWriter {
   }
 }
 
-public opaque type BufferedReader[Source: Reader](source: Source, pending: List[UInt8], start: USize, room: USize)
+public opaque type BufferedReader[Source: Reader](source: Source, pending: List[UInt8], start: USize, capacity: USize)
   invariant start <= pending.length()
-  invariant room > 0
+  invariant capacity > 0
 
 public fn BufferedReader[Source: Reader].new(source: own Source, capacity: USize = 65536) -> BufferedReader[Source] {
-  BufferedReader(source: own source, pending: [], start: 0, room: if capacity == 0 { 1 } else { capacity })
+  BufferedReader(source: own source, pending: [], start: 0, capacity: if capacity == 0 { 1 } else { capacity })
 }
 
 internal fn BufferedReader[Source: Reader].fill(mut self) -> Result[USize, SystemError]
@@ -206,7 +206,7 @@ internal fn BufferedReader[Source: Reader].fill(mut self) -> Result[USize, Syste
     mut self.pending.remove_range(0..self.start)
     self.start = 0
   }
-  mut self.source.read(mut self.pending, limit: self.room)
+  mut self.source.read(mut self.pending, limit: self.capacity)
 }
 
 public fn BufferedReader[Source: Reader].read_until(
@@ -216,33 +216,33 @@ public fn BufferedReader[Source: Reader].read_until(
 ) -> Result[USize, SystemError]
   uses Handles
 {
-  var taken: USize = 0
+  var consumed: USize = 0
   var more = true
   while more
     invariant self.start <= self.pending.length()
-    invariant self.room > 0
+    invariant self.capacity > 0
   {
     var index = self.start
-    var found = false
-    while index < self.pending.length() && !found
+    var at_delimiter = false
+    while index < self.pending.length() && !at_delimiter
       invariant self.start <= index
       invariant index <= self.pending.length()
-      decreases self.pending.length() - index + (if found { 0 } else { 1 })
+      decreases self.pending.length() - index + (if at_delimiter { 0 } else { 1 })
     {
-      found = self.pending[index] == delimiter
+      at_delimiter = self.pending[index] == delimiter
       index += 1
     }
     mut buffer.append_slice(self.pending.slice_range(self.start, stop: index))
-    taken = taken.saturating_add(index - self.start)
+    consumed = consumed.saturating_add(index - self.start)
     self.start = index
-    if found {
+    if at_delimiter {
       more = false
     } else {
       let count = mut self.fill()?
       more = count > 0
     }
   }
-  Ok(taken)
+  Ok(consumed)
 }
 
 public fn BufferedReader[Source: Reader].read_line(mut self) -> Result[Option[String], SystemError]
@@ -271,7 +271,7 @@ public fn BufferedReader[Source: Reader].lines(mut self) yields own Result[Strin
   var more = true
   while more
     invariant self.start <= self.pending.length()
-    invariant self.room > 0
+    invariant self.capacity > 0
   {
     match mut self.read_line() {
       Ok(Some(line)) => yield Ok(own line)
@@ -293,7 +293,7 @@ public fn BufferedReader[Source: Reader].peek(mut self, count: USize) -> Result[
   var more = true
   while more && self.pending.length() - self.start < count
     invariant self.start <= self.pending.length()
-    invariant self.room > 0
+    invariant self.capacity > 0
   {
     let got = mut self.fill()?
     more = got > 0
@@ -316,7 +316,7 @@ impl Reader for BufferedReader[Source: Reader] {
     uses Handles
   {
     if self.start == self.pending.length() {
-      if limit >= self.room {
+      if limit >= self.capacity {
         return mut self.source.read(mut buffer, limit: limit)
       }
       let _ = mut self.fill()?
@@ -352,10 +352,10 @@ impl Seek for BufferedReader[Source: Reader + Seek] {
   }
 }
 
-public opaque type BufferedWriter[Sink: Writer](sink: Sink, pending: List[UInt8], room: USize)
+public opaque type BufferedWriter[Sink: Writer](sink: Sink, pending: List[UInt8], capacity: USize)
 
 public fn BufferedWriter[Sink: Writer].new(sink: own Sink, capacity: USize = 65536) -> BufferedWriter[Sink] {
-  BufferedWriter(sink: own sink, pending: [], room: capacity)
+  BufferedWriter(sink: own sink, pending: [], capacity: capacity)
 }
 
 public fn BufferedWriter[Sink: Writer].write_line(mut self, text: StringSlice) -> Result[Unit, SystemError]
@@ -375,11 +375,11 @@ impl Writer for BufferedWriter[Sink: Writer] {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError]
     uses Handles
   {
-    if bytes.length() >= self.room {
+    if bytes.length() >= self.capacity {
       mut self.flush()?
       return mut self.sink.write(bytes)
     }
-    if self.pending.length() > self.room - bytes.length() {
+    if self.pending.length() > self.capacity - bytes.length() {
       mut self.flush()?
     }
     mut self.pending.append_slice(bytes)

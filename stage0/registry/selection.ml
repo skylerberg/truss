@@ -35,8 +35,10 @@ let choose ~lock ~roots ~local ~load =
     lock;
   let rec pass () =
     let seen = Hashtbl.create 16 in
-    let changed = ref false and found = ref [] and problems = ref [] in
-    let problem found = if not (List.mem found !problems) then problems := found :: !problems in
+    let changed = ref false and selected = ref [] and problems = ref [] in
+    let problem new_problem =
+      if not (List.mem new_problem !problems) then problems := new_problem :: !problems
+    in
     let record_of ~recorded_by (entry : Lock.entry) =
       match Hashtbl.find_opt chosen entry.name with
       | Some (version, _) when Version.compare version entry.version > 0 -> ()
@@ -56,7 +58,7 @@ let choose ~lock ~roots ~local ~load =
             match load name version ~hash with
             | Error reason -> problem (Cannot_load { name; version; reason })
             | Ok ((manifest : Manifest.package), record) ->
-                found := { name; version; hash; manifest; record } :: !found;
+                selected := { name; version; hash; manifest; record } :: !selected;
                 List.iter (record_of ~recorded_by:name) record;
                 (* A dependency that a package's record does not name is one
                    only its tests use, which a build that uses the package
@@ -73,7 +75,7 @@ let choose ~lock ~roots ~local ~load =
        is made again until none is raised. Versions only rise, so it ends. *)
     if !changed then pass ()
     else
-      ( List.sort (fun left right -> Path.compare_package left.name right.name) !found,
+      ( List.sort (fun left right -> Path.compare_package left.name right.name) !selected,
         List.rev !problems )
   in
   pass ()
@@ -85,13 +87,13 @@ let holds ~project packages =
   let grant ~holder (dependency : Manifest.dependency) =
     in_build dependency.package
     &&
-    let given =
+    let offered =
       match holder with
       | None -> dependency.capabilities
       | Some holder ->
           List.filter (fun capability -> List.mem capability (of_ holder)) dependency.capabilities
     in
-    let now = List.sort_uniq String.compare (given @ of_ dependency.package) in
+    let now = List.sort_uniq String.compare (offered @ of_ dependency.package) in
     now <> of_ dependency.package
     && begin
       Hashtbl.replace held dependency.package now;
