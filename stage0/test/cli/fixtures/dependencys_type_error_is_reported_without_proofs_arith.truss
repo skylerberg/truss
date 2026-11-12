@@ -1,0 +1,3 @@
+public fn two() -> Int64 {
+  true
+}

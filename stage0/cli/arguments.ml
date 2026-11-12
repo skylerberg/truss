@@ -1,13 +1,13 @@
-(* [truss -C DIRECTORY COMMAND ...] is read as [truss COMMAND -C DIRECTORY
-   ...], as git reads it. *)
+(* [truss -C DIRECTORY COMMAND ...] is parsed as [truss COMMAND -C
+   DIRECTORY ...], as in git. *)
 let leading_directory = function
   | program :: "-C" :: directory :: command :: rest
     when not (String.starts_with ~prefix:"-" command) ->
       program :: command :: "-C" :: directory :: rest
   | arguments -> arguments
 
-(* After [run], the first argument that is not one of its options starts
-   the program's arguments, which [--] marks for the parser. *)
+(* After [run], the first argument that is not an option of [run] starts
+   the program's arguments, so a [--] is inserted before it. *)
 let program_arguments = function
   | program :: "run" :: rest ->
       let rec options = function
