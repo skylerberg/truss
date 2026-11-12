@@ -23,6 +23,11 @@ let manifest_file directory = if directory = "" then "truss.toml" else directory
 let parent path = match String.rindex_opt path '/' with Some i -> String.sub path 0 i | None -> ""
 let segments path = if path = "" then [] else String.split_on_char '/' path
 
+let rec package_directory ~is_package directory =
+  if is_package directory then Some directory
+  else if directory = "" then None
+  else package_directory ~is_package (parent directory)
+
 (* A module file's path under its package's directory, as module names. *)
 let module_names ~directory path =
   let inside =
@@ -54,17 +59,19 @@ type layout = {
 
 let files database root = Option.value (Query.find database tree root) ~default:[]
 
+(* Records a problem with the manifest in [directory]. *)
+let manifest_problem problems directory format =
+  Printf.ksprintf
+    (fun message ->
+      problems := Printf.sprintf "%s: %s" (manifest_file directory) message :: !problems)
+    format
+
 let layout =
   Query.query ~name:"project_layout" ~phase:Phases.project ~saved:true ~show:Fun.id
     (fun database root ->
       let files = files database root in
       let problems = ref [] in
-      let problem directory format =
-        Printf.ksprintf
-          (fun message ->
-            problems := Printf.sprintf "%s: %s" (manifest_file directory) message :: !problems)
-          format
-      in
+      let problem directory = manifest_problem problems directory in
       let manifests =
         List.filter_map
           (fun path ->
@@ -132,20 +139,13 @@ let layout =
                     Some (directory, package)))
           parsed
       in
-      (* A module file belongs to the nearest directory above it with a
-         manifest, if that manifest has a package. *)
-      let rec owner directory =
-        if Hashtbl.mem directories directory then Some directory
-        else if directory = "" then None
-        else owner (parent directory)
-      in
       let modules =
         List.filter_map
           (fun path ->
             if not (Filename.check_suffix path ".truss") then None
             else
               Option.bind
-                (owner (parent path))
+                (package_directory ~is_package:(Hashtbl.mem directories) (parent path))
                 (fun directory ->
                   Option.map
                     (fun (package : Manifest.package) ->
@@ -386,12 +386,7 @@ let problems =
       let chosen = Query.demand database selection () in
       let packages = own.packages in
       let problems = ref [] in
-      let problem directory format =
-        Printf.ksprintf
-          (fun message ->
-            problems := Printf.sprintf "%s: %s" (manifest_file directory) message :: !problems)
-          format
-      in
+      let problem directory = manifest_problem problems directory in
       let named name = List.find_opt (fun (_, (p : Manifest.package)) -> p.name = name) packages in
       let selected_named name =
         List.find_opt

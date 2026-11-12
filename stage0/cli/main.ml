@@ -463,14 +463,6 @@ let finish (outcome : Outcome.t) =
         ~finally:(fun () -> try Sys.remove program with Sys_error _ -> ())
         (fun () -> Process.run_attached program arguments)
 
-let rec remove path =
-  match (Unix.lstat path).st_kind with
-  | S_DIR ->
-      Array.iter (fun entry -> remove (Filename.concat path entry)) (Sys.readdir path);
-      Unix.rmdir path
-  | _ -> Sys.remove path
-  | exception Unix.Unix_error (ENOENT, _, _) -> ()
-
 let request arguments =
   {
     arguments;
@@ -492,7 +484,7 @@ let clean_store () =
   ignore (ask_running [ "stop" ]);
   Database.reset ();
   let directory = Database.store_directory () in
-  match remove directory with
+  match File_system.remove directory with
   | () -> 0
   | exception Unix.Unix_error (error, _, _) ->
       Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);

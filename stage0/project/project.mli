@@ -26,6 +26,16 @@ val lock_file : string
 val manifest_file : string -> string
 val module_path : directory:string -> Path.module_ -> string
 
+val parent : string -> string
+(** The directory a relative path is in, [""] for the root. *)
+
+val segments : string -> string list
+(** A relative path's names, none for the root. *)
+
+val package_directory : is_package:(string -> bool) -> string -> string option
+(** The package a relative directory is in: the directory itself, or the nearest directory above it,
+    for which [is_package] holds. *)
+
 (** {1 One root} *)
 
 type layout = {

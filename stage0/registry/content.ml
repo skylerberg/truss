@@ -3,21 +3,19 @@ let skipped name = name = "" || name.[0] = '.' || name = "_build" || name = "nod
 let hash files =
   let lines =
     List.map
-      (fun (path, bytes) -> Printf.sprintf "%s %s\n" path (Blake3.to_hex (Blake3.hash bytes)))
+      (fun (path, bytes) -> Printf.sprintf "%s %s\n" path (Blake3.hex_digest bytes))
       (List.sort (fun (left, _) (right, _) -> String.compare left right) files)
   in
-  Blake3.to_hex (Blake3.hash (String.concat "" lines))
+  Blake3.hex_digest (String.concat "" lines)
 
 let is_hash text =
   String.length text = 64
   && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) text
 
-let published name =
-  name = "truss.toml" || name = "truss.lock"
-  || Filename.check_suffix name ".truss"
-  || Filename.check_suffix name ".md"
+let is_input name =
+  name = "truss.toml" || name = "truss.lock" || Filename.check_suffix name ".truss"
 
-let read path = In_channel.with_open_bin path In_channel.input_all
+let published name = is_input name || Filename.check_suffix name ".md"
 
 let files ?(all = false) directory =
   let found = ref [] in
@@ -37,7 +35,7 @@ let files ?(all = false) directory =
             then walk path
         | S_REG ->
             if all || (published entry && (entry <> "truss.lock" || relative = "")) then
-              found := (path, read full) :: !found
+              found := (path, File_system.read full) :: !found
         | _ -> ())
       entries
   in

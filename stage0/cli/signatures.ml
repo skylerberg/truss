@@ -103,3 +103,21 @@ let kind_word : Resolve.Names.kind -> string = function
   | Impl -> "impl"
   | Test -> "test"
   | Law_proof -> "law proof"
+
+(* The parts of a definition that its users read. *)
+let parts = [ "interface"; "signature"; "shape" ]
+
+(* The signature of the definition at [path], as [text] gives it. *)
+let of_path context path =
+  match Query.demand context Interface.Summary.key path with
+  | Some key -> text context ~body:false ~opaque:false key
+  | None -> None
+
+(* A signature under a label, as in [    was: fn f()], with each further
+   line indented under the first. *)
+let labeled label signature =
+  let indent = String.make (String.length label) ' ' in
+  String.concat "\n"
+    (List.mapi
+       (fun i line -> Printf.sprintf "    %s %s" (if i = 0 then label else indent) line)
+       (String.split_on_char '\n' signature))
