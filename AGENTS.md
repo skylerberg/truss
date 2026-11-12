@@ -77,7 +77,7 @@ Before you push, run only:
 
 1. `dune build`, and `dune build @fmt` if OCaml changed.
 2. The test suites of the libraries that the change edits: for a change in
-   `stage0/parser`, the parser's suites. Run a suite as its executable,
+   `stage0/parser/parser`, the parser's suites. Run a suite as its executable,
    such as `stage0/test/parser_tests.exe`.
 3. For a change under `standard/`, the check and the proofs of the modules
    that the change edits, and their tests.
