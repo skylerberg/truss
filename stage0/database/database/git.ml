@@ -13,9 +13,6 @@ let run ?(environment = []) ~directory arguments =
 
 let trim text = String.trim text
 
-(* The top of the worktree a directory is in, or [None] outside git. *)
-let toplevel directory = Option.map trim (run ~directory [ "rev-parse"; "--show-toplevel" ])
-
 let common_directory directory =
   Option.map
     (fun path ->

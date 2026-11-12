@@ -63,8 +63,6 @@ and compare_result a b =
 and compare_yielding a b =
   Path.compare a.method_ b.method_ >>= fun () -> compare_arguments a.type_arguments b.type_arguments
 
-let equal a b = compare a b = 0
-
 let rec path_name : Path.t -> string = function
   | Top { name; _ } | Test { name; _ } -> name
   | Impl { trait; for_type; _ } -> trait ^ " for " ^ Path.show_type_head for_type

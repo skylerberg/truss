@@ -179,7 +179,6 @@ val interpolations : string_literal -> interpolation array
 val keywords : (string * keyword) list
 val reserved_words : (string * reserved) list
 val punctuation : (string * punctuation) list
-val foreign_sequences : (string * foreign) list
 
 val word : string -> kind option
 (** The keyword or reserved word with this spelling, if there is one. *)

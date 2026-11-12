@@ -106,13 +106,6 @@ let readers engine (node : node) =
   in
   by_id found
 
-let counterpart (node : node) other =
-  match node.cell with
-  | Input (input, cell) ->
-      Option.map (fun cell -> cell.input_node) (find_input other input cell.input_key)
-  | Result (query, cell) -> Option.map (fun cell -> cell.node) (find_result other query cell.key)
-  | Unfilled -> None
-
 (* The same query and key in another engine, computed there if it has none.
    The other engine only observes it, so comparing two states makes no root
    in either. *)

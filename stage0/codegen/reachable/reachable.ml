@@ -156,6 +156,8 @@ let walk env ~lookup ~by_call roots =
   done;
   List.rev !found
 
+(* The same instances in the same order, each with the first way the walk
+   reached it: the keys from a root to the instance, both included. *)
 let reached env ~lookup roots = walk env ~lookup ~by_call:false roots
 let running env ~lookup roots = walk env ~lookup ~by_call:true roots
 let reachable env ~lookup roots = List.map fst (reached env ~lookup roots)

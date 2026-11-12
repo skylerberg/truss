@@ -21,7 +21,6 @@ type context = {
 
 val ground : context -> Types.substitution -> Types.ty -> Ground.ty
 val ground_argument : context -> Types.substitution -> Types.argument -> Ground.argument
-val ground_function : context -> Types.substitution -> Types.function_type -> Ground.function_type
 val mode : Types.mode -> Ground.mode
 
 (* The capabilities that a function takes evidence for in an instance, in
@@ -36,7 +35,6 @@ val evidence_for : context -> Types.substitution -> Types.capability list -> Pat
    substitution and its lookups apply to it, and the substitution of
    generic parameters by ground arguments. *)
 val back : Ground.ty -> Types.ty
-val back_argument : Ground.argument -> Types.argument
 val substitution : Types.generic list -> Ground.argument list -> Types.substitution
 
 (* The ground type of a built-in. *)

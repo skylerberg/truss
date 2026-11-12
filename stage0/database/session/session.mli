@@ -111,7 +111,6 @@ val results : kind:string -> (string -> string option) * (string -> string -> un
 (** Finding and keeping the results of one kind, each under a key. *)
 
 val find_result : kind:string -> key:string -> string option
-val add_result : kind:string -> key:string -> string -> unit
 val flush : unit -> unit
 
 val on_close : (unit -> unit) -> unit

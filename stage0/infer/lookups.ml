@@ -584,8 +584,3 @@ and each_call state (span : span) type_ mode =
               element )
       | _ -> None)
   | None -> None
-
-(* The type that the [each] method of a value yields for a loop with the
-   given mode. *)
-and yielded state (span : span) type_ mode =
-  Option.map (fun ((_ : C.call), element) -> element) (each_call state span type_ mode)

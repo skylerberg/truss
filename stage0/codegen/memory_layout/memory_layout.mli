@@ -101,7 +101,6 @@ val target : env -> target
 (* What a type is made of, as the layouts are computed from. *)
 val shape : env -> Ground.ty -> shape
 val of_type : env -> Ground.ty -> t
-val of_member : env -> member -> t
 
 (* The heap block of the [indirect] variant [variant] of [ty]: its fields as
    a [Struct]. Asked for separately, because a block may hold the type
