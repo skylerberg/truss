@@ -62,6 +62,17 @@ internal fn Array[Element, count: USize].slice_range(self, start: USize, stop: U
   self.slice().slice_range(start, stop: stop)
 }
 
+internal fn Array[Element, count: USize].slice_from(self, start: USize) -> Slice[Element]
+  requires start <= count
+  ensures result.length() == count - start
+  ensures forall index in 0..result.length() =>
+    identical(result.model()[index], self.model()[start + index])
+  cost time O(1)
+  cost allocations == 0
+{
+  self.slice().slice_from(start)
+}
+
 impl Model for Array[Element, count: USize] {
   type Value = Sequence[Element]
 

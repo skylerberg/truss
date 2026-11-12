@@ -72,7 +72,9 @@ let () =
   passes "a guard that fails leaves the value for the next arm"
     Fixtures.Feature.guard_that_fails_leaves_the_value_for_the_next_arm;
   passes "an expression a pattern looks into is evaluated once"
-    Fixtures.Feature.expression_a_pattern_looks_into_is_evaluated_once
+    Fixtures.Feature.expression_a_pattern_looks_into_is_evaluated_once;
+  passes "a slice of a temporary evaluates the temporary once"
+    Fixtures.Feature.slice_of_a_temporary_evaluates_it_once
 
 let () =
   passes "a list grows as it is pushed and keeps its elements"

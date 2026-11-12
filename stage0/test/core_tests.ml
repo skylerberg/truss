@@ -150,8 +150,7 @@ let () =
      intrinsic::storage_push(mut place storage, own 1); intrinsic::storage_push(mut place storage, \
      own 2); intrinsic::storage_push(mut place storage, own 3); \
      standard::list::List.from_storage[Int64](own storage) }; let _ = slice \
-     standard::list::List.slice_range[Int64](place numbers, 1, \
-     standard::list::List.length[Int64](place numbers)); lent Index.at for List[Int64] by \
+     standard::list::List.slice_from[Int64](place numbers, 1); lent Index.at for List[Int64] by \
      standard::list::impl Index for List[Element](place numbers, 0) lends }";
   expect_body "a set literal becomes `with_capacity` and one `insert` per element"
     Fixtures.Core.set_literal_becomes_with_capacity_and_one_insert
@@ -277,8 +276,8 @@ let () =
         <> "{ if standard::list::List.is_empty[String](place self.books) { yield \
             Option[First].None() } else { yield Option[First].Some(value: First(title: place lent \
             Index.at for List[String] by standard::list::impl Index for List[Element](place \
-            self.books, 0) lends, rest: slice standard::list::List.slice_range[String](place \
-            self.books, 1, standard::list::List.length[String](place self.books)))) } }"
+            self.books, 0) lends, rest: slice standard::list::List.slice_from[String](place \
+            self.books, 1))) } }"
       then fail "found:\n%s" actual);
   test "a constructor yielded `mut` lends the places that are marked `mut`" (fun () ->
       let actual =
