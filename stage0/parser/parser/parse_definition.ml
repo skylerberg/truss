@@ -9,8 +9,6 @@
 open Token
 open Syntax
 
-(* [recovered] is filled in by [Parser.definition], once the checks that run
-   after parsing have run too. *)
 let finish cursor start visibility kind : definition =
   {
     visibility;

@@ -1,7 +1,6 @@
 (* The state of the type checker while it checks one definition, and the
    helpers that every part of the checker uses: reporting diagnostics,
-   recording types, unification, places, and instantiation of signatures.
-   [Expressions] describes the checking algorithm. *)
+   recording types, unification, and places. *)
 
 open Syntax
 module Names = Resolve.Names
@@ -62,7 +61,7 @@ let runs (env : env) = not (env.specification || env.compile_time)
    must be in [superset]. Either set may contain capability variables.
 
    Constraints are collected while a definition is checked and solved at
-   the end ([Capabilities.solve]). Solving grows each variable in a
+   the end. Solving grows each variable in a
    [superset] until the constraint holds. If a constraint still fails after
    solving (because its [superset] has no variable to grow), the solver
    calls [report_missing] with the capabilities that [superset] lacks. *)

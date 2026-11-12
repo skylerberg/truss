@@ -31,7 +31,7 @@ val create :
 val trivial : t -> Ground.ty -> bool
 
 (* The drop function of a type: [Instance.Drop ty], taking a writable
-   pointer to the value, as [Convention.drop_signature] says. *)
+   pointer to the value. *)
 val drop : t -> Ground.ty -> Lir.t
 
 (* The copy function of a type: [Instance.Copy ty], taking the value as a

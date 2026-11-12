@@ -10,11 +10,9 @@
    so a statement inside a lambda leaves the variables of the enclosing
    statement for that statement to solve. *)
 
-(* This file has the dispatch on the kind of an expression, and the checks
-   of literals, names, members, and brackets. The rest is in other files, in
-   the order they call each other: [Lookups], [Pattern_typing], [Calls],
-   [Methods], [Operators], [Statements], and [Values]. A file calls a later
-   file through [Hooks], which this file sets. *)
+(* The dispatch on the kind of an expression, and the checks of literals,
+   names, members, and brackets. A module that comes earlier in the build
+   calls this one through [Hooks], which this file sets. *)
 
 open Syntax
 module Names = Resolve.Names

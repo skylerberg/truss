@@ -200,11 +200,11 @@ val server_key : string -> string
 (** What names the background process for a directory: the root of the project it is in. *)
 
 val serve : key:string -> handle:(progress:(string -> unit) -> 'request -> 'response) -> unit
-(** Runs the background process of a key until it has gone three hours without a request, the
-    project's directory is gone, or {!stop} is called, answering each request with [handle], which
-    may send text to show while it works with [progress]. Each project has a process of its own, so
-    requests about different projects, and so different worktrees, are answered at once; those about
-    one project are answered one at a time. The client and the process are the same executable, so a
+(** Runs the background process of a key until it has been idle past its limit, the project's
+    directory is gone, or {!stop} is called, answering each request with [handle], which may send
+    text to show while it works with [progress]. Each project has a process of its own, so requests
+    about different projects, and so different worktrees, are answered at once; those about one
+    project are answered one at a time. The client and the process are the same executable, so a
     request and a response are the client's own types. *)
 
 val call :

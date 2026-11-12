@@ -1,11 +1,8 @@
-(* Generates the core forms of the methods of a derived [impl]. Each is the
-   body that the method would have if it were written by hand. [equal]
-   compares the variants and then each field. [hash] writes the variant's
-   index and then hashes each field. [compare] orders by variant index, in
-   declaration order, and then by each field in order. [default] constructs
-   the record from each field's default. A method with a default body in the
-   trait, such as [not_equal], uses the trait's core form and is not
-   generated here. *)
+(* Generates the core forms of the methods of a derived [impl]: each is the
+   body that the method would have if it were written by hand. [compare]
+   orders by variant, in declaration order, and then by each field in order.
+   A method with a default body in the trait, such as [not_equal], uses the
+   trait's core form. *)
 module Impls = Interface.Impls
 module Environment = Interface.Environment
 
