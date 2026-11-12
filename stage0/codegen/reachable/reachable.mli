@@ -16,16 +16,8 @@ val reachable :
   Instance.key list ->
   Lir.compiled list
 
-(* The same instances in the same order, each with the first way the walk
-   reached it: the keys from a root to the instance, both included. *)
-val reached :
-  Memory_layout.env ->
-  lookup:(Instance.key -> Lir.compiled) ->
-  Instance.key list ->
-  (Lir.compiled * Instance.key list) list
-
 (* Every instance that running the roots can reach, each with the first way
-   to it. It is what [reached] gives, but for the entries of a capability's
+   to it. It walks as [reachable] does, but for the entries of a capability's
    table: a build compiles them all, and running reaches one only where code
    that runs calls that method of the capability, whose way it is given. *)
 val running :

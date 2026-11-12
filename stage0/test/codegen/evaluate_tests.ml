@@ -1,7 +1,6 @@
 (* The prover deciding a tagged template's check by running it, through
    code generation. *)
 
-open Harness
 open Codegen_support
 
 (* The oracles' responses, recorded in the engine, as the database does for

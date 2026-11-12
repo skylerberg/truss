@@ -50,6 +50,9 @@ let forget_fingerprint (node : node) =
 let derive_exception_fingerprint =
   Blake3.derive_key ~context:"truss 2026-11-12 incremental exception fingerprint"
 
+(* The name of a node's value in the store: the hash of its bytes. [None] for
+   a result that raised, or whose value holds functions, or when no store is
+   attached. *)
 let fingerprint engine (node : node) =
   match node.fingerprint with
   | Some fingerprint -> Some fingerprint

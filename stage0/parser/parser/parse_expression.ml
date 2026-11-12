@@ -1080,7 +1080,7 @@ and turbofish cursor start (function_path : path) =
     match type_.kind with
     | Path_type { path; arguments = []; _ } ->
         { kind = Name path; span = type_.span; id = Cursor.fresh_id cursor }
-    | Path_type { path; arguments; span } ->
+    | Path_type { path; arguments; span; _ } ->
         let items =
           List.map
             (function

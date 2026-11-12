@@ -970,13 +970,6 @@ and resolved st (callee : Core.callee) =
       (path, type_arguments, signature, bind signature.generics type_arguments)
   | None -> bug "a callee that is not a function or a method"
 
-(* The types of a callee's parameters, in order, a receiver first. *)
-and parameter_types st (callee : Core.callee) =
-  let _, _, signature, substitution = resolved st callee in
-  List.map
-    (fun (_, ty) -> Monomorphic.ground st.context.monomorphic substitution ty)
-    (interface_parameters signature)
-
 and result_type st (callee : Core.callee) =
   let path, _, signature, substitution = resolved st callee in
   match signature.output with

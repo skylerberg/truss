@@ -107,7 +107,6 @@ let key_of context path =
 
 let text_of context key = match demand context Names.text key with Some text -> text | None -> ""
 let back = Monomorphic.back
-let back_argument = Monomorphic.back_argument
 let bind = Monomorphic.substitution
 
 let impl_interface context impl =

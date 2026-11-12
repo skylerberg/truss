@@ -48,18 +48,3 @@ let owner package_directories path =
     else up (parent directory)
   in
   up (parent path)
-
-(* A module file's path under its package's directory, as module names. *)
-let module_names ~package_directory path =
-  let inside =
-    if package_directory = "" then path
-    else
-      String.sub path
-        (String.length package_directory + 1)
-        (String.length path - String.length package_directory - 1)
-  in
-  segments (Filename.chop_suffix inside ".truss")
-
-let module_file ~package_directory (module_ : Path.module_) =
-  let file = String.concat "/" module_.modules ^ ".truss" in
-  if package_directory = "" then file else package_directory ^ "/" ^ file

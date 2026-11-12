@@ -52,7 +52,7 @@ let body state env (written : block) =
     | [ (last : statement) ] ->
         in_statement state env last.span (fun () ->
             match (last.kind, env.output) with
-            | Expression value, Some (Returns output) when resolve state output = T.unit ->
+            | Expression _, Some (Returns output) when resolve state output = T.unit ->
                 (* The body of a function with no result ends with a
                    statement. Its value must be used or discarded, like the
                    value of any statement. *)
@@ -470,7 +470,7 @@ let check_definition state (lowered : Environment.lowered_interface) =
               let contract = core_contract state clauses in
               Function { parameters; contract; body = Some (build_block state written) });
         if not (broken Body) then body state env written
-    | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type } ->
+    | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
         (* The body names the law's parameters, as the law's own body does. *)
         (match Query.demand state.database Environment.trait_interface trait.trait with
         | Some interface ->

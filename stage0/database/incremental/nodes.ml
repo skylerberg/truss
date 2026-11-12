@@ -248,8 +248,6 @@ let create ?(log = false) ?(bases = []) () =
   remember engine;
   engine
 
-let is_frozen engine = engine.frozen
-let bases engine = engine.bases
 let context engine = { engine; frame = None; observing = false }
 let observer engine = { engine; frame = None; observing = true }
 let engine_of (context : context) = context.engine

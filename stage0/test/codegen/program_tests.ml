@@ -1,6 +1,5 @@
 (* Test results kept by key, the checks in place of proofs, and whole programs. *)
 
-open Memory_layout
 open Codegen_support
 
 (* Test results kept by key *)
