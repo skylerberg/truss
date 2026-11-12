@@ -221,8 +221,9 @@ let check_derives state (interface : T.type_interface) (clauses : type_clause li
                   then
                     report state Not_derivable written.span
                       (Printf.sprintf
-                         "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, and `Plain` can \
-                          be derived, not `%s`."
+                         "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
+                          `serialization::Serialize`, and `serialization::Deserialize` can be \
+                          derived, not `%s`."
                          shown)
                   else if Well_known.is Copyable trait || Well_known.is Plain trait then
                     begin if not interface.opaque then

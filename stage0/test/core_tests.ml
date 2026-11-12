@@ -846,7 +846,11 @@ let printed_derived text type_name trait name receiver =
           Derived
             {
               type_ = Top { module_ = module_of "app::main"; name = type_name };
-              trait = Path.standard [ "core" ] trait;
+              trait =
+                List.find
+                  (fun (path : Path.t) ->
+                    match path with Top { name; _ } -> name = trait | _ -> false)
+                  (List.map Well_known.path Well_known.all);
             };
         name;
         receiver;
@@ -866,6 +870,18 @@ let pair =
 
 let light =
   "type Light =\n  | Off\n  | Dim(level: Int64)\n  | On\n  derives Equal, Hash, Ordered\n\n"
+
+let reading =
+  "use standard::serialization\n\n\
+   type Reading(sensor: String, value: Int64 = 0)\n\
+  \  derives serialization::Serialize, serialization::Deserialize\n\n"
+
+let signal =
+  "use standard::serialization\n\n\
+   type Signal =\n\
+  \  | Off\n\
+  \  | Level(value: Int64)\n\
+  \  derives serialization::Serialize, serialization::Deserialize\n\n"
 
 let () =
   expect_derived "a record's derived equal compares each field" pair "Pair" "Equal" "equal" Read
@@ -911,6 +927,51 @@ let () =
     "fn()\n\
      { Pair[Second](first: Default.default for Int64 by standard::numbers::signed::impl Default \
      for Int64(), second: Default.default for Second by a bound()) }";
+  expect_derived "a record's derived serialize writes each field by name, in declaration order"
+    reading "Reading" "Serialize" "serialize" Read
+    "fn(self: Reading, mut sink: Sink)\n\
+     { Serializer.begin_record for Sink by a bound(mut place sink, 2); Serializer.field for Sink \
+     by a bound(mut place sink, \"sensor\"); Serialize.serialize for String by \
+     standard::serialization::impl Serialize for String(place self.sensor, mut place sink); \
+     Serializer.field for Sink by a bound(mut place sink, \"value\"); Serialize.serialize for \
+     Int64 by standard::serialization::impl Serialize for Int64(place self.value, mut place sink); \
+     Serializer.end_record for Sink by a bound(mut place sink) }";
+  expect_derived "a record's derived deserialize reads a field with a default only if it is present"
+    reading "Reading" "Deserialize" "deserialize" Static
+    "fn(mut source: Source)\n\
+     { match Deserializer.begin_record for Source by a bound(mut place source) { Ok(value: own \
+     value) => { value } Err(error: own error) => { return Result[Reading, Error].Err(error: \
+     error) } }; let own sensor = match standard::serialization::required[String, Source](mut \
+     place source, \"sensor\") { Ok(value: own value) => { value } Err(error: own error) => { \
+     return Result[Reading, Error].Err(error: error) } }; let var own built = Reading(sensor: \
+     sensor, value: default); match match standard::serialization::optional[Int64, Source](mut \
+     place source, \"value\") { Ok(value: own value) => { value } Err(error: own error) => { \
+     return Result[Reading, Error].Err(error: error) } } { Some(value: own value) => { built.value \
+     = value } _ => {  } }; Deserializer.end_record for Source by a bound(mut place source); \
+     Result[Reading, Error].Ok(value: built) }";
+  expect_derived "a sum type's derived serialize writes the variant's name, then its fields" signal
+    "Signal" "Serialize" "serialize" Read
+    "fn(self: Signal, mut sink: Sink)\n\
+     { match place self { Off => { Serializer.begin_variant for Sink by a bound(mut place sink, \
+     \"Off\", 0); Serializer.end_variant for Sink by a bound(mut place sink) } Level(value: value) \
+     => { Serializer.begin_variant for Sink by a bound(mut place sink, \"Level\", 1); \
+     Serializer.field for Sink by a bound(mut place sink, \"value\"); Serialize.serialize for \
+     Int64 by standard::serialization::impl Serialize for Int64(place value, mut place sink); \
+     Serializer.end_variant for Sink by a bound(mut place sink) } } }";
+  expect_derived "a sum type's derived deserialize reads the variant by its name" signal "Signal"
+    "Deserialize" "deserialize" Static
+    "fn(mut source: Source)\n\
+     { let own name = match Deserializer.variant for Source by a bound(mut place source) { \
+     Ok(value: own value) => { value } Err(error: own error) => { return Result[Signal, \
+     Error].Err(error: error) } }; match place name { equal to \"Off\" => { let own built = \
+     Signal.Off(); Deserializer.end_variant for Source by a bound(mut place source); \
+     Result[Signal, Error].Ok(value: built) } equal to \"Level\" => { let own value = match \
+     standard::serialization::required[Int64, Source](mut place source, \"value\") { Ok(value: own \
+     value) => { value } Err(error: own error) => { return Result[Signal, Error].Err(error: error) \
+     } }; let own built = Signal.Level(value: value); Deserializer.end_variant for Source by a \
+     bound(mut place source); Result[Signal, Error].Ok(value: built) } _ => { return \
+     Result[Signal, Error].Err(error: standard::serialization::unknown_variant[Source](place \
+     source, place name)) } } }";
   test "a `todo` type has no derived core form" (fun () ->
       let database = setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
       let path : Path.t =

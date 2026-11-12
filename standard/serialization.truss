@@ -1,0 +1,388 @@
+use standard::text
+
+public trait Serialize {
+  fn serialize[Sink: Serializer](self, sink: mut Sink)
+}
+
+public trait Deserialize {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Self, Error]
+}
+
+public trait Serializer {
+  fn null(mut self)
+  fn bool(mut self, value: Bool)
+  fn integer(mut self, value: Int64)
+  fn unsigned(mut self, value: UInt64)
+  fn float(mut self, value: Float64)
+  fn text(mut self, value: StringSlice)
+  fn begin_list(mut self, length: USize)
+  fn end_list(mut self)
+  fn begin_record(mut self, length: USize)
+  fn field(mut self, name: StringSlice)
+  fn end_record(mut self)
+  fn begin_map(mut self, length: USize)
+  fn key(mut self, key: StringSlice)
+  fn end_map(mut self)
+  fn begin_variant(mut self, name: StringSlice, length: USize)
+  fn end_variant(mut self)
+}
+
+public type Kind = Absent | Null | Bool | Integer | Float | Text | List | Record
+  derives Equal
+
+public trait Deserializer {
+  fn kind(self) -> Kind
+  fn skip(mut self)
+  fn bool(mut self) -> Result[Bool, Error]
+  fn integer(mut self) -> Result[Int64, Error]
+  fn unsigned(mut self) -> Result[UInt64, Error]
+  fn float(mut self) -> Result[Float64, Error]
+  fn text(mut self) -> Result[String, Error]
+  fn begin_list(mut self) -> Result[Unit, Error]
+  fn next_element(mut self) -> Bool
+  fn end_list(mut self)
+  fn begin_record(mut self) -> Result[Unit, Error]
+  fn field(mut self, name: StringSlice) -> Bool
+  fn end_record(mut self)
+  fn begin_map(mut self) -> Result[Unit, Error]
+  fn next_key(mut self) -> Option[String]
+  fn end_map(mut self)
+  fn variant(mut self) -> Result[String, Error]
+  fn end_variant(mut self)
+  fn error(self, message: StringSlice) -> Error
+}
+
+public type Error(path: String, message: String)
+  derives Equal
+
+impl Display for Error {
+  fn display(self, output: mut TextBuilder)
+  {
+    if self.path.length() > 0 {
+      mut output.write("at ")
+      mut output.write(self.path.slice())
+      mut output.write(": ")
+    }
+    mut output.write(self.message.slice())
+  }
+}
+
+public fn required[Field: Deserialize, Source: Deserializer](source: mut Source, name: StringSlice) -> Result[Field, Error] {
+  let _ = mut source.field(name)
+  Field.deserialize(mut source)
+}
+
+public fn optional[Field: Deserialize, Source: Deserializer](
+  source: mut Source,
+  name: StringSlice,
+) -> Result[Option[Field], Error] {
+  if !mut source.field(name) {
+    return Ok(None)
+  }
+  match Field.deserialize(mut source) {
+    Ok(field) => Ok(Some(own field))
+    Err(error) => Err(own error)
+  }
+}
+
+public fn unknown_variant[Source: Deserializer](source: Source, name: String) -> Error {
+  var message = "there is no variant `"
+  mut message.push(name.slice())
+  mut message.push("`")
+  source.error(message.slice())
+}
+
+fn out_of_range[Source: Deserializer](source: Source, type_name: StringSlice) -> Error {
+  var message = "expected a number that fits `"
+  mut message.push(type_name)
+  mut message.push("`")
+  source.error(message.slice())
+}
+
+impl Serialize for Bool {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.bool(self)
+  }
+}
+
+impl Deserialize for Bool {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Bool, Error] {
+    mut source.bool()
+  }
+}
+
+impl Serialize for Int8 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.integer(Int64.from(self))
+  }
+}
+
+impl Deserialize for Int8 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int8, Error] {
+    match Int8.try_from(mut source.integer()?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(out_of_range(source, type_name: "Int8"))
+    }
+  }
+}
+
+impl Serialize for Int16 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.integer(Int64.from(self))
+  }
+}
+
+impl Deserialize for Int16 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int16, Error] {
+    match Int16.try_from(mut source.integer()?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(out_of_range(source, type_name: "Int16"))
+    }
+  }
+}
+
+impl Serialize for Int32 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.integer(Int64.from(self))
+  }
+}
+
+impl Deserialize for Int32 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int32, Error] {
+    match Int32.try_from(mut source.integer()?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(out_of_range(source, type_name: "Int32"))
+    }
+  }
+}
+
+impl Serialize for Int64 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.integer(self)
+  }
+}
+
+impl Deserialize for Int64 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Int64, Error] {
+    mut source.integer()
+  }
+}
+
+impl Serialize for ISize {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.integer(Int64.from(self))
+  }
+}
+
+impl Deserialize for ISize {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[ISize, Error] {
+    match ISize.try_from(mut source.integer()?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(out_of_range(source, type_name: "ISize"))
+    }
+  }
+}
+
+impl Serialize for UInt8 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.unsigned(UInt64.from(self))
+  }
+}
+
+impl Deserialize for UInt8 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt8, Error] {
+    match UInt8.try_from(mut source.unsigned()?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(out_of_range(source, type_name: "UInt8"))
+    }
+  }
+}
+
+impl Serialize for UInt16 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.unsigned(UInt64.from(self))
+  }
+}
+
+impl Deserialize for UInt16 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt16, Error] {
+    match UInt16.try_from(mut source.unsigned()?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(out_of_range(source, type_name: "UInt16"))
+    }
+  }
+}
+
+impl Serialize for UInt32 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.unsigned(UInt64.from(self))
+  }
+}
+
+impl Deserialize for UInt32 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt32, Error] {
+    match UInt32.try_from(mut source.unsigned()?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(out_of_range(source, type_name: "UInt32"))
+    }
+  }
+}
+
+impl Serialize for UInt64 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.unsigned(self)
+  }
+}
+
+impl Deserialize for UInt64 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[UInt64, Error] {
+    mut source.unsigned()
+  }
+}
+
+impl Serialize for USize {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.unsigned(UInt64.from(self))
+  }
+}
+
+impl Deserialize for USize {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[USize, Error] {
+    match USize.try_from(mut source.unsigned()?) {
+      Ok(number) => Ok(number)
+      Err(_) => Err(out_of_range(source, type_name: "USize"))
+    }
+  }
+}
+
+impl Serialize for Float32 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.float(Float64.from(self))
+  }
+}
+
+impl Deserialize for Float32 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Float32, Error] {
+    let number = mut source.float()?
+    Ok(number.to_float32())
+  }
+}
+
+impl Serialize for Float64 {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.float(self)
+  }
+}
+
+impl Deserialize for Float64 {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Float64, Error] {
+    mut source.float()
+  }
+}
+
+impl Serialize for String {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.text(self.slice())
+  }
+}
+
+impl Deserialize for String {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[String, Error] {
+    mut source.text()
+  }
+}
+
+impl Serialize for List[Element: Serialize] {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.begin_list(self.length())
+    for item in self {
+      item.serialize(mut sink)
+    }
+    mut sink.end_list()
+  }
+}
+
+impl Deserialize for List[Element: Deserialize] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[List[Element], Error] {
+    mut source.begin_list()?
+    var items: List[Element] = []
+    while mut source.next_element() {
+      mut items.push(Element.deserialize(mut source)?)
+    }
+    mut source.end_list()
+    Ok(own items)
+  }
+}
+
+impl Serialize for Option[Inner: Serialize] {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    match self {
+      Some(inner) => inner.serialize(mut sink)
+      None => mut sink.null()
+    }
+  }
+}
+
+impl Deserialize for Option[Inner: Deserialize] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Option[Inner], Error] {
+    let kind = source.kind()
+    if kind == Kind.Absent || kind == Kind.Null {
+      mut source.skip()
+      return Ok(None)
+    }
+    match Inner.deserialize(mut source) {
+      Ok(inner) => Ok(Some(own inner))
+      Err(error) => Err(own error)
+    }
+  }
+}
+
+impl Serialize for Map[Key: Hash + Ordered + Display, Member: Serialize] {
+  fn serialize[Sink: Serializer](self, sink: mut Sink) {
+    mut sink.begin_map(self.length())
+    for entry in self {
+      let key = "${entry.key}"
+      mut sink.key(key.slice())
+      entry.value.serialize(mut sink)
+    }
+    mut sink.end_map()
+  }
+}
+
+impl Deserialize for Map[Key: Hash + Ordered + text::Parse, Member: Deserialize] {
+  fn deserialize[Source: Deserializer](source: mut Source) -> Result[Map[Key, Member], Error] {
+    mut source.begin_map()?
+    var members: Map[Key, Member] = [:]
+    while true {
+      match mut source.next_key() {
+        Some(name) => match Key.parse(name.slice()) {
+          Ok(key) => mut members.insert(own key, value: Member.deserialize(mut source)?)
+          Err(_) => return Err(source.error("expected a key of the map's type"))
+        }
+        None => break
+      }
+    }
+    mut source.end_map()
+    Ok(own members)
+  }
+}
+
+public fn serialize_text[Item: Display, Sink: Serializer](item: Item, sink: mut Sink) {
+  let text = "${item}"
+  mut sink.text(text.slice())
+}
+
+public fn deserialize_text[Item: text::Parse, Source: Deserializer](
+  source: mut Source,
+  expected: StringSlice,
+) -> Result[Item, Error] {
+  let text = mut source.text()?
+  match Item.parse(text.slice()) {
+    Ok(item) => Ok(own item)
+    Err(_) => {
+      var message = "expected "
+      mut message.push(expected)
+      Err(source.error(message.slice()))
+    }
+  }
+}

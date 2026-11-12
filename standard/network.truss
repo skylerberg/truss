@@ -1,4 +1,5 @@
 use standard::intrinsic
+use standard::serialization
 use standard::streams
 use standard::text
 
@@ -551,6 +552,15 @@ public fn IpNetwork.contains(self, address: IpAddress) -> Bool
   }
 }
 
+impl Display for IpNetwork {
+  fn display(self, output: mut TextBuilder)
+  {
+    self.address.display(mut output)
+    mut output.write("/")
+    self.prefix_length.display(mut output)
+  }
+}
+
 impl text::Parse for IpNetwork {
   type Error = AddressError
 
@@ -742,5 +752,41 @@ impl NetworkClient for HostsAllowed
 
   fn open_datagram(self) -> Result[DatagramSocket, SystemError] {
     Err(SystemError.PermissionDenied)
+  }
+}
+
+impl serialization::Serialize for IpAddress {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for IpAddress {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[IpAddress, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "an IP address")
+  }
+}
+
+impl serialization::Serialize for SocketAddress {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for SocketAddress {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[SocketAddress, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "an IP address and a port")
+  }
+}
+
+impl serialization::Serialize for IpNetwork {
+  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+    serialization::serialize_text(self, sink: mut sink)
+  }
+}
+
+impl serialization::Deserialize for IpNetwork {
+  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[IpNetwork, serialization::Error] {
+    serialization::deserialize_text(mut source, expected: "an IP network, such as `10.0.0.0/8`")
   }
 }

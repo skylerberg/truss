@@ -727,8 +727,6 @@ so they are compiled once and shared:
   and the standard library's lists and slices, and quoted text with escapes
   for its strings. Integers are decimal, and floats the shortest decimal
   that reads back as the same value, always with a point or an exponent.
-- **Derived implementations:** `Equal`, `Hash`, `Ordered`, and `Default`, from
-  the type's shape and the version of the rule that derives them.
 
 ### Updates in place
 
@@ -902,6 +900,10 @@ methods it holds.
   monomorphization, every such call is a direct call to an instance.
 - **A trait's provided methods,** such as `max`, are compiled for each type
   that uses them, unless the `impl` replaces them.
+- **A derived implementation is lowered from its core form.** The type
+  checker writes the core form of each derived method from the type's
+  shape, as the body the method would have if it were written by hand, so
+  lowering compiles it as it compiles a written method.
 - **Derived implementations may be inlined into callers even in
   development builds.** Their code comes from the type's shape, which every
   caller already depends on through the layout, so inlining them adds

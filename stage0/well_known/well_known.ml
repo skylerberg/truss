@@ -38,6 +38,13 @@ type t =
   | Finite_map
   | Panic
   | Tasks
+  | Serialize
+  | Deserialize
+  | Serializer
+  | Deserializer
+  | Deserialize_required
+  | Deserialize_optional
+  | Unknown_variant
   | Write_fully
   | Text_copied_from
   | Run_tests
@@ -83,6 +90,13 @@ let all =
     Finite_map;
     Panic;
     Tasks;
+    Serialize;
+    Deserialize;
+    Serializer;
+    Deserializer;
+    Deserialize_required;
+    Deserialize_optional;
+    Unknown_variant;
     Write_fully;
     Text_copied_from;
     Run_tests;
@@ -128,6 +142,13 @@ let modules_and_name = function
   | Finite_map -> ([ "specification" ], "FiniteMap")
   | Panic -> ([ "capabilities" ], "Panic")
   | Tasks -> ([ "capabilities" ], "Tasks")
+  | Serialize -> ([ "serialization" ], "Serialize")
+  | Deserialize -> ([ "serialization" ], "Deserialize")
+  | Serializer -> ([ "serialization" ], "Serializer")
+  | Deserializer -> ([ "serialization" ], "Deserializer")
+  | Deserialize_required -> ([ "serialization" ], "required")
+  | Deserialize_optional -> ([ "serialization" ], "optional")
+  | Unknown_variant -> ([ "serialization" ], "unknown_variant")
   | Write_fully -> ([ "system"; "calls" ], "write_fully")
   | Text_copied_from -> ([ "system"; "calls" ], "text_copied_from")
   | Run_tests -> ([ "system"; "test_runner" ], "run")

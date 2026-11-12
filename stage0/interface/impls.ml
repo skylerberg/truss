@@ -4,7 +4,9 @@ module Names = Resolve.Names
 let head = function T.Named { path; _ } -> Some path | _ -> None
 
 let derivable (trait : Path.t) =
-  match Well_known.of_path trait with Some (Equal | Hash | Ordered | Default) -> true | _ -> false
+  match Well_known.of_path trait with
+  | Some (Equal | Hash | Ordered | Default | Serialize | Deserialize) -> true
+  | _ -> false
 
 let index =
   Query.query ~name:"impl_index" ~phase:Phases.interfaces ~show:Path.show_package
