@@ -37,12 +37,7 @@ type optimization = O1 | O2
 (* Clang's ThinLTO where the compiler is clang, and otherwise full LTO,
    which GCC has. *)
 let link_time_optimization t =
-  let contains text part =
-    let n = String.length part in
-    let rec at i = i + n <= String.length text && (String.sub text i n = part || at (i + 1)) in
-    at 0
-  in
-  if contains t.identity "clang" then [ "-flto=thin" ] else [ "-flto" ]
+  if Substring.contains t.identity "clang" then [ "-flto=thin" ] else [ "-flto" ]
 
 let optimization_flag = function O1 -> "-O1" | O2 -> "-O2"
 

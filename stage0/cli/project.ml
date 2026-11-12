@@ -45,7 +45,7 @@ let relative ~from path =
 let real path = try Unix.realpath path with Unix.Unix_error _ -> normalize path
 let shown path = relative ~from:(real (Sys.getcwd ())) (normalize path)
 
-type package = { name : string; directory : string  (** Absolute *) }
+type package = { name : Path.package; directory : string  (** Absolute *) }
 
 type t = {
   session : Database.session;
@@ -98,7 +98,7 @@ let package t =
   | several ->
       cannot_run "This is about %d packages: %s. Run the command in one's directory."
         (List.length several)
-        (String.concat ", " (List.map (fun p -> p.name) several))
+        (String.concat ", " (List.map (fun p -> Path.show_package p.name) several))
 
 let is_own t (module_ : Path.module_) = List.exists (fun p -> p.name = module_.package) t.packages
 

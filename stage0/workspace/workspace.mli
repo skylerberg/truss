@@ -5,11 +5,11 @@
     definition whose tree comes out the same, as one that only moved does, changes nothing that
     reads it. *)
 
-type dependency = Manifest.dependency = { package : string; capabilities : string list }
+type dependency = Manifest.dependency = { package : Path.package; capabilities : string list }
 (** A dependency from the manifest, with the capabilities it is granted. *)
 
 type package = Project.package = {
-  name : string;
+  name : Path.package;
   dependencies : dependency list;
   modules : Path.module_ list;
   usize_bits : int;
@@ -31,25 +31,25 @@ type file = {
 val file : (Path.module_, file) Query.query
 (** A module's file, lexed and parsed. Raises [Not_found] if the module has no text. *)
 
-val package : Query.context -> string -> package option
+val package : Query.context -> Path.package -> package option
 (** A package, or [None] if there is no such package. Reading it reads the whole of what the
     manifest says, so a result that needs one thing of it asks for that thing below. *)
 
-val modules : (string, Path.module_ list) Query.query
+val modules : (Path.package, Path.module_ list) Query.query
 (** A package's modules, and none for a package there is not. *)
 
-val dependencies : (string, dependency list) Query.query
+val dependencies : (Path.package, dependency list) Query.query
 (** A package's dependencies, each with what it is granted. *)
 
-val usize_bits : (string, int) Query.query
+val usize_bits : (Path.package, int) Query.query
 (** The width of [USize] a package's code must hold for. *)
 
-val exists : (string, bool) Query.query
+val exists : (Path.package, bool) Query.query
 (** Whether there is a package of that name. *)
 
-val split_path : Query.context -> string list -> (string * string list) option
-(** The package that the names of a full path start with, which is two of them when it has an owner,
-    and the names after it; [None] when they start with no package's name. *)
+val split_module : Query.context -> string list -> Path.module_ option
+(** The module that the names of a full path start with, whose package is two of them when it has an
+    owner; [None] when they start with no package's name. *)
 
 val module_exists : (Path.module_, bool) Query.query
 (** Whether a package has the module, which a [use] line or a full path asks. *)

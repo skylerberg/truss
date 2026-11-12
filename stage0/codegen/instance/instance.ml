@@ -150,11 +150,17 @@ let rec path : Path.t -> string = function
   | Top { module_; name } -> module_path module_ ^ "__" ^ name
   | Method { owner; name; receiver = r } -> path owner ^ "_" ^ name ^ receiver r
   | Member_constant { owner; name } -> path owner ^ marker "Member" ^ name
-  | Impl { module_; name } -> module_path module_ ^ marker "Impl" ^ text name ^ marker "End"
+  | Impl { module_; trait; for_type } ->
+      module_path module_ ^ marker "Impl" ^ text trait ^ marker "For"
+      ^ text (Path.show_type_head for_type)
+      ^ marker "End"
   | Derived { type_; trait } ->
       marker "Derived" ^ path trait ^ marker "For" ^ path type_ ^ marker "End"
   | Test { module_; name } -> module_path module_ ^ marker "Test" ^ text name ^ marker "End"
-  | Law_proof { module_; name } -> module_path module_ ^ marker "Proof" ^ text name ^ marker "End"
+  | Law_proof { module_; trait; law; for_type } ->
+      module_path module_ ^ marker "Proof" ^ text trait ^ marker "Law" ^ text law ^ marker "For"
+      ^ text (Path.show_type_head for_type)
+      ^ marker "End"
 
 let mode : Ground.mode -> string = function Read -> "" | Mut -> marker "Mut" | Own -> marker "Own"
 

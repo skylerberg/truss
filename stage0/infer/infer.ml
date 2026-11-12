@@ -4,7 +4,7 @@ type result = Body.result = {
   checked : Checked.t;
   core : Core.t option;
   diagnostics : Diagnostic.t list;
-  evidence : string list;
+  evidence : Path.package list;
 }
 
 let checked = Body.checked

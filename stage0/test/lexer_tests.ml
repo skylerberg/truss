@@ -68,7 +68,7 @@ let interpolation_tokens text index =
   | Some literal -> shown (interpolations literal).(index).tokens
   | None -> []
 
-let find = Documents.find
+let find text part ~occurrence = Option.get (Substring.find ~occurrence text part)
 
 (* Asserts that [text] gives exactly one diagnostic, with [code], starting at
    the [occurrence]th occurrence of [at]. With [fixed], its fixes must turn

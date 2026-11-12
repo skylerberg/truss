@@ -40,12 +40,7 @@ let message text =
       Printf.sprintf "%d diagnostics: %s" (List.length found)
         (String.concat "; " (Support.codes found))
 
-let contains text fragment =
-  let length = String.length fragment in
-  let rec at i =
-    i + length <= String.length text && (String.sub text i length = fragment || at (i + 1))
-  in
-  at 0
+let contains = Substring.contains
 
 (* Operations that could fail *)
 
@@ -3149,10 +3144,11 @@ let () =
 let across library program =
   let database = Engine.context (Engine.create ()) in
   Database.load_standard (Engine.of_context database);
-  Database.load_package (Engine.of_context database) ~name:"lib" ~dependencies:[]
+  Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
+    ~dependencies:[]
     [ (Support.module_of "lib::numbers", library) ];
-  Database.load_package (Engine.of_context database) ~name:"app"
-    ~dependencies:[ { package = "lib"; capabilities = [] } ]
+  Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
+    ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
     [ (Support.module_of "app::main", "use lib::numbers\n\n" ^ program) ];
   check database (Support.module_of "app::main")
 
@@ -4153,11 +4149,12 @@ let () =
 let () =
   test "an answer read from the cache is marked as asked now" (fun () ->
       let directory = Filename.temp_dir "truss-answers" "" in
+      let now = Logic.Symbol.Variable { label = "asked.now"; numbers = [] } in
       let query =
         {
-          Logic.declarations = [ Logic.Constant ("asked.now", Logic.Int) ];
+          Logic.declarations = [ Logic.Constant (now, Logic.Int) ];
           facts = [];
-          goal = Logic.Apply (">=", [ Logic.Symbol "asked.now"; Logic.Symbol "asked.now" ]);
+          goal = Logic.Operation (">=", [ Logic.Symbol now; Logic.Symbol now ]);
         }
       in
       let file = Filename.concat directory (Solver.key query) in
@@ -4324,59 +4321,67 @@ let () =
 
 (* Triggers *)
 
+let v label = Logic.Symbol.Variable { label; numbers = [] }
+
 let triggered fact =
   let open Logic in
   Logic.text
     {
       declarations =
-        [ Function ("f", [ Int ], Int); Function ("g", [ Int ], Int); Constant ("n", Int) ];
+        [ Function (v "f", [ Int ], Int); Function (v "g", [ Int ], Int); Constant (v "n", Int) ];
       facts = [ fact ];
-      goal = Apply (">", [ Apply ("f", [ Symbol "n" ]); int 0 ]);
+      goal = Operation (">", [ Apply (v "f", [ Symbol (v "n") ]); int 0 ]);
     }
 
 let () =
   let open Logic in
-  let i = Symbol "i" and j = Symbol "j" in
-  let f term = Apply ("f", [ term ]) and g term = Apply ("g", [ term ]) in
-  let positive term = Apply (">", [ term; int 0 ]) in
+  let i = Symbol (v "i") and j = Symbol (v "j") in
+  let f term = Apply (v "f", [ term ]) and g term = Apply (v "g", [ term ]) in
+  let positive term = Operation (">", [ term; int 0 ]) in
   let expect fact fragment =
     let text = triggered fact in
     if not (contains text fragment) then fail "expected %s in %s" fragment text
   in
   test "a quantified fact triggers on an application of its variable" (fun () ->
       expect
-        (Forall ([ ("i", Int) ], Apply (">=", [ i; int 0 ]) ==> positive (f i)))
+        (Forall ([ (v "i", Int) ], Operation (">=", [ i; int 0 ]) ==> positive (f i)))
         ":pattern ((x0 b0))");
   test "a trigger has no arithmetic on a bound variable" (fun () ->
-      let text = triggered (Forall ([ ("i", Int) ], positive (f (Apply ("+", [ i; int 1 ]))))) in
+      let text =
+        triggered (Forall ([ (v "i", Int) ], positive (f (Operation ("+", [ i; int 1 ])))))
+      in
       if contains text ":pattern" then fail "%s" text);
   test "a trigger that would match its own body's larger term is passed over" (fun () ->
       expect
         (Forall
-           ([ ("i", Int) ], Apply ("<", [ f i; f (Apply ("+", [ i; int 1 ])) ]) &&& positive (g i)))
+           ( [ (v "i", Int) ],
+             Operation ("<", [ f i; f (Operation ("+", [ i; int 1 ])) ]) &&& positive (g i) ))
         ":pattern ((x2 b0)))");
   test "a definition triggers on what it defines" (fun () ->
-      let text = triggered (Forall ([ ("i", Int) ], equal (f i) (Apply ("+", [ g i; int 1 ])))) in
+      let text =
+        triggered (Forall ([ (v "i", Int) ], equal (f i) (Operation ("+", [ g i; int 1 ]))))
+      in
       if (not (contains text ":pattern ((x0 b0)))")) || contains text ":pattern ((x1" then
         fail "%s" text);
   let query fact =
     {
       declarations =
-        [ Function ("f", [ Int ], Int); Function ("g", [ Int ], Int); Constant ("n", Int) ];
+        [ Function (v "f", [ Int ], Int); Function (v "g", [ Int ], Int); Constant (v "n", Int) ];
       facts = [ fact ];
-      goal = Apply (">", [ Apply ("f", [ Symbol "n" ]); int 0 ]);
+      goal = Operation (">", [ Apply (v "f", [ Symbol (v "n") ]); int 0 ]);
     }
   in
   test "a quantified fact with no trigger is told apart" (fun () ->
       if
         not
-          (untriggered (query (Forall ([ ("i", Int) ], positive (f (Apply ("+", [ i; int 1 ])))))))
+          (untriggered
+             (query (Forall ([ (v "i", Int) ], positive (f (Operation ("+", [ i; int 1 ])))))))
       then fail "a fact on f(i + 1) alone has no trigger";
-      if untriggered (query (Forall ([ ("i", Int) ], positive (f i)))) then
+      if untriggered (query (Forall ([ (v "i", Int) ], positive (f i)))) then
         fail "a fact on f(i) has one");
   test "variables named by no one application share a trigger" (fun () ->
       expect
-        (Forall ([ ("i", Int); ("j", Int) ], Apply ("<", [ f i; g j ])))
+        (Forall ([ (v "i", Int); (v "j", Int) ], Operation ("<", [ f i; g j ])))
         ":pattern ((x0 b0) (x2 b1))")
 
 (* Short-circuit operators *)
@@ -4711,7 +4716,9 @@ let () = finish ()
 let () =
   let proven_in_standard text =
     let database = Engine.context (Engine.create ~log:true ()) in
-    Database.load_package (Engine.of_context database) ~name:"standard" ~dependencies:[]
+    Database.load_package (Engine.of_context database)
+      ~name:{ owner = None; name = "standard" }
+      ~dependencies:[]
       [ (Support.module_of "standard::probe", text) ];
     match check database (Support.module_of "standard::probe") with
     | [] -> ()

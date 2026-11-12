@@ -64,8 +64,8 @@ let impls database (modules : Path.module_ list) =
     modules
 
 let package_impls =
-  Query.query ~phase:Phases.proofs ~name:"package_impls" ~show:Fun.id (fun database package ->
-      impls database (Query.demand database Workspace.modules package))
+  Query.query ~phase:Phases.proofs ~name:"package_impls" ~show:Path.show_package
+    (fun database package -> impls database (Query.demand database Workspace.modules package))
 
 (* The [impl]s of a package that a value of a type, given where one of
    these traits is needed, could use. Matched by the type's head, which may
@@ -181,7 +181,7 @@ let build database package =
         (Query.demand database Names.declarations module_))
     modules
 
-let graph = Query.query ~phase:Phases.proofs ~name:"call_graph" ~show:Fun.id build
+let graph = Query.query ~phase:Phases.proofs ~name:"call_graph" ~show:Path.show_package build
 
 (* The methods an [impl] writes. *)
 let impl_methods database impl =

@@ -18,7 +18,7 @@ type session = Session.t
     tried, a published package, or the standard library being worked on. Whatever its files come
     from, it is read through {!context}. *)
 
-val open_session : string -> (session * (string * string) list, string) result
+val open_session : string -> (session * (string * Path.package) list, string) result
 (** The session for the project a directory is in, brought up to date with its files, and the
     packages the directory is about: those at or under it, or the one it is in, each as its
     directory relative to the project's root and its name. The project's root is the nearest
@@ -48,18 +48,18 @@ val problems : session -> string list
     could not be read, a package name used twice, a dependency that is no package of the project. *)
 
 val manifest_problems :
-  session -> string list -> (string * string * Type_checker.manifest_problem) list
+  session -> Path.package list -> (string * Path.package * Type_checker.manifest_problem) list
 (** What only the code of the named packages shows to be wrong with their manifests: each one's
     file, relative to the project's root, its package, and the problem. Asking checks those
     packages. *)
 
-val packages : session -> (string * string) list
+val packages : session -> (string * Path.package) list
 (** Every package of the project: its directory relative to the root, and its name. *)
 
 val time_limit : session -> int
 (** The time each test of the project may take, in seconds. *)
 
-val registry_packages : session -> (string * Registry.Version.t * string) list
+val registry_packages : session -> (Path.package * Registry.Version.t * string) list
 (** The registry packages of the project's build, in order of name: each one's name, its version,
     and the hash of its files. *)
 
@@ -67,7 +67,7 @@ val lock_fix : session -> string option
 (** The lock file the project's manifests give, when the one that is written is another, which is a
     problem whose fix is to write this one. *)
 
-val package_modules : session -> string -> Path.module_ list
+val package_modules : session -> Path.package -> Path.module_ list
 
 val module_file : session -> Path.module_ -> string
 (** A module's file, relative to the project's root. *)
@@ -75,7 +75,7 @@ val module_file : session -> Path.module_ -> string
 val diagnostics : session -> Path.module_ -> Diagnostic.t list
 (** A file's diagnostics, kept current and saved. *)
 
-val code_packages : session -> string -> string list
+val code_packages : session -> Path.package -> Path.package list
 (** The packages a package's code uses, its tests apart. *)
 
 val sessions : unit -> (string * int) list
@@ -96,7 +96,7 @@ val base_commit : session -> string option -> string option
 val open_commit_of : session -> string -> (session, string) result
 (** A session of the worktree's repository at a commit. *)
 
-val published : string -> Registry.Version.t -> (session, string) result
+val published : Path.package -> Registry.Version.t -> (session, string) result
 (** A published package at a version, as a session of its own with the packages it was published
     with, for comparing a release with it. An error says, as a sentence, why it cannot be had. *)
 
@@ -185,7 +185,10 @@ type lock_plan = {
 }
 
 val plan_lock :
-  session -> set:(string * Registry.Version.t option) list -> all:bool -> (lock_plan, string) result
+  session ->
+  set:(Path.package * Registry.Version.t option) list ->
+  all:bool ->
+  (lock_plan, string) result
 (** The lock file a project would have with other versions: each package of [set] at the version
     given, or at the registry's newest, and with [all], every registry package of the build at its
     newest. The rest follow as a build's versions do. It fetches what it needs and writes no file.
@@ -238,7 +241,7 @@ val reset : unit -> unit
 val load_package :
   ?usize_bits:int ->
   Engine.t ->
-  name:string ->
+  name:Path.package ->
   dependencies:Workspace.dependency list ->
   (Path.module_ * string) list ->
   unit
@@ -253,7 +256,11 @@ module Testing : sig
   (** Gives one module of a package set with {!load_package} another text. *)
 
   val set_manifest :
-    ?usize_bits:int -> Engine.t -> name:string -> dependencies:Workspace.dependency list -> unit
+    ?usize_bits:int ->
+    Engine.t ->
+    name:Path.package ->
+    dependencies:Workspace.dependency list ->
+    unit
   (** Gives a package set with {!load_package} another manifest, and leaves its modules as they are.
   *)
 

@@ -2,7 +2,7 @@
     project's lock file or the record of any package of the build names. *)
 
 type package = {
-  name : string;
+  name : Path.package;
   version : Version.t;
   hash : string;
   manifest : Manifest.package;
@@ -11,19 +11,19 @@ type package = {
 (** A registry package of a build. *)
 
 type problem =
-  | No_version of { name : string; wanted_by : string }
+  | No_version of { name : Path.package; wanted_by : Path.package }
       (** A dependency that no lock file or record gives a version *)
-  | Cannot_load of { name : string; version : Version.t; reason : string }
-  | Two_contents of { name : string; version : Version.t; recorded_by : string }
+  | Cannot_load of { name : Path.package; version : Version.t; reason : string }
+  | Two_contents of { name : Path.package; version : Version.t; recorded_by : Path.package }
       (** A record that names one version with another hash than the build's *)
 
 val sentence : problem -> string
 
 val choose :
   lock:Lock.t ->
-  roots:(string * string) list ->
-  local:(string -> bool) ->
-  load:(string -> Version.t -> hash:string -> (Manifest.package * Lock.t, string) result) ->
+  roots:(Path.package * Path.package) list ->
+  local:(Path.package -> bool) ->
+  load:(Path.package -> Version.t -> hash:string -> (Manifest.package * Lock.t, string) result) ->
   package list * problem list
 (** The registry packages of a build, in order of name. [roots] are the dependencies of the
     project's packages, each with the package that names it, [local] says whether a name is a
@@ -32,7 +32,7 @@ val choose :
     published package that its record names, and not one that only its tests use, which the record
     leaves out. *)
 
-val holds : project:Manifest.dependency list -> package list -> (string * string list) list
+val holds : project:Manifest.dependency list -> package list -> (Path.package * string list) list
 (** The capabilities each package of a build holds: those its users in the build grant it, of the
     ones each user holds itself. A project's own packages, whose entries [project] is, hold
     everything. *)

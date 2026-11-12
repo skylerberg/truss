@@ -82,6 +82,7 @@ let string_literal cursor ~start ~modules (literal : Token.string_literal) ~inte
   in
   {
     tag;
+    form = literal.form;
     first = text cursor literal.first;
     rest =
       Array.to_list

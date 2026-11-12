@@ -85,13 +85,13 @@ let record (project : Project.t) registry (package : Project.package) =
                     "`%s` is a package of this project, and its files are not those of a version \
                      the registry holds. A package is published with registry packages only, so \
                      publish `%s` first."
-                    name name
+                    (Path.show_package name) (Path.show_package name)
                   :: !problems)
         | None, None -> ()
       end
     in
     List.iter visit (dependencies ~code:true name);
-    List.sort (fun (left : Lock.entry) right -> String.compare left.name right.name) !entries
+    List.sort (fun (left : Lock.entry) right -> Path.compare_package left.name right.name) !entries
   and published_as name directory =
     let hash = Registry.Content.hash (files { name; directory } (closure name)) in
     List.find_map
@@ -138,17 +138,15 @@ let failed_tests (project : Project.t) (package : Project.package) =
 
 (* The name a package would be published under once it breaks what its
    name has offered: the next number after [_v]. *)
-let next_name name =
-  let major = Version.major_of_name name in
+let next_name (package : Path.package) =
+  let major = Version.major_of_name package in
   let base =
-    if major = 1 then name
-    else
-      let suffix = Printf.sprintf "_v%d" major in
-      if String.ends_with ~suffix name then
-        String.sub name 0 (String.length name - String.length suffix)
-      else name
+    let suffix = Printf.sprintf "_v%d" major in
+    if major > 1 && String.ends_with ~suffix package.name then
+      String.sub package.name 0 (String.length package.name - String.length suffix)
+    else package.name
   in
-  Printf.sprintf "%s_v%d" base (major + 1)
+  { package with name = Printf.sprintf "%s_v%d" base (major + 1) }
 
 type outcome =
   | Published of {
@@ -196,7 +194,8 @@ let decide (project : Project.t) registry (package : Project.package) =
                 @
                 if narrowed then
                   [
-                    Printf.sprintf "`%s` ran on every target, and now says `usize_bits = 64`." name;
+                    Printf.sprintf "`%s` ran on every target, and now says `usize_bits = 64`."
+                      (Path.show_package name);
                   ]
                 else []
               in
@@ -205,10 +204,12 @@ let decide (project : Project.t) registry (package : Project.package) =
                   (Printf.sprintf
                      "This would break what `%s` %s offers, so it cannot be published under that \
                       name:"
-                     name (Version.show version)
+                     (Path.show_package name) (Version.show version)
                    :: List.map (fun sentence -> "  " ^ sentence) breaks
-                  @ [ Printf.sprintf "Publish it under a new name, such as `%s`." (next_name name) ]
-                  )
+                  @ [
+                      Printf.sprintf "Publish it under a new name, such as `%s`."
+                        (Path.show_package (next_name name));
+                    ])
               else
                 let grows = Compatibility.grows found in
                 Published
@@ -223,10 +224,10 @@ let run ~directory ~json =
   let project = Project.load directory in
   let package = Project.package project in
   let name = package.name in
-  if List.length (Path.package_parts name) <> 2 then
+  if name.owner = None then
     Project.cannot_run
-      "`%s` has no owner in its name, which a published package's has, such as `acme::%s`." name
-      name;
+      "`%s` has no owner in its name, which a published package's has, such as `acme::%s`."
+      name.name name.name;
   let registry =
     match Registry.Index.current () with
     | Some registry -> registry
@@ -266,7 +267,9 @@ let run ~directory ~json =
                 if json then
                   Json.print
                     (Report.document report [ ("version", Json.String (Version.show version)) ])
-                else Output.printf "`%s` %s is these files already.\n" name (Version.show version);
+                else
+                  Output.printf "`%s` %s is these files already.\n" (Path.show_package name)
+                    (Version.show version);
                 0
             | Published { version; files; grows } ->
                 Registry.Index.add registry name version files;
@@ -275,7 +278,7 @@ let run ~directory ~json =
                   Json.print
                     (Report.document report
                        [
-                         ("package", Json.String name);
+                         ("package", Json.String (Path.show_package name));
                          ("version", Json.String (Version.show version));
                          ("hash", Json.String hash);
                          ( "grows",
@@ -290,7 +293,8 @@ let run ~directory ~json =
                                 grows) );
                        ])
                 else begin
-                  Output.printf "Published `%s` %s.\n" name (Version.show version);
+                  Output.printf "Published `%s` %s.\n" (Path.show_package name)
+                    (Version.show version);
                   List.iter
                     (fun (path, what) -> Output.printf "  %s %s.\n" (Path.show path) what)
                     grows

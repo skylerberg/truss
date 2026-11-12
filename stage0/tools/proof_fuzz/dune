@@ -8,6 +8,7 @@
   token
   lexer
   documents
+  substring
   query
   engine
   database

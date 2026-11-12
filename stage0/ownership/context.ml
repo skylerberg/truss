@@ -11,7 +11,7 @@ type context = {
   database : Query.context;
   bounds : T.parameter -> T.trait_reference list;
   spans : Syntax.span array;
-  text : string;  (** The definition's source text, in which the spans are offsets. *)
+  marks : (Core.origin * Syntax_walk.mark) list;  (** Each expression's [mut] or [own] mark. *)
   names : (Core.local, string) Hashtbl.t;
   kinds : (Core.local, kind) Hashtbl.t;
   types : (Core.local, T.ty) Hashtbl.t;
@@ -126,30 +126,16 @@ let collect context (definition : Core.definition) =
     }
     definition
 
-(* The start offset of the mark before a place, if the place has that mark.
-   The core form does not record marks, so this reads the source text. *)
-let mark_start context (place : Syntax.span) ~mark : int option =
-  let rec skip_space index =
-    if index > 0 && (context.text.[index - 1] = ' ' || context.text.[index - 1] = '\n') then
-      skip_space (index - 1)
-    else index
-  in
-  let stop = skip_space (min place.start (String.length context.text)) in
-  let length = String.length mark in
-  if stop < place.start && stop >= length && String.sub context.text (stop - length) length = mark
-  then Some (stop - length)
-  else None
-
 (* The edits that replace a move by a copy: insert [.copy()] after the place
    and delete the [own] mark before it. *)
-let copy_at context (moved : Syntax.span) =
-  (match mark_start context moved ~mark:"own" with
-    | Some start -> [ Diagnostic.delete (Source.span start moved.start) ]
-    | None -> [])
-  @ [ Diagnostic.insert moved.stop ".copy()" ]
+let copy_at context (moved : Core.origin) =
+  (match List.assoc_opt moved context.marks with
+    | Some { mode = Own; mark; _ } -> [ Diagnostic.delete (Source.span mark.start mark.stop) ]
+    | Some { mode = Mut; _ } | None -> [])
+  @ [ Diagnostic.insert (span context moved).stop ".copy()" ]
 
 (* The span of a place together with the [mut] or [own] mark before it. *)
-let with_mark context (place : Syntax.span) : Syntax.span =
-  match (mark_start context place ~mark:"mut", mark_start context place ~mark:"own") with
-  | Some start, _ | None, Some start -> Syntax.Span.make start place.stop
-  | None, None -> place
+let with_mark context (place : Core.origin) : Syntax.span =
+  match List.assoc_opt place context.marks with
+  | Some { marked; _ } -> marked
+  | None -> span context place

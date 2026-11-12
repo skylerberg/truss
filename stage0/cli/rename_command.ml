@@ -18,31 +18,33 @@ type plan = {
   moved : (Path.module_ * Path.module_) option;  (** A renamed module's old and new paths *)
 }
 
-let split text = String.split_on_char ':' text |> List.filter (( <> ) "")
-
 let module_exists (project : Project.t) (module_ : Path.module_) =
   List.mem_assoc module_ project.files
 
 (* The project's package that [from_] starts with the name of, and the
-   names after it. *)
+   names after it, as a module of it. *)
 let in_package (project : Project.t) from_ =
-  let named name = List.exists (fun (p : Project.package) -> p.name = name) project.packages in
-  match split from_ with
-  | owner :: name :: rest when named (owner ^ "::" ^ name) -> (owner ^ "::" ^ name, rest)
-  | name :: rest when named name -> (name, rest)
-  | [] -> Project.cannot_run "`%s` names nothing." from_
-  | _ ->
+  let is_package package =
+    List.exists (fun (p : Project.package) -> p.name = package) project.packages
+  in
+  let argument = Path_argument.parse from_ in
+  match Path.split_module ~is_package argument.names with
+  | Some module_ -> (module_, argument.member)
+  | None when argument.names = [] -> Project.cannot_run "`%s` names nothing." from_
+  | None ->
       Project.cannot_run
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
         from_
 
 (* What [from_] names. *)
 let what (project : Project.t) from_ =
-  let package, names = in_package project from_ in
-  if module_exists project { package; modules = names } then Module { package; modules = names }
+  let { Path.package; modules = names }, member = in_package project from_ in
+  let package_name = Path.show_package package in
+  if member = None && module_exists project { package; modules = names } then
+    Module { package; modules = names }
   else
     match List.rev names with
-    | last :: rest when module_exists project { package; modules = List.rev rest } -> (
+    | last :: rest when module_exists project { package; modules = List.rev rest } ->
         let module_ : Path.module_ = { package; modules = List.rev rest } in
         let declared path =
           List.exists
@@ -56,38 +58,30 @@ let what (project : Project.t) from_ =
                (Project.modules project))
         in
         let path : Path.t =
-          match String.index_opt last '.' with
+          match member with
           | None -> Top { module_; name = last }
-          | Some dot ->
-              Method
-                {
-                  owner = Top { module_; name = String.sub last 0 dot };
-                  name = String.sub last (dot + 1) (String.length last - dot - 1);
-                  receiver = Static;
-                }
+          | Some name -> Method { owner = Top { module_; name = last }; name; receiver = Static }
         in
-        match path with
-        | (Top _ | Method _) when declared path -> Definition path
-        | _ -> Project.cannot_run "Nothing named `%s` is defined in %s." from_ package)
-    | _ -> Project.cannot_run "Nothing named `%s` is defined in %s." from_ package
+        if declared path then Definition path
+        else Project.cannot_run "Nothing named `%s` is defined in %s." from_ package_name
+    | _ -> Project.cannot_run "Nothing named `%s` is defined in %s." from_ package_name
 
 (* The new last name, from a full path or a bare name. A definition keeps
    its module and a method its type, so a full path must say the same
    ones. *)
 let new_name ~from_ to_ =
-  let last text = match List.rev (split text) with last :: _ -> last | [] -> text in
-  let member text =
-    match String.index_opt text '.' with
-    | Some dot -> (String.sub text 0 dot, String.sub text (dot + 1) (String.length text - dot - 1))
-    | None -> ("", text)
+  let written = Path_argument.parse to_ and old = Path_argument.parse from_ in
+  (* A method's type and name, or a definition's name alone. *)
+  let owner_and_name (argument : Path_argument.t) =
+    let last = match List.rev argument.names with last :: _ -> last | [] -> "" in
+    match argument.member with Some member -> (last, member) | None -> ("", last)
   in
-  let prefix text = match List.rev (split text) with _ :: rest -> List.rev rest | [] -> [] in
-  let from_owner, _ = member (last from_) in
-  if String.contains to_ ':' && prefix to_ <> prefix from_ then
+  let from_owner, _ = owner_and_name old in
+  if List.length written.names > 1 && Path_argument.prefix written <> Path_argument.prefix old then
     Project.cannot_run
       "A rename keeps a definition in its module, and `%s` is in another one than `%s`." to_ from_;
-  let owner, name = member (last to_) in
-  if String.contains (last to_) '.' && owner <> from_owner then
+  let owner, name = owner_and_name written in
+  if written.member <> None && owner <> from_owner then
     Project.cannot_run "A rename keeps a method with its type, and `%s` is not under `%s`." to_
       from_owner;
   if name = "" then Project.cannot_run "`%s` gives no new name." to_;
@@ -112,14 +106,15 @@ let plan_module (project : Project.t) (old_module : Path.module_) to_ =
   let package = old_module.package in
   let modules =
     match in_package project to_ with
-    | named, (_ :: _ as modules) when named = package -> modules
+    | { package = named; modules = _ :: _ as modules }, None when named = package -> modules
     | _ | (exception Project.Cannot_run _) ->
+        let package = Path.show_package package in
         Project.cannot_run "`%s` is not a module path in %s, such as `%s::name`." to_ package
           package
   in
   List.iter
     (fun name ->
-      if Manifest.name_parts name <> Some [ name ] then
+      if not (Manifest.valid_name name) then
         Project.cannot_run "`%s` is not a lower_snake_case name, which a module's must be." name)
     modules;
   let new_module : Path.module_ = { package; modules } in

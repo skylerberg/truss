@@ -1,2 +1,3 @@
 (library
- (name manifest))
+ (name manifest)
+ (libraries path))

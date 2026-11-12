@@ -1,5 +1,5 @@
 type package = {
-  name : string;
+  name : Path.package;
   version : Version.t;
   hash : string;
   manifest : Manifest.package;
@@ -7,24 +7,26 @@ type package = {
 }
 
 type problem =
-  | No_version of { name : string; wanted_by : string }
-  | Cannot_load of { name : string; version : Version.t; reason : string }
-  | Two_contents of { name : string; version : Version.t; recorded_by : string }
+  | No_version of { name : Path.package; wanted_by : Path.package }
+  | Cannot_load of { name : Path.package; version : Version.t; reason : string }
+  | Two_contents of { name : Path.package; version : Version.t; recorded_by : Path.package }
 
-let sentence = function
+let sentence problem =
+  let show = Path.show_package in
+  match problem with
   | No_version { name; wanted_by } ->
       Printf.sprintf
         "`%s` depends on `%s`, which is not a package of this project and has no line in \
          `truss.lock`. Run `truss add %s`."
-        wanted_by name name
+        (show wanted_by) (show name) (show name)
   | Cannot_load { name; version; reason } ->
-      Printf.sprintf "`truss.lock` names `%s` %s, whose files are not in the store, and %s." name
-        (Version.show version) reason
+      Printf.sprintf "`truss.lock` names `%s` %s, whose files are not in the store, and %s."
+        (show name) (Version.show version) reason
   | Two_contents { name; version; recorded_by } ->
       Printf.sprintf
         "`%s` was published with `%s` %s under another hash than the build has for it. One version \
          has one content, so one of the two is wrong."
-        recorded_by name (Version.show version)
+        (show recorded_by) (show name) (Version.show version)
 
 let choose ~lock ~roots ~local ~load =
   let chosen = Hashtbl.create 16 in
@@ -71,7 +73,8 @@ let choose ~lock ~roots ~local ~load =
        is made again until none is raised. Versions only rise, so it ends. *)
     if !changed then pass ()
     else
-      (List.sort (fun left right -> String.compare left.name right.name) !found, List.rev !problems)
+      ( List.sort (fun left right -> Path.compare_package left.name right.name) !found,
+        List.rev !problems )
   in
   pass ()
 
@@ -133,23 +136,26 @@ let differences ~(written : Lock.t) ~(current : Lock.t) =
       match Lock.find written entry.name with
       | None ->
           Some
-            (Printf.sprintf "`%s` %s is in the build and has no line." entry.name
-               (Version.show entry.version))
+            (Printf.sprintf "`%s` %s is in the build and has no line."
+               (Path.show_package entry.name) (Version.show entry.version))
       | Some line when Version.compare line.version entry.version <> 0 ->
           Some
             (Printf.sprintf "`%s` is %s, and a package of the build was published with %s."
-               entry.name (Version.show line.version) (Version.show entry.version))
+               (Path.show_package entry.name) (Version.show line.version)
+               (Version.show entry.version))
       | Some line when line.hash <> entry.hash ->
-          Some (Printf.sprintf "`%s` %s has another hash." entry.name (Version.show entry.version))
+          Some
+            (Printf.sprintf "`%s` %s has another hash." (Path.show_package entry.name)
+               (Version.show entry.version))
       | Some line when List.sort String.compare line.holds <> entry.holds ->
           Some
-            (Printf.sprintf "`%s` is said to hold %s, and the manifests grant it %s." entry.name
-               (capabilities line.holds) (capabilities entry.holds))
+            (Printf.sprintf "`%s` is said to hold %s, and the manifests grant it %s."
+               (Path.show_package entry.name) (capabilities line.holds) (capabilities entry.holds))
       | Some _ -> None)
     current
   @ List.filter_map
       (fun (line : Lock.entry) ->
         if Lock.find current line.name = None then
-          Some (Printf.sprintf "Nothing in the build uses `%s`." line.name)
+          Some (Printf.sprintf "Nothing in the build uses `%s`." (Path.show_package line.name))
         else None)
       written

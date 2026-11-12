@@ -6,12 +6,10 @@ type found = { declaration : Names.declaration; file : string; line : int; text 
 
 (* The module a path names, if it names one: [weather], or
    [weather::forecast]. *)
-let as_module database parts : Path.module_ option =
-  match Workspace.split_path database parts with
-  | None -> None
-  | Some (package, modules) ->
-      let module_ : Path.module_ = { package; modules } in
-      if Query.demand database Workspace.module_exists module_ then Some module_ else None
+let as_module database names : Path.module_ option =
+  match Workspace.split_module database names with
+  | Some module_ when Query.demand database Workspace.module_exists module_ -> Some module_
+  | Some _ | None -> None
 
 let declarations database (module_ : Path.module_) =
   Query.demand database Names.declarations module_
@@ -30,40 +28,29 @@ let owner_of : Path.t -> Path.t option = function
   | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
   | _ -> None
 
-(* An [impl] is shown with a type when its name, which spells its trait
-   and type as written, ends with the type's name. *)
+(* An [impl] is shown with a type when it is written for the type's name. *)
 let impl_of_type (path : Path.t) name =
-  match path with
-  | Impl { name = impl; _ } ->
-      let suffix = " for " ^ name in
-      let n = String.length suffix and m = String.length impl in
-      let rec at i =
-        i + n <= m
-        && ((String.sub impl i n = suffix && (i + n = m || impl.[i + n] = '[')) || at (i + 1))
-      in
-      at 0
-  | _ -> false
+  match path with Impl { for_type; _ } -> for_type.type_name = name | _ -> false
 
 (* The definitions a path names, in the order to show them. *)
 let resolve (project : Project.t) text =
   let database = project.context in
-  let parts = String.split_on_char ':' text |> List.filter (( <> ) "") in
+  let argument = Path_argument.parse text in
   let in_package package =
     List.concat_map (declarations database) (package_modules database package)
   in
-  match (Workspace.split_path database parts, as_module database parts) with
-  | Some (package, []), _ ->
+  let module_ = if argument.member = None then as_module database argument.names else None in
+  match (Workspace.split_module database argument.names, module_, argument.member) with
+  | Some { package; modules = [] }, _, None ->
       (* A package: what it makes public. *)
       List.filter (fun (d : Names.declaration) -> Names.is_public d.visibility) (in_package package)
-  | _, Some module_ -> List.filter (visible project) (declarations database module_)
-  | _, None -> (
-      match List.rev parts with
-      | [] -> []
-      | last :: rest -> (
-          let modules = List.rev rest in
-          match (as_module database modules, String.index_opt last '.') with
-          | None, _ -> []
-          | Some module_, None -> (
+  | _, Some module_, _ -> List.filter (visible project) (declarations database module_)
+  | _, None, member -> (
+      match (as_module database (Path_argument.prefix argument), List.rev argument.names) with
+      | None, _ | _, [] -> []
+      | Some module_, last :: _ -> (
+          match member with
+          | None -> (
               let path : Path.t = Top { module_; name = last } in
               match
                 List.filter
@@ -81,10 +68,8 @@ let resolve (project : Project.t) text =
                   @ List.filter (fun (d : Names.declaration) -> impl_of_type d.path last) package
                   |> List.filter (visible project)
               | found -> List.filter (visible project) found)
-          | Some module_, Some dot ->
-              let type_name = String.sub last 0 dot in
-              let member = String.sub last (dot + 1) (String.length last - dot - 1) in
-              let owner : Path.t = Top { module_; name = type_name } in
+          | Some member ->
+              let owner : Path.t = Top { module_; name = last } in
               in_package module_.package
               |> List.filter (fun (d : Names.declaration) ->
                   match d.path with

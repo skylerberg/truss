@@ -335,7 +335,8 @@ let () =
   test "an impl overlaps an impl in a package it depends on" (fun () ->
       let database = Engine.context (Engine.create ()) in
       Database.load_standard (Engine.of_context database);
-      Database.load_package (Engine.of_context database) ~name:"lib" ~dependencies:[]
+      Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
+        ~dependencies:[]
         [
           ( module_of "lib::vector",
             "public type Vector[Element](items: List[Element])\n\n\
@@ -345,8 +346,8 @@ let () =
             \  fn add(self, right: Element) -> Vector[Element] { todo }\n\
              }\n" );
         ];
-      Database.load_package (Engine.of_context database) ~name:"app"
-        ~dependencies:[ { package = "lib"; capabilities = [] } ]
+      Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
+        ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
         [
           ( module_of "app::main",
             "use lib::vector\n\n\
@@ -363,14 +364,15 @@ let () =
   test "an impl in another package cannot give a type another version of its method" (fun () ->
       let database = Engine.context (Engine.create ()) in
       Database.load_standard (Engine.of_context database);
-      Database.load_package (Engine.of_context database) ~name:"lib" ~dependencies:[]
+      Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "lib" }
+        ~dependencies:[]
         [
           ( module_of "lib::counter",
             "public type Counter(count: Int64)\n\npublic fn Counter.label(self) -> Int64 { todo }\n"
           );
         ];
-      Database.load_package (Engine.of_context database) ~name:"app"
-        ~dependencies:[ { package = "lib"; capabilities = [] } ]
+      Database.load_package (Engine.of_context database) ~name:{ owner = None; name = "app" }
+        ~dependencies:[ { package = { owner = None; name = "lib" }; capabilities = [] } ]
         [
           ( module_of "app::main",
             "use lib::counter\n\n\

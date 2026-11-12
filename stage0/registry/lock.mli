@@ -3,7 +3,7 @@
     [holds]. *)
 
 type entry = {
-  name : string;
+  name : Path.package;
   version : Version.t;
   hash : string;  (** Of the package's files, as {!Content.hash} gives it *)
   holds : string list;  (** The capabilities its users in the build grant it, as grants name them *)
@@ -21,4 +21,4 @@ val parse : string -> t
 val print : t -> string
 (** The one way a lock file is written, which {!parse} reads back as the same entries. *)
 
-val find : t -> string -> entry option
+val find : t -> Path.package -> entry option

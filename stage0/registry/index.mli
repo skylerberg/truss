@@ -18,20 +18,20 @@ val configure : string option -> unit
 val at : string -> t
 val root : t -> string
 
-val versions : t -> string -> (Version.t * string) list
+val versions : t -> Path.package -> (Version.t * string) list
 (** A package's versions, each with its hash, in the order they were published. A package the
     registry does not hold has none. *)
 
-val newest : t -> string -> (Version.t * string) option
-val hash_of : t -> string -> Version.t -> string option
+val newest : t -> Path.package -> (Version.t * string) option
+val hash_of : t -> Path.package -> Version.t -> string option
 
-val version_directory : t -> string -> Version.t -> string
+val version_directory : t -> Path.package -> Version.t -> string
 (** Where a version's files are. *)
 
-val add : t -> string -> Version.t -> (string * string) list -> unit
+val add : t -> Path.package -> Version.t -> (string * string) list -> unit
 (** Adds a version of a package with these files, each a path and its bytes. *)
 
-val fetch : t -> into:string -> string -> Version.t -> hash:string -> (string, string) result
+val fetch : t -> into:string -> Path.package -> Version.t -> hash:string -> (string, string) result
 (** The directory, under [into], that holds a version's files, named by their hash, copying them
     from the registry if it is not there yet. The files are kept only if they have that hash. An
     error says why they could not be had, as the end of a sentence. *)

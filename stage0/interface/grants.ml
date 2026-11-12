@@ -1,15 +1,6 @@
 module T = Types
 module Names = Resolve.Names
 
-(* [a::b::Name] as its names, or [None] where [::] is not written whole. *)
-let path_names written =
-  let rec names = function
-    | [ last ] when last <> "" -> Some [ last ]
-    | name :: "" :: rest when name <> "" -> Option.map (fun rest -> name :: rest) (names rest)
-    | _ -> None
-  in
-  names (String.split_on_char ':' written)
-
 (* The capability a grant's entry names: a prelude capability by its name,
    and any other by its full path, which must be one the package granting
    it can see. *)
@@ -21,12 +12,12 @@ let capability database ~package written : Path.t option =
         Some (Path.Top { module_; name })
     | _ -> None
   in
-  match Option.map List.rev (path_names written) with
+  match Option.map List.rev (Path.parse_names written) with
   | Some [ name ] ->
       Option.bind (Resolve.Prelude.find_type name) (fun module_ -> found module_ name)
   | Some (name :: modules) -> (
-      match Workspace.split_path database (List.rev modules) with
-      | Some (owner, modules) -> found { package = owner; modules } name
+      match Workspace.split_module database (List.rev modules) with
+      | Some module_ -> found module_ name
       | None -> None)
   | Some [] | None -> None
 
@@ -43,7 +34,8 @@ type grant = {
 
 let granted =
   Query.query ~name:"granted" ~phase:Phases.interfaces ~saved:true
-    ~show:(fun (package, dependency) -> Printf.sprintf "%s to %s" package dependency)
+    ~show:(fun (package, dependency) ->
+      Printf.sprintf "%s to %s" (Path.show_package package) (Path.show_package dependency))
     (fun database (package, dependency) ->
       Option.map
         (fun (entry : Workspace.dependency) ->
@@ -74,6 +66,7 @@ let missing database ~package ~of_ (uses : T.capability list) =
       (List.sort_uniq compare uses)
 
 let message ~what ~of_ capability =
+  let of_ = Path.show_package of_ in
   Printf.sprintf
     "%s uses `%s`, which the manifest does not grant `%s`. To grant it, add \"%s\" to the entry \
      for `%s` in `truss.toml`."

@@ -7,7 +7,7 @@ let manifest_block () =
   let text = Documents.read "../../SYNTAX.md" in
   String.concat "\n" (Documents.block_after text "### Package manifest")
 
-let contains text part = Documents.find text part ~occurrence:1 >= 0
+let contains text part = Substring.contains text part
 
 let malformed_at line text =
   match Manifest.parse text with
@@ -22,13 +22,16 @@ let () =
        package =
          Some
            {
-             name = "weather";
+             name = { Path.owner = None; name = "weather" };
              truss = Some "0.1";
              dependencies =
                [
-                 { package = "forecast"; capabilities = [] };
-                 { package = "truss::toml"; capabilities = [] };
-                 { package = "truss::http"; capabilities = [ "NetworkClient"; "Handles"; "Clock" ] };
+                 { package = { Path.owner = None; name = "forecast" }; capabilities = [] };
+                 { package = { Path.owner = Some "truss"; name = "toml" }; capabilities = [] };
+                 {
+                   package = { Path.owner = Some "truss"; name = "http" };
+                   capabilities = [ "NetworkClient"; "Handles"; "Clock" ];
+                 };
                ];
              usize_bits = 32;
            };
@@ -44,7 +47,7 @@ let () =
       | _ -> fail "read differently");
   test "a manifest has a package, a project, or both" (fun () ->
       (match Manifest.parse "[project]\n[package]\nname = \"a\"\n" with
-      | { package = Some { name = "a"; _ }; project = true; _ } -> ()
+      | { package = Some { name = { Path.owner = None; name = "a" }; _ }; project = true; _ } -> ()
       | _ -> fail "read differently");
       malformed_at 1 "# nothing\n";
       malformed_at 2 "[project]\n[dependencies]\njson = []\n");
@@ -117,7 +120,13 @@ let () =
        package =
          Some
            {
-             dependencies = [ { package = "http"; capabilities = [ "NetworkClient"; "Clock" ] } ];
+             dependencies =
+               [
+                 {
+                   package = { Path.owner = None; name = "http" };
+                   capabilities = [ "NetworkClient"; "Clock" ];
+                 };
+               ];
              _;
            };
        _;
@@ -131,7 +140,13 @@ let () =
       with
       | {
        package =
-         Some { name = "a"; dependencies = [ { package = "b"; capabilities = [ "c#d" ] } ]; _ };
+         Some
+           {
+             name = { Path.owner = None; name = "a" };
+             dependencies =
+               [ { package = { Path.owner = None; name = "b" }; capabilities = [ "c#d" ] } ];
+             _;
+           };
        _;
       } ->
           ()
@@ -151,14 +166,15 @@ let () =
      \"truss::toml\" = []\n"
   in
   test "a manifest without a dependency loses that entry's lines and no others" (fun () ->
-      let without = Manifest.without_dependency text "http" in
+      let without = Manifest.without_dependency text { Path.owner = None; name = "http" } in
       if without <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n\"truss::toml\" = []\n"
       then fail "wrote %S" without;
-      let without = Manifest.without_dependency text "truss::toml" in
+      let without = Manifest.without_dependency text { Path.owner = Some "truss"; name = "toml" } in
       if contains without "toml" || not (contains without "NetworkClient") then
         fail "wrote %S" without);
   test "a manifest without a dependency it does not list is unchanged" (fun () ->
-      if Manifest.without_dependency text "yaml" <> text then fail "changed")
+      if Manifest.without_dependency text { Path.owner = None; name = "yaml" } <> text then
+        fail "changed")
 
 let () =
   test "a dependency is added after a manifest's other entries, granted nothing" (fun () ->
@@ -172,7 +188,7 @@ let () =
          [test]\n\
          time_limit = 3\n"
       in
-      let added = Manifest.with_dependency text "acme::geometry" in
+      let added = Manifest.with_dependency text { Path.owner = Some "acme"; name = "geometry" } in
       if
         added
         <> "[package]\n\
@@ -187,17 +203,28 @@ let () =
       then fail "wrote %S" added;
       match Manifest.parse added with
       | {
-       package = Some { dependencies = [ _; { package = "acme::geometry"; capabilities = [] } ]; _ };
+       package =
+         Some
+           {
+             dependencies =
+               [
+                 _; { package = { Path.owner = Some "acme"; name = "geometry" }; capabilities = [] };
+               ];
+             _;
+           };
        _;
       } ->
           ()
       | _ -> fail "read differently");
   test "a dependency is added to a manifest with no dependencies, in a table of its own" (fun () ->
-      let added = Manifest.with_dependency "[package]\nname = \"a\"" "json" in
+      let added =
+        Manifest.with_dependency "[package]\nname = \"a\"" { Path.owner = None; name = "json" }
+      in
       if added <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n" then
         fail "wrote %S" added);
   test "a dependency a manifest already lists is not added again" (fun () ->
       let text = "[package]\nname = \"a\"\n[dependencies]\njson = [\"Clock\"]\n" in
-      if Manifest.with_dependency text "json" <> text then fail "changed")
+      if Manifest.with_dependency text { Path.owner = None; name = "json" } <> text then
+        fail "changed")
 
 let () = finish ()

@@ -2,6 +2,7 @@
  (name cli_tests)
  (libraries
   harness
+  substring
   unix
   cli
   path

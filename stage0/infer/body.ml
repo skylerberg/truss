@@ -19,7 +19,7 @@ type result = {
   core : Core.t option;
       (** The definition's core form, when it parsed whole and nothing in it is an error. *)
   diagnostics : Diagnostic.t list;
-  evidence : string list;  (** The packages whose [impl]s met a bound in the definition *)
+  evidence : Path.package list;  (** The packages whose [impl]s met a bound in the definition *)
 }
 
 let no_output : env =

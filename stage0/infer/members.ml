@@ -7,7 +7,7 @@ module Environment = Interface.Environment
 
 (* The packages whose traits a method call with a dot can find: the standard
    library, the calling package, and the packages its manifest lists. *)
-let visible_packages database (package : string) =
+let visible_packages database (package : Path.package) =
   List.sort_uniq compare
     (Path.standard_package :: package
     :: List.map

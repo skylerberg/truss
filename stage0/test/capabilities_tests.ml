@@ -291,8 +291,9 @@ let () =
               "public fn stamp() -> Instant\n  uses Clock\n{\n  Clock.now()\n}\n" );
           ]
       in
-      Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
-        ~dependencies:[ { package = "clock_library"; capabilities = [] } ];
+      Database.Testing.set_manifest (Engine.of_context database)
+        ~name:{ owner = None; name = "app" }
+        ~dependencies:[ { package = { owner = None; name = "clock_library" }; capabilities = [] } ];
       match codes (check database (module_of "app::main")) with
       | [ "capabilities.not_granted" ] -> ()
       | found -> fail "found [%s]" (String.concat "; " found))
@@ -300,8 +301,9 @@ let () =
 let () =
   let with_grant files granted =
     let database = setup files in
-    Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
-      ~dependencies:[ { package = "clock_library"; capabilities = granted } ];
+    Database.Testing.set_manifest (Engine.of_context database) ~name:{ owner = None; name = "app" }
+      ~dependencies:
+        [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ];
     codes (check database (module_of "app::main"))
   in
   let library =
@@ -414,7 +416,7 @@ let () =
    each with what it is granted. *)
 let codes_with_grants files grants =
   let database = setup files in
-  Database.Testing.set_manifest (Engine.of_context database) ~name:"app"
+  Database.Testing.set_manifest (Engine.of_context database) ~name:{ owner = None; name = "app" }
     ~dependencies:
       (List.map (fun (package, capabilities) -> { Workspace.package; capabilities }) grants);
   (database, codes (check database (module_of "app::main")))
@@ -455,10 +457,11 @@ let () =
   test "a function value of a dependency's function can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
-        (codes_with_grants [ value; time ] [ ("clock_library", []) ]));
+        (codes_with_grants [ value; time ] [ ({ owner = None; name = "clock_library" }, []) ]));
   test "a function value of a dependency's function can use a granted capability" (fun () ->
       expect_codes ~expected:[]
-        (codes_with_grants [ value; time ] [ ("clock_library", [ "Clock" ]) ]));
+        (codes_with_grants [ value; time ]
+           [ ({ owner = None; name = "clock_library" }, [ "Clock" ]) ]));
   let bound =
     ( "app::main",
       "use framework::sources\n\
@@ -478,11 +481,17 @@ let () =
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (codes_with_grants [ bound; sources; timers ]
-           [ ("framework", [ "Clock" ]); ("plugins", []) ]));
+           [
+             ({ owner = None; name = "framework" }, [ "Clock" ]);
+             ({ owner = None; name = "plugins" }, []);
+           ]));
   test "an impl of a dependency that satisfies a bound can use a granted capability" (fun () ->
       expect_codes ~expected:[]
         (codes_with_grants [ bound; sources; timers ]
-           [ ("framework", [ "Clock" ]); ("plugins", [ "Clock" ]) ]));
+           [
+             ({ owner = None; name = "framework" }, [ "Clock" ]);
+             ({ owner = None; name = "plugins" }, [ "Clock" ]);
+           ]));
   test "an impl of a dependency behind an `any` value can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
@@ -497,7 +506,10 @@ let () =
              sources;
              timers;
            ]
-           [ ("framework", [ "Clock" ]); ("plugins", []) ]))
+           [
+             ({ owner = None; name = "framework" }, [ "Clock" ]);
+             ({ owner = None; name = "plugins" }, []);
+           ]))
 
 (* What a grant names *)
 
@@ -515,21 +527,28 @@ let ledger =
 let pays =
   ("app::main", "use store::ledger\n\nfn f()\n  uses ledger::Ledger\n{\n  ledger::pay(1)\n}\n")
 
-let problems database = Query.demand database Package_checks.manifest_problems "app"
+let problems database =
+  Query.demand database Package_checks.manifest_problems { owner = None; name = "app" }
 
 let () =
   test "a grant names a capability outside the prelude by its full path" (fun () ->
       expect_codes ~expected:[]
-        (codes_with_grants [ pays; ledger ] [ ("store", [ "store::ledger::Ledger" ]) ]));
+        (codes_with_grants [ pays; ledger ]
+           [ ({ owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]));
   test "a capability's name alone grants only one of the prelude" (fun () ->
-      let database, found = codes_with_grants [ pays; ledger ] [ ("store", [ "Ledger" ]) ] in
+      let database, found =
+        codes_with_grants [ pays; ledger ] [ ({ owner = None; name = "store" }, [ "Ledger" ]) ]
+      in
       expect_codes ~expected:[ "capabilities.not_granted" ] (database, found);
       match problems database with
-      | [ Not_a_capability { dependency = "store"; name = "Ledger" } ] -> ()
+      | [ Not_a_capability { dependency = { Path.owner = None; name = "store" }; name = "Ledger" } ]
+        ->
+          ()
       | _ -> fail "the grant is not reported");
   test "a grant covers only the capabilities it names" (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
-        (codes_with_grants [ pays; ledger ] [ ("store", [ "Clock" ]) ]))
+        (codes_with_grants [ pays; ledger ]
+           [ ({ Path.owner = None; name = "store" }, [ "Clock" ]) ]))
 
 (* A dependency that nothing uses *)
 
@@ -538,12 +557,15 @@ let () =
       let database, _ =
         codes_with_grants
           [ ("app::main", "fn f() -> Int64 {\n  1\n}\n"); time ]
-          [ ("clock_library", []) ]
+          [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
-      match problems database with [ Unused "clock_library" ] -> () | _ -> fail "not reported");
+      match problems database with
+      | [ Unused { Path.owner = None; name = "clock_library" } ] -> ()
+      | _ -> fail "not reported");
   test "a dependency named in a path is used" (fun () ->
       let database, _ =
-        codes_with_grants [ pays; ledger ] [ ("store", [ "store::ledger::Ledger" ]) ]
+        codes_with_grants [ pays; ledger ]
+          [ ({ Path.owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]
       in
       if problems database <> [] then fail "reported");
   test "a dependency whose trait's method is called with a dot is used" (fun () ->
@@ -561,7 +583,7 @@ let () =
               \  }\n\
                }\n" );
           ]
-          [ ("shapes", []) ]
+          [ ({ Path.owner = None; name = "shapes" }, []) ]
       in
       expect_codes ~expected:[] (database, found);
       if problems database <> [] then fail "reported");
@@ -595,15 +617,17 @@ let () =
                }\n" );
             time;
           ]
-          [ ("clock_library", []) ]
+          [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       expect_codes ~expected:[] (database, found);
-      match problems database with [ Unused "clock_library" ] -> () | _ -> fail "not reported");
+      match problems database with
+      | [ Unused { Path.owner = None; name = "clock_library" } ] -> ()
+      | _ -> fail "not reported");
   test "an unused dependency is not reported for a package with an error" (fun () ->
       let database, _ =
         codes_with_grants
           [ ("app::main", "fn f() -> Int64 {\n  true\n}\n"); time ]
-          [ ("clock_library", []) ]
+          [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       if problems database <> [] then fail "reported")
 

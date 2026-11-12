@@ -5,7 +5,7 @@
 
 val bound_diagnostics :
   Query.context ->
-  package:string ->
+  package:Path.package ->
   bounds:Impls.bounds ->
   (Syntax.span * Types.ty) list ->
   Diagnostic.t list

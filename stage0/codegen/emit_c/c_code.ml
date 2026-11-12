@@ -145,12 +145,12 @@ let call_c context fc (target : Lir.target) arguments =
       Printf.sprintf "%s.f_code(%s)" value
         (String.concat ", " ((value ^ ".f_environment") :: List.map fst arguments))
   | Intrinsic intrinsic -> intrinsic_c context intrinsic arguments
-  | Foreign declaration ->
+  | Foreign declaration -> (
       declare_prototype context declaration.symbol (Libc.prototype declaration);
       let given =
         try
           List.map2
-            (fun c (text, _) -> Printf.sprintf "(%s)(%s)" c text)
+            (fun c (text, _) -> Printf.sprintf "(%s)(%s)" (Libc.show_c_type c) text)
             declaration.takes arguments
         with Invalid_argument _ ->
           bug "a call of %s with an argument of zero size" declaration.symbol
@@ -158,8 +158,9 @@ let call_c context fc (target : Lir.target) arguments =
       let called = Printf.sprintf "%s(%s)" declaration.symbol (String.concat ", " given) in
       (* An address comes back as C's own type for it, which the local it
          goes to need not be. *)
-      if String.ends_with ~suffix:"*" declaration.returns then "((void *)" ^ called ^ ")"
-      else called
+      match declaration.returns with
+      | Pointer _ -> "((void *)" ^ called ^ ")"
+      | _ -> called)
   | Table_call { table; value; slot; signature } ->
       let table =
         match operand_c context fc table with

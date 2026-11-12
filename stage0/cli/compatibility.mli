@@ -8,7 +8,7 @@ type change =
 type found = { path : Path.t; change : change }
 (** A change to a public definition, with what changed as the end of a sentence about it. *)
 
-val compare : before:Query.context -> after:Query.context -> string -> found list * bool
+val compare : before:Query.context -> after:Query.context -> Path.package -> found list * bool
 (** What a package's public definitions change from one state to another, each state holding the
     package and the packages it uses, and whether the package ran on every target and now runs only
     on 64-bit ones, which breaks every user that runs on the others.

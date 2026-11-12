@@ -116,7 +116,7 @@ type form = {
 type state = {
   database : Query.context;
   key : Names.key;
-  package : string;
+  package : Path.package;
   definition : definition;
   resolved : Resolve.resolved;
   context : Lower.context;
@@ -145,7 +145,7 @@ type state = {
   mutable capability_solution : (int, T.capability list) Hashtbl.t option;
       (** The set each capability variable was solved to. [None] until the constraints are solved. A
           variable with no entry is the empty set. *)
-  mutable evidence : string list;  (** The packages whose [impl]s met a bound here. *)
+  mutable evidence : Path.package list;  (** The packages whose [impl]s met a bound here. *)
 }
 
 let reported state ?(fixes = []) code (span : span) message =

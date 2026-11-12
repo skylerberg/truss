@@ -186,6 +186,7 @@ and expression_kind =
 
 and string_literal = {
   tag : path option;
+  form : Token.form;
   first : text;
   rest : (expression * text) list;
   span : span;

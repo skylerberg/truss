@@ -18,13 +18,15 @@ let add_root engine root =
 let manifest_text ~usize_bits ~name ~(dependencies : Workspace.dependency list) =
   String.concat ""
     ([
-       Printf.sprintf "[package]\nname = %S\ntruss = %S\n" name Manifest.truss_version;
+       Printf.sprintf "[package]\nname = %S\ntruss = %S\n" (Path.show_package name)
+         Manifest.truss_version;
        (if usize_bits = 64 then "usize_bits = 64\n" else "");
        (if dependencies = [] then "" else "\n[dependencies]\n");
      ]
     @ List.map
         (fun (dependency : Workspace.dependency) ->
-          Printf.sprintf "%S = [%s]\n" dependency.package
+          Printf.sprintf "%S = [%s]\n"
+            (Path.show_package dependency.package)
             (String.concat ", " (List.map (Printf.sprintf "%S") dependency.capabilities)))
         dependencies)
 
@@ -166,7 +168,9 @@ let load_published name version ~hash =
           Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
       | Some { package = Some manifest; _ }, record when manifest.name = name ->
           Ok (manifest, record)
-      | _ -> Error (Printf.sprintf "its manifest does not name the package `%s`" name))
+      | _ ->
+          Error
+            (Printf.sprintf "its manifest does not name the package `%s`" (Path.show_package name)))
 
 (* Gives the build the files of the registry packages it selects. Which
    those are is a query, which names each package whose files are not
@@ -694,13 +698,15 @@ let plan_lock session ~set ~all =
             | None -> (
                 match Registry.Index.newest registry name with
                 | Some (version, hash) -> Ok (name, version, hash)
-                | None -> Error (Printf.sprintf "The registry has no package `%s`." name))
+                | None ->
+                    Error
+                      (Printf.sprintf "The registry has no package `%s`." (Path.show_package name)))
             | Some version -> (
                 match Registry.Index.hash_of registry name version with
                 | Some hash -> Ok (name, version, hash)
                 | None ->
                     Error
-                      (Printf.sprintf "The registry has no `%s` %s." name
+                      (Printf.sprintf "The registry has no `%s` %s." (Path.show_package name)
                          (Registry.Version.show version))))
           set
       in
@@ -758,17 +764,20 @@ let published name version =
         Registry.Index.hash_of registry name version)
   with
   | None ->
-      Error (Printf.sprintf "The registry has no `%s` %s." name (Registry.Version.show version))
+      Error
+        (Printf.sprintf "The registry has no `%s` %s." (Path.show_package name)
+           (Registry.Version.show version))
   | Some hash -> (
       let cannot reason =
         Error
-          (Printf.sprintf "`%s` %s cannot be read: %s." name (Registry.Version.show version) reason)
+          (Printf.sprintf "`%s` %s cannot be read: %s." (Path.show_package name)
+             (Registry.Version.show version) reason)
       in
       match load_published name version ~hash with
       | Error reason -> cannot reason
       | Ok _ -> (
           let directory = Filename.concat (Session.directory "packages") hash in
-          let key = Printf.sprintf "published:%s:%s" name hash in
+          let key = Printf.sprintf "published:%s:%s" (Path.show_package name) hash in
           match open_files ~key ~kind:Published (Files.of_directory directory) with
           | Error () -> cannot "its state is open in another process"
           | Ok session -> (

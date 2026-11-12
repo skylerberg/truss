@@ -12,8 +12,8 @@ let main = {|fn main(arguments: List[String]) -> ExitCode {
 (* The directory is named after the package, without its owner. *)
 let run ~directory ~name =
   let directory_name =
-    match Manifest.name_parts name with
-    | Some parts -> List.nth parts (List.length parts - 1)
+    match Manifest.parse_name name with
+    | Some package -> package.name
     | None ->
         Project.cannot_run
           "`%s` is not a package's name, which is a lower_snake_case name, such as `weather`, or \

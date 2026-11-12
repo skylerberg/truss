@@ -14,7 +14,7 @@ let unavailable : (string, string) Query.input =
 let project_root = ""
 let standard_root = "standard"
 let registry_root hash = "registry " ^ hash
-let package_root name = "package " ^ name
+let package_root name = "package " ^ Path.show_package name
 let lock_file = "truss.lock"
 let manifest_file directory = if directory = "" then "truss.toml" else directory ^ "/truss.toml"
 
@@ -39,7 +39,7 @@ let module_path ~directory (module_ : Path.module_) =
   if directory = "" then file else directory ^ "/" ^ file
 
 type package = {
-  name : string;
+  name : Path.package;
   dependencies : Manifest.dependency list;
   modules : Path.module_ list;
   usize_bits : int;
@@ -124,8 +124,8 @@ let layout =
             | Some package -> (
                 match Hashtbl.find_opt seen package.name with
                 | Some other ->
-                    problem directory "The package name `%s` is already used by %s." package.name
-                      (manifest_file other);
+                    problem directory "The package name `%s` is already used by %s."
+                      (Path.show_package package.name) (manifest_file other);
                     None
                 | None ->
                     Hashtbl.replace seen package.name directory;
@@ -160,7 +160,7 @@ let layout =
 
 type selection = {
   selected : Registry.Selection.package list;
-  missing : (string * Registry.Version.t * string) list;
+  missing : (Path.package * Registry.Version.t * string) list;
   failed : string list;
   lock_problems : string list;
   lock_fix : string option;
@@ -212,7 +212,10 @@ let selection =
                 Error (Printf.sprintf "its lock file cannot be read: line %d: %s" line message)
             | Some { package = Some manifest; _ }, record when manifest.name = name ->
                 Ok (manifest, record)
-            | _ -> Error (Printf.sprintf "its manifest does not name the package `%s`" name))
+            | _ ->
+                Error
+                  (Printf.sprintf "its manifest does not name the package `%s`"
+                     (Path.show_package name)))
       in
       let selected, selection_problems =
         Registry.Selection.choose
@@ -222,9 +225,9 @@ let selection =
                (fun (package : Manifest.package) ->
                  List.filter_map
                    (fun (dependency : Manifest.dependency) ->
-                     match Path.package_parts dependency.package with
-                     | [ _; _ ] -> Some (package.name, dependency.package)
-                     | _ -> None)
+                     match dependency.package.owner with
+                     | Some _ -> Some (package.name, dependency.package)
+                     | None -> None)
                    package.dependencies)
                packages)
           ~local:named ~load
@@ -242,7 +245,7 @@ let selection =
             match found.manifest.truss with
             | Some version when not (Manifest.toolchain_builds version) ->
                 lock_problem "`%s` %s is written for Truss %s, and this toolchain is Truss %s."
-                  found.name
+                  (Path.show_package found.name)
                   (Registry.Version.show found.version)
                   version Manifest.truss_version
             | _ -> ())
@@ -303,14 +306,16 @@ let build =
         List.iter
           (fun (package : Registry.Selection.package) -> add (registry_root package.hash))
           (Query.demand database selection ()).selected;
-      List.sort compare (Hashtbl.fold (fun name place found -> (name, place) :: found) found []))
+      List.sort
+        (fun (left, _) (right, _) -> Path.compare_package left right)
+        (Hashtbl.fold (fun name place found -> (name, place) :: found) found []))
 
 let place =
-  Query.query ~name:"project_place" ~phase:Phases.project ~saved:true ~show:Fun.id
+  Query.query ~name:"project_place" ~phase:Phases.project ~saved:true ~show:Path.show_package
     (fun database name -> List.assoc_opt name (Query.demand database build ()))
 
 let package =
-  Query.query ~name:"project_package" ~phase:Phases.project ~saved:true ~show:Fun.id
+  Query.query ~name:"project_package" ~phase:Phases.project ~saved:true ~show:Path.show_package
     (fun database name ->
       Option.map
         (fun { root; directory; manifest } ->
@@ -403,32 +408,30 @@ let problems =
                 Manifest.truss_version
           | Some version when not (Manifest.toolchain_builds version) ->
               problem directory "`%s` is written for Truss %s, and this toolchain is Truss %s."
-                package.name version Manifest.truss_version
+                (Path.show_package package.name) version Manifest.truss_version
           | Some _ -> ());
           (* Every path must read one way: [acme::geometry::vector] cannot be
              both a module of [acme::geometry] and one of a package [acme]. *)
-          (match Path.package_parts package.name with
-          | [ name ] ->
+          (match package.name with
+          | { owner = None; name } ->
               List.iter
-                (fun other ->
-                  match Path.package_parts other with
-                  | [ owner; _ ] when owner = name ->
-                      problem directory
-                        "The package name `%s` is the owner in `%s`, so a path that starts with it \
-                         could be read two ways. Give one of them another name."
-                        name other
-                  | _ -> ())
-                (List.sort_uniq compare
+                (fun (other : Path.package) ->
+                  if other.owner = Some name then
+                    problem directory
+                      "The package name `%s` is the owner in `%s`, so a path that starts with it \
+                       could be read two ways. Give one of them another name."
+                      name (Path.show_package other))
+                (List.sort_uniq Path.compare_package
                    (List.map (fun (_, (p : Manifest.package)) -> p.name) packages
                    @ List.concat_map
                        (fun (_, (p : Manifest.package)) ->
                          List.map (fun (d : Manifest.dependency) -> d.package) p.dependencies)
                        packages))
-          | _ -> ());
+          | { owner = Some _; _ } -> ());
           List.iter
             (fun (dependency : Manifest.dependency) ->
               if dependency.package = package.name then
-                problem directory "`%s` cannot depend on itself." package.name
+                problem directory "`%s` cannot depend on itself." (Path.show_package package.name)
               else
                 let found =
                   match (named dependency.package, selected_named dependency.package) with
@@ -437,9 +440,9 @@ let problems =
                   | None, None ->
                       (* A dependency the registry would have, with no version
                          known, is reported with the lock file. *)
-                      if List.length (Path.package_parts dependency.package) = 1 then
+                      if dependency.package.owner = None then
                         problem directory "`%s` is not a package of this project."
-                          dependency.package;
+                          (Path.show_package dependency.package);
                       None
                 in
                 match found with
@@ -449,14 +452,15 @@ let problems =
                     problem directory
                       "`%s` runs only on 64-bit targets, so `%s` must say `usize_bits = 64` to \
                        depend on it."
-                      other.name package.name
+                      (Path.show_package other.name) (Path.show_package package.name)
                 | _ -> ())
             package.dependencies)
         packages;
       (match dependency_cycle packages with
       | Some (directory, way) ->
           problem directory "Packages cannot depend on each other in a cycle: %s."
-            (String.concat " -> " (List.map (Printf.sprintf "`%s`") way))
+            (String.concat " -> "
+               (List.map (fun package -> Printf.sprintf "`%s`" (Path.show_package package)) way))
       | None -> ());
       own.problems @ chosen.lock_problems @ List.rev !problems)
 
