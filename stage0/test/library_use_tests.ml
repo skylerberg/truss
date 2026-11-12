@@ -148,5 +148,3 @@ let () =
         \  let second = \"a\"\n\
         \  first == second\n\
          }\n")
-
-let () = finish ()

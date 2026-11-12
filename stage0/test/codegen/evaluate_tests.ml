@@ -273,5 +273,3 @@ let () =
           if second.trusts_compiled_code || second.failure <> None then
             fail "the proof of g's ensures should be proven without trusting compiled code"
       | found -> fail "expected 2 ensures states, got %d" (List.length found))
-
-let () = Harness.finish ()

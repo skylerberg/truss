@@ -318,5 +318,3 @@ let () =
         fail "expected [%s], got [%s]"
           (String.concat "; " (show expected))
           (String.concat "; " (show found)))
-
-let () = Harness.finish ()

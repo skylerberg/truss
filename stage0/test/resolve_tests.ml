@@ -646,5 +646,3 @@ let () =
       one_diagnostic
         "use standard::intrinsic\n\nfn f(left: Int64) -> Int64 {\n  intrinsic::add(left, left)\n}\n"
         "resolve.intrinsic_import")
-
-let () = finish ()

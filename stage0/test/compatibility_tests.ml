@@ -232,5 +232,3 @@ let () =
       if not (snd (changes ~usize_bits:(32, 64) "" "")) then fail "not told";
       if snd (changes ~usize_bits:(64, 64) "" "") || snd (changes ~usize_bits:(64, 32) "" "") then
         fail "told of a package that does not narrow")
-
-let () = finish ()

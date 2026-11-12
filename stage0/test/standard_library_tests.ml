@@ -215,5 +215,3 @@ let () =
           | errors -> report errors))
     checked;
   timed "saving the state" (fun () -> Option.iter Database.save_session session)
-
-let () = finish ()

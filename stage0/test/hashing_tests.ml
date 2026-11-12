@@ -145,5 +145,3 @@ let () =
           let actual = hex (Blake3.derive_key ~context:vector_context input) in
           if actual <> expected_derived then fail "expected %s, got %s" expected_derived actual))
     vectors
-
-let () = finish ()

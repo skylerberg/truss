@@ -204,7 +204,7 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
   let yielded = Hashtbl.create 8 in
   let plain =
     let bounds parameter =
-      match Query.demand database Interface.Environment.lowered key with
+      match Query.demand database Interface.Environment.lowered_interface key with
       | Some lowered -> Option.value ~default:[] (List.assoc_opt parameter lowered.bounds)
       | None -> []
     in

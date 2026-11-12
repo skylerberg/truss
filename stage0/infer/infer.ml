@@ -137,7 +137,7 @@ let clean database key =
          && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
          &&
          (* A method inside a type, trait, or impl that did not parse. *)
-         match Query.demand database Interface.Environment.lowered key with
+         match Query.demand database Interface.Environment.lowered_interface key with
          | Some { interface = Error_interface _; _ } -> false
          | _ -> true ->
       Some tables

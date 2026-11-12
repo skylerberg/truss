@@ -97,5 +97,3 @@ let () =
       match checked () with
       | [] -> ()
       | rechecked -> fail "checked [%s]" (String.concat "; " rechecked))
-
-let () = finish ()

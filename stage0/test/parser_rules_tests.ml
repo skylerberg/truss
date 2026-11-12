@@ -585,5 +585,3 @@ let () =
   test "elif" (fun () ->
       body_error "if a {\n  f()\n}\nelif b {\n  g()\n}" ~code:Elif ~at:"elif"
         ~fixed:"if a {\n  f()\n} else if b {\n  g()\n}")
-
-let () = finish ()

@@ -605,7 +605,7 @@ let () =
 
 (* The documents *)
 
-let document name = Documents.read (Filename.concat "../.." name)
+let document name = Documents.read (Harness.workspace_path name)
 let truss_blocks name = Documents.truss_blocks (document name)
 let block_after = Documents.block_after
 let words = Documents.words
@@ -660,8 +660,7 @@ let () =
         (truss_blocks name))
     (* Every document at the root of the repository, so a new one is
        covered without being listed here. *)
-    (Sys.readdir "../.." |> Array.to_list
+    (Sys.readdir (Harness.workspace_path ".")
+    |> Array.to_list
     |> List.filter (fun name -> Filename.check_suffix name ".md")
     |> List.sort compare)
-
-let () = finish ()

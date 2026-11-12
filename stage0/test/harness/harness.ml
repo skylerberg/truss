@@ -57,9 +57,31 @@ let expect_not_recomputed engine ~first ~again labels =
   let after = computed again in
   List.iter (fun label -> if List.mem label after then fail "%s was computed again" label) labels
 
-let finish () =
-  if !failures > 0 then begin
-    Printf.printf "%d failures in %d tests\n" !failures !count;
-    exit 1
-  end
-  else Printf.printf "%d tests pass\n" !count
+(* The workspace root: the nearest directory above the executable that
+   holds [dune-project]. The executable is built under [_build/default],
+   which has no copy of it. *)
+let workspace_root =
+  lazy
+    (let rec up directory =
+       if Sys.file_exists (Filename.concat directory "dune-project") then directory
+       else
+         let parent = Filename.dirname directory in
+         if parent = directory then failwith "no dune-project above the test executable"
+         else up parent
+     in
+     let executable =
+       if Filename.is_relative Sys.executable_name then
+         Filename.concat (Sys.getcwd ()) Sys.executable_name
+       else Sys.executable_name
+     in
+     up (Filename.dirname executable))
+
+let workspace_path path = Filename.concat (Lazy.force workspace_root) path
+
+let () =
+  at_exit (fun () ->
+      if !failures > 0 then begin
+        Printf.printf "%d failures in %d tests\n" !failures !count;
+        exit 1
+      end
+      else Printf.printf "%d tests pass\n" !count)
