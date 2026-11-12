@@ -54,6 +54,7 @@
   phases
   engine
   database
+  graph_types
   store
   unix
   path

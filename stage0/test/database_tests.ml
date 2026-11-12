@@ -419,7 +419,7 @@ let doubling : Path.t =
       name = "doubling";
     }
 
-let test_body_reads_signature : Database.edge =
+let test_body_reads_signature : Graph_types.edge =
   {
     dependent = doubling;
     dependent_part = "body";
@@ -457,7 +457,7 @@ let () =
       let dependencies = Database.dependencies session [ keep ] in
       if dependencies = [] then fail "keep depends on nothing";
       List.iter
-        (fun (edge : Database.edge) ->
+        (fun (edge : Graph_types.edge) ->
           if contains (Path.show edge.dependency) "standard::html" then
             fail "keep depends on %s" (Path.show edge.dependency))
         dependencies);
@@ -557,7 +557,7 @@ let () =
               (List.exists
                  (fun (path, part, difference) ->
                    Path.equal path double && part = Some "signature"
-                   && difference = Database.Changed)
+                   && difference = Graph_types.Changed)
                  (Database.changes session base))
           then
             fail "double's signature is not changed: %s"
@@ -566,7 +566,7 @@ let () =
                     (fun (path, part, digest) ->
                       Printf.sprintf "%s %s %s" (Path.show path) (Option.value part ~default:"-")
                         (match digest with
-                        | Database.Changed -> "changed"
+                        | Graph_types.Changed -> "changed"
                         | Added -> "added"
                         | Same -> "same"))
                     (Database.changes session base))));
@@ -593,7 +593,7 @@ let () =
             not
               (List.exists
                  (function
-                   | Database.Reads { this_worktree = true; change; reads } ->
+                   | Graph_types.Reads { this_worktree = true; change; reads } ->
                        change.path = Some quadruple && reads.path = Some double
                    | _ -> false)
                  overlaps)
@@ -602,7 +602,7 @@ let () =
               (String.concat "; "
                  (List.map
                     (function
-                      | Database.Both_change problem -> "both " ^ problem.label
+                      | Graph_types.Both_change problem -> "both " ^ problem.label
                       | Reads { this_worktree; change; reads } ->
                           Printf.sprintf "%b %s %s" this_worktree change.label reads.label)
                     overlaps)));
@@ -636,7 +636,8 @@ let () =
             not
               (List.exists
                  (function
-                   | Database.Reads { this_worktree = true; reads; _ } -> reads.path = Some double
+                   | Graph_types.Reads { this_worktree = true; reads; _ } ->
+                       reads.path = Some double
                    | _ -> false)
                  overlaps)
           then fail "no overlap found");

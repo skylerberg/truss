@@ -892,7 +892,7 @@ let () =
       if not (contains output "means a name bound here" && contains output "has type Counter") then
         fail "wrote %s" output);
   test "an overlap is told as a sentence about the parts that meet" (fun () ->
-      let place path part : Database.place =
+      let place path part : Graph_types.place =
         {
           path =
             Some

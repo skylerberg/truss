@@ -14,7 +14,7 @@ type change = {
   status : [ `Added | `Removed | `Changed of string list ];  (** The parts that changed *)
   before : string option;  (** The signature at the base, when it changed *)
   after : string option;  (** The signature now *)
-  dependents : Database.edge list;  (** The edges to its changed signature *)
+  dependents : Graph_types.edge list;  (** The edges to its changed signature *)
 }
 
 let declarations context packages =
@@ -34,7 +34,7 @@ let changes (project : Project.t) base =
   let changed = Hashtbl.create 32 in
   let order = ref [] in
   List.iter
-    (fun (path, part, (difference : Database.difference)) ->
+    (fun (path, part, (difference : Graph_types.difference)) ->
       if difference <> Same then begin
         if not (Hashtbl.mem changed path) then order := path :: !order;
         let parts = Option.value (Hashtbl.find_opt changed path) ~default:[] in
@@ -77,7 +77,9 @@ let changes (project : Project.t) base =
               (if is_signature_changed path then Signatures.of_path old_context path else None);
             after = (if is_signature_changed path then Signatures.of_path context path else None);
             dependents =
-              List.filter (fun (edge : Database.edge) -> Path.equal edge.dependency path) dependents;
+              List.filter
+                (fun (edge : Graph_types.edge) -> Path.equal edge.dependency path)
+                dependents;
           })
       !order
   in
@@ -126,7 +128,7 @@ let status_word = function `Added -> "added" | `Removed -> "removed" | `Changed 
 let dependents_json dependents =
   Json.List
     (List.map
-       (fun (edge : Database.edge) ->
+       (fun (edge : Graph_types.edge) ->
          Json.Object
            [
              ("reader", Json.String (Path.show edge.dependent));
@@ -161,7 +163,7 @@ let print_change change =
     Output.printf "    read by: %s\n"
       (String.concat ", "
          (List.sort_uniq compare
-            (List.map (fun (edge : Database.edge) -> Path.show edge.dependent) change.dependents)))
+            (List.map (fun (edge : Graph_types.edge) -> Path.show edge.dependent) change.dependents)))
 
 let run ~directory ~base ~json =
   let project = Project.load directory in
