@@ -13,12 +13,13 @@ let weights =
     ("standard::collections::bit_set", 421);
     ("standard::collections::deque", 127);
     ("standard::collections::heap", 46);
+    ("standard::collections::lru_cache", 273);
     ("standard::collections::sorted_map", 536);
     ("standard::collections::sorted_set", 506);
     ("standard::console", 41);
     ("standard::core", 23);
     ("standard::core::range", 5);
-    ("standard::cryptography", 1962);
+    ("standard::cryptography", 2641);
     ("standard::csv", 45);
     ("standard::cursors", 4);
     ("standard::environment", 68);
@@ -87,4 +88,4 @@ let weights =
     ("standard::writing", 5);
   ]
 
-let letters_for_one = 50
+let letters_for_one = 48
