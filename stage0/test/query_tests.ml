@@ -154,8 +154,7 @@ let () =
       let node label = List.find (fun node -> Engine.label node = label) (Engine.nodes engine) in
       if labels (Engine.reads engine (node "total()")) <> [ "parity(a)"; "parity(b)" ] then
         fail "reads";
-      if labels (Engine.For_testing.readers engine (node "length(a)")) <> [ "parity(a)" ] then
-        fail "readers")
+      if labels (Engine.readers engine (node "length(a)")) <> [ "parity(a)" ] then fail "readers")
 
 (* Phases *)
 
@@ -616,7 +615,7 @@ let () =
       let engine, _, total = setup () in
       let value = Query.demand (Engine.observer engine) total () in
       if value <> 2 then fail "total %d" value;
-      if List.exists (fun node -> not (Engine.For_testing.is_input node)) (Engine.nodes engine) then
+      if List.exists (fun node -> not (Engine.is_input node)) (Engine.nodes engine) then
         fail "the engine holds [%s]" (String.concat "; " (labels (Engine.nodes engine))));
   test "observing a root leaves it a root" (fun () ->
       let engine, files, total = setup () in
@@ -635,8 +634,8 @@ let () =
       ignore (Engine.get mine build.total ());
       List.iter
         (fun node -> ignore (Engine.current_in node theirs))
-        (List.filter (fun node -> not (Engine.For_testing.is_input node)) (Engine.nodes mine));
-      if List.exists (fun node -> not (Engine.For_testing.is_input node)) (Engine.nodes theirs) then
+        (List.filter (fun node -> not (Engine.is_input node)) (Engine.nodes mine));
+      if List.exists (fun node -> not (Engine.is_input node)) (Engine.nodes theirs) then
         fail "the other engine holds [%s]" (String.concat "; " (labels (Engine.nodes theirs))))
 
 let () =

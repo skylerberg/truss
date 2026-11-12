@@ -440,6 +440,27 @@ let () =
       ignore (errors (Database.root session));
       if not (List.mem test_body_reads_signature (Database.dependencies session [ doubling ])) then
         fail "the test's body does not read double's signature");
+  test "a definition does not depend on standard-library types it does not use" (fun () ->
+      fresh_store ();
+      let directory = fresh "package" in
+      write directory "truss.toml" (manifest "app");
+      write directory "main.truss" Fixtures.Database.moving_a_string;
+      let session, _ = session directory in
+      ignore (errors directory);
+      let keep : Path.t =
+        Top
+          {
+            module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
+            name = "keep";
+          }
+      in
+      let dependencies = Database.dependencies session [ keep ] in
+      if dependencies = [] then fail "keep depends on nothing";
+      List.iter
+        (fun (edge : Database.edge) ->
+          if contains (Path.show edge.dependency) "standard::html" then
+            fail "keep depends on %s" (Path.show edge.dependency))
+        dependencies);
   test "a root reaches its dependencies and itself" (fun () ->
       fresh_store ();
       let session, _ = session (package ()) in

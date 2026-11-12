@@ -42,7 +42,7 @@ let check_body definition (body : Mir.body) =
       | Switch_variant { place = found; cases } ->
           place found;
           List.iter (fun (_, target) -> block target) cases
-      | Each { part; body = inside; after; _ } ->
+      | For { part; body = inside; after; _ } ->
           local part;
           block inside;
           block after
@@ -179,6 +179,7 @@ let () =
     \  goto 10\n\
      10:\n\
     \  _1 = 0\n\
+    \  dead _6, _7\n\
     \  goto 13\n\
      11:\n\
     \  dead _4, _5\n\
@@ -187,15 +188,19 @@ let () =
     \  end loans 0\n\
     \  _1 = _3\n\
     \  dead _3\n\
+    \  dead _2\n\
     \  goto 13\n\
      13:\n\
-    \  return _1";
+    \  _8 = _1\n\
+    \  dead _1\n\
+    \  return _8";
   expect "a let with an else tests its pattern, and the else leaves the block"
     Fixtures.Mir.let_with_an_else_tests_its_pattern_and_the_else
     "0:\n\
     \  _1 = _0 is Some\n\
     \  branch _1 2 1\n\
      1:\n\
+    \  dead _1\n\
     \  return 1\n\
      2:\n\
     \  live _2\n\
@@ -203,7 +208,9 @@ let () =
     \  goto 3\n\
      3:\n\
     \  dead _1\n\
-    \  return _2";
+    \  _3 = _2\n\
+    \  dead _2\n\
+    \  return _3";
   expect "a short-circuit operator jumps past its right operand"
     Fixtures.Mir.short_circuit_operator_jumps_past_its_right
     "0:\n\
@@ -217,7 +224,9 @@ let () =
     \  _2 = false\n\
     \  goto 4\n\
      4:\n\
-    \  return _2";
+    \  _3 = _2\n\
+    \  dead _2\n\
+    \  return _3";
   expect "a range loop copies its counter, steps it at continue, and ends at an inclusive stop"
     Fixtures.Mir.range_loop_copies_its_counter_steps_it_at_continue
     "0:\n\
@@ -227,51 +236,43 @@ let () =
     \  goto 1\n\
      1:\n\
     \  dead _1\n\
-    \  _3 = 0\n\
-    \  _4 = _0\n\
-    \  goto 2\n\
-     2: loop\n\
-    \  _5 = _3 <= _4\n\
-    \  branch _5 3 11\n\
+    \  _3 = _0\n\
+    \  for _4 in 0..=_3 3 after 2\n\
+     2:\n\
+    \  dead _3\n\
+    \  _11 = _2\n\
+    \  dead _2\n\
+    \  return _11\n\
      3:\n\
-    \  live _6\n\
-    \  _6 = _3\n\
-    \  _7 = _6\n\
-    \  loan 0: read _7 for the operation\n\
+    \  live _5\n\
+    \  _5 = _4\n\
+    \  _6 = _5\n\
+    \  loan 0: read _6 for the operation\n\
     \  end loans 0\n\
-    \  _8 = _7 == 3\n\
-    \  branch _8 7 4\n\
+    \  _7 = _6 == 3\n\
+    \  branch _7 7 4\n\
      4:\n\
-    \  dead _7, _8\n\
+    \  dead _6, _7\n\
     \  goto 5\n\
      5:\n\
     \  goto 6\n\
      6:\n\
-    \  live _9\n\
-    \  _9 = _6\n\
-    \  loan 1: read _9 for the operation\n\
+    \  live _8\n\
+    \  _8 = _5\n\
+    \  loan 1: read _8 for the operation\n\
     \  end loans 1\n\
-    \  _10 = _9\n\
-    \  _11 = add(take _2, _10)\n\
-    \  _2 = _11\n\
-    \  dead _9, _10, _11\n\
-    \  dead _6\n\
-    \  goto 9\n\
+    \  _9 = _8\n\
+    \  _10 = add(take _2, _9)\n\
+    \  _2 = _10\n\
+    \  dead _8, _9, _10\n\
+    \  dead _5\n\
+    \  next\n\
      7:\n\
-    \  dead _7, _8\n\
+    \  dead _6, _7\n\
     \  goto 8\n\
      8:\n\
-    \  dead _6\n\
-    \  goto 9\n\
-     9:\n\
-    \  _12 = _3 == _4\n\
-    \  branch _12 11 10\n\
-     10:\n\
-    \  _3 = add(_3, 1)\n\
-    \  goto 2\n\
-     11:\n\
-    \  dead _3, _4, _5, _12\n\
-    \  return _2";
+    \  dead _5\n\
+    \  next";
   expect "a loop over a yielding call runs its body for each part"
     Fixtures.Mir.loop_over_a_yielding_call_runs_its_body_for_each
     "0:\n\
@@ -281,7 +282,7 @@ let () =
     \  goto 1\n\
      1:\n\
     \  dead _1\n\
-    \  each _3 in standard::list::impl Iterable for List[Element].each(read _0) 2 after 8\n\
+    \  for _3 in standard::list::impl Iterable for List[Element].each(read _0) 2 after 8\n\
      2:\n\
     \  loan 0: read read _0 for the loop\n\
     \  live _4\n\
@@ -316,13 +317,17 @@ let () =
     \  dead _4\n\
     \  goto 8\n\
      8:\n\
-    \  return _2";
+    \  _10 = _2\n\
+    \  dead _2\n\
+    \  return _10";
   expect "a lambda's captures and parameters are its own locals"
     Fixtures.Mir.lambdas_captures_and_parameters_are_its_own_locals
     "0:\n\
     \  _1 = lambda 0\n\
     \  _2 = app::main::apply(_1)\n\
-    \  return _2\n\n\
+    \  _3 = _2\n\
+    \  dead _1, _2\n\
+    \  return _3\n\n\
      lambda 0\n\
      0:\n\
     \  _2 = _1\n\
@@ -330,4 +335,7 @@ let () =
     \  _3 = _0\n\
     \  end loans 0\n\
     \  _4 = add(_2, _3)\n\
-    \  return _4"
+    \  _5 = _4\n\
+    \  dead _1\n\
+    \  dead _2, _3, _4\n\
+    \  return _5"

@@ -91,9 +91,10 @@ A definition's MIR is its body and the bodies of its lambdas. Each body has:
 - **For a lambda, its captures:** the locals of the enclosing body that it
   borrows, in order of first use.
 
-The control-flow graph is reducible. Every loop is a natural loop with one
-header, because Truss has no `goto`, and `break` and `continue` leave only
-loops that enclose them.
+The control-flow graph is reducible: a `while` loop is a natural loop with
+one header, and a `for` loop is a structured terminator whose body is a
+region. Truss has no `goto`, and `break` and `continue` leave only loops
+that enclose them.
 
 ### Places and operands
 
@@ -168,25 +169,27 @@ about types, and the MIR is a function of the core form alone.
 | `goto block` | Jump. |
 | `branch(operand, yes, no)` | Branch on a `Bool`. |
 | `switch_variant(place, cases)` | Branch on a sum type's variant. |
-| `each(call, part, body, after)` | A `for` loop over a call of a yielding method. `body` runs once for each part the callee yields, which the local `part` holds, and ends with `next` or a jump to `after`. |
-| `next` | The end of an iteration of the enclosing `each`. |
+| `for(iteration, part, body, after)` | A `for` loop over a call of a yielding method, an integer range, or a cursor. `body` runs once for each element, which the local `part` holds, and ends with `next` or a jump to `after`. |
+| `next` | The end of an iteration of the enclosing `for`. |
 | `yield(mode, operand, resume)` | In a lending or yielding method, give a part to the caller's loop, and continue at `resume` unless the loop has ended. |
 | `return operand` | Return a value, or nothing. |
-| `exit_tasks(tasks, exit)` | An early exit from `concurrent` code: end these tasks, then return or jump. |
+| `exit_tasks(tasks, exit)` | An early exit from `concurrent` code: end these tasks, then return, jump, or end the iteration. |
 | `unreachable` | A point the prover shows is never reached: the last arm of a `match` whose guards cover every case, or `unreachable` as written. |
 | `todo` | Stop the program at a `todo`. |
 
-Every other loop is a natural loop of jumps. Its header block carries the
-loop's `invariant`, `decreases`, and `cost` clauses, its schedule (one
+A `for` loop is a structured terminator, which carries the loop's
+`invariant`, `decreases`, and `cost` clauses and its schedule: one
 iteration after another, or at once for a `parallel for` or a
-`concurrent for`), and, for a loop over an integer range, its counter.
-
-`each` stays a structured terminator, unlike other loops. Code generation
-inlines the yielding method and runs the body at each of its `yield`s, and
-it cannot always pull a cursor instead: `Ownership.pullable` refuses
-methods that yield `mut` places or that yield through themselves. The
-ownership check borrows the call's receiver for the region, and the prover
-reads the callee's contract for each part.
+`concurrent for`. Each consumer needs the body as a region. Code
+generation inlines a yielding method and runs the body at each of its
+`yield`s, which it cannot always replace with pulling a cursor:
+`Ownership.pullable` refuses methods that yield `mut` places or that yield
+through themselves. It splits a `parallel for` over a range into chunks of
+indexes, and runs each iteration of a `concurrent for` as a task. The
+ownership check borrows what the loop iterates over for the body. The prover
+reads a yielding method's contract for each part, and knows a range's
+element lies in the range. A `while` loop is a natural loop of jumps whose
+header carries its clauses.
 
 ## Evaluation order
 
@@ -290,8 +293,8 @@ takes.
 | `Lent`, `Temporary` | A `lend` statement, or a temporary local, with the loan ended at the end of the statement |
 | `If`, `Match`, `Matches`, `let ... else`, `?` | Branches, variant switches, comparisons with literals, and calls of `equal`, with the bindings as assignments of locals (see [Pattern matching](#pattern-matching)) |
 | `Operator`, a call of an intrinsic that is a primitive operation | `operation` (see [Primitive operations](#primitive-operations)) |
-| `While`, `For` over a range, `For` over a cursor | A natural loop, with a counter or a `pull` at its header, and the clauses on the header |
-| `For` over a call of a yielding method | `each` |
+| `While` | A natural loop, with the clauses on its header |
+| `For` | `for`, over a yielding call, a range, or a cursor |
 | `Parallel`, `Concurrent`, `parallel for`, `concurrent for` | Regions |
 | `Task_exit`, `Return`, `Break`, `Continue` | `exit_tasks`, `return`, and jumps |
 | `Lambda` | A body of its own, and a `function` rvalue |
@@ -302,9 +305,10 @@ takes.
 | `Old`, `Yielded`, `Finished` | Ghost locals, which the builder assigns at entry, at each part, and at the end |
 | `Result`, `Quantified`, `Identical`, `Specification_function`, `Method_time`, `Implies`, `Map_literal` | Unchanged inside the core expressions of specifications. They do not appear in executable code. |
 
-A range loop has a fact that the prover needs and the source does not
-write: the counter is at least the start and at most the stop. The builder
-writes it on the loop header, as an assumption that is ghost code.
+A jump out of scopes ends what it leaves: the loans, the bindings, the
+temporaries of the statements it leaves, and a `provide` block. A `return`
+leaves every scope, after its value is held in a local that no scope ends,
+so a consumer drops owned values where the MIR says they end.
 
 ## How each consumer reads it
 
@@ -324,12 +328,13 @@ of a tree. At a join of blocks, each local that differs gets a fresh
 symbol, so the verification condition still grows with the body and not
 with its paths, as in Boogie's passive form. A loop is cut at its header:
 the locals it may change are havocked there, its invariant is assumed, the
-body runs once, and the invariant is shown at each back edge. One rule
-covers every loop that is not an `each`, so the prover has one translation
-of loops where today it has five.
+body runs once, and the invariant is shown at each back edge. A `for` loop
+is cut the same way, at its terminator, and its iteration adds only facts:
+a range's element lies in the range, and a yielding call's or a cursor's
+part meets the callee's contract. So the prover has one translation of
+loops where today it has five.
 
-A call is read by its contract, as now. An `each` is read by the yielding
-method's contract for each part. A `lend` and its `end_lend` are the
+A call is read by its contract, as now. A `lend` and its `end_lend` are the
 lending method's contract for the part it lends and for the value it hands
 back. Ghost statements are its own.
 

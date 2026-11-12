@@ -132,27 +132,34 @@ and statement_kind =
   | Ghost_assert of Core.expression  (** An [assert] that cannot run. Only the prover reads it. *)
   | Proof of Core.block  (** Only the prover reads it. *)
 
-type loop = {
-  clauses : Core.loop_clause list;
-  schedule : Core.loop_mode;
-  counter : local option;
-      (** The counter of a loop over an integer range, which is at least the range's start and at
-          most its stop at the header. *)
-  origin : Core.origin;
-}
+type loop = { clauses : Core.loop_clause list; schedule : Core.loop_mode; origin : Core.origin }
 (** The clauses of a loop, which its header carries. *)
 
+(** What a [for] loop iterates over. *)
+type iteration =
+  | Yielding of call  (** The parts a call of a yielding method yields. *)
+  | Range of { start : operand; stop : operand; inclusive : bool }
+      (** The integers or characters from [start] to [stop], each once. A range of [Character] skips
+          the surrogates. *)
+  | Pull of { cursor : place; next : callee option }
+      (** The values a cursor gives until it has none: the built-in cursor of a yielding method when
+          [next] is [None], or else the cursor type's [Cursor.next]. *)
+
 (** Where an early exit from [concurrent] code goes once its tasks end. *)
-type task_exit = Exit_return of operand option | Exit_to of block
+type task_exit =
+  | Exit_return of operand option
+  | Exit_to of block
+  | Exit_iteration  (** The end of the iteration of the enclosing [For]. *)
 
 type terminator =
   | Goto of block
   | Branch of { condition : operand; yes : block; no : block }
   | Switch_variant of { place : place; cases : (string * block) list }
-  | Each of { call : call; part : local; body : block; after : block; loop : loop }
-      (** A [for] loop over a call of a yielding method. [body] runs for each part the callee
-          yields, which [part] holds, and ends with {!Iteration_end} or a jump to [after]. *)
-  | Iteration_end  (** The end of an iteration of the enclosing {!Each}. *)
+  | For of { iteration : iteration; part : local; body : block; after : block; loop : loop }
+      (** A [for] loop. [body] runs once for each element, which [part] holds, and ends with
+          {!Iteration_end} or a jump to [after]. The iterations run one after another, or at once as
+          [loop]'s schedule says. *)
+  | Iteration_end  (** The end of an iteration of the enclosing {!For}. *)
   | Yield of { mode : Types.mode; part : operand; resume : block }
   | Return of operand option
   | Exit_tasks of { tasks : Core.task list; exit : task_exit }

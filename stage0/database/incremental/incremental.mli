@@ -158,6 +158,9 @@ val nodes : t -> node list
 (** Every input and result of the state, apart from those of its fixed bases, in the order they were
     made. *)
 
+val nodes_including_fixed : t -> node list
+(** Every input and result of the state, those of its fixed bases included. *)
+
 val count : t -> int
 (** How many inputs and results the engine itself holds. *)
 

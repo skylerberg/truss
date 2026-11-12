@@ -32,6 +32,7 @@ type counters = Incremental.counters = {
 
 let counters = Incremental.counters
 let nodes = Incremental.nodes
+let nodes_including_fixed = Incremental.nodes_including_fixed
 let differing = Incremental.differing
 let unshared = Incremental.unshared
 let identity = Incremental.identity
@@ -91,8 +92,6 @@ module For_testing = struct
   let clear_log = clear_log
   let differing = differing
   let count = count
-  let is_input = is_input
-  let readers = readers
   let audit_all = audit_all
   let auditing = auditing
 end

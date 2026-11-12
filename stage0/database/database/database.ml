@@ -45,8 +45,9 @@ let load_package ?(usize_bits = 32) engine ~name ~dependencies modules =
 (* The standard library holds the code for each platform, and its bounds of
    [USize] are its target's, so it is checked with the target's width. *)
 let set_standard engine modules =
-  set_package engine ~root:Project.standard_root ~usize_bits:64 ~name:Path.standard_package
-    ~dependencies:[] modules
+  set_package engine
+    ~root:(Project.package_root Path.standard_package)
+    ~usize_bits:64 ~name:Path.standard_package ~dependencies:[] modules
 
 let load_standard engine = set_standard engine Standard_library.modules
 

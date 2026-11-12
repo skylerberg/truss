@@ -976,11 +976,15 @@ saves each session it opened when its command is done. A test runs only when
 asked.
 
 A question about the graph first checks every package of the sessions it
-reads, so that every definition's results are there to read. A definition
-reads another's part when one of its nodes reads that part's node, directly
-or through nodes about no definition, such as lookups; the standard
-library's own lookups are not followed, so a definition is not said to read
-everything they read.
+reads, so that every definition's results are there to read. A part of a
+definition depends on a part of another when a node about the first reads
+the node about the second, directly or through nodes about no definition,
+such as lookups. The path does not continue through a node derived from
+fixed bases alone, such as one of the standard library's own lookups, even
+where the state holds a copy of it, so a definition does not depend on
+everything those lookups read. `dependencies` follows reads from the
+definition's nodes, and `dependents` follows readers from the target's
+nodes, with the same rule.
 
 ### Comparing two states
 
@@ -1187,10 +1191,11 @@ with the same inputs.
   added or removed and when any of those changes, and its cost follows the
   package. Splitting it into a result for each definition and one for each
   lookup would make it follow the change.
-- **Questions answered from an index.** A question about dependents
-  computes every definition's dependencies, which costs the state's size
-  each time it is asked. An index kept current like any result would answer
-  in the size of the answer.
+- **Questions answered from an index.** A graph question scans every node
+  of the state to find the nodes about its definitions, which costs the
+  state's size each time it is asked. An index from each definition to its
+  nodes, kept current like any result, would answer in the size of the
+  answer.
 - **Running affected tests unasked** is not decided. Test keys stay current
   once a test run has asked for them, so the background process could run
   the tests whose keys changed while the machine is idle, and have their

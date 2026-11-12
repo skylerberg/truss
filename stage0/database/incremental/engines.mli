@@ -12,6 +12,7 @@ val differing : Nodes.t -> Nodes.node list
 val count : Nodes.t -> int
 val unshared : Nodes.t -> Nodes.t -> Nodes.node list
 val nodes : Nodes.t -> Nodes.node list
+val nodes_including_fixed : Nodes.t -> Nodes.node list
 val reads : Nodes.t -> Nodes.node -> Nodes.node list
 val readers : Nodes.t -> Nodes.node -> Nodes.node list
 val current_in : Nodes.node -> Nodes.t -> Nodes.node option

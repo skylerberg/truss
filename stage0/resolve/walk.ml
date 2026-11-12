@@ -730,7 +730,8 @@ and statement state scope (statement_ : statement) =
       expression state scope target;
       expression state scope value;
       scope
-  | For { pattern = pattern_; iterable; clauses; body; _ } ->
+  | For { pattern = pattern_; annotation; iterable; clauses; body; _ } ->
+      Option.iter (type_expression state scope) annotation;
       expression state scope iterable;
       let inner = bind_pattern state scope pattern_ in
       (* A range's index names the next index in the loop's clauses. Any

@@ -60,6 +60,10 @@ val counters : t -> counters
 val nodes : t -> node list
 (** Every input and result of the state, apart from its fixed bases'. *)
 
+val nodes_including_fixed : t -> node list
+val is_input : node -> bool
+val readers : t -> node -> node list
+
 val unshared : t -> t -> node list
 (** The nodes of an engine that may differ from another's. *)
 
@@ -158,8 +162,6 @@ module For_testing : sig
   (** The nodes the engine itself holds: those that differ from its bases, or may. *)
 
   val count : t -> int
-  val is_input : node -> bool
-  val readers : t -> node -> node list
 
   val audit_all : unit -> string list
   (** Audits every engine made since {!auditing} was set that did work since its last audit. *)

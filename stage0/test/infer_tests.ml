@@ -182,6 +182,20 @@ let () =
     (fun () ->
       one_diagnostic Fixtures.Infer.local_whose_literal_does_not_fit_the_type_a
         "types.literal_out_of_range");
+  test "a loop's annotation decides the literals of its range" (fun () ->
+      let text = Fixtures.Infer.loop_annotation_decides_the_literals_of_its_range in
+      has_type text "10" "UInt8";
+      fine text);
+  test "a loop's annotation is the type of a destructured element" (fun () ->
+      fine Fixtures.Infer.loop_annotation_of_a_destructured_element);
+  test "a loop's annotation must be its element type" (fun () ->
+      one_diagnostic Fixtures.Infer.loop_annotation_must_be_the_element_type "types.mismatch"
+        ~says:"The elements of this loop are `UInt16`, not `UInt8`.");
+  test "a loop variable given its default type by a method call has a fix that annotates the loop"
+    (fun () ->
+      one_diagnostic Fixtures.Infer.loop_variable_given_its_default_type_by_a_method
+        "types.mismatch"
+        ~fixed:Fixtures.Infer.loop_variable_given_its_default_type_by_a_method_fixed);
   test "a local used as two types is one error, at the second use" (fun () ->
       one_diagnostic Fixtures.Infer.local_used_as_two_types_is_one_error "types.mismatch"
         ~says:"An earlier statement decided that the type of `base` is `UInt8`.");
