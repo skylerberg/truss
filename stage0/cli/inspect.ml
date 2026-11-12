@@ -1,19 +1,19 @@
-(* What the tools ask about one definition: its holes, with the type each
-   must have and the names in scope there, and what is at a position. These
-   read the type checker's results, and decide nothing of their own. *)
+(* Queries about one definition for the agent tools: its holes, with each
+   one's expected type and the bindings in scope, and the expression at a
+   position. They only read the type checker's results. *)
 
 open Syntax
 
 type hole = {
   offset : int;  (** Relative to the definition *)
-  expected : string option;
-      (** The type the hole must have, or [None] for a type defined as [todo] *)
-  scope : (string * string) list;  (** Each name in scope, with its type, by name *)
+  expected : string option;  (** The hole's expected type, or [None] for a type defined as [todo] *)
+  scope : (string * string) list;  (** Each binding in scope with its type, sorted by name *)
 }
 
-(* A type as tools show it. The tables hold no unsolved type, so the type
-   of a [todo] nothing fixes, such as one that is interpolated, is the error
-   type there, and is not decided yet. *)
+(* A type as the tools print it. The type checker's tables hold no
+   unsolved type variable, so an unconstrained [todo], such as an
+   interpolated one, has the error type, which is printed as not decided
+   yet. *)
 let show_type (tables : Infer.tables) id =
   match if id < Array.length tables.types then tables.types.(id) else None with
   | Some (Types.Error _ | Types.Hole) -> "not decided yet"
@@ -33,9 +33,9 @@ let expression_span (definition : definition) id =
   Syntax_walk.definition visit definition;
   !span
 
-(* Each [todo] of a definition, in order: the names in scope come from name
-   resolution, which records them at each [todo] as it walks, and their
-   types from the tables. *)
+(* Each [todo] of a definition, in source order. Name resolution records
+   the bindings in scope at each [todo], and the type checker's tables give
+   their types. *)
 let holes (definition : definition) (resolved : Resolve.resolved) (tables : Infer.tables) =
   let values =
     List.filter_map
@@ -66,7 +66,7 @@ let holes (definition : definition) (resolved : Resolve.resolved) (tables : Infe
 
 type explanation = {
   text : string;  (** The name or expression as written *)
-  meaning : string option;  (** What a name refers to *)
+  meaning : string option;  (** The meaning of a name *)
   refers_to : Path.t option;  (** The definition a name refers to, for its signature *)
   type_ : string option;
 }
@@ -91,8 +91,8 @@ let describe_target (target : Resolve.target) =
 
 let contains (span : span) offset = span.start <= offset && offset <= span.stop
 
-(* The innermost expression at an offset, relative to the definition, and
-   what it means. *)
+(* The innermost expression at an offset relative to the definition, and
+   its meaning. *)
 let explain_at (definition : definition) (resolved : Resolve.resolved)
     (tables : Infer.tables option) ~text offset =
   let innermost = ref None in

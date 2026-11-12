@@ -1,4 +1,4 @@
-(* [truss show]: the signatures at each path. *)
+(* [truss show]: prints the signatures at each path. *)
 
 module Names = Resolve.Names
 
@@ -22,8 +22,8 @@ let declarations database (module_ : Path.module_) =
 
 let package_modules database package = Query.demand database Workspace.modules package
 
-(* Whether the packages a command is about can see a definition: anything
-   in them, and only what is public elsewhere. *)
+(* Whether a definition is visible from the command's packages: every
+   definition in them, and only public definitions elsewhere. *)
 let visible (project : Project.t) (declaration : Names.declaration) =
   Project.is_own project declaration.module_ || Names.is_public declaration.visibility
 
@@ -31,11 +31,12 @@ let owner_of : Path.t -> Path.t option = function
   | Method { owner; _ } | Member_constant { owner; _ } -> Some owner
   | _ -> None
 
-(* An [impl] is shown with a type when it is written for the type's name. *)
+(* An [impl] is shown with a type when its self type has the type's
+   name. *)
 let impl_of_type (path : Path.t) name =
   match path with Impl { for_type; _ } -> for_type.type_name = name | _ -> false
 
-(* The definitions a path names, in the order to show them. *)
+(* The definitions a path names, in printing order. *)
 let resolve (project : Project.t) text =
   let database = project.context in
   let argument = Path_argument.parse text in
@@ -45,7 +46,7 @@ let resolve (project : Project.t) text =
   let module_ = if argument.member = None then as_module database argument.names else None in
   match (Workspace.split_module database argument.names, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
-      (* A package: what it makes public. *)
+      (* A package: its public definitions. *)
       List.filter (fun (d : Names.declaration) -> Names.is_public d.visibility) (in_package package)
   | _, Some module_, _ -> List.filter (visible project) (declarations database module_)
   | _, None, member -> (
@@ -140,5 +141,6 @@ let run ~directory ~paths ~body ~json =
       results;
     List.iter (fun (path, _) -> Output.eprintf "Nothing named `%s` is visible here.\n" path) missing
   end;
-  (* A path that names nothing is a bad argument, not a problem in the code. *)
+  (* A path that names nothing is a bad argument, not an error in the
+   code. *)
   if missing = [] then 0 else 2

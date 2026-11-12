@@ -1,5 +1,5 @@
-(* [truss holes]: every [todo], with the type it must have, the names in
-   scope there, and what it blocks. *)
+(* [truss holes]: every [todo], with its expected type, the bindings in
+   scope, and the tests and [main] that reach it. *)
 
 module Names = Resolve.Names
 
@@ -9,7 +9,7 @@ type hole = {
   line : int;
   column : int;
   type_ : string option;  (** [None] for a type defined as [todo] *)
-  in_scope : (string * string) list;  (** Each name, with its type *)
+  in_scope : (string * string) list;  (** Each binding in scope, with its type *)
   mutable blocks : string list;
 }
 
@@ -48,8 +48,8 @@ let gather (project : Project.t) paths =
         (Query.demand project.context Names.declarations module_))
     (Project.selected project paths)
 
-(* What each hole blocks: [main], if the program can reach it, and every
-   test that can, through what each reads, directly or not. *)
+(* The blocked roots of each hole: [main] and every test that reaches the
+   hole's definition transitively. *)
 let fill_blocks (project : Project.t) holes =
   if holes <> [] then begin
     let dependencies = Database.dependencies project.session in

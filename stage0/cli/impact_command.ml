@@ -1,10 +1,11 @@
-(* [truss impact]: what the worktree's changes from a base commit reach.
+(* [truss impact]: the definitions that the worktree changes since a base
+   commit, and their dependents.
 
-   The worktree's session is compared with a session of the base commit:
-   every result a changed input can reach is brought up to date and
-   compared, so a part that was checked again but came out the same is
-   told apart from one that changed, and reformatting, or moving a
-   definition within its file, changes nothing. *)
+   The worktree's session is compared with a session of the base commit.
+   Every result that depends on a changed input is updated in both and
+   compared, so a result recomputed with the same value counts as
+   unchanged. Reformatting a file, or moving a definition within its file,
+   changes nothing. *)
 
 module Names = Resolve.Names
 
@@ -14,7 +15,8 @@ type change = {
   before : string option;  (** The signature at the base, when it changed *)
   after : string option;  (** The signature now *)
   read_by : (Path.t * string * string) list;
-      (** What reads its changed signature: each reader, its part, and the part it reads *)
+      (** The dependents of its changed signature: each dependent, its part, and the part it reads
+      *)
 }
 
 let declarations context packages =
@@ -95,10 +97,10 @@ let changes (project : Project.t) base =
   in
   changes @ removed
 
-(* The tests whose code changed since the base: those whose key, the hash of
-   the code each can run, differs, each with whether its result is kept for
-   its code now. Finding keys lowers code and compiles nothing, so it needs
-   no C compiler. *)
+(* The tests whose code changed since the base, which are the tests whose
+   key differs, each with whether a result is cached for its current key.
+   A test's key is the hash of the code it can reach. Computing keys lowers
+   code but compiles nothing, so it needs no C compiler. *)
 let tests_changed (project : Project.t) base =
   let keys context session =
     let compile =
@@ -176,7 +178,7 @@ let run ~directory ~base ~json =
       | Error message -> Project.cannot_run "%s" message
       | Ok base_session ->
           let changes = changes project base_session in
-          (* Lowering needs code without errors. *)
+          (* Lowering requires code without diagnostics. *)
           let tests = if Report.clean report then tests_changed project base_session else [] in
           if json then
             Json.print
@@ -205,10 +207,10 @@ let run ~directory ~base ~json =
             if tests <> [] then begin
               let cached_count = List.length (List.filter snd tests) in
               Output.printf "\nTests whose code changed: %d%s\n" (List.length tests)
-                (if cached_count > 0 then Printf.sprintf " (%d kept)" cached_count else "");
+                (if cached_count > 0 then Printf.sprintf " (%d cached)" cached_count else "");
               List.iter
                 (fun (path, is_cached) ->
-                  Output.printf "  %s%s\n" (Path.show path) (if is_cached then "  kept" else ""))
+                  Output.printf "  %s%s\n" (Path.show path) (if is_cached then "  cached" else ""))
                 tests
             end
           end;

@@ -1,23 +1,24 @@
-(** Whether a release of a package keeps what the release before it offered, read from the two
+(** Whether a release of a package is compatible with the previous release, by comparing the two
     releases' public definitions. *)
 
 type change =
-  | Breaks of string  (** What a user of the release before could rely on and no longer can *)
-  | Grows of string  (** What the release offers that the one before did not *)
+  | Breaks of string  (** A guarantee of the previous release that this release removes *)
+  | Grows of string  (** An addition that the previous release lacked *)
 
 type public_change = { path : Path.t; change : change }
-(** A change to a public definition, with what changed as the end of a sentence about it. *)
+(** A change to a public definition, described by a predicate that completes a sentence about the
+    definition. *)
 
 val compare :
   before:Query.context -> after:Query.context -> Path.package -> public_change list * bool
-(** What a package's public definitions change from one state to another, each state holding the
-    package and the packages it uses, and whether the package ran on every target and now runs only
-    on 64-bit ones, which breaks every user that runs on the others.
+(** The changes to a package's public definitions between two states, each holding the package and
+    its dependencies, and whether the package ran on every target and now requires 64-bit targets,
+    which is incompatible for every user on other targets.
 
-    A signature's types are compared as the checker worked them out. A contract is compared as it is
-    written: a release may drop a [requires] clause and add an [ensures] or a cost clause, and any
-    other difference in one breaks. A yielding method that could be pulled as a cursor and no longer
-    can breaks too, though that is worked out from its body. *)
+    A signature's types are compared after type checking. A contract is compared syntactically: a
+    release may remove a [requires] clause and add an [ensures] or cost clause, and any other change
+    to a contract is incompatible. A yielding method that could be pulled as a cursor and no longer
+    can is incompatible too, although that property is inferred from its body. *)
 
 val breaks : public_change list -> (Path.t * string) list
 val grows : public_change list -> (Path.t * string) list

@@ -118,6 +118,28 @@ let () =
                file.module_.package = { Path.owner = None; name = "lib" })
              (Report.files report))
       then fail "the dependency's overflow is not reported");
+  test "a dependency's type error is reported without proofs" (fun () ->
+      let root =
+        directory
+          [
+            ("truss.toml", "[project]\n");
+            ("app/truss.toml", manifest_of "app" ^ "[dependencies]\nlib = []\n");
+            ( "app/main.truss",
+              "use lib::arith\n\n\
+               fn main(arguments: List[String]) -> ExitCode {\n\
+              \  let _ = arith::two()\n\
+              \  ExitCode.success\n\
+               }\n" );
+            ("lib/truss.toml", manifest_of "lib");
+            ("lib/arith.truss", "public fn two() -> Int64 {\n  true\n}\n");
+          ]
+      in
+      let status, output =
+        captured (fun () ->
+            Program_command.run ~directory:(Filename.concat root "app") ~release:false
+              ~sanitize:false ~arguments:[])
+      in
+      if status <> Outcome.Exit 1 || not (contains output "lib/arith.truss") then fail "%s" output);
   test "a package with no [project] above it is a project by itself" (fun () ->
       let root =
         directory
@@ -1299,7 +1321,7 @@ let () =
       let root = angles turn in
       ignore (publish_from root);
       let status, output = publish_from root in
-      if status <> 0 || not (contains output "`acme::angles` 1.0.0 is these files already") then
+      if status <> 0 || not (contains output "`acme::angles` 1.0.0 already has these files") then
         fail "status %d: %s" status output;
       expect_published registry { Path.owner = Some "acme"; name = "angles" } [ "1.0.0" ]);
   test "a release that changes a public signature is refused, with the signature as it was and is"
@@ -1308,7 +1330,7 @@ let () =
       let root = angles turn in
       ignore (publish_from root);
       rewrite root "degrees.truss" "public fn turn(times: Int64) -> Int64 {\n  times\n}\n";
-      expect_refused root "acme::angles::degrees::turn has other parameters or another result";
+      expect_refused root "acme::angles::degrees::turn changed its parameters or its result";
       let _, output = publish_from root in
       List.iter
         (fun part -> if not (contains output part) then fail "%s is not in: %s" part output)
@@ -1323,7 +1345,7 @@ let () =
       let root = angles (turn ^ "\npublic fn half() -> Int64 {\n  180\n}\n") in
       ignore (publish_from root);
       rewrite root "degrees.truss" turn;
-      expect_refused root "acme::angles::degrees::half is gone, or is no longer public");
+      expect_refused root "acme::angles::degrees::half was removed or is no longer public");
   test "a private definition can change freely" (fun () ->
       let registry = registry () in
       let root = angles (turn ^ "\nfn half() -> Int64 {\n  180\n}\n") in
@@ -1420,7 +1442,7 @@ let () =
       expect_versions root
         [ ("acme::geometry", "1.0.0"); ("acme::units", "1.0.0"); ("acme::walls", "1.0.0") ];
       if not (clean root) then fail "has diagnostics");
-  test "a dependency that only a package's tests use is not one of what it is published with"
+  test "a dependency that only a package's tests use is left out of its published lock file"
     (fun () ->
       let registry = stocked () in
       let root =
@@ -1452,7 +1474,8 @@ let () =
       in
       ignore (add user [ "acme::walls" ]);
       expect_versions user [ ("acme::walls", "1.0.0") ];
-      if not (clean user) then fail "has diagnostics");
+      if not (Report.clean (Report.gather ~proofs:true (Project.load user))) then
+        fail "has diagnostics");
   test "a package that depends on one of its project's that is not published is refused" (fun () ->
       let _ = registry () in
       let root =

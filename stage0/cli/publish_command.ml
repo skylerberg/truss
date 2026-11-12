@@ -1,14 +1,14 @@
-(* [truss publish]: adds the package it is run in to the registry, as its
-   next version, once it is finished and breaks nothing the version before
-   it offered. The registry gives the version its number. *)
+(* [truss publish]: publishes the package the command runs in to the
+   registry as its next version, if the package is complete and compatible
+   with its previous version. The registry assigns the version number. *)
 
 module Names = Resolve.Names
 module Version = Registry.Version
 module Lock = Registry.Lock
 
-(* Every [todo] and [echo] of the package, with where it is. Truss has no
-   comments, and a string is one token, so the keyword is always the thing
-   itself. *)
+(* Every [todo] and [echo] of the package, with its position. Truss has no
+   comments, and a string literal is one token, so every occurrence of the
+   keyword token is a real [todo] or [echo]. *)
 let unfinished (project : Project.t) =
   List.concat_map
     (fun module_ ->
@@ -28,18 +28,18 @@ let unfinished (project : Project.t) =
         (Array.to_list file.tokens))
     (Project.modules project)
 
-(* The files a package is published as: its own, with the lock file that
-   records what it is published with in place of its project's. *)
+(* The files to publish: the package's own, with its published lock file
+   in place of the project's. *)
 let files (package : Project.package) (record : Lock.t) =
   List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.files package.directory)
   @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
 
-(* What a package is published with: each registry package its code reaches,
-   its tests apart, at the build's version. A dependency that is one of the
-   project's packages counts as the registry's only when its files are
-   those of a version the registry holds, which is then its version. Each
-   that is not is a problem, since a package is published with registry
-   packages only. *)
+(* The published lock file's entries: each registry package that the
+   package's non-test code reaches, at the build's version. A dependency
+   that is a project package counts as a registry package only when its
+   files match a version the registry holds, which is then its version. Any
+   other project package is a problem, since a package may depend only on
+   registry packages. *)
 let record (project : Project.t) registry (package : Project.package) =
   let session = project.session in
   let root = Database.root session in
@@ -67,7 +67,7 @@ let record (project : Project.t) registry (package : Project.package) =
         match (in_registry name, directory_of name) with
         | Some (_, version, hash), _ ->
             add name version hash;
-            (* What a registry package takes on is in the build already. *)
+            (* A registry package's own dependencies are already in the build. *)
             List.iter
               (fun next -> if in_registry next <> None || directory_of next <> None then visit next)
               (dependencies ~code:false name)
@@ -98,8 +98,8 @@ let record (project : Project.t) registry (package : Project.package) =
   let entries = closure package.name in
   (entries, List.sort_uniq compare !problems)
 
-(* The package's tests that have no [uses] and do not pass, each with how it
-   ended. *)
+(* The package's failing tests that have no [uses], each with its
+   outcome. *)
 let failed_tests (project : Project.t) (package : Project.package) =
   let tests =
     List.filter
@@ -133,8 +133,8 @@ let failed_tests (project : Project.t) (package : Project.package) =
                  ])
              tests records)
 
-(* The name a package would be published under once it breaks what its
-   name has offered: the next number after [_v]. *)
+(* The name to publish an incompatible release under: the name with the
+   next number after [_v]. *)
 let next_name (package : Path.package) =
   let major = Version.major_of_name package in
   let base =
@@ -174,11 +174,11 @@ let decide (project : Project.t) registry (package : Project.package) =
               in
               let breaks =
                 List.map
-                  (fun (path, what) ->
+                  (fun (path, description) ->
                     let was = Signatures.of_path (Database.context published) path
                     and now = Signatures.of_path project.context path in
                     String.concat ""
-                      (Printf.sprintf "%s %s." (Path.show path) what
+                      (Printf.sprintf "%s %s." (Path.show path) description
                       ::
                       (if was <> now then
                          List.filter_map Fun.id
@@ -199,8 +199,8 @@ let decide (project : Project.t) registry (package : Project.package) =
               if breaks <> [] then
                 Refused
                   (Printf.sprintf
-                     "This would break what `%s` %s offers, so it cannot be published under that \
-                      name:"
+                     "This release is incompatible with `%s` %s, so it cannot be published under \
+                      that name:"
                      (Path.show_package name) (Version.show version)
                    :: List.map (fun sentence -> "  " ^ sentence) breaks
                   @ [
@@ -229,7 +229,8 @@ let run ~directory ~json =
     match Registry.Index.current () with
     | Some registry -> registry
     | None ->
-        Project.cannot_run "No registry is set: `%s` names its directory." Registry.Index.variable
+        Project.cannot_run "No registry is set. Set `%s` to the registry's directory."
+          Registry.Index.variable
   in
   let report = Report.gather ~proofs:true project in
   let refuse sentences =
@@ -265,7 +266,7 @@ let run ~directory ~json =
                   Json.print
                     (Report.document report [ ("version", Json.String (Version.show version)) ])
                 else
-                  Output.printf "`%s` %s is these files already.\n" (Path.show_package name)
+                  Output.printf "`%s` %s already has these files.\n" (Path.show_package name)
                     (Version.show version);
                 0
             | Published { version; files; grows } ->
@@ -281,11 +282,11 @@ let run ~directory ~json =
                          ( "grows",
                            Json.List
                              (List.map
-                                (fun (path, what) ->
+                                (fun (path, description) ->
                                   Json.Object
                                     [
                                       ("path", Json.String (Path.show path));
-                                      ("what", Json.String what);
+                                      ("what", Json.String description);
                                     ])
                                 grows) );
                        ])
@@ -293,7 +294,8 @@ let run ~directory ~json =
                   Output.printf "Published `%s` %s.\n" (Path.show_package name)
                     (Version.show version);
                   List.iter
-                    (fun (path, what) -> Output.printf "  %s %s.\n" (Path.show path) what)
+                    (fun (path, description) ->
+                      Output.printf "  %s %s.\n" (Path.show path) description)
                     grows
                 end;
                 0))

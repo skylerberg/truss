@@ -1,5 +1,5 @@
-(* The JSON the commands write with --json. Strings are written as diagnostics
-   write them, so the output is always valid UTF-8. *)
+(* The JSON that commands write with --json. Strings are escaped as
+   diagnostics escape them, so the output is always valid UTF-8. *)
 
 type t =
   | Null
@@ -8,7 +8,7 @@ type t =
   | String of string
   | List of t list
   | Object of (string * t) list
-  | Raw of string  (** JSON written elsewhere, such as a diagnostic's *)
+  | Raw of string  (** Serialized JSON, such as a diagnostic's *)
 
 let rec write buffer = function
   | Null -> Buffer.add_string buffer "null"
@@ -51,8 +51,9 @@ let print value = Output.print_line (to_string value)
 
 exception Malformed
 
-(* A JSON text as a value. A number with a fraction or an exponent is cut
-   to an integer, since the messages read here carry only integers. *)
+(* Parses a JSON text. A number with a fraction or an exponent is
+   truncated to an integer, since the messages parsed here contain only
+   integers. *)
 let parse text =
   let length = String.length text in
   let position = ref 0 in

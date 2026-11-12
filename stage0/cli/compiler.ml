@@ -1,9 +1,9 @@
-(* Code generation as the commands that build use it. *)
+(* Code generation, configured for the commands that build programs. *)
 
 type build = Development | Release
 
 (* [--sanitize] builds with AddressSanitizer and UndefinedBehaviorSanitizer,
-   for testing the compiler: a report from either is a bug in it. *)
+   for testing the compiler: every report is a compiler bug. *)
 let sanitizers =
   [ "-fsanitize=address,undefined"; "-fno-sanitize-recover=undefined"; "-fno-omit-frame-pointer" ]
 
@@ -18,11 +18,10 @@ let target () =
   | Some system -> Memory_layout.target_64 system
   | None -> Project.cannot_run "Stage0 builds programs only for Linux and macOS."
 
-(* A development build compiles the package at -O1, one C file an
-   instance. A release build compiles at -O2 and optimizes across every
-   file as they are linked. A build checks each primitive operation that
-   could fail as it runs, unless [checks] is false, which only a build
-   made once every proof it reaches is done may be. *)
+(* A development build compiles at -O1, one C file per instance. A release
+   build compiles at -O2 with link-time optimization. A build checks every
+   fallible primitive operation at run time unless [checks] is false, which
+   is sound only when every obligation the program reaches is proven. *)
 let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
   let toolchain = toolchain () in
   let extra = if sanitize then sanitizers else [] in
@@ -36,10 +35,9 @@ let create ?(sanitize = false) ?(checks = true) (project : Project.t) build =
           extra = Toolchain.link_time_optimization toolchain @ extra;
         }
   in
-  (* A development build reports positions in files as the current
-     directory reaches them, as diagnostics do. A release build names them
-     from the package's root, so the program is the same wherever it was
-     built. *)
+  (* A development build names files relative to the current directory,
+     as diagnostics do. A release build names them relative to the
+     package root, so the program is identical wherever it is built. *)
   let file_name module_ =
     match (build, List.assoc_opt module_ project.files) with
     | Development, Some file -> Project.shown file

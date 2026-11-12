@@ -1,12 +1,12 @@
-(* [truss upgrade]: moves the project's registry packages to other versions,
-   and says what that changes before the lock file is written. [truss add]
-   shares what it reports. *)
+(* [truss upgrade]: changes the versions of the project's registry
+   packages, and reports the effect before writing the lock file. [truss
+   add] prints the same report. *)
 
 module Lock = Registry.Lock
 module Version = Registry.Version
 
-(* A package written as [acme::geometry], or with a version, as
-   [acme::geometry@1.4.2]. *)
+(* Parses a package argument, such as [acme::geometry], or with a version,
+   such as [acme::geometry@1.4.2]. *)
 let wanted text =
   let written, version =
     match String.index_opt text '@' with
@@ -33,13 +33,13 @@ let wanted text =
               version)
       version )
 
-(* What a new lock file changes of the old. *)
+(* The differences between the old lock file and the new one. *)
 type change =
   | Entered of Lock.entry
   | Left of Lock.entry
   | Moved of { name : Path.package; from : Version.t; to_ : Version.t }
   | Holds of { name : Path.package; gained : string list }
-      (** A package that would hold capabilities it did not *)
+      (** A package that would be granted capabilities it lacks now *)
 
 let lock_changes ~(before : Lock.t) ~(after : Lock.t) =
   List.concat_map
@@ -107,8 +107,8 @@ let change_json = function
           ("gained", Json.List (List.map (fun held -> Json.String held) gained));
         ]
 
-(* A signature of a registry package that the new versions change and the
-   project reads. *)
+(* A signature of a registry package that the project depends on and the
+   new versions change. *)
 type signature = {
   path : Path.t;
   before : string option;
@@ -116,10 +116,10 @@ type signature = {
   read_by : Path.t list;
 }
 
-(* What the new versions change that the project's code reads, found in a
-   session that has them, before any file is written: each changed signature
-   with the definitions that read it, and the diagnostics the project would
-   have that it does not have now. *)
+(* The effect of the new versions on the project's code, computed in a
+   trial session with those versions before any file is written: each
+   changed signature with its dependents in the project, and the
+   diagnostics that the project would have and does not have now. *)
 let consequences (project : Project.t) text =
   let trial = Database.trial project.session [ ("truss.lock", Some text) ] in
   let own = List.map snd (Database.packages project.session) in

@@ -1,21 +1,21 @@
-(* Where each definition, method, and module is named in a package's code,
-   from what resolution and type checking decided each name means. [truss
-   rename] edits these places, and [truss impact] finds what depends on a
-   definition through them. *)
+(* The occurrences of each definition, method, and module in a package's
+   code, as name resolution and type checking resolved each name. [truss
+   rename] edits the occurrences, and [truss impact] finds a definition's
+   dependents through them. *)
 
 module Names = Resolve.Names
 
 type target = Definition of Path.t | Module of Path.module_
 
 type occurrence = {
-  module_ : Path.module_;  (** The file it is in *)
-  span : Source.span;  (** In the file's offsets *)
+  module_ : Path.module_;  (** The occurrence's file *)
+  span : Source.span;  (** In offsets of the file *)
   target : target;
-  in_definition : Names.key;  (** The definition it is written in *)
-  declares : bool;  (** Whether this is the name a definition declares itself with *)
+  in_definition : Names.key;  (** The enclosing definition *)
+  declares : bool;  (** Whether this occurrence is the definition's declared name *)
 }
 
-(* The name a definition declares itself with, if it has one. *)
+(* The definition's declared name, if it has one. *)
 let declared_name (definition : Syntax.definition) : Syntax.name option =
   match definition.kind with
   | Function { signature = { name = Plain_name name | Member_name (_, name); _ }; _ }
@@ -28,8 +28,9 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
       Some name
   | Impl _ | Test _ | Law_proof _ | Definition_error _ -> None
 
-(* The method or member a type-checked expression names, if any: a call to
-   a type's own method, or a method or constant used as a value. *)
+(* The method or member that a type-checked expression refers to, if any:
+   the callee of a method call on a type, or a method or constant used as a
+   value. *)
 let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
   let members = ref [] in
   let add (name : Syntax.name) path = members := (name, path) :: !members in
@@ -72,9 +73,9 @@ let of_definition database (key : Names.key) =
                with
                | Some (Definition (_, path)) -> [ occurrence name.span (Definition path) ]
                | Some (Module m) ->
-                   (* A module is written as its import's name, one name, or
-                      as its full path, the package's names and then each
-                      module's, which follow it among the names. *)
+                   (* A module is written either as its import's name, one
+                      segment, or as its full path: the package's segments
+                      followed by each module's. *)
                    let parts = Path.module_parts m in
                    let written_in_full =
                      List.length parts > 1
@@ -121,8 +122,8 @@ let all (project : Project.t) =
         (Query.demand project.context Names.declarations module_))
     (Project.modules project)
 
-(* The [use] lines that name a module: each file's, with the span of the
-   path in the file's offsets. *)
+(* The [use] declarations of each file that name a module, with the span of
+   the path in offsets of the file. *)
 let uses (project : Project.t) (target_module : Path.module_) =
   List.concat_map
     (fun module_ ->
@@ -138,8 +139,8 @@ let uses (project : Project.t) (target_module : Path.module_) =
         file.uses)
     (Project.modules project)
 
-(* Whether an occurrence names a definition or, for a method, any version
-   of it. *)
+(* Whether an occurrence refers to a definition or, for a method, to any
+   version of it. *)
 let names_definition (definition : Path.t) occurrence =
   match (occurrence.target, definition) with
   | Definition (Method { owner; name; _ }), Method { owner = o; name = n; _ } ->
