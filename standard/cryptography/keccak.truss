@@ -1,0 +1,107 @@
+use standard::intrinsic
+
+let round_constants: Array[UInt64, 24] = [
+  1, 32898, 9223372036854808714, 9223372039002292224,
+  32907, 2147483649, 9223372039002292353, 9223372036854808585,
+  138, 136, 2147516425, 2147483658,
+  2147516555, 9223372036854775947, 9223372036854808713, 9223372036854808579,
+  9223372036854808578, 9223372036854775936, 32778, 9223372039002259466,
+  9223372039002292353, 9223372036854808704, 2147483649, 9223372039002292232,
+]
+
+let rotations: Array[USize, 25] = [0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14]
+
+let all_ones: UInt64 = 18446744073709551615
+
+fn permute(state: mut Array[UInt64, 25]) {
+  let five: USize = 5
+  let rounds: USize = 24
+  for round in 0..rounds {
+    var columns: Array[UInt64, 5] = [0, 0, 0, 0, 0]
+    for x in 0..five {
+      columns[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20]
+    }
+    for x in 0..five {
+      let mixed = columns[(x + 4) % 5] ^ columns[(x + 1) % 5].rotate_left(1)
+      for y in 0..five {
+        state[x + 5 * y] = state[x + 5 * y] ^ mixed
+      }
+    }
+    var moved: Array[UInt64, 25] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for x in 0..five {
+      for y in 0..five {
+        moved[y + 5 * ((2 * x + 3 * y) % 5)] = state[x + 5 * y].rotate_left(rotations[x + 5 * y])
+      }
+    }
+    for x in 0..five {
+      for y in 0..five {
+        state[x + 5 * y] = moved[x + 5 * y] ^ ((moved[(x + 1) % 5 + 5 * y] ^ all_ones) & moved[(x + 2) % 5 + 5 * y])
+      }
+    }
+    state[0] = state[0] ^ round_constants[round]
+  }
+}
+
+internal type Sponge(state: Array[UInt64, 25], rate: USize, position: USize)
+
+fn absorb_block(state: mut Array[UInt64, 25], block: Slice[UInt8]) {
+  let lanes = block.length() / 8
+  for lane in 0..lanes {
+    if lane < 25 && 8 * lane + 8 <= block.length() {
+      var value: UInt64 = 0
+      let width: USize = 8
+      for index in 0..width {
+        value = value | (intrinsic::convert[UInt8, UInt64](block[8 * lane + index]) << (8 * index))
+      }
+      state[lane] = state[lane] ^ value
+    }
+  }
+}
+
+internal fn absorb(rate: USize, message: Slice[UInt8], suffix: UInt8) -> Sponge {
+  var state: Array[UInt64, 25] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  if rate == 0 || rate > 200 || rate % 8 != 0 {
+    return Sponge(state: state, rate: 136, position: 0)
+  }
+  var start: USize = 0
+  while message.length() - start >= rate
+    invariant start <= message.length()
+  {
+    absorb_block(mut state, block: message[start..start + rate])
+    permute(mut state)
+    start += rate
+  }
+  var last: List[UInt8] = message[start..].to_list()
+  mut last.push(suffix)
+  while last.length() < rate {
+    mut last.push(0)
+  }
+  if last.length() == rate {
+    last[rate - 1] = last[rate - 1] | 128
+  }
+  absorb_block(mut state, block: last.slice())
+  permute(mut state)
+  Sponge(state: state, rate: rate, position: 0)
+}
+
+internal fn squeeze(sponge: mut Sponge, count: USize) -> List[UInt8] {
+  var output: List[UInt8] = List.with_capacity(count)
+  while output.length() < count {
+    if sponge.position >= sponge.rate {
+      permute(mut sponge.state)
+      sponge.position = 0
+    }
+    let lane = sponge.position / 8
+    if lane >= 25 {
+      return output
+    }
+    mut output.push(intrinsic::convert((sponge.state[lane] >> (8 * (sponge.position % 8))) & 255))
+    sponge.position += 1
+  }
+  output
+}
+
+internal fn hash(rate: USize, message: Slice[UInt8], suffix: UInt8, count: USize) -> List[UInt8] {
+  var sponge = absorb(rate, message: message, suffix: suffix)
+  squeeze(mut sponge, count: count)
+}

@@ -20,8 +20,10 @@ let weights =
     ("standard::console", 41);
     ("standard::core", 23);
     ("standard::core::range", 5);
-    ("standard::cryptography", 1541);
+    ("standard::cryptography", 1470);
     ("standard::cryptography::elliptic", 247);
+    ("standard::cryptography::keccak", 41);
+    ("standard::cryptography::mlkem", 63);
     ("standard::cryptography::modular", 201);
     ("standard::csv", 45);
     ("standard::cursors", 4);
@@ -90,7 +92,7 @@ let weights =
     ("standard::text::unicode_data", 184);
     ("standard::text::unicode_tables", 296);
     ("standard::time", 553);
-    ("standard::tls", 411);
+    ("standard::tls", 295);
     ("standard::toml", 1453);
     ("standard::unicode", 18);
     ("standard::url", 102);

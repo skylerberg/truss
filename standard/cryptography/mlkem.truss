@@ -1,0 +1,472 @@
+use standard::cryptography::keccak
+use standard::intrinsic
+
+let zetas: Array[UInt64, 128] = [
+  1, 1729, 2580, 3289, 2642, 630, 1897, 848, 1062, 1919, 193, 797, 2786, 3260, 569, 1746,
+  296, 2447, 1339, 1476, 3046, 56, 2240, 1333, 1426, 2094, 535, 2882, 2393, 2879, 1974, 821,
+  289, 331, 3253, 1756, 1197, 2304, 2277, 2055, 650, 1977, 2513, 632, 2865, 33, 1320, 1915,
+  2319, 1435, 807, 452, 1438, 2868, 1534, 2402, 2647, 2617, 1481, 648, 2474, 3110, 1227, 910,
+  17, 2761, 583, 2649, 1637, 723, 2288, 1100, 1409, 2662, 3281, 233, 756, 2156, 3015, 3050,
+  1703, 1651, 2789, 1789, 1847, 952, 1461, 2687, 939, 2308, 2437, 2388, 733, 2337, 268, 641,
+  1584, 2298, 2037, 3220, 375, 2549, 2090, 1645, 1063, 319, 2773, 757, 2099, 561, 2466, 2594,
+  2804, 1092, 403, 1026, 1143, 2150, 2775, 886, 1722, 1212, 1874, 1029, 2110, 2935, 885, 2154,
+]
+
+let gammas: Array[UInt64, 128] = [
+  17, 3312, 2761, 568, 583, 2746, 2649, 680, 1637, 1692, 723, 2606, 2288, 1041, 1100, 2229,
+  1409, 1920, 2662, 667, 3281, 48, 233, 3096, 756, 2573, 2156, 1173, 3015, 314, 3050, 279,
+  1703, 1626, 1651, 1678, 2789, 540, 1789, 1540, 1847, 1482, 952, 2377, 1461, 1868, 2687, 642,
+  939, 2390, 2308, 1021, 2437, 892, 2388, 941, 733, 2596, 2337, 992, 268, 3061, 641, 2688,
+  1584, 1745, 2298, 1031, 2037, 1292, 3220, 109, 375, 2954, 2549, 780, 2090, 1239, 1645, 1684,
+  1063, 2266, 319, 3010, 2773, 556, 757, 2572, 2099, 1230, 561, 2768, 2466, 863, 2594, 735,
+  2804, 525, 1092, 2237, 403, 2926, 1026, 2303, 1143, 2186, 2150, 1179, 2775, 554, 886, 2443,
+  1722, 1607, 1212, 2117, 1874, 1455, 1029, 2300, 2110, 1219, 2935, 394, 885, 2444, 2154, 1175,
+]
+
+let modulus: UInt64 = 3329
+
+internal let encapsulation_key_length: USize = 1184
+
+internal let decapsulation_key_length: USize = 2400
+
+internal let ciphertext_length: USize = 1088
+
+fn below_modulus(value: UInt64) -> UInt64 {
+  let difference = value.wrapping_subtract(modulus)
+  let zero: UInt64 = 0
+  let mask = zero.wrapping_subtract(difference >> 63)
+  difference.wrapping_add(modulus & mask) & 4095
+}
+
+fn reduce(value: UInt64) -> UInt64 {
+  let bounded = value & 67108863
+  let quotient = (bounded * 1290167) >> 32
+  below_modulus(bounded.wrapping_subtract(quotient.wrapping_multiply(modulus)))
+}
+
+fn add(first: UInt64, second: UInt64) -> UInt64 {
+  below_modulus((first & 4095) + (second & 4095))
+}
+
+fn subtract(first: UInt64, second: UInt64) -> UInt64 {
+  below_modulus(((first & 4095) + modulus).wrapping_subtract(second & 4095))
+}
+
+fn multiply(first: UInt64, second: UInt64) -> UInt64 {
+  reduce((first & 4095) * (second & 4095))
+}
+
+fn ntt(coefficients: mut Array[UInt64, 256]) {
+  var zeta_index: USize = 1
+  var length: USize = 128
+  while length >= 2 && length <= 128 {
+    var start: USize = 0
+    while start < 256 {
+      let zeta = zetas[zeta_index % 128]
+      zeta_index = zeta_index.saturating_add(1)
+      for offset in 0..length {
+        let low = start + offset
+        let high = low + length
+        if high < 256 {
+          let product = multiply(zeta, second: coefficients[high])
+          coefficients[high] = subtract(coefficients[low], second: product)
+          coefficients[low] = add(coefficients[low], second: product)
+        }
+      }
+      start += 2 * length
+    }
+    length = length / 2
+  }
+}
+
+fn inverse_ntt(coefficients: mut Array[UInt64, 256]) {
+  var zeta_index: USize = 127
+  var length: USize = 2
+  while length <= 128 {
+    var start: USize = 0
+    while start < 256 {
+      let zeta = zetas[zeta_index % 128]
+      zeta_index = zeta_index.saturating_subtract(1)
+      for offset in 0..length {
+        let low = start + offset
+        let high = low + length
+        if high < 256 {
+          let lower = coefficients[low]
+          coefficients[low] = add(lower, second: coefficients[high])
+          coefficients[high] = multiply(zeta, second: subtract(coefficients[high], second: lower))
+        }
+      }
+      start += 2 * length
+    }
+    length = length * 2
+  }
+  let count: USize = 256
+  for index in 0..count {
+    coefficients[index] = multiply(coefficients[index], second: 3303)
+  }
+}
+
+fn multiply_ntt(first: Array[UInt64, 256], second: Array[UInt64, 256]) -> Array[UInt64, 256] {
+  var product: Array[UInt64, 256] = Array.filled(0)
+  let pairs: USize = 128
+  for pair in 0..pairs {
+    let a0 = first[2 * pair]
+    let a1 = first[2 * pair + 1]
+    let b0 = second[2 * pair]
+    let b1 = second[2 * pair + 1]
+    product[2 * pair] = add(multiply(a0, second: b0), second: multiply(multiply(a1, second: b1), second: gammas[pair]))
+    product[2 * pair + 1] = add(multiply(a0, second: b1), second: multiply(a1, second: b0))
+  }
+  product
+}
+
+fn add_polynomials(first: Array[UInt64, 256], second: Array[UInt64, 256]) -> Array[UInt64, 256] {
+  var sum: Array[UInt64, 256] = Array.filled(0)
+  let count: USize = 256
+  for index in 0..count {
+    sum[index] = add(first[index], second: second[index])
+  }
+  sum
+}
+
+fn encode(output: mut List[UInt8], coefficients: Array[UInt64, 256], bits: USize) {
+  if bits == 0 || bits > 12 {
+    return
+  }
+  let mask: UInt64 = (1 << bits) - 1
+  var buffer: UInt64 = 0
+  var filled: USize = 0
+  let count: USize = 256
+  for index in 0..count {
+    if filled > 7 {
+      return
+    }
+    buffer = buffer | ((coefficients[index] & mask) << filled)
+    filled += bits
+    while filled >= 8
+      invariant filled <= 19
+    {
+      mut output.push(intrinsic::convert(buffer & 255))
+      buffer = buffer >> 8
+      filled -= 8
+    }
+  }
+}
+
+fn decode(bytes: Slice[UInt8], bits: USize) -> Array[UInt64, 256] {
+  var coefficients: Array[UInt64, 256] = Array.filled(0)
+  if bits == 0 || bits > 12 {
+    return coefficients
+  }
+  let mask: UInt64 = (1 << bits) - 1
+  var buffer: UInt64 = 0
+  var filled: USize = 0
+  var at: USize = 0
+  let count: USize = 256
+  for index in 0..count {
+    if filled > 11 {
+      return coefficients
+    }
+    while filled < bits && at < bytes.length()
+      invariant filled <= 19
+    {
+      buffer = buffer | (intrinsic::convert[UInt8, UInt64](bytes[at]) << filled)
+      filled += 8
+      at += 1
+    }
+    if filled >= bits {
+      coefficients[index] = buffer & mask
+      buffer = buffer >> bits
+      filled -= bits
+    }
+  }
+  coefficients
+}
+
+fn compress(value: UInt64, bits: USize) -> UInt64 {
+  if bits == 0 || bits > 11 {
+    return 0
+  }
+  let shifted = ((value & 4095) << bits) + 1664
+  ((shifted * 330282857) >> 40) & ((1 << bits) - 1)
+}
+
+fn decompress(value: UInt64, bits: USize) -> UInt64 {
+  if bits == 0 || bits > 11 {
+    return 0
+  }
+  (((value & 4095) * modulus) + (1 << (bits - 1))) >> bits
+}
+
+fn compressed(coefficients: Array[UInt64, 256], bits: USize) -> Array[UInt64, 256] {
+  var result: Array[UInt64, 256] = Array.filled(0)
+  let count: USize = 256
+  for index in 0..count {
+    result[index] = compress(coefficients[index], bits: bits)
+  }
+  result
+}
+
+fn decompressed(coefficients: Array[UInt64, 256], bits: USize) -> Array[UInt64, 256] {
+  var result: Array[UInt64, 256] = Array.filled(0)
+  let count: USize = 256
+  for index in 0..count {
+    result[index] = decompress(coefficients[index], bits: bits)
+  }
+  result
+}
+
+fn sample_ntt(rho: Slice[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256] {
+  var seed = rho.to_list()
+  mut seed.push(column)
+  mut seed.push(row)
+  var sponge = keccak::absorb(168, message: seed.slice(), suffix: 31)
+  var coefficients: Array[UInt64, 256] = Array.filled(0)
+  var count: USize = 0
+  var stream: List[UInt8] = []
+  var at: USize = 0
+  while count < 256 {
+    if at >= stream.length() || stream.length() - at < 3 {
+      stream = keccak::squeeze(mut sponge, count: 168)
+      at = 0
+      if stream.length() < 3 {
+        return coefficients
+      }
+    }
+    let first: UInt64 = intrinsic::convert(stream[at])
+    let second: UInt64 = intrinsic::convert(stream[at + 1])
+    let third: UInt64 = intrinsic::convert(stream[at + 2])
+    at += 3
+    let low = first + 256 * (second % 16)
+    let high = second / 16 + 16 * third
+    if low < modulus {
+      coefficients[count] = low
+      count += 1
+    }
+    if high < modulus && count < 256 {
+      coefficients[count] = high
+      count += 1
+    }
+  }
+  coefficients
+}
+
+fn sample_noise(seed: Slice[UInt8], nonce: UInt8) -> Array[UInt64, 256] {
+  var input = seed.to_list()
+  mut input.push(nonce)
+  let bytes = keccak::hash(136, message: input.slice(), suffix: 31, count: 128)
+  var coefficients: Array[UInt64, 256] = Array.filled(0)
+  let count: USize = 256
+  for index in 0..count {
+    let byte: UInt64 = if index / 2 < bytes.length() { intrinsic::convert(bytes[index / 2]) } else { 0 }
+    let bits = (byte >> (4 * (index % 2))) & 15
+    let positive = (bits & 1) + ((bits >> 1) & 1)
+    let negative = ((bits >> 2) & 1) + ((bits >> 3) & 1)
+    coefficients[index] = subtract(positive, second: negative)
+  }
+  coefficients
+}
+
+type Matrix(rows: Array[Array[Array[UInt64, 256], 3], 3])
+
+fn matrix(rho: Slice[UInt8]) -> Matrix {
+  var rows: Array[Array[Array[UInt64, 256], 3], 3] = Array.filled(Array.filled(Array.filled(0)))
+  let rank: USize = 3
+  for row in 0..rank {
+    for column in 0..rank {
+      rows[row][column] = sample_ntt(rho, column: intrinsic::convert(column), row: intrinsic::convert(row))
+    }
+  }
+  Matrix(rows: rows)
+}
+
+fn split_512(input: Slice[UInt8]) -> List[UInt8] {
+  keccak::hash(72, message: input, suffix: 6, count: 64)
+}
+
+internal fn hash_256(input: Slice[UInt8]) -> List[UInt8] {
+  keccak::hash(136, message: input, suffix: 6, count: 32)
+}
+
+internal type KeyPair(encapsulation: List[UInt8], decapsulation: List[UInt8])
+
+fn generate_pke(seed: Slice[UInt8]) -> KeyPair {
+  var input = seed.to_list()
+  mut input.push(3)
+  let expanded = split_512(input.slice())
+  if expanded.length() != 64 {
+    return KeyPair(encapsulation: [], decapsulation: [])
+  }
+  let rho = expanded[0..32]
+  let sigma = expanded[32..64]
+  let a = matrix(rho)
+  let rank: USize = 3
+  var secret: Array[Array[UInt64, 256], 3] = Array.filled(Array.filled(0))
+  var error: Array[Array[UInt64, 256], 3] = Array.filled(Array.filled(0))
+  for index in 0..rank {
+    secret[index] = sample_noise(sigma, nonce: intrinsic::convert(index))
+    ntt(mut secret[index])
+  }
+  for index in 0..rank {
+    error[index] = sample_noise(sigma, nonce: intrinsic::convert(index + 3))
+    ntt(mut error[index])
+  }
+  var encapsulation: List[UInt8] = List.with_capacity(encapsulation_key_length)
+  var decapsulation: List[UInt8] = List.with_capacity(1152)
+  for row in 0..rank {
+    var accumulated = error[row]
+    for column in 0..rank {
+      accumulated = add_polynomials(accumulated, second: multiply_ntt(a.rows[row][column], second: secret[column]))
+    }
+    encode(mut encapsulation, coefficients: accumulated, bits: 12)
+  }
+  mut encapsulation.append_slice(rho)
+  for index in 0..rank {
+    encode(mut decapsulation, coefficients: secret[index], bits: 12)
+  }
+  KeyPair(encapsulation: own encapsulation, decapsulation: own decapsulation)
+}
+
+fn encrypt(encapsulation: Slice[UInt8], message: Slice[UInt8], randomness: Slice[UInt8]) -> List[UInt8] {
+  if encapsulation.length() != encapsulation_key_length {
+    return []
+  }
+  let rank: USize = 3
+  var t: Array[Array[UInt64, 256], 3] = Array.filled(Array.filled(0))
+  for index in 0..rank {
+    t[index] = decode(encapsulation[384 * index..384 * index + 384], bits: 12)
+  }
+  let a = matrix(encapsulation[1152..1184])
+  var y: Array[Array[UInt64, 256], 3] = Array.filled(Array.filled(0))
+  for index in 0..rank {
+    y[index] = sample_noise(randomness, nonce: intrinsic::convert(index))
+    ntt(mut y[index])
+  }
+  var ciphertext: List[UInt8] = List.with_capacity(ciphertext_length)
+  for column in 0..rank {
+    var accumulated: Array[UInt64, 256] = Array.filled(0)
+    for row in 0..rank {
+      accumulated = add_polynomials(accumulated, second: multiply_ntt(a.rows[row][column], second: y[row]))
+    }
+    inverse_ntt(mut accumulated)
+    let noise = sample_noise(randomness, nonce: intrinsic::convert(column + 3))
+    encode(mut ciphertext, coefficients: compressed(add_polynomials(accumulated, second: noise), bits: 10), bits: 10)
+  }
+  var inner: Array[UInt64, 256] = Array.filled(0)
+  for index in 0..rank {
+    inner = add_polynomials(inner, second: multiply_ntt(t[index], second: y[index]))
+  }
+  inverse_ntt(mut inner)
+  let noise = sample_noise(randomness, nonce: 6)
+  let mu = decompressed(decode(message, bits: 1), bits: 1)
+  let v = add_polynomials(add_polynomials(inner, second: noise), second: mu)
+  encode(mut ciphertext, coefficients: compressed(v, bits: 4), bits: 4)
+  ciphertext
+}
+
+fn decrypt(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -> List[UInt8] {
+  if decapsulation.length() < 1152 || ciphertext.length() != ciphertext_length {
+    return []
+  }
+  let rank: USize = 3
+  var inner: Array[UInt64, 256] = Array.filled(0)
+  for index in 0..rank {
+    var u = decompressed(decode(ciphertext[320 * index..320 * index + 320], bits: 10), bits: 10)
+    ntt(mut u)
+    let secret = decode(decapsulation[384 * index..384 * index + 384], bits: 12)
+    inner = add_polynomials(inner, second: multiply_ntt(secret, second: u))
+  }
+  inverse_ntt(mut inner)
+  let v = decompressed(decode(ciphertext[960..1088], bits: 4), bits: 4)
+  var w: Array[UInt64, 256] = Array.filled(0)
+  let count: USize = 256
+  for index in 0..count {
+    w[index] = subtract(v[index], second: inner[index])
+  }
+  var message: List[UInt8] = List.with_capacity(32)
+  encode(mut message, coefficients: compressed(w, bits: 1), bits: 1)
+  message
+}
+
+internal fn generate(seed: Slice[UInt8], rejection: Slice[UInt8]) -> KeyPair {
+  let pair = generate_pke(seed)
+  var decapsulation = pair.decapsulation.copy()
+  mut decapsulation.append_slice(pair.encapsulation.slice())
+  mut decapsulation.append(hash_256(pair.encapsulation.slice()))
+  mut decapsulation.append_slice(rejection)
+  KeyPair(encapsulation: own pair.encapsulation, decapsulation: own decapsulation)
+}
+
+internal type Encapsulated(shared: List[UInt8], ciphertext: List[UInt8])
+
+internal fn encapsulate(encapsulation: Slice[UInt8], message: Slice[UInt8]) -> Encapsulated {
+  var input = message.to_list()
+  mut input.append(hash_256(encapsulation))
+  let expanded = split_512(input.slice())
+  if expanded.length() != 64 {
+    return Encapsulated(shared: [], ciphertext: [])
+  }
+  let ciphertext = encrypt(encapsulation, message: message, randomness: expanded[32..64])
+  Encapsulated(shared: expanded[0..32].to_list(), ciphertext: own ciphertext)
+}
+
+internal fn decapsulate(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -> List[UInt8] {
+  if decapsulation.length() != decapsulation_key_length || ciphertext.length() != ciphertext_length {
+    return []
+  }
+  let message = decrypt(decapsulation[0..1152], ciphertext: ciphertext)
+  var input = message.copy()
+  mut input.append_slice(decapsulation[2336..2368])
+  let expanded = split_512(input.slice())
+  if expanded.length() != 64 {
+    return []
+  }
+  var rejection_input = decapsulation[2368..2400].to_list()
+  mut rejection_input.append_slice(ciphertext)
+  let rejected = keccak::hash(136, message: rejection_input.slice(), suffix: 31, count: 32)
+  let again = encrypt(decapsulation[1152..2336], message: message.slice(), randomness: expanded[32..64])
+  var difference: UInt8 = 0
+  if again.length() != ciphertext.length() {
+    difference = 1
+  }
+  let length = if again.length() < ciphertext.length() { again.length() } else { ciphertext.length() }
+  for index in 0..length {
+    difference = difference | (again[index] ^ ciphertext[index])
+  }
+  let zero: UInt64 = 0
+  let differs = (zero.wrapping_subtract(intrinsic::convert[UInt8, UInt64](difference)) >> 63) & 1
+  let mask: UInt8 = intrinsic::convert(zero.wrapping_subtract(differs) & 255)
+  var shared: List[UInt8] = List.with_capacity(32)
+  let width: USize = 32
+  for index in 0..width {
+    let accepted = if index < expanded.length() { expanded[index] } else { 0 }
+    let fallback = if index < rejected.length() { rejected[index] } else { 0 }
+    mut shared.push((accepted & (mask ^ 255)) | (fallback & mask))
+  }
+  shared
+}
+
+internal fn is_valid_encapsulation_key(encapsulation: Slice[UInt8]) -> Bool {
+  if encapsulation.length() != encapsulation_key_length {
+    return false
+  }
+  let rank: USize = 3
+  let count: USize = 256
+  for index in 0..rank {
+    let coefficients = decode(encapsulation[384 * index..384 * index + 384], bits: 12)
+    for position in 0..count {
+      if coefficients[position] >= modulus {
+        return false
+      }
+    }
+  }
+  true
+}
+
+internal fn is_valid_decapsulation_key(decapsulation: Slice[UInt8]) -> Bool {
+  if decapsulation.length() != decapsulation_key_length {
+    return false
+  }
+  let digest = hash_256(decapsulation[1152..2336])
+  digest.slice() == decapsulation[2336..2368]
+}
