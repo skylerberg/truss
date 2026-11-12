@@ -1041,8 +1041,13 @@ choices below keep method calls predictable:
   them under its name, which is serde's default form. A field with a
   default may be missing when it is read, and a missing field of type
   `Option` reads as `None`. A format may rename every field, as
-  `json::Names.CamelCase` does. A type that needs other names writes its
-  `impl`, since Truss has no attributes to rename one field.
+  `serialization::Names.CamelCase` does. A type that needs other names
+  writes its `impl`, since Truss has no attributes to rename one field.
+- **A format whose values form a tree implements `serialization::Tree`,**
+  as `json::Value` and `toml::Value` do. `serialization::TreeWriter`
+  serializes into such a tree and `serialization::TreeReader` deserializes
+  from one, so a format writes neither a `Serializer` nor a `Deserializer`
+  of its own.
 - **Derived `Ordered` and `Hash` need a derived `Equal`.** Their laws link them
   to `Equal`. Two derived implementations agree by construction. A hand-written
   `Equal`, such as one for a set stored as a list, would not agree with a
