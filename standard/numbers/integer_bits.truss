@@ -31,12 +31,14 @@ public transparent fn Int8.trailing_zeros(self) -> USize
 
 public transparent fn Int8.rotate_left(self, amount: USize) -> Int8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn Int8.rotate_right(self, amount: USize) -> Int8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -146,12 +148,14 @@ public transparent fn Int16.trailing_zeros(self) -> USize
 
 public transparent fn Int16.rotate_left(self, amount: USize) -> Int16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn Int16.rotate_right(self, amount: USize) -> Int16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -261,12 +265,14 @@ public transparent fn Int32.trailing_zeros(self) -> USize
 
 public transparent fn Int32.rotate_left(self, amount: USize) -> Int32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn Int32.rotate_right(self, amount: USize) -> Int32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -376,12 +382,14 @@ public transparent fn Int64.trailing_zeros(self) -> USize
 
 public transparent fn Int64.rotate_left(self, amount: USize) -> Int64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn Int64.rotate_right(self, amount: USize) -> Int64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -491,12 +499,14 @@ public transparent fn ISize.trailing_zeros(self) -> USize
 
 public transparent fn ISize.rotate_left(self, amount: USize) -> ISize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn ISize.rotate_right(self, amount: USize) -> ISize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -582,12 +592,14 @@ public transparent fn UInt8.trailing_zeros(self) -> USize
 
 public transparent fn UInt8.rotate_left(self, amount: USize) -> UInt8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn UInt8.rotate_right(self, amount: USize) -> UInt8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -700,12 +712,14 @@ public transparent fn UInt16.trailing_zeros(self) -> USize
 
 public transparent fn UInt16.rotate_left(self, amount: USize) -> UInt16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn UInt16.rotate_right(self, amount: USize) -> UInt16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -818,12 +832,14 @@ public transparent fn UInt32.trailing_zeros(self) -> USize
 
 public transparent fn UInt32.rotate_left(self, amount: USize) -> UInt32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn UInt32.rotate_right(self, amount: USize) -> UInt32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -936,12 +952,14 @@ public transparent fn UInt64.trailing_zeros(self) -> USize
 
 public transparent fn UInt64.rotate_left(self, amount: USize) -> UInt64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn UInt64.rotate_right(self, amount: USize) -> UInt64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }
@@ -1054,12 +1072,14 @@ public transparent fn USize.trailing_zeros(self) -> USize
 
 public transparent fn USize.rotate_left(self, amount: USize) -> USize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_left(self, amount: amount)
 }
 
 public transparent fn USize.rotate_right(self, amount: USize) -> USize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::rotate_right(self, amount: amount)
 }

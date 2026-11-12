@@ -413,21 +413,6 @@ fn repetition_at(text: StringSlice, from: USize, to: USize) -> Result[Repetition
   Ok(Repetition(least: least, most: most, bounded: bounded, lazy: lazy, end: end))
 }
 
-fn hexadecimal(byte: UInt8) -> UInt32
-  ensures result <= 16
-  cost time O(1)
-{
-  if 48 <= byte && byte <= 57 {
-    intrinsic::convert(byte - 48)
-  } else if 97 <= byte && byte <= 102 {
-    intrinsic::convert(byte - 87)
-  } else if 65 <= byte && byte <= 70 {
-    intrinsic::convert(byte - 55)
-  } else {
-    16
-  }
-}
-
 fn escaped_character(text: StringSlice, from: USize, to: USize) -> Result[UInt32, PatternError]
   requires from < to
   requires to <= text.length()
@@ -460,9 +445,9 @@ fn escaped_character(text: StringSlice, from: USize, to: USize) -> Result[UInt32
     if to - from < 4 {
       return Err(wrong)
     }
-    let high = hexadecimal(text.byte(from + 2))
-    let low = hexadecimal(text.byte(from + 3))
-    if high == 16 || low == 16 {
+    let high: UInt32 = intrinsic::convert(text.byte(from + 2).digit_value())
+    let low: UInt32 = intrinsic::convert(text.byte(from + 3).digit_value())
+    if high >= 16 || low >= 16 {
       return Err(wrong)
     }
     return Ok(high * 16 + low)
@@ -479,8 +464,8 @@ fn escaped_character(text: StringSlice, from: USize, to: USize) -> Result[UInt32
       invariant code <= 1114111
       decreases to - index
     {
-      let digit = hexadecimal(text.byte(index))
-      if digit == 16 || code > 69631 {
+      let digit: UInt32 = intrinsic::convert(text.byte(index).digit_value())
+      if digit >= 16 || code > 69631 {
         return Err(wrong)
       }
       code = code * 16 + digit

@@ -142,28 +142,19 @@ public fn Duration.absolute(self) -> Duration
 public fn Duration.checked_add(self, other: Duration) -> Option[Duration]
   cost time O(1)
 {
-  match self.nanoseconds.checked_add(other.nanoseconds) {
-    Some(sum) => Some(Duration(nanoseconds: sum))
-    None => None
-  }
+  Some(Duration(nanoseconds: self.nanoseconds.checked_add(other.nanoseconds)?))
 }
 
 public fn Duration.checked_subtract(self, other: Duration) -> Option[Duration]
   cost time O(1)
 {
-  match self.nanoseconds.checked_subtract(other.nanoseconds) {
-    Some(difference) => Some(Duration(nanoseconds: difference))
-    None => None
-  }
+  Some(Duration(nanoseconds: self.nanoseconds.checked_subtract(other.nanoseconds)?))
 }
 
 public fn Duration.checked_multiply(self, factor: Int64) -> Option[Duration]
   cost time O(1)
 {
-  match self.nanoseconds.checked_multiply(factor) {
-    Some(product) => Some(Duration(nanoseconds: product))
-    None => None
-  }
+  Some(Duration(nanoseconds: self.nanoseconds.checked_multiply(factor)?))
 }
 
 impl Add[Duration] for Duration {
@@ -219,10 +210,7 @@ impl Divide[Int64] for Duration {
 
   fn divide(self, right: Int64) -> Option[Duration]
   {
-    match self.nanoseconds.checked_divide(right) {
-      Some(quotient) => Some(Duration(nanoseconds: quotient))
-      None => None
-    }
+    Some(Duration(nanoseconds: self.nanoseconds.checked_divide(right)?))
   }
 }
 
@@ -503,19 +491,13 @@ public fn Instant.from_unix_nanoseconds(nanoseconds: Int64) -> Instant
 public fn Instant.from_unix_milliseconds(milliseconds: Int64) -> Option[Instant]
   cost time O(1)
 {
-  match milliseconds.checked_multiply(1000000) {
-    Some(nanoseconds) => Some(Instant(nanoseconds: nanoseconds))
-    None => None
-  }
+  Some(Instant(nanoseconds: milliseconds.checked_multiply(1000000)?))
 }
 
 public fn Instant.from_unix_seconds(seconds: Int64) -> Option[Instant]
   cost time O(1)
 {
-  match seconds.checked_multiply(1000000000) {
-    Some(nanoseconds) => Some(Instant(nanoseconds: nanoseconds))
-    None => None
-  }
+  Some(Instant(nanoseconds: seconds.checked_multiply(1000000000)?))
 }
 
 public fn Instant.unix_nanoseconds(self) -> Int64
@@ -545,19 +527,13 @@ public fn Instant.duration_since(self, earlier: Instant) -> Duration
 public fn Instant.checked_add(self, duration: Duration) -> Option[Instant]
   cost time O(1)
 {
-  match self.nanoseconds.checked_add(duration.nanoseconds) {
-    Some(sum) => Some(Instant(nanoseconds: sum))
-    None => None
-  }
+  Some(Instant(nanoseconds: self.nanoseconds.checked_add(duration.nanoseconds)?))
 }
 
 public fn Instant.checked_subtract(self, duration: Duration) -> Option[Instant]
   cost time O(1)
 {
-  match self.nanoseconds.checked_subtract(duration.nanoseconds) {
-    Some(difference) => Some(Instant(nanoseconds: difference))
-    None => None
-  }
+  Some(Instant(nanoseconds: self.nanoseconds.checked_subtract(duration.nanoseconds)?))
 }
 
 impl Add[Duration] for Instant {
@@ -824,13 +800,8 @@ internal fn DateTime.instant(self, offset_seconds: Int64) -> Option[Instant]
   let days: Int64 = intrinsic::convert(self.date.days_since_epoch)
   let within: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
   let near: Int64 = if days < -2 { -2 } else if days > 2 { 2 } else { days }
-  match (days - near).checked_multiply(86400000000000) {
-    Some(whole) => match whole.checked_add(near * 86400000000000 + within - offset_seconds * 1000000000) {
-      Some(nanoseconds) => Some(Instant(nanoseconds: nanoseconds))
-      None => None
-    }
-    None => None
-  }
+  let whole = (days - near).checked_multiply(86400000000000)?
+  Some(Instant(nanoseconds: whole.checked_add(near * 86400000000000 + within - offset_seconds * 1000000000)?))
 }
 
 internal fn write_fraction(output: mut TextBuilder, value: UInt64, digits: USize)
@@ -1427,10 +1398,7 @@ public fn Date.week_of_year(self) -> UInt8
 public fn Date.plus_days(self, days: Int32) -> Option[Date]
   cost time O(1)
 {
-  match self.days_since_epoch.checked_add(days) {
-    Some(sum) => Some(Date(days_since_epoch: sum))
-    None => None
-  }
+  Some(Date(days_since_epoch: self.days_since_epoch.checked_add(days)?))
 }
 
 public fn Date.plus_months(self, months: Int32) -> Option[Date]
@@ -1624,13 +1592,11 @@ public fn DateTime.plus(self, duration: Duration) -> Option[DateTime]
   let within: Int64 = intrinsic::convert(self.time.nanoseconds_since_midnight)
   let total = within + rest
   let carried: Int64 = if total >= 86400000000000 { 1 } else { 0 }
-  match self.date.plus_days(intrinsic::convert(days + carried)) {
-    Some(date) => Some(DateTime(
-      date: date,
-      time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(total - carried * 86400000000000)),
-    ))
-    None => None
-  }
+  let date = self.date.plus_days(intrinsic::convert(days + carried))?
+  Some(DateTime(
+    date: date,
+    time: TimeOfDay(nanoseconds_since_midnight: intrinsic::convert(total - carried * 86400000000000)),
+  ))
 }
 
 impl Display for DateTime {
@@ -1837,10 +1803,8 @@ fn count_at(bytes: Slice[UInt8], at: USize) -> Option[USize]
   ensures !(result is Some(count) && count > 4294967295)
   cost time O(1)
 {
-  match big_endian(bytes, at: at, width: 4) {
-    Some(value) => Some(intrinsic::convert(value % 4294967296))
-    None => None
-  }
+  let value = big_endian(bytes, at: at, width: 4)?
+  Some(intrinsic::convert(value % 4294967296))
 }
 
 fn read_header(bytes: Slice[UInt8], at: USize, time_width: USize) -> Option[ZoneHeader]
@@ -2180,13 +2144,8 @@ fn instant_at(seconds: Int64, nanoseconds: Int64) -> Option[Instant]
   requires 0 <= nanoseconds && nanoseconds < 1000000000
   cost time O(1)
 {
-  match seconds.checked_multiply(1000000000) {
-    Some(whole) => match whole.checked_add(nanoseconds) {
-      Some(total) => Some(Instant(nanoseconds: total))
-      None => None
-    }
-    None => None
-  }
+  let whole = seconds.checked_multiply(1000000000)?
+  Some(Instant(nanoseconds: whole.checked_add(nanoseconds)?))
 }
 
 public fn TimeZone.to_instant(self, local: DateTime) -> Option[LocalInstant]

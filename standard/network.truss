@@ -215,21 +215,6 @@ internal fn is_dotted_quad_at(text: StringSlice, from: USize) -> Bool
   index > from && index < text.length() && text.byte(index) == 46
 }
 
-internal fn hexadecimal_value(byte: UInt8) -> UInt16
-  ensures result <= 16
-  cost time O(1)
-{
-  if byte >= 48 && byte <= 57 {
-    intrinsic::convert(byte - 48)
-  } else if byte >= 97 && byte <= 102 {
-    intrinsic::convert(byte - 87)
-  } else if byte >= 65 && byte <= 70 {
-    intrinsic::convert(byte - 55)
-  } else {
-    16
-  }
-}
-
 internal type Group(value: UInt16, end: USize)
 
 internal fn parse_group(text: StringSlice, from: USize) -> Result[Group, AddressError]
@@ -240,7 +225,7 @@ internal fn parse_group(text: StringSlice, from: USize) -> Result[Group, Address
 {
   var value: UInt16 = 0
   var index = from
-  while index < text.length() && index - from < 4 && hexadecimal_value(text.byte(index)) < 16
+  while index < text.length() && index - from < 4 && text.byte(index).digit_value() < 16
     invariant from <= index
     invariant index <= text.length()
     invariant index - from <= 4
@@ -250,7 +235,8 @@ internal fn parse_group(text: StringSlice, from: USize) -> Result[Group, Address
     invariant index - from <= 3 ==> value < 4096
     decreases from + 4 - index
   {
-    value = value * 16 + hexadecimal_value(text.byte(index))
+    let digit: UInt16 = intrinsic::convert(text.byte(index).digit_value())
+    value = value * 16 + digit
     index += 1
   }
   if index == from {
@@ -398,20 +384,21 @@ internal fn address_within(text: StringSlice, from: USize, to: USize) -> Result[
   }
 }
 
-internal fn parse_number(text: StringSlice, from: USize, limit: UInt32) -> Result[UInt32, AddressError]
-  requires from <= text.length()
+internal fn parse_number(text: StringSlice, from: USize, to: USize, limit: UInt32) -> Result[UInt32, AddressError]
+  requires from <= to
+  requires to <= text.length()
   requires limit <= 65535
   ensures !(result is Ok(value) && value > limit)
   ensures !(result is Err(error) && error.offset > text.length())
-  cost time O(text.length() - from)
+  cost time O(to - from)
 {
   var value: UInt32 = 0
   var index = from
-  while index < text.length()
+  while index < to
     invariant from <= index
-    invariant index <= text.length()
+    invariant index <= to
     invariant value <= limit
-    decreases text.length() - index
+    decreases to - index
     cost time O(index - from)
   {
     let byte = text.byte(index)
@@ -492,7 +479,7 @@ impl text::Parse for SocketAddress {
       return Err(AddressError(offset: 0))
     }
     let colon = if bracketed { expect_byte(text, from: close + 1, byte: 58)? } else { close + 1 }
-    let port = parse_number(text, from: colon, limit: 65535)?
+    let port = parse_number(text, from: colon, to: text.length(), limit: 65535)?
     Ok(SocketAddress(address: address, port: intrinsic::convert(port)))
   }
 }
@@ -575,7 +562,7 @@ impl text::Parse for IpNetwork {
       return Err(AddressError(offset: slash))
     }
     let address = address_within(text, from: 0, to: slash)?
-    let length = parse_number(text, from: slash + 1, limit: 128)?
+    let length = parse_number(text, from: slash + 1, to: text.length(), limit: 128)?
     match IpNetwork.new(address, prefix_length: intrinsic::convert(length)) {
       Some(network) => Ok(network)
       None => Err(AddressError(offset: slash + 1))
