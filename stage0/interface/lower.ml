@@ -4,7 +4,7 @@ type context = {
   database : Query.context;
   resolved : Resolve.resolved;
   bounds : (Types.parameter, Types.trait_reference list) Hashtbl.t;
-  self_type : Types.ty option;  (** What [Self] means here. *)
+  self_type : Types.ty option;  (** The meaning of [Self] here. *)
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability list) list;
@@ -85,7 +85,7 @@ let rec type_ context (written : type_expression) : Types.ty =
   | Function_type function_type -> Types.Function (function_type_ context function_type)
   | Type_error -> Types.Error (Resolve.Parts.recovery_report written.span)
 
-(* What [Self] means, which only lowering knows: resolution cannot tell a
+(* The meaning of [Self], which only lowering knows: resolution cannot tell a
    method of a type from a function. *)
 and self context (span : span) =
   match context.self_type with
@@ -375,7 +375,7 @@ and uses context clauses =
        (fun (clause : clause) -> match clause.kind with Uses written -> written | _ -> [])
        clauses)
 
-(* A function type's cost clauses. What [calls] counts there is a
+(* A function type's cost clauses. There [calls] counts a
    capability's calls: a type cannot name a parameter, whose calls a
    function's own clauses count. *)
 and costs context clauses =

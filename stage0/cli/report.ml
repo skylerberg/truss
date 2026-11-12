@@ -1,8 +1,8 @@
 (* The diagnostics of the packages a command is about, shown for people on
-   standard error or as JSON. What is wrong with a manifest is a problem in
-   the code too: what reading the manifests shows, which the session finds
-   before any file is checked, and what only a package's code shows of its
-   own. *)
+   standard error or as JSON. An error in a manifest is a problem in the code
+   too: the errors reading the manifests shows, which the session finds
+   before any file is checked, and the errors only a package's code shows
+   in its own. *)
 
 type file = { module_ : Path.module_; source : Source.t; diagnostics : Diagnostic.t list }
 

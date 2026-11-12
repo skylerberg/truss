@@ -29,12 +29,12 @@ let unfinished (project : Project.t) =
     (Project.modules project)
 
 (* The files a package is published as: its own, with the lock file that
-   records what it is published with in place of its project's. *)
+   records its dependencies at publication in place of its project's. *)
 let files (package : Project.package) (record : Lock.t) =
   List.filter (fun (path, _) -> path <> "truss.lock") (Registry.Content.files package.directory)
   @ if record = [] then [] else [ ("truss.lock", Lock.print record) ]
 
-(* What a package is published with: each registry package its code reaches,
+(* A package's dependencies at publication: each registry package its code reaches,
    its tests apart, at the build's version. A dependency that is one of the
    project's packages counts as the registry's only when its files are
    those of a version the registry holds, which is then its version. Each
@@ -67,7 +67,7 @@ let record (project : Project.t) registry (package : Project.package) =
         match (in_registry name, directory_of name) with
         | Some (_, version, hash), _ ->
             add name version hash;
-            (* What a registry package takes on is in the build already. *)
+            (* A registry package's own dependencies are in the build already. *)
             List.iter
               (fun next -> if in_registry next <> None || directory_of next <> None then visit next)
               (dependencies ~code:false name)
@@ -133,7 +133,7 @@ let failed_tests (project : Project.t) (package : Project.package) =
                  ])
              tests records)
 
-(* The name a package would be published under once it breaks what its
+(* The name a package would be published under once it breaks the API its
    name has offered: the next number after [_v]. *)
 let next_name (package : Path.package) =
   let major = Version.major_of_name package in
@@ -174,11 +174,11 @@ let decide (project : Project.t) registry (package : Project.package) =
               in
               let breaks =
                 List.map
-                  (fun (path, what) ->
+                  (fun (path, reason) ->
                     let was = Signatures.of_path (Database.context published) path
                     and now = Signatures.of_path project.context path in
                     String.concat ""
-                      (Printf.sprintf "%s %s." (Path.show path) what
+                      (Printf.sprintf "%s %s." (Path.show path) reason
                       ::
                       (if was <> now then
                          List.filter_map Fun.id
@@ -199,7 +199,7 @@ let decide (project : Project.t) registry (package : Project.package) =
               if breaks <> [] then
                 Refused
                   (Printf.sprintf
-                     "This would break what `%s` %s offers, so it cannot be published under that \
+                     "This would break the API of `%s` %s, so it cannot be published under that \
                       name:"
                      (Path.show_package name) (Version.show version)
                    :: List.map (fun sentence -> "  " ^ sentence) breaks
@@ -281,11 +281,11 @@ let run ~directory ~json =
                          ( "grows",
                            Json.List
                              (List.map
-                                (fun (path, what) ->
+                                (fun (path, addition) ->
                                   Json.Object
                                     [
                                       ("path", Json.String (Path.show path));
-                                      ("what", Json.String what);
+                                      ("addition", Json.String addition);
                                     ])
                                 grows) );
                        ])
@@ -293,7 +293,7 @@ let run ~directory ~json =
                   Output.printf "Published `%s` %s.\n" (Path.show_package name)
                     (Version.show version);
                   List.iter
-                    (fun (path, what) -> Output.printf "  %s %s.\n" (Path.show path) what)
+                    (fun (path, addition) -> Output.printf "  %s %s.\n" (Path.show path) addition)
                     grows
                 end;
                 0))

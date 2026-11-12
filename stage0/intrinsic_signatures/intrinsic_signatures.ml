@@ -287,7 +287,7 @@ type amount = Argument of int | Generic of string
 type allocations = No_allocations | One_if_positive of amount | Unknown_allocations
 type cost = { time : time; allocations : allocations }
 
-(* What each operation costs, as the prover trusts it. Arithmetic, and
+(* Each operation's cost, as the prover trusts it. Arithmetic, and
    reading or swapping in place, take a fixed number of steps and allocate
    nothing. Making a storage with room for some elements takes a fixed
    number of steps and allocates one block, unless the room is for none. Moving or comparing the elements of a storage or a view, as

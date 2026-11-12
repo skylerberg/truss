@@ -1,7 +1,7 @@
-(* What a state's graph answers. Every answer names definitions and parts;
+(* Graph questions about a state. Every answer names definitions and parts;
    the engine's nodes stay inside. *)
 
-(* What a node's definition reads of other definitions: its reads, through
+(* The parts of other definitions a node's definition reads: its reads, through
    nodes about no definition, to the definitions and parts they reach. *)
 let definition_reads engine memo node =
   let own = Option.map (fun (subject : Query.subject) -> subject.path) (Engine.subject node) in
@@ -36,8 +36,8 @@ let definition_reads engine memo node =
 
 type dependencies = (Path.t, (Path.t * string * string) list) Hashtbl.t
 
-(* For every definition a state holds results about, what it reads of every
-   other. *)
+(* For every definition a state holds results about, the parts of every
+   other it reads. *)
 let dependencies engine : dependencies =
   let memo = Hashtbl.create 1024 in
   let table = Hashtbl.create 256 in
@@ -70,8 +70,8 @@ let readers (table : dependencies) target =
 type difference = Changed | Added | Same
 
 (* Every node of [mine] that may differ from the same node in [theirs],
-   with how it compares. A state holds only what differs from its bases, or
-   may, so where the two share a base these are the nodes either holds
+   with how it compares. A state holds only its differences from its bases, or
+   possible ones, so where the two share a base these are the nodes either holds
    itself; a base that only one has is compared whole. *)
 let compare_nodes mine theirs =
   let differs node =

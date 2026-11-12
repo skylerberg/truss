@@ -36,7 +36,7 @@ let stop_at_diagnostics ?proofs ~json project =
     raise (Stop 1)
   end
 
-let what = function `Todo -> "`todo`" | `Echo -> "`echo`"
+let construct_name = function `Todo -> "`todo`" | `Echo -> "`echo`"
 
 let unshippable_json project (unshippable : Compile.unshippable) =
   Json.Object
@@ -65,7 +65,8 @@ let refuse_unshippable ~json ~echo (project : Project.t) compile main =
             Output.eprintf
               "%s:%d:%d: %s can be reached from `main`, so the program cannot be built.\n    %s\n"
               (Project.shown_workspace_path project unshippable.file)
-              unshippable.line unshippable.column (what unshippable.failure)
+              unshippable.line unshippable.column
+              (construct_name unshippable.failure)
               (String.concat " -> " (List.map Path.show unshippable.way)))
           unshippable;
       raise (Stop 1)

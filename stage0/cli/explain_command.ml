@@ -1,5 +1,5 @@
-(* [truss explain FILE:LINE:COLUMN]: what is at a position: the name or
-   expression there, what it means, its type, and the signature of the
+(* [truss explain FILE:LINE:COLUMN]: the entity at a position: the name or
+   expression there, its meaning, its type, and the signature of the
    definition it refers to. *)
 
 module Names = Resolve.Names

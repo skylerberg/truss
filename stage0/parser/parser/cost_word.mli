@@ -3,4 +3,6 @@ type t = Amortized | Time | Allocations | Allocated_bytes | Calls | O | Finite |
 val spellings : (string * t) list
 val of_token : Token.kind -> t option
 val resources : t list
-val expect : ?suggested:t list -> Cursor.t -> accepted:t list -> what:string -> expected:string -> t
+
+val expect :
+  ?suggested:t list -> Cursor.t -> accepted:t list -> category:string -> expected:string -> t

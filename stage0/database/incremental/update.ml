@@ -2,10 +2,10 @@ open Nodes
 open Edges
 open Values
 
-let phase_error (reader : node) what =
+let phase_error (reader : node) read_label =
   invalid_arg
     (Printf.sprintf "Incremental: %s, of phase %d, reads %s, of a later phase" (label reader)
-       reader.phase what)
+       reader.phase read_label)
 
 (* A root, a copy of a base's node, or a node something reads. A node that
    is none of these is unnecessary. *)
@@ -27,7 +27,7 @@ and ensure_result : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) res
     | Some _, _ | None, (Hashed _ | Opaque _) -> ()
     | None, Unknown -> if not (adopt_new engine query cell) then compute engine query cell
 
-(* Checks what a marked result read, in order, and computes it again only
+(* Checks a marked result's dependencies, in order, and computes it again only
    if one of those changed since it was last found current. The check stops
    at the first such read, since a later one may not be read at all once an
    earlier one gives a different answer. *)
@@ -126,7 +126,7 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
     node.changed_at <- tick engine;
     Dynarray.add_last engine.changed node;
     engine.tally.changes <- engine.tally.changes + 1;
-    (* What read a result while it was first being computed is on a cycle
+    (* A reader of a result while it was first being computed is on a cycle
        with it, and has the cycle as its result, as this one has. *)
     if not first then seed engine node
   end;
@@ -138,9 +138,9 @@ and compute : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_ce
   Hashtbl.replace engine.unsaved node.id node
 
 (* Looks for a result as a fact, under the key of [candidates], which are
-   what it read before, with the fingerprints they have now. A fact found
+   its earlier dependencies, with the fingerprints they have now. A fact found
    was computed from reads with exactly these fingerprints, and a query is a
-   function of what it reads, so computing it now would read the same and
+   function of its reads, so computing it now would read the same and
    give the same. *)
 and adopt :
     'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cell -> node list -> bool =
@@ -193,8 +193,8 @@ and adopt :
                 true))
   | _ -> false
 
-(* A result the engine has never held: what a result of its query and key
-   read, wherever one was first computed, says what to look for. *)
+(* A result the engine has never held: the dependencies of a result of its
+   query and key, wherever one was first computed, give the key to look for. *)
 and adopt_new : 'key 'value. t -> ('key, 'value) query -> ('key, 'value) result_cell -> bool =
  fun engine query cell ->
   match engine.store with
@@ -227,7 +227,7 @@ let lowest engine =
   in
   find 0
 
-(* Marks what reads a result that changed, for one phase. *)
+(* Marks the readers of a result that changed, for one phase. *)
 let mark_seeds engine phase =
   let seeds = engine.seeds.(phase) in
   engine.seeds.(phase) <- [];
@@ -257,7 +257,7 @@ let rec settle_marks engine phase =
       settle_marks engine phase
 
 (* Brings the phases up to and including [through] up to date. The later
-   ones keep what is queued for them. *)
+   ones keep their queued results. *)
 let rec settle ?(through = phases - 1) engine =
   if engine.waiting > 0 then
     match lowest engine with

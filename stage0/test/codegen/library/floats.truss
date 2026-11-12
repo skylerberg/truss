@@ -148,7 +148,7 @@ test "a hypotenuse does not overflow on the way" {
   assert single.hypotenuse(8.0) == 10.0
 }
 
-test "a sum keeps what each addition rounds away" {
+test "a sum keeps the error each addition rounds away" {
   let tenths: List[Float64] = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
   assert Float64.sum(tenths) == 1.0
   let cancelling: List[Float64] = [1.0e100, 1.0, -1.0e100]

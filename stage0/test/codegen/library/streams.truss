@@ -78,7 +78,7 @@ test "a reader that gives a little at a time is read to an exact count, to its e
   }
 }
 
-test "a byte reader gives its bytes, and a byte writer keeps what it is given" {
+test "a byte reader gives its bytes, and a byte writer keeps its input" {
   provide streams::NoHandles() {
     let bytes: List[UInt8] = [1, 2, 3, 4, 5]
     var reader = streams::ByteReader.new(bytes)
@@ -121,7 +121,7 @@ test "a buffered reader gives lines, with either line end or none at the end" {
   }
 }
 
-test "a buffered reader reads up to a byte, shows what is coming, and returns its source" {
+test "a buffered reader reads up to a byte, peeks at the next bytes, and returns its source" {
   provide streams::NoHandles() {
     var reader = streams::BufferedReader.new(drip("key=value;rest", step: 5), capacity: 4)
     var buffer: List[UInt8] = []

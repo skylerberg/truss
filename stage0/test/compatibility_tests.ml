@@ -23,8 +23,8 @@ let show (actual, _) =
   List.map
     (fun ({ path; change } : Compatibility.public_change) ->
       match change with
-      | Breaks what -> Printf.sprintf "breaks: %s %s" (Path.show path) what
-      | Grows what -> Printf.sprintf "grows: %s %s" (Path.show path) what)
+      | Breaks reason -> Printf.sprintf "breaks: %s %s" (Path.show path) reason
+      | Grows addition -> Printf.sprintf "grows: %s %s" (Path.show path) addition)
     actual
 
 let expect before after expected =
@@ -90,12 +90,12 @@ let () =
       expect timed pure [ "grows: lib::shapes::stamp uses fewer capabilities" ]);
   test "a requires that is added breaks, and one that is dropped grows" (fun () ->
       let guarded = area "  requires side > 0\n" in
-      expect (area "") guarded [ "breaks: lib::shapes::area requires what it did not" ];
+      expect (area "") guarded [ "breaks: lib::shapes::area requires more" ];
       expect guarded (area "") [ "grows: lib::shapes::area requires less" ]);
   test "an ensures that is added grows, and one that is dropped breaks" (fun () ->
       let promised = area "  ensures result == side\n" in
       expect (area "") promised [ "grows: lib::shapes::area ensures more" ];
-      expect promised (area "") [ "breaks: lib::shapes::area no longer ensures what it did" ]);
+      expect promised (area "") [ "breaks: lib::shapes::area ensures less" ]);
   test "a cost that is added grows, and one that is dropped breaks" (fun () ->
       let bounded = area "  cost time O(1)\n" in
       expect (area "") bounded

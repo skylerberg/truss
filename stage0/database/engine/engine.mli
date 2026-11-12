@@ -3,7 +3,7 @@
     stages see {!Query}. *)
 
 type t = Incremental.t
-(** One state: what differs from its bases, with the rest read from them. *)
+(** One state: its differences from its bases, with the rest read from them. *)
 
 val seal : unit -> unit
 (** Rejects every input and query declared from now on. The database calls it before it opens a
@@ -39,8 +39,8 @@ type node = Incremental.node
 type change = Incremental.change = { computed : node list; changed : node list }
 
 val stabilize : t -> change
-(** Brings every result the engine holds up to date, and returns what was computed since the last
-    call, and what came out different. *)
+(** Brings every result the engine holds up to date, and returns the results computed since the last
+    call, and those that came out different. *)
 
 val executed : t -> string list
 (** The results computed since the log was last cleared, as ["name(key)"]: for a check that nothing
@@ -73,13 +73,13 @@ val nodes : t -> node list
 (** Every input and result of the state, apart from its fixed bases'. *)
 
 val differing : t -> node list
-(** The nodes the engine itself holds: what differs from its bases, or may. *)
+(** The nodes the engine itself holds: those that differ from its bases, or may. *)
 
 val unshared : t -> t -> node list
 (** The nodes of an engine that may differ from another's. *)
 
 val identity : node -> string
-(** What names a node in every engine. *)
+(** A node's name in every engine. *)
 
 val count : t -> int
 val label : node -> string
@@ -97,13 +97,13 @@ val same_outcome : t -> node -> t -> node -> bool
 
 (** {1 States and facts in the store}
 
-    A state is written as an artifact: the whole state, or what changed since an earlier artifact.
+    A state is written as an artifact: the whole state, or its changes since an earlier artifact.
     Values are put in the store by fingerprint, and each saved result is also kept as a fact, under
-    the key of what it read, so that any state whose reads have the same fingerprints finds it. *)
+    the key of its reads, so that any state whose reads have the same fingerprints finds it. *)
 
 val attach : t -> Store.t -> version:string -> unit
-(** Keeps the engine's values and facts in the store. [version] names what computed them, and is
-    part of every key. *)
+(** Keeps the engine's values and facts in the store. [version] names the compiler that computed
+    them, and is part of every key. *)
 
 val record_facts : t -> unit
 (** Keeps a fact for each saved result computed since the last call. *)
@@ -151,9 +151,9 @@ val forget_bases : unit -> unit
 (** {1 Checking the engine} *)
 
 val audit : ?include_bases:bool -> ?before:Query.phase -> t -> string list
-(** A line for each result that differs from what a new engine with the same inputs computes. With
+(** A line for each result that differs from a new engine's result with the same inputs. With
     [before], only the results of the phases before that one are computed again, which leaves out
-    what is costly to compute and audited elsewhere, such as proofs. *)
+    results that are costly to compute and audited elsewhere, such as proofs. *)
 
 val audit_all : unit -> string list
 (** Audits every engine made since {!auditing} was set that did work since its last audit. *)

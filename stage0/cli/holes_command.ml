@@ -1,5 +1,5 @@
 (* [truss holes]: every [todo], with the type it must have, the names in
-   scope there, and what it blocks. *)
+   scope there, and the work it blocks. *)
 
 module Names = Resolve.Names
 
@@ -48,8 +48,8 @@ let gather (project : Project.t) paths =
         (Query.demand project.context Names.declarations module_))
     (Project.selected project paths)
 
-(* What each hole blocks: [main], if the program can reach it, and every
-   test that can, through what each reads, directly or not. *)
+(* The work each hole blocks: [main], if the program can reach it, and every
+   test that can, through the definitions' reads, directly or not. *)
 let fill_blocks (project : Project.t) holes =
   if holes <> [] then begin
     let dependencies = Database.dependencies project.session in

@@ -244,7 +244,7 @@ let run ~directory ~paths ~match_ ~timings:show_timings ~rerun ~json ~sanitize =
       }
     in
     let build_ended = ref None in
-    (* A sanitized run keeps no results, since it checks what a plain one
+    (* A sanitized run keeps no results, since it checks properties a plain one
        does not. *)
     let results = if sanitize then None else Some (Compiler.test_results ()) in
     let outcome =

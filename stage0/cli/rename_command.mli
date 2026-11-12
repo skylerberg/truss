@@ -1,6 +1,6 @@
 module Names = Resolve.Names
 
-type what = Definition of Path.t | Module of Path.module_
+type target = Definition of Path.t | Module of Path.module_
 
 type plan = {
   edits : (Path.module_ * Diagnostic.span Diagnostic.edit list) list;

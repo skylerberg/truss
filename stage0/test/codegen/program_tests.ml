@@ -322,7 +322,7 @@ let () =
              ])
         (in_terminal ());
       (* Run as it is, the program has this test's terminal, which a run
-         under CI lacks. Only there can the test say what it finds. *)
+         under CI lacks. Only there can the test report its findings. *)
       match Unix.openfile "/dev/tty" [ O_RDWR ] 0 with
       | terminal -> Unix.close terminal
       | exception Unix.Unix_error _ ->
@@ -488,12 +488,12 @@ let () =
       expect_string ~expected:"0: first\n1: second \xef\xbf\xbd line\n2: last\n" output)
 
 let () =
-  test "a line longer than a block is read whole, and what follows it is kept" (fun () ->
+  test "a line longer than a block is read whole, and the text after it is kept" (fun () ->
       let long = String.make 150_000 'x' in
       let status, output, _ =
         run_main
           ~input:(long ^ "\nshort\n" ^ long)
-          Fixtures.Program.line_longer_than_a_block_is_read_whole_and_what
+          Fixtures.Program.line_longer_than_a_block_is_read_whole_and_the
       in
       expect_int ~expected:0 status;
       expect_string ~expected:"150000\n5\n150000\n" output);

@@ -30,7 +30,7 @@ let file =
 
 let package database name = Query.demand database Project.package name
 
-(* What a package's manifest says, one thing at a time: a result that reads
+(* A package's manifest, one field at a time: a result that reads
    only a package's modules is not recomputed when its dependencies
    change, and the other way round. *)
 let modules =

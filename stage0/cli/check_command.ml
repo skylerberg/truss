@@ -3,7 +3,7 @@
 
 (* The fixes of one round in one file: each diagnostic's only fix, leaving
    out any whose edits overlap an earlier one's, since applying both could
-   not give what either meant. They are applied in the next round once the
+   give a result neither intended. They are applied in the next round once the
    file is checked again. *)
 let chosen (diagnostics : Diagnostic.t list) =
   let overlaps (left : Diagnostic.span Diagnostic.edit) (right : Diagnostic.span Diagnostic.edit) =

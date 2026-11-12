@@ -45,7 +45,7 @@ val builtin : Intrinsic.builtin -> Ground.ty
    type lists it. *)
 val panic_capability : Path.t
 
-(* What a ground type is made of, for its layout. *)
+(* A ground type's shape, for its layout. *)
 val shape : context -> Ground.ty -> Memory_layout.shape
 
 (* How a ground type holds its value: its shape, or a built-in representation. *)

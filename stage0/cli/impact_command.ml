@@ -14,7 +14,7 @@ type change = {
   before : string option;  (** The signature at the base, when it changed *)
   after : string option;  (** The signature now *)
   read_by : (Path.t * string * string) list;
-      (** What reads its changed signature: each reader, its part, and the part it reads *)
+      (** The readers of its changed signature: each reader, its part, and the part it reads *)
 }
 
 let declarations context packages =

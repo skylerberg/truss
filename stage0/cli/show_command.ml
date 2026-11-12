@@ -23,7 +23,7 @@ let declarations database (module_ : Path.module_) =
 let package_modules database package = Query.demand database Workspace.modules package
 
 (* Whether the packages a command is about can see a definition: anything
-   in them, and only what is public elsewhere. *)
+   in them, and only public definitions elsewhere. *)
 let visible (project : Project.t) (declaration : Names.declaration) =
   Project.is_own project declaration.module_ || Names.is_public declaration.visibility
 
@@ -45,7 +45,7 @@ let resolve (project : Project.t) text =
   let module_ = if argument.member = None then as_module database argument.names else None in
   match (Workspace.split_module database argument.names, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
-      (* A package: what it makes public. *)
+      (* A package: its public definitions. *)
       List.filter
         (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
         (in_package package)

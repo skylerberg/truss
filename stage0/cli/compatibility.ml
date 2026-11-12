@@ -1,6 +1,6 @@
 (* Whether a release of a package is compatible with the release before it,
    read from the two releases' public definitions. The types of a signature
-   are compared as the checker worked them out, and a contract as it is
+   are compared as the checker inferred them, and a contract as it is
    written: a `requires` may lose clauses, an `ensures` and a cost may gain
    them. Whether a yielding method can be pulled is the one thing read from
    a body. *)
@@ -40,12 +40,10 @@ let contract ~(before : clause list) ~(after : clause list) =
   let cost_before, cost_after = pair `Cost in
   List.concat
     [
-      (if missing_from requires_before requires_after <> [] then
-         [ Breaks "requires what it did not" ]
+      (if missing_from requires_before requires_after <> [] then [ Breaks "requires more" ]
        else if missing_from requires_after requires_before <> [] then [ Grows "requires less" ]
        else []);
-      (if missing_from ensures_after ensures_before <> [] then
-         [ Breaks "no longer ensures what it did" ]
+      (if missing_from ensures_after ensures_before <> [] then [ Breaks "ensures less" ]
        else if missing_from ensures_before ensures_after <> [] then [ Grows "ensures more" ]
        else []);
       (if missing_from cost_after cost_before <> [] then
@@ -203,8 +201,8 @@ let trait ~(before : Types.trait_interface) ~(after : Types.trait_interface) ~be
       (fun (was : Types.trait_method) ->
         let named change =
           match change with
-          | Breaks what -> Breaks (Printf.sprintf "its method `%s` %s" was.method_name what)
-          | Grows what -> Grows (Printf.sprintf "its method `%s` %s" was.method_name what)
+          | Breaks reason -> Breaks (Printf.sprintf "its method `%s` %s" was.method_name reason)
+          | Grows addition -> Grows (Printf.sprintf "its method `%s` %s" was.method_name addition)
         in
         match List.find_opt (same was) after.methods with
         | None -> [ Breaks (Printf.sprintf "no longer has the method `%s`" was.method_name) ]
@@ -377,10 +375,12 @@ let compare ~before ~after package =
 
 let breaks changes =
   List.filter_map
-    (fun { path; change } -> match change with Breaks what -> Some (path, what) | Grows _ -> None)
+    (fun { path; change } ->
+      match change with Breaks reason -> Some (path, reason) | Grows _ -> None)
     changes
 
 let grows changes =
   List.filter_map
-    (fun { path; change } -> match change with Grows what -> Some (path, what) | Breaks _ -> None)
+    (fun { path; change } ->
+      match change with Grows addition -> Some (path, addition) | Breaks _ -> None)
     changes

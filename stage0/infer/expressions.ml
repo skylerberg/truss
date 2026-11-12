@@ -261,7 +261,7 @@ and bracket state env ?expected (value : expression) (base : expression) items =
       (* A name with type arguments, used as a value. *)
       match head state value with
       | Some resolution -> named state env value resolution
-      | None -> bug "type arguments are written after what is not a name")
+      | None -> bug "type arguments are written after an expression that is not a name")
   | Some Method_bracket -> (
       (* Name resolution cannot tell a field from a method before the dot. A
          field followed by brackets is an index expression. *)

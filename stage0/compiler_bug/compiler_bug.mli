@@ -6,7 +6,7 @@
    precondition, which [while_doing] turns into a bug of the stage that called
    it. *)
 
-(* The stage that found the broken invariant, what it found, and the
+(* The stage that found the broken invariant, its message, and the
    compiler's context, innermost first. *)
 type t = { stage : string; message : string; doing : string list }
 
@@ -20,6 +20,6 @@ val bug : stage:string -> ('a, unit, string, 'b) format4 -> 'a
    or a failed [assert], becomes a bug of [stage]. *)
 val while_doing : stage:string -> string -> (unit -> 'a) -> 'a
 
-(* A bug as a report: the stage and what it found, then each thing the
-   compiler was doing, a line each. *)
+(* A bug as a report: the stage and its message, then each step of the
+   compiler's context, a line each. *)
 val to_string : t -> string

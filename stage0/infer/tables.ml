@@ -49,7 +49,7 @@ type call = {
           [compare], this is not the operator's own type. *)
 }
 
-(* What a name, member, or bracket expression resolves to, once types are
+(* The resolution of a name, member, or bracket expression, once types are
    known. *)
 type resolution =
   | Local_value of local
@@ -99,7 +99,7 @@ type template = {
   interpolated : bool;
 }
 
-(* What tools read of the tables. *)
+(* The tables tools read. *)
 type published = {
   types : Types.ty option array;
   local_types : Types.ty option array;

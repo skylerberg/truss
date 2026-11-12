@@ -530,7 +530,7 @@ let lower_definition database ~interface_of (key : Names.key) (definition : defi
     },
     context )
 
-(* The lowered interface of a definition, with what lowering reported. The
+(* The lowered interface of a definition, with lowering's diagnostics. The
    interface of a trait, an [impl], or a capability is assembled from its
    header and from the interface of each method written inside it. Each
    method's interface reads only the header, so neither query depends on

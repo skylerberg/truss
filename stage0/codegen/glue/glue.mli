@@ -43,7 +43,7 @@ val copy_signature : t -> Ground.ty -> Lir.signature
    pointer untyped and drops the value. *)
 val any_drop : t -> Ground.ty -> Lir.t
 
-(* What a debug or an encode function appends to: storage of bytes, which
+(* The buffer a debug or an encode function appends to: storage of bytes, which
    its caller owns. Each takes the address of one to change, after the
    value. *)
 val output_ty : Ground.ty

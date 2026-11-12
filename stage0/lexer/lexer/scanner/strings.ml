@@ -804,7 +804,7 @@ let format_field_edits cursor ~start ~stop =
   in
   edits start []
 
-(* What a string prefix of another language means. *)
+(* The meaning of a string prefix of another language. *)
 type prefix_kind = Format | Raw_text | Bytes
 
 let prefix_kind = function "f" | "$" -> Format | "r" | "@" -> Raw_text | _ -> Bytes

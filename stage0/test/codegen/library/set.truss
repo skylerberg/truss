@@ -119,7 +119,7 @@ test "a copy of a set changes on its own" {
   assert roomy.is_empty() && roomy == fresh
 }
 
-test "a seeded set starts empty and holds what is put in it" {
+test "a seeded set starts empty and holds its inserted elements" {
   provide random::SeededRandom.new(11) {
     var seeded: Set[Int64] = Set.seeded()
     assert seeded.is_empty()

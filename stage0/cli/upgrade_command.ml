@@ -1,6 +1,6 @@
 (* [truss upgrade]: moves the project's registry packages to other versions,
-   and says what that changes before the lock file is written. [truss add]
-   shares what it reports. *)
+   and reports the effects before the lock file is written. [truss add]
+   shares the report. *)
 
 module Lock = Registry.Lock
 module Version = Registry.Version
@@ -33,7 +33,7 @@ let wanted text =
               version)
       version )
 
-(* What a new lock file changes of the old. *)
+(* A new lock file's changes from the old. *)
 type change =
   | Entered of Lock.entry
   | Left of Lock.entry

@@ -24,11 +24,11 @@ let json =
           "Write one JSON document to standard output in place of the report for people, with \
            every diagnostic and the command's own fields.")
 
-let paths what =
+let paths targets =
   Arg.(
     value & pos_all string []
     & info [] ~docv:"FILE_OR_DIRECTORY"
-        ~doc:("Look only at the " ^ what ^ " in these files and directories."))
+        ~doc:("Look only at the " ^ targets ^ " in these files and directories."))
 
 (* Hidden from the commands' help: for testing the compiler. *)
 let sanitize =
@@ -41,7 +41,7 @@ let sanitize =
 
 let exits =
   [
-    Cmd.Exit.info 0 ~doc:"when the command did what was asked and the code had no problem.";
+    Cmd.Exit.info 0 ~doc:"when the command succeeded and the code had no problem.";
     Cmd.Exit.info 1
       ~doc:"when the code has a problem: a diagnostic, a test that did not pass, a refused build.";
     Cmd.Exit.info 2 ~doc:"when the command could not do its job.";
@@ -56,7 +56,7 @@ let check =
       & info [ "fix" ]
           ~doc:
             "Apply every fix that is the only fix its diagnostic offers, check again, and repeat \
-             until none is left, then report what remains.")
+             until none is left, then report the remaining diagnostics.")
   in
   let no_proofs =
     Arg.(
@@ -139,7 +139,7 @@ let build =
 
 let holes =
   command "holes"
-    ~doc:"List every $(b,todo), with its type, the names in scope, and what it blocks."
+    ~doc:"List every $(b,todo), with its type, the names in scope, and the work it blocks."
     Term.(
       const (fun directory paths json -> Outcome.Exit (Holes_command.run ~directory ~paths ~json))
       $ directory $ paths "holes" $ json)
@@ -188,14 +188,14 @@ let name_argument =
            $(b,Forecast.summary).")
 
 let references =
-  command "references" ~doc:"List what reads a definition, part by part."
+  command "references" ~doc:"List a definition's readers, part by part."
     Term.(
       const (fun directory name json ->
           Outcome.Exit (Graph_command.run ~directory ~direction:References ~name ~json))
       $ directory $ name_argument $ json)
 
 let dependencies =
-  command "dependencies" ~doc:"List what a definition reads, part by part."
+  command "dependencies" ~doc:"List a definition's dependencies, part by part."
     Term.(
       const (fun directory name json ->
           Outcome.Exit (Graph_command.run ~directory ~direction:Dependencies ~name ~json))
@@ -209,7 +209,9 @@ let explain =
       & info [] ~docv:"FILE:LINE:COLUMN" ~doc:"A position, as diagnostics give them.")
   in
   command "explain"
-    ~doc:"Say what is at a position: what a name means, its type, and the signature it refers to."
+    ~doc:
+      "Describe the entity at a position: a name's meaning, its type, and the signature it refers \
+       to."
     Term.(
       const (fun directory position json ->
           Outcome.Exit (Explain_command.run ~directory ~position ~json))
@@ -264,7 +266,7 @@ let upgrade =
   command "upgrade"
     ~doc:
       "Move the project's registry packages to their newest versions, or the packages named to \
-       theirs or to the version written after $(b,@), and say what that changes."
+       theirs or to the version written after $(b,@), and report the effects."
     Term.(
       const (fun directory names json -> Outcome.Exit (Upgrade_command.run ~directory ~names ~json))
       $ directory
@@ -496,7 +498,7 @@ let clean_store () =
       Output.eprintf "Cannot delete %s: %s\n" directory (Unix.error_message error);
       2
 
-(* The directory a command line is about: what [-C] names, from the current
+(* The directory a command line is about: the one [-C] names, from the current
    directory, or the current directory. Its project's background process is
    the one that answers. *)
 let directory_of arguments =

@@ -65,12 +65,12 @@ let standard_base () =
   Engine.freeze ~fixed:true engine;
   engine
 
-(* Each file's stamp, by its path: what says, without reading the file,
+(* Each file's stamp, by its path: the evidence, without reading the file,
    that it has not changed. A restart reads only the files whose stamps
    changed. *)
 let stamps : (string, string) Query.input = Query.input ~name:"worktree_stamp" ~show:Fun.id ()
 
-(* What a session's files are, for what is asked of git. *)
+(* The source of a session's files, for the questions asked of git. *)
 type kind =
   | Worktree of string  (** A project's root *)
   | Commit of { repository : string; commit : string }
@@ -384,7 +384,7 @@ let context session = Session.context session
 let set = Session.set
 let problems session = demand session Project.problems ()
 
-(* What only a package's code shows to be wrong with its manifest, which
+(* The errors in a package's manifest that only its code shows, which
    checks the package. *)
 let manifest_problems session names =
   List.concat_map
@@ -849,7 +849,7 @@ let standard_artifacts () =
        (fun artifact -> (identity, artifact))
        (Session.find_result ~kind:"package" ~key:(standard_key identity)))
 
-(* What names the background process for a directory: its project's root.
+(* The name of the background process for a directory: its project's root.
    A directory in no project is served by a process of its own. *)
 let server_key directory = Option.value (root_of directory) ~default:""
 

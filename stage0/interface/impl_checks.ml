@@ -259,8 +259,8 @@ let check_impl state (written_members : impl_member line list) (impl : Types.imp
           trait.requires;
         if (not trait.is_capability) && impl.impl_uses <> [] then
           report state Impl_uses trait_path.span
-            "Only an `impl` of a capability can have `uses`. A trait's methods can use only what \
-             the trait declares."
+            "Only an `impl` of a capability can have `uses`. A trait's methods can use only the \
+             capabilities the trait declares."
 
 (* A method written inside an [impl], against the method its trait
    declares. *)
@@ -293,7 +293,7 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
               (Printf.sprintf
                  "`%s` gives `%s` a body, which an `impl` can replace only by a version proven to \
                   give the same result, and so only when the provided one is pure, has a `time` \
-                  clause, and changes none of its arguments, so that its body is what it means."
+                  clause, and changes none of its arguments, so that its body is its definition."
                  shown_trait name.text);
           if trait.is_capability && not (receiver = Read || receiver = Mut) then
             report state Wrong_receiver name.span
@@ -380,8 +380,8 @@ let check_impl_method state (name : name) (receiver : Path.receiver) (written : 
                 report state Impl_uses name.span
                   (if trait.is_capability then
                      Printf.sprintf
-                       "`%s` implements a capability, so it can use only what its `impl` declares \
-                        with `uses`."
+                       "`%s` implements a capability, so it can use only the capabilities its \
+                        `impl` declares with `uses`."
                        name.text
                    else
                      Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."

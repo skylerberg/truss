@@ -18,7 +18,7 @@ val missing :
     grant to it. A package's own code and the standard library need no grant. A capability parameter
     is instantiated by the caller with the caller's own capabilities, so it needs none either. *)
 
-val message : what:string -> of_:Path.package -> Path.t -> string
+val message : subject:string -> of_:Path.package -> Path.t -> string
 (** The sentence for a capability that is not granted. *)
 
 val evidence_uses :

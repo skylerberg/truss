@@ -66,7 +66,7 @@ let holes (definition : definition) (resolved : Resolve.resolved) (tables : Infe
 
 type explanation = {
   text : string;  (** The name or expression as written *)
-  meaning : string option;  (** What a name refers to *)
+  meaning : string option;  (** A name's referent *)
   refers_to : Path.t option;  (** The definition a name refers to, for its signature *)
   type_ : string option;
 }
@@ -92,7 +92,7 @@ let describe_target (target : Resolve.target) =
 let contains (span : span) offset = span.start <= offset && offset <= span.stop
 
 (* The innermost expression at an offset, relative to the definition, and
-   what it means. *)
+   its meaning. *)
 let explain_at (definition : definition) (resolved : Resolve.resolved)
     (tables : Infer.tables option) ~text offset =
   let innermost = ref None in

@@ -1,7 +1,7 @@
 (* Where each definition, method, and module is named in a package's code,
-   from what resolution and type checking decided each name means. [truss
-   rename] edits these places, and [truss impact] finds what depends on a
-   definition through them. *)
+   from the meaning resolution and type checking gave each name. [truss
+   rename] edits these places, and [truss impact] finds a definition's
+   dependents through them. *)
 
 module Names = Resolve.Names
 

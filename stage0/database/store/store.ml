@@ -275,7 +275,7 @@ let seal store =
       store.segments <- writer.segment :: store.segments;
       writing := List.filter (fun other -> other != store) !writing
 
-(* A process that ends seals what it added, so that the next reads an index
+(* A process that ends seals its additions, so that the next reads an index
    and not every record. *)
 let () =
   at_exit (fun () ->
@@ -351,7 +351,7 @@ let lookup_once store key =
 
 let refresh_interval = 0.02
 
-(* A miss looks again for what other processes added, but not more often
+(* A miss looks again for other processes' additions, but not more often
    than every [refresh_interval]: a build that computes everything misses
    on every result, and a result another process added a moment ago is only
    computed again. *)
@@ -454,7 +454,7 @@ let unlock pointer =
       pointer.lock_descriptor <- None
   | None -> ()
 
-(* What a pointer holds is framed with its length and a checksum, so that
+(* A pointer's value is framed with its length and a checksum, so that
    one cut short or damaged reads as nothing. *)
 let framed bytes =
   let length = Bytes.create 4 in

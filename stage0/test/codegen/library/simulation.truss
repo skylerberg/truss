@@ -396,7 +396,7 @@ test "a world runs the programs of its setup and keeps the commands that were ru
   }
 }
 
-test "a program spawned in a world has pipes that hold what it wrote, and has already exited" {
+test "a program spawned in a world has pipes that hold its output, and has already exited" {
   var setup = simulation::Setup.new()
   setup = own setup.with_program("sort", output: scripted(0, output: "a\nb\n", error_output: "warning"))
   provide simulation::World.from(own setup) {

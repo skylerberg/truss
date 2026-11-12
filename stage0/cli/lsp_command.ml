@@ -5,7 +5,7 @@
    change it asks for the open files' diagnostics through [check], which
    runs where every other command runs, in the project's background
    process unless [--no-server] says otherwise, and checks a trial session
-   with the open files' texts in place of what is on disk. Nothing is
+   with the open files' texts in place of the files on disk. Nothing is
    written to a file. *)
 
 (* An LSP position counts columns in UTF-16 code units unless the client
@@ -82,8 +82,8 @@ let lsp_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
              diagnostic.notes) );
     ]
 
-(* An obligation's state: where it is, what it is to show, whether it is
-   shown, and whether its proof trusts compiled code. *)
+(* An obligation's state: where it is, its goal, whether it is
+   proven, and whether its proof trusts compiled code. *)
 let lsp_state encoding source (state : Diagnostic.span Prover.state) =
   Json.Object
     [
@@ -96,7 +96,7 @@ let lsp_state encoding source (state : Diagnostic.span Prover.state) =
 
 (* The diagnostics of each open file, by its URI as the client writes it,
    and the states of its obligations, with each file's text in place of
-   what is on disk: a JSON object with a field [files], each with its
+   the file on disk: a JSON object with a field [files], each with its
    [uri], [diagnostics], and [states]. A file's proofs are checked once it
    has no other diagnostic, as [truss check] does. A file in no package of
    the project has neither. *)
@@ -233,7 +233,7 @@ let publish server uri diagnostics =
   notify server "textDocument/publishDiagnostics"
     (Json.Object [ ("uri", Json.String uri); ("diagnostics", diagnostics) ])
 
-(* Checks the open files and publishes what was found: each file's
+(* Checks the open files and publishes the results: each file's
    diagnostics, and its obligations' states as [truss/proofStates]. A
    closed file's diagnostics are cleared. *)
 let refresh server =
@@ -319,7 +319,7 @@ let changed encoding text changes =
 
 type step = Continue | Recheck | Stop of int
 
-(* What one message does to the server. *)
+(* Handles one message. *)
 let handle server message =
   let id = Json.field "id" message and params = Json.field "params" message in
   let document = Json.field "textDocument" params in

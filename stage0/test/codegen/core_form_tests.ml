@@ -162,13 +162,13 @@ let () =
     Fixtures.Core_form.loop_over_a_range_of_characters_which_has_no
 
 let () =
-  passes "a function with a default, called through a function value, uses what it is given"
+  passes "a function with a default, called through a function value, uses its arguments"
     Fixtures.Core_form.function_with_a_default_called_through_a_function
 
 (* Checks which of a module's constants fold and which are computed by
    running their evaluators, and that the module's test passes. *)
-let folds what ~folded ~run source =
-  test what (fun () ->
+let folds name ~folded ~run source =
+  test name (fun () ->
       let database, _ = load source in
       let context =
         Lower.context ~checks:true database target_64 ~constant:(fun context path ->

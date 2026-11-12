@@ -347,7 +347,7 @@ val signature : function_ -> signature
 val declaration : system -> function_ -> declaration
 
 val prototype : declaration -> string
-(** What a C file that includes no header writes before it calls the function. *)
+(** The prototype a C file that includes no header writes before it calls the function. *)
 
 val numbers : number list
 

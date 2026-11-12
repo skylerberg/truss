@@ -5,8 +5,8 @@
    from, or else the one that directory is in: a package's directory and
    everything below it, apart from directories that hold their own
    [truss.toml], which are other packages, and those whose names start with
-   [.]. The session reads the project's files and keeps what was computed
-   about them, so a command after a small edit does little work. *)
+   [.]. The session reads the project's files and keeps the results computed
+   from them, so a command after a small edit does little work. *)
 
 exception Cannot_run of string
 (** The command cannot do its job: no manifest, a session another process holds, a file that cannot
@@ -103,14 +103,14 @@ let package project =
 let is_own project (module_ : Path.module_) =
   List.exists (fun part -> part.name = module_.package) project.packages
 
-(* What only the code of the command's packages shows to be wrong with
-   their manifests. *)
+(* The errors in the command's packages' manifests that only their code
+   shows. *)
 let manifest_problems project =
   Database.manifest_problems project.session
     (List.map (fun (package : package) -> package.name) project.packages)
 
-(* Reads the files again after a command changed some, so only what
-   changed is checked again. *)
+(* Reads the files again after a command changed some, so only the
+   changes are checked again. *)
 let reload project =
   Database.refresh project.session;
   project.files <- module_files project.session project.packages

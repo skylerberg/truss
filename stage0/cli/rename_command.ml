@@ -9,7 +9,7 @@
 
 module Names = Resolve.Names
 
-type what =
+type target =
   | Definition of Path.t  (** A top-level definition, or every version of a method *)
   | Module of Path.module_
 
@@ -36,8 +36,8 @@ let in_package (project : Project.t) from_ =
         "Only the definitions of this project's packages can be renamed, and `%s` is not in one."
         from_
 
-(* What [from_] names. *)
-let what (project : Project.t) from_ =
+(* The definition or module [from_] names. *)
+let target (project : Project.t) from_ =
   let { Path.package; modules = names }, member = in_package project from_ in
   let package_name = Path.show_package package in
   if member = None && module_exists project { package; modules = names } then
@@ -219,7 +219,7 @@ let edits_json (project : Project.t) plan =
     plan.edits
 
 (* A rename reaches every package of the worktree, whichever directory it
-   is run from, since any of them may name what it renames. *)
+   is run from, since any of them may name the renamed definition. *)
 let run ~directory ~from_ ~to_ ~json =
   let here = Project.load directory in
   let project = Project.load (Database.root here.session) in
@@ -236,7 +236,7 @@ let run ~directory ~from_ ~to_ ~json =
   end
   else
     let plan =
-      match what project from_ with
+      match target project from_ with
       | Definition path -> plan_definition project path (new_name ~from_ to_)
       | Module module_ -> plan_module project module_ to_
     in

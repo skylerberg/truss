@@ -152,7 +152,7 @@ let words input offset length =
   done;
   block
 
-(* What finishing a chunk or a parent node needs: compressed without [root]
+(* The inputs to finishing a chunk or a parent node: compressed without [root]
    it is a chaining value, and with it the digest. *)
 type output = { chaining : int array; block : int array; counter : int; length : int; flags : int }
 

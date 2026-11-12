@@ -2,8 +2,8 @@
 
 This document describes `truss`, the one program people and agents run to
 work on Truss code, in [`stage0/cli/`](stage0/cli): checking, testing,
-running, building, and the tools that let an agent see what a change
-touches. It follows [GOALS.md](GOALS.md) and the decisions in
+running, building, and the tools that let an agent see a change's
+effects. It follows [GOALS.md](GOALS.md) and the decisions in
 [DESIGN.md](DESIGN.md), and drives the stages that
 [TYPECHECKER.md](TYPECHECKER.md), [PROVER.md](PROVER.md), and
 [CODEGEN.md](CODEGEN.md) describe, through the code database that
@@ -19,23 +19,23 @@ touches. It follows [GOALS.md](GOALS.md) and the decisions in
   status is this program's. Tools for working on the compiler itself, which
   are not shipped, are separate programs in `stage0/tools/`.
 - **Every command is O(change).** Each command asks the same query database
-  for what it needs, so running the whole package's checks and tests after a
+  for its results, so running the whole package's checks and tests after a
   small edit does a small amount of work. Commands therefore act on the whole
-  package by default and seldom need to be told what to look at. Go and
+  package by default and seldom need a target. Go and
   Cargo grow flags for picking packages and tests because running everything
   is slow; Truss leaves most of those out.
 - **No warnings, no levels, no configuration of checks.** Every diagnostic is
   an error, as DESIGN.md decides, so there is no `-W`, no `--deny`, and no
-  lint configuration. A command either succeeds or reports what is wrong.
+  lint configuration. A command either succeeds or reports the problem.
 - **Built for agents as much as for people.** Every command that reports
   something can report it as JSON, with stable diagnostic codes and exact
   fixes as byte ranges. The agent-facing commands, `holes`, `show`, `impact`,
-  and `rename`, come from GOALS.md's "LLM-friendly" principle: tools that say
-  what a change affects, show the signatures that matter, and change code in
+  and `rename`, come from GOALS.md's "LLM-friendly" principle: tools that report
+  a change's effects, show the signatures that matter, and change code in
   structured ways.
 - **The same answer every time.** A command's output depends only on the
   code, the toolchain, and, for `run` and external tests, the world. It does
-  not depend on whether a background process was running, what was cached,
+  not depend on whether a background process was running, the cache's contents,
   or how many cores the machine has. The exceptions are the facts that
   describe the run itself: which test results came from the cache, and how
   long things took.
@@ -48,15 +48,15 @@ touches. It follows [GOALS.md](GOALS.md) and the decisions in
 | `truss test` | Checks the packages, then runs the tests whose results are not kept |
 | `truss run` | Checks the package, builds its program for development, and runs it |
 | `truss build` | Checks the package and builds its program for release, refusing any `todo` or `echo` `main` can reach |
-| `truss holes` | Lists every `todo`, with its type, the names in scope, and what it blocks |
+| `truss holes` | Lists every `todo`, with its type, the names in scope, and the work it blocks |
 | `truss show` | Prints the signatures of a package, module, type, or definition |
 | `truss impact` | Lists the definitions the worktree's changes from a base commit modify, and their dependents |
-| `truss references`, `truss dependencies` | Lists what reads a definition, or what it reads, part by part |
-| `truss explain` | Says what is at a position: what a name means, its type, and the signature it refers to |
+| `truss references`, `truss dependencies` | Lists a definition's readers, or its dependencies, part by part |
+| `truss explain` | Describes the entity at a position: a name's meaning, its type, and the signature it refers to |
 | `truss overlap` | Lists where the worktree's changes meet other worktrees', or a branch's |
 | `truss rename` | Renames a definition, method, or module, and every reference to it in the worktree |
 | `truss add` | Makes registry packages dependencies of the package, and writes their versions in the lock file |
-| `truss upgrade` | Moves the project's registry packages to other versions, and says what that changes |
+| `truss upgrade` | Moves the project's registry packages to other versions, and reports the effects |
 | `truss publish` | Adds the package to the registry as its next version, once it is finished and breaks nothing |
 | `truss new` | Makes a new package |
 | `truss sync`, `truss status`, `truss stop` | Brings a worktree's session up to date, lists the background process's sessions, and stops it |
@@ -85,7 +85,7 @@ running at the root of a project of several packages is about all of them.
 `run` and `build` need exactly one, and say so when there are more.
 `-C DIRECTORY`, as in `git` and `make`, runs as if from that directory,
 written before the command or after it. The positional arguments are free
-for what each command acts on.
+for each command's targets.
 
 A package's modules are the `.truss` files under its directory, as
 SYNTAX.md says, with two exceptions:
@@ -104,7 +104,7 @@ A package's dependencies are found among the project's packages, by name,
 and then among the registry's, at the versions the project's lock file
 gives (see [Registry packages](#registry-packages)).
 
-What is wrong with a manifest is a problem in the code, reported with the
+An error in a manifest is a problem in the code, reported with the
 diagnostics, and the exit status is 1:
 
 - a manifest that cannot be read, with the line
@@ -143,7 +143,7 @@ describes, and are reported for the packages the command is about.
   runs the command in its own process, not in the background process (see
   [The background process](#the-background-process)).
 
-There is no `--quiet` or `--verbose` beyond what a command lists. Reports
+There is no `--quiet` or `--verbose` beyond the options a command lists. Reports
 for people are plain text. Color, when it comes, belongs only on a
 terminal, and never when `NO_COLOR` is set, so it needs no option either.
 
@@ -157,7 +157,7 @@ built.
 
 ### Output streams and exit status
 
-- **What a command produces goes to standard output:** a test report, a
+- **A command's output goes to standard output:** a test report, a
   list of holes, signatures, a JSON document. **Diagnostics for people go
   to standard error,** as rustc, Go, and Cargo send them, so that `truss run`
   can give its program's output alone on standard output. With `--json`,
@@ -167,7 +167,7 @@ built.
 
   | Status | Means |
   |---|---|
-  | 0 | The command did what was asked, and the code had no problem |
+  | 0 | The command succeeded, and the code had no problem |
   | 1 | The code has a problem: a diagnostic, a failed test, a build refused for a `todo` |
   | 2 | The command could not do its job: a bad argument, a path that names nothing, no `truss.toml`, no C compiler, a compiler bug |
 
@@ -213,8 +213,9 @@ works. The JSON document is `{"format", "diagnostics"}`.
 
 **`--fix`** applies every fix that is the only fix its diagnostic offers,
 writes the files, checks again, and repeats until no such fix is left, then
-reports what remains. Two fixes whose edits overlap are not applied in the
-same round, since applying both could give what neither meant; the second
+reports the remaining diagnostics. Two fixes whose edits overlap are not
+applied in the same round, since applying both could give a result neither
+intended; the second
 waits for the next round, after the file is checked again. Rounds stop
 after 32, so fixes that undo each other cannot run forever. A diagnostic with several fixes, such as an addition
 that may overflow, which offers four, is a choice for the person or agent,
@@ -303,7 +304,7 @@ whose result is kept is not built or run again. External tests, those with
   code it tests, as DESIGN.md allows, turns the suite red until that code is
   written, which is the red and green of test-first development. `incomplete`
   stays its own outcome, so the report says which tests wait on a `todo` and
-  which are wrong, and `truss holes` lists what each `todo` blocks.
+  which are wrong, and `truss holes` lists the work each `todo` blocks.
 - **`--rerun`** runs every selected test, using no kept results and keeping
   new ones, as `go test -count=1` does. Results are deterministic, so this
   is only for doubting the cache, after a suspected compiler bug, or for
@@ -373,8 +374,8 @@ Building for another target, which CODEGEN.md allows through the target's
 ## Tools for agents
 
 These commands answer the questions that GOALS.md says dominate fast
-development: what is unfinished, what a definition promises, what a change
-touches, and how to change a name everywhere at once.
+development: unfinished code, a definition's contract, a change's
+effects, and how to change a name everywhere at once.
 
 ### `truss holes`
 
@@ -384,7 +385,7 @@ truss holes [--json] [FILE_OR_DIRECTORY...]
 
 Lists every `todo` in the package, or in the named files, as DESIGN.md's
 "Unfinished code" asks: its position, the type it must have, the names in
-scope with their types, and what it blocks, which is `main`, if `main` can
+scope with their types, and the work it blocks, which is `main`, if `main` can
 reach it, and each test that can. A `todo` in a theorem or a `proof` block
 is a hole in a proof, listed the same way. Each hole is a task a person or
 agent can take on its own. A type defined as `todo` is listed too.
@@ -398,12 +399,12 @@ render.truss:12:14: hole of type String
 A `todo` whose type nothing fixes, such as one inside an interpolation, is
 listed as "not decided yet". Name resolution records the names in scope at
 each `todo`, and the type checker's tables give their types, through the `Inspect`
-library. What a hole blocks is every test, and `main`, that reaches the
-hole's definition through what each definition reads, which the code
+library. A hole blocks every test, and `main`, that reaches the
+hole's definition through the definitions' reads, which the code
 database keeps. The JSON document is
 `{"format", "diagnostics", "holes"}`, each with its definition, file, line,
 and column, its kind, `value` or `type`, its type, its names in scope with
-their types, and what it blocks. Listing holes is not a failure, so the
+their types, and the work it blocks. Listing holes is not a failure, so the
 exit status is 0 unless the package has diagnostics.
 
 ### `truss show`
@@ -425,7 +426,7 @@ signature is the definition's text with every body left out.
 - for a module, `weather::forecast`, every definition's signature, and for
   a package, `weather`, every public one
 
-A module of another package, such as `standard::list`, shows only what is
+A module of another package, such as `standard::list`, shows only the parts
 visible from this one, so an opaque type's fields stay hidden. A path that
 names nothing visible is a bad argument, so the exit status is 2. `--body` prints whole definitions. Truss
 has no comments, so a signature is the whole of a definition's
@@ -441,8 +442,8 @@ truss impact [--base REVISION] [--json]
 ```
 
 Compares the worktree as it is with a base commit: the one `--base` names,
-or else where the worktree's branch left the default branch, so that a
-branch's every change is what it shows, uncommitted ones included. The code
+or else where the worktree's branch left the default branch, so that it
+shows every change of the branch, uncommitted ones included. The code
 database compares the two sessions, as DATABASE.md's "Comparing two states"
 describes:
 every result a changed file can reach is brought up to date in both and
@@ -452,8 +453,8 @@ file, changes nothing. For each definition that was added, removed, or
 changed, it shows:
 
 - **The parts that changed,** such as its tree, its signature, or its body.
-- **For a changed signature,** the old and new one, since those are what a
-  reviewer must read closely, and every definition that reads it, which are
+- **For a changed signature,** the old and new one, since a
+  reviewer must read those closely, and every definition that reads it, which are
   the callers to review.
 
 Then it lists the tests whose code changed, which are the only tests the
@@ -477,7 +478,7 @@ repository can each run it and compare the dependents of their changes, and `tru
 does that for them. The JSON document is `{"format", "diagnostics",
 "problems", "base", "changes", "tests"}`, where each change has its path,
 `added`, `removed`, or `changed`, the parts that changed, its signature
-before and after, and what reads it, with the parts on each side.
+before and after, and its readers, with the parts on each side.
 
 ### `truss references` and `truss dependencies`
 
@@ -486,7 +487,7 @@ truss references [--json] NAME
 truss dependencies [--json] NAME
 ```
 
-List what reads a definition, or what a definition reads, part by part,
+List a definition's readers, or its dependencies, part by part,
 such as `weather::main::main: its body reads the signature of
 weather::forecast::parse`. `NAME` is a full path or the end of one, such
 as `parse` or `Forecast.summary`, and names every definition it matches.
@@ -500,8 +501,8 @@ exact: a read through a method chosen by type checking, or through an
 truss explain [--json] FILE:LINE:COLUMN
 ```
 
-Says what is at a position, as diagnostics give positions: the name or
-expression there, what a name means, its type, and the signature of the
+Describes the entity at a position, as diagnostics give positions: the
+name or expression there, a name's meaning, its type, and the signature of the
 definition it refers to, so an agent can ask about one name without
 reading the file around it.
 
@@ -542,7 +543,7 @@ references are found through checked code. References in packages outside
 the project cannot be changed, so renaming a public definition changes the
 package's public interface, which `truss impact` reports like any other
 changed signature. Each edit replaces the name's tokens alone, so the files
-need no formatting afterward. The callers of what was renamed are checked
+need no formatting afterward. The callers of the renamed definition are checked
 again, but nothing is proven or tested again: a solver's answer and a
 test's result are kept under keys that hold no names. Renaming a local
 variable is left to the language server, which has the
@@ -593,7 +594,7 @@ grant is a choice someone makes, and a line in the project's lock file at
 the registry's newest version, or at the one written after `@`, as in
 `truss add acme::geometry@1.4.2`. The packages it depends on come with it,
 at the versions it was published with, unless the build already has newer
-ones. It prints what entered the build. A package the registry does not hold
+ones. It prints the packages that entered the build. A package the registry does not hold
 is a bad argument, and nothing is written. The JSON document is `{"format",
 "diagnostics", "changes", "signatures", "breaks"}`, as `upgrade` writes it.
 
@@ -606,7 +607,7 @@ truss upgrade [--json] [PACKAGE...]
 Moves every registry package of the build to its newest version, or only the
 packages named, each to its newest or to the version written after `@`. The
 other versions follow as a build's do, so a package named may bring newer
-versions of what it depends on. A version can be asked for that is lower
+versions of its dependencies. A version can be asked for that is lower
 than the build's, and is the build's only if no package of the build was
 published with a higher one.
 
@@ -614,12 +615,12 @@ The new versions are checked before the lock file is written, in a state of
 their own that starts from the project's session and holds their
 changes, as a rename is checked. The command prints:
 
-- **What changes in the lock file:** each package that moves, enters, or
+- **The lock file's changes:** each package that moves, enters, or
   leaves, and each that would hold a capability it did not.
 - **The signatures the project reads that change,** each as it was and as it
   would be, with the project's definitions that read it. These are the
   places to review, and no others: a package whose signatures the project
-  reads are all unchanged can only have changed what its bodies compute.
+  reads are all unchanged can only have changed its bodies' results.
 - **The errors the project would have that it does not have now.**
 
 ```text
@@ -640,7 +641,7 @@ have new errors, since the code then has a problem, and 0 otherwise. The
 JSON document is `{"format", "diagnostics", "changes", "signatures",
 "breaks"}`: each change with its kind, `moved`, `entered`, `left`, or
 `holds`, its package, and its versions or the capabilities gained, each
-signature with its path, its text before and after, and what reads it, and
+signature with its path, its text before and after, and its readers, and
 each error as a sentence.
 
 ### `truss publish`
@@ -665,7 +666,7 @@ its name. It is published only when:
   are published one after another, and otherwise is to be published first.
 - **It breaks nothing its last version offers** (below).
 
-What is published is the package's files, as SYNTAX.md's "The lock file"
+A release publishes the package's files, as SYNTAX.md's "The lock file"
 lists them: its manifest as it is written, its modules, and the Markdown
 files beside them, with a lock file in place of the project's that has a
 line for each registry package the package's code uses, its tests apart,
@@ -680,14 +681,14 @@ package is compared with its newest version, which is loaded into a state
 of its own with the packages it was published with:
 
 - A release that breaks something is refused, with each definition that
-  breaks, what about it does, and its signature as it was and as it is, and
+  breaks, the reason, and its signature as it was and as it is, and
   the name to publish it under.
-- A release that offers more gets the next minor number, and what is new is
+- A release that offers more gets the next minor number, and the additions are
   listed.
 - Any other gets the next patch number.
 
 ```text
-This would break what `acme::geometry` 1.4.2 offers, so it cannot be published under that name:
+This would break the API of `acme::geometry` 1.4.2, so it cannot be published under that name:
   acme::geometry::vector::length has other parameters or another result.
     was: public fn length(self) -> Float64
     now: public fn length(self, scale: Float64) -> Float64
@@ -707,10 +708,11 @@ The comparison is of every public definition and every `impl`:
 | An `impl` | It is gone | It is new |
 | The package | `usize_bits = 64` where it ran on every target | |
 
-Types are compared as the checker worked them out, so a type written
+Types are compared as the checker inferred them, so a type written
 through another `use` is the same type. The exit status is 1 when the
 package is not published, and the JSON document is `{"format",
-"diagnostics", "problems", "package", "version", "hash", "grows"}`, or with
+"diagnostics", "problems", "package", "version", "hash", "grows"}`, each
+entry of `grows` being `{"path", "addition"}`, or with
 `"refused"`, the sentences that say why.
 
 ## The language server
@@ -721,20 +723,20 @@ truss lsp
 
 Speaks the Language Server Protocol on standard input and output, for an
 editor. It holds the text of each file the editor has open and, after each
-change, reports what `truss check` would report of the open files with
-that text in place of what is on disk. Nothing is written to a file.
+change, reports the diagnostics `truss check` would report of the open files
+with that text in place of the files on disk. Nothing is written to a file.
 
 - **The check runs where commands run:** in the project's background
   process, or with `--no-server` in the server's own process. It reads a
   trial session, which starts from the worktree's session and replaces the
-  open files, so an edit costs what it changes.
+  open files, so an edit costs only its changes.
 - **Each open file's diagnostics** are published as
   `textDocument/publishDiagnostics`, with a diagnostic's notes as related
   information. A file's proofs are checked once it has no other
   diagnostic, as `truss check` checks them.
 - **Each obligation's state** is sent as a `truss/proofStates`
   notification: for each open file, every obligation's range, its code,
-  what it is to show, whether it is proven, and whether its proof trusts
+  its goal, whether it is proven, and whether its proof trusts
   compiled code, for an editor to mark proven and unproven code apart and
   to show which proofs rely on running code.
 - **Positions count UTF-16 code units,** the protocol's default, or bytes
@@ -783,7 +785,7 @@ process" describes, and the command line is its client:
   command line and the current directory, and prints the process's
   answer. It runs the command line's own code, from that
   directory, so the answer is the same as in the command's own process.
-  What a command writes to standard error, such as the status line, comes
+  A command's writes to standard error, such as the status line, comes
   to the command as it is written, and its output and exit status when it is
   done.
 - **A process ends after three hours without a command,** when its
@@ -802,7 +804,7 @@ process" describes, and the command line is its client:
 Sessions, test results, object files, and programs built to run are kept in
 the code database's store, under `$TRUSS_CACHE`, or else
 `$XDG_CACHE_HOME/truss`, or else `~/.cache/truss`, as DATABASE.md's "The
-store" describes. Every entry is named by a key of what it was made from, so
+store" describes. Every entry is named by a key of its inputs, so
 entries never go stale, the store collects old entries itself to keep within
 its budget, and nothing in it is ever needed for a correct answer. **`truss clean`** stops the background process and
 deletes the store, which only costs time.
@@ -821,14 +823,14 @@ It is left out of each command's help.
   text for each code would be a second place to keep up to date.
 - **A watch mode,** such as `cargo watch` or `vitest --watch`. The
   background process already checks every open worktree as its files
-  change, so running a command again does what a watch would, at once.
-- **Selecting tests by what changed,** as Nx's `affected` does. The cache
+  change, so running a command again does a watch's job, at once.
+- **Selecting tests by the changed files,** as Nx's `affected` does. The cache
   already runs only the tests whose code changed, and exactly those, so a
   selection by files changed could only be less exact.
 
 ## Not built
 
-- **A contract compared by what it means.** DESIGN.md has a release keep a
+- **A contract compared by its meaning.** DESIGN.md has a release keep a
   `requires` that the old one implies and an `ensures` that implies the old
   one, which is the prover's to show. `truss publish` compares a contract's
   clauses as they are written: one that is reworded breaks, and one whose

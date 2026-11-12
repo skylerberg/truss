@@ -34,7 +34,8 @@ type ty =
 and argument =
   | Type of ty
   | Value of value
-  | Capabilities of capability list  (** What a [capability] parameter stands for, sorted. *)
+  | Capabilities of capability list
+      (** The capabilities a [capability] parameter is instantiated with, sorted. *)
 
 and value =
   | Known of Z.t
@@ -71,9 +72,9 @@ and cost = { amortized : bool; resource : resource; bound : cost_bound }
 (** A cost clause of a function type, which cannot mention parameters. Only the prover reads its
     bound; the checker reads whether there is a [time] clause. *)
 
-(** What a function type's cost clause counts. Its [calls] counts the calls of a capability's
-    methods, or of one of them: calls through a parameter are counted in a function's own clauses,
-    which can name it. *)
+(** The resource a function type's cost clause counts. Its [calls] counts the calls of a
+    capability's methods, or of one of them: calls through a parameter are counted in a function's
+    own clauses, which can name it. *)
 and resource =
   | Time
   | Allocations
@@ -118,7 +119,7 @@ val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability list -> capability list
 
 val result_type : result -> ty
-(** The type of what a function returns, yields, or lends. *)
+(** The type of a function's result, yielded part, or lent part. *)
 
 val show_mode : mode -> string
 (** How a mode is written before a type: [""], ["mut "], or ["own "]. *)
@@ -136,7 +137,7 @@ val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val has_capability_variable : capability list -> bool
 
 val capabilities_unsolved : capability list -> bool
-(** Whether what a set holds is not known yet: it has a {!Capability_variable}, or an associated
+(** Whether a set's members are not known yet: it has a {!Capability_variable}, or an associated
     capability set of a type that is not inferred yet. *)
 
 val equal : ty -> ty -> bool
@@ -155,7 +156,7 @@ val same_clauses : function_type -> function_type -> bool
 (** Whether two function types have the same [uses] and the same costs, in any order. *)
 
 val costs_imply : provided:cost list -> required:cost list -> bool
-(** Whether costs promise what others ask, by their constants alone: each cost asked has one given
+(** Whether costs imply the required ones, by their constants alone: each cost asked has one given
     for the same resource that is at least as strong, where an exact count is within any bound it
     does not exceed, a count is [O(...)], and every bound is [finite]. *)
 
@@ -174,7 +175,7 @@ val show_output : result -> string
 
 (** {1 Interfaces}
 
-    What other definitions may depend on: the checked outward-facing part of each definition. *)
+    The part other definitions may depend on: the checked outward-facing part of each definition. *)
 
 type generic_kind =
   | Type_generic of trait_reference list  (** Bounds. *)
@@ -190,8 +191,8 @@ val bounds_of : generic list -> parameter -> trait_reference list
 (** The bounds a list of generics gives one type parameter. *)
 
 val substitution_of : generic list -> argument list -> substitution option
-(** What stands for each of a definition's generic parameters, given its arguments in order, or
-    [None] when there is not one argument for each parameter. *)
+(** The substitution for a definition's generic parameters, given its arguments in order, or [None]
+    when there is not one argument for each parameter. *)
 
 type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
 

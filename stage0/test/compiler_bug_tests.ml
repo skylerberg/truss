@@ -8,7 +8,7 @@ let expect_bug work check =
   | exception Compiler_bug.Bug bug -> check bug
 
 let () =
-  test "a bug carries its stage and what it found" (fun () ->
+  test "a bug carries its stage and its message" (fun () ->
       expect_bug
         (fun () -> Compiler_bug.bug ~stage:"Lower" "no type for expression %d" 7)
         (fun bug ->
@@ -38,7 +38,7 @@ let () =
             bug.stage <> "Prover" || bug.doing <> [ "translating f" ]
             || not (String.starts_with ~prefix:"Assert_failure at " bug.message)
           then fail "got %s" (Compiler_bug.to_string bug)));
-  test "a bug reads as its stage, what it found, and each thing being done" (fun () ->
+  test "a bug reads as its stage, its message, and each step of its context" (fun () ->
       let text =
         Compiler_bug.to_string
           { stage = "Lower"; message = "no impl"; doing = [ "lowering f"; "lowering g" ] }

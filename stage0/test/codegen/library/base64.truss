@@ -41,7 +41,7 @@ test "text decodes with or without its padding" {
     && bytes[2] == 254
 }
 
-test "decoding says what is wrong with text that is not base64" {
+test "decoding names the problem with text that is not base64" {
   assert base64::decode("Z") == Err(base64::DecodeError.InvalidLength)
   assert base64::decode("Zm9vY") == Err(base64::DecodeError.InvalidLength)
   assert base64::decode("Zg=") == Err(base64::DecodeError.InvalidPadding)
