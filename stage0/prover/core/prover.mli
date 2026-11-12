@@ -53,11 +53,12 @@ val solve_ahead :
     proofs calls it once with all of them, which keeps every core busy where one module's queries
     are few. *)
 
-type state = {
+type 'span state = {
   code : Diagnostic.Code.prover;
-  span : Diagnostic.span;  (** In the file's offsets. *)
+  span : 'span;
   shows : string;  (** What the obligation is to show, as its diagnostic first says it. *)
-  failure : Diagnostic.t option;  (** Why it was not shown, or [None] where it was. *)
+  failure : 'span Diagnostic.diagnostic option;
+      (** Why it was not shown, or [None] where it was. *)
   trusts_compiled_code : bool;
       (** It was shown by running compiled code, or with a fact that running a call gave. *)
 }
@@ -69,7 +70,7 @@ val states :
   Query.context ->
   Solver.t ->
   Path.module_ ->
-  state list
+  Diagnostic.span state list
 (** Every obligation of a file's definitions, shown or not, and every definition the prover could
     not read, in the file's offsets and in order. *)
 

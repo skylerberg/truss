@@ -112,6 +112,26 @@ let () =
   test "a byte order mark at the start is skipped" (fun () -> tokens "\xEF\xBB\xBFx" [ "x"; "NL" ]);
   test "a byte order mark elsewhere is forbidden" (fun () ->
       error "a \xEF\xBB\xBF b" ~code:Forbidden_character ~at:"\xEF" ~fixed:"a b");
+  test "the first line starts after a byte order mark" (fun () ->
+      let source = Source.create ~path:"test.truss" "\xEF\xBB\xBFab\ncd" in
+      let shown offset =
+        let line, column = Source.position source offset in
+        Printf.sprintf "%d:%d" line column
+      in
+      equal_lists Fun.id "positions" [ "1:1"; "1:2"; "2:1" ] (List.map shown [ 3; 4; 6 ]);
+      if Source.line_start source 4 <> 3 then fail "the first line starts at 3";
+      if not (Source.starts_line source 3) then fail "offset 3 starts its line");
+  test "a diagnostic after a byte order mark shows its line without it" (fun () ->
+      let text = "\xEF\xBB\xBFlet x = 1;" in
+      let source = Source.create ~path:"test.truss" text in
+      match snd (Lexer.lex source) with
+      | [ diagnostic ] ->
+          let rendered = Diagnostic.render source diagnostic in
+          if not (String.starts_with ~prefix:"test.truss:1:10:" rendered) then
+            fail "expected the position 1:10, got %s" rendered;
+          if String.contains rendered '\xEF' then
+            fail "expected the line without the byte order mark, got %s" rendered
+      | diagnostics -> fail "expected one diagnostic, got %d" (List.length diagnostics));
   test "a carriage return and line feed is one line break" (fun () ->
       tokens "a\r\nb\r\n" [ "a"; "NL"; "b"; "NL" ]);
   test "a carriage return on its own is an error and a line break" (fun () ->
@@ -169,8 +189,8 @@ let () =
         List.concat_map
           (fun (d : Diagnostic.t) ->
             List.concat_map
-              (fun (fix : Diagnostic.fix) ->
-                List.map (fun (e : Diagnostic.edit) -> e.replacement) fix.edits)
+              (fun (fix : _ Diagnostic.fix) ->
+                List.map (fun (e : _ Diagnostic.edit) -> e.replacement) fix.edits)
               d.fixes)
           (snd (lex "userName(userName)"))
       in

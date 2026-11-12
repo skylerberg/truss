@@ -263,7 +263,7 @@ let () =
       in
       let ensures =
         List.filter
-          (fun (state : Prover.state) ->
+          (fun (state : Diagnostic.span Prover.state) ->
             Diagnostic.Code.name (Prover state.code) = "prover.ensures")
           states
       in

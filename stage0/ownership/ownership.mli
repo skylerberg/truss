@@ -2,7 +2,7 @@
     dangling views, mutation of a borrowed place, and data races. *)
 
 type result = {
-  diagnostics : Diagnostic.t list;  (** In the definition's own offsets. *)
+  diagnostics : Syntax.diagnostic list;
   moves : Core.id list;  (** The [Use] nodes of the core form that move a place. *)
   disjoint : (Core.origin * Core.origin) list;
       (** The [Disjoint] obligations: pairs of index calls or slices of one collection, by origin,

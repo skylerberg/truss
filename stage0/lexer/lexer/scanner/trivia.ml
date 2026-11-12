@@ -130,7 +130,7 @@ let character_literal_end ?(after_prefix = false) cursor start =
    from the text, since the scanner does not keep the token before. *)
 let after_operand cursor index =
   let rec back position =
-    if position < Source.byte_order_mark_length cursor.source then None
+    if position < Source.line_start cursor.source 0 then None
     else
       let current = byte cursor position in
       if is_space current || is_line_break current then back (position - 1) else Some position

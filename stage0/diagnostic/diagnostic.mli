@@ -261,47 +261,58 @@ module Code : sig
   val name : t -> string
 end
 
-type edit = { span : span; replacement : string }
+type 'span edit = { span : 'span; replacement : string }
 (** Replace the bytes of [span] with [replacement]. An empty span inserts. *)
 
-type fix = { title : string; edits : edit list }
+type 'span fix = { title : string; edits : 'span edit list }
 
-type t = {
+type 'span diagnostic = {
   code : Code.t;
   message : string;
       (** Whole sentences, each starting with a capital letter, or with code in backticks, and
           ending with a period: "This string is not closed on its line." Every stage writes them the
           same way. *)
-  span : span;
-  notes : (span * string) list;
-  fixes : fix list;  (** Alternatives. Most diagnostics have at most one. *)
+  span : 'span;
+  notes : ('span * string) list;
+  fixes : 'span fix list;  (** Alternatives. Most diagnostics have at most one. *)
 }
+(** A diagnostic's spans are either file offsets, {!span}, or offsets relative to a definition's
+    base, [Syntax.Span.t]. Every stage that caches its results per definition keeps its diagnostics
+    relative, so that moving a definition invalidates none of them. The two kinds of span are
+    different types, so a relative diagnostic cannot be shown at the wrong place in its file. *)
 
-val make : ?notes:(span * string) list -> ?fixes:fix list -> code:Code.t -> span -> string -> t
-val fix : string -> edit list -> fix
-val replace : span -> string -> edit
-val insert : int -> string -> edit
-val delete : span -> edit
+type t = span diagnostic
+(** A diagnostic in its file's offsets, which can be shown. *)
+
+val make :
+  ?notes:('span * string) list ->
+  ?fixes:'span fix list ->
+  code:Code.t ->
+  'span ->
+  string ->
+  'span diagnostic
+
+val fix : string -> 'span edit list -> 'span fix
+val replace : 'span -> string -> 'span edit
+val insert : int -> string -> span edit
+val delete : 'span -> 'span edit
 
 type reported
 (** Proof that an error was reported. A result that stands for something wrong, such as the type of
     an expression that did not check, holds one, so it cannot be made where nothing was reported.
     Everything is accepted of such a result, and that never accepts a mistake silently. *)
 
-val reported : t -> reported
+val reported : _ diagnostic -> reported
 (** The diagnostic is the report. *)
 
-val recovered : span -> reported
+val recovered : _ -> reported
 (** A span the parser recorded as a recovery is the report: it records one only where it or the
     lexer reported an error. *)
 
-val move : int -> t -> t
-(** [move offset diagnostic] adds [offset] to every span in [diagnostic]: its own, its notes', and
-    its fixes' edits. A stage whose results are cached apart from where they are in the file, such
-    as the parser's for each definition, keeps its diagnostics relative to a base and moves them
-    back when they are shown. Raises [Invalid_argument] if a span would start before 0. *)
+val map_spans : ('a -> 'b) -> 'a diagnostic -> 'b diagnostic
+(** Converts every span in a diagnostic: its own, its notes', and its fixes' edits. *)
 
-val apply_fix : string -> fix -> string
+val apply_fix : string -> span fix -> string
 (** Applies a fix's edits to the text it was made for. Raises [Invalid_argument] if the edits
     overlap. *)
 

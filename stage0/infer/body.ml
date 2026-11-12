@@ -18,7 +18,7 @@ type type_check_result = {
   tables : Tables.published;
   core : Core.t option;
       (** The definition's core form, when it parsed whole and nothing in it is an error. *)
-  diagnostics : Diagnostic.t list;
+  diagnostics : Syntax.diagnostic list;
   evidence : Path.package list;  (** The packages whose [impl]s met a bound in the definition *)
 }
 
@@ -751,7 +751,7 @@ let check database (key : Names.key) =
           core;
           diagnostics =
             List.sort_uniq
-              (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+              (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
                 compare (left.span, left.code, left.message) (right.span, right.code, right.message))
               state.diagnostics;
           evidence = List.sort_uniq compare state.evidence;

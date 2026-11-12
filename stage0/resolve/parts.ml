@@ -49,7 +49,7 @@ let lies_in all (recovered : span) (part_span : span) =
       part_span.start = position
     else part_span.start <= position && position < part_span.stop
 
-let error_node (span : span) = Diagnostic.recovered (Source.span span.start span.stop)
+let error_node (span : span) = Diagnostic.recovered span
 
 let reported definition part =
   let all = spans definition in

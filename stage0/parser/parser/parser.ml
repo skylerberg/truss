@@ -9,10 +9,10 @@ let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword 
 let begins_statement = Atoms.begins_statement
 let spelled_words = List.map fst Cost_word.spellings
 
-type relative_diagnostics = Diagnostic.t list
-type 'value parsed = { value : 'value Syntax.item; diagnostics : relative_diagnostics }
+type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnostic list }
 
-let placed parsed = List.map (Diagnostic.move parsed.value.base) parsed.diagnostics
+let placed parsed =
+  List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base:parsed.value.base)) parsed.diagnostics
 
 (* Parses a piece with a cursor of its own, whose collector holds only the
    piece's diagnostics. *)
@@ -34,7 +34,11 @@ let item (cursor : Cursor.t) value : _ Syntax.item =
   }
 
 let parsed cursor value diagnostics =
-  { value = item cursor value; diagnostics = List.map (Diagnostic.move (-cursor.base)) diagnostics }
+  {
+    value = item cursor value;
+    diagnostics =
+      List.map (Diagnostic.map_spans (Syntax.Span.of_source ~base:cursor.base)) diagnostics;
+  }
 
 (* Runs the checks that need a definition's whole tree. *)
 let check cursor definition =

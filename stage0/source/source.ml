@@ -8,8 +8,13 @@ let zero_width position = span position position
 
 type t = { path : string; text : string; line_starts : int array }
 
+let byte_order_mark = "\xEF\xBB\xBF"
+
 let compute_line_starts text =
-  let starts = Dynarray.of_list [ 0 ] in
+  let first =
+    if String.starts_with ~prefix:byte_order_mark text then String.length byte_order_mark else 0
+  in
+  let starts = Dynarray.of_list [ first ] in
   let length = String.length text in
   String.iteri
     (fun index character ->
@@ -22,18 +27,9 @@ let compute_line_starts text =
   Dynarray.to_array starts
 
 let create ~path text = { path; text; line_starts = compute_line_starts text }
-
-let read_file path =
-  let channel = open_in_bin path in
-  let text = really_input_string channel (in_channel_length channel) in
-  close_in channel;
-  create ~path text
-
+let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
 let path source = source.path
 let text source = source.text
-
-let byte_order_mark_length source =
-  if String.starts_with ~prefix:"\xEF\xBB\xBF" source.text then 3 else 0
 
 (* The index of the line holding [offset], counting from 0. *)
 let line_index source offset =
@@ -58,15 +54,11 @@ let line_end source offset =
 
 let position source offset =
   let index = line_index source offset in
-  let start =
-    max source.line_starts.(index) (if index = 0 then byte_order_mark_length source else 0)
-  in
   let column = ref 1 in
-  for byte = start to min offset (String.length source.text) - 1 do
+  for byte = source.line_starts.(index) to min offset (String.length source.text) - 1 do
     (* Count every byte except UTF-8 continuation bytes. *)
     if Char.code source.text.[byte] land 0xC0 <> 0x80 then incr column
   done;
   (index + 1, !column)
 
-let starts_line source offset =
-  offset = line_start source offset || offset = byte_order_mark_length source
+let starts_line source offset = offset = line_start source offset

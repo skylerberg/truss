@@ -22,7 +22,7 @@ type context = {
       (** The definition is a method of an [impl] of a capability. Its callers cannot see the
           implementation, so no view may be stored in [self] or returned from it. *)
   mutable mutable_locals : Core.local list;  (** The locals declared with [var]. *)
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
   mutable moves : Core.id list;  (** The [Use] nodes that move a place. *)
   mutable must_be_disjoint : (Core.origin * Core.origin) list;
       (** Pairs of index calls or slices of one collection, by origin, that must select disjoint
@@ -69,13 +69,7 @@ let span context (origin : Core.origin) : Syntax.span =
 
 let report context ?(fixes = []) ?(notes = []) code (at : Syntax.span) message =
   context.diagnostics <-
-    Diagnostic.make ~fixes
-      ~notes:
-        (List.map
-           (fun ((note : Syntax.span), text) -> (Source.span note.start note.stop, text))
-           notes)
-      ~code:(Ownership code) (Source.span at.start at.stop) message
-    :: context.diagnostics
+    Diagnostic.make ~fixes ~notes ~code:(Ownership code) at message :: context.diagnostics
 
 let kind_of_mode : T.mode -> kind = function Own -> Owned | Read -> Borrowed | Mut -> Borrowed_mut
 
@@ -130,9 +124,9 @@ let collect context (definition : Core.definition) =
    and delete the [own] mark before it. *)
 let copy_at context (moved : Core.origin) =
   (match List.assoc_opt moved context.marks with
-    | Some { mode = Own; mark; _ } -> [ Diagnostic.delete (Source.span mark.start mark.stop) ]
+    | Some { mode = Own; mark; _ } -> [ Diagnostic.delete mark ]
     | Some { mode = Mut; _ } | None -> [])
-  @ [ Diagnostic.insert (span context moved).stop ".copy()" ]
+  @ [ Diagnostic.replace (Syntax.Span.zero_width (span context moved).stop) ".copy()" ]
 
 (* The span of a place together with the [mut] or [own] mark before it. *)
 let with_mark context (place : Core.origin) : Syntax.span =

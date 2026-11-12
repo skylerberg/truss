@@ -35,7 +35,7 @@ type resolved = {
   names : target option array;
   brackets : bracket option array;
   holes : (Syntax.id * (string * value) list) list;
-  diagnostics : Diagnostic.t list;
+  diagnostics : Syntax.diagnostic list;
 }
 
 type head = {
@@ -134,7 +134,8 @@ let resolved =
               holes = List.rev state.holes;
               diagnostics =
                 List.sort
-                  (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
+                  (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+                    compare left.span right.span)
                   state.diagnostics;
             }
       | None -> None)
@@ -214,7 +215,7 @@ let file_diagnostics =
 
 let diagnostics database module_ =
   List.sort
-    (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
     (Query.demand database file_diagnostics module_
     @ Names.per_definition database module_ (fun key ->

@@ -55,7 +55,7 @@ type resolved = {
   holes : (Syntax.id * (string * value) list) list;
       (** Each [todo], by its id, in the order of the walk, with the values in scope there, by name
           in order. *)
-  diagnostics : Diagnostic.t list;  (** Relative to the definition. *)
+  diagnostics : Syntax.diagnostic list;
 }
 
 type head = {

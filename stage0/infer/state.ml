@@ -123,7 +123,7 @@ type state = {
   text : string;  (** The definition's source text, for fixes. *)
   mutable tables : C.t;
   form : form;
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
   unifier : Unify.t;
   locals : (id, local) Hashtbl.t;
   mutable law_parameters : (string * T.ty) list;
@@ -149,9 +149,7 @@ type state = {
 }
 
 let reported state ?(fixes = []) code (span : span) message =
-  let diagnostic =
-    Diagnostic.make ~fixes ~code:(Types code) (Source.span span.start span.stop) message
-  in
+  let diagnostic = Diagnostic.make ~fixes ~code:(Types code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
 
@@ -352,8 +350,8 @@ let fresh_synthetic_local state : Core.local =
   Synthetic number
 
 let fix title edits = Diagnostic.fix title edits
-let replace (span : span) text = Diagnostic.replace (Source.span span.start span.stop) text
-let insert position text = Diagnostic.insert position text
+let replace = Diagnostic.replace
+let insert position text = Diagnostic.replace (Span.zero_width position) text
 let current_frame state = match state.frames with frame :: _ -> Some frame | [] -> None
 
 let record state (value : expression) type_ =
@@ -480,8 +478,7 @@ let check_evidence_grants state (span : span) evidence =
   List.iter
     (fun message ->
       state.diagnostics <-
-        Diagnostic.make ~code:(Capabilities Not_granted) (Source.span span.start span.stop) message
-        :: state.diagnostics)
+        Diagnostic.make ~code:(Capabilities Not_granted) span message :: state.diagnostics)
     (Interface.Grants.messages state.database ~package:state.package impls)
 
 let copyable state type_ = Impls.copyable state.database ~bounds:(bounds state) (zonk state type_)
@@ -1407,7 +1404,7 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
         ~fixes:
           [
             fix "Remove the mark."
-              [ Diagnostic.delete (Source.span value.span.start inner.span.start) ];
+              [ Diagnostic.delete (Span.make value.span.start inner.span.start) ];
           ]
         (Printf.sprintf "`%s` only reads its argument, so it takes no mark." name)
   | Mut, Marked (Mut, inner) -> mutate state env ~by:Mut_mark inner
@@ -1440,14 +1437,7 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
   | Own, Marked (Own, inner) ->
       if plain state type_ then
         report state Redundant_mark value.span
-          ~fixes:
-            [
-              fix "Remove the mark."
-                [
-                  Diagnostic.delete
-                    (Source.span (mark_span value inner).start (mark_span value inner).stop);
-                ];
-            ]
+          ~fixes:[ fix "Remove the mark." [ Diagnostic.delete (mark_span value inner) ] ]
           (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (show state type_))
   | Own, Temporary -> ()
   | Own, Place when Hashtbl.find_opt state.yielded value.id = Some Mut ->
@@ -1529,8 +1519,7 @@ let check_lent_value state env (operand : expression) =
                 in
                 if not (plain state type_ || fieldless_variant) then
                   state.diagnostics <-
-                    Diagnostic.make ~code:(Ownership Owned_beside_lent)
-                      (Source.span value.span.start value.span.stop)
+                    Diagnostic.make ~code:(Ownership Owned_beside_lent) value.span
                       "This value is owned, but the value that is yielded lends a place, so it \
                        owns nothing. Bind this value to a name first, and pass the name."
                     :: state.diagnostics;
@@ -1572,9 +1561,7 @@ let check_owned state env (value : expression) type_ =
                       place )
               in
               state.diagnostics <-
-                Diagnostic.make ~fixes ~code:(Ownership Needs_owned)
-                  (Source.span value.span.start value.span.stop)
-                  message
+                Diagnostic.make ~fixes ~code:(Ownership Needs_owned) value.span message
                 :: state.diagnostics
           | _ -> ());
           true

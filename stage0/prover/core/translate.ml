@@ -62,7 +62,7 @@ type obligation = {
   cited : (Names.key * span) option;
       (** The clause it comes from, in the definition that states it, where that is not the one
           being proven: a callee's [requires]. *)
-  fixes : Diagnostic.fix list;  (** Edits of the definition proven that would show it. *)
+  fixes : span Diagnostic.fix list;  (** Edits of the definition proven that would show it. *)
   query : L.query;
   contracts_alone : L.query option;
       (** The query without what unfolding callees' definitions gave, where it has any: asked when
@@ -485,9 +485,9 @@ let add_requires context frame required =
   let edit =
     match brace with
     | Some at when at > 0 && text.[at - 1] = '\n' ->
-        Some (Diagnostic.insert at ("  requires " ^ required ^ "\n"))
+        Some (Diagnostic.replace (Syntax.Span.zero_width at) ("  requires " ^ required ^ "\n"))
     | Some at when at > 0 && text.[at - 1] = ' ' ->
-        Some (Diagnostic.replace (Source.span (at - 1) at) ("\n  requires " ^ required ^ "\n"))
+        Some (Diagnostic.replace (Syntax.Span.make (at - 1) at) ("\n  requires " ^ required ^ "\n"))
     | _ -> None
   in
   match edit with
@@ -687,7 +687,7 @@ and occurs part term =
 (* Where a node came from in its form's text, by its origin. *)
 let span_of (source : source) origin =
   let spans = Lazy.force source.spans in
-  if origin >= 0 && origin < Array.length spans then spans.(origin) else Span.make 0 0
+  if origin >= 0 && origin < Array.length spans then spans.(origin) else Syntax.Span.make 0 0
 
 (* A node's source text, for messages. *)
 let quote source origin =
@@ -9260,7 +9260,7 @@ let empty_frame source =
    returns. *)
 let definition_span (source : source) =
   let spans = Lazy.force source.spans in
-  match Array.length spans with 0 -> Span.make 0 0 | count -> spans.(count - 1)
+  match Array.length spans with 0 -> Syntax.Span.make 0 0 | count -> spans.(count - 1)
 
 (* A cost clause, as a promise about one counter, shown at each way its
    definition returns. A trait's clause, which an [impl]'s method keeps, is

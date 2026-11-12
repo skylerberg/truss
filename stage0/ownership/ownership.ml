@@ -11,7 +11,7 @@ type pulling = Yield_rules.pulling = Pullable | Yields_mut | Recursive | Yields_
 let pullable = Yield_rules.pullable
 
 type result = {
-  diagnostics : Diagnostic.t list;
+  diagnostics : Syntax.diagnostic list;
   moves : Core.id list;
   disjoint : (Core.origin * Core.origin) list;
 }
@@ -74,7 +74,7 @@ let inputs database (key : Resolve.Names.key) =
 
 (* The result of the dataflow analyses of one definition. *)
 type analysis = {
-  reported : Diagnostic.t list;
+  reported : Syntax.diagnostic list;
   moved : Core.id list;
   must_be_disjoint : (Core.origin * Core.origin) list;
   task_hazard : Views.task_hazard option;
@@ -143,7 +143,7 @@ let check database (key : Resolve.Names.key) : result option =
         {
           diagnostics =
             List.sort_uniq
-              (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+              (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
                 compare (left.span, left.message) (right.span, right.message))
               (analyzed.reported @ context.diagnostics);
           moves = List.sort_uniq compare analyzed.moved;

@@ -73,15 +73,13 @@ type state = {
   module_ : Path.module_;
   names : target option array;
   brackets : bracket option array;
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
   mutable holes : (id * (string * value) list) list;
       (** Each [todo], by its id, with the values in scope there, by name, latest first *)
 }
 
 let reported state ?fixes code (span : span) message =
-  let diagnostic =
-    Diagnostic.make ?fixes ~code:(Resolve code) (Source.span span.start span.stop) message
-  in
+  let diagnostic = Diagnostic.make ?fixes ~code:(Resolve code) span message in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
 
@@ -141,7 +139,7 @@ let unknown state (name : name) ~what candidates =
         [
           Diagnostic.fix
             (Printf.sprintf "Write `%s`." candidate)
-            [ Diagnostic.replace (Source.span name.span.start name.span.stop) candidate ];
+            [ Diagnostic.replace name.span candidate ];
         ]
     | None -> []
   in
@@ -394,12 +392,7 @@ and local_value state scope (name : name) =
                 (Unknown
                    (reported state Null name.span
                       ~fixes:
-                        [
-                          Diagnostic.fix "Write `None`."
-                            [
-                              Diagnostic.replace (Source.span name.span.start name.span.stop) "None";
-                            ];
-                        ]
+                        [ Diagnostic.fix "Write `None`." [ Diagnostic.replace name.span "None" ] ]
                       (Printf.sprintf
                          "Truss has no `%s`. A value that may be missing is an `Option`, and \
                           `None` is its empty case."
@@ -504,7 +497,7 @@ and check_place state (marked : expression) (inner : expression) =
         ~fixes:
           [
             Diagnostic.fix "Remove the mark."
-              [ Diagnostic.delete (Source.span marked.span.start keyword_end) ];
+              [ Diagnostic.delete (Span.make marked.span.start keyword_end) ];
           ]
         "Only a place, such as a variable, a field, or an element, can be marked `mut` or `own`. A \
          temporary value is always handed over as owned."

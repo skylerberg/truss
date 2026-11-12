@@ -25,7 +25,7 @@ let create source diagnostics =
     text = Source.text source;
     length = String.length (Source.text source);
     diagnostics;
-    position = Source.byte_order_mark_length source;
+    position = Source.line_start source 0;
     first_line_break = None;
     blank_line = false;
     line_is_blank = true;
@@ -105,8 +105,7 @@ let spaces_before cursor offset =
   loop offset
 
 let only_spaces_before cursor offset =
-  spaces_before cursor offset
-  = max (Source.line_start cursor.source offset) (Source.byte_order_mark_length cursor.source)
+  spaces_before cursor offset = Source.line_start cursor.source offset
 
 (* Describing characters in messages, without copying bytes that are not
    valid UTF-8 into them. *)

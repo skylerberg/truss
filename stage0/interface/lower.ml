@@ -10,7 +10,7 @@ type context = {
   self_associated : (string * T.ty) list;  (** In an [impl], its associated types. *)
   self_capabilities : (string * T.capability list) list;
       (** In an [impl], each associated capability set that its trait declares. *)
-  diagnostics : Diagnostic.t list ref;  (** Shared by every copy of the context. *)
+  diagnostics : Syntax.diagnostic list ref;  (** Shared by every copy of the context. *)
   named : (span * T.ty) list ref;  (** Each named type lowered, for checking its bounds. *)
 }
 
@@ -28,7 +28,7 @@ let create database resolved =
   }
 
 let reported context code (span : span) message =
-  let diagnostic = Diagnostic.make ~code:(Types code) (Source.span span.start span.stop) message in
+  let diagnostic = Diagnostic.make ~code:(Types code) span message in
   context.diagnostics := diagnostic :: !(context.diagnostics);
   Diagnostic.reported diagnostic
 

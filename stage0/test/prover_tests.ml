@@ -3272,7 +3272,7 @@ let () =
             (String.concat "; "
                (List.map
                   (fun (d : Diagnostic.t) ->
-                    String.concat ", " (List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes))
+                    String.concat ", " (List.map (fun (f : _ Diagnostic.fix) -> f.title) d.fixes))
                   found)))
 
 (* Facts under a quantifier *)
@@ -3368,7 +3368,7 @@ let () =
   let fix_titles text =
     let database = Support.setup [ ("app::main", text) ] in
     List.concat_map
-      (fun (d : Diagnostic.t) -> List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes)
+      (fun (d : Diagnostic.t) -> List.map (fun (f : _ Diagnostic.fix) -> f.title) d.fixes)
       (check database (Support.module_of "app::main"))
   in
   test "a divisor that may be zero offers a requires that it is not" (fun () ->
@@ -3392,7 +3392,7 @@ let () =
             (String.concat "; "
                (List.map
                   (fun (d : Diagnostic.t) ->
-                    String.concat ", " (List.map (fun (f : Diagnostic.fix) -> f.title) d.fixes))
+                    String.concat ", " (List.map (fun (f : _ Diagnostic.fix) -> f.title) d.fixes))
                   found)));
   test "a failed assert about the parameters offers it as a requires" (fun () ->
       match
@@ -3797,7 +3797,9 @@ let () =
         Prover.states ~record:(Support.record database) database solver
           (Support.module_of "app::main")
       in
-      let failed = List.filter (fun (state : Prover.state) -> state.failure <> None) states in
+      let failed =
+        List.filter (fun (state : Diagnostic.span Prover.state) -> state.failure <> None) states
+      in
       if List.length failed <> 1 || List.length states < 2 then
         fail "%d states, %d failed" (List.length states) (List.length failed));
   test "a call's requires that may not hold has a note at the clause" (fun () ->

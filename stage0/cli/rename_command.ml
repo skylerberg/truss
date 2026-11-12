@@ -14,7 +14,7 @@ type what =
   | Module of Path.module_
 
 type plan = {
-  edits : (Path.module_ * Diagnostic.edit list) list;
+  edits : (Path.module_ * Diagnostic.span Diagnostic.edit list) list;
   moved : (Path.module_ * Path.module_) option;  (** A renamed module's old and new paths *)
 }
 
@@ -192,7 +192,7 @@ let edits_json (project : Project.t) plan =
     (fun (module_, edits) ->
       let source = Project.source project module_ in
       List.map
-        (fun (edit : Diagnostic.edit) ->
+        (fun (edit : Diagnostic.span Diagnostic.edit) ->
           Json.Object
             [
               ("file", Json.String (Source.path source));

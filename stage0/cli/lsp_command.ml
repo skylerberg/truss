@@ -139,7 +139,7 @@ let lsp_diagnostic encoding ~uri text (diagnostic : Diagnostic.t) =
 
 (* An obligation's state: where it is, what it is to show, whether it is
    shown, and whether its proof trusts compiled code. *)
-let lsp_state encoding text (state : Prover.state) =
+let lsp_state encoding text (state : Diagnostic.span Prover.state) =
   Json.Object
     [
       ("range", range encoding text state.span);

@@ -187,10 +187,7 @@ let accept_keyword cursor keyword =
 
 (* Positions *)
 
-let relative cursor offset = offset - cursor.base
-
-let span cursor (span : Source.span) =
-  Syntax.Span.make (relative cursor span.start) (relative cursor span.stop)
+let span cursor span = Syntax.Span.of_source ~base:cursor.base span
 
 (* The end of the token before the current one, which is where a node that
    ends here stops. *)
@@ -202,10 +199,9 @@ let previous_stop cursor =
 let span_from cursor start_index =
   let start = (token_at cursor start_index).span.start in
   let stop = max start (previous_stop cursor) in
-  Syntax.Span.make (relative cursor start) (relative cursor stop)
+  span cursor (Source.span start stop)
 
-let absolute cursor (span : Syntax.span) =
-  Source.span (span.start + cursor.base) (span.stop + cursor.base)
+let absolute cursor span = Syntax.Span.to_source ~base:cursor.base span
 
 (* The source text under [span], which must lie in the definition. *)
 let text cursor (span : Source.span) =

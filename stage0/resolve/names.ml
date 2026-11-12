@@ -674,10 +674,11 @@ let per_definition database module_ of_definition =
     (fun declaration ->
       let key = key_of declaration in
       match Query.demand database base key with
-      | Some (_, base) -> List.map (Diagnostic.move base) (of_definition key)
+      | Some (_, base) ->
+          List.map (Diagnostic.map_spans (Syntax.Span.to_source ~base)) (of_definition key)
       | None -> [])
     (Query.demand database declarations module_)
-  |> List.sort (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
+  |> List.sort (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))
 
 (* A definition's source text, which fixes quote, apart from the rest of

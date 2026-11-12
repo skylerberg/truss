@@ -32,7 +32,7 @@ type context = {
   database : Query.context;
   spans : Syntax.span array;
   text : string;  (** The definition's source text, in which the spans are offsets. *)
-  mutable diagnostics : Diagnostic.t list;
+  mutable diagnostics : Syntax.diagnostic list;
 }
 
 let span context (origin : Core.origin) : Syntax.span =
@@ -41,8 +41,7 @@ let span context (origin : Core.origin) : Syntax.span =
 
 let report context ?(fixes = []) code (span : Syntax.span) message =
   context.diagnostics <-
-    Diagnostic.make ~fixes ~code:(Patterns code) (Source.span span.start span.stop) message
-    :: context.diagnostics
+    Diagnostic.make ~fixes ~code:(Patterns code) span message :: context.diagnostics
 
 let integer_range type_ =
   let bits signed width =
@@ -496,7 +495,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                   Diagnostic.fix "Delete the arm."
                     [
                       Diagnostic.delete
-                        (Source.span
+                        (Syntax.Span.make
                            (arm_span.start
                            - String.length (indentation context.text arm_span.start)
                            - 1)
@@ -521,11 +520,11 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                       let found = at alternative in
                       let deleted =
                         match if index > 0 then List.nth_opt alternatives (index - 1) else None with
-                        | Some previous -> Source.span (at previous).stop found.stop
+                        | Some previous -> Syntax.Span.make (at previous).stop found.stop
                         | None -> (
                             match List.nth_opt alternatives 1 with
-                            | Some next -> Source.span found.start (at next).start
-                            | None -> Source.span found.start found.stop)
+                            | Some next -> Syntax.Span.make found.start (at next).start
+                            | None -> found)
                       in
                       report context Unreachable_alternative found
                         ~fixes:
@@ -559,7 +558,8 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
               [
                 Diagnostic.fix "Add an arm for each missing case."
                   [
-                    Diagnostic.insert last.stop
+                    Diagnostic.replace
+                      (Syntax.Span.zero_width last.stop)
                       (String.concat ""
                          (List.map
                             (fun witness ->
@@ -623,7 +623,8 @@ let definition_diagnostics =
           let context = { database; spans; text; diagnostics = [] } in
           check_definition context form.definition;
           List.sort
-            (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span right.span)
+            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
+              compare left.span right.span)
             context.diagnostics
       | _ -> [])
 
