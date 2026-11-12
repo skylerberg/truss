@@ -608,7 +608,7 @@ and capability_defaults st ~capability ~name (arguments : Core.argument list) ev
    signature to read the parameter's type from. *)
 and argument_place st (argument : Core.argument) =
   match argument with
-  | Passed { mode; value } -> (mode, ground st (operand_type value), operand_place st value)
+  | Passed { mode; value; _ } -> (mode, ground st (operand_type value), operand_place st value)
   | Default -> bug "an omitted argument in a call that has no defaults"
 
 (* Lowers a loop over [iteration]. [each] lowers the loop body for the
@@ -970,13 +970,6 @@ and resolved st (callee : Core.callee) =
       (path, type_arguments, signature, bind signature.generics type_arguments)
   | None -> bug "a callee that is not a function or a method"
 
-(* The types of a callee's parameters, in order, a receiver first. *)
-and parameter_types st (callee : Core.callee) =
-  let _, _, signature, substitution = resolved st callee in
-  List.map
-    (fun (_, ty) -> Monomorphic.ground st.context.monomorphic substitution ty)
-    (interface_parameters signature)
-
 and result_type st (callee : Core.callee) =
   let path, _, signature, substitution = resolved st callee in
   match signature.output with
@@ -1067,7 +1060,7 @@ and intrinsic_operation st operation ~type_arguments (arguments : Core.argument 
       (fun (argument : Core.argument) ->
         match argument with
         | Passed { value = Place source; _ } -> Intrinsics.Place (place st source)
-        | Passed { mode; value = Value value } ->
+        | Passed { mode; value = Value value; _ } ->
             let ty = ground st value.type_ in
             let evaluated = value_place st value in
             (* An intrinsic takes storage and views by place. *)

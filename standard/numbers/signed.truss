@@ -170,18 +170,21 @@ public transparent fn Int8.checked_multiply(self, other: Int8) -> Option[Int8]
 
 public transparent fn Int8.wrapping_add(self, other: Int8) -> Int8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn Int8.wrapping_subtract(self, other: Int8) -> Int8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn Int8.wrapping_multiply(self, other: Int8) -> Int8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
@@ -473,18 +476,21 @@ public transparent fn Int16.checked_multiply(self, other: Int16) -> Option[Int16
 
 public transparent fn Int16.wrapping_add(self, other: Int16) -> Int16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn Int16.wrapping_subtract(self, other: Int16) -> Int16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn Int16.wrapping_multiply(self, other: Int16) -> Int16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
@@ -764,18 +770,21 @@ public transparent fn Int32.checked_multiply(self, other: Int32) -> Option[Int32
 
 public transparent fn Int32.wrapping_add(self, other: Int32) -> Int32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn Int32.wrapping_subtract(self, other: Int32) -> Int32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn Int32.wrapping_multiply(self, other: Int32) -> Int32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
@@ -1043,18 +1052,21 @@ public transparent fn Int64.checked_multiply(self, other: Int64) -> Option[Int64
 
 public transparent fn Int64.wrapping_add(self, other: Int64) -> Int64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn Int64.wrapping_subtract(self, other: Int64) -> Int64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn Int64.wrapping_multiply(self, other: Int64) -> Int64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
@@ -1304,18 +1316,21 @@ public transparent fn ISize.checked_multiply(self, other: ISize) -> Option[ISize
 
 public transparent fn ISize.wrapping_add(self, other: ISize) -> ISize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn ISize.wrapping_subtract(self, other: ISize) -> ISize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn ISize.wrapping_multiply(self, other: ISize) -> ISize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }

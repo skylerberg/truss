@@ -4,6 +4,8 @@ let package_parts package = Option.to_list package.owner @ [ package.name ]
 let show_package package = String.concat "::" (package_parts package)
 let compare_package left right = String.compare (show_package left) (show_package right)
 
+(* A package from one name, or an owner and a name; [None] from any other
+   number of names. *)
 let package_of_parts = function
   | [ name ] -> Some { owner = None; name }
   | [ owner; name ] -> Some { owner = Some owner; name }

@@ -67,6 +67,13 @@ It does not mean everyday vocabulary.
 
 Before you commit, reread what you wrote against rules 1 to 7.
 
+## OCaml
+
+Give every module an `.mli` that exports only what other modules use. The
+compiler reports an unused value, type, constructor, or field only when the
+interface hides it, so a module without an interface hides dead code. The
+entry module of an executable needs none: dune gives it an empty one.
+
 ## Testing
 
 CI is the full gate. It runs every test suite and every proof of the

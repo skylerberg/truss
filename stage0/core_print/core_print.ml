@@ -163,7 +163,7 @@ and call names (call : call) =
   Printf.sprintf "%s(%s)%s" (callee names call.callee)
     (list
        (function
-         | Passed { mode = passed; value } -> mode passed ^ operand names value
+         | Passed { mode = passed; value; _ } -> mode passed ^ operand names value
          | Default -> "default")
        call.arguments)
     (match call.lends with

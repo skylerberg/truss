@@ -149,22 +149,11 @@ public fn ByteReader.remaining(self) -> Slice[UInt8]
   self.bytes.slice_range(self.position, stop: self.bytes.length())
 }
 
-internal fn append_bytes(buffer: mut List[UInt8], bytes: Slice[UInt8])
-  ensures buffer.length() == old(buffer.length()) + bytes.length()
-{
-  mut buffer.reserve(bytes.length())
-  for index in 0..bytes.length()
-    invariant buffer.length() == old(buffer.length()) + yielded.length()
-  {
-    mut buffer.push(bytes[index])
-  }
-}
-
 impl Reader for ByteReader {
   fn read(mut self, buffer: mut List[UInt8], limit: USize) -> Result[USize, SystemError] {
     let left = self.bytes.length() - self.position
     let count = if limit < left { limit } else { left }
-    append_bytes(mut buffer, bytes: self.bytes.slice_range(self.position, stop: self.position + count))
+    mut buffer.append_slice(self.bytes.slice_range(self.position, stop: self.position + count))
     self.position += count
     Ok(count)
   }
@@ -192,7 +181,7 @@ public fn ByteWriter.finish(own self) -> List[UInt8]
 
 impl Writer for ByteWriter {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[USize, SystemError] {
-    append_bytes(mut self.bytes, bytes: bytes)
+    mut self.bytes.append_slice(bytes)
     Ok(bytes.length())
   }
 
@@ -243,7 +232,7 @@ public fn BufferedReader[Source: Reader].read_until(
       found = self.pending[index] == delimiter
       index += 1
     }
-    append_bytes(mut buffer, bytes: self.pending.slice_range(self.start, stop: index))
+    mut buffer.append_slice(self.pending.slice_range(self.start, stop: index))
     taken = taken.saturating_add(index - self.start)
     self.start = index
     if found {
@@ -334,7 +323,7 @@ impl Reader for BufferedReader[Source: Reader] {
     }
     let available = self.pending.length() - self.start
     let count = if limit < available { limit } else { available }
-    append_bytes(mut buffer, bytes: self.pending.slice_range(self.start, stop: self.start + count))
+    mut buffer.append_slice(self.pending.slice_range(self.start, stop: self.start + count))
     self.start += count
     Ok(count)
   }
@@ -393,7 +382,7 @@ impl Writer for BufferedWriter[Sink: Writer] {
     if self.pending.length() > self.room - bytes.length() {
       mut self.flush()?
     }
-    append_bytes(mut self.pending, bytes: bytes)
+    mut self.pending.append_slice(bytes)
     Ok(bytes.length())
   }
 

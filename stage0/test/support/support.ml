@@ -309,13 +309,13 @@ let check_core_invariants database (key : Resolve.Names.key) (form : Core.t) =
               (match call.callee with Indirect function_value -> operand function_value | _ -> ());
               List.iter
                 (function
-                  | Core.Passed { mode = Mut; value = Value { kind = Slice { base; _ }; _ } } ->
+                  | Core.Passed { mode = Mut; value = Value { kind = Slice { base; _ }; _ }; _ } ->
                       mutable_place "a slice passed `mut`" base
-                  | Core.Passed { mode = Mut; value = Value _ } ->
+                  | Core.Passed { mode = Mut; value = Value _; _ } ->
                       wrong "a `mut` parameter receives a value that is not a slice"
-                  | Passed { mode = Mut; value = Place found } ->
+                  | Passed { mode = Mut; value = Place found; _ } ->
                       mutable_place "a `mut` argument" found
-                  | Passed { mode = Own; value = Place _ } ->
+                  | Passed { mode = Own; value = Place _; _ } ->
                       wrong "an `own` parameter receives a place"
                   | Passed { value; _ } -> operand value
                   | Default -> ())

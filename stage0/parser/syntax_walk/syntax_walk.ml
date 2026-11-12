@@ -4,7 +4,7 @@ let rec type_expression f (type_ : type_expression) =
   match type_.kind with
   | Path_type path -> path_type f path
   | Any_type path -> path_type f path
-  | Function_type { inputs; output; clauses } ->
+  | Function_type { inputs; output; clauses; _ } ->
       List.iter (fun (_, input) -> type_expression f input) inputs;
       Option.iter (type_expression f) output;
       List.iter (clause f) clauses
@@ -304,7 +304,7 @@ let walk_names ~on_name:add (definition_ : definition) =
     | Associated (base, key) ->
         add base;
         add key
-    | Function_type { inputs; output; clauses } ->
+    | Function_type { inputs; output; clauses; _ } ->
         List.iter (fun (_, input) -> type_ input) inputs;
         Option.iter type_ output;
         List.iter clause_ clauses

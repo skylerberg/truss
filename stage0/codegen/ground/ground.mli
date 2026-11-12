@@ -35,7 +35,6 @@ and yielding = { method_ : Path.t; type_arguments : argument list }
 
 val compare : ty -> ty -> int
 val compare_arguments : argument list -> argument list -> int
-val equal : ty -> ty -> bool
 
 (* The last part of a path, as a type is written: [List] for
    [standard::list::List]. *)
@@ -53,4 +52,3 @@ val argument_to_string : argument -> string
 val encode : ?path:(Path.t -> Cbor.t) -> ty -> Cbor.t
 val encode_path : Path.t -> Cbor.t
 val encode_argument : ?path:(Path.t -> Cbor.t) -> argument -> Cbor.t
-val encode_mode : mode -> Cbor.t
