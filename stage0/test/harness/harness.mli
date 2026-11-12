@@ -45,7 +45,8 @@ val expect_strings : expected:string list -> string list -> unit
 (** Fails the running test unless the lists are equal. *)
 
 val markdown_documents : unit -> string list
-(** The names of the Markdown documents at the root of the repository, in order. *)
+(** The paths of the Markdown documents at the root of the repository and under [standard/], in
+    order. *)
 
 val workspace_path : string -> string
 (** The path of a file of the repository, given from the workspace root, such as
