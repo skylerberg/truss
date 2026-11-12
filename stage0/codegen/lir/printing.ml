@@ -10,12 +10,12 @@ let rec ty_to_string = function
   | Value ty -> Ground.to_string ty
   | Pointer { target; writable } -> (if writable then "*mut " else "*") ^ ty_to_string target
   | Raw scalar -> "raw " ^ scalar_name scalar
-  | Environment n -> Printf.sprintf "environment %d" n
-  | Evidence n -> Printf.sprintf "evidence %d" n
+  | Environment nested_index -> Printf.sprintf "environment %d" nested_index
+  | Evidence nested_index -> Printf.sprintf "evidence %d" nested_index
 
 let function_ref_to_string = function
   | Instance key -> Instance.to_string key
-  | Nested n -> Printf.sprintf "nested %d" n
+  | Nested nested_index -> Printf.sprintf "nested %d" nested_index
 
 let constant_to_string = function
   | Integer (_, value) -> Z.to_string value
@@ -122,7 +122,8 @@ let intrinsic_name = function
 let rvalue_to_string = function
   | Use operand -> operand_to_string operand
   | Unary (op, operand) -> unary_name op ^ operand_to_string operand
-  | Binary (op, a, b) -> operand_to_string a ^ " " ^ binary_name op ^ " " ^ operand_to_string b
+  | Binary (op, left, right) ->
+      operand_to_string left ^ " " ^ binary_name op ^ " " ^ operand_to_string right
   | Convert (operand, scalar) -> scalar_name scalar ^ "(" ^ operand_to_string operand ^ ")"
   | Build { ty; variant; fields } ->
       Ground.to_string ty
@@ -134,7 +135,10 @@ let rvalue_to_string = function
   | Is_variant (place, variant) -> place_to_string place ^ " is " ^ variant
   | Function_value { code; environment } -> (
       "fn " ^ function_ref_to_string code
-      ^ match environment with None -> "" | Some e -> " with " ^ operand_to_string e)
+      ^
+      match environment with
+      | None -> ""
+      | Some environment_operand -> " with " ^ operand_to_string environment_operand)
 
 let target_to_string = function
   | Direct { function_; _ } -> function_ref_to_string function_
@@ -185,13 +189,23 @@ let terminator_to_string = function
   | Switch { value; cases; default } ->
       "switch " ^ operand_to_string value ^ " ["
       ^ String.concat ", "
-          (List.map (fun (v, b) -> Printf.sprintf "%s => b%d" (Z.to_string v) b) cases)
-      ^ (match default with None -> "" | Some b -> Printf.sprintf ", _ => b%d" b)
+          (List.map
+             (fun (case_value, block_index) ->
+               Printf.sprintf "%s => b%d" (Z.to_string case_value) block_index)
+             cases)
+      ^ (match default with
+        | None -> ""
+        | Some block_index -> Printf.sprintf ", _ => b%d" block_index)
       ^ "]"
   | Switch_variant { place; cases; default } ->
       "switch " ^ place_to_string place ^ " ["
-      ^ String.concat ", " (List.map (fun (v, b) -> Printf.sprintf "%s => b%d" v b) cases)
-      ^ (match default with None -> "" | Some b -> Printf.sprintf ", _ => b%d" b)
+      ^ String.concat ", "
+          (List.map
+             (fun (case_value, block_index) -> Printf.sprintf "%s => b%d" case_value block_index)
+             cases)
+      ^ (match default with
+        | None -> ""
+        | Some block_index -> Printf.sprintf ", _ => b%d" block_index)
       ^ "]"
   | Return None -> "return"
   | Return (Some operand) -> "return " ^ operand_to_string operand
@@ -201,19 +215,19 @@ let terminator_to_string = function
       ^ operand_to_string message ^ ", " ^ operand_to_string length ^ ")"
   | Yield { value; resume; stop } ->
       Printf.sprintf "yield %s resume b%d%s" (operand_to_string value) resume
-        (match stop with None -> "" | Some b -> Printf.sprintf " stop b%d" b)
+        (match stop with None -> "" | Some block_index -> Printf.sprintf " stop b%d" block_index)
 
-let function_to_string (f : function_) =
+let function_to_string (function_ : function_) =
   let parameters =
     String.concat ", "
       (List.map
-         (fun local -> Printf.sprintf "_%d: %s" local (ty_to_string f.locals.(local).ty))
-         f.parameters)
+         (fun local -> Printf.sprintf "_%d: %s" local (ty_to_string function_.locals.(local).ty))
+         function_.parameters)
   in
   let header =
     Printf.sprintf "fn(%s)%s%s" parameters
-      (match f.result with None -> "" | Some ty -> " -> " ^ ty_to_string ty)
-      (if f.returns then "" else " never")
+      (match function_.result with None -> "" | Some ty -> " -> " ^ ty_to_string ty)
+      (if function_.returns then "" else " never")
   in
   let blocks =
     List.mapi
@@ -221,13 +235,14 @@ let function_to_string (f : function_) =
         Printf.sprintf "b%d: %s" index
           (String.concat "; "
              (List.map statement_to_string statements @ [ terminator_to_string terminator ])))
-      (Array.to_list f.blocks)
+      (Array.to_list function_.blocks)
   in
   String.concat "\n" (header :: blocks)
 
-let to_string t =
+let to_string lir =
   String.concat "\n"
-    ((Instance.to_string t.key ^ " " ^ function_to_string t.main)
+    ((Instance.to_string lir.key ^ " " ^ function_to_string lir.main)
     :: List.mapi
-         (fun i f -> Printf.sprintf "nested %d %s" i (function_to_string f))
-         (Array.to_list t.nested))
+         (fun position function_ ->
+           Printf.sprintf "nested %d %s" position (function_to_string function_))
+         (Array.to_list lir.nested))

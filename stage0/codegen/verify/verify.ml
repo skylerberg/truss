@@ -1,12 +1,14 @@
 let bug format = Compiler_bug.bug ~stage:"Verify" format
-let environment (instance : Lir.t) n = instance.nested.(n).environment
+let environment (instance : Lir.t) nested_index = instance.nested.(nested_index).environment
 
-let each_function (instance : Lir.t) f =
-  f "the function" instance.main;
-  Array.iteri (fun n nested -> f (Printf.sprintf "nested function %d" n) nested) instance.nested
+let each_function (instance : Lir.t) visit =
+  visit "the function" instance.main;
+  Array.iteri
+    (fun nested_index nested -> visit (Printf.sprintf "nested function %d" nested_index) nested)
+    instance.nested
 
-let each_statement (f : Lir.function_) visit =
-  Array.iter (fun (block : Lir.basic_block) -> List.iter visit block.statements) f.blocks
+let each_statement (function_ : Lir.function_) visit =
+  Array.iter (fun (block : Lir.basic_block) -> List.iter visit block.statements) function_.blocks
 
 (* Whether two places may share memory. Places under different roots do
    not. Under one root they do not if their paths part at different fields
@@ -17,11 +19,11 @@ let may_alias (first : Lir.place) (second : Lir.place) =
   let rec overlap (first : Lir.projection list) (second : Lir.projection list) =
     match (first, second) with
     | [], rest | rest, [] -> not (List.mem Lir.Deref rest)
-    | Field a :: first, Field b :: second -> a = b && overlap first second
-    | Variant_field a :: first, Variant_field b :: second ->
-        a.variant <> b.variant || (a.field = b.field && overlap first second)
+    | Field left :: first, Field right :: second -> left = right && overlap first second
+    | Variant_field left :: first, Variant_field right :: second ->
+        left.variant <> right.variant || (left.field = right.field && overlap first second)
     | Deref :: first, Deref :: second -> overlap first second
-    | Index a :: first, Index b :: second -> a <> b || overlap first second
+    | Index left :: first, Index right :: second -> left <> right || overlap first second
     | (Field _ | Variant_field _ | Deref | Index _) :: _, _ -> true
   in
   first.root = second.root && overlap first.projections second.projections
@@ -29,12 +31,12 @@ let may_alias (first : Lir.place) (second : Lir.place) =
 (* How many arguments a call passes: what its target is given first, the
    pointer a large result is written through, and each argument that has a
    size. *)
-let passed env (instance : Lir.t) (f : Lir.function_) (target : Lir.target) arguments
+let passed env (instance : Lir.t) (function_ : Lir.function_) (target : Lir.target) arguments
     (result : Lir.destination) =
   let sized (operand : Lir.operand) =
     match operand with
     | Copy place | Move place ->
-        Lir.place_type env ~environment:(environment instance) f place <> None
+        Lir.place_type env ~environment:(environment instance) function_ place <> None
     | Address _ | Moved_address _ | Constant _ -> true
   in
   (match target with
@@ -44,10 +46,11 @@ let passed env (instance : Lir.t) (f : Lir.function_) (target : Lir.target) argu
   + List.length (List.filter sized arguments)
 
 let target_signature (instance : Lir.t) : Lir.target -> Lir.signature option = function
-  | Direct { function_ = Nested n; signature } ->
-      if n < 0 || n >= Array.length instance.nested then bug "a call of nested function %d" n;
-      if not (Lir.equal_signature signature (Lir.signature instance.nested.(n))) then
-        bug "a call of nested function %d with a signature it does not have" n;
+  | Direct { function_ = Nested nested_index; signature } ->
+      if nested_index < 0 || nested_index >= Array.length instance.nested then
+        bug "a call of nested function %d" nested_index;
+      if not (Lir.equal_signature signature (Lir.signature instance.nested.(nested_index))) then
+        bug "a call of nested function %d with a signature it does not have" nested_index;
       Some signature
   | Direct { signature; _ }
   | Indirect { signature; _ }
@@ -56,20 +59,24 @@ let target_signature (instance : Lir.t) : Lir.target -> Lir.signature option = f
       Some signature
   | Intrinsic _ | Foreign _ -> None
 
-let function_ env (instance : Lir.t) what (f : Lir.function_) =
-  let blocks = Array.length f.blocks and locals = Array.length f.locals in
+let function_ env (instance : Lir.t) what (function_ : Lir.function_) =
+  let blocks = Array.length function_.blocks and locals = Array.length function_.locals in
   let bug format = Printf.ksprintf (fun message -> bug "%s: %s" what message) format in
-  let local l = if l < 0 || l >= locals then bug "local %d, of %d" l locals in
-  List.iter local f.parameters;
+  let local local_number =
+    if local_number < 0 || local_number >= locals then bug "local %d, of %d" local_number locals
+  in
+  List.iter local function_.parameters;
   Option.iter
-    (fun l -> if not (List.mem l f.parameters) then bug "a result pointer that is no parameter")
-    f.written_result;
+    (fun local_number ->
+      if not (List.mem local_number function_.parameters) then
+        bug "a result pointer that is no parameter")
+    function_.written_result;
   let visitor : Lir.visitor =
     {
       place =
         (fun place ->
-          (match place.root with Local l -> local l | Static _ -> ());
-          ignore (Lir.place_type env ~environment:(environment instance) f place));
+          (match place.root with Local local_number -> local local_number | Static _ -> ());
+          ignore (Lir.place_type env ~environment:(environment instance) function_ place));
       operand =
         (function
         | Move { root = Static { key; _ }; _ } | Moved_address { root = Static { key; _ }; _ } ->
@@ -79,15 +86,17 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
   in
   (* A nested function that a fork runs takes its environment, and for a
      range the part to cover, and returns nothing. *)
-  let forked n (parameters : Lir.ty list) =
-    if n < 0 || n >= Array.length instance.nested then bug "a fork of nested function %d" n;
-    let signature = Lir.signature instance.nested.(n) in
+  let forked nested_index (parameters : Lir.ty list) =
+    if nested_index < 0 || nested_index >= Array.length instance.nested then
+      bug "a fork of nested function %d" nested_index;
+    let signature = Lir.signature instance.nested.(nested_index) in
     if signature.parameters <> parameters || signature.result <> None then
-      bug "a fork of nested function %d, which does not take what a fork gives" n
+      bug "a fork of nested function %d, which does not take what a fork gives" nested_index
   in
   let nested_value : Lir.statement -> unit = function
-    | Assign (_, Function_value { code = Nested n; _ }) ->
-        if n < 0 || n >= Array.length instance.nested then bug "a value of nested function %d" n
+    | Assign (_, Function_value { code = Nested nested_index; _ }) ->
+        if nested_index < 0 || nested_index >= Array.length instance.nested then
+          bug "a value of nested function %d" nested_index
     | _ -> ()
   in
   (* The emitter leaves out a field that has no size, which it knows by
@@ -100,8 +109,10 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
           | Record members, None -> Some (List.map fst members)
           | Sum variants, Some name ->
               Option.map
-                (fun (v : Memory_layout.variant_shape) -> List.map fst v.fields)
-                (List.find_opt (fun (v : Memory_layout.variant_shape) -> v.name = name) variants)
+                (fun (variant : Memory_layout.variant_shape) -> List.map fst variant.fields)
+                (List.find_opt
+                   (fun (variant : Memory_layout.variant_shape) -> variant.name = name)
+                   variants)
           | _ -> None
         in
         match has with
@@ -148,7 +159,7 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
               | _ -> ());
               Option.iter
                 (fun (signature : Lir.signature) ->
-                  let passed_count = passed env instance f target arguments result in
+                  let passed_count = passed env instance function_ target arguments result in
                   let arity = List.length signature.parameters in
                   if passed_count <> arity then
                     bug "a call that passes %d arguments to a target that takes %d" passed_count
@@ -166,14 +177,15 @@ let function_ env (instance : Lir.t) what (f : Lir.function_) =
         block.statements;
       Lir.visit_terminator visitor block.terminator;
       List.iter
-        (fun b -> if b < 0 || b >= blocks then bug "block %d, of %d" b blocks)
+        (fun block_index ->
+          if block_index < 0 || block_index >= blocks then bug "block %d, of %d" block_index blocks)
         (Lir.successors block.terminator);
-      match (block.terminator, f.result) with
+      match (block.terminator, function_.result) with
       | Yield _, _ -> bug "a yield that yield lowering left in place"
       | Return None, Some _ -> bug "a return of nothing from a function with a result"
       | Return (Some _), None -> bug "a return of a value from a function with no result"
       | _ -> ())
-    f.blocks
+    function_.blocks
 
 let instance env (instance : Lir.t) = each_function instance (function_ env instance)
 
@@ -199,8 +211,10 @@ let links env ~find (compiled : Lir.compiled) =
   | Data _ -> ()
   | Table table -> List.iter (fun (key, signature) -> has key signature) table.entries
   | Code instance ->
-      each_function instance (fun _ f ->
-          let type_of place = Lir.place_type env ~environment:(environment instance) f place in
+      each_function instance (fun _ function_ ->
+          let type_of place =
+            Lir.place_type env ~environment:(environment instance) function_ place
+          in
           let visitor : Lir.visitor =
             {
               place =
@@ -217,7 +231,7 @@ let links env ~find (compiled : Lir.compiled) =
                 | _ -> ());
             }
           in
-          each_statement f (fun statement ->
+          each_statement function_ (fun statement ->
               Lir.visit_statement visitor statement;
               match statement with
               | Call { target = Direct { function_ = Instance key; signature }; _ } ->
@@ -236,4 +250,4 @@ let links env ~find (compiled : Lir.compiled) =
                   ());
           Array.iter
             (fun (block : Lir.basic_block) -> Lir.visit_terminator visitor block.terminator)
-            f.blocks)
+            function_.blocks)

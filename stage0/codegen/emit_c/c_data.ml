@@ -31,7 +31,9 @@ let rec initializer_c context ty (value : Lir.static_value) : string option =
     let key = Block (ty, variant) in
     register context key;
     let block_fields =
-      match (Memory_layout.block context.env ty variant).form with Struct f -> f | _ -> []
+      match (Memory_layout.block context.env ty variant).form with
+      | Struct fields -> fields
+      | _ -> []
     in
     (* The parts first, which are static objects of their own, then this
        one's name, so no two share one. *)
@@ -76,18 +78,20 @@ let rec initializer_c context ty (value : Lir.static_value) : string option =
       | Some index -> Some (string_of_int index)
       | None -> bug "no variant %s" name)
   | Tagged { variants; _ }, Static_variant (name, values) -> (
-      match List.find_opt (fun (v : Memory_layout.variant) -> v.name = name) variants with
+      match
+        List.find_opt (fun (variant : Memory_layout.variant) -> variant.name = name) variants
+      with
       | None -> bug "no variant %s" name
-      | Some v -> (
-          match v.payload.form with
-          | Zero_size -> Some (Printf.sprintf "{ .tag = %d }" v.index)
+      | Some variant -> (
+          match variant.payload.form with
+          | Zero_size -> Some (Printf.sprintf "{ .tag = %d }" variant.index)
           | Struct fields ->
               Some
-                (Printf.sprintf "{ .tag = %d, %s }" v.index
+                (Printf.sprintf "{ .tag = %d, %s }" variant.index
                    (fields_c fields values (".payload.v_" ^ name)))
           | Scalar (Pointer (Block _)) ->
               Some
-                (Printf.sprintf "{ .tag = %d, .payload.v_%s = %s }" v.index name
+                (Printf.sprintf "{ .tag = %d, .payload.v_%s = %s }" variant.index name
                    (block_c name values))
           | _ -> bug "a payload"))
   | Niche_encoded { dataful; others; encoding }, Static_variant (name, values) ->

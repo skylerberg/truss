@@ -106,7 +106,7 @@ let bind = Monomorphic.substitution
 
 let impl_interface context impl =
   match Interface.Impls.impl_interface context.database impl with
-  | Some i -> i
+  | Some position -> position
   | None -> bug "no interface for %s" (Path.show impl)
 
 (* What an [impl]'s [Self] and its trait's parameters stand for, in terms of
@@ -141,7 +141,9 @@ let code_of context (path : Path.t) type_arguments : code =
       uses = interface.uses;
       real = [];
       has_defaults =
-        List.exists (fun (p : Types.parameter_info) -> p.has_default) interface.parameters;
+        List.exists
+          (fun (parameter : Types.parameter_info) -> parameter.has_default)
+          interface.parameters;
     }
   in
   match path with
@@ -182,7 +184,7 @@ let code_of context (path : Path.t) type_arguments : code =
           | Some code ->
               let trait_signature = signature_of context provided in
               let count = List.length (impl_interface context impl).impl_generics in
-              let of_impl = List.filteri (fun i _ -> i < count) substitution in
+              let of_impl = List.filteri (fun position _ -> position < count) substitution in
               let of_trait =
                 List.map
                   (fun (parameter, argument) ->
@@ -194,7 +196,7 @@ let code_of context (path : Path.t) type_arguments : code =
                   (fun (generic : Types.generic) -> not (Path.equal generic.generic.owner trait))
                   trait_signature.generics
               in
-              let own = List.filteri (fun i _ -> i >= count) type_arguments in
+              let own = List.filteri (fun position _ -> position >= count) type_arguments in
               function_code ~anchor:provided ~enclosing_impl code ~interface:trait_signature
                 ~substitution:(of_trait @ bind own_generics own @ substitution)
           | None -> bug "%s neither writes nor is given %s" (Path.show impl) name)
@@ -230,7 +232,7 @@ let lir_signature context substitution ~(parameters : (Types.mode * Types.ty) li
   (Convention.signature ~returns (written @ mask @ evidence) result_ty, result_ty)
 
 let has_defaults (signature : Types.signature) =
-  List.exists (fun (p : Types.parameter_info) -> p.has_default) signature.parameters
+  List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters
 
 let interface_parameters (signature : Types.signature) =
   (match signature.receiver with
