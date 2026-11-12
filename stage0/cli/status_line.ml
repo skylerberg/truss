@@ -34,3 +34,7 @@ let clear status =
     Output.eprint erase_line;
     status.drawn <- false
   end
+
+module For_testing = struct
+  let cut = cut
+end

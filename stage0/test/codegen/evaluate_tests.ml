@@ -148,7 +148,7 @@ let () =
           fail "%s"
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-      Database.Testing.set_text (Engine.of_context database) example (source "0");
+      Database.For_testing.set_text (Engine.of_context database) example (source "0");
       match proven () with
       | [ _ ] -> ()
       | actual ->

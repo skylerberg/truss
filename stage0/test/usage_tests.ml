@@ -1,12 +1,9 @@
-module Patterns = Type_checker.For_testing.Patterns
-module Usage = Type_checker.For_testing.Usage
-
 (* The tests of the rules on use: unused variables and unreachable code. *)
 
 open Harness
 open Support
 
-let check = Type_checker.through Usage
+let check = Type_checker.For_testing.through Usage
 let one_diagnostic = one_diagnostic ~check
 let fine text = no_diagnostics ~check [ ("app::main", text) ]
 

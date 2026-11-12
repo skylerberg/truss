@@ -23,4 +23,3 @@ val query :
 
 val demand : Nodes.context -> ('key, 'value) Nodes.query -> 'key -> 'value
 val observed_node : Nodes.t -> ('key, 'value) Nodes.query -> 'key -> Nodes.node
-val known : Nodes.context -> ('key, 'value) Nodes.query -> 'key -> 'value option

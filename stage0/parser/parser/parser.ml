@@ -231,3 +231,9 @@ let example_statement source tokens piece =
         | exception Cursor.Failed -> ())
   in
   diagnostics
+
+module For_testing = struct
+  let definition = definition
+  let begins_statement = begins_statement
+  let spelled_words = spelled_words
+end

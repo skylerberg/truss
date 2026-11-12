@@ -91,7 +91,7 @@ let () =
             type_arguments = [];
           }
       in
-      match Compile.compiled compile equal with
+      match Compile.For_testing.compiled compile equal with
       | Code instance ->
           let branches =
             Array.to_list instance.main.blocks
@@ -100,7 +100,7 @@ let () =
           in
           if List.length branches <> 2 then
             fail "expected a branch after each field, got %d:\n%s" (List.length branches)
-              (Lir.to_string instance)
+              (Lir.For_testing.to_string instance)
       | _ -> fail "expected code")
 
 let () =

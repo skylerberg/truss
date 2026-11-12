@@ -19,5 +19,6 @@ let lex source =
       (tokens, diagnostics)
 
 module For_testing = struct
-  module Layout = Layout
+  let can_end = Layout.can_end
+  let can_begin = Layout.can_begin
 end

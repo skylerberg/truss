@@ -5,7 +5,7 @@
 open Harness
 open Support
 
-let check = Type_checker.through Infer
+let check = Type_checker.For_testing.through Infer
 let one_diagnostic = one_diagnostic ~check
 let no_diagnostics = no_diagnostics ~check
 let fine text = no_diagnostics [ ("app::main", text) ]
@@ -543,7 +543,7 @@ let () =
       expect_not_recomputed engine
         ~first:(fun () -> ignore (Infer.diagnostics database module_))
         ~again:(fun () ->
-          Database.Testing.set_text engine module_ (text "2");
+          Database.For_testing.set_text engine module_ (text "2");
           ignore (Infer.diagnostics database module_))
         Infer.type_check_result
         [ top_key "app::main" "caller" ]);

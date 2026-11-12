@@ -394,10 +394,10 @@ let () =
       let database = setup [ ("app::main", text "2") ] in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Database.Testing.set_text (Engine.of_context database) module_ (text "3");
-      Engine.clear_log (Engine.of_context database);
+      Database.For_testing.set_text (Engine.of_context database) module_ (text "3");
+      Engine.For_testing.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
+      let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
       if resolved <> [ Support.top_key "app::main" "second" ] then
         fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "moving a definition down resolves nothing again" (fun () ->
@@ -407,7 +407,7 @@ let () =
       expect_not_recomputed engine
         ~first:(fun () -> ignore (Resolve.diagnostics database module_))
         ~again:(fun () ->
-          Database.Testing.set_text engine module_
+          Database.For_testing.set_text engine module_
             Fixtures.Resolve.moving_a_definition_down_resolves_nothing_again;
           ignore (Resolve.diagnostics database module_))
         Resolve.resolved
@@ -432,11 +432,11 @@ let () =
       in
       let module_ = module_of "app::main" in
       ignore (Resolve.diagnostics database module_);
-      Database.Testing.set_text (Engine.of_context database) module_
+      Database.For_testing.set_text (Engine.of_context database) module_
         Fixtures.Resolve.definition_added_above_another_resolves_nothing_2;
-      Engine.clear_log (Engine.of_context database);
+      Engine.For_testing.clear_log (Engine.of_context database);
       ignore (Resolve.diagnostics database module_);
-      let resolved = Engine.computed (Engine.of_context database) Resolve.resolved in
+      let resolved = Engine.For_testing.computed (Engine.of_context database) Resolve.resolved in
       if resolved <> [ Support.top_key "app::main" "third_number" ] then
         fail "resolved again: %s" (String.concat "; " (List.map Resolve.Names.show_key resolved)));
   test "an import used only in a part the parser could not read is not unused" (fun () ->
@@ -486,7 +486,7 @@ let () =
       ~name:{ Path.owner = Some "acme"; name = "geometry" }
       ~dependencies:[]
       [ (geometry, Fixtures.Resolve.geometry_length) ];
-    Database.Testing.set_manifest engine
+    Database.For_testing.set_manifest engine
       ~name:{ Path.owner = None; name = "app" }
       ~dependencies:(List.map (fun package -> { Manifest.package; capabilities = [] }) dependencies);
     database
@@ -499,7 +499,7 @@ let () =
       (match diagnostics database "app::main" with
       | [] -> ()
       | reported -> fail "found [%s]" (String.concat "; " (codes reported)));
-      match Query.demand database Resolve.Names.imports (module_of "app::main") with
+      match Query.demand database Resolve.Names.For_testing.imports (module_of "app::main") with
       | [ ("vector", imported) ] when imported = geometry -> ()
       | _ -> fail "imported differently");
   test "a package with an owner that the manifest does not list cannot be named" (fun () ->

@@ -1959,3 +1959,7 @@ let check system =
                     None)
               row.parameters)
         functions)
+
+module For_testing = struct
+  let check = check
+end

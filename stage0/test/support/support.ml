@@ -11,7 +11,7 @@ let top_key module_name name : Resolve.Names.key =
 
 (* The standard library as a fixed base, shared by every test in a run, so
    that it is checked once. *)
-let standard = lazy (Database.Testing.standard_base ())
+let standard = lazy (Database.For_testing.standard_base ())
 
 let setup files =
   let database = Engine.context (Engine.create ~log:true ~bases:[ Lazy.force standard ] ()) in

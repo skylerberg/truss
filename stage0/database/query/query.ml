@@ -23,11 +23,6 @@ let query ~name ~show ~phase ?saved ?portable ?equal ?about compute =
   Incremental.query ~name ~show ~phase ?saved ?portable ?equal ?about compute
 
 let find = Incremental.read
-
-let get context input key =
-  match Incremental.read context input key with Some value -> value | None -> raise Not_found
-
 let demand = Incremental.demand
-let known = Incremental.known
 
 exception Cycle = Incremental.Cycle

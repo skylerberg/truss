@@ -348,3 +348,8 @@ let rec to_string layout =
     (match layout.niche with None -> "" | Some niche -> " " ^ niche_to_string niche)
 
 let has_zero_size env ty = (of_type env ty).size = 0
+
+module For_testing = struct
+  let target_32 = target_32
+  let to_string = to_string
+end
