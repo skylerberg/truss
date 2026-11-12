@@ -78,10 +78,10 @@ let () =
       match Prover.diagnostics ~record:(record database) database (Lazy.force solver) example with
       | [ _ ] -> ()
       | actual -> fail "%d diagnostics" (List.length actual));
-  test "what running a call gives is what it gives, not what was hoped" (fun () ->
+  test "running a call gives its real result, not the hoped one" (fun () ->
       match
         proven_with_running
-          (counting ^ Fixtures.Evaluate.what_running_a_call_gives_is_what_it_gives_not)
+          (counting ^ Fixtures.Evaluate.running_a_call_gives_its_real_result_not_the)
       with
       | [ _ ] -> ()
       | actual -> fail "%d diagnostics" (List.length actual))

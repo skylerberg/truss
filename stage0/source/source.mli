@@ -26,7 +26,7 @@ val position : t -> int -> int * int
     break is a line feed, a carriage return followed by a line feed, or a carriage return on its
     own, which the scanner reports but still treats as a line break. *)
 
-(** What a column counts. *)
+(** The unit a column counts. *)
 type units = Bytes | Scalar_values | Utf_16_code_units
 
 val location : units -> t -> int -> int * int

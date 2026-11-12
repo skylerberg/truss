@@ -27,7 +27,7 @@ val objects :
   (string * string) list ->
   (string list, string) result
 
-(* A program: each list of what instances compile to is one C file, [sources] are
+(* A program: each list of compiled instances is one C file, [sources] are
    further C files, such as the startup code and the anchors, and the
    runtime for the target is always linked: a test program's with [tests],
    which the test runner's startup code needs. With [in_order], as a test

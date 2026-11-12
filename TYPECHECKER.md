@@ -162,7 +162,7 @@ node ids, of the referent of every name. The tree itself is unchanged (see
 the file's `use` lines, and the names that other files and packages export,
 each through a query.
 
-### What a name can refer to
+### Namespaces
 
 Names are in separate namespaces, which the case rules distinguish:
 
@@ -385,12 +385,12 @@ the change invalidates nothing beyond the definition:
   with. The parameters and the contract are built before the body, so their
   nodes are numbered the same whatever the body is. Editing a body that the
   specification leaves out leaves the specification equal. A second result,
-  the exported specification, is what a proof in another package reads. It has
+  the exported specification, is the part a proof in another package reads. It has
   the body of a function only when the function is `public transparent`, so
   editing any other body re-proves nothing in a package that depends on this
   one. `transparent` is part of the signature, and it is an error on a function
   whose body cannot be a definition.
-- **What another package's proofs read names only what is public.** Those
+- **The specification another package's proofs read names only public definitions.** Those
   proofs read the `requires`, `ensures`, and `cost` of every definition that
   the package can call, and the body of a `transparent` function. A function
   or a constant that such a clause or body names must be public
@@ -530,8 +530,8 @@ different types, as in Rust.
   function that `uses Clock` is never a `fn()`, in an argument, a `let`, a
   `return`, a field, or an assignment. Where the expected type lists a
   capability parameter of the callee, the parameter is instantiated with the
-  capabilities that the function uses, as [What code may
-  call](#what-code-may-call) describes.
+  capabilities that the function uses, as [Capability
+  checking](#capability-checking) describes.
 - **The checker accepts weaker costs that the constants of the two types
   show:** an exact count is within any bound that it does not exceed, a count
   is `O(...)`, and every bound is `finite`. The type of a named function has
@@ -543,7 +543,7 @@ different types, as in Rust.
 
 ### Properties of types
 
-Five properties of a type decide what code can do with a value of it. Each is
+Five properties of a type decide the operations allowed on its values. Each is
 derived from the type's shape, as a condition on its type parameters:
 `Option[Value]` is `Plain` exactly when `Value` is.
 
@@ -902,7 +902,7 @@ decided in this order:
    A literal shift amount is a `USize`, as Go's is a `uint`.
 
 This never looks at which `impl`s exist, so adding an `impl` never changes
-what an existing call means, as DESIGN.md requires. Once a literal's type is
+an existing call's meaning, as DESIGN.md requires. Once a literal's type is
 known:
 
 - **An integer literal must fit** its type, after negation: a `-` applied
@@ -1338,7 +1338,7 @@ allowed once `middle` is dead, as in SYNTAX.md's example. A loan of a view is
 also a loan of the places that the view views.
 
 The operands of one operation are evaluated in the order written, and a later
-operand cannot mutate what an earlier operand evaluated to. The operands are
+operand cannot mutate an earlier operand's value. The operands are
 the arguments of a call, the fields of a constructor, the elements of a literal,
 the scrutinees of a `match`, the collection and then the keys of an index, and
 the value of an assignment and then the keys of its target.
@@ -1386,10 +1386,10 @@ uses one definition of the places that a value views, `Graph.views_of`.
   a function only if its elements do, so `mut items.sort_by(fn(first, second)
   { key(first) < key(second) })` is accepted where `items` is a `mut` slice
   parameter.
-- **The value of an `if`, a `match`, or a block views what any of its tail
-  expressions views.** After `let part = if first { items[..1] } else {
+- **The value of an `if`, a `match`, or a block views every place its tail
+  expressions view.** After `let part = if first { items[..1] } else {
   items[1..] }`, `part` views `items`. A copy of a view has the same views, and
-  a record built by `with` views what its base and its new fields view. The
+  a record built by `with` views every place its base and its new fields view. The
   checker decides this for every kind of expression, with no default case.
 - **A place that is assigned a view has the value's views.** After `holder.view
   = data[0..2]`, `holder` views `data`. A variable that is assigned again also
@@ -1478,7 +1478,7 @@ uses one definition of the places that a value views, `Graph.views_of`.
   produced the view. The error asks to bind the temporary to a name first, as
   Rust's E0716 does. The same holds for a view of a temporary that is assigned
   to a place, or that is passed to a call together with a `mut` argument that
-  can hold views. A cursor views what its call's read-only arguments view, as a
+  can hold views. A cursor views the places its call's read-only arguments view, as a
   view would. A string literal without interpolation has static storage, so a
   view of one is accepted.
 
@@ -1697,7 +1697,7 @@ follow the same data race rule as `parallel`. They differ in two ways: `?`,
 
 ## Capabilities
 
-### What code may call
+### Capability checking
 
 At each point of a body, a set of capabilities is *available*: the function's
 `uses`, its capability parameters, and the capabilities that each enclosing
@@ -2087,7 +2087,7 @@ trait method, the parameter and mode of each argument, the omitted defaults,
 and the capability set; the value of each literal; the variant or record of
 each pattern and the type of its scrutinee; the iteration of each `for` loop;
 the conversions of each template; and the mode of each lending call. The
-checker builds the core form from them. What a `provide` provides, and the
+checker builds the core form from them. A `provide`'s capabilities, and the
 obligations that the type checker creates, are in the core form only.
 
 The tables are canonical, so that two checks of the same definition give equal
@@ -2227,7 +2227,7 @@ the whole definition is checked. Only then is every type final, and some
 choices, such as the `impl` an operator resolves to, are made at the end of
 a statement.
 
-The check described in [What code may call](#what-code-may-call) runs on
+The check described in [Capability checking](#capability-checking) runs on
 the core form, and it solves the capability variables, because only the
 core form has every call. If the definition has capability variables, the
 core form is built again after they are solved, so that its types contain
@@ -2435,7 +2435,7 @@ whenever the intent is unambiguous:
 - **The parser** produces one syntax tree per definition, with positions
   relative to the definition and an id on every node. Later stages record their
   decisions in tables keyed by those ids, and never change the tree. For a
-  broken definition, the parser keeps what PARSER.md states, and the type
+  broken definition, the parser keeps the parts PARSER.md states, and the type
   checker relies on it as [Broken definitions](#broken-definitions) describes.
 - **The prover** reads core forms, the interfaces and contracts of their
   callees, the functional bodies that it uses as definitions, and the type

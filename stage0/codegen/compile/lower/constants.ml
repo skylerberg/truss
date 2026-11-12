@@ -32,7 +32,7 @@ let integer_kind st ty =
 let truth value = Some (Lir.Static_scalar (Bool value))
 
 (* An arithmetic or bitwise operation on two folded numbers, where the
-   result is exactly what running the operation gives. Anything else, such
+   result equals the result of running the operation. Anything else, such
    as a sum that does not fit its type, is left to be run. *)
 let arithmetic st ty (operation : Intrinsic.operation) (left : Lir.static_value)
     (right : Lir.static_value) =
@@ -119,12 +119,12 @@ let compared (comparison : Core.comparison) (left : Lir.static_value) (right : L
    run. *)
 let call_depth = 8
 
-(* A constant expression's value, where folding gives exactly what
-   running it would. For anything else there is none, and the value is
-   computed by running the constant's evaluator. Running is what a
-   constant's value means; folding only saves the run.
+(* A constant expression's value, where folding gives exactly the
+   result of running it. For anything else there is none, and the value is
+   computed by running the constant's evaluator. Running defines a
+   constant's value; folding only saves the run.
 
-   What folds: literals, operators on numbers and on [Bool], other constants
+   The expressions that fold: literals, operators on numbers and on [Bool], other constants
    that fold, records, variants, and arrays built from parts that fold, and
    a list literal. A list literal is a block that makes a storage, pushes
    each element, and calls [List.from_storage], so folding follows a block's

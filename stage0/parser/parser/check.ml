@@ -126,7 +126,7 @@ and types ?(parameter = false) cursor context type_ =
   requires_placement cursor ~top:parameter type_;
   Syntax_walk.type_expression (expression cursor (specification context)) type_
 
-(* A [requires] on a function type says what a callee passes its callback,
+(* A [requires] on a function type constrains the arguments a callee passes its callback,
    so it belongs only on the type of a definition's parameter, at its top:
    never on a field's, a result's, or a type argument's. *)
 and requires_placement cursor ~top (type_ : type_expression) =

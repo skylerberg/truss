@@ -84,7 +84,8 @@ let () =
       malformed_at 2 "[package]\nname = \"Weather\"\n");
   test "a dependency's name with :: is written in quotes" (fun () ->
       malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\ntruss::json = []\n");
-  test "a version, as other languages' manifests have, is malformed, with what to write" (fun () ->
+  test "a version, as other languages' manifests have, is malformed, with the replacement"
+    (fun () ->
       (match Manifest.parse "[package]\nname = \"a\"\nversion = \"1.0\"\n" with
       | exception Manifest.Malformed (3, message) ->
           if not (contains message "holds no version") then fail "said %s" message

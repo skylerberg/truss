@@ -261,7 +261,7 @@ let rec mangle = function
 let limit = 200
 let prefix_length = 180
 
-(* A long name keeps its start, which is what a profiler shows, and ends
+(* A long name keeps its start, which a profiler shows, and ends
    with a hash of the whole name, which keeps it unique. *)
 let shorten name =
   if String.length name <= limit then name

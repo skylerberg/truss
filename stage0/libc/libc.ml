@@ -455,7 +455,7 @@ let function_name = function
 
 (* Everything about a function, written once: each parameter with how Truss
    passes it and its C type on each system. Only the check reads the rest:
-   [headers] declare the function; [layout] is what must hold of a structure
+   [headers] declare the function; [layout] is the condition on a structure
    it takes for the storage passed to be that structure; and [named] gives a
    parameter the type the headers call it by, where that is a name only the
    headers have and the C that is emitted says [void]. *)
@@ -636,7 +636,7 @@ let describe function_ =
         ~headers:[ "unistd.h" ]
   | Poll ->
       (* A [pollfd] is its descriptor and then two numbers of half the
-         size, what to wait for and what was found, which are the low and
+         size, the requested and the returned events, which are the low and
          the high half of one [Int32] where the low byte comes first. *)
       row ~at_most:"count" (everywhere (Named "int")) (Returns Int32)
         [
@@ -869,7 +869,7 @@ let describe function_ =
         ]
         ~headers:[ "fcntl.h" ]
   | Posix_spawn_file_actions_init ->
-      (* What a program that is started does to its descriptors before it
+      (* The actions a started program applies to its descriptors before it
          runs. The structure is storage of as many bytes as it takes, which
          only these functions read. *)
       row (everywhere (Named "int")) (Returns Int32)
@@ -1898,7 +1898,7 @@ let check system =
       @ List.concat_map number_headers
           (List.filter (fun number -> number_expression system number <> None) numbers))
   in
-  let holds what condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition what in
+  let holds message condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition message in
   (* The address is of one of the numbers, where C takes the first of
      several, or of a structure that is all of them. *)
   let reached symbol c_type count scalar =
@@ -1917,7 +1917,7 @@ let check system =
      ]
     @ List.map (fun header -> Printf.sprintf "#include <%s>\n" header) headers
     (* A header may also define a function as a macro, as macOS does
-       [sigaddset]. The function is what a program calls. *)
+       [sigaddset]. A program calls the function. *)
     @ List.sort_uniq String.compare
         (List.map
            (fun function_ -> Printf.sprintf "#undef %s\n" (declaration system function_).symbol)

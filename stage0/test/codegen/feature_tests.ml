@@ -33,8 +33,8 @@ let () =
     Fixtures.Feature.lends_mut_method_yields_on_two_paths_and_owns_a;
   passes "a lending method resumes when its caller's statement exits early"
     Fixtures.Feature.lending_method_resumes_when_its_callers_statement;
-  passes "a cursor dropped before it ends drops what it holds"
-    Fixtures.Feature.cursor_dropped_before_it_ends_drops_what_it_holds;
+  passes "a cursor dropped before it ends drops its values"
+    Fixtures.Feature.cursor_dropped_before_it_ends_drops_its_values;
   passes "sets and maps keep one of each key, in order"
     Fixtures.Feature.sets_and_maps_keep_one_of_each_key_in_order;
   passes "strings, constants, and ranges of constants are patterns"
@@ -70,8 +70,8 @@ let () =
     Fixtures.Feature.expression_a_pattern_looks_into_is_evaluated_once
 
 let () =
-  passes "a list grows as it is pushed and keeps what it held"
-    Fixtures.Feature.list_grows_as_it_is_pushed_and_keeps_what_it_held;
+  passes "a list grows as it is pushed and keeps its elements"
+    Fixtures.Feature.list_grows_as_it_is_pushed_and_keeps_its_elements;
   passes "text that started as a literal is copied before it is added to"
     Fixtures.Feature.text_that_started_as_a_literal_is_copied_before_it
 

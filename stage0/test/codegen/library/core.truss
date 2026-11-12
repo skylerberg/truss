@@ -55,7 +55,7 @@ test "a collection folds, counts, and maps its elements" {
   assert none.flat_map(fn(item) { [item] }).length() == 0
 }
 
-test "the errors of parsing and converting say what went wrong" {
+test "the errors of parsing and converting name the failure" {
   assert "${core::ParseIntegerError.Empty}" == "the text has no digits"
   assert "${core::ParseIntegerError.InvalidDigit(offset: 3)}" == "the byte at offset 3 is not a digit"
   assert "${core::ParseIntegerError.OutOfRange}" == "the number does not fit the type"
@@ -63,7 +63,7 @@ test "the errors of parsing and converting say what went wrong" {
   assert "${core::ConversionError()}" == "the value does not fit the type"
 }
 
-test "take empties an option and replace fills it, each giving what was there" {
+test "take empties an option and replace fills it, each giving the old value" {
   var held: Option[String] = Some("a${1}")
   let removed = mut held.take()
   assert held is None
@@ -87,7 +87,7 @@ test "find lends the first element that matches" {
   assert none.find(fn(word) { word.is_empty() }) is None
 }
 
-test "get_or_insert fills an empty option and lends what it holds to change" {
+test "get_or_insert fills an empty option and lends its value to change" {
   var slot: Option[Int64] = None
   mut slot.get_or_insert(5) += 1
   assert slot == Some(6)
@@ -98,7 +98,7 @@ test "get_or_insert fills an empty option and lends what it holds to change" {
   assert name == Some("a1b")
 }
 
-test "a system error says what went wrong" {
+test "a system error names the failure" {
   assert "${SystemError.NotFound}" == "no such file or directory"
   assert "${SystemError.PermissionDenied}" == "permission denied"
   assert "${SystemError.TimedOut}" == "timed out"

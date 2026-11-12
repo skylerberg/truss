@@ -1,4 +1,4 @@
-(* What each module of the standard library costs to prove, for dealing the modules out to the
+(* Each standard library module's proof cost, for dealing the modules out to the
    jobs that prove them. `TRUSS_PROOF_WEIGHTS=all ./standard_library_tests.exe` prints this file's
    definitions again, and a list of module names in place of `all` measures those modules only. *)
 

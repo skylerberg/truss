@@ -5,8 +5,8 @@
 
      dune exec stage0/tools/engine_fuzz/engine_fuzz.exe -- [--seed N] [--count N] [--steps N]
 
-   Each run makes a graph of queries over a few inputs. What a query reads
-   depends on what it has read so far, so its reads change as the inputs
+   Each run makes a graph of queries over a few inputs. A query's reads
+   depend on its earlier reads, so its reads change as the inputs
    do; some queries divide their result, so that it often comes out the
    same; some raise; some are saved; and the queries are spread over the phases. After
    each random step every engine is audited against a new engine with no
@@ -33,7 +33,7 @@ let phase_of index = index * Array.length phases / nodes
 let value_input : (int, int) Query.input = Query.input ~name:"fuzz_input" ~show:string_of_int ()
 
 (* A fixed mixing of integers, so that a node's reads are a function of its
-   index and of what it has read, and of nothing else. *)
+   index and of its earlier reads, and of nothing else. *)
 let mix left right third =
   let hash = ref (left * 0x9E3779B1 lxor (right * 0x85EBCA77) lxor (third * 0xC2B2AE3D)) in
   hash := !hash lxor (!hash lsr 15);
@@ -160,7 +160,7 @@ let apply world step =
 let audit world =
   List.concat_map (Engine.audit ~include_bases:true) (world.engine :: Option.to_list world.other)
 
-(* What is wrong after the first of the steps that leaves something wrong. *)
+(* The problems after the first step that leaves a problem. *)
 let problems steps =
   let world = fresh_world () in
   let reported =

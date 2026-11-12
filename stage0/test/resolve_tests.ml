@@ -1,5 +1,5 @@
 (* The tests of name resolution. Each gives a few small files and states one
-   fact: what a name refers to, or the one diagnostic, with its code and the
+   fact: a name's referent, or the one diagnostic, with its code and the
    text after applying its fix. *)
 
 open Harness

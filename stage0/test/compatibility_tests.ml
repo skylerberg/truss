@@ -23,8 +23,8 @@ let show (actual, _) =
   List.map
     (fun ({ path; change } : Compatibility.public_change) ->
       match change with
-      | Breaks what -> Printf.sprintf "breaks: %s %s" (Path.show path) what
-      | Grows what -> Printf.sprintf "grows: %s %s" (Path.show path) what)
+      | Breaks reason -> Printf.sprintf "breaks: %s %s" (Path.show path) reason
+      | Grows addition -> Printf.sprintf "grows: %s %s" (Path.show path) addition)
     actual
 
 let expect before after expected =

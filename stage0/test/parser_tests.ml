@@ -229,7 +229,7 @@ let () =
             fail "the method's text is %S" method_.text;
           if method_.base <> 25 then fail "the method starts at %d" method_.base
       | definitions -> fail "%d definitions" (List.length definitions));
-  test "a method's tree does not depend on what is around it" (fun () ->
+  test "a method's tree does not depend on its surroundings" (fun () ->
       let method_of text =
         match (fst (parse text)).definitions with
         | [ _; method_ ] -> method_.value

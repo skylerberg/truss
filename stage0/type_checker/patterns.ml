@@ -83,8 +83,8 @@ let arity context type_ constructor = List.length (fields_of context type_ const
 
 (* A pattern as a space, with its fields in the order of the shape and the fields
    that it does not name as wildcards. [replace] substitutes one or-pattern,
-   by its id, with a subset of its alternatives, to compute what that subset
-   covers. *)
+   by its id, with a subset of its alternatives, to compute that subset's
+   coverage. *)
 let rec space ?replace context (written : Core.pattern) : space =
   match written.kind with
   | Wildcard | Bind _ -> Wild

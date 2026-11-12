@@ -11,7 +11,7 @@
     - every type is fully inferred and normalized.
 
     If a later stage has to look up which method a name refers to, or inspect the shape of a type to
-    decide what a node means, the core form is missing something.
+    decide a node's meaning, the core form is missing something.
 
     Every node has an [id], unique within the definition. Later results (such as ownership's) are
     keyed by it. Every node also has an [origin]: the id of the syntax node it was built from.
@@ -90,7 +90,7 @@ and argument =
           is in the callee's core form. *)
 
 and mark = { written : origin; marked : origin }
-(** A [mut] or [own] mark: [written], the syntax node of the mark with what it marks, and [marked],
+(** A [mut] or [own] mark: [written], the syntax node of the mark with its operand, and [marked],
     the expression after the mark. *)
 
 (** An operand is either a place, which is borrowed, or a value. *)

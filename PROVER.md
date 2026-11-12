@@ -5,8 +5,8 @@ This document describes stage0's prover, in
 type checker gives each definition and the knowledge that every promise a
 program makes holds. It
 follows the decisions in [DESIGN.md](DESIGN.md) and [SYNTAX.md](SYNTAX.md),
-reads what [TYPECHECKER.md](TYPECHECKER.md) produces, and states what
-[CODEGEN.md](CODEGEN.md) relies on. `truss check` and `truss build` run it,
+reads the output [TYPECHECKER.md](TYPECHECKER.md) describes, and states the
+guarantees [CODEGEN.md](CODEGEN.md) relies on. `truss check` and `truss build` run it,
 as [CLI.md](CLI.md) describes, and its queries run on the code database,
 which [DATABASE.md](DATABASE.md) describes.
 
@@ -30,7 +30,7 @@ The prover:
 - checks termination over each package's call graph, and proves cost
   bounds by counting
 - decides a tagged template's check by running compiled code
-- reports what it could not prove, with values that break it
+- reports each obligation it could not prove, with a counterexample
 
 It does not:
 
@@ -111,7 +111,7 @@ Every fact the prover must show, and where it comes from:
 | A loop invariant holds | On entry to the loop, and at the end of each iteration |
 | A loop's `cost` holds | On entry to the loop, and at the end of each iteration |
 | A callback's `requires` holds | Each call through a function-typed parameter whose type has a `requires` |
-| A function passed as a callback accepts what it is promised | Each named function or function-typed parameter passed where a parameter's type has a `requires`: that `requires` implies the function's own |
+| A function passed as a callback accepts every argument it is promised | Each named function or function-typed parameter passed where a parameter's type has a `requires`: that `requires` implies the function's own |
 | A function value accepts every argument of its type | Each function with a `requires`, and each function-typed parameter whose type has one, used as a value anywhere but in a call or passed to a parameter |
 | Recursion and loops end | Each call in a cycle of the call graph, and each loop, in a function with a `time` clause |
 | A cost clause holds | Each function with one (see [Costs](#costs)) |
@@ -152,7 +152,7 @@ functional, keeps it in its own.
 
 ### Values are values
 
-Mutable value semantics is what keeps the logic small. No two names can
+Mutable value semantics keeps the logic small. No two names can
 change the same memory, so the prover has no heap, no aliasing, and no
 permissions to track, unlike verifiers for Rust (Prusti's permissions,
 Creusot's prophecies) or for languages with references (Dafny's `modifies`
@@ -244,8 +244,8 @@ and `reads` clauses):
   name, so `List`, `Slice`, `String`, and `StringSlice` define `model()`
   over their buffers. Each operation reads or changes that sequence as the
   compiler makes it do: `storage_push` appends, `storage_insert` shifts
-  what follows, `view_slice` is a run of its view, and `storage_lengthen`
-  makes the room a C function wrote into the storage's, `storage_shorten`
+  the later elements, `view_slice` is a run of its view, and `storage_lengthen`
+  adds the elements a C function wrote into the spare capacity to the storage, `storage_shorten`
   keeps the elements before the length it is given, which must be at most
   the storage's, and every operation but `storage_set_capacity` keeps the
   capacity; `compare_bytes` is
@@ -304,8 +304,8 @@ and `reads` clauses):
   comparison DESIGN.md defines. A float `%` is known only by its type.
 - **Datatypes stay datatypes** within the package that can see their
   fields. Outside it, an opaque type is a sort with no structure, so a
-  proof in another package can rely only on what its methods and its model
-  promise, which keeps `opaque` meaningful to proofs. A datatype's variants
+  proof in another package can rely only on the contracts of its methods and
+  its model, which keeps `opaque` meaningful to proofs. A datatype's variants
   and fields are in the order of their names, so reordering them in the
   code changes no query, and each field read is in its type's range.
 - **Text is its bytes.** `String`, `StringSlice`, and a template's
@@ -332,22 +332,22 @@ unstable proofs.
   `update`, `contains`, and `sum`, which adds up a measure of each
   element: a function value that ends and uses no capabilities. Its laws
   are in the contracts of `append`, `concatenate`, and `update`, and a
-  loop's `yielded` meets `append`'s, so a loop's cost can be a sum of what
-  its iterations spend.
+  loop's `yielded` meets `append`'s, so a loop's cost can be a sum of
+  its iterations' costs.
 - **A `FiniteSet` and a `FiniteMap`** have membership, a size, inserting,
   and, for a map, the value under each key and its keys; a set can also
   remove. A `Multiset` has a count of each value so far.
 - **Extensionality,** that two sequences with the same length and
   elements are identical, is the one fact contracts cannot state, since a
   contract describes a result, so it is an axiom of the prover's, and so
-  are its kin for a set, by what it contains, and a map, by its keys and
+  are its kin for a set, by its elements, and a map, by its keys and
   their values. Each is stated for each two values that `identical`
   compares, rather than for every two, which would have the solver
   compare every pair it knows.
 - **A literal** of an array or a `Sequence` is a value whose sequence, the
   array's model or the sequence itself, has the literal's length and
   elements. A `FiniteMap` literal holds each key's value and no other key,
-  and a `FiniteSet` literal contains what it lists and nothing else. A
+  and a `FiniteSet` literal contains its listed elements and nothing else. A
   literal of a `List`, a `Set`, or a `Map` is desugared to the calls that
   build it, so it is known through their contracts: a map literal's keys
   must be distinct because `Map.insert_absent` requires it.
@@ -387,10 +387,9 @@ unstable proofs.
 A generic function is proven once, for every type argument, as Dafny and
 Verus prove generic code, not once per instance. Its type parameters are
 sorts the solver knows nothing about, and each bound brings the methods of
-its trait as functions with the trait's contracts and laws. This is what
-lets a generic function's proof be cached like any other, and it is why a
-trait's contracts and laws, not its implementations, are what generic code
-may use.
+its trait as functions with the trait's contracts and laws. This lets a
+generic function's proof be cached like any other, and it is why generic
+code may use a trait's contracts and laws but not its implementations.
 
 Code generic over an integer trait is the exception: it is proven once for
 each built-in type that implements the trait, as SPARK proves each instance
@@ -401,9 +400,9 @@ would need a symbolic width, which the solver's bit-vector theory does not
 have. An obligation that fails names its instance, as in "Where `Self` is
 `Int8`: ...".
 
-## What functions mean
+## Functions in the logic
 
-DESIGN.md's [What a function means to the prover](DESIGN.md#what-a-function-means-to-the-prover)
+DESIGN.md's [Bodies and contracts in proofs](DESIGN.md#bodies-and-contracts-in-proofs)
 decides when a body is a definition. In the solver:
 
 - **A function used in specifications is a function symbol.** A pure
@@ -431,7 +430,7 @@ decides when a body is a definition. In the solver:
   reads it, and the same obligation of that translation is asked; where it
   proves, the message says that the callee's body is not visible and that
   with it the obligation would be proven, and names the fixes: an
-  `ensures` that says what is needed, or, for a function,
+  `ensures` that states the needed fact, or, for a function,
   `public transparent fn`.
 - **Called on a quantifier's bound values,** a definition with no
   `requires` is stated once, for every argument, since a fact about one
@@ -459,12 +458,12 @@ decides when a body is a definition. In the solver:
   only with the calls in it.
 - **A query that runs out of steps is asked again with contracts alone.**
   Unfolding gives the solver every definition a query reaches, which can
-  be too much for it where the callee's `ensures` already says what is
-  needed, as a caller's bound on a callee that itself unfolds several
+  be too much for it where the callee's `ensures` already states the needed
+  fact, as a caller's bound on a callee that itself unfolds several
   others' arithmetic. Leaving facts out is always sound, so such a query is
-  asked once more without what unfolding gave, and is proven if that one
-  is. This is what Dafny's and Verus's ways to hide a body from the
-  solver are for, so Truss has no such way: pruning keeps a definition out
+  asked once more without the unfolded definitions, and is proven if that
+  one is. Dafny's and Verus's ways to hide a body from the solver serve
+  this purpose, so Truss has no such way: pruning keeps a definition out
   of a query that does not reach it, and this keeps one that does from
   costing a proof its contract alone would give.
 - **Every other function is a fresh result.** A call to a function that is
@@ -475,7 +474,7 @@ decides when a body is a definition. In the solver:
   changes none of its arguments is the value applied to its arguments, so
   two calls with the same arguments agree. A call through any other
   function value gives a fresh result.
-- **Applied, a function value is what it names.** A pure function named
+- **Applied, a function value is the function it names.** A pure function named
   as a value is that function applied, or its body where its definition
   holds for every argument. A lambda with a functional body is its body
   applied to its arguments, and two lambdas with the same body over the
@@ -489,9 +488,9 @@ decides when a body is a definition. In the solver:
   argument meets, shows nothing of the path it is written on. The range of
   its result is known for arguments in the ranges of their types.
 - **Otherwise, a function value is known by its contract.** A lambda whose
-  body is not functional, as one with a `var` or a loop is, gives what its
-  body showed for its fresh arguments, for every argument meeting what was
-  assumed of them: each value made in the body is a function of the
+  body is not functional, as one with a `var` or a loop is, gives the facts its
+  body proved for its fresh arguments, for every argument meeting the
+  assumptions on them: each value made in the body is a function of the
   arguments, and on each way the body ends, the lambda applied is the value
   it ended with. A pure function named as a value that has no definition
   for every argument, as one with a `requires` has not, gives its `ensures`
@@ -506,7 +505,7 @@ decides when a body is a definition. In the solver:
 - **A named function passed for such a parameter** must accept every
   argument the parameter's type promises it, and keep the type's cost
   clauses. A function-typed parameter passed on for another callee's
-  parameter must be promised what its own `requires` asks.
+  parameter must be promised its own `requires`.
 - **A function type keeps no `requires`.** A function with a `requires`,
   or a function-typed parameter whose type has one, used as a value
   anywhere but in a call or passed straight to a parameter, such as bound
@@ -536,18 +535,18 @@ The prover walks each checked body forward, taking steps of four kinds:
 | `assert fact, obligation` | `fact` must hold here; the rest of the path may rely on it |
 
 These are the statements of Boogie, the intermediate language behind Dafny,
-and of Why3's, cut down to what Truss needs. The walk is in the passive form
+and of Why3's, cut down to the parts Truss needs. The walk is in the passive form
 of Flanagan and Saxe ("Avoiding Exponential Explosion", 2001): every value
 is a term, every fact is guarded by the condition of the path it holds on,
 and where paths join, each local that differs gets a fresh symbol that each
 path defines. So does the joined condition, which every later fact on the
-path names instead of repeating each branch's condition. So what a body gives its queries grows with the body, not
+path names instead of repeating each branch's condition. So the size of a body's queries grows with the body, not
 with its number of paths. No step goes around a loop: each loop is cut at
 its head by its invariant, as below. The right side of `&&`, `||`, or
 `==>` runs on only one path, so when it changes a local, as a call with a
 `mut` argument does, that path joins the one where it did not run, as the
 two arms of an `if` do, and so does one where the right side spends
-anything, since what it spends is known only where it ran. A `match` arm's guard runs only where its patterns matched, so
+anything, since its cost is known only where it ran. A `match` arm's guard runs only where its patterns matched, so
 the next arm is tried where they did not, joined with where they did and
 the guard, which may change locals the same way, was false. A binding
 that a pattern lends `mut` is a local of the arm. Wherever the arm ends,
@@ -561,13 +560,13 @@ are not evaluated a second time after the call.
 A `parallel` block's branches change disjoint places, so they are read
 one after another. A `concurrent` block's are too: they change disjoint
 places as well, and a capability call already gives a fresh value, so
-nothing a proof relies on is changed by what another task does between
+nothing a proof relies on is changed by another task between
 two calls. A `concurrent for` loop's iterations are read as a `for`'s. A
 `?`, `return`, or `break` that leaves a branch takes effect only where the
 block ends, after the other branches, which are cancelled and run to their
 own ends: each later branch is read from where the exit was as well as
 from where the branches before it ended, and the exit is then taken with
-what each branch did. An exit from an iteration of a `concurrent for`
+each branch's effects. An exit from an iteration of a `concurrent for`
 ends that iteration, since the iterations after it are cancelled and run
 to their own ends, and is taken where the loop ends: a `break` is where
 the loop ends anyway, and a `return` returns there, on a path of its own,
@@ -628,9 +627,9 @@ call uses the capability method's contract.
   assumed, and the body runs once from there, after which the invariants
   are asserted again. The places a body may change are the locals, or
   `self`, that it assigns to, passes `mut`, loops over `mut`, or matches
-  with a pattern that binds part of it `mut`, so nothing else loses what
-  was known about it. The condition runs at the head of each iteration,
-  so what it changes is in that set, and what it spends is the iteration's.
+  with a pattern that binds part of it `mut`, so nothing else loses the
+  facts known about it. The condition runs at the head of each iteration,
+  so its changes are in that set, and its cost is the iteration's.
 - **Validity is an invariant of every loop.** Each value a loop changes
   that is valid on entry is valid at the head of each iteration, and is
   asserted valid at the end of each one. A body may break a value's
@@ -678,9 +677,9 @@ call uses the capability method's contract.
   where the method ends are assumed, with `yielded` holding the part as the
   statement left it. This is how `mut grid.cell(position).visit()` is known
   to change exactly the one cell.
-- **A pulled cursor** is what a yielding method called outside a `for`
-  loop makes. The call meets the method's `requires` and spends its whole
-  cost there. The cursor carries what it has yielded, `yielded`, and
+- **A pulled cursor** is the result of a yielding method called outside a `for`
+  loop. The call meets the method's `requires` and spends its whole
+  cost there. The cursor carries its yielded parts, `yielded`, and
   whether it has ended, as ghost parts of its value. `next()` gives `Some`
   of a value that meets the method's clauses for each `yield`, or `None`,
   after which the method's other clauses hold with `finished` true. A
@@ -709,9 +708,9 @@ invariants and the validity of its fields.
 - **A private method that takes `mut self`** neither assumes nor asserts
   the validity of `self`. A call to one from a method of the same type
   passes `self` without asserting it, so a half-finished update can be
-  finished by a helper. Its `requires` and `ensures` carry what it needs and
-  leaves.
-- **Values that are not parameters keep what is known.** A local that was
+  finished by a helper. Its `requires` and `ensures` state its precondition and
+  postcondition.
+- **Values that are not parameters keep their known facts.** A local that was
   valid stays known to be valid until it changes, so a body may break an
   invariant between two calls and restore it.
 - **Functions in an invariant are definitions or contracts like any
@@ -854,7 +853,7 @@ prover chooses them, as Dafny does, and states them in the query:
   `forall i => f(i) < f(i + 1)`, would make each use of the fact give the
   term for another, without end, so it is left out when anything else is
   left.
-- **A definition triggers on what it defines.** An equation whose left
+- **A definition triggers on the term it defines.** An equation whose left
   side is an application naming every bound name, such as a lambda's
   definition, is triggered by its left side alone.
 
@@ -868,7 +867,7 @@ the quantifier's bound names in the logic, since it can differ for each of
 their values: `forall i in 0..items.length() => same(items[i]) == items[i]`
 is about one result for each `i`, not one result for all of them.
 
-What is known of such a value, as the range of `items[i].count_ones()`, is
+A fact known of such a value, as the range of `items[i].count_ones()`, is
 a fact about the bound names, which is not stated for every value of them:
 the standard library's maps state nested quantifiers, and with a fact for
 every combination of bound names the solver runs out of steps. It is a
@@ -910,18 +909,18 @@ A query's text is canonical, so that its hash can be its cache key:
   proof that needs more help gets it from a `proof` block or a theorem.
   The limit does not grow with a query's size: a limit that did would make
   a query's answer depend on facts that have nothing to do with its goal,
-  which is what keeping one limit is for. Its value is two million steps,
+  which one limit prevents. Its value is two million steps,
   under which the standard library proves. A change to it changes every
   answer's key, so it is made by itself, with the benchmark of solving to
-  show what it costs.
+  show its cost.
 - **One process per query,** given the query's text through SMT-LIB, with a
   fixed random seed. A solver that answered earlier queries carries state
   that can change later answers, so no state is shared.
 - **Many queries at once,** one for each core. Before any proof is read,
   the queries of every definition being checked are solved together, and
   each definition then finds its answers solved. Since an answer depends
-  only on its text, solving them at once gives what solving them one after
-  another does. A query asked only after another's answer, such as a bound
+  only on its text, solving them at once gives the same answers as solving them one after
+  another. A query asked only after another's answer, such as a bound
   with another choice of constants, or a bitwise query asked again exactly,
   is solved when it is asked.
 - **An answer is a fact about the text.** Its key is the hash of the
@@ -994,7 +993,7 @@ cycle can only be seen across definitions:
 
 ## Costs
 
-### What is counted
+### Counted operations
 
 The prover adds a ghost counter for each resource that has a cost clause:
 
@@ -1006,8 +1005,8 @@ The prover adds a ghost counter for each resource that has a cost clause:
 | `calls(target)` | Each call to the target, and each callee's count for it |
 
 - **A specification spends nothing.** A `requires`, an `ensures`, a
-  type's or a loop's invariant, a law, or a bound never runs, so what it
-  calls is not counted, wherever it is read: an invariant read to check a
+  type's or a loop's invariant, a law, or a bound never runs, so its
+  callees are not counted, wherever it is read: an invariant read to check a
   value's validity counts nothing either.
 - **A counter is an `Integer` on each path,** increased at each call and
   each iteration, so costs are proven by the same verification conditions
@@ -1038,7 +1037,7 @@ The prover adds a ghost counter for each resource that has a cost clause:
   or of a capability's method. A call through a value of the target's type
   counts where the value equals the target, so a call through an alias,
   such as `if flag { visit } else { other }`, counts. A callee that is passed the function value,
-  or uses the capability, counts what its own `calls` clause about it says;
+  or uses the capability, counts as its own `calls` clause about it says;
   one that can reach neither counts nothing; and one passed a lambda that
   captures the function value is known by no bound.
 
@@ -1052,7 +1051,7 @@ loop that calls `visit` once per iteration over a list it runs through once.
 ### Asymptotic bounds
 
 `O(f)` promises that the cost is at most `c * f + d` for some constants. The
-constants are what makes this hard to prove: each callee has constants of its
+constants make this hard to prove: each callee has constants of its
 own, unknown to the caller, and the prover must find the caller's. Truss
 removes them in two steps:
 
@@ -1074,7 +1073,7 @@ removes them in two steps:
    `Plain` value that holds none takes one, so `List.filled` of `UInt64`s
    is `O(count)`. It is one term for each method and type, so a
    callee's bound and its caller's are about the same term. Every callee's real cost is at
-   most `C` times what is counted, where `C` is the largest of the callees'
+   most `C` times the counted cost, where `C` is the largest of the callees'
    constants and 1. That `C` is a fixed number, though unknown, so a bound
    `counted <= c' * f + d'` proves the real cost is at most
    `C * c' * f + C * d'`, which is `O(f)`.
@@ -1108,7 +1107,7 @@ which the first pair gives both.
 ### Loops
 
 A loop's cost is its number of iterations times a bound on each iteration,
-plus what happens before and after:
+plus the costs before and after it:
 
 - **The number of iterations** of a `for` loop is the length of `yielded`,
   which the `each` it calls bounds, as `List.each`'s
@@ -1156,14 +1155,14 @@ plus what happens before and after:
 - **A value's potential** is its type's `cost potential` plus the
   potentials of its parts, as DESIGN.md defines it, and a type with no
   `cost potential` holds none of its own. A record's potential is its
-  parts', and a part of a record built here is what it was built from, so
-  a push into `self.bytes` changes the potential of `self` by what it
-  changes the list's. In the logic it is a
+  parts', and a part of a record built here is the value it was built
+  from, so a push into `self.bytes` changes the potential of `self` by its
+  change to the list's. In the logic it is a
   function of the value, whose definition is unfolded once for each value
   it is asked of, so a recursive type's potential is never unfolded
   forever. A growable buffer, a storage or a type whose model is the
   sequence of the storage it holds, such as a `List` or a `String`, holds
-  what it saved for growing, which is between zero and its length, and the
+  the potential it saved for growing, which is between zero and its length, and the
   sum of its elements' potentials over its model, as `Sequence.sum` gives
   it. `storage_push` takes one step, amortized, paid out of that saving, so
   pushing `count` times costs `O(count + items.length())`. A view, or a
@@ -1171,18 +1170,18 @@ plus what happens before and after:
   so it holds only the sum of its elements' potentials, and so does an
   `Array`, whose model is its `count` elements. A `List` or a `String` is read so only
   where its fields are not seen; in its own package it is a record like
-  any other, holding what its storage holds, so a callee that changes
-  `self.storage` changes the list's potential by what it changes the
+  any other, holding its storage's potential, so a callee that changes
+  `self.storage` changes the list's potential by its change to the
   storage's.
 - **Potential is counted in the units work is counted in,** whatever its
-  type. A callee's real cost is at most its own constant times what it is
-  counted as, its bound less the growth in potential it leaves, which is
+  type. A callee's real cost is at most its own constant times its
+  counted cost, its bound less the growth in potential it leaves, which is
   never below zero; so it is at most `C` times that as well, for the
   largest constant `C`. A query therefore adds potentials of any types and
   counted work as they are, with no factor between them, and potential a
   `Deque` holds pays for work on the lists it holds.
 - **A method with `cost amortized time O(f)`** proves that its counted cost,
-  plus the potential of what it returns and of each `mut` parameter
+  plus the potential of its result and of each `mut` parameter
   afterward, minus the potential on entry of each parameter it changes or
   takes `own`, is within the bound. A parameter it only reads keeps its
   potential, so the method cannot spend it.
@@ -1190,16 +1189,16 @@ plus what happens before and after:
   method's change in potential leaves out its part's, from as it lent it
   to as the caller left it, and the caller's statement counts that change
   as its own, through the operations it changed the part with. So a
-  method that lends a part of `self` is amortized on what it does, and a
+  method that lends a part of `self` is amortized on its own work, and a
   caller that raises the part's potential pays for it.
 - **A call to one** adds its bound to the caller's counter and subtracts the
-  change in potential of what it changed, so a caller with a plain bound
-  pays for the potential it consumed from what it was given: a function
+  change in potential of the values it changed, so a caller with a plain
+  bound pays for the potential it consumed from its arguments: a function
   that pushes `count` times can promise `O(count + items.length())`.
 - **A plain and an amortized bound on one resource** count on counters of
   their own. A callee with both, such as `List.pop`, is counted on each
   counter by the clause of the counter's kind. A plain bound on a call
-  says nothing of the potential the call leaves in what it changes, which
+  says nothing of the potential the call leaves in the values it changes, which
   an amortized bound pays for, so an amortized counter counts the
   amortized clause; a plain counter counts the plain one, which the
   potential the call takes does not raise. So a definition can state both,
@@ -1233,14 +1232,14 @@ plus what happens before and after:
   show it.
 - **A function named as a value** is one unit of time per call when its
   own `time` is a constant.
-- **A lambda whose body is not its definition** is known by what its body
-  does for every argument: each value its body makes is a function of the
+- **A lambda whose body is not its definition** is known by its body's
+  behavior for every argument: each value its body makes is a function of the
   arguments, and so is a functional lambda inside it that captures one of
   them, whose definition is then about them too. Inside a quantifier, a
   lambda that captures none of its bound values is read as it is outside
-  it, and one that captures some says what it does for each of them,
+  it, and one that captures some states its behavior for each of them,
   closed over the quantifier.
-- **A quantifier in code** spends its range times what its body spends.
+- **A quantifier in code** costs its range times its body's cost.
 
 ## Running code while proving
 
@@ -1299,7 +1298,7 @@ It also decides a tagged template's checks by running them, as
   they differ. Without this, a callee's new body would leave its callers
   proven by its old result, which would prove a false `ensures`.
 - **This trusts compiled code.** A fact from running code is only as true as
-  code generation and the C compiler, which is what Lean's `native_decide`
+  code generation and the C compiler, which Lean's `native_decide`
   trusts too. It is the price of a check that no solver could make. Each
   obligation's state says whether its proof trusts compiled code, as
   Lean's `#print axioms` shows a theorem's use of `native_decide`, so a
@@ -1308,13 +1307,13 @@ It also decides a tagged template's checks by running them, as
 ## Holes
 
 A `todo` in a theorem, a `proof` block, or a `proof` definition is the one
-gap a proof may have, as DESIGN.md says. What it was to prove is not a
+gap a proof may have, as DESIGN.md says. Its goal is not a
 failure: the `todo` is recorded as a hole, with its position, so the tools
 can list it as a task. A build of a program refuses one that can reach a
 hole, as it refuses one that can reach a `todo` in code. Tests run
 regardless, with their run-time checks.
 
-- **What a hole was to prove is everything after it on its path.** A proof
+- **A hole's goal is everything after it on its path.** A proof
   cannot say which later obligations its steps were for, so the path
   through a hole ends there for the prover, as an `assume false` would,
   and the obligations after it hold trivially, the code after a `proof`
@@ -1335,7 +1334,7 @@ regardless, with their run-time checks.
   hole there, so a build refuses it.
 - **Holes are not errors.** Truss has no warnings, so a hole is not a
   diagnostic: each definition's outcome lists its holes, `truss holes`
-  lists every `todo` with what it blocks, and `truss build` refuses a
+  lists every `todo` with the work it blocks, and `truss build` refuses a
   program whose `main` can reach a definition with a hole in its proofs.
 
 ## Diagnostics
@@ -1345,7 +1344,7 @@ Each obligation the prover could not prove is an error, with the shared
 `prover.overflow`, `prover.requires`, `prover.ensures`, `prover.invariant`,
 `prover.termination`, and `prover.cost`, and:
 
-- **What could not be shown,** written in Truss, pointing at the operation:
+- **The fact that could not be proven,** written in Truss, pointing at the operation:
   "`count + 1` may overflow `UInt8`."
 - **Whether the solver found a counterexample or ran out of steps.** A
   counterexample means the fact can be false on some path. Running out of
@@ -1355,7 +1354,7 @@ Each obligation the prover could not prove is an error, with the shared
   "For example, when `count` is 255." It gives the values of the locals in
   scope where the obligation is, and of `result`, too, which the query is
   asked for only once it has a counterexample, so that a query that proves
-  is keyed by what it proves. A float is the shortest decimal that
+  is keyed by its goal. A float is the shortest decimal that
   reads back as the same bits, and a record or a variant is its name with
   its fields. An agent can turn these values into a test, which then fails
   at its run-time check if the code is wrong.
@@ -1397,7 +1396,7 @@ Each obligation the prover could not prove is an error, with the shared
   another's that failed in the same definition, such as a second index into
   the same list with the same index on another path, is not reported again.
 - **Code the prover cannot read** is an error of its own,
-  `prover.unsupported`, that says what stopped it, and none of the
+  `prover.unsupported`, that names the construct it stopped at, and none of the
   definition's obligations count as proven.
 
 ## Incremental work
@@ -1421,7 +1420,7 @@ whose text changed:
 
 | Edit | Solved again |
 |---|---|
-| A function's body | The queries whose paths pass through what changed |
+| A function's body | The queries whose paths pass through the change |
 | The code a run reaches | The run, and the outcomes that used its result |
 | A function's `ensures` | Queries that used it: the function's own, and callers' that included it after pruning |
 | A function's `requires` | The same, plus each caller's obligation to meet it |
@@ -1439,8 +1438,8 @@ A proof is as trustworthy as:
 
 - the solver, and the prover's translation into its logic
 - the facts the prover states itself: that the mathematical collections
-  are extensional, what `log` and `power` are, the few facts about bitwise
-  operations, and what a derived `Equal` means
+  are extensional, the definitions of `log` and `power`, the few facts about
+  bitwise operations, and the meaning of a derived `Equal`
 - the contracts of `standard::specification`, which define the
   mathematical collections, so its definitions are not proven
 - the prover's facts about the intrinsic module's integer operations, its
@@ -1509,8 +1508,8 @@ test the prover itself:
 - **Reading the MIR.** The prover walks the core form, as the ownership
   check and code generation each lower it themselves. MIR.md describes the
   one lowering that all three are to read.
-- **Contracts for the intrinsic module's system calls.** What a C function
-  returns beyond what its row of the table says is known only by its type,
+- **Contracts for the intrinsic module's system calls.** A C function's
+  result beyond its row of the table is known only by its type,
   and so is the address of a view of any type but a built-in scalar, whose
   size is the code generator's and may be zero.
 - **Proofs for a 32-bit `USize`.** DESIGN.md verifies a package that does
