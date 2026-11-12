@@ -159,13 +159,13 @@ and statement state env (written : statement) ~last : unit =
                     ->
                       false
                   | left, right ->
-                      if not (Types.is_integer_type left || Types.is_error left) then
+                      if not (integer_type state left || Types.is_error left) then
                         report state No_impl written_target.span
                           (Printf.sprintf "Shifts work on built-in integers, not `%s`."
                              (Types.show left));
                       if
                         not
-                          ((Types.is_integer_type right && not (Types.is_signed right))
+                          ((integer_type state right && not (signed_type state right))
                           || Types.is_error right)
                       then
                         report state Mismatch value.span
@@ -179,7 +179,7 @@ and statement state env (written : statement) ~last : unit =
                   match normalize state target_type with
                   | Types.Literal _ | Types.Variable _ -> false
                   | resolved ->
-                      if not (Types.is_integer_type resolved || Types.is_error resolved) then
+                      if not (integer_type state resolved || Types.is_error resolved) then
                         report state No_impl written_target.span
                           (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                              (Types.show resolved));
@@ -387,7 +387,7 @@ and loop_iterable state env (written : statement) ~mode (iterable : expression) 
               let element = normalize state element in
               if Types.contains_unsolved element then false
               else begin
-                if Types.is_integer_type element || Types.is_builtin Character element then
+                if integer_type state element || Types.is_builtin Character element then
                   state.tables.loops.(written.id) <- Some (Integer_range { element; inclusive })
                 else if not (Types.is_error element) then
                   report state Not_indexable iterable.span

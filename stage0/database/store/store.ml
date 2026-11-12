@@ -347,15 +347,17 @@ let lookup_once t key =
         (fun segment -> Option.bind (find_in segment key) (read_from segment key))
         t.segments
 
+let refresh_interval = 0.02
+
 (* A miss looks again for what other processes added, but not more often
-   than every twenty milliseconds: a build that computes everything misses
+   than every [refresh_interval]: a build that computes everything misses
    on every result, and a result another process added a moment ago is only
    computed again. *)
 let lookup t key =
   match lookup_once t key with
   | Some value -> Some value
   | None ->
-      if Unix.gettimeofday () -. t.refreshed > 0.02 then begin
+      if Unix.gettimeofday () -. t.refreshed > refresh_interval then begin
         refresh t;
         lookup_once t key
       end

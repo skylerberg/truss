@@ -15,17 +15,17 @@ type key =
           evidence its [impl] uses. It has a name so that every use of it in a file is one C type: a
           region that captures such a local holds a pointer to it. *)
 
-let compare_key a b =
-  match (a, b) with
-  | Type a, Type b -> Ground.compare a b
-  | Block (a, v), Block (b, w) ->
-      let c = Ground.compare a b in
-      if c <> 0 then c else String.compare v w
-  | Code a, Code b -> Ground.compare (Function a) (Function b)
-  | Environment (s, n), Environment (t, m) ->
-      let c = String.compare s t in
-      if c <> 0 then c else Int.compare n m
-  | Evidence n, Evidence m -> Int.compare n m
+let compare_key left right =
+  match (left, right) with
+  | Type left, Type right -> Ground.compare left right
+  | Block (left, left_name), Block (right, right_name) ->
+      let order = Ground.compare left right in
+      if order <> 0 then order else String.compare left_name right_name
+  | Code left, Code right -> Ground.compare (Function left) (Function right)
+  | Environment (left_symbol, left_number), Environment (right_symbol, right_number) ->
+      let order = String.compare left_symbol right_symbol in
+      if order <> 0 then order else Int.compare left_number right_number
+  | Evidence left_number, Evidence right_number -> Int.compare left_number right_number
   | _ ->
       let rank = function
         | Type _ -> 0
@@ -34,7 +34,7 @@ let compare_key a b =
         | Environment _ -> 3
         | Evidence _ -> 4
       in
-      Int.compare (rank a) (rank b)
+      Int.compare (rank left) (rank right)
 
 module Keys = Map.Make (struct
   type t = key
@@ -45,9 +45,9 @@ end)
 let key_name = function
   | Type ty -> Instance.type_symbol ty
   | Block (ty, variant) -> Instance.type_symbol ty ^ "_Block_" ^ variant
-  | Code f -> Instance.type_symbol (Function f) ^ "_Code"
-  | Environment (symbol, n) -> Printf.sprintf "%s_Environment_%d" symbol n
-  | Evidence n -> Printf.sprintf "t_Evidence_%d" n
+  | Code function_type -> Instance.type_symbol (Function function_type) ^ "_Code"
+  | Environment (symbol, nested_index) -> Printf.sprintf "%s_Environment_%d" symbol nested_index
+  | Evidence nested_index -> Printf.sprintf "t_Evidence_%d" nested_index
 
 (* How a key is defined: a [typedef] of a scalar or a pointer, which needs
    only forward declarations; a function pointer type; or a [struct], which
@@ -121,9 +121,9 @@ and pointee_c context : Memory_layout.pointee -> string = function
   | Block (ty, variant) ->
       register context (Block (ty, variant));
       key_name (Block (ty, variant)) ^ " *"
-  | Code f ->
-      register context (Code f);
-      key_name (Code f)
+  | Code function_type ->
+      register context (Code function_type);
+      key_name (Code function_type)
   | Opaque -> "void *"
 
 let rec c_ty context symbol : Lir.ty -> string = function
@@ -131,11 +131,11 @@ let rec c_ty context symbol : Lir.ty -> string = function
   | Pointer { target; writable } ->
       (if writable then "" else "const ") ^ c_ty context symbol target ^ " *"
   | Raw scalar -> scalar_c context scalar
-  | Environment n ->
-      register context (Environment (symbol, n));
-      key_name (Environment (symbol, n))
-  | Evidence n ->
-      let key = Evidence (max n 1) in
+  | Environment nested_index ->
+      register context (Environment (symbol, nested_index));
+      key_name (Environment (symbol, nested_index))
+  | Evidence nested_index ->
+      let key = Evidence (max nested_index 1) in
       register context key;
       key_name key
 
@@ -163,10 +163,12 @@ let signature_parameters context symbol (parameters : Lir.ty list) names =
   | _ ->
       String.concat ", "
         (List.mapi
-           (fun i ty ->
-             let c = c_ty context symbol ty in
-             let qualified = match ty with Lir.Pointer _ -> c ^ "restrict" | _ -> c in
-             match names with None -> qualified | Some names -> qualified ^ " " ^ List.nth names i)
+           (fun position ty ->
+             let order = c_ty context symbol ty in
+             let qualified = match ty with Lir.Pointer _ -> order ^ "restrict" | _ -> order in
+             match names with
+             | None -> qualified
+             | Some names -> qualified ^ " " ^ List.nth names position)
            parameters)
 
 let rec define context key =
@@ -232,22 +234,26 @@ and define_text context key =
           let body, holds = field_declarations context fields in
           Struct { body; holds }
       | _ -> bug "the block of %s.%s has no fields" (Ground.to_string ty) variant)
-  | Code f ->
-      let signature = Convention.function_value context.env f in
+  | Code function_type ->
+      let signature = Convention.function_value context.env function_type in
       let result = match signature.result with None -> "void" | Some ty -> c_ty context "" ty in
       Code_typedef
         (Printf.sprintf "typedef %s (*%s)(%s);\n" result (key_name key)
            (signature_parameters context "" signature.parameters None))
-  | Evidence n ->
+  | Evidence nested_index ->
       Struct
         {
           body =
             Printf.sprintf "  struct t_evidence evidence;\n  const struct t_evidence *outer[%d];\n"
-              n;
+              nested_index;
           holds = [];
         }
   | Environment _ ->
-      let fields = match Keys.find_opt key context.environments with Some f -> f | None -> [] in
+      let fields =
+        match Keys.find_opt key context.environments with
+        | Some function_type -> function_type
+        | None -> []
+      in
       let symbol = match key with Environment (symbol, _) -> symbol | _ -> "" in
       Struct
         {

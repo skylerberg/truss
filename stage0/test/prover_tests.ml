@@ -44,6 +44,10 @@ let () =
   test "an overflow's counterexample names the value" (fun () ->
       let actual = message Fixtures.Prover.overflows_counterexample_names_the_value in
       if not (contains actual "`count` is 255") then fail "message %S" actual);
+  test "code generic over an integer trait is proven for each type that implements it" (fun () ->
+      proven Fixtures.Prover.code_generic_over_an_integer_trait_is_proven_for;
+      let actual = message Fixtures.Prover.code_generic_over_an_integer_trait_is_proven_for_2 in
+      if not (contains actual "`Number` is `UInt8`") then fail "message %S" actual);
   test "a requires rules out the overflow" (fun () ->
       proven Fixtures.Prover.requires_rules_out_the_overflow);
   test "a check in an if rules out the overflow" (fun () ->
@@ -159,8 +163,8 @@ let () =
       proven (point ^ Fixtures.Prover.derived_equality_is_the_solvers_equality));
   test "is binds the parts it matches, where it is true" (fun () ->
       proven Fixtures.Prover.is_binds_the_parts_it_matches_where_it_is_true);
-  test "? goes on with what is inside" (fun () ->
-      not_proven Fixtures.Prover.goes_on_with_what_is_inside "prover.overflow");
+  test "? continues with the value inside" (fun () ->
+      not_proven Fixtures.Prover.continues_with_the_value_inside "prover.overflow");
   test "? returns an error unchanged" (fun () -> proven Fixtures.Prover.returns_an_error_unchanged)
 
 (* Collections, definitions, and impls *)
@@ -245,14 +249,14 @@ let () =
   let tagged ensures =
     Fixtures.Prover.ensures ^ ensures ^ "{\n  yield Tagged(tag: 0, value: mut self.second)\n}\n"
   in
-  test "a constructor lent `mut` leaves the places it does not lend" (fun () ->
-      proven (tagged "  ensures self.first == old(self.first)\n"));
-  test "a constructor lent `mut` stores the caller's change in the place it lends" (fun () ->
+  test "a constructor yielded `mut` does not change a field of `self` that it does not lend"
+    (fun () -> proven (tagged "  ensures self.first == old(self.first)\n"));
+  test "a caller's change to a constructor yielded `mut` is written to the lent field" (fun () ->
       not_proven (tagged "  ensures self.second == old(self.second)\n") "prover.ensures");
-  test "a caller of a constructor lent `mut` keeps what the method's contract says" (fun () ->
+  test "a caller of a method that yields a constructor `mut` can rely on its `ensures`" (fun () ->
       proven
         (tagged "  ensures self.first == old(self.first)\n"
-        ^ Fixtures.Prover.caller_of_a_constructor_lent_mut_keeps_what_the));
+        ^ Fixtures.Prover.caller_of_a_method_that_yields_a_constructor_mut));
   test "a yielding method that yields more than it promises" (fun () ->
       not_proven Fixtures.Prover.yielding_method_that_yields_more_than_it_promises "prover.ensures");
   test "a loop over a user's yielding method gets its facts" (fun () ->
@@ -270,8 +274,8 @@ let () =
       proven Fixtures.Prover.inclusive_range_loops_index_in_its_clauses_runs);
   test "a range loop's index bounds its cost" (fun () ->
       proven Fixtures.Prover.range_loops_index_bounds_its_cost);
-  test "a while loop in a yielding method names what the method handed out" (fun () ->
-      proven Fixtures.Prover.while_loop_in_a_yielding_method_names_what_the);
+  test "a while loop's invariant in a yielding method can name `yielded`" (fun () ->
+      proven Fixtures.Prover.while_loops_invariant_in_a_yielding_method_can);
   test "a pull of a cursor meets its method's clauses for each part" (fun () ->
       proven (couple ^ Fixtures.Prover.pull_of_a_cursor_meets_its_methods_clauses_for));
   test "a cursor ends where its method says it has yielded all it will" (fun () ->
@@ -720,7 +724,8 @@ let () =
   test "a loop that pushes into a record's list is amortized linear" (fun () ->
       proven (encoder ^ Fixtures.Prover.loop_that_pushes_into_a_records_list_is_amortized));
   let bag = Fixtures.Prover.bag in
-  test "a method that lends a part mut does not pay for what is done to it" (fun () -> proven bag);
+  test "a method that lends a part `mut` is not charged for the caller's changes to it" (fun () ->
+      proven bag);
   test "a caller that raises a lent part's potential pays for it" (fun () ->
       let actual =
         codes (meter ^ bag ^ Fixtures.Prover.caller_that_raises_a_lent_parts_potential_pays_for)

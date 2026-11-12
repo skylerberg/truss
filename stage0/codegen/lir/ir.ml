@@ -5,11 +5,11 @@ include Ir_types
 
 let local_place local = { root = Local local; projections = [] }
 
-let signature (f : function_) =
+let signature (function_ : function_) =
   {
-    parameters = List.map (fun local -> f.locals.(local).ty) f.parameters;
-    result = f.result;
-    returns = f.returns;
+    parameters = List.map (fun local -> function_.locals.(local).ty) function_.parameters;
+    result = function_.result;
+    returns = function_.returns;
   }
 
 let bug format = Compiler_bug.bug ~stage:"Lir" format
@@ -44,8 +44,12 @@ let variant_field_type env sum variant field =
   in
   match layout.form with
   | Tagged { variants; _ } -> (
-      match List.find_opt (fun (v : Memory_layout.variant) -> v.name = variant) variants with
-      | Some v -> in_payload v.payload
+      match
+        List.find_opt
+          (fun (variant_layout : Memory_layout.variant) -> variant_layout.name = variant)
+          variants
+      with
+      | Some variant_layout -> in_payload variant_layout.payload
       | None -> bug "%s has no variant %s" (Ground.to_string sum) variant)
   | Niche_encoded { dataful; _ } when dataful.name = variant -> in_payload dataful.payload
   | Niche_encoded _ | Tag_only _ | Zero_size -> None
@@ -62,10 +66,10 @@ let projection_type env ~environment ty projection =
         | Struct _ -> struct_field layout name
         | Zero_size -> None
         | _ -> bug "field %s of %s, which is not a record" name (Ground.to_string record))
-    | Field name, Environment n -> (
-        match List.assoc_opt name (environment n) with
+    | Field name, Environment nested_index -> (
+        match List.assoc_opt name (environment nested_index) with
         | Some ty -> Some ty
-        | None -> bug "environment %d has no field %s" n name)
+        | None -> bug "environment %d has no field %s" nested_index name)
     | Variant_field { variant; field }, Value sum -> variant_field_type env sum variant field
     | Index _, Value array -> (
         match (Memory_layout.of_type env array).form with
@@ -78,9 +82,11 @@ let projection_type env ~environment ty projection =
   in
   match result with Some ty when erased env ty -> None | other -> other
 
-let place_type env ~environment (f : function_) (place : place) =
+let place_type env ~environment (function_ : function_) (place : place) =
   let root =
-    match place.root with Local local -> f.locals.(local).ty | Static { ty; _ } -> Value ty
+    match place.root with
+    | Local local -> function_.locals.(local).ty
+    | Static { ty; _ } -> Value ty
   in
   if erased env root then None
   else
@@ -98,59 +104,67 @@ let target_operands = function
    each after the places and operands inside it. *)
 type visitor = { place : place -> unit; operand : operand -> unit }
 
-let rec visit_place v (p : place) =
+let rec visit_place visitor (lir_place : place) =
   List.iter
-    (function Index o -> visit_operand v o | Field _ | Variant_field _ | Deref -> ())
-    p.projections;
-  v.place p
+    (function
+      | Index lir_operand -> visit_operand visitor lir_operand
+      | Field _ | Variant_field _ | Deref -> ())
+    lir_place.projections;
+  visitor.place lir_place
 
-and visit_operand v (o : operand) =
-  (match o with
-  | Copy p | Move p | Address { place = p; _ } | Moved_address p -> visit_place v p
+and visit_operand visitor (lir_operand : operand) =
+  (match lir_operand with
+  | Copy lir_place | Move lir_place | Address { place = lir_place; _ } | Moved_address lir_place ->
+      visit_place visitor lir_place
   | Constant _ -> ());
-  v.operand o
+  visitor.operand lir_operand
 
-let visit_rvalue v = function
-  | Use o | Unary (_, o) | Convert (o, _) -> visit_operand v o
-  | Binary (_, a, b) ->
-      visit_operand v a;
-      visit_operand v b
-  | Build { fields; _ } -> List.iter (fun (_, o) -> visit_operand v o) fields
-  | Is_variant (p, _) -> visit_place v p
-  | Function_value { environment; _ } -> Option.iter (visit_operand v) environment
+let visit_rvalue visitor = function
+  | Use lir_operand | Unary (_, lir_operand) | Convert (lir_operand, _) ->
+      visit_operand visitor lir_operand
+  | Binary (_, left, right) ->
+      visit_operand visitor left;
+      visit_operand visitor right
+  | Build { fields; _ } ->
+      List.iter (fun (_, lir_operand) -> visit_operand visitor lir_operand) fields
+  | Is_variant (lir_place, _) -> visit_place visitor lir_place
+  | Function_value { environment; _ } -> Option.iter (visit_operand visitor) environment
 
-let visit_statement v = function
-  | Assign (p, rvalue) ->
-      visit_rvalue v rvalue;
-      visit_place v p
+let visit_statement visitor = function
+  | Assign (lir_place, rvalue) ->
+      visit_rvalue visitor rvalue;
+      visit_place visitor lir_place
   | Call { target; arguments; result } -> (
-      List.iter (visit_operand v) (target_operands target);
-      List.iter (visit_operand v) arguments;
-      match result with Returned p | Written p -> visit_place v p | Discarded -> ())
-  | Drop p | Free_block { place = p; _ } -> visit_place v p
+      List.iter (visit_operand visitor) (target_operands target);
+      List.iter (visit_operand visitor) arguments;
+      match result with
+      | Returned lir_place | Written lir_place -> visit_place visitor lir_place
+      | Discarded -> ())
+  | Drop lir_place | Free_block { place = lir_place; _ } -> visit_place visitor lir_place
   | Echo { text; length; _ } ->
-      visit_operand v text;
-      visit_operand v length
+      visit_operand visitor text;
+      visit_operand visitor length
   | Region { region = Chunk { first; last }; _ } ->
-      visit_place v (local_place first);
-      visit_place v (local_place last)
+      visit_place visitor (local_place first);
+      visit_place visitor (local_place last)
   | Region { region = Task { function_value; item }; _ } ->
-      visit_place v (local_place function_value);
-      visit_place v (local_place item)
+      visit_place visitor (local_place function_value);
+      visit_place visitor (local_place item)
   | Region { region = Branch; _ } | Regions_end _ -> ()
-  | Fork { branches } -> List.iter (fun (_, environment) -> visit_operand v environment) branches
+  | Fork { branches } ->
+      List.iter (fun (_, environment) -> visit_operand visitor environment) branches
   | Fork_range { environment; first; last; _ } ->
-      visit_operand v environment;
-      visit_operand v first;
-      visit_operand v last
+      visit_operand visitor environment;
+      visit_operand visitor first;
+      visit_operand visitor last
 
-let visit_terminator v = function
-  | Switch { value; _ } | Yield { value; _ } -> visit_operand v value
-  | Switch_variant { place; _ } -> visit_place v place
-  | Return value -> Option.iter (visit_operand v) value
+let visit_terminator visitor = function
+  | Switch { value; _ } | Yield { value; _ } -> visit_operand visitor value
+  | Switch_variant { place; _ } -> visit_place visitor place
+  | Return value -> Option.iter (visit_operand visitor) value
   | Fail { message; length; _ } ->
-      visit_operand v message;
-      visit_operand v length
+      visit_operand visitor message;
+      visit_operand visitor length
   | Goto _ | Unreachable -> ()
 
 let successors = function
@@ -177,30 +191,37 @@ let reverse_postorder (blocks : basic_block array) =
 
 (* Rewrites every place, each after the places in its indexes, and every
    block number. *)
-let rec map_place ~place ~block (p : place) =
-  place { p with projections = List.map (map_projection ~place ~block) p.projections }
+let rec map_place ~place ~block (lir_place : place) =
+  place
+    { lir_place with projections = List.map (map_projection ~place ~block) lir_place.projections }
 
 and map_projection ~place ~block = function
   | Index operand -> Index (map_operand ~place ~block operand)
   | (Field _ | Variant_field _ | Deref) as projection -> projection
 
 and map_operand ~place ~block = function
-  | Copy p -> Copy (map_place ~place ~block p)
-  | Move p -> Move (map_place ~place ~block p)
-  | Address { place = p; writable } -> Address { place = map_place ~place ~block p; writable }
-  | Moved_address p -> Moved_address (map_place ~place ~block p)
+  | Copy lir_place -> Copy (map_place ~place ~block lir_place)
+  | Move lir_place -> Move (map_place ~place ~block lir_place)
+  | Address { place = lir_place; writable } ->
+      Address { place = map_place ~place ~block lir_place; writable }
+  | Moved_address lir_place -> Moved_address (map_place ~place ~block lir_place)
   | Constant _ as operand -> operand
 
 let map_rvalue ~place ~block rvalue =
   let operand = map_operand ~place ~block in
   match rvalue with
-  | Use o -> Use (operand o)
-  | Unary (op, o) -> Unary (op, operand o)
-  | Binary (op, a, b) -> Binary (op, operand a, operand b)
-  | Convert (o, scalar) -> Convert (operand o, scalar)
+  | Use lir_operand -> Use (operand lir_operand)
+  | Unary (op, lir_operand) -> Unary (op, operand lir_operand)
+  | Binary (op, left, right) -> Binary (op, operand left, operand right)
+  | Convert (lir_operand, scalar) -> Convert (operand lir_operand, scalar)
   | Build { ty; variant; fields } ->
-      Build { ty; variant; fields = List.map (fun (name, o) -> (name, operand o)) fields }
-  | Is_variant (p, variant) -> Is_variant (map_place ~place ~block p, variant)
+      Build
+        {
+          ty;
+          variant;
+          fields = List.map (fun (name, lir_operand) -> (name, operand lir_operand)) fields;
+        }
+  | Is_variant (lir_place, variant) -> Is_variant (map_place ~place ~block lir_place, variant)
   | Function_value { code; environment } ->
       Function_value { code; environment = Option.map operand environment }
 
@@ -220,11 +241,12 @@ let map_target ~place ~block = function
 
 let map_destination ~place ~block = function
   | Discarded -> Discarded
-  | Returned p -> Returned (map_place ~place ~block p)
-  | Written p -> Written (map_place ~place ~block p)
+  | Returned lir_place -> Returned (map_place ~place ~block lir_place)
+  | Written lir_place -> Written (map_place ~place ~block lir_place)
 
 let map_statement ~place ~block = function
-  | Assign (p, rvalue) -> Assign (map_place ~place ~block p, map_rvalue ~place ~block rvalue)
+  | Assign (lir_place, rvalue) ->
+      Assign (map_place ~place ~block lir_place, map_rvalue ~place ~block rvalue)
   | Call { target; arguments; result } ->
       Call
         {
@@ -232,14 +254,15 @@ let map_statement ~place ~block = function
           arguments = List.map (map_operand ~place ~block) arguments;
           result = map_destination ~place ~block result;
         }
-  | Drop p -> Drop (map_place ~place ~block p)
-  | Free_block { place = p; variant } -> Free_block { place = map_place ~place ~block p; variant }
+  | Drop lir_place -> Drop (map_place ~place ~block lir_place)
+  | Free_block { place = lir_place; variant } ->
+      Free_block { place = map_place ~place ~block lir_place; variant }
   | Echo { text; length; site } ->
       Echo
         { text = map_operand ~place ~block text; length = map_operand ~place ~block length; site }
   | Region { fork; region = (Chunk _ | Task _) as region } ->
-      let local l =
-        match place (local_place l) with
+      let local local_number =
+        match place (local_place local_number) with
         | { root = Local mapped; projections = [] } -> mapped
         | _ -> bug "a region's local mapped to a place that is not a local"
       in
@@ -274,19 +297,19 @@ let map_statement ~place ~block = function
 let map_terminator ~place ~block terminator =
   let operand = map_operand ~place ~block in
   match terminator with
-  | Goto b -> Goto (block b)
+  | Goto block_index -> Goto (block block_index)
   | Switch { value; cases; default } ->
       Switch
         {
           value = operand value;
-          cases = List.map (fun (value, b) -> (value, block b)) cases;
+          cases = List.map (fun (value, block_index) -> (value, block block_index)) cases;
           default = Option.map block default;
         }
-  | Switch_variant { place = p; cases; default } ->
+  | Switch_variant { place = lir_place; cases; default } ->
       Switch_variant
         {
-          place = map_place ~place ~block p;
-          cases = List.map (fun (variant, b) -> (variant, block b)) cases;
+          place = map_place ~place ~block lir_place;
+          cases = List.map (fun (variant, block_index) -> (variant, block block_index)) cases;
           default = Option.map block default;
         }
   | Return value -> Return (Option.map operand value)
@@ -296,14 +319,16 @@ let map_terminator ~place ~block terminator =
   | Yield { value; resume; stop } ->
       Yield { value = operand value; resume = block resume; stop = Option.map block stop }
 
-let rename map_local (p : place) =
-  match p.root with Local local -> { p with root = Local (map_local local) } | Static _ -> p
+let rename map_local (lir_place : place) =
+  match lir_place.root with
+  | Local local -> { lir_place with root = Local (map_local local) }
+  | Static _ -> lir_place
 
-let canonical (f : function_) =
-  let order = reverse_postorder f.blocks in
-  let block_number = Array.make (Array.length f.blocks) (-1) in
+let canonical (function_ : function_) =
+  let order = reverse_postorder function_.blocks in
+  let block_number = Array.make (Array.length function_.blocks) (-1) in
   List.iteri (fun index block -> block_number.(block) <- index) order;
-  let local_number = Array.make (Array.length f.locals) (-1) in
+  let local_number = Array.make (Array.length function_.locals) (-1) in
   let next = ref 0 in
   let number local =
     if local_number.(local) < 0 then begin
@@ -312,25 +337,27 @@ let canonical (f : function_) =
     end;
     local
   in
-  List.iter (fun local -> ignore (number local)) f.parameters;
+  List.iter (fun local -> ignore (number local)) function_.parameters;
   let identity block = block in
   List.iter
-    (fun b ->
-      let { statements; terminator } = f.blocks.(b) in
+    (fun block_index ->
+      let { statements; terminator } = function_.blocks.(block_index) in
       List.iter
         (fun statement -> ignore (map_statement ~place:(rename number) ~block:identity statement))
         statements;
       ignore (map_terminator ~place:(rename number) ~block:identity terminator))
     order;
   let locals = Array.make !next { ty = Raw Bool; name = None; borrowed = false } in
-  Array.iteri (fun old index -> if index >= 0 then locals.(index) <- f.locals.(old)) local_number;
+  Array.iteri
+    (fun old index -> if index >= 0 then locals.(index) <- function_.locals.(old))
+    local_number;
   let map_local local = local_number.(local) in
   let map_block block = block_number.(block) in
   let blocks =
     Array.of_list
       (List.map
          (fun block ->
-           let { statements; terminator } = f.blocks.(block) in
+           let { statements; terminator } = function_.blocks.(block) in
            {
              statements =
                List.map (map_statement ~place:(rename map_local) ~block:map_block) statements;
@@ -339,11 +366,12 @@ let canonical (f : function_) =
          order)
   in
   {
-    f with
-    parameters = List.map map_local f.parameters;
-    written_result = Option.map map_local f.written_result;
+    function_ with
+    parameters = List.map map_local function_.parameters;
+    written_result = Option.map map_local function_.written_result;
     locals;
     blocks;
   }
 
-let canonical_instance t = { t with main = canonical t.main; nested = Array.map canonical t.nested }
+let canonical_instance lir =
+  { lir with main = canonical lir.main; nested = Array.map canonical lir.nested }

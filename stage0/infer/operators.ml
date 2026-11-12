@@ -137,7 +137,7 @@ and prefix state env ?expected (value : expression) operator (inner : expression
       register_expression state value (fun () -> Form.operator state value Complement [ inner ]);
       if
         not
-          (Types.is_integer_type (normalize state type_)
+          (integer_type state (normalize state type_)
           ||
           match resolve state type_ with
           | Types.Literal (Integer_literal, _) -> true
@@ -164,8 +164,8 @@ and prefix state env ?expected (value : expression) operator (inner : expression
                   (* A negated literal of an unsigned type gets only this
                      diagnostic, and no second one for a value out of range. *)
                   if
-                    Types.is_integer_type resolved
-                    && (not (Types.is_signed resolved))
+                    integer_type state resolved
+                    && (not (signed_type state resolved))
                     && not (Z.equal number Z.zero)
                   then
                     report state Negated_unsigned value.span
@@ -178,12 +178,12 @@ and prefix state env ?expected (value : expression) operator (inner : expression
           let type_ = expression state env ?expected inner in
           let resolved = normalize state type_ in
           if resolved = Types.Hole then Types.Hole
-          else if Types.is_integer_type resolved && not (Types.is_signed resolved) then begin
+          else if integer_type state resolved && not (signed_type state resolved) then begin
             report state Negated_unsigned value.span
               (Printf.sprintf "`%s` is unsigned, so it cannot be negated." (Types.show resolved));
             type_
           end
-          else if env.specification && (Types.is_integer_type resolved || resolved = Types.Integer)
+          else if env.specification && (integer_type state resolved || resolved = Types.Integer)
           then begin
             register_expression state value (fun () -> Form.operator state value Negate [ inner ]);
             Types.Integer
@@ -284,9 +284,9 @@ and operator_call ?(operands = []) state (value : expression) ~trait ~method_ ~l
    have that type, as an untyped constant does in Go. *)
 and literal_operands state ~left ~right =
   match (resolve state left, resolve state right) with
-  | Types.Literal (kind, _), other when Unify.literal_fits kind other ->
+  | Types.Literal (kind, _), other when Unify.literal_fits state.unifier kind other ->
       ignore (unify state left right)
-  | other, Types.Literal (kind, _) when Unify.literal_fits kind other ->
+  | other, Types.Literal (kind, _) when Unify.literal_fits state.unifier kind other ->
       ignore (unify state left right)
   | Types.Literal (left_kind, _), Types.Literal (right_kind, _) when left_kind = right_kind ->
       ignore (unify state left right)
@@ -354,7 +354,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
           match normalize state left_type with
           | Types.Literal _ | Types.Variable _ -> false
           | resolved ->
-              if not (Types.is_integer_type resolved || Types.is_error resolved) then
+              if not (integer_type state resolved || Types.is_error resolved) then
                 report state No_impl value.span
                   (Printf.sprintf "Bitwise operators work on built-in integers, not `%s`."
                      (Types.show resolved));
@@ -374,13 +374,13 @@ and binary state env ?expected (value : expression) operator (left : expression)
           | (Types.Literal _ | Types.Variable _), _ | _, (Types.Literal _ | Types.Variable _) ->
               false
           | left_resolved, right_resolved ->
-              if not (Types.is_integer_type left_resolved || Types.is_error left_resolved) then
+              if not (integer_type state left_resolved || Types.is_error left_resolved) then
                 report state No_impl left.span
                   (Printf.sprintf "Shifts work on built-in integers, not `%s`."
                      (Types.show left_resolved));
               if
                 not
-                  ((Types.is_integer_type right_resolved && not (Types.is_signed right_resolved))
+                  ((integer_type state right_resolved && not (signed_type state right_resolved))
                   || Types.is_error right_resolved)
               then
                 report state Mismatch right.span
@@ -398,7 +398,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
       literal_operands state ~left:left_type ~right:right_type;
       let integers type_ =
         let type_ = normalize state type_ in
-        Types.is_integer_type type_ || type_ = Types.Integer
+        integer_type state type_ || type_ = Types.Integer
         || match resolve state type_ with Types.Literal (Integer_literal, _) -> true | _ -> false
       in
       if env.specification && integers left_type && integers right_type then begin
@@ -479,7 +479,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
       else begin
         let integers type_ =
           let type_ = normalize state type_ in
-          Types.is_integer_type type_ || type_ = Types.Integer
+          integer_type state type_ || type_ = Types.Integer
           ||
           match resolve state type_ with
           | Types.Literal (Integer_literal, _) -> true
@@ -503,7 +503,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
             match (resolve state left_type, resolve state right_type) with
             | Types.Literal (left_kind, _), Types.Literal (right_kind, _) -> left_kind = right_kind
             | left_resolved, right_resolved ->
-                (Types.is_integer_type left_resolved || Types.is_float_type left_resolved)
+                (integer_type state left_resolved || Types.is_float_type left_resolved)
                 && Types.equal left_resolved right_resolved
           in
           let trait, method_ =
@@ -515,8 +515,8 @@ and binary state env ?expected (value : expression) operator (left : expression)
             | _ -> (Well_known.path Remainder, "remainder")
           in
           if
-            (Types.is_integer_type (normalize state left_type)
-            && Types.is_integer_type (normalize state right_type))
+            (integer_type state (normalize state left_type)
+            && integer_type state (normalize state right_type))
             && not (Types.equal (normalize state left_type) (normalize state right_type))
           then Types.Error (mismatched_operands state value left right ~left_type ~right_type)
           else begin
@@ -551,7 +551,7 @@ and binary state env ?expected (value : expression) operator (left : expression)
 and mismatched_operands state (value : expression) (left : expression) (right : expression)
     ~left_type ~right_type =
   let left_type = normalize state left_type and right_type = normalize state right_type in
-  if Types.is_integer_type left_type && Types.is_integer_type right_type then begin
+  if integer_type state left_type && integer_type state right_type then begin
     let from = trait_reference ~arguments:[ Types.Type right_type ] (Well_known.path From) in
     let fixes =
       if Option.is_some (implements state left_type from) then

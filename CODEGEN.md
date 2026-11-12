@@ -2274,11 +2274,9 @@ a command line can hold.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
-- **`match` as a decision tree.** A tree would test each part of the value
-  once, in the order the patterns need, and switch on tags and integers,
-  where arms tested in order may test one part again for each arm.
-  Maranget's "Compiling Pattern Matching to Good Decision Trees" (2008) is
-  the method.
+- **`match` as a decision tree.** Arms are tested in order, so one part of
+  the value may be tested again for each arm. MIR.md has the MIR builder
+  make the tree, for every consumer.
 - **Room reserved for an interpolation.** The literal lengths are known, so
   the `TextBuilder` can start with that much room and grow only if a part
   writes more than its estimate.

@@ -1,0 +1,5 @@
+type Count(value: Int64)
+
+impl SignedInteger for Count {
+  type Unsigned = UInt64
+}

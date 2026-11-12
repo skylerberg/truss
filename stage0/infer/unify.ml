@@ -8,6 +8,9 @@ type t = {
       (** Pairs of capability sets that unification found in the same position of two types, where
           at least one has a capability variable. They must be equal once the variables are solved.
       *)
+  mutable integer_range : Types.ty -> (Z.t * Z.t) option;
+      (** For a type parameter or projection that an integer trait bounds, the values an integer
+          literal of its type may have: those every implementor holds. *)
 }
 
 let create () =
@@ -17,6 +20,7 @@ let create () =
     values = Hashtbl.create 4;
     capability_variable_count = 0;
     deferred_capability_equalities = [];
+    integer_range = (fun _ -> None);
   }
 
 let fresh unifier =
@@ -125,10 +129,11 @@ let occurs unifier index =
     | Variable other | Literal (_, other) -> other = index
     | _ -> false)
 
-let literal_fits (kind : Types.literal_kind) (type_ : Types.ty) =
-  match kind with
-  | Integer_literal -> Types.is_integer_type type_ || type_ = Types.Integer
-  | Float_literal -> Types.is_float_type type_
+let literal_fits unifier (kind : Types.literal_kind) (type_ : Types.ty) =
+  match (kind, type_) with
+  | Integer_literal, (Parameter _ | Projection _) -> unifier.integer_range type_ <> None
+  | Integer_literal, _ -> Types.is_integer_type type_ || type_ = Types.Integer
+  | Float_literal, _ -> Types.is_float_type type_
 
 let bind unifier index type_ =
   if occurs unifier index type_ then false
@@ -213,7 +218,7 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
   | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
       left_kind = right_kind && (left_index = right_index || bind unifier left_index right)
   | Literal (kind, index), other | other, Literal (kind, index) ->
-      literal_fits kind other && bind unifier index other
+      literal_fits unifier kind other && bind unifier index other
   | Named left, Named right ->
       Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right

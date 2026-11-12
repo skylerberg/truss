@@ -28,7 +28,6 @@ val trait_header : (Path.t, trait_header option) Query.query
     the traits it requires, as resolution named them. *)
 
 val trait_closure : Query.context -> ?seen:Path.t list -> Path.t -> Path.t list
-(** The traits a trait requires, directly or not, with itself first. Stops at a cycle, which [Check]
-    reports. *)
+(** The traits a trait requires, directly or not, with itself first. Stops at a cycle. *)
 
 val kind_of : Query.context -> Path.t -> Resolve.Names.named option

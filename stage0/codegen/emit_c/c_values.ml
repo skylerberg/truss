@@ -4,10 +4,10 @@
 open C_runtime
 open C_types
 
-type function_context = { symbol : string; f : Lir.function_ }
+type function_context = { symbol : string; function_ : Lir.function_ }
 
-let local_name (f : Lir.function_) local =
-  match f.locals.(local).name with
+let local_name (function_ : Lir.function_) local =
+  match function_.locals.(local).name with
   | Some name -> Printf.sprintf "l%d_%s" local name
   | None -> Printf.sprintf "l%d" local
 
@@ -23,11 +23,11 @@ let declare_prototype context symbol declaration =
     context.prototypes <- (symbol, declaration) :: context.prototypes
 
 let integer_literal integer value =
-  let c = integer_c integer in
-  if Z.sign value >= 0 then Printf.sprintf "((%s)%sULL)" c (Z.to_string value)
+  let c_type = integer_c integer in
+  if Z.sign value >= 0 then Printf.sprintf "((%s)%sULL)" c_type (Z.to_string value)
   else if signed integer && Z.equal value (Z.neg (Z.shift_left Z.one 63)) then
-    Printf.sprintf "((%s)(-9223372036854775807LL - 1))" c
-  else Printf.sprintf "((%s)%sLL)" c (Z.to_string value)
+    Printf.sprintf "((%s)(-9223372036854775807LL - 1))" c_type
+  else Printf.sprintf "((%s)%sLL)" c_type (Z.to_string value)
 
 (* A float as an expression that C takes for a constant, since a static
    value is initialized with one. A float that is not finite has no literal;
@@ -53,10 +53,10 @@ let bytes_name context text =
 
 let function_ref_symbol fc : Lir.function_ref -> string = function
   | Instance key -> Instance.symbol key
-  | Nested n -> Printf.sprintf "%s_Nested_%d" fc.symbol n
+  | Nested nested_index -> Printf.sprintf "%s_Nested_%d" fc.symbol nested_index
 
-let environment_of context fc n =
-  match Keys.find_opt (Environment (fc.symbol, n)) context.environments with
+let environment_of context fc nested_index =
+  match Keys.find_opt (Environment (fc.symbol, nested_index)) context.environments with
   | Some fields -> fields
   | None -> []
 
@@ -68,7 +68,8 @@ let indirect context sum variant =
   match (layout context sum).form with
   | Tagged { variants; _ } ->
       List.exists
-        (fun (v : Memory_layout.variant) -> v.name = variant && is_block v.payload)
+        (fun (candidate : Memory_layout.variant) ->
+          candidate.name = variant && is_block candidate.payload)
         variants
   | Niche_encoded { dataful; _ } -> dataful.name = variant && is_block dataful.payload
   | _ -> false
@@ -83,7 +84,7 @@ let block_pointer context text sum variant =
 let rec place_c context fc (place : Lir.place) : (string * Lir.ty) option =
   let root =
     match place.root with
-    | Local local -> (local_name fc.f local, fc.f.locals.(local).ty)
+    | Local local -> (local_name fc.function_ local, fc.function_.locals.(local).ty)
     | Static { key; ty } ->
         let symbol = Instance.symbol key in
         declare_prototype context symbol
@@ -125,7 +126,8 @@ and address_c context fc (place : Lir.place) ~writable =
          not convert implicitly. *)
       let text =
         match (place, ty) with
-        | { root = Local local; projections = [] }, Pointer _ when List.mem local fc.f.parameters ->
+        | { root = Local local; projections = [] }, Pointer _
+          when List.mem local fc.function_.parameters ->
             Printf.sprintf "((%s)&%s)" (c_ty context fc.symbol pointer) text
         | _ -> "(&" ^ text ^ ")"
       in
@@ -183,18 +185,21 @@ let unsigned_of context (scalar : Memory_layout.scalar) =
 
 (* Float comparisons are lawful: every NaN equals every NaN, and NaN comes
    after every number. *)
-let lawful_equal a b = Printf.sprintf "(%s == %s || (%s != %s && %s != %s))" a b a a b b
-let lawful_less a b = Printf.sprintf "(%s < %s || (%s == %s && %s != %s))" a b a a b b
+let lawful_equal left right =
+  Printf.sprintf "(%s == %s || (%s != %s && %s != %s))" left right left left right right
 
-let binary_c context (op : Lir.binary) (a, a_ty) (b, _) =
+let lawful_less left right =
+  Printf.sprintf "(%s < %s || (%s == %s && %s != %s))" left right left left right right
+
+let binary_c context (op : Lir.binary) (left, a_ty) (right, _) =
   let scalar = scalar_of context a_ty in
-  let c = scalar_c context scalar in
+  let c_type = scalar_c context scalar in
   let boolean text = Printf.sprintf "((uint8_t)%s)" text in
   let arithmetic symbol =
-    if is_float scalar then Printf.sprintf "(%s %s %s)" a symbol b
-    else Printf.sprintf "((%s)(%s %s %s))" c a symbol b
+    if is_float scalar then Printf.sprintf "(%s %s %s)" left symbol right
+    else Printf.sprintf "((%s)(%s %s %s))" c_type left symbol right
   in
-  let compare symbol = boolean (Printf.sprintf "(%s %s %s)" a symbol b) in
+  let compare symbol = boolean (Printf.sprintf "(%s %s %s)" left symbol right) in
   let mask = bit_width context scalar - 1 in
   match op with
   | Add -> arithmetic "+"
@@ -205,31 +210,35 @@ let binary_c context (op : Lir.binary) (a, a_ty) (b, _) =
       if is_float scalar then
         Printf.sprintf "%s(%s, %s)"
           (if scalar = Float32 then "__builtin_fmodf" else "__builtin_fmod")
-          a b
+          left right
       else arithmetic "%"
   | Bit_and -> arithmetic "&"
   | Bit_or -> arithmetic "|"
   | Bit_xor -> arithmetic "^"
   | Shift_left ->
-      Printf.sprintf "((%s)((%s)%s << (%s & %d)))" c (unsigned_of context scalar) a b mask
-  | Shift_right -> Printf.sprintf "((%s)(%s >> (%s & %d)))" c a b mask
-  | Equal -> if is_float scalar then boolean (lawful_equal a b) else compare "=="
-  | Not_equal -> if is_float scalar then boolean ("!" ^ lawful_equal a b) else compare "!="
-  | Less -> if is_float scalar then boolean (lawful_less a b) else compare "<"
-  | Less_equal -> if is_float scalar then boolean ("!" ^ lawful_less b a) else compare "<="
-  | Greater -> if is_float scalar then boolean (lawful_less b a) else compare ">"
-  | Greater_equal -> if is_float scalar then boolean ("!" ^ lawful_less a b) else compare ">="
+      Printf.sprintf "((%s)((%s)%s << (%s & %d)))" c_type (unsigned_of context scalar) left right
+        mask
+  | Shift_right -> Printf.sprintf "((%s)(%s >> (%s & %d)))" c_type left right mask
+  | Equal -> if is_float scalar then boolean (lawful_equal left right) else compare "=="
+  | Not_equal -> if is_float scalar then boolean ("!" ^ lawful_equal left right) else compare "!="
+  | Less -> if is_float scalar then boolean (lawful_less left right) else compare "<"
+  | Less_equal -> if is_float scalar then boolean ("!" ^ lawful_less right left) else compare "<="
+  | Greater -> if is_float scalar then boolean (lawful_less right left) else compare ">"
+  | Greater_equal ->
+      if is_float scalar then boolean ("!" ^ lawful_less left right) else compare ">="
   | Ieee_equal -> compare "=="
   | Ieee_less -> compare "<"
   | Ieee_less_equal -> compare "<="
 
-let unary_c context (op : Lir.unary) (a, a_ty) =
+let unary_c context (op : Lir.unary) (operand_text, a_ty) =
   let scalar = scalar_of context a_ty in
-  let c = scalar_c context scalar in
+  let c_type = scalar_c context scalar in
   match op with
-  | Negate -> if is_float scalar then "(-" ^ a ^ ")" else Printf.sprintf "((%s)-%s)" c a
-  | Not -> "((uint8_t)!" ^ a ^ ")"
-  | Complement -> Printf.sprintf "((%s)~%s)" c a
+  | Negate ->
+      if is_float scalar then "(-" ^ operand_text ^ ")"
+      else Printf.sprintf "((%s)-%s)" c_type operand_text
+  | Not -> "((uint8_t)!" ^ operand_text ^ ")"
+  | Complement -> Printf.sprintf "((%s)~%s)" c_type operand_text
 
 (* The C expression for the scalar a niche path reaches. *)
 let niche_c text (niche : Memory_layout.niche) =
@@ -268,10 +277,10 @@ let is_variant_c context text sum variant =
           match niche.scalar with
           | Pointer _ -> Printf.sprintf "((uint8_t)(%s != ((void *)0)))" at
           | scalar ->
-              let c = scalar_c context scalar in
+              let c_type = scalar_c context scalar in
               let stop = Z.add niche.start (Z.of_int (List.length others)) in
-              Printf.sprintf "((uint8_t)!(%s >= (%s)%sULL && %s < (%s)%sULL))" at c
-                (Z.to_string niche.start) at c (Z.to_string stop))
+              Printf.sprintf "((uint8_t)!(%s >= (%s)%sULL && %s < (%s)%sULL))" at c_type
+                (Z.to_string niche.start) at c_type (Z.to_string stop))
       | _ -> bug "a niche in a type without one")
 
 (* A record's or a variant's fields as C designated initializers, leaving out
@@ -306,7 +315,7 @@ type built =
   | Allocating of { block : key; fill : string; value : string -> string }
 
 let build_c context fc ty variant (values : (string * Lir.operand) list) =
-  let c = value_c context ty in
+  let c_type = value_c context ty in
   let layout = layout context ty in
   let block_of variant =
     let key = Block (ty, variant) in
@@ -317,21 +326,26 @@ let build_c context fc ty variant (values : (string * Lir.operand) list) =
   match (variant, layout.form) with
   | _, Zero_size -> None
   | None, Struct fields ->
-      Some (Expression (Printf.sprintf "((%s){ %s })" c (initializers context fc "" fields values)))
+      Some
+        (Expression
+           (Printf.sprintf "((%s){ %s })" c_type (initializers context fc "" fields values)))
   | Some variant, Tag_only { variants; _ } -> (
       match List.find_index (String.equal variant) variants with
-      | Some index -> Some (Expression (Printf.sprintf "((%s)%d)" c index))
+      | Some index -> Some (Expression (Printf.sprintf "((%s)%d)" c_type index))
       | None -> bug "no variant %s" variant)
   | Some name, Tagged { variants; _ } -> (
-      match List.find_opt (fun (v : Memory_layout.variant) -> v.name = name) variants with
+      match
+        List.find_opt (fun (candidate : Memory_layout.variant) -> candidate.name = name) variants
+      with
       | None -> bug "no variant %s" name
-      | Some v -> (
-          match v.payload.form with
-          | Zero_size -> Some (Expression (Printf.sprintf "((%s){ .tag = %d })" c v.index))
+      | Some candidate -> (
+          match candidate.payload.form with
+          | Zero_size ->
+              Some (Expression (Printf.sprintf "((%s){ .tag = %d })" c_type candidate.index))
           | Struct fields ->
               Some
                 (Expression
-                   (Printf.sprintf "((%s){ .tag = %d, %s })" c v.index
+                   (Printf.sprintf "((%s){ .tag = %d, %s })" c_type candidate.index
                       (initializers context fc (".payload.v_" ^ name) fields values)))
           | Scalar (Pointer (Block _)) ->
               let block, fill = block_of name in
@@ -342,8 +356,8 @@ let build_c context fc ty variant (values : (string * Lir.operand) list) =
                      fill;
                      value =
                        (fun pointer ->
-                         Printf.sprintf "((%s){ .tag = %d, .payload.v_%s = %s })" c v.index name
-                           pointer);
+                         Printf.sprintf "((%s){ .tag = %d, .payload.v_%s = %s })" c_type
+                           candidate.index name pointer);
                    })
           | _ -> bug "a payload"))
   | Some name, Niche_encoded { dataful; others; encoding } ->
@@ -352,7 +366,7 @@ let build_c context fc ty variant (values : (string * Lir.operand) list) =
         | Struct fields ->
             Some
               (Expression
-                 (Printf.sprintf "((%s){ %s })" c (initializers context fc "" fields values)))
+                 (Printf.sprintf "((%s){ %s })" c_type (initializers context fc "" fields values)))
         | Scalar (Pointer (Block _)) ->
             let block, fill = block_of name in
             Some (Allocating { block; fill; value = (fun pointer -> pointer) })
@@ -362,7 +376,7 @@ let build_c context fc ty variant (values : (string * Lir.operand) list) =
         | Some value, Some niche -> (
             let stored = niche_value context niche value in
             match niche.path with
-            | [] -> Some (Expression (Printf.sprintf "((%s)%s)" c stored))
+            | [] -> Some (Expression (Printf.sprintf "((%s)%s)" c_type stored))
             | path ->
                 let designator =
                   String.concat ""
@@ -370,7 +384,7 @@ let build_c context fc ty variant (values : (string * Lir.operand) list) =
                        (function Memory_layout.Field name -> ".f_" ^ name | Tag -> ".tag")
                        path)
                 in
-                Some (Expression (Printf.sprintf "((%s){ %s = %s })" c designator stored)))
+                Some (Expression (Printf.sprintf "((%s){ %s = %s })" c_type designator stored)))
         | _ -> bug "no variant %s" name
         end
   | _ -> bug "building %s" (Ground.to_string ty)
@@ -384,15 +398,21 @@ let prototype context current symbol ?names ~linkage (signature : Lir.signature)
     (signature_parameters context current signature.parameters names)
 
 let rvalue_c context fc (target : Lir.ty) (rvalue : Lir.rvalue) : built option =
-  let operand o =
-    match operand_c context fc o with Some x -> x | None -> bug "an operand of zero size"
+  let operand lir_operand =
+    match operand_c context fc lir_operand with
+    | Some expression -> expression
+    | None -> bug "an operand of zero size"
   in
   match rvalue with
-  | Use o -> Option.map (fun (text, _) -> Expression text) (operand_c context fc o)
-  | Unary (op, o) -> Some (Expression (unary_c context op (operand o)))
-  | Binary (op, a, b) -> Some (Expression (binary_c context op (operand a) (operand b)))
-  | Convert (o, scalar) ->
-      Some (Expression (Printf.sprintf "((%s)%s)" (scalar_c context scalar) (fst (operand o))))
+  | Use lir_operand ->
+      Option.map (fun (text, _) -> Expression text) (operand_c context fc lir_operand)
+  | Unary (op, lir_operand) -> Some (Expression (unary_c context op (operand lir_operand)))
+  | Binary (op, left, right) ->
+      Some (Expression (binary_c context op (operand left) (operand right)))
+  | Convert (lir_operand, scalar) ->
+      Some
+        (Expression
+           (Printf.sprintf "((%s)%s)" (scalar_c context scalar) (fst (operand lir_operand))))
   | Build { ty; variant; fields } -> build_c context fc ty variant fields
   | Is_variant (place, variant) -> (
       match place_c context fc place with
@@ -400,9 +420,9 @@ let rvalue_c context fc (target : Lir.ty) (rvalue : Lir.rvalue) : built option =
       | Some _ -> bug "a variant test on a place that is not a value"
       | None -> Some (Expression "((uint8_t)1)"))
   | Function_value { code; environment } ->
-      let f =
+      let function_ =
         match target with
-        | Value (Function f) -> f
+        | Value (Function function_) -> function_
         | _ -> bug "a function value stored where no function goes"
       in
       let symbol = function_ref_symbol fc code in
@@ -410,11 +430,13 @@ let rvalue_c context fc (target : Lir.ty) (rvalue : Lir.rvalue) : built option =
       | Instance _ ->
           declare_prototype context symbol
             (prototype context fc.symbol symbol ~linkage:External
-               (Convention.function_value context.env f)
+               (Convention.function_value context.env function_)
             ^ ";\n")
       | Nested _ -> ());
       let environment =
-        match environment with None -> "((void *)0)" | Some e -> fst (operand e)
+        match environment with
+        | None -> "((void *)0)"
+        | Some environment_operand -> fst (operand environment_operand)
       in
       Some
         (Expression

@@ -1,10 +1,6 @@
 (* The ownership check: moves, loans, and views, checked within each
    function. It prevents use after move, dangling views, mutation of a
-   borrowed place, and data races.
-
-   The check reads a definition's core form. [Graph] builds the control-flow
-   graph of the body. [Moves] and [Views] run dataflow analyses on it, and
-   [Yield_rules] checks the rules on [yield]. *)
+   borrowed place, and data races. *)
 
 type pulling = Yield_rules.pulling = Pullable | Yields_mut | Recursive | Yields_places
 

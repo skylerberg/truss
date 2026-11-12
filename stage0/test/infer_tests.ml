@@ -126,6 +126,17 @@ let () =
   test "a literal that does not fit its type is an error" (fun () ->
       one_diagnostic Fixtures.Infer.literal_that_does_not_fit_its_type_is_an_error
         "types.literal_out_of_range");
+  test "a literal of a type an integer trait bounds is an integer of that type" (fun () ->
+      fine Fixtures.Infer.literal_of_a_type_an_integer_trait_bounds_is_an);
+  test "a literal of a type an integer trait bounds must fit every type that implements it"
+    (fun () ->
+      one_diagnostic Fixtures.Infer.literal_of_a_type_an_integer_trait_bounds_must_fit
+        "types.literal_out_of_range";
+      one_diagnostic Fixtures.Infer.literal_of_a_type_an_integer_trait_bounds_must_fit_2
+        "types.literal_out_of_range");
+  test "a literal of a type UnsignedInteger bounds cannot be negated" (fun () ->
+      one_diagnostic Fixtures.Infer.literal_of_a_type_unsignedinteger_bounds_cannot_be
+        "types.negated_unsigned");
   test "a USize literal must fit in 32 bits, so that the code holds on every target" (fun () ->
       one_diagnostic Fixtures.Infer.usize_literal_must_fit_in_32_bits_so_that_the_code
         "types.literal_out_of_range");

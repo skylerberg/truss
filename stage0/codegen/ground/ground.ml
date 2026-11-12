@@ -16,23 +16,25 @@ and function_type = { parameters : (mode * ty) list; result : result; uses : Pat
 and result = Returns of ty | Yields of mode * ty | Lends of mode * ty
 and yielding = { method_ : Path.t; type_arguments : argument list }
 
-let ( >>= ) c next = if c <> 0 then c else next ()
+let ( >>= ) order next = if order <> 0 then order else next ()
 
-let rec compare a b =
-  match (a, b) with
-  | Named a, Named b ->
-      Path.compare a.path b.path >>= fun () -> compare_arguments a.arguments b.arguments
-  | Function a, Function b -> compare_function a b
-  | Any a, Any b ->
-      Path.compare a.trait b.trait >>= fun () ->
-      compare_arguments a.arguments b.arguments >>= fun () ->
+let rec compare left right =
+  match (left, right) with
+  | Named left, Named right ->
+      Path.compare left.path right.path >>= fun () ->
+      compare_arguments left.arguments right.arguments
+  | Function left, Function right -> compare_function left right
+  | Any left, Any right ->
+      Path.compare left.trait right.trait >>= fun () ->
+      compare_arguments left.arguments right.arguments >>= fun () ->
       List.compare
-        (fun (n, t) (m, u) -> String.compare n m >>= fun () -> compare t u)
-        a.associated b.associated
-  | Cursor a, Cursor b -> compare_yielding a b
-  | Lent a, Lent b -> compare_lent a b
+        (fun (left_name, left_type) (right_name, right_type) ->
+          String.compare left_name right_name >>= fun () -> compare left_type right_type)
+        left.associated right.associated
+  | Cursor left, Cursor right -> compare_yielding left right
+  | Lent left, Lent right -> compare_lent left right
   | Never, Never -> 0
-  | _ -> Int.compare (rank a) (rank b)
+  | _ -> Int.compare (rank left) (rank right)
 
 and rank = function
   | Named _ -> 0
@@ -42,51 +44,55 @@ and rank = function
   | Lent _ -> 4
   | Never -> 5
 
-and compare_lent a b =
-  compare a.base b.base >>= fun () ->
-  Bool.compare a.writable b.writable >>= fun () ->
+and compare_lent left right =
+  compare left.base right.base >>= fun () ->
+  Bool.compare left.writable right.writable >>= fun () ->
   List.compare
-    (fun f g ->
-      Option.compare String.compare f.variant g.variant >>= fun () ->
-      String.compare f.field g.field >>= fun () ->
-      match (f.holds, g.holds) with
+    (fun left_field right_field ->
+      Option.compare String.compare left_field.variant right_field.variant >>= fun () ->
+      String.compare left_field.field right_field.field >>= fun () ->
+      match (left_field.holds, right_field.holds) with
       | Address, Address -> 0
-      | Nested f, Nested g -> compare_lent f g
+      | Nested left_field, Nested right_field -> compare_lent left_field right_field
       | Address, Nested _ -> -1
       | Nested _, Address -> 1)
-    a.fields b.fields
+    left.fields right.fields
 
 (* [Z.t] is compared by [Z.compare], since the polymorphic comparison does
    not accept it. Every other part is a string, a list, or a constructor. *)
-and compare_argument a b =
-  match (a, b) with
-  | Type a, Type b -> compare a b
-  | Value a, Value b -> Z.compare a b
-  | Capabilities a, Capabilities b -> List.compare Path.compare a b
+and compare_argument left right =
+  match (left, right) with
+  | Type left, Type right -> compare left right
+  | Value left, Value right -> Z.compare left right
+  | Capabilities left, Capabilities right -> List.compare Path.compare left right
   | _ ->
       let rank = function Type _ -> 0 | Value _ -> 1 | Capabilities _ -> 2 in
-      Int.compare (rank a) (rank b)
+      Int.compare (rank left) (rank right)
 
-and compare_arguments a b = List.compare compare_argument a b
+and compare_arguments left right = List.compare compare_argument left right
 
-and compare_function a b =
+and compare_function left right =
   List.compare
-    (fun (m, t) (n, u) -> Stdlib.compare m n >>= fun () -> compare t u)
-    a.parameters b.parameters
+    (fun (right_name, left_type) (left_name, right_type) ->
+      Stdlib.compare right_name left_name >>= fun () -> compare left_type right_type)
+    left.parameters right.parameters
   >>= fun () ->
-  compare_result a.result b.result >>= fun () -> List.compare Path.compare a.uses b.uses
+  compare_result left.result right.result >>= fun () ->
+  List.compare Path.compare left.uses right.uses
 
-and compare_result a b =
-  match (a, b) with
-  | Returns a, Returns b -> compare a b
-  | Yields (m, a), Yields (n, b) | Lends (m, a), Lends (n, b) ->
-      Stdlib.compare m n >>= fun () -> compare a b
+and compare_result left right =
+  match (left, right) with
+  | Returns left, Returns right -> compare left right
+  | Yields (right_name, left), Yields (left_name, right)
+  | Lends (right_name, left), Lends (left_name, right) ->
+      Stdlib.compare right_name left_name >>= fun () -> compare left right
   | _ ->
       let rank = function Returns _ -> 0 | Yields _ -> 1 | Lends _ -> 2 in
-      Int.compare (rank a) (rank b)
+      Int.compare (rank left) (rank right)
 
-and compare_yielding a b =
-  Path.compare a.method_ b.method_ >>= fun () -> compare_arguments a.type_arguments b.type_arguments
+and compare_yielding left right =
+  Path.compare left.method_ right.method_ >>= fun () ->
+  compare_arguments left.type_arguments right.type_arguments
 
 let rec path_name : Path.t -> string = function
   | Top { name; _ } | Test { name; _ } -> name
@@ -101,25 +107,27 @@ let mode_prefix = function Read -> "" | Mut -> "mut " | Own -> "own "
 let rec to_string = function
   | Named { path; arguments = [] } -> path_name path
   | Named { path; arguments } -> path_name path ^ arguments_to_string arguments
-  | Function f ->
-      let parameters = List.map (fun (mode, ty) -> mode_prefix mode ^ to_string ty) f.parameters in
+  | Function function_type ->
+      let parameters =
+        List.map (fun (mode, ty) -> mode_prefix mode ^ to_string ty) function_type.parameters
+      in
       let result =
-        match f.result with
+        match function_type.result with
         | Returns (Named { path; arguments = [] }) when path_name path = "Unit" -> ""
         | Returns ty -> " -> " ^ to_string ty
         | Yields (mode, ty) -> " yields " ^ mode_prefix mode ^ to_string ty
         | Lends (mode, ty) -> " lends " ^ mode_prefix mode ^ to_string ty
       in
       let text = "fn(" ^ String.concat ", " parameters ^ ")" ^ result in
-      if f.uses = [] then text
-      else "(" ^ text ^ " uses " ^ String.concat ", " (List.map path_name f.uses) ^ ")"
+      if function_type.uses = [] then text
+      else "(" ^ text ^ " uses " ^ String.concat ", " (List.map path_name function_type.uses) ^ ")"
   | Any { trait; arguments; associated } ->
       let items =
         List.map argument_to_string arguments
         @ List.map (fun (name, ty) -> name ^ " = " ^ to_string ty) associated
       in
       "any " ^ path_name trait ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
-  | Cursor y -> "cursor of " ^ path_name y.method_
+  | Cursor yielding -> "cursor of " ^ path_name yielding.method_
   | Lent lent -> lent_to_string lent
   | Never -> "Never"
 
@@ -137,7 +145,7 @@ and lent_to_string { base; writable; fields } =
 
 and argument_to_string = function
   | Type ty -> to_string ty
-  | Value v -> Z.to_string v
+  | Value value -> Z.to_string value
   | Capabilities set -> "{" ^ String.concat ", " (List.map path_name set) ^ "}"
 
 and arguments_to_string arguments =
@@ -145,12 +153,13 @@ and arguments_to_string arguments =
 
 (* Encoding: each constructor is an array whose first item numbers it. *)
 
-let tagged n items = Cbor.Array (Cbor.int n :: items)
+let tagged tag items = Cbor.Array (Cbor.int tag :: items)
 let texts names = Cbor.Array (List.map (fun name -> Cbor.Text name) names)
 
-let encode_module (m : Path.module_) =
+let encode_module (module_ : Path.module_) =
   Cbor.Array
-    (texts (Path.package_parts m.package) :: List.map (fun name -> Cbor.Text name) m.modules)
+    (texts (Path.package_parts module_.package)
+    :: List.map (fun name -> Cbor.Text name) module_.modules)
 
 let encode_type_head (head : Path.type_head) =
   Cbor.Array [ Text head.type_name; texts head.generics ]
@@ -178,8 +187,9 @@ let encode_mode = function Read -> Cbor.int 0 | Mut -> Cbor.int 1 | Own -> Cbor.
 let rec encode ?(path = encode_path) ty =
   let encode = encode ~path and argument = encode_argument ~path in
   match ty with
-  | Named { path = p; arguments } -> tagged 0 [ path p; Cbor.Array (List.map argument arguments) ]
-  | Function f -> tagged 1 [ encode_function ~path f ]
+  | Named { path = named_path; arguments } ->
+      tagged 0 [ path named_path; Cbor.Array (List.map argument arguments) ]
+  | Function function_type -> tagged 1 [ encode_function ~path function_type ]
   | Any { trait; arguments; associated } ->
       tagged 2
         [
@@ -206,20 +216,23 @@ and encode_lent ~path { base; writable; fields } =
 
 and encode_argument ?(path = encode_path) = function
   | Type ty -> tagged 0 [ encode ~path ty ]
-  | Value v -> tagged 1 [ Cbor.Integer v ]
+  | Value value -> tagged 1 [ Cbor.Integer value ]
   | Capabilities set -> tagged 2 [ Cbor.Array (List.map path set) ]
 
-and encode_function ~path f =
+and encode_function ~path function_type =
   Cbor.Array
     [
       Cbor.Array
-        (List.map (fun (mode, ty) -> Cbor.Array [ encode_mode mode; encode ~path ty ]) f.parameters);
-      (match f.result with
+        (List.map
+           (fun (mode, ty) -> Cbor.Array [ encode_mode mode; encode ~path ty ])
+           function_type.parameters);
+      (match function_type.result with
       | Returns ty -> tagged 0 [ encode ~path ty ]
       | Yields (mode, ty) -> tagged 1 [ encode_mode mode; encode ~path ty ]
       | Lends (mode, ty) -> tagged 2 [ encode_mode mode; encode ~path ty ]);
-      Cbor.Array (List.map path f.uses);
+      Cbor.Array (List.map path function_type.uses);
     ]
 
-and encode_yielding ~path y =
-  Cbor.Array [ path y.method_; Cbor.Array (List.map (encode_argument ~path) y.type_arguments) ]
+and encode_yielding ~path yielding =
+  Cbor.Array
+    [ path yielding.method_; Cbor.Array (List.map (encode_argument ~path) yielding.type_arguments) ]

@@ -394,7 +394,9 @@ let fresh context frame label sort =
    loop changes, or one made inside it. *)
 let mentions_fresh_after context mark term =
   let is_fresh_after name =
-    match Hashtbl.find_opt context.fresh_order name with Some n -> n > mark | None -> false
+    match Hashtbl.find_opt context.fresh_order name with
+    | Some order -> order > mark
+    | None -> false
   in
   let rec walk = function
     | Logic.Symbol name -> is_fresh_after name
@@ -885,7 +887,9 @@ let declared_fields context ty variant =
       match (interface.shape, variant) with
       | Record list, None -> Some (fields list)
       | Sum variants, Some name -> (
-          match List.find_opt (fun (v : Types.variant) -> v.variant_name = name) variants with
+          match
+            List.find_opt (fun (variant : Types.variant) -> variant.variant_name = name) variants
+          with
           | Some { fields = Some list; _ } -> Some (fields list)
           | Some { fields = None; _ } -> Some []
           | None -> None)
@@ -1176,11 +1180,14 @@ let join context ?value_type frames =
                 (fun ((frame : frame), _) ->
                   ( frame.condition,
                     in_joined frame
-                      (match List.assoc_opt key frame.spent with Some t -> t | None -> term) ))
+                      (match List.assoc_opt key frame.spent with
+                      | Some spent_term -> spent_term
+                      | None -> term) ))
                 frames
             in
             match values with
-            | (_, first_value) :: rest when List.for_all (fun (_, v) -> v = first_value) rest ->
+            | (_, first_value) :: rest
+              when List.for_all (fun (_, variant) -> variant = first_value) rest ->
                 (key, first_value)
             | _ ->
                 let choice =
@@ -1519,8 +1526,13 @@ let method_contract ?reading_package database (trait : Types.trait_reference) na
             (part_of callee)
       | Some (_, _, Provided) | None ->
           (* A method the [impl] leaves to its trait: the trait's clauses,
-             with the [impl]'s signature for the method. *)
-          Option.map (fun own -> make_contract database path ~own ~others:[] ~body:None) trait_side)
+             with the [impl]'s signature for the method, and the trait's
+             body, which is what the method does for this [impl]. *)
+          Option.map
+            (fun own ->
+              make_contract database path ~own ~others:[]
+                ~body:(provided_body database trait.trait name receiver))
+            trait_side)
   | Bound | Dynamic ->
       Option.map
         (fun own ->
@@ -1627,10 +1639,10 @@ and note_place context frame (node : expression) place =
       (fun (first, second) ->
         if first = origin || second = origin then
           match (List.assoc_opt first context.indexes, List.assoc_opt second context.indexes) with
-          | Some (a, (first_span : span)), Some (b, (second_span : span)) ->
+          | Some (left, (first_span : span)), Some (right, (second_span : span)) ->
               let apart =
-                match (a, b) with
-                | One a, One b -> Logic.not_ (Logic.equal a b)
+                match (left, right) with
+                | One left, One right -> Logic.not_ (Logic.equal left right)
                 | One index, Run (start, stop) | Run (start, stop), One index ->
                     outside index start stop
                 | Run (start, stop), Run (other_start, other_stop) ->
@@ -1820,25 +1832,27 @@ and expression_kind context frame (node : expression) : (frame * Logic.term) opt
   | Operator { operation; arguments } -> Some (operator context frame node operation arguments)
   | Compare { comparison = compared; left; right } ->
       let operand_type = type_of context frame left in
-      let frame, a = value context frame left in
-      let frame, b = value context frame right in
+      let frame, left_term = value context frame left in
+      let frame, right_term = value context frame right in
       Some
         ( frame,
           if float_format operand_type <> None then
             match compared with
-            | Equal -> float_equal a b
-            | Not_equal -> Logic.not_ (float_equal a b)
-            | Less -> float_less a b
-            | Less_equal -> Logic.( ||| ) (float_less a b) (float_equal a b)
-            | Greater -> float_less b a
-            | Greater_equal -> Logic.( ||| ) (float_less b a) (float_equal a b)
+            | Equal -> float_equal left_term right_term
+            | Not_equal -> Logic.not_ (float_equal left_term right_term)
+            | Less -> float_less left_term right_term
+            | Less_equal ->
+                Logic.( ||| ) (float_less left_term right_term) (float_equal left_term right_term)
+            | Greater -> float_less right_term left_term
+            | Greater_equal ->
+                Logic.( ||| ) (float_less right_term left_term) (float_equal left_term right_term)
           else
             match comparison compared with
             | Some symbol when compared = Equal ->
                 ignore symbol;
-                Logic.equal a b
-            | Some symbol -> Logic.Operation (symbol, [ a; b ])
-            | None -> Logic.not_ (Logic.equal a b) )
+                Logic.equal left_term right_term
+            | Some symbol -> Logic.Operation (symbol, [ left_term; right_term ])
+            | None -> Logic.not_ (Logic.equal left_term right_term) )
   | Not inner ->
       let frame, term = value context frame inner in
       Some (frame, Logic.not_ term)
@@ -2093,18 +2107,18 @@ and short_circuit context frame right ~runs ~otherwise ~binds combine =
     | Some (joined, None) -> Some (joined, Logic.Boolean true)
     | None -> None
 
-and equal_of context frame (ty : Types.ty) a b =
-  if structural context ty then Logic.equal a b
-  else if float_format ty <> None then float_equal a b
+and equal_of context frame (ty : Types.ty) left right =
+  if structural context ty then Logic.equal left right
+  else if float_format ty <> None then float_equal left right
   else
-    match written_equal context ty a b with
+    match written_equal context ty left right with
     | Some equal -> equal
-    | None -> derived_equal context frame ty a b
+    | None -> derived_equal context frame ty left right
 
 (* [==] on a type whose [impl] of [Equal] is written: the term a call of its
    [equal] is, so that what the [impl]'s contract says of a call holds of
    it. *)
-and written_equal context ty a b =
+and written_equal context ty left right =
   match concrete_impl context { trait = equal_trait; trait_arguments = []; associated = [] } ty with
   | Some (((Impl _ : Path.t) as impl), arguments) -> (
       let evidence : evidence = Impl { impl; arguments } in
@@ -2123,15 +2137,15 @@ and written_equal context ty a b =
           in
           let sort = sort_of context ty in
           declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
-          Some (Logic.Apply (symbol, [ a; b ]))
+          Some (Logic.Apply (symbol, [ left; right ]))
       | _ -> None)
   | _ -> None
 
-and derived_equal context frame (ty : Types.ty) a b =
+and derived_equal context frame (ty : Types.ty) left right =
   let sort = sort_of context ty in
   let symbol = Symbol.Equal (type_key ty) in
   declare context (Logic.Function (symbol, [ sort; sort ], Logic.Bool));
-  let equal = Logic.Apply (symbol, [ a; b ]) in
+  let equal = Logic.Apply (symbol, [ left; right ]) in
   (match (visible_type context ty, constructors context ty) with
   | Some (interface, _), Some shape
     when List.exists is_standard_equal interface.derives
@@ -2143,11 +2157,12 @@ and derived_equal context frame (ty : Types.ty) a b =
           (List.map
              (fun (field, field_type) ->
                let selector = selector_name ty variant field in
-               let a = Logic.Apply (selector, [ a ]) and b = Logic.Apply (selector, [ b ]) in
-               if structural context field_type then Logic.equal a b
-               else if float_format field_type <> None then float_equal a b
+               let left = Logic.Apply (selector, [ left ])
+               and right = Logic.Apply (selector, [ right ]) in
+               if structural context field_type then Logic.equal left right
+               else if float_format field_type <> None then float_equal left right
                else
-                 match written_equal context field_type a b with
+                 match written_equal context field_type left right with
                  | Some equal -> equal
                  | None ->
                      (* Unfolded only when it is compared itself. *)
@@ -2157,7 +2172,7 @@ and derived_equal context frame (ty : Types.ty) a b =
                           ( symbol,
                             [ sort_of context field_type; sort_of context field_type ],
                             Logic.Bool ));
-                     Logic.Apply (symbol, [ a; b ]))
+                     Logic.Apply (symbol, [ left; right ]))
              fields)
       in
       let defined =
@@ -2168,7 +2183,7 @@ and derived_equal context frame (ty : Types.ty) a b =
               (List.map
                  (fun ((variant, _) as one) ->
                    let is_variant term = Logic.Is (constructor_name ty variant, term) in
-                   Logic.(is_variant a &&& is_variant b &&& fields_equal one))
+                   Logic.(is_variant left &&& is_variant right &&& fields_equal one))
                  variants)
       in
       fact context frame (Logic.equal equal defined)
@@ -2206,11 +2221,11 @@ and operator context frame (node : expression) (operation : Intrinsic.operation)
   if float_format ty <> None then
     let result =
       match (operation, operands) with
-      | Add, [ a; b ] -> float_operation "fp.add" a b
-      | Subtract, [ a; b ] -> float_operation "fp.sub" a b
-      | Multiply, [ a; b ] -> float_operation "fp.mul" a b
-      | Divide, [ a; b ] -> float_operation "fp.div" a b
-      | Negate, [ a ] -> Logic.Operation ("fp.neg", [ a ])
+      | Add, [ left_term; right_term ] -> float_operation "fp.add" left_term right_term
+      | Subtract, [ left_term; right_term ] -> float_operation "fp.sub" left_term right_term
+      | Multiply, [ left_term; right_term ] -> float_operation "fp.mul" left_term right_term
+      | Divide, [ left_term; right_term ] -> float_operation "fp.div" left_term right_term
+      | Negate, [ left_term ] -> Logic.Operation ("fp.neg", [ left_term ])
       | _ -> arrive context frame "operator" ty
     in
     (frame, result)
@@ -2747,7 +2762,12 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       frame values
   in
   let arguments_of (type_arguments : Types.argument list) =
-    List.map (Types.substitute_argument frame.substitution) type_arguments
+    List.map
+      (fun argument ->
+        match Types.substitute_argument frame.substitution argument with
+        | Types.Type ty -> Types.Type (substituted context frame ty)
+        | other -> other)
+      type_arguments
   in
   let generics_of path =
     match Interface.Impls.signature context.database path with
@@ -2777,6 +2797,27 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       | Function { path; _ } -> signature_terminates context path
       | Trait_method { evidence = Impl { impl; _ }; name; receiver; _ } ->
           signature_terminates context (Path.Method { owner = impl; name; receiver })
+      | Trait_method { trait; name; receiver; evidence = Bound; self_type; _ } -> (
+          (* A bound on a type the frame's substitution makes known, as in
+             code proven once for each integer type, reaches its [impl]. *)
+          let trait =
+            {
+              trait with
+              trait_arguments =
+                List.map
+                  (function
+                    | Types.Type ty -> Types.Type (substituted context frame ty)
+                    | argument -> argument)
+                  trait.trait_arguments;
+            }
+          in
+          match concrete_impl context trait (substituted context frame self_type) with
+          | Some (impl, _)
+            when Interface.Impls.signature context.database
+                   (Path.Method { owner = impl; name; receiver })
+                 <> None ->
+              signature_terminates context (Path.Method { owner = impl; name; receiver })
+          | _ -> signature_terminates context (Path.Method { owner = trait.trait; name; receiver }))
       | Trait_method { trait; name; receiver; _ } ->
           signature_terminates context (Path.Method { owner = trait.trait; name; receiver })
       | Capability_method { capability; name } ->
@@ -2849,14 +2890,25 @@ and resolved_call ?lent_final context frame (node : expression) (call_ : call) =
       assume_laws context frame ~at:span trait self_type;
       let operands () = List.map (fun (passed : passed) -> passed.term) values in
       match (name, evidence, operands ()) with
-      | "equal", _, [ a; b ] when Path.equal trait.trait equal_trait && structural context self_type
-        ->
+      | ("minimum_value" | "maximum_value" | "bit_width"), _, []
+        when Well_known.is Fixed_width_integer trait.trait && Types.integer_bits self_type <> None
+        -> (
+          (* A built-in integer type's bounds and bits are numbers, so that
+             an obligation that names them stays linear. *)
+          match (name, Types.integer_range self_type, Types.integer_bits self_type) with
+          | "minimum_value", Some (low, _), _ -> Some (frame, Logic.Integer low)
+          | "maximum_value", Some (_, high), _ -> Some (frame, Logic.Integer high)
+          | _, _, Some (bits, _) -> Some (frame, Logic.int bits)
+          | _ -> None)
+      | "equal", _, [ left; right ]
+        when Path.equal trait.trait equal_trait && structural context self_type ->
           (* [==] on a type with identity semantics is the solver's
              equality. *)
-          Some (frame, Logic.equal a b)
-      | "equal", Impl { impl = Derived _; _ }, [ a; b ] when Path.equal trait.trait equal_trait ->
+          Some (frame, Logic.equal left right)
+      | "equal", Impl { impl = Derived _; _ }, [ left; right ]
+        when Path.equal trait.trait equal_trait ->
           (* A derived [impl] is defined by the rule that derived it. *)
-          Some (frame, equal_of context frame self_type a b)
+          Some (frame, equal_of context frame self_type left right)
       | _ ->
           (match evidence with
           | (Bound | Dynamic) when name = "from_template" && Path.equal trait.trait template_trait
@@ -3656,8 +3708,8 @@ and read_lambda ?(capture_free = false) context frame (node : expression)
                   match (bound, constants) with
                   | Order_of, Some constants ->
                       Costs.at_most spent (Costs.bound constants (Logic.int 1))
-                  | No_more_than (Some k), _ -> Costs.at_most spent (Logic.Integer k)
-                  | Exactly_cost (Some k), _ -> Logic.equal spent (Logic.Integer k)
+                  | No_more_than (Some limit), _ -> Costs.at_most spent (Logic.Integer limit)
+                  | Exactly_cost (Some limit), _ -> Logic.equal spent (Logic.Integer limit)
                   | _ -> Logic.Boolean true
                 in
                 oblige context exit_ Cost span
@@ -4210,7 +4262,7 @@ and law_fact context frame source ~substitution (law : law) =
       law_frame
         { frame with bound = symbols @ frame.bound }
         source ~substitution law
-        (List.map (fun s -> Logic.Symbol s) symbols)
+        (List.map (fun symbol -> Logic.Symbol symbol) symbols)
     in
     try
       let premise =
@@ -4312,25 +4364,25 @@ and sequence_at context element term index =
    the one fact about sequences their contracts cannot state, since a
    contract describes a result. It is stated for each two that are
    compared, which keeps the solver from comparing every two it knows. *)
-and extensional context frame (ty : Types.ty) a b =
+and extensional context frame (ty : Types.ty) left right =
   match ty with
   | Named { path; arguments = [ Types.Type element ] } when Path.equal path sequence_path -> (
       let index = fresh_name context "index" in
       match
-        ( sequence_at context element a (Logic.Symbol index),
-          sequence_at context element b (Logic.Symbol index) )
+        ( sequence_at context element left (Logic.Symbol index),
+          sequence_at context element right (Logic.Symbol index) )
       with
       | Some at_a, Some at_b ->
           let length = sequence_length context element in
           fact context frame
             Logic.(
-              equal (length a) (length b)
+              equal (length left) (length right)
               &&& Forall
                     ( [ (index, Int) ],
                       Operation ("<=", [ int 0; Symbol index ])
-                      &&& Operation ("<", [ Symbol index; length a ])
+                      &&& Operation ("<", [ Symbol index; length left ])
                       ==> equal at_a at_b )
-              ==> equal a b)
+              ==> equal left right)
       | _ -> ())
   | Named { path; arguments }
     when Path.equal path finite_set_path || Path.equal path finite_map_path -> (
@@ -4354,12 +4406,15 @@ and extensional context frame (ty : Types.ty) a b =
                   let get =
                     function_ "get" (sort_of context value_type) [ (Logic.Symbol each, key_sort) ]
                   in
-                  Logic.(equal (has a) (has b) &&& (has a ==> equal (get a) (get b)))
-              | _ -> Logic.equal (has a) (has b)
-            else Logic.equal (has a) (has b)
+                  Logic.(
+                    equal (has left) (has right) &&& (has left ==> equal (get left) (get right)))
+              | _ -> Logic.equal (has left) (has right)
+            else Logic.equal (has left) (has right)
           in
           fact context frame
-            Logic.(Forall ([ (each, key_sort) ], in_range key (Symbol each) ==> same) ==> equal a b)
+            Logic.(
+              Forall ([ (each, key_sort) ], in_range key (Symbol each) ==> same)
+              ==> equal left right)
       | _ -> ())
   | _ -> ()
 
@@ -4961,7 +5016,7 @@ and type_source context (ty : Types.ty) =
 
 (* A frame for reading a type's own clauses about a value of it. *)
 and type_frame context frame source (ty : Types.ty) ~self =
-  let substitution = match visible_type context ty with Some (_, s) -> s | None -> [] in
+  let substitution = match visible_type context ty with Some (_, symbol) -> symbol | None -> [] in
   {
     frame with
     source;
@@ -5208,7 +5263,9 @@ and parameter_type context frame (call_ : call) index =
    for, which can only be a constant: a constant [O(...)], or a number of
    at most, or exactly, what is asked. *)
 and keeps_cost context path (contract : contract) (asked : Types.cost) =
-  let constant (value : expression) = match value.kind with Integer k -> Some k | _ -> None in
+  let constant (value : expression) =
+    match value.kind with Integer limit -> Some limit | _ -> None
+  in
   let same (cost : Core.cost) =
     match (asked.resource, cost.resource) with
     | Time, Time | Allocations, Allocations | Allocated_bytes, Allocated_bytes -> true
@@ -5228,7 +5285,7 @@ and keeps_cost context path (contract : contract) (asked : Types.cost) =
           match (asked.bound, cost.bound) with
           | Order_of, (Order_of value | At_most value | Exactly value) -> constant value <> None
           | No_more_than (Some most), (At_most value | Exactly value) -> (
-              match constant value with Some k -> Z.leq k most | None -> false)
+              match constant value with Some limit -> Z.leq limit most | None -> false)
           | Exactly_cost (Some exact), Exactly value -> constant value = Some exact
           | _ -> false)
       | None -> false)
@@ -5547,9 +5604,9 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
               in
               let ended = block_value context entered arm_.body in
               (* Exits are added at the front, so the arm's are the first. *)
-              let rewrite count list f =
+              let rewrite count list exit_frame =
                 let added = List.length list - count in
-                List.mapi (fun index item -> if index < added then f item else item) list
+                List.mapi (fun index item -> if index < added then exit_frame item else item) list
               in
               context.returns <-
                 rewrite returns context.returns (fun (at, value) -> (write_back at, value));
@@ -5563,7 +5620,10 @@ and match_ context frame (node : expression) scrutinees (arms : arm list) =
       arms
   in
   if carries_value then
-    match join context ~value_type:result_type (List.map (fun (f, t) -> (f, Some t)) reached) with
+    match
+      join context ~value_type:result_type
+        (List.map (fun (exit_frame, spent_term) -> (exit_frame, Some spent_term)) reached)
+    with
     | Some (joined, Some term) -> Some (scoped joined, term)
     | Some (joined, None) -> Some (scoped joined, Logic.Boolean true)
     | None -> None
@@ -5695,12 +5755,12 @@ and requires_fix context frame (part : part) (clause : expression) term (values 
   in
   let simple text =
     String.for_all
-      (fun c ->
-        c = '_' || c = '.'
-        || Char.code c >= 128
-        || (c >= 'a' && c <= 'z')
-        || (c >= 'A' && c <= 'Z')
-        || (c >= '0' && c <= '9'))
+      (fun character ->
+        character = '_' || character = '.'
+        || Char.code character >= 128
+        || (character >= 'a' && character <= 'z')
+        || (character >= 'A' && character <= 'Z')
+        || (character >= '0' && character <= '9'))
       text
   in
   let written =
@@ -5769,11 +5829,11 @@ and parameter_operand context frame (operand : expression) term =
     let text = quote frame.source operand.origin in
     let plain =
       String.for_all
-        (fun c ->
-          c = '_' || c = '.'
-          || (c >= 'a' && c <= 'z')
-          || (c >= 'A' && c <= 'Z')
-          || (c >= '0' && c <= '9'))
+        (fun character ->
+          character = '_' || character = '.'
+          || (character >= 'a' && character <= 'z')
+          || (character >= 'A' && character <= 'Z')
+          || (character >= '0' && character <= '9'))
         text
     in
     Some (if plain then text else "(" ^ text ^ ")")
@@ -5786,18 +5846,18 @@ and parameter_operand context frame (operand : expression) term =
 and overflow_fix context frame ty (operation : Intrinsic.operation) (operand : expression) left
     right =
   match (bounds ty, right, parameter_operand context frame operand left) with
-  | Some (low, high), Logic.Integer k, Some text -> (
+  | Some (low, high), Logic.Integer limit, Some text -> (
       let clause relation limit =
         if Z.leq low limit && Z.leq limit high then
           add_requires context frame (Printf.sprintf "%s %s %s" text relation (Z.to_string limit))
         else []
       in
       match operation with
-      | Add when Z.sign k > 0 -> clause "<=" (Z.sub high k)
-      | Add when Z.sign k < 0 -> clause ">=" (Z.sub low k)
-      | Subtract when Z.sign k > 0 -> clause ">=" (Z.add low k)
-      | Subtract when Z.sign k < 0 -> clause "<=" (Z.add high k)
-      | Multiply when Z.sign k > 0 && Z.sign low = 0 -> clause "<=" (Z.div high k)
+      | Add when Z.sign limit > 0 -> clause "<=" (Z.sub high limit)
+      | Add when Z.sign limit < 0 -> clause ">=" (Z.sub low limit)
+      | Subtract when Z.sign limit > 0 -> clause ">=" (Z.add low limit)
+      | Subtract when Z.sign limit < 0 -> clause "<=" (Z.add high limit)
+      | Multiply when Z.sign limit > 0 && Z.sign low = 0 -> clause "<=" (Z.div high limit)
       | _ -> [])
   | _ -> []
 
@@ -5911,7 +5971,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
           "This recursive call may not be on a part of its parameters: give the function a \
            `decreases` clause."
           Logic.(
-            conjunction (List.map (fun b -> Operation ("<=", [ int 0; b ])) before)
+            conjunction
+              (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
             &&& lexicographically_less before after)
     | [], _ | _, [] ->
         oblige context frame Termination span
@@ -5927,9 +5988,9 @@ and contract_call context frame (node : expression) (call_ : call) path contract
         let callee_entry = entry_frame own in
         let rec prefix before after =
           match (before, after) with
-          | b :: before, a :: after ->
+          | right_term :: before, left_term :: after ->
               let rest_before, rest_after = prefix before after in
-              (b :: rest_before, a :: rest_after)
+              (right_term :: rest_before, left_term :: rest_after)
           | _ -> ([], [])
         in
         let before = List.map (fun measure -> snd (value context current_frame measure)) measures in
@@ -6443,11 +6504,13 @@ and argument_at_index (values : passed list) index =
 
 and lexicographically_less before after =
   match (before, after) with
-  | [ b ], [ a ] -> Logic.(Operation ("<=", [ int 0; b ]) &&& Operation ("<", [ a; b ]))
-  | b :: before, a :: after ->
+  | [ right ], [ left ] ->
+      Logic.(Operation ("<=", [ int 0; right ]) &&& Operation ("<", [ left; right ]))
+  | right :: before, left :: after ->
       Logic.(
-        Operation ("<=", [ int 0; b ])
-        &&& (Operation ("<", [ a; b ]) ||| (equal a b &&& lexicographically_less before after)))
+        Operation ("<=", [ int 0; right ])
+        &&& (Operation ("<", [ left; right ])
+            ||| (equal left right &&& lexicographically_less before after)))
   | _ -> Logic.Boolean true
 
 (* Costs: what each step spends. *)
@@ -6533,21 +6596,23 @@ and same_resource (cost : Core.cost) ~locals (counter : Costs.counter) =
 and promised_amount context frame (counter : Costs.counter) (bound : bound) ~evaluate ~assumed
     ~exact_target ~change =
   match (bound, counter.counting) with
-  | Order_of g, Units ->
-      let g = evaluate g in
+  | Order_of amount, Units ->
+      let amount = evaluate amount in
       let amount =
         match assumed with
         | Some constants ->
-            let hypothesis = Costs.at_least_zero (Costs.bound constants g) in
+            let hypothesis = Costs.at_least_zero (Costs.bound constants amount) in
             if counter.resource = Time then Costs.plus hypothesis (Logic.int 1) else hypothesis
-        | None -> Costs.units g
+        | None -> Costs.units amount
       in
       Costs.minus amount change
-  | (At_most g | Exactly g), Units -> Costs.at_least_zero (Costs.minus (evaluate g) change)
-  | At_most g, (At_most | Exactly) -> bounded_amount context frame (Costs.minus (evaluate g) change)
-  | Exactly g, (At_most | Exactly) ->
-      let g = Costs.minus (evaluate g) change in
-      if exact_target then g else bounded_amount context frame g
+  | (At_most amount | Exactly amount), Units ->
+      Costs.at_least_zero (Costs.minus (evaluate amount) change)
+  | At_most amount, (At_most | Exactly) ->
+      bounded_amount context frame (Costs.minus (evaluate amount) change)
+  | Exactly amount, (At_most | Exactly) ->
+      let amount = Costs.minus (evaluate amount) change in
+      if exact_target then amount else bounded_amount context frame amount
   | (Order_of _ | Finite), _ -> unknown_amount context frame counter
 
 (* How much a potential grew, or zero where it fell or cannot be read. *)
@@ -6592,7 +6657,7 @@ and callee_amount ?ends_in context after ~path ~(parts : part list) ~(bound_fram
     | true, None -> unknown_amount context after counter
     | _ ->
         promised_amount context after counter cost.bound
-          ~evaluate:(fun g -> snd (value context frame g))
+          ~evaluate:(fun amount -> snd (value context frame amount))
           ~assumed ~exact_target
           ~change:
             (match (cost.amortized, change) with true, Some change -> change () | _ -> Costs.zero)
@@ -6713,10 +6778,11 @@ and function_value_amount context frame (function_type : Types.function_type) ca
   let by_clause resource =
     match (clause resource, counter.counting) with
     | Some { bound = Order_of; _ }, Units -> Logic.int 1
-    | Some { bound = No_more_than (Some k) | Exactly_cost (Some k); _ }, Units -> Logic.Integer k
-    | Some { bound = No_more_than (Some k); _ }, (At_most | Exactly) ->
-        bounded_amount context frame (Logic.Integer k)
-    | Some { bound = Exactly_cost (Some k); _ }, (At_most | Exactly) -> Logic.Integer k
+    | Some { bound = No_more_than (Some limit) | Exactly_cost (Some limit); _ }, Units ->
+        Logic.Integer limit
+    | Some { bound = No_more_than (Some limit); _ }, (At_most | Exactly) ->
+        bounded_amount context frame (Logic.Integer limit)
+    | Some { bound = Exactly_cost (Some limit); _ }, (At_most | Exactly) -> Logic.Integer limit
     | _ -> unknown_amount context frame counter
   in
   match counter.resource with
@@ -6823,12 +6889,12 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       needs
         (Logic.Operation ("<=", [ Logic.Operation ("+", [ length before; by ]); capacity buffer ]));
       keeps_capacity ();
-      let k = bound () in
+      let limit = bound () in
       assume context frame
         (Logic.equal (length after) (Logic.Operation ("+", [ length before; by ])));
       assume context frame
-        (all k (Logic.int 0) (length before)
-           (Logic.equal (at after (Logic.Symbol k)) (at before (Logic.Symbol k))));
+        (all limit (Logic.int 0) (length before)
+           (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
       known
   | Storage_shorten, [ buffer; shorter ] ->
       (* The first [shorter] elements, in the same room. *)
@@ -6836,11 +6902,11 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       needs ~what:"be given a length at most the storage's"
         (Logic.Operation ("<=", [ shorter; length before ]));
       keeps_capacity ();
-      let k = bound () in
+      let limit = bound () in
       assume context frame (Logic.equal (length after) shorter);
       assume context frame
-        (all k (Logic.int 0) shorter
-           (Logic.equal (at after (Logic.Symbol k)) (at before (Logic.Symbol k))));
+        (all limit (Logic.int 0) shorter
+           (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
       known
   | Storage_push, [ buffer; value ] ->
       needs (Logic.Operation ("<", [ length (storage buffer); capacity buffer ]));
@@ -6857,7 +6923,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
       let before = storage buffer and after = changed_storage () in
       needs (Logic.Operation ("<", [ length before; capacity buffer ]));
       keeps_capacity ();
-      let k = bound () in
+      let limit = bound () in
       assume context frame
         (Logic.conjunction
            [
@@ -6867,21 +6933,21 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
              Logic.equal (at after index) value;
            ]);
       assume context frame
-        (all k (Logic.int 0) index
-           (Logic.equal (at after (Logic.Symbol k)) (at before (Logic.Symbol k))));
-      let k = bound () in
+        (all limit (Logic.int 0) index
+           (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
+      let limit = bound () in
       assume context frame
-        (all k index (length before)
+        (all limit index (length before)
            (Logic.equal
-              (at after (Logic.Operation ("+", [ Logic.Symbol k; Logic.int 1 ])))
-              (at before (Logic.Symbol k))));
-      let k = bound () in
+              (at after (Logic.Operation ("+", [ Logic.Symbol limit; Logic.int 1 ])))
+              (at before (Logic.Symbol limit))));
+      let limit = bound () in
       assume context frame
-        (all k
+        (all limit
            (Logic.Operation ("+", [ index; Logic.int 1 ]))
            (length after)
-           (Logic.equal (at after (Logic.Symbol k))
-              (at before (Logic.Operation ("-", [ Logic.Symbol k; Logic.int 1 ])))));
+           (Logic.equal (at after (Logic.Symbol limit))
+              (at before (Logic.Operation ("-", [ Logic.Symbol limit; Logic.int 1 ])))));
       assume context frame
         (each_sum (fun sum measure ->
              Logic.equal (sum after) (Logic.Operation ("+", [ sum before; measure value ]))));
@@ -6889,7 +6955,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
   | Storage_remove, [ buffer; index ] ->
       keeps_capacity ();
       let before = storage buffer and after = changed_storage () in
-      let k = bound () in
+      let limit = bound () in
       assume context frame
         (Logic.conjunction
            [
@@ -6898,13 +6964,13 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
              Logic.equal known (at before index);
            ]);
       assume context frame
-        (all k (Logic.int 0) index
-           (Logic.equal (at after (Logic.Symbol k)) (at before (Logic.Symbol k))));
-      let k = bound () in
+        (all limit (Logic.int 0) index
+           (Logic.equal (at after (Logic.Symbol limit)) (at before (Logic.Symbol limit))));
+      let limit = bound () in
       assume context frame
-        (all k index (length after)
-           (Logic.equal (at after (Logic.Symbol k))
-              (at before (Logic.Operation ("+", [ Logic.Symbol k; Logic.int 1 ])))));
+        (all limit index (length after)
+           (Logic.equal (at after (Logic.Symbol limit))
+              (at before (Logic.Operation ("+", [ Logic.Symbol limit; Logic.int 1 ])))));
       assume context frame
         (each_sum (fun sum measure ->
              Logic.equal (sum before) (Logic.Operation ("+", [ sum after; measure known ]))));
@@ -6917,7 +6983,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
           (storage buffer, changed_storage ())
         end
       in
-      let k = bound () in
+      let limit = bound () in
       assume context frame
         (Logic.conjunction
            [
@@ -6928,11 +6994,11 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
              Logic.equal (at after second) (at before first);
            ]);
       assume context frame
-        (all k (Logic.int 0) (length before)
+        (all limit (Logic.int 0) (length before)
            Logic.(
-             not_ (equal (Symbol k) first)
-             &&& not_ (equal (Symbol k) second)
-             ==> equal (at after (Symbol k)) (at before (Symbol k))));
+             not_ (equal (Symbol limit) first)
+             &&& not_ (equal (Symbol limit) second)
+             ==> equal (at after (Symbol limit)) (at before (Symbol limit))));
       assume context frame (each_sum (fun sum _ -> Logic.equal (sum after) (sum before)));
       known
   | (Storage_at | Storage_at_mut), [ buffer; index ] ->
@@ -6971,7 +7037,7 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
   | Compare_bytes, [ left; right ] -> byte_order context (view left) (view right)
   | View_slice, [ buffer; start; stop ] ->
       let whole = view buffer and part = view known in
-      let k = bound () in
+      let limit = bound () in
       assume context frame
         (Logic.conjunction
            [
@@ -6981,9 +7047,9 @@ and buffer_operation context frame ~(node : expression) (operation : Intrinsic.o
              Logic.equal (length part) (Logic.Operation ("-", [ stop; start ]));
            ]);
       assume context frame
-        (all k (Logic.int 0) (length part)
-           (Logic.equal (at part (Logic.Symbol k))
-              (at whole (Logic.Operation ("+", [ start; Logic.Symbol k ])))));
+        (all limit (Logic.int 0) (length part)
+           (Logic.equal (at part (Logic.Symbol limit))
+              (at whole (Logic.Operation ("+", [ start; Logic.Symbol limit ])))));
       known
   | _ -> known
 
@@ -6995,27 +7061,28 @@ and byte_order context left right =
   let symbol = Symbol.Compare_bytes_order in
   let first = not (Hashtbl.mem context.declared symbol) in
   declare context (Logic.Function (symbol, [ sequence; sequence ], Logic.Int));
-  let order a b = Logic.Apply (symbol, [ a; b ]) in
+  let order first_term second_term = Logic.Apply (symbol, [ first_term; second_term ]) in
   if first then begin
-    let a = Logic.Symbol (variable "bytes.first")
-    and b = Logic.Symbol (variable "bytes.second")
-    and c = Logic.Symbol (variable "bytes.third") in
+    let first_term = Logic.Symbol (variable "bytes.first")
+    and second_term = Logic.Symbol (variable "bytes.second")
+    and third_term = Logic.Symbol (variable "bytes.third") in
     let over names body = Logic.Forall (List.map (fun name -> (name, sequence)) names, body) in
     context.facts <-
       over
         [ variable "bytes.first"; variable "bytes.second" ]
         Logic.(
-          Operation ("<=", [ int (-1); order a b ])
-          &&& Operation ("<=", [ order a b; int 1 ])
-          &&& (equal (order a b) (int 0) ==> equal a b)
-          &&& equal (order b a) (Operation ("-", [ order a b ])))
-      :: over [ variable "bytes.first" ] (Logic.equal (order a a) (Logic.int 0))
+          Operation ("<=", [ int (-1); order first_term second_term ])
+          &&& Operation ("<=", [ order first_term second_term; int 1 ])
+          &&& (equal (order first_term second_term) (int 0) ==> equal first_term second_term)
+          &&& equal (order second_term first_term)
+                (Operation ("-", [ order first_term second_term ])))
+      :: over [ variable "bytes.first" ] (Logic.equal (order first_term first_term) (Logic.int 0))
       :: over
            [ variable "bytes.first"; variable "bytes.second"; variable "bytes.third" ]
            Logic.(
-             Operation ("<", [ order a b; int 0 ])
-             &&& Operation ("<", [ order b c; int 0 ])
-             ==> Operation ("<", [ order a c; int 0 ]))
+             Operation ("<", [ order first_term second_term; int 0 ])
+             &&& Operation ("<", [ order second_term third_term; int 0 ])
+             ==> Operation ("<", [ order first_term third_term; int 0 ]))
       :: context.facts
   end;
   order left right
@@ -7204,8 +7271,8 @@ and specification_function context frame (node : expression) (measure : specific
         List.map (fun argument -> snd (value context frame argument)) arguments)
   in
   match (measure, values, arguments) with
-  | Log, [ n ], [ argument ] ->
-      let log = log_of context frame n in
+  | Log, [ log_argument ], [ argument ] ->
+      let log = log_of context frame log_argument in
       (* [log] of a value of a bounded type is at most [log] of the type's
          largest value: its width, for an unsigned type. *)
       let rec unconverted (node : expression) =
@@ -7214,43 +7281,45 @@ and specification_function context frame (node : expression) (measure : specific
         | _ -> node
       in
       (match bounds (type_of context frame (unconverted argument)) with
-      | Some (_, high) when not (Logic.mentions frame.bound n) ->
+      | Some (_, high) when not (Logic.mentions frame.bound log_argument) ->
           fact context frame
             Logic.(
-              Operation ("<=", [ n; Integer high ])
+              Operation ("<=", [ log_argument; Integer high ])
               ==> Operation ("<=", [ log; int (Z.numbits high) ]))
       | _ -> ());
       Some (frame, log)
   | Power, [ base; exponent ], _ -> Some (frame, power_of context frame base exponent)
-  | Time, [ f ], [ function_value ] ->
-      Some (frame, time_of context frame (type_of context frame function_value) f)
+  | Time, [ function_term ], [ function_value ] ->
+      Some (frame, time_of context frame (type_of context frame function_value) function_term)
   | _ -> unsupported (at frame node) "this specification function"
 
-and log_of context frame n =
+and log_of context frame log_argument =
   declare context (Logic.Function (Symbol.Cost_log, [ Logic.Int ], Logic.Int));
-  let rec add n ~halving =
-    match List.assoc_opt n context.logs with
+  let rec add log_argument ~halving =
+    match List.assoc_opt log_argument context.logs with
     | Some true -> ()
     | Some false when not halving -> ()
     | seen ->
         if seen = None then
-          List.iter (fun (other, _) -> fact context frame (Costs.log_order n other)) context.logs;
-        context.logs <- (n, halving) :: List.remove_assoc n context.logs;
-        let facts, half = Costs.log_facts n ~halving in
+          List.iter
+            (fun (other, _) -> fact context frame (Costs.log_order log_argument other))
+            context.logs;
+        context.logs <- (log_argument, halving) :: List.remove_assoc log_argument context.logs;
+        let facts, half = Costs.log_facts log_argument ~halving in
         List.iter (fact context frame) facts;
         Option.iter (fun half -> add half ~halving:false) half
   in
-  if not (Logic.mentions frame.bound n) then add n ~halving:true;
+  if not (Logic.mentions frame.bound log_argument) then add log_argument ~halving:true;
   (* Of a number, it is the number's bit length: the smallest integer at
      least log2(n + 1). *)
-  (match n with
-  | Logic.Integer k ->
+  (match log_argument with
+  | Logic.Integer limit ->
       fact context frame
         (Logic.equal
-           (Logic.Apply (Symbol.Cost_log, [ n ]))
-           (Logic.int (if Z.sign k <= 0 then 0 else Z.numbits k)))
+           (Logic.Apply (Symbol.Cost_log, [ log_argument ]))
+           (Logic.int (if Z.sign limit <= 0 then 0 else Z.numbits limit)))
   | _ -> ());
-  Logic.Apply (Symbol.Cost_log, [ n ])
+  Logic.Apply (Symbol.Cost_log, [ log_argument ])
 
 and power_of context frame base exponent =
   declare context (Logic.Function (Symbol.Cost_power, [ Logic.Int; Logic.Int ], Logic.Int));
@@ -7275,11 +7344,12 @@ and power_of context frame base exponent =
      | None -> ());
   (* Of two numbers, it is their power. *)
   (match (base, exponent) with
-  | Logic.Integer b, Logic.Integer e when Z.sign e >= 0 && Z.leq e (Z.of_int 256) ->
+  | Logic.Integer base_value, Logic.Integer exponent_value
+    when Z.sign exponent_value >= 0 && Z.leq exponent_value (Z.of_int 256) ->
       fact context frame
         (Logic.equal
            (Logic.Apply (Symbol.Cost_power, [ base; exponent ]))
-           (Logic.Integer (Z.pow b (Z.to_int e))))
+           (Logic.Integer (Z.pow base_value (Z.to_int exponent_value))))
   | _ -> ());
   Logic.Apply (Symbol.Cost_power, [ base; exponent ])
 
@@ -7300,9 +7370,9 @@ and trait_method_time context frame (method_ : Path.t) self_type =
   declare context (Logic.Constant (symbol, Logic.Int));
   fact context frame (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
   (match method_time_bound context method_ self_type with
-  | Some k ->
+  | Some limit ->
       fact context frame
-        (Logic.Operation ("<=", [ Logic.Symbol symbol; Logic.Integer (Z.max k Z.one) ]))
+        (Logic.Operation ("<=", [ Logic.Symbol symbol; Logic.Integer (Z.max limit Z.one) ]))
   | None -> ());
   Logic.Symbol symbol
 
@@ -7351,10 +7421,10 @@ and method_time_bound context (method_ : Path.t) self_type =
                         | {
                          resource = Time;
                          amortized = false;
-                         bound = Order_of { kind = Integer k; _ };
+                         bound = Order_of { kind = Integer limit; _ };
                          _;
                         } ->
-                            Some k
+                            Some limit
                         | _ -> None)
                       part.costs)
                   contract.parts
@@ -7453,18 +7523,19 @@ and counting_of (cost : Core.cost) : Costs.counting =
 (* A loop's [cost] clause, about what the loop has spent so far, at [at]. *)
 and loop_clause_holds context (at : frame) (counter : Costs.counter) (cost : Core.cost) constants
     ~since =
-  let g =
+  let amount =
     match cost.bound with
-    | Order_of g | At_most g | Exactly g -> snd (value context { at with checking = false } g)
+    | Order_of amount | At_most amount | Exactly amount ->
+        snd (value context { at with checking = false } amount)
     | Finite -> Costs.zero
   in
   match (counter.counting, constants) with
-  | Units, Some constants -> Costs.at_most since (Costs.bound constants g)
-  | Exactly, _ -> Logic.equal since g
-  | _ -> Costs.at_most since g
+  | Units, Some constants -> Costs.at_most since (Costs.bound constants amount)
+  | Exactly, _ -> Logic.equal since amount
+  | _ -> Costs.at_most since amount
 
 and spent_at (frame : frame) key =
-  match List.assoc_opt key frame.spent with Some t -> t | None -> Costs.zero
+  match List.assoc_opt key frame.spent with Some spent_term -> spent_term | None -> Costs.zero
 
 (* What a counter is bounded by at the head and where the loop is left:
    its value, plus the potential the loop holds there, for [per_held]. *)
@@ -7512,7 +7583,7 @@ and loop_entry context frame costs =
       | Clause_bound (written, constants) ->
           (* The bound is well defined, as every specification must be. *)
           (match written.bound with
-          | Order_of g | At_most g | Exactly g -> ignore (value context frame g)
+          | Order_of amount | At_most amount | Exactly amount -> ignore (value context frame amount)
           | Finite -> ());
           oblige context frame Cost
             (span_of frame.source written.origin)
@@ -7542,8 +7613,8 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
                    when_)
                 (loop_clause_holds context frame cost.counter written_cost constants
                    ~since:(Costs.minus (spent_at frame cost.counter) cost.entry)))
-            (List.map (fun f -> (f, "after an iteration")) ends
-            @ List.map (fun f -> (f, "where the loop is left")) breaks)
+            (List.map (fun exit_frame -> (exit_frame, "after an iteration")) ends
+            @ List.map (fun exit_frame -> (exit_frame, "where the loop is left")) breaks)
       | Per_iteration { per; per_held } -> (
           let frames = ends @ breaks in
           let plain (frame : frame) =
@@ -7555,7 +7626,7 @@ and loop_iterations context (loop : statement) head costs ~mark ~facts ~ends ~br
           let held_rule =
             match (per_held, cost.held) with
             | Some (per_held, _), Some held
-              when List.exists (fun f -> mentions_potential (plain f)) frames ->
+              when List.exists (fun exit_frame -> mentions_potential (plain exit_frame)) frames ->
                 [
                   ( per_held,
                     fun (frame : frame) ->
@@ -7606,17 +7677,17 @@ and loop_exit context (exit_ : frame) costs ~iterations ~most =
         let at = spent_at exit_ cost.counter in
         match cost.rule with
         | Clause_bound (written, _) ->
-            let g =
+            let amount =
               match written.bound with
-              | Order_of g | At_most g | Exactly g ->
-                  snd (value context { exit_ with checking = false } g)
+              | Order_of amount | At_most amount | Exactly amount ->
+                  snd (value context { exit_ with checking = false } amount)
               | Finite -> Costs.zero
             in
             let counted =
               match cost.counter.counting with
-              | Units -> Costs.units g
-              | At_most -> bounded_amount context exit_ g
-              | Exactly -> g
+              | Units -> Costs.units amount
+              | At_most -> bounded_amount context exit_ amount
+              | Exactly -> amount
             in
             (cost.counter, Costs.plus cost.entry counted)
         | Per_iteration { per; per_held } ->
@@ -7935,8 +8006,9 @@ and held_symbol context ty term =
 
 (* The facts since a mark in the list, which is kept reversed. *)
 and facts_since context count =
-  let rec take n list =
-    if n <= 0 then [] else match list with [] -> [] | x :: rest -> x :: take (n - 1) rest
+  let rec take count list =
+    if count <= 0 then []
+    else match list with [] -> [] | item :: rest -> item :: take (count - 1) rest
   in
   take (List.length context.facts - count) context.facts
 
@@ -8249,8 +8321,8 @@ and sliced_owner_changed context frame (base : place) ~start ~stop =
 and run_replaced context frame element ~before ~after ~start ~stop ~run =
   let length sequence = sequence_length context element sequence in
   let at = element_at context element in
-  let k = fresh_name context "index" in
-  let index = Logic.Symbol k in
+  let limit = fresh_name context "index" in
+  let index = Logic.Symbol limit in
   let inside =
     match run with
     | Some run -> Logic.equal (at after index) (at run (Logic.Operation ("-", [ index; start ])))
@@ -8259,7 +8331,7 @@ and run_replaced context frame element ~before ~after ~start ~stop ~run =
   assume context frame (Logic.equal (length after) (length before));
   assume context frame
     (Logic.Forall
-       ( [ (k, Logic.Int) ],
+       ( [ (limit, Logic.Int) ],
          Logic.(
            Operation ("<=", [ int 0; index ])
            &&& Operation ("<", [ index; length before ])
@@ -8273,18 +8345,18 @@ and run_replaced context frame element ~before ~after ~start ~stop ~run =
 and replaced context frame element ~before ~after index part =
   let length sequence = sequence_length context element sequence in
   let at = element_at context element in
-  let k = fresh_name context "index" in
+  let limit = fresh_name context "index" in
   assume context frame
     (Logic.conjunction
        [ Logic.equal (length after) (length before); Logic.equal (at after index) part ]);
   assume context frame
     (Logic.Forall
-       ( [ (k, Logic.Int) ],
+       ( [ (limit, Logic.Int) ],
          Logic.(
-           Operation ("<=", [ int 0; Symbol k ])
-           &&& Operation ("<", [ Symbol k; length before ])
-           &&& not_ (equal (Symbol k) index)
-           ==> equal (at after (Symbol k)) (at before (Symbol k))) ))
+           Operation ("<=", [ int 0; Symbol limit ])
+           &&& Operation ("<", [ Symbol limit; length before ])
+           &&& not_ (equal (Symbol limit) index)
+           ==> equal (at after (Symbol limit)) (at before (Symbol limit))) ))
 
 (* The local or [self] a place is part of, which takes a fresh value when
    a part of it changes in a way the prover does not follow. *)
@@ -8391,7 +8463,7 @@ and store context frame (place : place) new_value =
    [f] with each key's term recorded, so that reading or storing the target
    in [f] evaluates no key again. A key evaluated twice would run its
    effects twice. *)
-and with_target_keys context frame target f =
+and with_target_keys context frame target work =
   let rec keys frame (place : place) =
     match place with
     | Local _ | Constant _ | Temporary _ -> (frame, [])
@@ -8418,7 +8490,7 @@ and with_target_keys context frame target f =
   let frame, evaluated = keys frame target in
   let outer = context.evaluated_keys in
   context.evaluated_keys <- evaluated @ outer;
-  Fun.protect ~finally:(fun () -> context.evaluated_keys <- outer) (fun () -> f frame)
+  Fun.protect ~finally:(fun () -> context.evaluated_keys <- outer) (fun () -> work frame)
 
 (* Whether a place is a part, through fields, of what a call lends to be
    changed. *)
@@ -8647,14 +8719,23 @@ and while_ context frame (node : statement) condition clauses body =
              (fun measure -> snd (value context { at with checking = false } measure))
              measures)
     | `Guessed (left, right, compared) -> (
-        let _, l = value context { at with checking = false } left in
-        let _, r = value context { at with checking = false } right in
+        let _, left_value = value context { at with checking = false } left in
+        let _, right_value = value context { at with checking = false } right in
         match compared with
-        | Less -> Some [ Logic.Operation ("-", [ r; l ]) ]
+        | Less -> Some [ Logic.Operation ("-", [ right_value; left_value ]) ]
         | Less_equal ->
-            Some [ Logic.Operation ("+", [ Logic.Operation ("-", [ r; l ]); Logic.int 1 ]) ]
-        | Greater -> Some [ Logic.Operation ("-", [ l; r ]) ]
-        | _ -> Some [ Logic.Operation ("+", [ Logic.Operation ("-", [ l; r ]); Logic.int 1 ]) ])
+            Some
+              [
+                Logic.Operation
+                  ("+", [ Logic.Operation ("-", [ right_value; left_value ]); Logic.int 1 ]);
+              ]
+        | Greater -> Some [ Logic.Operation ("-", [ left_value; right_value ]) ]
+        | _ ->
+            Some
+              [
+                Logic.Operation
+                  ("+", [ Logic.Operation ("-", [ left_value; right_value ]); Logic.int 1 ]);
+              ])
     | `None -> None
   in
   let start_measures = if context.terminates then measure_terms inside else None in
@@ -8710,7 +8791,7 @@ and while_ context frame (node : statement) condition clauses body =
     List.map
       (fun (frame' : frame) ->
         loop_exit context { frame' with loop = frame.loop } costs
-          ~iterations:(Option.map (fun n -> Costs.plus n (Logic.int 1)) iterations)
+          ~iterations:(Option.map (fun count -> Costs.plus count (Logic.int 1)) iterations)
           ~most)
       exits.breaks
   in
@@ -8796,7 +8877,9 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let outer_yielded = frame.yielded in
       (* In the loop's clauses, the pattern names the next index: [low] plus
          the iterations so far. *)
-      let at_index (f : frame) next = snd (pattern_match context f pattern next element) in
+      let at_index (exit_frame : frame) next =
+        snd (pattern_match context exit_frame pattern next element)
+      in
       let entry = at_index { frame with yielded = Some (empty_parts context frame element) } low in
       check_invariants context entry clauses ~when_:"on entry to the loop";
       let start =
@@ -8847,9 +8930,9 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let ends =
         (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues
       in
-      let with_through (f : frame) =
+      let with_through (exit_frame : frame) =
         at_index
-          { f with loop = frame.loop; yielded = Some through }
+          { exit_frame with loop = frame.loop; yielded = Some through }
           (Costs.plus index (Logic.int 1))
       in
       end_iterations context frame node clauses start ~head ~inside ~ends ~breaks:exits.breaks
@@ -8862,14 +8945,16 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       in
       let left =
         List.map
-          (fun (f : frame) ->
-            loop_exit context (with_through f) costs
+          (fun (exit_frame : frame) ->
+            loop_exit context (with_through exit_frame) costs
               ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
               ~most)
           exits.breaks
       in
       leave_loop context frame
-        (List.map (fun (f : frame) -> { f with yielded = outer_yielded }) (exit_ :: left))
+        (List.map
+           (fun (exit_frame : frame) -> { exit_frame with yielded = outer_yielded })
+           (exit_ :: left))
   | Yielding_call ({ kind = Call call_; _ } as driven) ->
       each_loop context frame node pattern driven call_ clauses body
   | Yielding_call _ -> unsupported span "this `for` loop"
@@ -9192,7 +9277,9 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
   let finished = block_value context inside body in
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
   each_iteration ~head ~ends;
-  let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
+  let with_through (exit_frame : frame) =
+    { exit_frame with loop = frame.loop; yielded = Some through }
+  in
   end_iterations context frame node clauses loop ~head ~inside ~ends ~breaks:exits.breaks
     ~with_through;
   let ended = received.advance (restrict head (Logic.not_ received.has_another)) in
@@ -9206,8 +9293,8 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
   in
   let left =
     List.map
-      (fun (f : frame) ->
-        loop_exit context (with_through f) costs
+      (fun (exit_frame : frame) ->
+        loop_exit context (with_through exit_frame) costs
           ~iterations:(Some (Costs.plus iterations (Logic.int 1)))
           ~most:
             (Costs.upper_bounds ~varies ~facts:ended_facts
@@ -9215,7 +9302,9 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
       exits.breaks
   in
   leave_loop context frame
-    (List.map (fun (f : frame) -> { f with yielded = frame.yielded }) (exit_ :: left))
+    (List.map
+       (fun (exit_frame : frame) -> { exit_frame with yielded = frame.yielded })
+       (exit_ :: left))
 
 (* Whether a loop's body hands out parts of the method it is in. *)
 and contains_yield body =
@@ -9393,16 +9482,17 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
   (* An amortized bound is on what is spent plus the growth of the
      potential of what the definition returns and changes. *)
   let spent = if promise.clause.amortized then Costs.plus spent (change ()) else spent in
-  let g =
+  let amount =
     match promise.clause.bound with
-    | Order_of g | At_most g | Exactly g -> snd (value context { at with checking = false } g)
+    | Order_of amount | At_most amount | Exactly amount ->
+        snd (value context { at with checking = false } amount)
     | Finite -> Costs.zero
   in
   let goal =
     match (promise.counter.counting, promise.constants) with
-    | Units, Some constants -> Costs.at_most spent (Costs.bound constants g)
-    | Exactly, _ -> Logic.equal spent g
-    | _ -> Costs.at_most spent g
+    | Units, Some constants -> Costs.at_most spent (Costs.bound constants amount)
+    | Exactly, _ -> Logic.equal spent amount
+    | _ -> Costs.at_most spent amount
   in
   oblige context frame Cost span
     (if promise.inherited then
@@ -9419,14 +9509,18 @@ let keep_promise context (frame : frame) (promise : promise) ~(at : frame) ~span
    cost clauses are shown at each way it returns. [inherited] is, for an
    [impl]'s method, its trait's clauses, with the substitution they are
    read under and the body the trait provides, if any. *)
-let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited database
-    (source : source) ~path =
+let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited ?(substitution = [])
+    database (source : source) ~path =
   let parameters, contract, body =
     match source.core.definition with
     | Function { parameters; contract; body = Some body } -> (parameters, contract, body)
     | _ -> unsupported (definition_span source) "a function without a body"
   in
-  let signature = Interface.Impls.signature database path in
+  let signature =
+    Option.map
+      (Types.map_signature (Types.substitute substitution))
+      (Interface.Impls.signature database path)
+  in
   let terminates =
     proof
     ||
@@ -9461,7 +9555,7 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
             if not updating_helper then assume_valid context frame self_type self;
             { frame with self = Some self; self_type = Some self_type }
         | local ->
-            let ty = parameter.type_ in
+            let ty = substituted context frame parameter.type_ in
             let term = arrive context frame ("parameter." ^ parameter.name) ty in
             (match term with
             | Logic.Symbol symbol ->
@@ -9470,7 +9564,8 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
             | _ -> ());
             assume_valid context frame ty term;
             bind frame local ty term)
-      (empty_frame source) parameters
+      { (empty_frame source) with substitution }
+      parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
   (* A lending or yielding method yields parts: its postconditions that
@@ -9623,9 +9718,9 @@ let function_ ?reveal ?(proof = false) ?(updating_helper = false) ?inherited dat
     (fun (promise : promise) ->
       if not promise.inherited then
         match promise.clause.bound with
-        | Order_of g | At_most g | Exactly g ->
+        | Order_of amount | At_most amount | Exactly amount ->
             let result = Option.map (arrive context start "result") output in
-            ignore (value context { start with result } g)
+            ignore (value context { start with result } amount)
         | Finite -> ())
     promised;
   let finished = block_value context start body in

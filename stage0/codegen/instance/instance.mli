@@ -57,8 +57,8 @@ val equal : key -> key -> bool
 val encode : ?path:(Path.t -> Cbor.t) -> key -> Cbor.t
 
 (* The C symbol of an instance: [t_], then its path and type arguments, with
-   markers between them that no Truss name can contain. A name longer than
-   200 bytes keeps its first 180 bytes and adds a hash of the whole name.
+   markers between them that no Truss name can contain. A long name keeps a
+   prefix and adds a hash of the whole name.
    Two different keys never give one symbol. *)
 val symbol : key -> string
 

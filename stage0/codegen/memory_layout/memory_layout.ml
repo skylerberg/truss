@@ -135,9 +135,9 @@ let place (fields : (string * member * t) list) =
   let sized = List.filter (fun (_, _, (layout : t)) -> layout.size > 0) fields in
   let ordered =
     List.stable_sort
-      (fun (name, _, (a : t)) (other, _, (b : t)) ->
-        let c = Int.compare b.alignment a.alignment in
-        if c <> 0 then c else String.compare name other)
+      (fun (name, _, (left : t)) (other, _, (right : t)) ->
+        let order = Int.compare right.alignment left.alignment in
+        if order <> 0 then order else String.compare name other)
       sized
   in
   let offset, alignment, placed =
@@ -226,7 +226,8 @@ and of_sum env ty shapes =
             let used = List.length dataless in
             let others =
               List.mapi
-                (fun i (variant : variant) -> (variant.name, Z.add niche.start (Z.of_int i)))
+                (fun position (variant : variant) ->
+                  (variant.name, Z.add niche.start (Z.of_int position)))
                 dataless
             in
             let remaining = Z.sub niche.count (Z.of_int used) in

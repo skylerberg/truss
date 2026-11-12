@@ -88,7 +88,7 @@ and pattern_with state env (written : pattern) type_ ~is_var ~mode =
       match resolve state type_ with
       | (Types.Named _ | Types.Function _ | Types.Any _ | Types.Cursor _ | Types.Parameter _) as
         resolved
-        when not (Types.is_integer_type resolved || Types.is_builtin Character resolved) ->
+        when not (integer_type state resolved || Types.is_builtin Character resolved) ->
           report state Mismatch written.span
             (Printf.sprintf "A range pattern matches an integer or a `Character`, not `%s`."
                (show state resolved))
@@ -337,7 +337,7 @@ and constant_pattern state id span path type_ =
    if every field has structural equality. *)
 and structural ?(seen = []) state (type_ : Types.ty) =
   if
-    Types.is_integer_type type_ || Types.is_builtin Bool type_ || Types.is_builtin Character type_
+    integer_type state type_ || Types.is_builtin Bool type_ || Types.is_builtin Character type_
     || Types.is_builtin Unit type_ || Types.is_well_known String type_
   then true
   else if Types.is_float_type type_ then false
@@ -397,7 +397,11 @@ and check_literal_fits state (value : expression) number type_ =
       match resolve state type_ with
       | Types.Literal _ | Types.Variable _ -> false
       | resolved ->
-          (match builtin_range ~usize_bits:(usize_bits state) resolved with
+          (match
+             match resolved with
+             | Types.Parameter _ | Types.Projection _ -> state.unifier.integer_range resolved
+             | _ -> builtin_range ~usize_bits:(usize_bits state) resolved
+           with
           | Some (low, high) when Z.lt number low || Z.gt number high ->
               report state Literal_out_of_range value.span
                 (Printf.sprintf "`%s` does not fit in `%s`, which holds %s to %s."
@@ -463,7 +467,7 @@ and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
       state.tables.literals.(id) <- Some (Integer_value number);
-      if not (Types.is_integer_type type_ || Types.is_error type_ || type_ = Types.Hole) then
+      if not (integer_type state type_ || Types.is_error type_ || type_ = Types.Hole) then
         report state Mismatch span
           (Printf.sprintf "An integer pattern matches an integer, not `%s`." (Types.show type_))
       else

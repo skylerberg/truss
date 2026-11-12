@@ -40,59 +40,69 @@ let rank = function
   | Locked_entry _ -> 18
   | Locked_table _ -> 19
 
-let ( >>= ) c next = if c <> 0 then c else next ()
+let ( >>= ) order next = if order <> 0 then order else next ()
 
-let rec compare a b =
-  match (a, b) with
-  | Code a, Code b ->
-      Path.compare a.path b.path >>= fun () ->
-      Ground.compare_arguments a.type_arguments b.type_arguments
-  | Constant a, Constant b -> Path.compare a b
-  | Drop a, Drop b | Copy a, Copy b | Debug a, Debug b | Encode a, Encode b | Any_drop a, Any_drop b
-    ->
-      Ground.compare a b
-  | Cursor_next a, Cursor_next b -> Ground.compare (Cursor a) (Cursor b)
-  | Adapter a, Adapter b ->
-      compare a.function_ b.function_ >>= fun () -> Ground.compare (Function a.ty) (Function b.ty)
-  | Entry a, Entry b | Any_entry a, Any_entry b -> compare a b
-  | Any_table a, Any_table b ->
-      Path.compare a.impl b.impl >>= fun () ->
-      Ground.compare_arguments a.type_arguments b.type_arguments
-  | Locked_entry a, Locked_entry b ->
-      Path.compare a.capability b.capability >>= fun () -> String.compare a.name b.name
-  | Locked_table a, Locked_table b -> Path.compare a b
-  | Table a, Table b ->
-      Path.compare a.impl b.impl >>= fun () ->
-      Ground.compare_arguments a.type_arguments b.type_arguments
-  | Program_main a, Program_main b | Evaluator a, Evaluator b -> Path.compare a b
-  | Template_check a, Template_check b ->
-      Path.compare a.from_template b.from_template >>= fun () ->
-      List.compare String.compare a.texts b.texts
-  | Call_evaluation a, Call_evaluation b ->
-      Path.compare a.function_ b.function_ >>= fun () ->
-      List.compare Z.compare a.arguments b.arguments
-  | _ -> Int.compare (rank a) (rank b)
+let rec compare left right =
+  match (left, right) with
+  | Code left, Code right ->
+      Path.compare left.path right.path >>= fun () ->
+      Ground.compare_arguments left.type_arguments right.type_arguments
+  | Constant left, Constant right -> Path.compare left right
+  | Drop left, Drop right
+  | Copy left, Copy right
+  | Debug left, Debug right
+  | Encode left, Encode right
+  | Any_drop left, Any_drop right ->
+      Ground.compare left right
+  | Cursor_next left, Cursor_next right -> Ground.compare (Cursor left) (Cursor right)
+  | Adapter left, Adapter right ->
+      compare left.function_ right.function_ >>= fun () ->
+      Ground.compare (Function left.ty) (Function right.ty)
+  | Entry left, Entry right | Any_entry left, Any_entry right -> compare left right
+  | Any_table left, Any_table right ->
+      Path.compare left.impl right.impl >>= fun () ->
+      Ground.compare_arguments left.type_arguments right.type_arguments
+  | Locked_entry left, Locked_entry right ->
+      Path.compare left.capability right.capability >>= fun () ->
+      String.compare left.name right.name
+  | Locked_table left, Locked_table right -> Path.compare left right
+  | Table left, Table right ->
+      Path.compare left.impl right.impl >>= fun () ->
+      Ground.compare_arguments left.type_arguments right.type_arguments
+  | Program_main left, Program_main right | Evaluator left, Evaluator right ->
+      Path.compare left right
+  | Template_check left, Template_check right ->
+      Path.compare left.from_template right.from_template >>= fun () ->
+      List.compare String.compare left.texts right.texts
+  | Call_evaluation left, Call_evaluation right ->
+      Path.compare left.function_ right.function_ >>= fun () ->
+      List.compare Z.compare left.arguments right.arguments
+  | _ -> Int.compare (rank left) (rank right)
 
-let equal a b = compare a b = 0
-let tagged n items = Cbor.Array (Cbor.int n :: items)
+let equal left right = compare left right = 0
+let tagged tag items = Cbor.Array (Cbor.int tag :: items)
 
 let rec encode ?(path = Ground.encode_path) key =
   let ty = Ground.encode ~path in
   let arguments arguments = Cbor.Array (List.map (Ground.encode_argument ~path) arguments) in
   match key with
-  | Code { path = p; type_arguments } -> tagged 0 [ path p; arguments type_arguments ]
-  | Constant p -> tagged 1 [ path p ]
-  | Drop t -> tagged 2 [ ty t ]
-  | Copy t -> tagged 3 [ ty t ]
-  | Debug t -> tagged 4 [ ty t ]
-  | Encode t -> tagged 13 [ ty t ]
-  | Any_drop t -> tagged 15 [ ty t ]
-  | Evaluator p -> tagged 14 [ path p ]
+  | Code { path = instance_path; type_arguments } ->
+      tagged 0 [ path instance_path; arguments type_arguments ]
+  | Constant instance_path -> tagged 1 [ path instance_path ]
+  | Drop component_type -> tagged 2 [ ty component_type ]
+  | Copy component_type -> tagged 3 [ ty component_type ]
+  | Debug component_type -> tagged 4 [ ty component_type ]
+  | Encode component_type -> tagged 13 [ ty component_type ]
+  | Any_drop component_type -> tagged 15 [ ty component_type ]
+  | Evaluator instance_path -> tagged 14 [ path instance_path ]
   | Template_check { from_template; texts } ->
       tagged 16 [ path from_template; Cbor.Array (List.map (fun text -> Cbor.Text text) texts) ]
   | Call_evaluation { function_; arguments } ->
       tagged 17
-        [ path function_; Cbor.Array (List.map (fun z -> Cbor.Text (Z.to_string z)) arguments) ]
+        [
+          path function_;
+          Cbor.Array (List.map (fun number -> Cbor.Text (Z.to_string number)) arguments);
+        ]
   | Cursor_next yielding -> tagged 5 [ ty (Cursor yielding) ]
   | Adapter { function_; ty } ->
       tagged 6 [ encode ~path function_; Ground.encode ~path (Function ty) ]
@@ -118,21 +128,21 @@ let rec encode ?(path = Ground.encode_path) key =
 
 let marker word = "_" ^ word ^ "_"
 
-let module_path (m : Path.module_) =
+let module_path (module_ : Path.module_) =
   let package =
-    match m.package.owner with
-    | Some owner -> owner ^ marker "Owns" ^ m.package.name
-    | None -> m.package.name
+    match module_.package.owner with
+    | Some owner -> owner ^ marker "Owns" ^ module_.package.name
+    | None -> module_.package.name
   in
-  String.concat "__" (package :: m.modules)
+  String.concat "__" (package :: module_.modules)
 
 let text value =
   String.concat ""
     (List.map
-       (fun c ->
-         match c with
-         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> String.make 1 c
-         | c -> Printf.sprintf "_C%02X_" (Char.code c))
+       (fun order ->
+         match order with
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> String.make 1 order
+         | order -> Printf.sprintf "_C%02X_" (Char.code order))
        (List.of_seq (String.to_seq value)))
 
 let receiver : Path.receiver -> string = function
@@ -143,7 +153,8 @@ let receiver : Path.receiver -> string = function
 
 let rec path : Path.t -> string = function
   | Top { module_; name } -> module_path module_ ^ "__" ^ name
-  | Method { owner; name; receiver = r } -> path owner ^ "_" ^ name ^ receiver r
+  | Method { owner; name; receiver = method_receiver } ->
+      path owner ^ "_" ^ name ^ receiver method_receiver
   | Member_constant { owner; name } -> path owner ^ marker "Member" ^ name
   | Impl { module_; trait; for_type } ->
       module_path module_ ^ marker "Impl" ^ text trait ^ marker "For"
@@ -161,14 +172,15 @@ let mode : Ground.mode -> string = function Read -> "" | Mut -> marker "Mut" | O
 
 let rec mangle_ty (ty : Ground.ty) =
   match ty with
-  | Named { path = p; arguments } -> path p ^ mangle_arguments arguments
+  | Named { path = instance_path; arguments } -> path instance_path ^ mangle_arguments arguments
   | Function { parameters; result; uses } ->
       marker "Fn"
-      ^ String.concat "" (List.map (fun (m, ty) -> mode m ^ mangle_ty ty ^ marker "And") parameters)
+      ^ String.concat ""
+          (List.map (fun (module_, ty) -> mode module_ ^ mangle_ty ty ^ marker "And") parameters)
       ^ (match result with
         | Returns ty -> marker "Returns" ^ mangle_ty ty
-        | Yields (m, ty) -> marker "Yields" ^ mode m ^ mangle_ty ty
-        | Lends (m, ty) -> marker "Lends" ^ mode m ^ mangle_ty ty)
+        | Yields (module_, ty) -> marker "Yields" ^ mode module_ ^ mangle_ty ty
+        | Lends (module_, ty) -> marker "Lends" ^ mode module_ ^ mangle_ty ty)
       ^ (match uses with
         | [] -> ""
         | uses -> marker "Uses" ^ String.concat (marker "And") (List.map path uses))
@@ -213,20 +225,25 @@ and mangle_yielding (yielding : Ground.yielding) =
   path yielding.method_ ^ mangle_arguments yielding.type_arguments
 
 let rec mangle = function
-  | Code { path = p; type_arguments } -> path p ^ mangle_arguments type_arguments
-  | Constant p -> marker "Constant" ^ path p
+  | Code { path = instance_path; type_arguments } ->
+      path instance_path ^ mangle_arguments type_arguments
+  | Constant instance_path -> marker "Constant" ^ path instance_path
   | Drop ty -> marker "Drop" ^ mangle_ty ty
   | Copy ty -> marker "Copy" ^ mangle_ty ty
   | Debug ty -> marker "Debug" ^ mangle_ty ty
   | Encode ty -> marker "Encode" ^ mangle_ty ty
   | Any_drop ty -> marker "AnyDrop" ^ mangle_ty ty
-  | Evaluator p -> marker "Evaluator" ^ path p
+  | Evaluator instance_path -> marker "Evaluator" ^ path instance_path
   | Template_check { from_template; texts } ->
       marker "Check" ^ path from_template
-      ^ String.concat "" (List.map (fun t -> marker "Text" ^ text t ^ marker "End") texts)
+      ^ String.concat ""
+          (List.map
+             (fun component_type -> marker "Text" ^ text component_type ^ marker "End")
+             texts)
   | Call_evaluation { function_; arguments } ->
       marker "Evaluate" ^ path function_
-      ^ String.concat "" (List.map (fun z -> marker "Value" ^ text (Z.to_string z)) arguments)
+      ^ String.concat ""
+          (List.map (fun number -> marker "Value" ^ text (Z.to_string number)) arguments)
       ^ marker "End"
   | Cursor_next yielding -> marker "Next" ^ mangle_yielding yielding
   | Adapter { function_; ty } ->

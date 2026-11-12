@@ -1,19 +1,4 @@
-(* Lowering: the core form of one instance to its LIR. The library's
-   modules, in the order each builds on the ones before it:
-
-   - [Definitions]: lowering's context, and finding an instance's code and
-     signature
-   - [Lowering]: the state of lowering one function, its scopes, locals,
-     and positions
-   - [Targets]: what a call reaches, how arguments are passed, evidence,
-     literals, cursors, and nested functions
-   - [Method_yields]: where a lending or yielding method's [yield]s are
-   - [Core_form]: expressions, statements, patterns, calls, inlining, and
-     defaults
-   - [Constants], [Derived], [Generated]: constants and their evaluators,
-     derived implementations, and the instances lowering makes, such as
-     capability tables and the program's [main]
-   - this module: pulled methods, each instance, and the interface *)
+(* Lowering: the core form of one instance to its LIR. *)
 
 open Lir_builder
 open Definitions
@@ -41,10 +26,10 @@ let context = Definitions.context
 let test_key = Definitions.test_key
 let cursor_result = Targets.cursor_result
 
-let pulled_evidence context (yielding : Ground.yielding) (f : Lir.function_) =
+let pulled_evidence context (yielding : Ground.yielding) (function_ : Lir.function_) =
   let count = List.length (Targets.cursor_evidence context yielding) in
-  let first = List.length f.parameters - count in
-  List.filteri (fun position _ -> position >= first) f.parameters
+  let first = List.length function_.parameters - count in
+  List.filteri (fun position _ -> position >= first) function_.parameters
 
 type constant = Constants.constant = Folded of Lir.data | Run of Ground.ty
 
@@ -91,10 +76,11 @@ let begin_body ?how st ~(parameters : Core.parameter list) =
   let code = st.frame.code in
   let bound = bind_parameters ?how st parameters in
   let mask =
-    if code.has_defaults then Some (local st.b ~name:"passed" (Raw (Integer UInt64))) else None
+    if code.has_defaults then Some (local st.builder ~name:"passed" (Raw (Integer UInt64)))
+    else None
   in
   let evidence = evidence_parameters st (evidence_for st.context code.substitution code.uses) in
-  start st.b (block st.b);
+  start st.builder (block st.builder);
   st.evidence <-
     st.evidence @ Generated.real_implementations st ~user:(Path.show code.anchor) code.real;
   Option.iter (fun mask -> Core_form.fill_defaults st mask parameters) mask;
@@ -158,7 +144,7 @@ let template_checked context from_template =
 let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
   let st, _ = code_state context from_template in
   let parameter, requires = from_template_contract context from_template in
-  start st.b (block st.b);
+  start st.builder (block st.builder);
   in_scope st (fun () ->
       let template =
         template_value st (ground st parameter.type_) texts
@@ -172,7 +158,7 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
           if clause.executable then begin
             let holds = temporary st context.bool in
             Core_form.into st clause.value holds;
-            Glue.encode_call context.glue st.b
+            Glue.encode_call context.glue st.builder
               ~output:(Address { place = output; writable = true })
               context.bool holds
           end)
@@ -182,7 +168,7 @@ let template_check context (key : Instance.key) ~from_template ~texts : Lir.t =
 
 let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
   let st, _ = code_state context function_ in
-  start st.b (block st.b);
+  start st.builder (block st.builder);
   let signature = signature_of context function_ in
   in_scope st (fun () ->
       let passed =
@@ -196,7 +182,7 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
               | Bool -> Lir.Constant (Bool (not (Z.equal value Z.zero)))
               | _ -> bug "an evaluated call's argument of type %s" (Ground.to_string ty)
             in
-            emit st.b (Assign (place, Use constant));
+            emit st.builder (Assign (place, Use constant));
             (mode, ty, place))
           (interface_parameters signature) arguments
       in
@@ -210,7 +196,7 @@ let call_evaluation context (key : Instance.key) ~function_ ~arguments : Lir.t =
         (Code { path = function_; type_arguments = [] })
         ~signature ~substitution:[] ~arguments:passed ~destination:result ();
       let output = Constants.begin_output st in
-      Glue.encode_call context.glue st.b
+      Glue.encode_call context.glue st.builder
         ~output:(Address { place = output; writable = true })
         result_ty result;
       Constants.write_output st output);

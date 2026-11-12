@@ -82,5 +82,5 @@ val diagnostics :
   Path.module_ ->
   Diagnostic.t list
 (** Every obligation of a file's definitions that the solver could not prove, and every definition
-    the prover could not read, in the file's offsets and in order. [evaluator] runs compiled code,
-    as code generation's [Compile.check_template] and [Compile.evaluate_call] do, where it can. *)
+    the prover could not read, in the file's offsets and in order. [evaluator] runs compiled code
+    where it can. *)

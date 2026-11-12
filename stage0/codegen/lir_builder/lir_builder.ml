@@ -19,82 +19,82 @@ let create () =
     statements = [];
   }
 
-let local b ?name ?(borrowed = false) ty =
-  b.locals <- { Lir.ty; name; borrowed } :: b.locals;
-  b.local_count <- b.local_count + 1;
-  b.local_count - 1
+let local builder ?name ?(borrowed = false) ty =
+  builder.locals <- { Lir.ty; name; borrowed } :: builder.locals;
+  builder.local_count <- builder.local_count + 1;
+  builder.local_count - 1
 
-let local_type b local = (List.nth b.locals (b.local_count - 1 - local)).ty
+let local_type builder local = (List.nth builder.locals (builder.local_count - 1 - local)).ty
 
-let block b =
-  if b.block_count = Array.length b.blocks then
-    b.blocks <- Array.append b.blocks (Array.make b.block_count empty_block);
-  b.block_count <- b.block_count + 1;
-  b.block_count - 1
+let block builder =
+  if builder.block_count = Array.length builder.blocks then
+    builder.blocks <- Array.append builder.blocks (Array.make builder.block_count empty_block);
+  builder.block_count <- builder.block_count + 1;
+  builder.block_count - 1
 
-let current b = b.current
+let current builder = builder.current
 
-let start b block =
-  b.current <- block;
-  b.statements <- []
+let start builder block =
+  builder.current <- block;
+  builder.statements <- []
 
-let emit b statement = b.statements <- statement :: b.statements
+let emit builder statement = builder.statements <- statement :: builder.statements
 
-let finish b terminator =
-  b.blocks.(b.current) <- { statements = List.rev b.statements; terminator };
-  b.statements <- []
+let finish builder terminator =
+  builder.blocks.(builder.current) <- { statements = List.rev builder.statements; terminator };
+  builder.statements <- []
 
-let in_block b block f =
-  let current = b.current and statements = b.statements in
-  start b block;
-  f ();
-  b.current <- current;
-  b.statements <- statements
+let in_block builder block body =
+  let current = builder.current and statements = builder.statements in
+  start builder block;
+  body ();
+  builder.current <- current;
+  builder.statements <- statements
 
 let at = Lir.local_place
 
 let ( / ) (place : Lir.place) projection : Lir.place =
   { place with projections = place.projections @ [ projection ] }
 
-let usize n = Lir.Constant (Integer (USize, Z.of_int n))
+let usize number = Lir.Constant (Integer (USize, Z.of_int number))
 
-let branch b value ~yes ~no =
-  finish b (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
+let branch builder value ~yes ~no =
+  finish builder (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
 
-let when_ b condition then_ =
-  let inside = block b in
-  let after = block b in
-  branch b condition ~yes:inside ~no:after;
-  start b inside;
+let when_ builder condition then_ =
+  let inside = block builder in
+  let after = block builder in
+  branch builder condition ~yes:inside ~no:after;
+  start builder inside;
   then_ ();
-  finish b (Goto after);
-  start b after
+  finish builder (Goto after);
+  start builder after
 
-let loop b ?(integer = Memory_layout.USize) ~index_type ~count body =
-  let constant n = Lir.Constant (Integer (integer, Z.of_int n)) in
-  let index = local b ~name:"index" index_type in
-  let going = local b (Raw Bool) in
-  let test = block b in
-  let inside = block b in
-  let after = block b in
-  emit b (Assign (at index, Use (constant 0)));
-  finish b (Goto test);
-  start b test;
-  emit b (Assign (at going, Binary (Less, Copy (at index), count)));
-  branch b (Copy (at going)) ~yes:inside ~no:after;
-  start b inside;
+let loop builder ?(integer = Memory_layout.USize) ~index_type ~count body =
+  let constant number = Lir.Constant (Integer (integer, Z.of_int number)) in
+  let index = local builder ~name:"index" index_type in
+  let going = local builder (Raw Bool) in
+  let test = block builder in
+  let inside = block builder in
+  let after = block builder in
+  emit builder (Assign (at index, Use (constant 0)));
+  finish builder (Goto test);
+  start builder test;
+  emit builder (Assign (at going, Binary (Less, Copy (at index), count)));
+  branch builder (Copy (at going)) ~yes:inside ~no:after;
+  start builder inside;
   body index;
-  emit b (Assign (at index, Binary (Add, Copy (at index), constant 1)));
-  finish b (Goto test);
-  start b after
+  emit builder (Assign (at index, Binary (Add, Copy (at index), constant 1)));
+  finish builder (Goto test);
+  start builder after
 
-let build ?written_result b ~parameters ~result : Lir.function_ =
+let build ?written_result builder ~parameters ~result : Lir.function_ =
   {
     parameters;
     written_result;
     result;
     returns = true;
-    locals = Array.of_list (List.rev b.locals);
-    blocks = Array.sub b.blocks 0 b.block_count;
+    locals = Array.of_list (List.rev builder.locals);
+    blocks = Array.sub builder.blocks 0 builder.block_count;
     environment = [];
   }

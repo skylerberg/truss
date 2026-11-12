@@ -6,9 +6,9 @@
    therefore one group of mutually recursive functions. Patterns contain
    none of them, and are their own module.
 
-   Expressions are parsed with a total order of precedence. [Operators]
-   then reports the combinations that Truss's partial order excludes, and
-   can quote both operands in its fixes. *)
+   Expressions are parsed with a total order of precedence. The
+   combinations that Truss's partial order excludes are reported after
+   parsing, so that a fix can quote both operands. *)
 
 open Token
 open Syntax

@@ -591,6 +591,35 @@ let finalize (state : state) =
         part_conversions = List.map (Option.map call) template.part_conversions;
       })
 
+(* The values an integer literal may have in a type that integer traits
+   bound: those of every built-in type that implements each of them, the
+   narrowest such type's. *)
+let integer_literal_range (bounds : Types.trait_reference list) =
+  let signed = Intrinsic.[ Int8; Int16; Int32; Int64; ISize ]
+  and unsigned = Intrinsic.[ UInt8; UInt16; UInt32; UInt64; USize ] in
+  let implementors =
+    List.fold_left
+      (fun found (bound : Types.trait_reference) ->
+        let these =
+          if Well_known.is Signed_integer bound.trait then Some signed
+          else if Well_known.is Unsigned_integer bound.trait then Some unsigned
+          else if Well_known.is Fixed_width_integer bound.trait then Some (signed @ unsigned)
+          else None
+        in
+        match (found, these) with
+        | Some found, Some these -> Some (List.filter (fun builtin -> List.mem builtin these) found)
+        | None, these | these, None -> these)
+      None bounds
+  in
+  Option.bind implementors (fun builtins ->
+      List.fold_left
+        (fun range builtin ->
+          match (range, Types.integer_range (Types.builtin builtin)) with
+          | Some (low, high), Some (other_low, other_high) ->
+              Some (Z.max low other_low, Z.min high other_high)
+          | None, found | found, None -> found)
+        None builtins)
+
 let check database (key : Names.key) =
   match
     (Query.demand database Names.definition key, Query.demand database Resolve.resolved key)
@@ -647,6 +676,10 @@ let check database (key : Names.key) =
          body, and their bounds, are reported here. *)
       let interface_diagnostics = List.length !(context.diagnostics) in
       let interface_named = List.length !(context.named) in
+      state.unifier.integer_range <-
+        (fun type_ ->
+          integer_literal_range
+            (Interface.Properties.known_bounds database ~bounds:(bounds state) type_));
       check_definition state lowered;
       let since count list = List.filteri (fun index _ -> index < List.length list - count) list in
       state.diagnostics <- since interface_diagnostics !(context.diagnostics) @ state.diagnostics;

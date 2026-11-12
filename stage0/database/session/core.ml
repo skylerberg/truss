@@ -422,7 +422,7 @@ let recovering run =
 
 let idle_limit = 3600.
 
-(* Drops sessions nobody has used for an hour, saving them first. *)
+(* Drops sessions unused for [idle_limit], saving them first. *)
 let drop_idle () =
   let state = current () in
   let now = Unix.time () in

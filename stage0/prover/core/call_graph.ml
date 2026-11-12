@@ -114,6 +114,16 @@ let impls_used database impls (callee : Core.callee) =
    bound on [Self], in a trait's provided body. A call through a bound on
    another type parameter reaches the [impl] for the type the parameter is
    given where the generic code is used, which that use's edges name. *)
+(* The traits that only the built-in integer types implement, and those
+   types. *)
+let integer_trait owner =
+  Well_known.is Fixed_width_integer owner
+  || Well_known.is Signed_integer owner
+  || Well_known.is Unsigned_integer owner
+
+let integer_types =
+  List.filter (fun builtin -> Types.is_integer_type (Types.builtin builtin)) Intrinsic.builtins
+
 let dispatched (called : Core.callee) =
   match called with
   | Trait_method { evidence = Dynamic; _ } -> true
@@ -138,6 +148,37 @@ let edges database impls (body : Core.block) =
             impls
         in
         add [ Calls (if writes then own else Path.Method { owner = trait.trait; name; receiver }) ]
+    | Trait_method
+        {
+          trait;
+          name;
+          receiver;
+          evidence = Bound;
+          self_type = Parameter { owner; name = "Self" };
+          _;
+        }
+      when integer_trait owner ->
+        (* [Self] in an integer trait's provided body is a built-in integer
+           type, so the call reaches that type's [impl], not every one. *)
+        let own =
+          List.concat_map
+            (fun builtin ->
+              List.concat_map
+                (fun impl ->
+                  let method_ = Path.Method { owner = impl; name; receiver } in
+                  if
+                    List.exists
+                      (fun (written, _, _, methods) ->
+                        Path.equal written impl && List.exists (Path.equal method_) methods)
+                      impls
+                  then [ method_ ]
+                  else [])
+                (impls_for impls [ trait.trait ] (Types.builtin builtin)))
+            integer_types
+        in
+        add
+          (if own = [] then [ Calls (Path.Method { owner = trait.trait; name; receiver }) ]
+           else List.map (fun method_ -> Calls method_) own)
     | Trait_method { trait; name; receiver; _ } when dispatched called ->
         add [ Calls (Path.Method { owner = trait.trait; name; receiver }) ]
     | Trait_method _ -> ()

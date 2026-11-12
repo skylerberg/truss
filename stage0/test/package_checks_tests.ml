@@ -17,6 +17,14 @@ let () =
   test "an impl must live with its trait, its type, or a type its trait names" (fun () ->
       one_diagnostic Fixtures.Package_checks.impl_must_live_with_its_trait_its_type_or_a_type
         "package.impl_location");
+  test "only the built-in integer types implement the integer traits" (fun () ->
+      let database =
+        setup
+          [ ("app::main", Fixtures.Package_checks.only_the_built_in_integer_types_implement_the) ]
+      in
+      let found = codes (check database (module_of "app::main")) in
+      if not (List.mem "package.sealed_trait_impl" found) then
+        fail "found [%s]" (String.concat "; " found));
   test "an impl may live with a type its trait's arguments name" (fun () ->
       fine Fixtures.Package_checks.impl_may_live_with_a_type_its_traits_arguments);
   test "two impls of a trait for one type constructor overlap when their arguments unify" (fun () ->

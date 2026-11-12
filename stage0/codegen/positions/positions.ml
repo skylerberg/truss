@@ -4,12 +4,12 @@ let c_string text =
   let buffer = Buffer.create (String.length text + 2) in
   Buffer.add_char buffer '"';
   String.iter
-    (fun c ->
-      match c with
-      | '"' | '\\' | '?' -> Buffer.add_string buffer (Printf.sprintf "\\%03o" (Char.code c))
-      | c when Char.code c < 0x20 || Char.code c >= 0x7f ->
-          Buffer.add_string buffer (Printf.sprintf "\\%03o" (Char.code c))
-      | c -> Buffer.add_char buffer c)
+    (fun character ->
+      match character with
+      | '"' | '\\' | '?' -> Buffer.add_string buffer (Printf.sprintf "\\%03o" (Char.code character))
+      | character when Char.code character < 0x20 || Char.code character >= 0x7f ->
+          Buffer.add_string buffer (Printf.sprintf "\\%03o" (Char.code character))
+      | character -> Buffer.add_char buffer character)
     text;
   Buffer.add_char buffer '"';
   Buffer.contents buffer

@@ -7,7 +7,7 @@ let at = Lir.local_place
 
 (* The fork of the first region that running the function reaches, which
    lies in no other fork's region. *)
-let first_fork (f : Lir.function_) =
+let first_fork (function_ : Lir.function_) =
   List.find_map
     (fun block ->
       List.find_map
@@ -15,8 +15,8 @@ let first_fork (f : Lir.function_) =
           | Lir.Region { fork; _ } -> Some fork
           | Regions_end { fork } -> bug "fork %d ends before it starts" fork
           | _ -> None)
-        f.blocks.(block).statements)
-    (Lir.reverse_postorder f.blocks)
+        function_.blocks.(block).statements)
+    (Lir.reverse_postorder function_.blocks)
 
 let marks fork : Lir.statement -> bool = function
   | Region { fork = other; _ } | Regions_end { fork = other } -> other = fork
@@ -25,9 +25,9 @@ let marks fork : Lir.statement -> bool = function
 (* The function's blocks with each mark of the fork first in a block of its
    own making: a block is cut before each mark in it, and each piece but the
    last goes to the next. *)
-let cut_at_marks fork (f : Lir.function_) : Lir.basic_block array =
+let cut_at_marks fork (function_ : Lir.function_) : Lir.basic_block array =
   let added = ref [] in
-  let next = ref (Array.length f.blocks) in
+  let next = ref (Array.length function_.blocks) in
   let fresh () =
     incr next;
     !next - 1
@@ -60,7 +60,7 @@ let cut_at_marks fork (f : Lir.function_) : Lir.basic_block array =
         add numbered;
         { statements = first; terminator = Goto (fst (List.hd numbered)) }
   in
-  let blocks = Array.map cut f.blocks in
+  let blocks = Array.map cut function_.blocks in
   let all = Array.make !next { Lir.statements = []; terminator = Unreachable } in
   Array.blit blocks 0 all 0 (Array.length blocks);
   List.iter (fun (number, block) -> all.(number) <- block) !added;
@@ -127,7 +127,7 @@ let block_locals (block : Lir.basic_block) =
     {
       place =
         (fun place ->
-          match place.root with Local l -> locals := Locals.add l !locals | Static _ -> ());
+          match place.root with Local local -> locals := Locals.add local !locals | Static _ -> ());
       operand = (fun _ -> ());
     }
   in
@@ -140,10 +140,10 @@ let block_assigns (block : Lir.basic_block) =
   List.fold_left
     (fun assigned (statement : Lir.statement) ->
       match statement with
-      | Assign ({ root = Local l; projections = [] }, _)
-      | Call { result = Returned { root = Local l; projections = [] }; _ }
-      | Call { result = Written { root = Local l; projections = [] }; _ } ->
-          Locals.add l assigned
+      | Assign ({ root = Local local; projections = [] }, _)
+      | Call { result = Returned { root = Local local; projections = [] }; _ }
+      | Call { result = Written { root = Local local; projections = [] }; _ } ->
+          Locals.add local assigned
       | _ -> assigned)
     Locals.empty block.statements
 
@@ -153,11 +153,11 @@ let union_over blocks (set : Blocks.t) of_block =
 (* Outlines the function's first fork. Gives the function without it and
    the nested functions made of its regions, which take the numbers from
    [first_number] on; or nothing when the function has no fork. *)
-let outline_fork env ~first_number (f : Lir.function_) =
-  match first_fork f with
+let outline_fork env ~first_number (function_ : Lir.function_) =
+  match first_fork function_ with
   | None -> None
   | Some fork ->
-      let blocks = cut_at_marks fork f in
+      let blocks = cut_at_marks fork function_ in
       let regions = regions fork blocks in
       let count = List.length regions in
       let in_a_region =
@@ -172,7 +172,8 @@ let outline_fork env ~first_number (f : Lir.function_) =
           (fun locals number ->
             if Blocks.mem number in_a_region then locals
             else Locals.union (block_locals blocks.(number)) locals)
-          (Locals.of_list f.parameters) (Lir.reverse_postorder blocks)
+          (Locals.of_list function_.parameters)
+          (Lir.reverse_postorder blocks)
       in
       (* The locals that each region's code refers to. The locals of the
          region's own mark are excluded. *)
@@ -192,10 +193,10 @@ let outline_fork env ~first_number (f : Lir.function_) =
          new value: the type checker lets no program do that, so it would
          be a temporary of the compiler's used twice. *)
       List.iteri
-        (fun i assigned_here ->
+        (fun region_index assigned_here ->
           List.iteri
-            (fun j used ->
-              if i <> j then
+            (fun other_region used ->
+              if region_index <> other_region then
                 match Locals.choose_opt (Locals.inter assigned_here used) with
                 | Some local ->
                     bug "local %d is given a value in one region of fork %d and used in another"
@@ -204,7 +205,7 @@ let outline_fork env ~first_number (f : Lir.function_) =
             named)
         assigned;
       let end_block = (List.nth regions (count - 1)).next in
-      let parent_locals = ref (Array.to_list f.locals) in
+      let parent_locals = ref (Array.to_list function_.locals) in
       let parent_local info =
         parent_locals := !parent_locals @ [ info ];
         List.length !parent_locals - 1
@@ -238,7 +239,7 @@ let outline_fork env ~first_number (f : Lir.function_) =
               local { (plain (Lir.Raw (Nullable_pointer Opaque))) with name = Some "environment" }
             in
             let part_locals =
-              List.map (fun original -> (original, local f.locals.(original))) part
+              List.map (fun original -> (original, local function_.locals.(original))) part
             in
             let environment =
               local (plain (Lir.Pointer { target = Environment number; writable = false }))
@@ -249,7 +250,7 @@ let outline_fork env ~first_number (f : Lir.function_) =
             Locals.iter
               (fun original ->
                 if not (Hashtbl.mem own original) then
-                  let info = f.locals.(original) in
+                  let info = function_.locals.(original) in
                   if Locals.mem original elsewhere && not (Lir.erased env info.ty) then
                     captured :=
                       (Printf.sprintf "capture%d" (List.length !captured), original) :: !captured
@@ -269,18 +270,18 @@ let outline_fork env ~first_number (f : Lir.function_) =
                         original fork)
                   captured
             | Branch | Task _ -> ());
-            let place (p : Lir.place) : Lir.place =
-              match p.root with
-              | Static _ -> p
+            let place (lir_place : Lir.place) : Lir.place =
+              match lir_place.root with
+              | Static _ -> lir_place
               | Local original -> (
                   match Hashtbl.find_opt own original with
-                  | Some mapped -> { p with root = Local mapped }
+                  | Some mapped -> { lir_place with root = Local mapped }
                   | None -> (
-                      match List.find_opt (fun (_, l) -> l = original) captured with
+                      match List.find_opt (fun (_, local) -> local = original) captured with
                       | Some (name, _) ->
                           {
                             root = Local environment;
-                            projections = [ Lir.Deref; Field name; Deref ] @ p.projections;
+                            projections = [ Lir.Deref; Field name; Deref ] @ lir_place.projections;
                           }
                       | None -> bug "local %d of a region is neither its own nor captured" original)
                   )
@@ -329,7 +330,8 @@ let outline_fork env ~first_number (f : Lir.function_) =
                 environment =
                   List.map
                     (fun (name, original) ->
-                      (name, Lir.Pointer { target = f.locals.(original).ty; writable = true }))
+                      ( name,
+                        Lir.Pointer { target = function_.locals.(original).ty; writable = true } ))
                     captured;
               }
             in
@@ -410,32 +412,39 @@ let outline_fork env ~first_number (f : Lir.function_) =
           blocks.(block) <- { (blocks.(block)) with statements = List.tl blocks.(block).statements })
         end_block;
       Some
-        ( { f with locals = Array.of_list !parent_locals; blocks },
+        ( { function_ with locals = Array.of_list !parent_locals; blocks },
           List.map (fun (_, nested, _, _, _) -> nested) outlined )
 
 let instance env (instance : Lir.t) : Lir.t =
   let nested = ref (Array.to_list instance.nested) in
   (* Outlines every fork of a function, each after the forks around it, and
      the forks of each nested function that makes. *)
-  let rec whole (f : Lir.function_) =
-    match outline_fork env ~first_number:(List.length !nested) f with
-    | None -> f
+  let rec whole (function_ : Lir.function_) =
+    match outline_fork env ~first_number:(List.length !nested) function_ with
+    | None -> function_
     | Some (without, outlined) ->
         let first = List.length !nested in
         nested := !nested @ outlined;
         List.iteri
           (fun index nested_function ->
             let finished = whole nested_function in
-            nested := List.mapi (fun i f -> if i = first + index then finished else f) !nested)
+            nested :=
+              List.mapi
+                (fun region_index function_ ->
+                  if region_index = first + index then finished else function_)
+                !nested)
           outlined;
         whole without
   in
   let main = whole instance.main in
   let count = Array.length instance.nested in
   List.iteri
-    (fun index f ->
+    (fun index function_ ->
       if index < count then
-        let finished = whole f in
-        nested := List.mapi (fun i f -> if i = index then finished else f) !nested)
+        let finished = whole function_ in
+        nested :=
+          List.mapi
+            (fun region_index function_ -> if region_index = index then finished else function_)
+            !nested)
     (Array.to_list instance.nested);
   { instance with main; nested = Array.of_list !nested }

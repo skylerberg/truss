@@ -60,7 +60,7 @@ type result_slot = Through of Lir.local | Returned_in of Lir.local | No_result
 type state = {
   context : Definitions.context;
   mutable frame : frame;
-  b : Lir_builder.t;
+  builder : Lir_builder.t;
   mutable scopes : scope list;
   mutable loops : loop list;
   mutable result : result_slot;
