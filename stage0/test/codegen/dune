@@ -78,6 +78,7 @@
   lir_builder
   resolve
   diagnostic
+  source
   compile
   type_checker
   prover
@@ -86,5 +87,4 @@
   documents)
  (deps
   (glob_files %{workspace_root}/*.md)
-  (glob_files library/*.truss)
-  (glob_files_rec %{workspace_root}/stage0/**dune)))
+  (glob_files library/*.truss)))

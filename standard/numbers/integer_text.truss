@@ -2,32 +2,33 @@ use standard::core
 use standard::intrinsic
 use standard::text
 
-internal fn digit_value(byte: UInt8) -> UInt64
+internal fn UInt8.digit_value(self) -> UInt8
   ensures result <= 36
   cost time O(1)
+  cost allocations == 0
 {
-  if byte >= 48 && byte <= 57 {
-    intrinsic::convert(byte - 48)
-  } else if byte >= 97 && byte <= 122 {
-    intrinsic::convert(byte - 87)
-  } else if byte >= 65 && byte <= 90 {
-    intrinsic::convert(byte - 55)
+  if self >= 48 && self <= 57 {
+    self - 48
+  } else if self >= 97 && self <= 122 {
+    self - 87
+  } else if self >= 65 && self <= 90 {
+    self - 55
   } else {
     36
   }
 }
 
-internal fn digit_character(digit: UInt64, uppercase: Bool) -> UInt8
-  requires digit < 36
+internal fn UInt8.digit_byte(self, uppercase: Bool) -> UInt8
+  requires self < 36
   cost time O(1)
+  cost allocations == 0
 {
-  let value: UInt8 = intrinsic::convert(digit)
-  if value < 10 {
-    value + 48
+  if self < 10 {
+    self + 48
   } else if uppercase {
-    value + 55
+    self + 55
   } else {
-    value + 87
+    self + 87
   }
 }
 
@@ -57,7 +58,8 @@ internal fn write_digits(output: mut intrinsic::Storage[UInt8], value: UInt64, b
   if value >= base {
     write_digits(mut output, value: value / base, base: base, uppercase: uppercase)
   }
-  intrinsic::storage_push(mut output, value: digit_character(value % base, uppercase: uppercase))
+  let digit: UInt8 = intrinsic::convert(value % base)
+  intrinsic::storage_push(mut output, value: digit.digit_byte(uppercase: uppercase))
 }
 
 internal fn format_magnitude(
@@ -115,7 +117,7 @@ internal fn parse_magnitude(
     invariant value <= limit
     decreases text.length() - index
   {
-    let digit = digit_value(text.byte(index))
+    let digit: UInt64 = intrinsic::convert(text.byte(index).digit_value())
     if digit >= base {
       return Err(core::ParseIntegerError.InvalidDigit(offset: index))
     }

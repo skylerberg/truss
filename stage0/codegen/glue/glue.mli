@@ -52,7 +52,6 @@ val output_ty : Ground.ty
    [Instance.Encode ty], taking a read-only pointer to the value, and the
    output. *)
 val encode : t -> Ground.ty -> Lir.t
-val encode_signature : t -> Ground.ty -> Lir.signature
 
 (* Writes, with the builder, a call to the encode function of the type on
    the value at the place, to append to [output]; nothing for a type of

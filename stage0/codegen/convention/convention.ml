@@ -1,3 +1,4 @@
+(* Values up to this many bytes are passed and returned by value. *)
 let by_value_limit = 16
 
 (* Whether a value holds an array's elements in its own bytes, so that a

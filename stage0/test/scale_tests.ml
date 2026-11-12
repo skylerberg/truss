@@ -88,13 +88,12 @@ let () =
   test "a definition that only moved is not checked again" (fun () ->
       let database = package 4 in
       let engine = Engine.of_context database in
+      let checked () =
+        List.filter (String.starts_with ~prefix:"type_check_result(") (Engine.executed engine)
+      in
+      if checked () = [] then fail "checking the package checked no definition";
       Engine.clear_log engine;
       ignore (edit database "app::part_0" ("\n\n" ^ module_text 0));
-      let rechecked =
-        List.filter
-          (fun label -> String.starts_with ~prefix:"type_check_result(" label)
-          (Engine.executed engine)
-      in
-      if rechecked <> [] then fail "checked [%s]" (String.concat "; " rechecked))
-
-let () = finish ()
+      match checked () with
+      | [] -> ()
+      | rechecked -> fail "checked [%s]" (String.concat "; " rechecked))

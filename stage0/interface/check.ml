@@ -6,7 +6,7 @@ type state = {
   database : Query.context;
   key : Names.key;
   definition : definition;
-  lowered : Environment.lowered;
+  lowered : Environment.lowered_interface;
   mutable diagnostics : Diagnostic.t list;
 }
 
@@ -862,8 +862,8 @@ let check state =
             match
               ( Query.demand database Names.definition container,
                 Option.map
-                  (fun (lowered : Environment.lowered) -> lowered.interface)
-                  (Query.demand database Environment.lowered container) )
+                  (fun (lowered : Environment.lowered_interface) -> lowered.interface)
+                  (Query.demand database Environment.lowered_interface container) )
             with
             | Some { kind = Trait _; _ }, Some (Trait_interface trait) ->
                 check_redeclared state name
@@ -971,7 +971,8 @@ let diagnostics =
   Query.query ~name:"interface_diagnostics" ~phase:Phases.interfaces ~saved:true
     ~show:Names.show_key (fun database key ->
       match
-        (Query.demand database Names.definition key, Query.demand database Environment.lowered key)
+        ( Query.demand database Names.definition key,
+          Query.demand database Environment.lowered_interface key )
       with
       | Some definition, Some lowered ->
           let state = { database; key; definition; lowered; diagnostics = [] } in

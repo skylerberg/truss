@@ -1,7 +1,6 @@
 use standard::core
 use standard::intrinsic
 use standard::numbers::float_math
-use standard::numbers::integer_text
 use standard::text
 
 public let pi: Float64 = 3.141592653589793
@@ -704,7 +703,7 @@ public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[Big
     invariant index <= text.length()
     decreases text.length() - index
   {
-    let digit = integer_text::digit_value(text.byte(index))
+    let digit: UInt64 = intrinsic::convert(text.byte(index).digit_value())
     if digit >= base {
       return Err(core::ParseIntegerError.InvalidDigit(offset: index))
     }
@@ -755,7 +754,8 @@ public fn BigInteger.format(self, radix: UInt32 = 10) -> String
       invariant written <= group.digits
       decreases group.digits - written
     {
-      mut digits.push(integer_text::digit_character(part % base, uppercase: false))
+      let digit: UInt8 = intrinsic::convert(part % base)
+      mut digits.push(digit.digit_byte(uppercase: false))
       part = part / base
       written += 1
     }

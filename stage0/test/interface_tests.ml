@@ -654,12 +654,14 @@ let () =
             Option.is_some
               (Interface.Impls.implements database ~bounds:(fun _ -> []) point (trait "Equal" [])))
       in
-      if not (Query.demand database asker ()) then fail "no impl of Equal";
-      Database.Testing.set_text (Engine.of_context database) (module_of "app::main")
-        (base ^ "\nimpl Hash for Point {\n  fn hash(self, hasher: mut Hasher) {}\n}\n");
-      Engine.clear_log (Engine.of_context database);
-      ignore (Query.demand database asker ());
-      if List.mem "asker()" (Engine.executed (Engine.of_context database)) then fail "asked again")
+      let engine = Engine.of_context database in
+      expect_not_recomputed engine
+        ~first:(fun () -> if not (Query.demand database asker ()) then fail "no impl of Equal")
+        ~again:(fun () ->
+          Database.Testing.set_text engine (module_of "app::main")
+            (base ^ "\nimpl Hash for Point {\n  fn hash(self, hasher: mut Hasher) {}\n}\n");
+          ignore (Query.demand database asker ()))
+        [ "asker()" ])
 
 (* What the review of interfaces found *)
 
@@ -882,5 +884,3 @@ let () =
           if Well_known.of_path (Well_known.path known) <> Some known then
             fail "`%s` is not found by its path" (Path.show (Well_known.path known)))
         Well_known.all)
-
-let () = finish ()

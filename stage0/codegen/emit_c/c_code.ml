@@ -4,8 +4,6 @@ open C_runtime
 open C_types
 open C_values
 
-let width_suffix context scalar = match bit_width context scalar with 64 -> "ll" | _ -> ""
-
 let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.ty) list) =
   let argument i = fst (List.nth arguments i) in
   let scalar i = scalar_of context (snd (List.nth arguments i)) in
@@ -178,7 +176,7 @@ let call_c context fc (target : Lir.target) arguments =
       Printf.sprintf "((%s (*)(%s))((const void *const *)%s)[%d])(%s)" result
         (signature_parameters context fc.symbol signature.parameters None)
         table slot texts
-  | Evidence_call { evidence; slot; signature } ->
+  | Evidence_call { evidence; slot; signature; _ } ->
       let evidence =
         match operand_c context fc evidence with
         | Some (text, _) -> text
@@ -284,7 +282,7 @@ let unreachable_c context =
   | Development -> "t_runtime_compiler_bug();"
   | Release -> "__builtin_unreachable();"
 
-let terminator_c context fc key buffer (terminator : Lir.terminator) =
+let terminator_c context fc buffer (terminator : Lir.terminator) =
   let line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
   in
@@ -379,7 +377,7 @@ let function_c context key symbol ~linkage (f : Lir.function_) =
     (fun index (block : Lir.basic_block) ->
       if Hashtbl.mem targets index then Buffer.add_string buffer (Printf.sprintf "b%d:;\n" index);
       List.iter (statement_c context fc buffer) block.statements;
-      terminator_c context fc key buffer block.terminator)
+      terminator_c context fc buffer block.terminator)
     f.blocks;
   Buffer.add_string buffer "}\n";
   Buffer.contents buffer

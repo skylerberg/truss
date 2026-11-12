@@ -622,5 +622,3 @@ let () =
           Engine.skip_audit opened;
           Engine.set opened closure_input () 6;
           if Engine.get opened applies () <> 7 then fail "the result after the input changed")
-
-let () = finish ()

@@ -1,6 +1,8 @@
-(* The pinned solver. *)
-
+(* The Z3 version the prover is pinned to. A different one is refused, since
+   its answers could differ. *)
 let version = "5.3.3"
+
+(* The limit in steps every query runs with. *)
 let steps = 2_000_000
 
 type t = { program : string; cache : string option; mutable solved : int }
@@ -155,6 +157,7 @@ let read request = function
              Option.map (fun value -> (symbol, value)) (List.assoc_opt canonical pairs))
            request.requested)
 
+(* Runs one request, or reads its answer from a cache. *)
 let ask solver request =
   let file = Option.map (fun directory -> Filename.concat directory request.key) solver.cache in
   let stored =
@@ -254,9 +257,5 @@ let ask_all solver requests =
   work ();
   List.iter Domain.join domains;
   Array.to_list answers
-
-let solve_all solver queries =
-  let requests = List.map (fun (values, query) -> request ~values query) queries in
-  List.map2 read requests (ask_all solver requests)
 
 let solved solver = locked (fun () -> solver.solved)

@@ -31,11 +31,36 @@ let printed_definition text name =
   | None -> failwith (Printf.sprintf "`%s` has no core form" name)
 
 (* The printed body of the function [name]: the last line of its printed
-   core form. *)
+   core form. Node ids, as in [concurrent #50], are renumbered from [#1] in
+   order of first appearance, since an id depends on every node lowered
+   before it. *)
 let printed_body text name =
-  match List.rev (String.split_on_char '\n' (printed_definition text name)) with
-  | last :: _ -> last
-  | [] -> ""
+  let body =
+    match List.rev (String.split_on_char '\n' (printed_definition text name)) with
+    | last :: _ -> last
+    | [] -> ""
+  in
+  let renumbered = Buffer.create (String.length body) and ids = Hashtbl.create 4 in
+  let length = String.length body in
+  let rec digits_end at =
+    if at < length && '0' <= body.[at] && body.[at] <= '9' then digits_end (at + 1) else at
+  in
+  let rec copy at =
+    if at < length then
+      if body.[at] = '#' && at > 0 && body.[at - 1] = ' ' && digits_end (at + 1) > at + 1 then begin
+        let stop = digits_end (at + 1) in
+        let id = String.sub body (at + 1) (stop - at - 1) in
+        if not (Hashtbl.mem ids id) then Hashtbl.add ids id (Hashtbl.length ids + 1);
+        Buffer.add_string renumbered (Printf.sprintf "#%d" (Hashtbl.find ids id));
+        copy stop
+      end
+      else begin
+        Buffer.add_char renumbered body.[at];
+        copy (at + 1)
+      end
+  in
+  copy 0;
+  Buffer.contents renumbered
 
 let expect_definition what text expected =
   test what (fun () ->
@@ -455,13 +480,13 @@ let () =
     \  Ok(0)\n\
      }\n"
     "{ for item in yielding_call standard::list::impl Iterable for List[Element].each[Int64](place \
-     items) { concurrent #50 { let own first = match app::main::fetch(place item) { Ok(value: own \
-     value) => { value } Err(error: own error) => { task_exit branch 0 of #50 { return \
+     items) { concurrent #1 { let own first = match app::main::fetch(place item) { Ok(value: own \
+     value) => { value } Err(error: own error) => { task_exit branch 0 of #1 { return \
      Result[Int64, Int64].Err(error: error) } } diverges }; if (item > 3) { task_exit branch 1 of \
-     #50 { break } } diverges }; let _ = place first }; concurrent #95 for item in yielding_call \
+     #1 { break } } diverges }; let _ = place first }; concurrent #2 for item in yielding_call \
      standard::list::impl Iterable for List[Element].each[Int64](place items) { if (item > 5) { \
-     task_exit an iteration of #95 { break } } diverges; if (item > 4) { continue } diverges; if \
-     (item > 3) { task_exit an iteration of #95 { return Result[Int64, Int64].Err(error: item) } } \
+     task_exit an iteration of #2 { break } } diverges; if (item > 4) { continue } diverges; if \
+     (item > 3) { task_exit an iteration of #2 { return Result[Int64, Int64].Err(error: item) } } \
      diverges }; Result[Int64, Int64].Ok(value: 0) }";
   expect_body "an assignment through an index calls `assign` where the type has it"
     "fn g(name: own String) {\n\
@@ -1159,5 +1184,3 @@ let () =
       match found with
       | Some { definition = Function { body = Some _; _ }; _ } -> ()
       | _ -> fail "the provided body is not in the specification")
-
-let () = finish ()

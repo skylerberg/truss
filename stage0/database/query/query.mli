@@ -37,8 +37,6 @@ val phase : name:string -> after:phase list -> phase
 (** A phase whose queries may read the phases in [after], and every phase those were declared after.
     Raises [Invalid_argument] for a name used twice. *)
 
-val phase_name : phase -> string
-
 val phase_rank : phase -> int
 (** A phase's place in the order, for the engine: lower for a phase that a higher one may read. *)
 

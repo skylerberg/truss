@@ -359,5 +359,3 @@ let () =
             functions;
           if !shown > 5 then fail "%d of %d functions are wrong" !shown (List.length functions)))
     makers
-
-let () = finish ()

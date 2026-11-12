@@ -173,11 +173,7 @@ fn upper_hexadecimal(output: mut intrinsic::Storage[UInt8], value: UInt32)
     upper_hexadecimal(mut output, value: value / 16)
   }
   let digit: UInt8 = intrinsic::convert(value % 16)
-  if digit < 10 {
-    byte(mut output, value: digit + 48)
-  } else {
-    byte(mut output, value: digit + 55)
-  }
+  byte(mut output, value: digit.digit_byte(uppercase: true))
 }
 
 fn escaped(output: mut intrinsic::Storage[UInt8], code: UInt32, quote: UInt8)

@@ -209,12 +209,17 @@ let () =
       write directory "reader.truss"
         "use app::point\n\nfn width(of: point::Point) -> Int64 {\n  of.x\n}\n";
       expect_errors directory 0;
+      let first = computed directory in
+      List.iter
+        (fun label -> if not (List.mem label first) then fail "never computed %s" label)
+        [ "type_check_result(app::reader::width)"; "lowered_interface(app::reader::width)" ];
       clear directory;
       write directory "point.truss" (point "y: Int64, x: Int64");
       expect_errors directory 0;
       let again = computed directory in
       if List.mem "type_check_result(app::reader::width)" again then fail "checked width again";
-      if List.mem "signature(app::reader::width)" again then fail "lowered width's signature again");
+      if List.mem "lowered_interface(app::reader::width)" again then
+        fail "lowered width's interface again");
   test "editing one method's body checks only that method again" (fun () ->
       fresh_store ();
       let directory = package () in
@@ -697,5 +702,3 @@ let () =
       with
       | _ -> fail "it was declared"
       | exception Invalid_argument _ -> ())
-
-let () = finish ()

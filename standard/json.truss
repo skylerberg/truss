@@ -165,21 +165,6 @@ fn skip_digits(text: StringSlice, from: USize) -> USize
   index
 }
 
-fn hexadecimal_value(byte: UInt8) -> UInt32
-  ensures result <= 16
-  cost time O(1)
-{
-  if 48 <= byte && byte <= 57 {
-    intrinsic::convert(byte - 48)
-  } else if 97 <= byte && byte <= 102 {
-    intrinsic::convert(byte - 87)
-  } else if 65 <= byte && byte <= 70 {
-    intrinsic::convert(byte - 55)
-  } else {
-    16
-  }
-}
-
 fn parse_hex4(text: StringSlice, from: USize) -> Option[UInt32]
   requires from <= text.length()
   ensures !(result is Some(code) && code > 65535)
@@ -189,11 +174,11 @@ fn parse_hex4(text: StringSlice, from: USize) -> Option[UInt32]
   if text.length() - from < 4 {
     return None
   }
-  let first = hexadecimal_value(text.byte(from))
-  let second = hexadecimal_value(text.byte(from + 1))
-  let third = hexadecimal_value(text.byte(from + 2))
-  let fourth = hexadecimal_value(text.byte(from + 3))
-  if first == 16 || second == 16 || third == 16 || fourth == 16 {
+  let first: UInt32 = intrinsic::convert(text.byte(from).digit_value())
+  let second: UInt32 = intrinsic::convert(text.byte(from + 1).digit_value())
+  let third: UInt32 = intrinsic::convert(text.byte(from + 2).digit_value())
+  let fourth: UInt32 = intrinsic::convert(text.byte(from + 3).digit_value())
+  if first >= 16 || second >= 16 || third >= 16 || fourth >= 16 {
     return None
   }
   Some(first * 4096 + second * 256 + third * 16 + fourth)
@@ -590,14 +575,6 @@ fn escape_overhead(byte: UInt8) -> USize
   }
 }
 
-fn lower_hexadecimal(value: UInt8) -> UInt8
-  requires value < 16
-  cost time O(1)
-  cost allocations == 0
-{
-  if value < 10 { value + 48 } else { value + 87 }
-}
-
 fn format_number(number: Number) -> String
   cost time finite
 {
@@ -655,8 +632,8 @@ public fn quote(text: StringSlice) -> String
       intrinsic::storage_push(mut output, value: 117)
       intrinsic::storage_push(mut output, value: 48)
       intrinsic::storage_push(mut output, value: 48)
-      intrinsic::storage_push(mut output, value: lower_hexadecimal(byte / 16))
-      intrinsic::storage_push(mut output, value: lower_hexadecimal(byte % 16))
+      intrinsic::storage_push(mut output, value: (byte / 16).digit_byte(uppercase: false))
+      intrinsic::storage_push(mut output, value: (byte % 16).digit_byte(uppercase: false))
       budget -= 5
     }
   }

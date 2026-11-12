@@ -918,15 +918,14 @@ let () =
         "fn callee() -> Int64 { " ^ body ^ " }\n\nfn caller() -> Int64 {\n  callee()\n}\n"
       in
       let database = setup [ ("app::main", text "1") ] in
+      let engine = Engine.of_context database in
       let module_ = module_of "app::main" in
-      ignore (Infer.diagnostics database module_);
-      Database.Testing.set_text (Engine.of_context database) module_ (text "2");
-      Engine.clear_log (Engine.of_context database);
-      ignore (Infer.diagnostics database module_);
-      if
-        List.mem "type_check_result(app::main::caller)"
-          (Engine.executed (Engine.of_context database))
-      then fail "the caller was checked again");
+      expect_not_recomputed engine
+        ~first:(fun () -> ignore (Infer.diagnostics database module_))
+        ~again:(fun () ->
+          Database.Testing.set_text engine module_ (text "2");
+          ignore (Infer.diagnostics database module_))
+        [ "type_check_result(app::main::caller)" ]);
   test "checking twice gives the same result" (fun () ->
       let text =
         "fn f(items: List[Int64]) -> Int64 {\n\
@@ -1837,5 +1836,3 @@ let () =
       fine
         (helper "internal "
        ^ "public fn hidden(value: Int64) -> Int64\n  cost time O(1)\n{\n  half(value)\n}\n"))
-
-let () = finish ()

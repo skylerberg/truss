@@ -458,11 +458,6 @@ let replace st place ty ~by =
 
 let constant_int integer value = Lir.Constant (Integer (integer, value))
 
-let integer_of st ty =
-  match (Memory_layout.of_type st.context.env ty).form with
-  | Scalar (Integer integer) -> integer
-  | _ -> bug "%s is not an integer type" (Ground.to_string ty)
-
 let scalar_of st ty =
   match (Memory_layout.of_type st.context.env ty).form with
   | Scalar scalar -> scalar

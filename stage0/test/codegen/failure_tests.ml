@@ -137,5 +137,3 @@ test "pulled" {
       in
       expect_bug ~saying:"while lowering example::main::Point" (fun () ->
           ignore (Compile.compiled compile not_code)))
-
-let () = Harness.finish ()

@@ -1721,7 +1721,7 @@ internal fn MemoryFiles.copy_out(self, inode: UInt64, from: UInt64, buffer: mut 
         let start: USize = intrinsic::convert(from)
         let available = contents.length() - start
         let count = if limit < available { limit } else { available }
-        streams::append_bytes(mut buffer, bytes: contents.slice_range(start, stop: start + count))
+        mut buffer.append_slice(contents.slice_range(start, stop: start + count))
         Ok(count)
       }
       Directory => Err(SystemError.IsADirectory)

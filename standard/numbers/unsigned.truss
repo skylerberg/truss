@@ -153,18 +153,21 @@ public transparent fn UInt8.checked_multiply(self, other: UInt8) -> Option[UInt8
 
 public transparent fn UInt8.wrapping_add(self, other: UInt8) -> UInt8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn UInt8.wrapping_subtract(self, other: UInt8) -> UInt8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn UInt8.wrapping_multiply(self, other: UInt8) -> UInt8
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
@@ -439,18 +442,21 @@ public transparent fn UInt16.checked_multiply(self, other: UInt16) -> Option[UIn
 
 public transparent fn UInt16.wrapping_add(self, other: UInt16) -> UInt16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn UInt16.wrapping_subtract(self, other: UInt16) -> UInt16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn UInt16.wrapping_multiply(self, other: UInt16) -> UInt16
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
@@ -719,18 +725,21 @@ public transparent fn UInt32.checked_multiply(self, other: UInt32) -> Option[UIn
 
 public transparent fn UInt32.wrapping_add(self, other: UInt32) -> UInt32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn UInt32.wrapping_subtract(self, other: UInt32) -> UInt32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn UInt32.wrapping_multiply(self, other: UInt32) -> UInt32
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
@@ -993,18 +1002,21 @@ public transparent fn UInt64.checked_multiply(self, other: UInt64) -> Option[UIn
 
 public transparent fn UInt64.wrapping_add(self, other: UInt64) -> UInt64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn UInt64.wrapping_subtract(self, other: UInt64) -> UInt64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn UInt64.wrapping_multiply(self, other: UInt64) -> UInt64
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }
@@ -1255,18 +1267,21 @@ public transparent fn USize.checked_multiply(self, other: USize) -> Option[USize
 
 public transparent fn USize.wrapping_add(self, other: USize) -> USize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_add(self, right: other)
 }
 
 public transparent fn USize.wrapping_subtract(self, other: USize) -> USize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_subtract(self, right: other)
 }
 
 public transparent fn USize.wrapping_multiply(self, other: USize) -> USize
   cost time O(1)
+  cost allocations == 0
 {
   intrinsic::wrapping_multiply(self, right: other)
 }

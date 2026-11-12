@@ -6,9 +6,6 @@ let run ?environment ~directory arguments =
   | 0, output, _ -> Some output
   | _ | (exception Unix.Unix_error _) -> None
 
-(* The top of the worktree a directory is in, or [None] outside git. *)
-let toplevel directory = Option.map String.trim (run ~directory [ "rev-parse"; "--show-toplevel" ])
-
 let common_directory directory =
   Option.map
     (fun path ->

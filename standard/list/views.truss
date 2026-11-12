@@ -8,10 +8,9 @@ public fn List[Element].get(self, index: USize) lends Option[Element]
   ensures !(result is Some(element) && !identical(element, self.model()[index]))
   cost time O(1)
 {
-  if index < self.length() {
-    yield Some(self[index])
-  } else {
-    yield None
+  match self.slice().get(index) {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 
@@ -21,10 +20,9 @@ public fn List[Element].first(self) lends Option[Element]
   ensures !(result is Some(element) && !identical(element, self.model()[0]))
   cost time O(1)
 {
-  if self.length() > 0 {
-    yield Some(self[0])
-  } else {
-    yield None
+  match self.slice().first() {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 
@@ -34,10 +32,9 @@ public fn List[Element].last(self) lends Option[Element]
   ensures !(result is Some(element) && !identical(element, self.model()[self.length() - 1]))
   cost time O(1)
 {
-  if self.length() > 0 {
-    yield Some(self[self.length() - 1])
-  } else {
-    yield None
+  match self.slice().last() {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 
@@ -46,10 +43,9 @@ public fn List[Element].split_first(self) lends Option[list::SplitFirst[Element]
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
-  if self.length() > 0 {
-    yield Some(list::SplitFirst(first: self[0], rest: self.slice_range(1, stop: self.length())))
-  } else {
-    yield None
+  match self.slice().split_first() {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 
@@ -58,10 +54,9 @@ public fn List[Element].split_last(self) lends Option[list::SplitLast[Element]]
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
-  if self.length() > 0 {
-    yield Some(list::SplitLast(last: self[self.length() - 1], rest: self.slice_range(0, stop: self.length() - 1)))
-  } else {
-    yield None
+  match self.slice().split_last() {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 
@@ -167,18 +162,9 @@ public fn List[Element: Ordered].minimum(self) lends Option[Element]
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(Element.compare))
 {
-  if self.length() == 0 {
-    yield None
-  } else {
-    var best: USize = 0
-    for index in 1..self.length()
-      invariant best < self.length()
-    {
-      if self[index] < self[best] {
-        best = index
-      }
-    }
-    yield Some(self[best])
+  match self.slice().minimum() {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 
@@ -186,18 +172,9 @@ public fn List[Element: Ordered].maximum(self) lends Option[Element]
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(Element.compare))
 {
-  if self.length() == 0 {
-    yield None
-  } else {
-    var best: USize = 0
-    for index in 1..self.length()
-      invariant best < self.length()
-    {
-      if self[index] > self[best] {
-        best = index
-      }
-    }
-    yield Some(self[best])
+  match self.slice().maximum() {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 
@@ -443,11 +420,9 @@ public fn List[Element].min_by(
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {
-  if self.length() > 0 {
-    let position = self[..].extreme_position(compare, greatest: false)
-    yield Some(self[position])
-  } else {
-    yield None
+  match self.slice().min_by(compare) {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 
@@ -458,11 +433,9 @@ public fn List[Element].max_by(
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
 {
-  if self.length() > 0 {
-    let position = self[..].extreme_position(compare, greatest: true)
-    yield Some(self[position])
-  } else {
-    yield None
+  match self.slice().max_by(compare) {
+    Some(found) => yield Some(found)
+    None => yield None
   }
 }
 

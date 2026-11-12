@@ -1618,5 +1618,3 @@ let () =
           {|"params":{"uri":"file:///project/a%20b.truss","diagnostics":[]}|};
         ];
       if List.length !asked <> 1 then fail "a check with no open file")
-
-let () = Harness.finish ()

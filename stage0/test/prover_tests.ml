@@ -4709,8 +4709,6 @@ let () =
       expect_again (text "result < 4000000000") (text "result <= amount / 2")
         ~proven:[ "halve"; "halve_and_add" ] ~solved:2)
 
-let () = finish ()
-
 (* Addresses of views *)
 
 let () =

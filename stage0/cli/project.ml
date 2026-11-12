@@ -108,10 +108,6 @@ let manifest_problems t =
   Database.manifest_problems t.session
     (List.map (fun (package : package) -> package.name) t.packages)
 
-(* A package as the session holds it: its dependencies, and the targets it
-   runs on. *)
-let manifest t (package : package) = Workspace.package t.context package.name
-
 (* Reads the files again after a command changed some, so only what
    changed is checked again. *)
 let reload t =

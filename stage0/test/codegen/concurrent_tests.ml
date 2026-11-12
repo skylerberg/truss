@@ -1573,5 +1573,3 @@ fn main(arguments: List[String]) -> ExitCode
   ExitCode.success
 }
 |}
-
-let () = Harness.finish ()
