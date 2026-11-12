@@ -215,7 +215,11 @@ let body cursor =
       if ends_member && not cursor.after_inserted_closer then begin
         Cursor.report cursor Missing_body (Source.zero_width stop)
           "A function needs a body; write `{ todo }` for one that is not written yet."
-          ~fixes:[ Diagnostic.fix "Add `{ todo }`" [ Diagnostic.insert stop " { todo }" ] ];
+          ~fixes:
+            [
+              Diagnostic.fix "Add `{ todo }`"
+                [ Diagnostic.insert (Source.zero_width stop) " { todo }" ];
+            ];
         (* The signature parsed, so the definition keeps it, with an error
            statement at the offset where the body belongs. *)
         let at = Cursor.span cursor (Source.zero_width stop) in

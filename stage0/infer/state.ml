@@ -351,7 +351,7 @@ let fresh_synthetic_local state : Core.local =
 
 let fix title edits = Diagnostic.fix title edits
 let replace = Diagnostic.replace
-let insert position text = Diagnostic.replace (Span.zero_width position) text
+let insert position text = Diagnostic.insert (Span.zero_width position) text
 let current_frame state = match state.frames with frame :: _ -> Some frame | [] -> None
 
 let record state (value : expression) type_ =

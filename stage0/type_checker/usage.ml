@@ -147,14 +147,12 @@ let rec statement_diverges context (written : statement) =
       not (breaks body)
   | _ -> false
 
-let line_start text position = Source.line_start (Source.create ~path:"" text) position
-
 let check_block context (written : block) =
   let rec go = function
     | first :: (next :: _ as rest) ->
         if statement_diverges context first then begin
           let last = List.nth rest (List.length rest - 1) in
-          let start = line_start context.text next.span.start in
+          let start = Source.fragment_line_start context.text next.span.start in
           let start = if start > 0 then start - 1 else start in
           report context Unreachable_code next.span
             ~fixes:

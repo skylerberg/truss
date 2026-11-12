@@ -535,7 +535,7 @@ let reported (_ : _ diagnostic) = Reported
 let recovered _ = Reported
 let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
-let insert offset replacement = { span = Source.zero_width offset; replacement }
+let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
 
 (* Suggestions *)

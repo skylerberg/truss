@@ -162,7 +162,7 @@ let number cursor =
               [
                 Diagnostic.fix
                   (Printf.sprintf "Write `%s0`" written)
-                  [ Diagnostic.insert (stop + 1) "0" ];
+                  [ Diagnostic.insert (Source.zero_width (stop + 1)) "0" ];
               ]
             (span stop (stop + 1))
             (Printf.sprintf "A float has a digit after its `.`: `%s0`." written);
@@ -181,7 +181,11 @@ let leading_dot_float cursor =
       cursor.position <- stop;
       report cursor ~code:Number_missing_digits
         ~fixes:
-          [ Diagnostic.fix (Printf.sprintf "Write `0%s`" written) [ Diagnostic.insert start "0" ] ]
+          [
+            Diagnostic.fix
+              (Printf.sprintf "Write `0%s`" written)
+              [ Diagnostic.insert (Source.zero_width start) "0" ];
+          ]
         (span start (start + 1))
         (Printf.sprintf "A float has a digit before its `.`: `0%s`." written);
       Some value

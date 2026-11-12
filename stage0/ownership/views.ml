@@ -392,7 +392,7 @@ let check context (graph : Graph.t) : task_hazard option =
               (if copyable context type_ then
                  [
                    Diagnostic.fix "Copy it."
-                     [ Diagnostic.replace (Syntax.Span.zero_width at.stop) ".copy()" ];
+                     [ Diagnostic.insert (Syntax.Span.zero_width at.stop) ".copy()" ];
                  ]
                else [])
             "This part is lent only until the statement ends, so it cannot be bound to a name. Use \

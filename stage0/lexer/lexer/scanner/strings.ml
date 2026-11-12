@@ -181,7 +181,11 @@ and scan_ordinary ?(closing = quote) cursor ~scan ~tag ~nesting =
       in
       if nesting = 0 then begin
         report cursor ~code:Unterminated_string
-          ~fixes:[ Diagnostic.fix "Close the string" [ Diagnostic.insert position "\"" ] ]
+          ~fixes:
+            [
+              Diagnostic.fix "Close the string"
+                [ Diagnostic.insert (Source.zero_width position) "\"" ];
+            ]
           (span literal_start position) message;
         (Unterminated, position)
       end
@@ -442,7 +446,7 @@ and scan_one_line_raw cursor ~scan ~tag ~form ~nesting ~literal_start ~dollars ~
           [
             Diagnostic.fix
               ("Close the string with `" ^ delimiter ^ "`")
-              [ Diagnostic.insert position delimiter ];
+              [ Diagnostic.insert (Source.zero_width position) delimiter ];
           ]
         else []
       in
@@ -642,7 +646,7 @@ and build_multi_line cursor ~tag ~form ~quotes ~delimiter_stop lines closing =
           ~fixes:
             [
               Diagnostic.fix "Move the closing delimiter to its own line"
-                [ Diagnostic.insert start ("\n" ^ indentation) ];
+                [ Diagnostic.insert (Source.zero_width start) ("\n" ^ indentation) ];
             ]
           (span start (start + quotes))
           "The closing delimiter of a multi-line raw string goes on a line of its own.";
@@ -793,7 +797,7 @@ let format_field_edits cursor ~start ~stop =
       | '{' -> (
           match field_end (position + 1) with
           | Some close when skip_spaces cursor (position + 1) < close ->
-              edits (close + 1) (Diagnostic.insert position "$" :: found)
+              edits (close + 1) (Diagnostic.insert (Source.zero_width position) "$" :: found)
           | _ -> None)
       | _ -> edits (position + 1) found
   in
@@ -990,7 +994,7 @@ let quoted_string cursor ~scan ~nesting ~delimiter =
     if position >= stop - 1 then List.rev found
     else if byte cursor position = Char.code '\\' then quote_edits (position + 2) found
     else if byte cursor position = quote && not (inside_interpolation position) then
-      quote_edits (position + 1) (Diagnostic.insert position "\\" :: found)
+      quote_edits (position + 1) (Diagnostic.insert (Source.zero_width position) "\\" :: found)
     else quote_edits (position + 1) found
   in
   let template = delimiter = Char.code '`' in

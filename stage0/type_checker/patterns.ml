@@ -457,7 +457,7 @@ let has_error context type_ =
   go [] type_
 
 let indentation text (position : int) =
-  let line_start = Source.line_start (Source.create ~path:"" text) position in
+  let line_start = Source.fragment_line_start text position in
   let rec spaces index =
     if index < String.length text && (text.[index] = ' ' || text.[index] = '\t') then
       spaces (index + 1)

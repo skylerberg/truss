@@ -294,7 +294,10 @@ val make :
 
 val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
-val insert : int -> string -> span edit
+
+val insert : 'span -> string -> 'span edit
+(** [insert at text] inserts [text] at [at], an empty span. *)
+
 val delete : 'span -> 'span edit
 
 val edit_distance : string -> string -> int
