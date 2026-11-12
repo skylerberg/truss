@@ -1364,6 +1364,49 @@ let () =
       let outcome, _ = captured (fun () -> Main.evaluate [ "bogus" ]) in
       if outcome <> Outcome.Exit 2 then fail "did not exit with 2")
 
+(* Tagged templates *)
+
+let () =
+  test "check accepts an HTML template that interpolates into text and quoted attributes" (fun () ->
+      let root =
+        package
+          [
+            ( "main.truss",
+              "use standard::html\n\n\
+               fn page(name: String, link: String) -> html::Html {\n\
+              \  html::Html\"<p title='${name.copy()}'><a href=\\\"${own link}\\\">${own \
+               name}</a></p>\"\n\
+               }\n" );
+          ]
+      in
+      let outcome, output = captured (fun () -> Main.evaluate [ "check"; "-C"; root ]) in
+      if outcome <> Outcome.Exit 0 then fail "did not succeed: %s" output);
+  test "check rejects an HTML template that interpolates into an event handler or a script"
+    (fun () ->
+      List.iter
+        (fun template ->
+          let root =
+            package
+              [
+                ( "main.truss",
+                  Printf.sprintf
+                    "use standard::html\n\n\
+                     fn page(code: String) -> html::Html {\n\
+                    \  html::Html\"%s\"\n\
+                     }\n"
+                    template );
+              ]
+          in
+          let outcome, output = captured (fun () -> Main.evaluate [ "check"; "-C"; root ]) in
+          if outcome = Outcome.Exit 0 || not (contains output "is_valid_template") then
+            fail "accepted %s: %s" template output)
+        [
+          "<a onclick=\\\"${own code}\\\">x</a>";
+          "<${own code}>x</p>";
+          "<script>${own code}</script>";
+          "<a href=${own code}>x</a>";
+        ])
+
 (* Making a package *)
 
 let () =
