@@ -16,9 +16,6 @@ and pattern state env written type_ ~mode = pattern_with state env written type_
 and pattern_with state env (written : pattern) type_ ~is_var ~mode =
   let type_ = normalize state type_ in
   state.tables.scrutinee_types.(written.id) <- Some type_;
-  (match current_frame state with
-  | Some frame -> frame.patterns <- written.id :: frame.patterns
-  | None -> ());
   let recurse = pattern_with state env ~is_var ~mode in
   let unknown type_ = unknown_pattern state env written type_ ~is_var ~mode in
   let binds id (bound : name) =
@@ -467,15 +464,28 @@ and literal_pattern state id (span : span) literal type_ =
   match literal with
   | Literal_integer number -> (
       state.tables.literals.(id) <- Some (Integer_value number);
-      if not (integer_type state type_ || Types.is_error type_ || type_ = Types.Hole) then
-        report state Mismatch span
-          (Printf.sprintf "An integer pattern matches an integer, not `%s`." (Types.show type_))
-      else
-        match builtin_range ~usize_bits:(usize_bits state) type_ with
-        | Some (low, high) when Z.lt number low || Z.gt number high ->
-            report state Literal_out_of_range span
-              (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (Types.show type_))
-        | _ -> ())
+      let check type_ =
+        if not (integer_type state type_ || Types.is_error type_ || type_ = Types.Hole) then
+          report state Mismatch span
+            (Printf.sprintf "An integer pattern matches an integer, not `%s`." (Types.show type_))
+        else
+          match builtin_range ~usize_bits:(usize_bits state) type_ with
+          | Some (low, high) when Z.lt number low || Z.gt number high ->
+              report state Literal_out_of_range span
+                (Printf.sprintf "`%s` does not fit in `%s`." (Z.to_string number) (Types.show type_))
+          | _ -> ()
+      in
+      (* A scrutinee whose literal type a later statement decides, such as
+         [base] after [let base = 3], is checked once it is decided. *)
+      match resolve state type_ with
+      | Types.Literal (Integer_literal, _) ->
+          defer state (fun () ->
+              match resolve state type_ with
+              | Types.Literal _ | Types.Variable _ -> false
+              | resolved ->
+                  check resolved;
+                  true)
+      | _ -> check type_)
   | Literal_true | Literal_false ->
       if not (unify state type_ Types.bool) then
         mismatch state span ~expected:type_ ~actual:Types.bool

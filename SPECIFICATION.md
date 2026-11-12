@@ -159,9 +159,12 @@ octal_digit   = "0" ... "7" ;
 A number literal is never directly followed by a name character, so `3u8`
 is an error.
 
-A literal takes its type from its context, as in `let small: UInt8 = 3`.
-When nothing decides it, an integer literal is an `Int64` and a float literal
-a `Float64`.
+A literal takes its type from its context, as in `let small: UInt8 = 3`. A
+local declared from literals alone takes its type from its first use that
+decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
+`limit` a `UInt8`, and so does `let digit: UInt8 = index` in the body of
+`for index in 0..10`. When nothing decides it, an integer literal is an
+`Int64` and a float literal a `Float64`.
 
 - A literal operand of an arithmetic operator, a comparison, or a range takes
   the other operand's type when it can be that type: in `count + 1` with a
@@ -620,7 +623,8 @@ fn area(shape: Shape) -> Float64 {
 - Inside a body, types are inferred one statement at a time: a variable's
   type comes from its own `let` or `var` and never changes. Where the
   statement alone cannot decide it, as in `var names = []`, the `let` has a
-  type.
+  type. The exception is a variable declared from literals alone (see
+  [Number literals](#number-literals)).
 - `self` is only the first parameter of a method (see [Methods](#methods)).
 
 ### Calls and arguments

@@ -1,0 +1,4 @@
+fn f() {
+  let big = 300
+  let small: UInt8 = big
+}

@@ -205,7 +205,8 @@ write those languages' syntax by habit.
   across a whole body, so a variable's type can come from a use many lines
   later, and an error can show up far from its cause. In Truss a variable's
   type is visible on its own line, to a reader, an LLM, and the language
-  server, and checking stays local and fast. The cost is an annotation where
+  server, and checking stays local and fast. A local declared from literals
+  alone is the exception (see [Integers](#integers)). The cost is an annotation where
   a statement alone cannot decide, as in `var names: List[String] = []`.
 - **Generic code is compiled once for each set of type arguments,** so
   generics cost nothing at run time. This rules out polymorphic recursion,
@@ -700,6 +701,13 @@ combination needs parentheses.
 - **Literals take their type from context, with no suffixes,** so `3` has one
   spelling and simple variables need no annotations. An integer literal is
   never a float, so `1` and `1.0` look different.
+- **A local declared from literals takes its type from its first use.**
+  Otherwise `let limit = 10` would fix `limit` at `Int64`, and code on
+  `UInt8` or `USize` would need an annotation on every such local. Only a
+  literal type outlives its statement, and it can only become a number type,
+  so the declaration still tells the reader that the local is a number. A
+  use that disagrees with the first is one error, with a note at the
+  statement that decided the type.
 - **A literal in an operator takes the other operand's type,** as Go's
   untyped constants do. The rule never looks at which `impl`s exist, so
   adding one never changes a call. Rust lets `impl` search decide a literal's

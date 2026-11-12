@@ -1,4 +1,4 @@
-fn f() -> Int64 {
+fn f() {
   var best = 0
-  best
+  best += 1
 }

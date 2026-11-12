@@ -5,6 +5,7 @@ type t = {
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   mutable integer_range : Types.ty -> (Z.t * Z.t) option;
+  code_literals : (int, unit) Hashtbl.t;
 }
 
 val create : unit -> t
