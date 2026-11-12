@@ -113,7 +113,7 @@ and named state env (value : expression) ({ name; target; type_arguments } : Res
       state.tables.resolutions.(value.id) <- Some Specification_value;
       register_expression state value (fun () -> Result);
       match env.output with
-      | Some output -> output_type output
+      | Some output -> T.result_type output
       | None -> bug "`result` is named where nothing is returned")
   | Old | Identical | Specification_function _ ->
       state.tables.resolutions.(value.id) <- Some Specification_value;
@@ -182,7 +182,7 @@ and field state (value : expression) base_type (member : name) =
   let unknown candidates =
     error state Unknown_member member.span
       ~fixes:
-        (match Resolve.closest member.text candidates with
+        (match Diagnostic.closest member.text candidates with
         | Some candidate ->
             [ fix (Printf.sprintf "Write `%s`." candidate) [ replace member.span candidate ] ]
         | None -> [])
@@ -300,7 +300,7 @@ and explicit_type_arguments ?(head = 0) state (value : expression) instance item
   end
 
 and finish_call state (value : expression) callee (instance : instance) arguments left_out =
-  let result = output_type instance.signature.output in
+  let result = T.result_type instance.signature.output in
   state.tables.calls.(value.id) <-
     Some
       {

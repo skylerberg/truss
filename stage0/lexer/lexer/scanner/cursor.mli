@@ -32,6 +32,7 @@ val is_line_break : int -> bool
 val is_end_of_line : int -> bool
 val is_space : int -> bool
 val is_digit : int -> bool
+val is_hexadecimal_digit : int -> bool
 val is_ascii_letter : int -> bool
 val is_ascii_name_byte : int -> bool
 val quote : int

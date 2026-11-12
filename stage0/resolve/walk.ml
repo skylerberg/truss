@@ -52,6 +52,9 @@ type specification = {
           [yielded] is the sequence of the parts yielded so far. *)
   finished : bool;
       (** In a lending or yielding method's [ensures], where [finished] has its meaning. *)
+  elements : string list;
+      (** In the clauses of a [for] loop over a collection or a cursor, the names its pattern binds,
+          which hold no value there. *)
 }
 
 type scope = {
@@ -64,7 +67,14 @@ type scope = {
 }
 
 let no_specification =
-  { active = false; result = false; cost_bound = false; yielded = false; finished = false }
+  {
+    active = false;
+    result = false;
+    cost_bound = false;
+    yielded = false;
+    finished = false;
+    elements = [];
+  }
 
 let in_specification = { no_specification with active = true }
 
@@ -80,7 +90,7 @@ type state = {
 
 let reported state ?fixes code (span : span) message =
   let diagnostic =
-    Diagnostic.make ?fixes ~code:(Resolve code) (Source.span span.start span.stop) message
+    Diagnostic.make ?fixes ~code:(Resolve code) (Syntax.Span.to_source span) message
   in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
@@ -90,58 +100,14 @@ let set state (name : name) target = state.names.(name.id) <- Some target
 
 (* Closest names *)
 
-(* The optimal string alignment distance: insertions, deletions,
-   substitutions, and swaps of two neighboring letters, the usual typos,
-   each count one. *)
-let distance left right =
-  let rows = String.length left + 1 and columns = String.length right + 1 in
-  let table = Array.make_matrix rows columns 0 in
-  for i = 0 to rows - 1 do
-    table.(i).(0) <- i
-  done;
-  for j = 0 to columns - 1 do
-    table.(0).(j) <- j
-  done;
-  for i = 1 to rows - 1 do
-    for j = 1 to columns - 1 do
-      let cost = if left.[i - 1] = right.[j - 1] then 0 else 1 in
-      let best =
-        min (min (table.(i - 1).(j) + 1) (table.(i).(j - 1) + 1)) (table.(i - 1).(j - 1) + cost)
-      in
-      table.(i).(j) <-
-        (if i > 1 && j > 1 && left.[i - 1] = right.[j - 2] && left.[i - 2] = right.[j - 1] then
-           min best (table.(i - 2).(j - 2) + 1)
-         else best)
-    done
-  done;
-  table.(rows - 1).(columns - 1)
-
-(* The visible name closest to [text], if one is near enough to be a typo:
-   at most a third of the name's letters away, and at least one. *)
-let closest text candidates =
-  let limit = max 1 (String.length text / 3) in
-  let best =
-    List.fold_left
-      (fun best candidate ->
-        let distance = distance text candidate in
-        if candidate = text || distance > limit then best
-        else
-          match best with
-          | Some (_, best_distance) when best_distance <= distance -> best
-          | _ -> Some (candidate, distance))
-      None
-      (List.sort_uniq compare candidates)
-  in
-  Option.map fst best
-
 let unknown state (name : name) ~what candidates =
   let fixes =
-    match closest name.text candidates with
+    match Diagnostic.closest name.text candidates with
     | Some candidate ->
         [
           Diagnostic.fix
             (Printf.sprintf "Write `%s`." candidate)
-            [ Diagnostic.replace (Source.span name.span.start name.span.stop) candidate ];
+            [ Diagnostic.replace (Syntax.Span.to_source name.span) candidate ];
         ]
     | None -> []
   in
@@ -384,6 +350,15 @@ and local_value state scope (name : name) =
       else if scope.specification.finished && text = "finished" then set state name Finished
       else if scope.specification.active && text = "identical" then set state name Identical
       else if scope.specification.result && text = "result" then set state name Result_value
+      else if List.mem text scope.specification.elements then
+        set state name
+          (Unknown
+             (reported state Unknown_name name.span
+                (Printf.sprintf
+                   "`%s` is the loop's element, which is bound only in the loop's body: the loop's \
+                    clauses hold before the first element and after the last. Name the elements so \
+                    far with `yielded`."
+                   text)))
       else
         begin match file_item state text with
         | Some item when Names.is_value_kind item.kind ->
@@ -396,9 +371,7 @@ and local_value state scope (name : name) =
                       ~fixes:
                         [
                           Diagnostic.fix "Write `None`."
-                            [
-                              Diagnostic.replace (Source.span name.span.start name.span.stop) "None";
-                            ];
+                            [ Diagnostic.replace (Syntax.Span.to_source name.span) "None" ];
                         ]
                       (Printf.sprintf
                          "Truss has no `%s`. A value that may be missing is an `Option`, and \
@@ -781,7 +754,20 @@ and statement state scope (statement_ : statement) =
   | For { pattern = pattern_; iterable; clauses; body; _ } ->
       expression state scope iterable;
       let inner = bind_pattern state scope pattern_ in
-      List.iter (loop_clause ~for_loop:true state inner) clauses;
+      (* A range's index names the next index in the loop's clauses. Any
+         other loop's element is bound only in its body. *)
+      let elements, clause_scope =
+        match iterable.kind with
+        | Range { start = Some _; stop = Some _; _ } -> ([], inner)
+        | _ ->
+            ( String_map.fold
+                (fun name binding names ->
+                  if String_map.find_opt name scope.values = Some binding then names
+                  else name :: names)
+                inner.values [],
+              scope )
+      in
+      List.iter (loop_clause ~for_loop:true ~elements state clause_scope) clauses;
       block state inner body;
       scope
   | While { condition = test; clauses; body } ->
@@ -820,16 +806,20 @@ and statement state scope (statement_ : statement) =
       scope
   | Statement_error -> scope
 
-and loop_clause ?(for_loop = false) state scope (written : loop_clause) =
+and loop_clause ?(for_loop = false) ?(elements = []) state scope (written : loop_clause) =
   let scope =
-    if for_loop then { scope with specification = { scope.specification with yielded = true } }
+    if for_loop then
+      { scope with specification = { scope.specification with yielded = true; elements } }
     else scope
   in
   (* [yielded] refers to the parts of the nearest loop or method: the parts
      of a [for] loop, or else, in a lending or yielding method, the parts of
      the method. *)
   let specification =
-    { scope with specification = { in_specification with yielded = for_loop || scope.hands_out } }
+    {
+      scope with
+      specification = { in_specification with yielded = for_loop || scope.hands_out; elements };
+    }
   in
   match written.kind with
   | Invariant value -> expression state specification value

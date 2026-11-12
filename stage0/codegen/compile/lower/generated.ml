@@ -319,15 +319,7 @@ let program_main context (key : Instance.key) main_path : Lir.t =
     | [ info ] -> (Monomorphic.ground context.monomorphic [] info.type_, info.mode)
     | _ -> bug "main takes its arguments"
   in
-  let string_ty, storage_field, storage_ty =
-    match Monomorphic.shape context.monomorphic list_ty with
-    | Record [ (field, Typed storage) ] -> (
-        match Monomorphic.representation context.monomorphic storage with
-        | Storage element -> (element, field, storage)
-        | _ -> bug "a List that is not storage")
-    | _ -> bug "main's arguments are not a List"
-  in
-  ignore storage_ty;
+  let storage_field, _, string_ty = list_parts context.monomorphic list_ty in
   let list = temporary st list_ty in
   let lower operation type_arguments arguments destination =
     ignore
@@ -340,36 +332,29 @@ let program_main context (key : Instance.key) main_path : Lir.t =
   lower Storage_with_capacity [ string_ty ]
     [ Value (Copy (at wanted)) ]
     (Some (list / Field storage_field));
-  let index = local b (Raw (Integer Int32)) in
-  emit b (Assign (at index, Use (Constant (Integer (Int32, Z.zero)))));
-  let test = block b and inside = block b and after = block b in
-  finish b (Goto test);
-  start b test;
-  let going = local b (Raw Bool) in
-  emit b (Assign (at going, Binary (Less, Copy (at index), Copy (at count))));
-  finish b (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
-  start b inside;
-  let length = local b (Value context.types.usize) and bytes = local b (Raw (Pointer Opaque)) in
-  let call intrinsic arguments result =
-    emit b (Call { target = Intrinsic intrinsic; arguments; result = Returned (at result) })
-  in
-  call Program_argument [ Copy (at arguments_pointer); Copy (at index) ] bytes;
-  call Terminated_length [ Copy (at bytes) ] length;
-  let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
-  let view = temporary st view_ty in
-  emit b
-    (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
-  let text = temporary st string_ty in
-  call_instance st
-    (Code { path = text_copied_from; type_arguments = [] })
-    ~signature:(signature_of context text_copied_from)
-    ~substitution:[]
-    ~arguments:[ (Read, view_ty, view) ]
-    ~destination:text ();
-  lower Storage_push [ string_ty ] [ Place (list / Field storage_field); Value (Move text) ] None;
-  emit b (Assign (at index, Binary (Add, Copy (at index), Constant (Integer (Int32, Z.one)))));
-  finish b (Goto test);
-  start b after;
+  loop b ~integer:Int32 ~index_type:(Raw (Integer Int32))
+    ~count:(Copy (at count))
+    (fun index ->
+      let length = local b (Value context.types.usize) and bytes = local b (Raw (Pointer Opaque)) in
+      let call intrinsic arguments result =
+        emit b (Call { target = Intrinsic intrinsic; arguments; result = Returned (at result) })
+      in
+      call Program_argument [ Copy (at arguments_pointer); Copy (at index) ] bytes;
+      call Terminated_length [ Copy (at bytes) ] length;
+      let view_ty = Storage.view_of_elements (Monomorphic.builtin UInt8) in
+      let view = temporary st view_ty in
+      emit b
+        (Assign (view, Storage.view view_ty ~elements:(Copy (at bytes)) ~length:(Copy (at length))));
+      let text = temporary st string_ty in
+      call_instance st
+        (Code { path = text_copied_from; type_arguments = [] })
+        ~signature:(signature_of context text_copied_from)
+        ~substitution:[]
+        ~arguments:[ (Read, view_ty, view) ]
+        ~destination:text ();
+      lower Storage_push [ string_ty ]
+        [ Place (list / Field storage_field); Value (Move text) ]
+        None);
   st.evidence <- real_implementations st ~user:"main" (evidence_for st.context [] signature.uses);
   let exit_ty =
     match signature.output with

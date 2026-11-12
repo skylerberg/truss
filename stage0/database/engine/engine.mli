@@ -43,6 +43,15 @@ val stabilize : t -> change
     call, and what came out different. *)
 
 val executed : t -> string list
+(** The results computed since the log was last cleared, as ["name(key)"]: for a check that nothing
+    was computed, and for messages. A check of one result uses {!computed}. *)
+
+val computed : t -> ('key, 'value) Query.query -> 'key list
+(** The keys whose results of the query were computed since the log was last cleared, in order. *)
+
+val result_label : ('key, 'value) Query.query -> 'key -> string
+(** A result as {!executed} names it, for messages. *)
+
 val clear_log : t -> unit
 
 type counters = Incremental.counters = {

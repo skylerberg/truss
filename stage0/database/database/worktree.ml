@@ -25,26 +25,9 @@ let files root =
             | exception Unix.Unix_error _ -> ()
             | { st_kind = S_DIR; _ } -> if not (skipped entry) then walk path
             | { st_kind = S_REG; _ } as stat ->
-                if
-                  entry = "truss.toml" || entry = "truss.lock"
-                  || Filename.check_suffix entry ".truss"
-                then found := (path, stamp_of stat) :: !found
+                if Registry.Content.is_input entry then found := (path, stamp_of stat) :: !found
             | _ -> ())
           entries
   in
   walk "";
   List.rev !found
-
-(* The directory a relative file is in, "" for the root. *)
-let parent path = match String.rindex_opt path '/' with Some i -> String.sub path 0 i | None -> ""
-let segments path = if path = "" then [] else String.split_on_char '/' path
-
-(* The package directory a module file belongs to: the nearest directory
-   above it with a manifest. *)
-let owner package_directories path =
-  let rec up directory =
-    if List.mem directory package_directories then Some directory
-    else if directory = "" then None
-    else up (parent directory)
-  in
-  up (parent path)

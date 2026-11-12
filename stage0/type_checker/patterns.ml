@@ -41,7 +41,7 @@ let span context (origin : Core.origin) : Syntax.span =
 
 let report context ?(fixes = []) code (span : Syntax.span) message =
   context.diagnostics <-
-    Diagnostic.make ~fixes ~code:(Patterns code) (Source.span span.start span.stop) message
+    Diagnostic.make ~fixes ~code:(Patterns code) (Syntax.Span.to_source span) message
     :: context.diagnostics
 
 let integer_range type_ =
@@ -525,7 +525,7 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                         | None -> (
                             match List.nth_opt alternatives 1 with
                             | Some next -> Source.span found.start (at next).start
-                            | None -> Source.span found.start found.stop)
+                            | None -> Syntax.Span.to_source found)
                       in
                       report context Unreachable_alternative found
                         ~fixes:

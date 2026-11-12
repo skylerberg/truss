@@ -292,10 +292,7 @@ let check_definition state (lowered : Environment.lowered_interface) =
     | Type_definition { body = type_body; clauses; _ }, Type_interface interface -> (
         let self =
           T.Named
-            {
-              path = state.key.path;
-              arguments = Environment.generic_arguments interface.type_generics;
-            }
+            { path = state.key.path; arguments = Types.generic_arguments interface.type_generics }
         in
         let env : env = { no_output with specification = true; self = Some self } in
         List.iter

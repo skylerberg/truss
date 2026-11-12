@@ -266,13 +266,7 @@ let run ~directory ~from_ ~to_ ~json =
             in
             if List.mem_assoc old_module plan.edits || old_module <> module_ then begin
               let path = file_of project module_ in
-              let rec make directory =
-                if not (Sys.file_exists directory) then begin
-                  make (Filename.dirname directory);
-                  Sys.mkdir directory 0o755
-                end
-              in
-              make (Filename.dirname path);
+              File_system.make_directory (Filename.dirname path);
               Project.write_file path text;
               if old_module <> module_ then Sys.remove (Project.file project old_module)
             end)

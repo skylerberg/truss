@@ -17,8 +17,8 @@ internal fn set_raw_mode(descriptor: Int32, enabled: Bool) -> Result[Unit, Int32
   let least_at = characters_at + least
   let wait_at = characters_at + wait
   var settings: List[UInt8] = []
-  for _ in 0..size
-    invariant settings.length() == yielded.length()
+  for index in 0..size
+    invariant settings.length() == index
   {
     mut settings.push(0)
   }

@@ -4,4 +4,4 @@
 
 (library
  (name session)
- (libraries unix blake3 engine query store path))
+ (libraries unix blake3 engine query store path file_system))

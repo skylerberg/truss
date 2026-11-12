@@ -148,7 +148,7 @@ and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
                   @@ error state Unknown_variant variant_name.last.span
                        ~fixes:
                          (match
-                            Resolve.closest variant_name.last.text
+                            Diagnostic.closest variant_name.last.text
                               (List.map
                                  (fun (variant : T.variant) -> variant.variant_name)
                                  variants)
@@ -257,7 +257,7 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
               @@ error state Unknown_member name.span
                    ~fixes:
                      (match
-                        Resolve.closest name.text
+                        Diagnostic.closest name.text
                           (List.map (fun (declared : T.field) -> declared.field_name) fields)
                       with
                      | Some candidate ->

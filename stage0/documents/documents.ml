@@ -1,8 +1,4 @@
-let read path =
-  let channel = open_in_bin path in
-  let text = really_input_string channel (in_channel_length channel) in
-  close_in channel;
-  text
+let read path = In_channel.with_open_bin path In_channel.input_all
 
 let truss_blocks text =
   let rec loop inside current blocks = function

@@ -392,7 +392,7 @@ public fn Map[Key: Hash + Ordered, Value].retain(
   var kept_count: USize = 0
   for index in 0..count
     invariant self.entries.length() == count
-    invariant kept_count <= yielded.length()
+    invariant kept_count <= index
     invariant forall i in 0..self.entries.length() => forall j in 0..self.entries.length() =>
       i < j ==> !(self.entries.model()[i].key == self.entries.model()[j].key)
   {

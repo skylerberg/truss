@@ -467,7 +467,7 @@ let rec emit_ops builder ops =
           finish builder
             (Switch
                {
-                 value = Copy { root = Local flag; projections = [] };
+                 value = Copy (Lir.local_place flag);
                  cases = [ (Z.one, body_block) ];
                  default = Some after;
                });
@@ -498,7 +498,7 @@ let rec emit_ops builder ops =
           builder.current <- after)
     ops
 
-let flag_place local : Lir.place = { root = Local local; projections = [] }
+let flag_place = Lir.local_place
 
 let elaborate env ~needs_drop ~environment (f : Lir.function_) =
   let a = analyse env ~needs_drop ~environment f in

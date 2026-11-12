@@ -25,18 +25,6 @@ let of_token (kind : Token.kind) =
 
 let resources = [ Time; Allocations; Allocated_bytes; Calls ]
 
-let edit_distance a b =
-  let previous = Array.init (String.length b + 1) Fun.id in
-  for i = 1 to String.length a do
-    let current = Array.make (String.length b + 1) i in
-    for j = 1 to String.length b do
-      let cost = if a.[i - 1] = b.[j - 1] then 0 else 1 in
-      current.(j) <- min (min (previous.(j) + 1) (current.(j - 1) + 1)) (previous.(j - 1) + cost)
-    done;
-    Array.blit current 0 previous 0 (Array.length current)
-  done;
-  previous.(String.length b)
-
 (* Reports the name [name] where one of the cost words [words] was
    expected. When exactly one of them is within an edit distance of 2, the
    fix replaces the name with that word, and the function returns the word,
@@ -47,7 +35,7 @@ let misspelled cursor (token : Token.t) name ~words ~what =
       (String.concat ", " (List.map (fun word -> "`" ^ spelling word ^ "`") words))
       name
   in
-  match List.filter (fun word -> edit_distance name (spelling word) <= 2) words with
+  match List.filter (fun word -> Diagnostic.edit_distance name (spelling word) <= 2) words with
   | [ word ] ->
       let spelling = spelling word in
       Cursor.report cursor Diagnostic.Code.Cost_word token.span message

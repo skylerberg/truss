@@ -3,6 +3,8 @@
 
 include Ir_types
 
+let local_place local = { root = Local local; projections = [] }
+
 let signature (f : function_) =
   {
     parameters = List.map (fun local -> f.locals.(local).ty) f.parameters;
@@ -16,7 +18,7 @@ let bug format = Compiler_bug.bug ~stage:"Lir" format
    another be lowered before the cursor's fields are known. *)
 let erased env = function
   | Value (Cursor _) -> false
-  | Value ty -> (Memory_layout.of_type env ty).size = 0
+  | Value ty -> Memory_layout.has_zero_size env ty
   | Pointer _ | Raw _ | Environment _ | Evidence _ -> false
 
 let member_ty : Memory_layout.member -> ty = function
@@ -130,11 +132,11 @@ let visit_statement v = function
       visit_operand v text;
       visit_operand v length
   | Region { region = Chunk { first; last }; _ } ->
-      visit_place v { root = Local first; projections = [] };
-      visit_place v { root = Local last; projections = [] }
+      visit_place v (local_place first);
+      visit_place v (local_place last)
   | Region { region = Task { function_value; item }; _ } ->
-      visit_place v { root = Local function_value; projections = [] };
-      visit_place v { root = Local item; projections = [] }
+      visit_place v (local_place function_value);
+      visit_place v (local_place item)
   | Region { region = Branch; _ } | Regions_end _ -> ()
   | Fork { branches } -> List.iter (fun (_, environment) -> visit_operand v environment) branches
   | Fork_range { environment; first; last; _ } ->
@@ -237,7 +239,7 @@ let map_statement ~place ~block = function
         { text = map_operand ~place ~block text; length = map_operand ~place ~block length; site }
   | Region { fork; region = (Chunk _ | Task _) as region } ->
       let local l =
-        match place { root = Local l; projections = [] } with
+        match place (local_place l) with
         | { root = Local mapped; projections = [] } -> mapped
         | _ -> bug "a region's local mapped to a place that is not a local"
       in

@@ -30,9 +30,7 @@ let compute directory =
       match known with
       | Some identity -> identity
       | None ->
-          let identity =
-            Blake3.to_hex (Blake3.hash (In_channel.with_open_bin path In_channel.input_all))
-          in
+          let identity = Blake3.hex_digest (File_system.read path) in
           (try
              Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ] 0o644 remembered
                (fun out -> Printf.fprintf out "%s\t%s\n" tag identity)

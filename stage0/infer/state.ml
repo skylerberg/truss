@@ -149,9 +149,7 @@ type state = {
 }
 
 let reported state ?(fixes = []) code (span : span) message =
-  let diagnostic =
-    Diagnostic.make ~fixes ~code:(Types code) (Source.span span.start span.stop) message
-  in
+  let diagnostic = Diagnostic.make ~fixes ~code:(Types code) (Syntax.Span.to_source span) message in
   state.diagnostics <- diagnostic :: state.diagnostics;
   Diagnostic.reported diagnostic
 
@@ -352,7 +350,7 @@ let fresh_synthetic_local state : Core.local =
   Synthetic number
 
 let fix title edits = Diagnostic.fix title edits
-let replace (span : span) text = Diagnostic.replace (Source.span span.start span.stop) text
+let replace (span : span) text = Diagnostic.replace (Syntax.Span.to_source span) text
 let insert position text = Diagnostic.insert position text
 let current_frame state = match state.frames with frame :: _ -> Some frame | [] -> None
 
@@ -480,7 +478,7 @@ let check_evidence_grants state (span : span) evidence =
   List.iter
     (fun message ->
       state.diagnostics <-
-        Diagnostic.make ~code:(Capabilities Not_granted) (Source.span span.start span.stop) message
+        Diagnostic.make ~code:(Capabilities Not_granted) (Syntax.Span.to_source span) message
         :: state.diagnostics)
     (Interface.Grants.messages state.database ~package:state.package impls)
 
@@ -1192,8 +1190,6 @@ let instantiate state (span : span) ?(extra = []) (signature : T.signature) =
         signature.generics;
   }
 
-let output_type = function T.Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
-
 let intrinsic_signature path =
   Option.map Intrinsic_signatures.signature (Intrinsic.operation_of_path path)
 
@@ -1530,7 +1526,7 @@ let check_lent_value state env (operand : expression) =
                 if not (plain state type_ || fieldless_variant) then
                   state.diagnostics <-
                     Diagnostic.make ~code:(Ownership Owned_beside_lent)
-                      (Source.span value.span.start value.span.stop)
+                      (Syntax.Span.to_source value.span)
                       "This value is owned, but the value that is yielded lends a place, so it \
                        owns nothing. Bind this value to a name first, and pass the name."
                     :: state.diagnostics;
@@ -1573,7 +1569,7 @@ let check_owned state env (value : expression) type_ =
               in
               state.diagnostics <-
                 Diagnostic.make ~fixes ~code:(Ownership Needs_owned)
-                  (Source.span value.span.start value.span.stop)
+                  (Syntax.Span.to_source value.span)
                   message
                 :: state.diagnostics
           | _ -> ());

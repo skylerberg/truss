@@ -50,7 +50,7 @@ type t = {
   mutable waiting : int;
   mutable candidates : node list;
   logging : bool;
-  mutable log : string list;
+  mutable log : node list;
   mutable computed : node list;
   mutable changed : node list;
   tally : tally;

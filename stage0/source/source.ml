@@ -22,13 +22,7 @@ let compute_line_starts text =
   Dynarray.to_array starts
 
 let create ~path text = { path; text; line_starts = compute_line_starts text }
-
-let read_file path =
-  let channel = open_in_bin path in
-  let text = really_input_string channel (in_channel_length channel) in
-  close_in channel;
-  create ~path text
-
+let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
 let path source = source.path
 let text source = source.text
 
@@ -56,17 +50,49 @@ let line_end source offset =
     else next - 1
   else String.length source.text
 
-let position source offset =
+type units = Bytes | Scalar_values | Utf_16_code_units
+
+(* Where the columns of a line start counting: after the byte order mark on
+   the first line. *)
+let first_column source index =
+  max source.line_starts.(index) (if index = 0 then byte_order_mark_length source else 0)
+
+(* The width in [units] of the character at [at], and its width in bytes. *)
+let step units text at =
+  let decoded = String.get_utf_8_uchar text at in
+  let width = max 1 (Uchar.utf_decode_length decoded) in
+  match units with
+  | Bytes -> (width, width)
+  | Scalar_values -> (1, width)
+  | Utf_16_code_units ->
+      ((if Uchar.to_int (Uchar.utf_decode_uchar decoded) >= 0x10000 then 2 else 1), width)
+
+let location units source offset =
+  let offset = max 0 (min offset (String.length source.text)) in
   let index = line_index source offset in
-  let start =
-    max source.line_starts.(index) (if index = 0 then byte_order_mark_length source else 0)
+  let rec count at column =
+    if at >= offset then column
+    else
+      let counted, width = step units source.text at in
+      count (at + width) (column + counted)
   in
-  let column = ref 1 in
-  for byte = start to min offset (String.length source.text) - 1 do
-    (* Count every byte except UTF-8 continuation bytes. *)
-    if Char.code source.text.[byte] land 0xC0 <> 0x80 then incr column
-  done;
-  (index + 1, !column)
+  (index, count (first_column source index) 0)
+
+let position source offset =
+  let line, column = location Scalar_values source offset in
+  (line + 1, column + 1)
+
+let offset units source ~line ~column =
+  if line >= Array.length source.line_starts then String.length source.text
+  else
+    let stop = line_end source source.line_starts.(line) in
+    let rec walk at counted =
+      if at >= stop || counted >= column then at
+      else
+        let units, width = step units source.text at in
+        walk (at + width) (counted + units)
+    in
+    walk (first_column source line) 0
 
 let starts_line source offset =
   offset = line_start source offset || offset = byte_order_mark_length source

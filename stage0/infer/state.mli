@@ -186,7 +186,6 @@ type instance = {
 val instantiate :
   state -> Syntax.span -> ?extra:(T.parameter * T.argument) list -> T.signature -> instance
 
-val output_type : T.result -> T.ty
 val function_signature : state -> Path.t -> (Types.signature, Diagnostic.reported) result option
 val note_lending : state -> Syntax.expression -> T.result -> unit
 val lent : state -> Syntax.expression -> T.mode option

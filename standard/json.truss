@@ -594,7 +594,7 @@ public fn quote(text: StringSlice) -> String
   }
   var extra: USize = 0
   for index in 0..text.length()
-    invariant extra <= 5 * yielded.length()
+    invariant extra <= 5 * index
   {
     extra += escape_overhead(text.byte(index))
   }
@@ -603,7 +603,7 @@ public fn quote(text: StringSlice) -> String
   intrinsic::storage_push(mut output, value: 34)
   var budget = extra
   for index in 0..text.length()
-    invariant intrinsic::storage_length(output) + (text.length() - yielded.length()) + budget + 1 <= capacity
+    invariant intrinsic::storage_length(output) + (text.length() - index) + budget + 1 <= capacity
     invariant intrinsic::storage_capacity(output) == capacity
   {
     let byte = text.byte(index)

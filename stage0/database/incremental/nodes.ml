@@ -51,7 +51,7 @@ type t = {
   mutable waiting : int;  (** How many seeds and marks there are *)
   mutable candidates : node list;  (** Nodes to collect, if still unnecessary, once no query runs *)
   logging : bool;
-  mutable log : string list;
+  mutable log : node list;  (** The results computed since the log was cleared, newest first *)
   mutable computed : node list;  (** Newest first *)
   mutable changed : node list;  (** Newest first *)
   tally : tally;

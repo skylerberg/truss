@@ -4,26 +4,9 @@ open Ir
 
 (* Printing *)
 
-let integer_name = function
-  | Memory_layout.Int8 -> "Int8"
-  | Int16 -> "Int16"
-  | Int32 -> "Int32"
-  | Int64 -> "Int64"
-  | UInt8 -> "UInt8"
-  | UInt16 -> "UInt16"
-  | UInt32 -> "UInt32"
-  | UInt64 -> "UInt64"
-  | USize -> "USize"
-  | ISize -> "ISize"
-
 let scalar_name = function
-  | Memory_layout.Integer integer -> integer_name integer
-  | Float32 -> "Float32"
-  | Float64 -> "Float64"
-  | Bool -> "Bool"
-  | Character -> "Character"
-  | Pointer _ -> "pointer"
-  | Nullable_pointer _ -> "nullable"
+  | Memory_layout.Nullable_pointer _ -> "nullable"
+  | scalar -> Memory_layout.scalar_to_string scalar
 
 let rec ty_to_string = function
   | Value ty -> Ground.to_string ty
@@ -181,12 +164,12 @@ let statement_to_string = function
   | Region { fork; region = Branch } -> Printf.sprintf "region of fork %d" fork
   | Region { fork; region = Chunk { first; last } } ->
       Printf.sprintf "region of fork %d for %s to %s" fork
-        (place_to_string { root = Local first; projections = [] })
-        (place_to_string { root = Local last; projections = [] })
+        (place_to_string (local_place first))
+        (place_to_string (local_place last))
   | Region { fork; region = Task { function_value; item } } ->
       Printf.sprintf "region of fork %d as a task %s given %s" fork
-        (place_to_string { root = Local function_value; projections = [] })
-        (place_to_string { root = Local item; projections = [] })
+        (place_to_string (local_place function_value))
+        (place_to_string (local_place item))
   | Regions_end { fork } -> Printf.sprintf "end of fork %d" fork
   | Fork { branches } ->
       "fork "

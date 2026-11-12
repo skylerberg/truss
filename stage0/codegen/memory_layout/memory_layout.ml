@@ -74,6 +74,13 @@ let integer_size target = function
   | Int64 | UInt64 -> 8
   | USize | ISize -> target.usize_bytes
 
+let integer_range target integer =
+  let bits = 8 * integer_size target integer in
+  match integer with
+  | Int8 | Int16 | Int32 | Int64 | ISize ->
+      (Z.neg (Z.shift_left Z.one (bits - 1)), Z.pred (Z.shift_left Z.one (bits - 1)))
+  | UInt8 | UInt16 | UInt32 | UInt64 | USize -> (Z.zero, Z.pred (Z.shift_left Z.one bits))
+
 let scalar_size target = function
   | Integer integer -> integer_size target integer
   | Float32 -> 4
@@ -338,3 +345,5 @@ let rec to_string layout =
   in
   Printf.sprintf "%d/%d %s%s" layout.size layout.alignment form
     (match layout.niche with None -> "" | Some niche -> " " ^ niche_to_string niche)
+
+let has_zero_size env ty = (of_type env ty).size = 0

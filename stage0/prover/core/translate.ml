@@ -4064,13 +4064,7 @@ and current_bounds context : Interface.Impls.bounds =
         | Some signature -> signature.generics
         | None -> impl_generics current)
   in
-  fun parameter ->
-    List.concat_map
-      (fun (generic : T.generic) ->
-        match generic.kind with
-        | Type_generic bounds when generic.generic = parameter -> bounds
-        | _ -> [])
-      generics
+  fun parameter -> T.bounds_of generics parameter
 
 (* A trait's laws, and those of the traits it requires, as facts about a
    type, each quantified over its parameters. A law is shown for each
@@ -8581,11 +8575,10 @@ and leave_loop context frame frames =
   Option.map (end_scope ~outer:frame) (join_frames context frames)
 
 (* The checks at the end of each iteration of a loop that receives parts:
-   its invariants and the validity it keeps, with [yielded] the parts
-   received [through] the iteration. *)
+   its invariants and the validity it keeps, in the frames [with_through]
+   gives, whose [yielded] is the parts received through the iteration. *)
 and end_iterations context frame (node : statement) clauses (start : loop_start) ~head ~inside ~ends
-    ~breaks ~through =
-  let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
+    ~breaks ~with_through =
   loop_iterations context node head start.loop_costs ~mark:start.fresh_mark
     ~facts:(facts_since context start.facts_mark @ [ inside.condition ])
     ~ends:(List.map with_through ends) ~breaks:(List.map with_through breaks);
@@ -8593,8 +8586,7 @@ and end_iterations context frame (node : statement) clauses (start : loop_start)
     (fun (end_ : frame) ->
       check_invariants context (with_through end_) clauses ~when_:"after an iteration";
       check_kept_validity context end_ (span_of frame.source node.origin) start.kept)
-    ends;
-  with_through
+    ends
 
 (* A ghost count of a loop's iterations so far, when the loop counts a
    cost by them. *)
@@ -8641,11 +8633,13 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let frame, low = value context frame start in
       let frame, high = value context frame stop in
       let outer_yielded = frame.yielded in
-      check_invariants context
-        { frame with yielded = Some (empty_parts context frame element) }
-        clauses ~when_:"on entry to the loop";
+      (* In the loop's clauses, the pattern names the next index: [low] plus
+         the iterations so far. *)
+      let at_index (f : frame) next = snd (pattern_match context f pattern next element) in
+      let entry = at_index { frame with yielded = Some (empty_parts context frame element) } low in
+      check_invariants context entry clauses ~when_:"on entry to the loop";
       let start =
-        enter_loop context frame ~entry:frame clauses ~changed:(changed_places frame body) body
+        enter_loop context frame ~entry clauses ~changed:(changed_places frame body) body
       in
       let costs = start.loop_costs and head = start.havocked in
       (* The [n]th iteration, from 0, has the index [low + n]. *)
@@ -8672,11 +8666,13 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
                     &&& Operation ("<", [ Symbol position; iterations ])
                     ==> equal found (Operation ("+", [ low; Symbol position ]))) ))
        | None -> ());
+      let index = Costs.plus low iterations in
       let head =
-        loop_head context { head with yielded = Some before } costs ~iterations:(Some iterations)
+        loop_head context
+          (at_index { head with yielded = Some before } index)
+          costs ~iterations:(Some iterations)
       in
       assume_invariants context head clauses;
-      let index = Costs.plus low iterations in
       let exits = { breaks = []; continues = [] } in
       let inside =
         { (restrict head (L.Operation ("<", [ iterations; count ]))) with loop = Some exits }
@@ -8689,10 +8685,11 @@ and loop_over context frame (node : statement) (pattern : pattern) (iteration : 
       let ends =
         (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues
       in
-      let with_through =
-        end_iterations context frame node clauses start ~head ~inside ~ends ~breaks:exits.breaks
-          ~through
+      let with_through (f : frame) =
+        at_index { f with loop = frame.loop; yielded = Some through } (Costs.plus index (L.int 1))
       in
+      end_iterations context frame node clauses start ~head ~inside ~ends ~breaks:exits.breaks
+        ~with_through;
       let most = [ Costs.at_least_zero count ] in
       let exit_ =
         loop_exit context
@@ -9024,9 +9021,9 @@ and receiving_loop ?(each_iteration = fun ~head:_ ~ends:_ -> ()) context frame (
   let finished = block_value context inside body in
   let ends = (match finished with Some (frame, _) -> [ frame ] | None -> []) @ exits.continues in
   each_iteration ~head ~ends;
-  let with_through =
-    end_iterations context frame node clauses loop ~head ~inside ~ends ~breaks:exits.breaks ~through
-  in
+  let with_through (f : frame) = { f with loop = frame.loop; yielded = Some through } in
+  end_iterations context frame node clauses loop ~head ~inside ~ends ~breaks:exits.breaks
+    ~with_through;
   let ended = received.advance (restrict head (L.not_ received.another)) in
   let varies = made_since context loop.fresh_mark in
   let ended_facts = facts_since context ended_mark @ facts_since context loop.facts_mark in
@@ -9700,8 +9697,7 @@ let type_ ?reveal database (source : source) ~path =
       let ty =
         match Query.demand database Interface.Environment.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
-            T.Named
-              { path; arguments = Interface.Environment.generic_arguments interface.type_generics }
+            T.Named { path; arguments = Types.generic_arguments interface.type_generics }
         | _ -> T.Named { path; arguments = [] }
       in
       let start = { (empty_frame source) with self_type = Some ty } in

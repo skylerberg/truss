@@ -4,6 +4,8 @@ val stabilize : Nodes.t -> change
 val freeze : ?fixed:bool -> Nodes.t -> unit
 val unroot : Nodes.t -> ('key, 'value) Nodes.query -> 'key -> unit
 val executed : Nodes.t -> string list
+val computed : Nodes.t -> ('key, 'value) Nodes.query -> 'key list
+val result_label : ('key, 'value) Nodes.query -> 'key -> string
 val clear_log : Nodes.t -> unit
 val by_id : Nodes.node list -> Nodes.node list
 val differing : Nodes.t -> Nodes.node list

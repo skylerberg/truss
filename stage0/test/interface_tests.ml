@@ -661,7 +661,7 @@ let () =
           Database.Testing.set_text engine (module_of "app::main")
             (base ^ "\nimpl Hash for Point {\n  fn hash(self, hasher: mut Hasher) {}\n}\n");
           ignore (Query.demand database asker ()))
-        [ "asker()" ])
+        asker [ () ])
 
 (* What the review of interfaces found *)
 
