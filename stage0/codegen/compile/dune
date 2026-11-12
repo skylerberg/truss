@@ -1,3 +1,5 @@
+(include_subdirs qualified)
+
 (library
  (name compile)
  (libraries
@@ -20,7 +22,6 @@
   drops
   outline
   yields
-  lower
   reachable
   cbor
   blake3
@@ -29,4 +30,15 @@
   startup
   positions
   build
-  unix))
+  unix
+  monomorphic
+  zarith
+  storage
+  intrinsic
+  types
+  core
+  core_walk
+  syntax
+  infer
+  lir_builder
+  convention))

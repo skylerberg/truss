@@ -1,3 +1,5 @@
+(include_subdirs qualified)
+
 (library
  (name lexer)
- (libraries source diagnostic token scanner layout))
+ (libraries source diagnostic token unicode zarith))

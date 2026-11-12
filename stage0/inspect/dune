@@ -1,3 +1,0 @@
-(library
- (name inspect)
- (libraries path syntax syntax_walk resolve checked types))

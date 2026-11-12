@@ -96,6 +96,24 @@ develop as well as make it easier to bootstrap the compiler in parts.
   with "Revert". To squash safely, read `origin/main` once into a variable,
   merge that commit, and squash onto that commit.
 
+### Libraries
+
+- **A library is a contract with more than one consumer, or a unit that
+  must not see what its consumer sees.** Code that one library alone uses
+  is a module of that library, so that nothing else can come to depend on
+  it. It stays a library of its own when its short dependency list is what
+  keeps it apart from a layer, as `session` knows no compiler stage and the
+  passes over LIR, such as `drops`, know nothing of the front end.
+- **A unit of several modules inside a library is a subdirectory.** The
+  library's `dune` file sets `(include_subdirs qualified)`, the
+  subdirectory's module of its own name is its interface, and its other
+  modules are hidden from the rest of the library, as `lexer/scanner` is.
+- **Every dependency is listed.** `dune-project` sets
+  `(implicit_transitive_deps false)`, so a module names only the libraries
+  its own `dune` file lists, and those lists are the whole graph.
+- **Tests reach a library's hidden modules through `For_testing`,** a
+  submodule of its interface that only tests read.
+
 ### Documents
 
 Each document has one job, and a fact is stated in one of them:

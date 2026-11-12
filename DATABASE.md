@@ -88,8 +88,7 @@ The database is four layers, each behind one narrow interface:
 
 `Query` and `Engine` are two views of one implementation, `Incremental`,
 which nothing else names. These rules keep each interface narrow, so that
-each layer can be replaced without touching the others, and a test holds
-each of them by reading every layer's build file:
+each layer can be replaced without touching the others:
 
 - **Stages see only `Query`.** A stage never sees the engine, the store, the
   file system, worktrees, git, or another session.

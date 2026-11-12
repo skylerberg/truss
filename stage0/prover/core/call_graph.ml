@@ -12,7 +12,6 @@
 
 open Syntax
 module Names = Resolve.Names
-module C = Checked
 module T = Types
 
 type edge =

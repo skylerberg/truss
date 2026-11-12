@@ -1,6 +1,7 @@
 (library
  (name prover)
  (libraries
+  source
   logic
   solver
   query
@@ -8,7 +9,6 @@
   path
   well_known
   types
-  checked
   core
   core_walk
   syntax

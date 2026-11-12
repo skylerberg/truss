@@ -1,3 +1,5 @@
+module Intrinsics = Compile.For_testing.Intrinsics
+
 (* Calling the C library: its table against the system's headers, and
    programs that call its functions. *)
 

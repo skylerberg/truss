@@ -4,6 +4,8 @@
 
 (name truss)
 
+(implicit_transitive_deps false)
+
 (generate_opam_files true)
 
 (package

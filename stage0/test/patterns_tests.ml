@@ -1,3 +1,5 @@
+module Patterns = Type_checker.For_testing.Patterns
+
 (* The tests of exhaustiveness and reachability. *)
 
 open Harness

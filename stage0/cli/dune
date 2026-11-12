@@ -17,7 +17,6 @@
   resolve
   checked
   infer
-  inspect
   interface
   type_checker
   manifest
@@ -33,6 +32,8 @@
   solver
   prover
   running
-  compatibility
   token
-  database))
+  database
+  types
+  syntax_print
+  ownership))

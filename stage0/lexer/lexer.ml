@@ -17,3 +17,7 @@ let lex source =
   | _, _, true ->
       let tokens, diagnostics, _ = attempt source ~recovery:true in
       (tokens, diagnostics)
+
+module For_testing = struct
+  module Layout = Layout
+end

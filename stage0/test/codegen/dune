@@ -75,10 +75,8 @@
   unix
   monomorphic
   lir_builder
-  intrinsics
   resolve
   diagnostic
-  lower
   compile
   type_checker
   prover

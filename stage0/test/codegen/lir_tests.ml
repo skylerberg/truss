@@ -1,3 +1,5 @@
+module Intrinsics = Compile.For_testing.Intrinsics
+
 (* The LIR, the C it becomes, and the intrinsic operations. *)
 
 open Memory_layout
