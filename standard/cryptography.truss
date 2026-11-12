@@ -34,34 +34,6 @@ let sha512_constants: Array[UInt64, 80] = [
   0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817,
 ]
 
-internal fn wrapping_add_32(first: UInt32, second: UInt32) -> UInt32
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(first, right: second)
-}
-
-internal fn wrapping_add_64(first: UInt64, second: UInt64) -> UInt64
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::wrapping_add(first, right: second)
-}
-
-internal fn rotate_right_32(value: UInt32, right: USize) -> UInt32
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::rotate_right(value, amount: right)
-}
-
-internal fn rotate_right_64(value: UInt64, right: USize) -> UInt64
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::rotate_right(value, amount: right)
-}
-
 internal fn sha256_compress(state: mut Array[UInt32, 8], block: Array[UInt8, 64])
   cost time O(1)
   cost allocations == 0
@@ -85,32 +57,32 @@ internal fn sha256_compress(state: mut Array[UInt32, 8], block: Array[UInt8, 64]
     } else {
       let early = words[(round + 1) % 16]
       let late = words[(round + 14) % 16]
-      let small_0 = rotate_right_32(early, right: 7) ^ rotate_right_32(early, right: 18) ^ (early >> 3)
-      let small_1 = rotate_right_32(late, right: 17) ^ rotate_right_32(late, right: 19) ^ (late >> 10)
-      words[slot] = wrapping_add_32(wrapping_add_32(wrapping_add_32(words[slot], second: small_0), second: words[(round + 9) % 16]), second: small_1)
+      let small_0 = early.rotate_right(7) ^ early.rotate_right(18) ^ (early >> 3)
+      let small_1 = late.rotate_right(17) ^ late.rotate_right(19) ^ (late >> 10)
+      words[slot] = words[slot].wrapping_add(small_0).wrapping_add(words[(round + 9) % 16]).wrapping_add(small_1)
     }
-    let big_1 = rotate_right_32(e, right: 6) ^ rotate_right_32(e, right: 11) ^ rotate_right_32(e, right: 25)
+    let big_1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25)
     let choice = (e & f) ^ (~e & g)
-    let first = wrapping_add_32(wrapping_add_32(wrapping_add_32(wrapping_add_32(h, second: big_1), second: choice), second: sha256_constants[round]), second: words[slot])
-    let big_0 = rotate_right_32(a, right: 2) ^ rotate_right_32(a, right: 13) ^ rotate_right_32(a, right: 22)
+    let first = h.wrapping_add(big_1).wrapping_add(choice).wrapping_add(sha256_constants[round]).wrapping_add(words[slot])
+    let big_0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22)
     let majority = (a & b) ^ (a & c) ^ (b & c)
     h = g
     g = f
     f = e
-    e = wrapping_add_32(d, second: first)
+    e = d.wrapping_add(first)
     d = c
     c = b
     b = a
-    a = wrapping_add_32(first, second: wrapping_add_32(big_0, second: majority))
+    a = first.wrapping_add(big_0.wrapping_add(majority))
   }
-  state[0] = wrapping_add_32(state[0], second: a)
-  state[1] = wrapping_add_32(state[1], second: b)
-  state[2] = wrapping_add_32(state[2], second: c)
-  state[3] = wrapping_add_32(state[3], second: d)
-  state[4] = wrapping_add_32(state[4], second: e)
-  state[5] = wrapping_add_32(state[5], second: f)
-  state[6] = wrapping_add_32(state[6], second: g)
-  state[7] = wrapping_add_32(state[7], second: h)
+  state[0] = state[0].wrapping_add(a)
+  state[1] = state[1].wrapping_add(b)
+  state[2] = state[2].wrapping_add(c)
+  state[3] = state[3].wrapping_add(d)
+  state[4] = state[4].wrapping_add(e)
+  state[5] = state[5].wrapping_add(f)
+  state[6] = state[6].wrapping_add(g)
+  state[7] = state[7].wrapping_add(h)
 }
 
 internal fn sha512_compress(state: mut Array[UInt64, 8], block: Array[UInt8, 128])
@@ -136,32 +108,32 @@ internal fn sha512_compress(state: mut Array[UInt64, 8], block: Array[UInt8, 128
     } else {
       let early = words[(round + 1) % 16]
       let late = words[(round + 14) % 16]
-      let small_0 = rotate_right_64(early, right: 1) ^ rotate_right_64(early, right: 8) ^ (early >> 7)
-      let small_1 = rotate_right_64(late, right: 19) ^ rotate_right_64(late, right: 61) ^ (late >> 6)
-      words[slot] = wrapping_add_64(wrapping_add_64(wrapping_add_64(words[slot], second: small_0), second: words[(round + 9) % 16]), second: small_1)
+      let small_0 = early.rotate_right(1) ^ early.rotate_right(8) ^ (early >> 7)
+      let small_1 = late.rotate_right(19) ^ late.rotate_right(61) ^ (late >> 6)
+      words[slot] = words[slot].wrapping_add(small_0).wrapping_add(words[(round + 9) % 16]).wrapping_add(small_1)
     }
-    let big_1 = rotate_right_64(e, right: 14) ^ rotate_right_64(e, right: 18) ^ rotate_right_64(e, right: 41)
+    let big_1 = e.rotate_right(14) ^ e.rotate_right(18) ^ e.rotate_right(41)
     let choice = (e & f) ^ (~e & g)
-    let first = wrapping_add_64(wrapping_add_64(wrapping_add_64(wrapping_add_64(h, second: big_1), second: choice), second: sha512_constants[round]), second: words[slot])
-    let big_0 = rotate_right_64(a, right: 28) ^ rotate_right_64(a, right: 34) ^ rotate_right_64(a, right: 39)
+    let first = h.wrapping_add(big_1).wrapping_add(choice).wrapping_add(sha512_constants[round]).wrapping_add(words[slot])
+    let big_0 = a.rotate_right(28) ^ a.rotate_right(34) ^ a.rotate_right(39)
     let majority = (a & b) ^ (a & c) ^ (b & c)
     h = g
     g = f
     f = e
-    e = wrapping_add_64(d, second: first)
+    e = d.wrapping_add(first)
     d = c
     c = b
     b = a
-    a = wrapping_add_64(first, second: wrapping_add_64(big_0, second: majority))
+    a = first.wrapping_add(big_0.wrapping_add(majority))
   }
-  state[0] = wrapping_add_64(state[0], second: a)
-  state[1] = wrapping_add_64(state[1], second: b)
-  state[2] = wrapping_add_64(state[2], second: c)
-  state[3] = wrapping_add_64(state[3], second: d)
-  state[4] = wrapping_add_64(state[4], second: e)
-  state[5] = wrapping_add_64(state[5], second: f)
-  state[6] = wrapping_add_64(state[6], second: g)
-  state[7] = wrapping_add_64(state[7], second: h)
+  state[0] = state[0].wrapping_add(a)
+  state[1] = state[1].wrapping_add(b)
+  state[2] = state[2].wrapping_add(c)
+  state[3] = state[3].wrapping_add(d)
+  state[4] = state[4].wrapping_add(e)
+  state[5] = state[5].wrapping_add(f)
+  state[6] = state[6].wrapping_add(g)
+  state[7] = state[7].wrapping_add(h)
 }
 
 internal fn sha1_compress(state: mut Array[UInt32, 5], block: Array[UInt8, 64])
@@ -183,7 +155,7 @@ internal fn sha1_compress(state: mut Array[UInt32, 5], block: Array[UInt8, 64])
       words[slot] = (intrinsic::convert[UInt8, UInt32](block[4 * round]) << 24) | (intrinsic::convert[UInt8, UInt32](block[4 * round + 1]) << 16) | (intrinsic::convert[UInt8, UInt32](block[4 * round + 2]) << 8) | intrinsic::convert[UInt8, UInt32](block[4 * round + 3])
     } else {
       let mixed = words[(round + 13) % 16] ^ words[(round + 8) % 16] ^ words[(round + 2) % 16] ^ words[slot]
-      words[slot] = rotate_right_32(mixed, right: 31)
+      words[slot] = mixed.rotate_right(31)
     }
     var mix = b ^ c ^ d
     var constant: UInt32 = 0x6ed9eba1
@@ -196,18 +168,18 @@ internal fn sha1_compress(state: mut Array[UInt32, 5], block: Array[UInt8, 64])
     } else if round >= 60 {
       constant = 0xca62c1d6
     }
-    let next = wrapping_add_32(wrapping_add_32(wrapping_add_32(wrapping_add_32(rotate_right_32(a, right: 27), second: mix), second: e), second: constant), second: words[slot])
+    let next = a.rotate_right(27).wrapping_add(mix).wrapping_add(e).wrapping_add(constant).wrapping_add(words[slot])
     e = d
     d = c
-    c = rotate_right_32(b, right: 2)
+    c = b.rotate_right(2)
     b = a
     a = next
   }
-  state[0] = wrapping_add_32(state[0], second: a)
-  state[1] = wrapping_add_32(state[1], second: b)
-  state[2] = wrapping_add_32(state[2], second: c)
-  state[3] = wrapping_add_32(state[3], second: d)
-  state[4] = wrapping_add_32(state[4], second: e)
+  state[0] = state[0].wrapping_add(a)
+  state[1] = state[1].wrapping_add(b)
+  state[2] = state[2].wrapping_add(c)
+  state[3] = state[3].wrapping_add(d)
+  state[4] = state[4].wrapping_add(e)
 }
 
 internal type Sha1(state: Array[UInt32, 5], pending: Array[UInt8, 64], pending_length: USize, total: UInt64)
@@ -576,14 +548,14 @@ internal fn blake3_mix(state: mut Array[UInt32, 16], a: USize, b: USize, c: USiz
   cost time O(1)
   cost allocations == 0
 {
-  state[a] = wrapping_add_32(wrapping_add_32(state[a], second: state[b]), second: x)
-  state[d] = rotate_right_32(state[d] ^ state[a], right: 16)
-  state[c] = wrapping_add_32(state[c], second: state[d])
-  state[b] = rotate_right_32(state[b] ^ state[c], right: 12)
-  state[a] = wrapping_add_32(wrapping_add_32(state[a], second: state[b]), second: y)
-  state[d] = rotate_right_32(state[d] ^ state[a], right: 8)
-  state[c] = wrapping_add_32(state[c], second: state[d])
-  state[b] = rotate_right_32(state[b] ^ state[c], right: 7)
+  state[a] = state[a].wrapping_add(state[b]).wrapping_add(x)
+  state[d] = (state[d] ^ state[a]).rotate_right(16)
+  state[c] = state[c].wrapping_add(state[d])
+  state[b] = (state[b] ^ state[c]).rotate_right(12)
+  state[a] = state[a].wrapping_add(state[b]).wrapping_add(y)
+  state[d] = (state[d] ^ state[a]).rotate_right(8)
+  state[c] = state[c].wrapping_add(state[d])
+  state[b] = (state[b] ^ state[c]).rotate_right(7)
 }
 
 internal fn blake3_round(state: mut Array[UInt32, 16], message: Array[UInt32, 16])
@@ -1289,14 +1261,14 @@ internal fn blake2b_mix(
   requires a < 16 && b < 16 && c < 16 && d < 16
   cost time O(1)
 {
-  words[a] = wrapping_add_64(wrapping_add_64(words[a], second: words[b]), second: first)
-  words[d] = rotate_right_64(words[d] ^ words[a], right: 32)
-  words[c] = wrapping_add_64(words[c], second: words[d])
-  words[b] = rotate_right_64(words[b] ^ words[c], right: 24)
-  words[a] = wrapping_add_64(wrapping_add_64(words[a], second: words[b]), second: second)
-  words[d] = rotate_right_64(words[d] ^ words[a], right: 16)
-  words[c] = wrapping_add_64(words[c], second: words[d])
-  words[b] = rotate_right_64(words[b] ^ words[c], right: 63)
+  words[a] = words[a].wrapping_add(words[b]).wrapping_add(first)
+  words[d] = (words[d] ^ words[a]).rotate_right(32)
+  words[c] = words[c].wrapping_add(words[d])
+  words[b] = (words[b] ^ words[c]).rotate_right(24)
+  words[a] = words[a].wrapping_add(words[b]).wrapping_add(second)
+  words[d] = (words[d] ^ words[a]).rotate_right(16)
+  words[c] = words[c].wrapping_add(words[d])
+  words[b] = (words[b] ^ words[c]).rotate_right(63)
 }
 
 internal fn blake2b_compress(state: mut Array[UInt64, 8], block: Array[UInt64, 16], byte_count: UInt64, last: Bool)
@@ -1473,7 +1445,7 @@ internal fn argon2_multiply_add(first: UInt64, second: UInt64) -> UInt64
   cost time O(1)
 {
   let product = intrinsic::wrapping_multiply(first & 4294967295, right: second & 4294967295)
-  wrapping_add_64(wrapping_add_64(first, second: second), second: intrinsic::wrapping_multiply(product, right: 2))
+  first.wrapping_add(second).wrapping_add(intrinsic::wrapping_multiply(product, right: 2))
 }
 
 internal fn argon2_mix(words: mut Array[UInt64, 16], a: USize, b: USize, c: USize, d: USize)
@@ -1481,13 +1453,13 @@ internal fn argon2_mix(words: mut Array[UInt64, 16], a: USize, b: USize, c: USiz
   cost time O(1)
 {
   words[a] = argon2_multiply_add(words[a], second: words[b])
-  words[d] = rotate_right_64(words[d] ^ words[a], right: 32)
+  words[d] = (words[d] ^ words[a]).rotate_right(32)
   words[c] = argon2_multiply_add(words[c], second: words[d])
-  words[b] = rotate_right_64(words[b] ^ words[c], right: 24)
+  words[b] = (words[b] ^ words[c]).rotate_right(24)
   words[a] = argon2_multiply_add(words[a], second: words[b])
-  words[d] = rotate_right_64(words[d] ^ words[a], right: 16)
+  words[d] = (words[d] ^ words[a]).rotate_right(16)
   words[c] = argon2_multiply_add(words[c], second: words[d])
-  words[b] = rotate_right_64(words[b] ^ words[c], right: 63)
+  words[b] = (words[b] ^ words[c]).rotate_right(63)
 }
 
 internal fn argon2_permute(words: Array[UInt64, 16]) -> Array[UInt64, 16]
@@ -1591,7 +1563,7 @@ internal fn argon2_reference_index(
   }
   let lane_length_64: UInt64 = intrinsic::convert(shape.lane_length)
   let start_64: UInt64 = intrinsic::convert(start)
-  let reference_column: USize = intrinsic::convert(wrapping_add_64(start_64, second: relative) % lane_length_64)
+  let reference_column: USize = intrinsic::convert(start_64.wrapping_add(relative) % lane_length_64)
   shape.block_index(block_count, lane: reference_lane, column: reference_column)
 }
 
@@ -1625,7 +1597,7 @@ internal fn argon2_fill_segment(
   var addresses = argon2_zero_block
   let first: USize = if pass == 0 && slice == 0 { 2 } else { 0 }
   if independent && first != 0 {
-    address_input[6] = wrapping_add_64(address_input[6], second: 1)
+    address_input[6] = address_input[6].wrapping_add(1)
     addresses = argon2_addresses(address_input)
   }
   for index in first..shape.segment_length
@@ -1635,7 +1607,7 @@ internal fn argon2_fill_segment(
     let previous_column = intrinsic::wrapping_subtract(if column == 0 { shape.lane_length } else { column }, right: 1)
     let previous = memory[shape.block_index(block_count, lane: lane, column: previous_column)]
     if independent && index % 128 == 0 {
-      address_input[6] = wrapping_add_64(address_input[6], second: 1)
+      address_input[6] = address_input[6].wrapping_add(1)
       addresses = argon2_addresses(address_input)
     }
     let pseudo_random = if independent { addresses[index % 128] } else { previous[0] }
@@ -1841,14 +1813,14 @@ internal fn chacha20_quarter_round(state: mut Array[UInt32, 16], a: USize, b: US
   cost time O(1)
   cost allocations == 0
 {
-  state[a] = wrapping_add_32(state[a], second: state[b])
-  state[d] = rotate_right_32(state[d] ^ state[a], right: 16)
-  state[c] = wrapping_add_32(state[c], second: state[d])
-  state[b] = rotate_right_32(state[b] ^ state[c], right: 20)
-  state[a] = wrapping_add_32(state[a], second: state[b])
-  state[d] = rotate_right_32(state[d] ^ state[a], right: 24)
-  state[c] = wrapping_add_32(state[c], second: state[d])
-  state[b] = rotate_right_32(state[b] ^ state[c], right: 25)
+  state[a] = state[a].wrapping_add(state[b])
+  state[d] = (state[d] ^ state[a]).rotate_right(16)
+  state[c] = state[c].wrapping_add(state[d])
+  state[b] = (state[b] ^ state[c]).rotate_right(20)
+  state[a] = state[a].wrapping_add(state[b])
+  state[d] = (state[d] ^ state[a]).rotate_right(24)
+  state[c] = state[c].wrapping_add(state[d])
+  state[b] = (state[b] ^ state[c]).rotate_right(25)
 }
 
 internal fn chacha20_block(key: Array[UInt32, 8], counter: UInt32, nonce: Array[UInt8, 12]) -> Array[UInt32, 16]
@@ -1881,7 +1853,7 @@ internal fn chacha20_block(key: Array[UInt32, 8], counter: UInt32, nonce: Array[
   for index in 0..count
     cost allocations == 0
   {
-    state[index] = wrapping_add_32(state[index], second: initial[index])
+    state[index] = state[index].wrapping_add(initial[index])
   }
   state
 }

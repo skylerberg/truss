@@ -214,12 +214,9 @@ public fn Character.digit_value(self, radix: UInt32 = 10) -> Option[UInt32]
   cost time O(1)
 {
   let code = self.code()
-  let value: UInt32 = if code >= 48 && code <= 57 {
-    code - 48
-  } else if code >= 97 && code <= 122 {
-    code - 87
-  } else if code >= 65 && code <= 90 {
-    code - 55
+  let value: UInt32 = if code < 128 {
+    let byte: UInt8 = intrinsic::convert(code)
+    intrinsic::convert(byte.digit_value())
   } else {
     36
   }
@@ -233,10 +230,9 @@ public fn Character.from_digit(value: UInt32, radix: UInt32 = 10) -> Option[Char
 {
   if value >= radix {
     None
-  } else if value < 10 {
-    Some(intrinsic::convert(value + 48))
   } else {
-    Some(intrinsic::convert(value + 87))
+    let digit: UInt8 = intrinsic::convert(value)
+    Some(intrinsic::convert(digit.digit_byte(uppercase: false)))
   }
 }
 

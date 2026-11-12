@@ -84,30 +84,6 @@ internal fn is_sub_delimiter(byte: UInt8) -> Bool
   byte == 33 || byte == 36 || (byte >= 38 && byte <= 44) || byte == 59 || byte == 61
 }
 
-internal fn hexadecimal_value(byte: UInt8) -> UInt8
-  ensures result <= 16
-  cost time O(1)
-  cost allocations == 0
-{
-  if byte >= 48 && byte <= 57 {
-    byte - 48
-  } else if byte >= 97 && byte <= 102 {
-    byte - 87
-  } else if byte >= 65 && byte <= 70 {
-    byte - 55
-  } else {
-    16
-  }
-}
-
-internal fn hexadecimal_digit(value: UInt8) -> UInt8
-  requires value < 16
-  cost time O(1)
-  cost allocations == 0
-{
-  if value < 10 { value + 48 } else { value + 55 }
-}
-
 internal type UrlPart = InUserInformation | InHost | InPath | InQuery
   derives Equal
 
@@ -190,7 +166,7 @@ internal fn validate(text: StringSlice, from: USize, to: USize, place: UrlPart) 
       if to - index < 3 {
         return Some(ParseError.InvalidPercentEncoding(offset: index))
       }
-      if hexadecimal_value(text.byte(index + 1)) == 16 || hexadecimal_value(text.byte(index + 2)) == 16 {
+      if text.byte(index + 1).digit_value() >= 16 || text.byte(index + 2).digit_value() >= 16 {
         return Some(ParseError.InvalidPercentEncoding(offset: index))
       }
       index += 3
@@ -244,27 +220,10 @@ internal fn parse_port(text: StringSlice, from: USize, to: USize) -> Result[Opti
   if from == to {
     return Ok(None)
   }
-  var value: UInt32 = 0
-  var index = from
-  while index < to
-    invariant from <= index
-    invariant index <= to
-    invariant value <= 65535
-    decreases to - index
-    cost time O(index - from)
-  {
-    let byte = text.byte(index)
-    if byte < 48 || byte > 57 {
-      return Err(ParseError.InvalidPort)
-    }
-    let next = value * 10 + intrinsic::convert[UInt8, UInt32](byte - 48)
-    if next > 65535 {
-      return Err(ParseError.InvalidPort)
-    }
-    value = next
-    index += 1
+  match network::parse_number(text, from: from, to: to, limit: 65535) {
+    Ok(port) => Ok(Some(intrinsic::convert(port)))
+    Err(_) => Err(ParseError.InvalidPort)
   }
-  Ok(Some(intrinsic::convert(value)))
 }
 
 internal fn parse_host(text: StringSlice, from: USize, to: USize) -> Result[Host, ParseError]
@@ -462,8 +421,8 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
       intrinsic::storage_push(mut output, value: byte)
     } else {
       intrinsic::storage_push(mut output, value: 37)
-      intrinsic::storage_push(mut output, value: hexadecimal_digit(byte / 16))
-      intrinsic::storage_push(mut output, value: hexadecimal_digit(byte % 16))
+      intrinsic::storage_push(mut output, value: (byte / 16).digit_byte(uppercase: true))
+      intrinsic::storage_push(mut output, value: (byte % 16).digit_byte(uppercase: true))
       budget -= 2
     }
   }
@@ -491,9 +450,9 @@ internal fn percent_decode_bytes(text: StringSlice, from: USize, to: USize, form
       if to - index < 3 {
         return Err(ParseError.InvalidPercentEncoding(offset: index))
       }
-      let high = hexadecimal_value(text.byte(index + 1))
-      let low = hexadecimal_value(text.byte(index + 2))
-      if high == 16 || low == 16 {
+      let high = text.byte(index + 1).digit_value()
+      let low = text.byte(index + 2).digit_value()
+      if high >= 16 || low >= 16 {
         return Err(ParseError.InvalidPercentEncoding(offset: index))
       }
       intrinsic::storage_push(mut output, value: high * 16 + low)

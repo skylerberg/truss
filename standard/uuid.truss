@@ -112,21 +112,6 @@ impl Display for Uuid {
   }
 }
 
-internal fn digit_value(byte: UInt8) -> UInt64
-  ensures result <= 16
-  cost time O(1)
-{
-  if byte >= 48 && byte <= 57 {
-    intrinsic::convert(byte - 48)
-  } else if byte >= 97 && byte <= 102 {
-    intrinsic::convert(byte - 87)
-  } else if byte >= 65 && byte <= 70 {
-    intrinsic::convert(byte - 55)
-  } else {
-    16
-  }
-}
-
 internal fn is_hyphen_place(index: USize) -> Bool
   cost time O(1)
 {
@@ -154,8 +139,8 @@ impl text::Parse for Uuid {
           return Err(ParseError.InvalidCharacter(offset: index))
         }
       } else {
-        let value = digit_value(byte)
-        if value == 16 {
+        let value: UInt64 = intrinsic::convert(byte.digit_value())
+        if value >= 16 {
           return Err(ParseError.InvalidCharacter(offset: index))
         }
         if digits < 16 {

@@ -1264,7 +1264,7 @@ impl Handles for World
         match completion {
           Bytes(bytes) => {
             let count = if bytes.length() < limit { bytes.length() } else { limit }
-            streams::append_bytes(mut buffer, bytes: bytes.slice_range(0, stop: count))
+            mut buffer.append_slice(bytes.slice_range(0, stop: count))
             return Ok(count)
           }
           _ => return Err(SystemError.InvalidData)
@@ -1289,7 +1289,7 @@ impl Handles for World
       }
     })?
     let count = if read.length() < limit { read.length() } else { limit }
-    streams::append_bytes(mut buffer, bytes: read.slice_range(0, stop: count))
+    mut buffer.append_slice(read.slice_range(0, stop: count))
     Ok(count)
   }
 
@@ -1342,7 +1342,7 @@ impl Handles for World
       }
     })?
     let count = if read.length() < limit { read.length() } else { limit }
-    streams::append_bytes(mut buffer, bytes: read.slice_range(0, stop: count))
+    mut buffer.append_slice(read.slice_range(0, stop: count))
     Ok(count)
   }
 
@@ -1510,7 +1510,7 @@ impl Handles for World
         match completion {
           Datagram(bytes, from) => {
             let count = if bytes.length() < limit { bytes.length() } else { limit }
-            streams::append_bytes(mut buffer, bytes: bytes.slice_range(0, stop: count))
+            mut buffer.append_slice(bytes.slice_range(0, stop: count))
             Ok(network::Datagram(length: count, from: from))
           }
           _ => Err(SystemError.InvalidData)
