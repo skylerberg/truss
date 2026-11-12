@@ -113,7 +113,7 @@ type signature = {
   path : Path.t;
   before : string option;
   after : string option;
-  read_by : Path.t list;
+  dependents : Path.t list;
 }
 
 (* The effect of the new versions on the project's code, computed in a
@@ -135,24 +135,26 @@ let consequences (project : Project.t) text =
            | _ -> None)
          (Database.changes trial project.session))
   in
-  let readers = lazy (Database.dependencies trial) in
+  let edges = Database.dependents trial changed in
   let signatures =
     List.filter_map
       (fun path ->
         match
           List.sort_uniq Path.compare
             (List.filter_map
-               (fun (reader, _, _) -> if ours reader then Some reader else None)
-               (Database.readers (Lazy.force readers) path))
+               (fun (edge : Database.edge) ->
+                 if Path.equal edge.dependency path && ours edge.dependent then Some edge.dependent
+                 else None)
+               edges)
         with
         | [] -> None
-        | read_by ->
+        | dependents ->
             Some
               {
                 path;
                 before = Signatures.of_path project.context path;
                 after = Signatures.of_path (Database.context trial) path;
-                read_by;
+                dependents;
               })
       changed
   in
@@ -186,7 +188,8 @@ let report ~json ~lock ~signatures ~broken =
                         ("after", Json.option (fun text -> Json.String text) changed.after);
                         ( "read_by",
                           Json.List
-                            (List.map (fun path -> Json.String (Path.show path)) changed.read_by) );
+                            (List.map (fun path -> Json.String (Path.show path)) changed.dependents)
+                        );
                       ])
                   signatures) );
            ("breaks", Json.List (List.map (fun sentence -> Json.String sentence) broken));
@@ -204,7 +207,7 @@ let report ~json ~lock ~signatures ~broken =
             changed.before;
           Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) changed.after;
           Output.printf "    read by: %s\n"
-            (String.concat ", " (List.map Path.show changed.read_by)))
+            (String.concat ", " (List.map Path.show changed.dependents)))
         signatures
     end;
     if broken <> [] then begin

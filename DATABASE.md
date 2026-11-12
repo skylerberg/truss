@@ -967,7 +967,9 @@ path and part, and files relative to the worktree's root, never nodes.
 | Question | Asked by | Answer |
 |---|---|---|
 | A session and its diagnostics | `truss check` and every command that reads code | The session for a directory's worktree, current with its files; the packages the directory is about; each file's diagnostics; and the manifests that could not be read |
-| What reads what | `truss references`, `truss dependencies`, `truss holes`, `truss impact` | For every definition, what each of its parts reads of other definitions' parts |
+| Dependencies | `truss dependencies` | For each part of the given definitions, the parts of other definitions it read |
+| Dependents | `truss references`, `truss impact`, `truss upgrade` | The parts of other definitions that read a part of the given definitions |
+| Reachable definitions | `truss holes`, `truss build`, `truss run` | For each root, every definition it reaches through dependencies |
 | What a name means | `truss references`, `truss dependencies` | The definitions a name means: a full path, or the end of one |
 | What changed since a commit | `truss impact` | A session at a commit, and every part a change between two sessions can reach, with whether it changed |
 | Where two worktrees meet | `truss overlap`, `truss check` | Where two sessions' changes meet, and the diagnostics a merge of the two would have that neither has |
@@ -1191,10 +1193,10 @@ with the same inputs.
   added or removed and when any of those changes, and its cost follows the
   package. Splitting it into a result for each definition and one for each
   lookup would make it follow the change.
-- **Questions answered from an index.** A graph question walks the state to
-  find what reads what, which costs the state's size each time it is asked.
-  An index kept current like any result would answer in the size of the
-  answer.
+- **Questions answered from an index.** A question about dependents
+  computes every definition's dependencies, which costs the state's size
+  each time it is asked. An index kept current like any result would answer
+  in the size of the answer.
 - **Running affected tests unasked** is not decided. Test keys stay current
   once a test run has asked for them, so the background process could run
   the tests whose keys changed while the machine is idle, and have their

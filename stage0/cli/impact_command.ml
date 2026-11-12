@@ -14,9 +14,7 @@ type change = {
   status : [ `Added | `Removed | `Changed of string list ];  (** The parts that changed *)
   before : string option;  (** The signature at the base, when it changed *)
   after : string option;  (** The signature now *)
-  read_by : (Path.t * string * string) list;
-      (** The dependents of its changed signature: each dependent, its part, and the part it reads
-      *)
+  dependents : Database.edge list;  (** The edges to its changed signature *)
 }
 
 let declarations context packages =
@@ -51,32 +49,35 @@ let changes (project : Project.t) base =
       (declarations context (Database.packages session))
   in
   let old_paths = paths old_context base and now = paths context mine in
-  let dependencies = lazy (Database.dependencies mine) in
+  let is_existing path = List.exists (Path.equal path) old_paths in
+  let is_signature_changed path =
+    List.exists (fun part -> List.mem part Signatures.parts) (Hashtbl.find changed path)
+  in
+  let dependents =
+    Database.dependents mine
+      (List.filter (fun path -> is_existing path && is_signature_changed path) !order)
+  in
   let changes =
     List.rev_map
       (fun path ->
         let parts = Hashtbl.find changed path in
-        if not (List.exists (Path.equal path) old_paths) then
+        if not (is_existing path) then
           {
             path;
             status = `Added;
             before = None;
             after = Signatures.of_path context path;
-            read_by = [];
+            dependents = [];
           }
         else
-          let signature_changed = List.exists (fun part -> List.mem part Signatures.parts) parts in
           {
             path;
             status = `Changed parts;
-            before = (if signature_changed then Signatures.of_path old_context path else None);
-            after = (if signature_changed then Signatures.of_path context path else None);
-            read_by =
-              (if signature_changed then
-                 List.filter
-                   (fun (reader, _, _) -> not (Path.equal reader path))
-                   (Database.readers (Lazy.force dependencies) path)
-               else []);
+            before =
+              (if is_signature_changed path then Signatures.of_path old_context path else None);
+            after = (if is_signature_changed path then Signatures.of_path context path else None);
+            dependents =
+              List.filter (fun (edge : Database.edge) -> Path.equal edge.dependency path) dependents;
           })
       !order
   in
@@ -91,7 +92,7 @@ let changes (project : Project.t) base =
               status = `Removed;
               before = Signatures.of_path old_context path;
               after = None;
-              read_by = [];
+              dependents = [];
             })
       old_paths
   in
@@ -127,17 +128,17 @@ let tests_changed (project : Project.t) base =
 
 let status_word = function `Added -> "added" | `Removed -> "removed" | `Changed _ -> "changed"
 
-let readers_json read_by =
+let dependents_json dependents =
   Json.List
     (List.map
-       (fun (reader, part, read) ->
+       (fun (edge : Database.edge) ->
          Json.Object
            [
-             ("reader", Json.String (Path.show reader));
-             ("part", Json.String part);
-             ("reads", Json.String read);
+             ("reader", Json.String (Path.show edge.dependent));
+             ("part", Json.String edge.dependent_part);
+             ("reads", Json.String edge.dependency_part);
            ])
-       read_by)
+       dependents)
 
 let change_json change =
   Json.Object
@@ -151,7 +152,7 @@ let change_json change =
           | _ -> []) );
       ("before", Json.option (fun text -> Json.String text) change.before);
       ("after", Json.option (fun text -> Json.String text) change.after);
-      ("read_by", readers_json change.read_by);
+      ("read_by", dependents_json change.dependents);
     ]
 
 let print_change change =
@@ -161,10 +162,11 @@ let print_change change =
     | status -> status_word status);
   Option.iter (fun text -> Output.print_line (Signatures.labeled "was:" text)) change.before;
   Option.iter (fun text -> Output.print_line (Signatures.labeled "now:" text)) change.after;
-  if change.read_by <> [] then
+  if change.dependents <> [] then
     Output.printf "    read by: %s\n"
       (String.concat ", "
-         (List.sort_uniq compare (List.map (fun (reader, _, _) -> Path.show reader) change.read_by)))
+         (List.sort_uniq compare
+            (List.map (fun (edge : Database.edge) -> Path.show edge.dependent) change.dependents)))
 
 let run ~directory ~base ~json =
   let project = Project.load directory in

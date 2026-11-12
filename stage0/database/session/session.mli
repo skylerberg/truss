@@ -130,31 +130,7 @@ val logging : bool ref
 
 (** {1 What a state's graph answers} *)
 
-module Graph : sig
-  type dependencies
-
-  val dependencies : Engine.t -> dependencies
-  (** For every definition a state holds results about, what its parts read of other definitions'
-      parts. *)
-
-  val reads : dependencies -> Path.t -> (Path.t * string * string) list
-  val readers : dependencies -> Path.t -> (Path.t * string * string) list
-
-  type difference = Changed | Added | Same
-
-  val changes : Engine.t -> Engine.t -> (Path.t * string option * difference) list
-  (** Every part of a definition that a change between two states could reach, in the first, with
-      how it compares with the same part in the second. *)
-
-  type place = { path : Path.t option; part : string option; label : string }
-
-  type overlap =
-    | Both_change of place
-    | Reads of { this_worktree : bool; change : place; reads : place }
-
-  val overlaps : base:Engine.t -> Engine.t -> Engine.t -> overlap list
-  (** Where two states' changes from a common base meet. *)
-end
+module Graph = Graph
 
 (** {1 The background process} *)
 
