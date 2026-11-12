@@ -1,0 +1,457 @@
+use standard::text
+
+public opaque type Html(text: String)
+  derives Equal, Copyable
+
+public fn Html.trusted(text: own String) -> Html {
+  Html(text: own text)
+}
+
+public fn Html.empty() -> Html {
+  Html(text: "")
+}
+
+public fn Html.text(self) -> StringSlice {
+  self.text.slice()
+}
+
+public fn Html.joined(parts: Slice[Html], separator: StringSlice = "") -> Html {
+  var text = ""
+  for index in 0..parts.length() {
+    if index > 0 {
+      mut text.push(separator)
+    }
+    mut text.push(parts[index].text.slice())
+  }
+  Html(text: own text)
+}
+
+impl Display for Html {
+  fn display(self, output: mut TextBuilder)
+  {
+    mut output.write(self.text.slice())
+  }
+}
+
+fn push_escaped(output: mut String, text: StringSlice) {
+  var run: USize = 0
+  for index in 0..text.length() {
+    let byte = text.byte(index)
+    let replacement = if byte == 38 {
+      "&amp;"
+    } else if byte == 60 {
+      "&lt;"
+    } else if byte == 62 {
+      "&gt;"
+    } else if byte == 34 {
+      "&quot;"
+    } else if byte == 39 {
+      "&#39;"
+    } else {
+      ""
+    }
+    if replacement.length() > 0 {
+      if run < index {
+        mut output.push(text.part(run, to: index))
+      }
+      mut output.push(replacement.slice())
+      run = index + 1
+    }
+  }
+  if run < text.length() {
+    mut output.push(text.part(run, to: text.length()))
+  }
+}
+
+public fn escape(text: StringSlice) -> String {
+  var output = String.with_capacity(text.length())
+  push_escaped(mut output, text: text)
+  output
+}
+
+type Content =
+  | Text(text: String)
+  | Markup(text: String)
+
+public opaque type Part(content: Content)
+
+impl From[StringSlice] for Part {
+  fn from(value: own StringSlice) -> Part {
+    Part(content: Content.Text(text: value.to_string()))
+  }
+}
+
+impl From[String] for Part {
+  fn from(value: own String) -> Part {
+    Part(content: Content.Text(text: own value))
+  }
+}
+
+impl From[Int64] for Part {
+  fn from(value: own Int64) -> Part {
+    Part(content: Content.Text(text: "${value}"))
+  }
+}
+
+impl From[UInt64] for Part {
+  fn from(value: own UInt64) -> Part {
+    Part(content: Content.Text(text: "${value}"))
+  }
+}
+
+impl From[Float64] for Part {
+  fn from(value: own Float64) -> Part {
+    Part(content: Content.Text(text: "${value}"))
+  }
+}
+
+impl From[Bool] for Part {
+  fn from(value: own Bool) -> Part {
+    Part(content: Content.Text(text: if value { "true" } else { "false" }))
+  }
+}
+
+impl From[Html] for Part {
+  fn from(value: own Html) -> Part {
+    Part(content: Content.Markup(text: own value.text))
+  }
+}
+
+impl From[List[Html]] for Part {
+  fn from(value: own List[Html]) -> Part {
+    Part(content: Content.Markup(text: Html.joined(value.slice()).text.copy()))
+  }
+}
+
+type State =
+  | Data
+  | TagOpen
+  | TagName
+  | EndTag
+  | InTag
+  | AttributeName
+  | AfterAttributeName
+  | BeforeValue
+  | DoubleQuoted
+  | SingleQuoted
+  | Unquoted
+  | Comment
+  | Declaration
+  | RawText
+  derives Equal
+
+type Place =
+  | InText
+  | InValue(url: Bool)
+  | Unsafe
+  derives Equal
+
+type Scanner(state: State, tag: List[UInt8], attribute: List[UInt8], raw_tag: List[UInt8], dashes: USize)
+
+fn Scanner.new() -> Scanner
+  cost time O(1)
+{
+  Scanner(state: State.Data, tag: [], attribute: [], raw_tag: [], dashes: 0)
+}
+
+fn is_space(byte: UInt8) -> Bool
+  cost time O(1)
+{
+  byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13
+}
+
+fn is_letter(byte: UInt8) -> Bool
+  cost time O(1)
+{
+  (65 <= byte && byte <= 90) || (97 <= byte && byte <= 122)
+}
+
+fn lowered(byte: UInt8) -> UInt8
+  cost time O(1)
+{
+  if 65 <= byte && byte <= 90 { byte + 32 } else { byte }
+}
+
+fn push_byte(name: mut List[UInt8], byte: UInt8)
+  cost time finite
+{
+  mut name.push(lowered(byte))
+}
+
+fn named(name: Slice[UInt8], expected: StringSlice) -> Bool
+  cost time finite
+{
+  name == expected.bytes()
+}
+
+fn is_raw_text_tag(tag: Slice[UInt8]) -> Bool
+  cost time finite
+{
+  named(tag, expected: "script") || named(tag, expected: "style") || named(tag, expected: "textarea")
+    || named(tag, expected: "title")
+}
+
+fn is_url_attribute(name: Slice[UInt8]) -> Bool
+  cost time finite
+{
+  named(name, expected: "href") || named(name, expected: "src") || named(name, expected: "action")
+    || named(name, expected: "formaction") || named(name, expected: "cite") || named(name, expected: "poster")
+    || named(name, expected: "background") || named(name, expected: "manifest") || named(name, expected: "xlink:href")
+}
+
+fn is_unsafe_attribute(name: Slice[UInt8]) -> Bool
+  cost time finite
+{
+  (name.length() >= 2 && name[0] == 111 && name[1] == 110) || named(name, expected: "style")
+    || named(name, expected: "srcdoc") || named(name, expected: "srcset")
+}
+
+fn closes_raw_text(rest: StringSlice, tag: Slice[UInt8]) -> Bool
+  cost time finite
+{
+  if rest.length() < tag.length() + 1 || rest.byte(0) != 47 {
+    return false
+  }
+  for index in 0..tag.length() {
+    if lowered(rest.byte(index + 1)) != tag[index] {
+      return false
+    }
+  }
+  true
+}
+
+fn end_tag(scanner: mut Scanner)
+  cost time finite
+{
+  if is_raw_text_tag(scanner.tag.slice()) {
+    scanner.raw_tag = scanner.tag.copy()
+    scanner.state = State.RawText
+  } else {
+    scanner.state = State.Data
+  }
+}
+
+fn step(scanner: mut Scanner, byte: UInt8, rest: StringSlice)
+  cost time finite
+{
+  match scanner.state {
+    Data => {
+      if byte == 60 {
+        scanner.state = State.TagOpen
+      }
+    }
+    TagOpen => {
+      if is_letter(byte) {
+        scanner.tag = []
+        push_byte(mut scanner.tag, byte: byte)
+        scanner.state = State.TagName
+      } else if byte == 47 {
+        scanner.state = State.EndTag
+      } else if byte == 33 {
+        if rest.starts_with("--") {
+          scanner.state = State.Comment
+          scanner.dashes = 0
+        } else {
+          scanner.state = State.Declaration
+        }
+      } else {
+        scanner.state = State.Data
+      }
+    }
+    TagName => {
+      if is_space(byte) || byte == 47 {
+        scanner.state = State.InTag
+      } else if byte == 62 {
+        end_tag(mut scanner)
+      } else {
+        push_byte(mut scanner.tag, byte: byte)
+      }
+    }
+    EndTag => {
+      if byte == 62 {
+        scanner.state = State.Data
+      }
+    }
+    InTag => {
+      if byte == 62 {
+        end_tag(mut scanner)
+      } else if !is_space(byte) && byte != 47 {
+        scanner.attribute = []
+        push_byte(mut scanner.attribute, byte: byte)
+        scanner.state = State.AttributeName
+      }
+    }
+    AttributeName => {
+      if byte == 61 {
+        scanner.state = State.BeforeValue
+      } else if is_space(byte) {
+        scanner.state = State.AfterAttributeName
+      } else if byte == 62 {
+        end_tag(mut scanner)
+      } else if byte == 47 {
+        scanner.state = State.InTag
+      } else {
+        push_byte(mut scanner.attribute, byte: byte)
+      }
+    }
+    AfterAttributeName => {
+      if byte == 61 {
+        scanner.state = State.BeforeValue
+      } else if byte == 62 {
+        end_tag(mut scanner)
+      } else if !is_space(byte) && byte != 47 {
+        scanner.attribute = []
+        push_byte(mut scanner.attribute, byte: byte)
+        scanner.state = State.AttributeName
+      }
+    }
+    BeforeValue => {
+      if byte == 34 {
+        scanner.state = State.DoubleQuoted
+      } else if byte == 39 {
+        scanner.state = State.SingleQuoted
+      } else if byte == 62 {
+        end_tag(mut scanner)
+      } else if !is_space(byte) {
+        scanner.state = State.Unquoted
+      }
+    }
+    DoubleQuoted => {
+      if byte == 34 {
+        scanner.state = State.InTag
+      }
+    }
+    SingleQuoted => {
+      if byte == 39 {
+        scanner.state = State.InTag
+      }
+    }
+    Unquoted => {
+      if is_space(byte) {
+        scanner.state = State.InTag
+      } else if byte == 62 {
+        end_tag(mut scanner)
+      }
+    }
+    Comment => {
+      if byte == 62 && scanner.dashes >= 2 {
+        scanner.state = State.Data
+      }
+      scanner.dashes = if byte == 45 { scanner.dashes.saturating_add(1) } else { 0 }
+    }
+    Declaration => {
+      if byte == 62 {
+        scanner.state = State.Data
+      }
+    }
+    RawText => {
+      if byte == 60 && closes_raw_text(rest, tag: scanner.raw_tag.slice()) {
+        scanner.state = State.EndTag
+      }
+    }
+  }
+}
+
+fn scan(scanner: mut Scanner, text: StringSlice)
+  cost time finite
+{
+  for index in 0..text.length() {
+    step(mut scanner, byte: text.byte(index), rest: text.part(index + 1, to: text.length()))
+  }
+}
+
+fn place_of(scanner: Scanner) -> Place
+  cost time finite
+{
+  match scanner.state {
+    Data => Place.InText
+    DoubleQuoted => if is_unsafe_attribute(scanner.attribute.slice()) {
+      Place.Unsafe
+    } else {
+      Place.InValue(url: is_url_attribute(scanner.attribute.slice()))
+    }
+    SingleQuoted => if is_unsafe_attribute(scanner.attribute.slice()) {
+      Place.Unsafe
+    } else {
+      Place.InValue(url: is_url_attribute(scanner.attribute.slice()))
+    }
+    _ => Place.Unsafe
+  }
+}
+
+fn places(literals: Slice[text::Literal]) -> List[Place]
+  cost time finite
+{
+  var scanner = Scanner.new()
+  var found: List[Place] = []
+  for index in 0..literals.length() {
+    scan(mut scanner, text: literals[index].text())
+    if index + 1 < literals.length() {
+      mut found.push(place_of(scanner))
+    }
+  }
+  found
+}
+
+public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
+  cost time finite
+{
+  for place in places(literals) {
+    if place == Place.Unsafe {
+      return false
+    }
+  }
+  true
+}
+
+fn is_safe_url(text: StringSlice) -> Bool {
+  let trimmed = text.trim()
+  var scheme_end: USize = 0
+  var found = false
+  var colon = false
+  for index in 0..trimmed.length() {
+    let byte = trimmed.byte(index)
+    if !found && (byte == 58 || byte == 47 || byte == 63 || byte == 35) {
+      found = true
+      colon = byte == 58
+      scheme_end = index
+    }
+  }
+  if !colon || scheme_end > trimmed.length() {
+    return true
+  }
+  let scheme = trimmed.part(0, to: scheme_end).to_ascii_lowercase()
+  scheme == "http" || scheme == "https" || scheme == "mailto" || scheme == "tel"
+}
+
+impl FromTemplate for Html {
+  type Part = Part
+
+  fn from_template(template: Template[Part]) -> Html
+    requires is_valid_template(template.literals)
+  {
+    let kinds = places(template.literals.slice())
+    var output = ""
+    for index in 0..template.literals.length() {
+      mut output.push(template.literals[index].text())
+      if index < template.parts.length() && index < kinds.length() {
+        let place = kinds[index]
+        match template.parts[index].content {
+          Text(text) => match place {
+            InValue(url) => if url && !is_safe_url(text.slice()) {
+              mut output.push("about:invalid")
+            } else {
+              push_escaped(mut output, text: text.slice())
+            }
+            _ => push_escaped(mut output, text: text.slice())
+          }
+          Markup(text) => match place {
+            InText => mut output.push(text.slice())
+            _ => push_escaped(mut output, text: text.slice())
+          }
+        }
+      }
+    }
+    Html(text: own output)
+  }
+}
