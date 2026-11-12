@@ -476,7 +476,7 @@ fn null_terminated(text: StringSlice) -> intrinsic::Storage[UInt8]
   var buffer: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(0)
   growth::reserve(mut buffer, additional: text.length())
   for index in 0..text.length()
-    invariant intrinsic::storage_length(buffer) == yielded.length()
+    invariant intrinsic::storage_length(buffer) == index
     invariant intrinsic::storage_capacity(buffer) >= text.length()
   {
     intrinsic::storage_push(mut buffer, value: text.byte(index))

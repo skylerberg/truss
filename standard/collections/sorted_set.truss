@@ -537,13 +537,13 @@ public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: (fn(El
   var kept: USize = 0
   for index in 0..count
     invariant elements.length() == count
-    invariant kept <= yielded.length()
+    invariant kept <= index
     invariant forall i in 0..kept => forall j in 0..kept =>
       i < j ==> elements.model()[i] < elements.model()[j]
-    invariant forall i in 0..kept => forall j in yielded.length()..elements.model().length() =>
+    invariant forall i in 0..kept => forall j in index..count =>
       elements.model()[i] < elements.model()[j]
-    invariant forall i in yielded.length()..elements.model().length() =>
-      forall j in yielded.length()..elements.model().length() =>
+    invariant forall i in index..count =>
+      forall j in index..count =>
         i < j ==> elements.model()[i] < elements.model()[j]
   {
     if keep(elements[index]) {

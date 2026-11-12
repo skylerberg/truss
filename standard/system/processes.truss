@@ -72,8 +72,8 @@ fn begin(command: processes::Command) -> Result[Started, SystemError] {
 
   let size = intrinsic::libc_spawn_file_actions_size()
   var actions: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
-  for _ in 0..size
-    invariant intrinsic::storage_length(actions) == yielded.length()
+  for index in 0..size
+    invariant intrinsic::storage_length(actions) == index
     invariant intrinsic::storage_capacity(actions) == size
   {
     intrinsic::storage_push(mut actions, value: 0)
@@ -174,7 +174,7 @@ fn addresses(texts: intrinsic::View[UInt8], starts: intrinsic::View[USize]) -> i
   let count = intrinsic::view_length(starts)
   var all: intrinsic::Storage[USize] = intrinsic::storage_with_capacity(count + 1)
   for index in 0..count
-    invariant intrinsic::storage_length(all) == yielded.length()
+    invariant intrinsic::storage_length(all) == index
     invariant intrinsic::storage_capacity(all) == count + 1
   {
     let start = intrinsic::view_at(starts, index: index)
@@ -323,7 +323,7 @@ fn add_without_zero_byte(bytes: intrinsic::View[UInt8], texts: mut intrinsic::St
   let length = intrinsic::view_length(bytes)
   growth::reserve(mut texts, additional: length + 1)
   for index in 0..length
-    invariant intrinsic::storage_length(texts) == start + yielded.length()
+    invariant intrinsic::storage_length(texts) == start + index
     invariant intrinsic::storage_capacity(texts) >= start + length + 1
   {
     let byte = intrinsic::view_at(bytes, index: index)

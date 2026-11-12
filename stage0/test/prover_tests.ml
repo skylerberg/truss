@@ -789,6 +789,70 @@ let () =
         \  }\n\
         \  seen\n\
          }\n");
+  test "a range loop's index in its clauses is the next index" (fun () ->
+      proven
+        "fn f(count: UInt32) -> UInt32\n\
+        \  ensures result == count\n\
+         {\n\
+        \  var seen: UInt32 = 0\n\
+        \  for index in 0..count\n\
+        \    invariant seen == index\n\
+        \  {\n\
+        \    seen += 1\n\
+        \  }\n\
+        \  seen\n\
+         }\n");
+  test "a range loop's index counts from the range's start" (fun () ->
+      proven
+        "fn f(start: UInt32, stop: UInt32) -> UInt32\n\
+        \  requires start <= stop\n\
+        \  ensures result == stop - start\n\
+         {\n\
+        \  var seen: UInt32 = 0\n\
+        \  for index in start..stop\n\
+        \    invariant seen == index - start\n\
+        \    invariant seen == yielded.length()\n\
+        \  {\n\
+        \    seen += 1\n\
+        \  }\n\
+        \  seen\n\
+         }\n");
+  test "a range loop's index in its clauses is past the last index at the end" (fun () ->
+      not_proven
+        "fn f(count: UInt32)\n\
+        \  requires count > 0\n\
+         {\n\
+        \  for index in 0..count\n\
+        \    invariant index < count\n\
+        \  {\n\
+        \  }\n\
+         }\n"
+        "prover.invariant");
+  test "an inclusive range loop's index in its clauses runs through one past its end" (fun () ->
+      proven
+        "fn f(last: UInt32) -> UInt64\n\
+        \  requires last < 1000\n\
+        \  ensures result == last + 1\n\
+         {\n\
+        \  var seen: UInt64 = 0\n\
+        \  for index in 0..=last\n\
+        \    invariant seen == index\n\
+        \    invariant index <= last + 1\n\
+        \  {\n\
+        \    seen += 1\n\
+        \  }\n\
+        \  seen\n\
+         }\n");
+  test "a range loop's index bounds its cost" (fun () ->
+      proven
+        "fn f(count: UInt32)\n\
+        \  cost time O(count)\n\
+         {\n\
+        \  for index in 0..count\n\
+        \    cost time O(index)\n\
+        \  {\n\
+        \  }\n\
+         }\n");
   test "a while loop in a yielding method names what the method handed out" (fun () ->
       proven
         "type Counter(limit: UInt32)\n\n\

@@ -92,8 +92,8 @@ fn entries_on_macos(descriptor: Int32, found: mut List[files::DirectoryEntry]) -
   calls::add_number(mut wanted, number: 0, size: 8)
   let room: USize = 32768
   var block: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(room)
-  for _ in 0..room
-    invariant intrinsic::storage_length(block) == yielded.length()
+  for index in 0..room
+    invariant intrinsic::storage_length(block) == index
     invariant intrinsic::storage_capacity(block) == room
   {
     intrinsic::storage_push(mut block, value: 0)

@@ -85,8 +85,8 @@ internal fn format_magnitude(
   if negative {
     intrinsic::storage_push(mut output, value: 45)
   }
-  for _ in 0..padding
-    invariant intrinsic::storage_length(output) == sign + yielded.length()
+  for index in 0..padding
+    invariant intrinsic::storage_length(output) == sign + index
     invariant intrinsic::storage_capacity(output) == sign + padding + digits
   {
     intrinsic::storage_push(mut output, value: 48)

@@ -6,10 +6,10 @@ public fn Array[Element: Copyable, count: USize].filled(value: Element) -> Array
   cost time O(count * time(Element.copy))
 {
   var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
-  for _ in 0..count
-    invariant intrinsic::storage_length(elements) == yielded.length()
+  for index in 0..count
+    invariant intrinsic::storage_length(elements) == index
     invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..yielded.length() => identical(intrinsic::storage_model(elements)[i], value)
+    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], value)
   {
     intrinsic::storage_push(mut elements, value: value.copy())
   }
@@ -25,9 +25,9 @@ public fn Array[Element, count: USize].generate(
 {
   var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
   for index in 0..count
-    invariant intrinsic::storage_length(elements) == yielded.length()
+    invariant intrinsic::storage_length(elements) == index
     invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..yielded.length() => identical(intrinsic::storage_model(elements)[i], make(i))
+    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], make(i))
   {
     intrinsic::storage_push(mut elements, value: make(index))
   }
@@ -167,9 +167,9 @@ public fn Array[Element, count: USize].map_each[Output, capability Granted](
   var remaining = own self.to_list()
   mut remaining.reverse()
   var outputs: intrinsic::Storage[Output] = intrinsic::storage_with_capacity(count)
-  for _ in 0..count
-    invariant remaining.length() + yielded.length() == count
-    invariant intrinsic::storage_length(outputs) == yielded.length()
+  for index in 0..count
+    invariant remaining.length() + index == count
+    invariant intrinsic::storage_length(outputs) == index
     invariant intrinsic::storage_capacity(outputs) == count
   {
     var item = intrinsic::storage_pop(mut remaining.storage)

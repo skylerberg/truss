@@ -345,8 +345,8 @@ impl Handles for SystemHandles {
 
   fn terminal_size(self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
     var size: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(8)
-    for _ in 0..8
-      invariant intrinsic::storage_length(size) == yielded.length()
+    for index in 0..8
+      invariant intrinsic::storage_length(size) == index
       invariant intrinsic::storage_capacity(size) == 8
     {
       intrinsic::storage_push(mut size, value: 0)

@@ -594,12 +594,12 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
   var kept: USize = 0
   for index in 0..count
     invariant entries.length() == count
-    invariant kept <= yielded.length()
+    invariant kept <= index
     invariant forall i in 0..kept => forall j in 0..kept =>
       i < j ==> entries.model()[i].key < entries.model()[j].key
-    invariant forall i in 0..kept => forall j in yielded.length()..entries.model().length() =>
+    invariant forall i in 0..kept => forall j in index..count =>
       entries.model()[i].key < entries.model()[j].key
-    invariant forall i in yielded.length()..entries.model().length() => forall j in yielded.length()..entries.model().length() =>
+    invariant forall i in index..count => forall j in index..count =>
       i < j ==> entries.model()[i].key < entries.model()[j].key
   {
     if keep(entries[index]) {
