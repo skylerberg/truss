@@ -20,34 +20,7 @@ open Harness
 open Support
 
 let check = Type_checker.through Ownership
-
-let helpers =
-  "type Held[View](view: View)\n\n\
-   type Window(view: Slice[Int64])\n\n\
-   type Holder(items: List[Int64], count: Int64)\n\n\
-   trait Sized {\n\
-  \  fn size(self) -> USize\n\
-   }\n\n\
-   impl Sized for Window {\n\
-  \  fn size(self) -> USize {\n\
-  \    self.view.length()\n\
-  \  }\n\
-   }\n\n\
-   fn Holder.reset(mut self) {\n\
-  \  self.items = []\n\
-   }\n\n\
-   fn first_of(items: List[Int64]) -> Slice[Int64] {\n\
-  \  items[0..1]\n\
-   }\n\n\
-   fn keep(items: own List[Int64]) {}\n\n\
-   fn change(items: mut List[Int64]) {}\n\n\
-   fn look[Value](value: Value) {}\n\n\
-   fn same[Value](value: own Value) -> Value {\n\
-  \  value\n\
-   }\n\n\
-   fn put[Value](held: mut List[Value], value: own Value) {\n\
-  \  mut held.push(own value)\n\
-   }\n\n"
+let helpers = Fixtures.Ownership_matrix.helpers
 
 (* A place that stores a [List[Int64]]. *)
 type source = {

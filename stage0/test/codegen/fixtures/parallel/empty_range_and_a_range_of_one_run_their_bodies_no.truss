@@ -1,0 +1,14 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Panic
+{
+  let none: Int64 = 0
+  parallel for _ in 5..none {
+    Panic.crash("an empty range ran")
+  }
+  parallel for index in -3..-2 {
+    if index == -3 {
+      Panic.crash("minus three ran")
+    }
+  }
+  ExitCode.success
+}

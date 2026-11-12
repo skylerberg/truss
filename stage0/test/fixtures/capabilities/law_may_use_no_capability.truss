@@ -1,0 +1,14 @@
+fn stamp() -> Bool
+  uses Clock
+  cost time finite
+{
+  todo
+}
+
+trait Steady {
+  fn value(self) -> Int64
+
+  law timeless(first: Self) {
+    stamp()
+  }
+}

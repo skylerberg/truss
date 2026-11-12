@@ -1,0 +1,8 @@
+fn f() {
+  {
+    let count = 1
+  }
+  {
+    let count = 2
+  }
+}

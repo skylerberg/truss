@@ -1,0 +1,16 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, right: Tree)
+
+fn node() -> Tree
+  cost allocations == 1
+{
+  Tree.Node(left: Tree.Leaf, right: Tree.Leaf)
+}
+
+fn pair() -> Tree
+  cost allocations == 2
+{
+  let _ = node()
+  node()
+}

@@ -1,0 +1,6 @@
+fn f(holder: mut Holder) -> USize {
+  let moved = own holder
+  let count = holder.count
+  holder = own moved
+  count
+}

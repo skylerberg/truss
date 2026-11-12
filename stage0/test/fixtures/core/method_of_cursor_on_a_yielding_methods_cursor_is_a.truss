@@ -1,0 +1,5 @@
+fn g(items: List[Int64]) -> USize {
+  var cursor = items.each()
+  let _ = mut cursor.next()
+  items.each().skip(1).count()
+}

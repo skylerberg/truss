@@ -1,0 +1,3 @@
+fn total(count: UInt8, other: UInt8) -> UInt8 {
+  count + other
+}

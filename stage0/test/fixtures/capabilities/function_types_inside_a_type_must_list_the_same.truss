@@ -1,0 +1,7 @@
+fn f() -> USize
+  uses Clock
+{
+  let actions: List[(fn() -> Instant uses Clock)] = [tick]
+  let plain: List[fn() -> Instant] = actions
+  plain.length()
+}

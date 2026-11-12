@@ -1,0 +1,9 @@
+use lib::counter
+
+trait Cleared {
+  fn label(mut self) -> Int64
+}
+
+impl Cleared for counter::Counter {
+  fn label(mut self) -> Int64 { todo }
+}

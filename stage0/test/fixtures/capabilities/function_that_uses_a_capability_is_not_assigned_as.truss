@@ -1,0 +1,5 @@
+fn f() -> Instant {
+  var action: fn() -> Instant = still
+  action = tick
+  action()
+}

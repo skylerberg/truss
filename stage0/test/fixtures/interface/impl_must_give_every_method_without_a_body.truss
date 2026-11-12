@@ -1,0 +1,3 @@
+type Point(x: Int64)
+
+impl Equal for Point {}

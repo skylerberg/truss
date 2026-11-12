@@ -1,0 +1,5 @@
+type Point(x: Int64, y: Int64)
+
+fn f(point: Point) -> Int64 {
+  point.z
+}

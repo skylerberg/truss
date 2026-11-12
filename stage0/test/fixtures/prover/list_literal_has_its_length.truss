@@ -1,0 +1,5 @@
+fn f() -> List[Int64]
+  ensures result.length() == 3
+{
+  [1, 2, 3]
+}

@@ -1,0 +1,4 @@
+
+fn f() -> Shout {
+  Shout"HEY"
+}

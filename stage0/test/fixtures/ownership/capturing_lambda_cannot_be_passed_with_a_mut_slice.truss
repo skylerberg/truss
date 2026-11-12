@@ -1,0 +1,5 @@
+fn fill(items: mut Slice[fn(Int64) -> Int64], from: fn(Int64) -> Int64) {}
+
+fn keep(items: mut Slice[fn(Int64) -> Int64], amount: Int64) {
+  fill(mut items, from: fn(value) { value + amount })
+}

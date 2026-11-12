@@ -1,0 +1,6 @@
+fn f(name: own String) -> USize {
+  var ports: Map[String, Int64] = ["http": 80]
+  ports["ftp"] = 21
+  ports[own name] = 8080
+  ports.length()
+}

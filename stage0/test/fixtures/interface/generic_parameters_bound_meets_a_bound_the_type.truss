@@ -1,0 +1,3 @@
+type Sorted[Element: Ordered](items: List[Element])
+
+fn f[Item: Ordered](items: Sorted[Item]) {}

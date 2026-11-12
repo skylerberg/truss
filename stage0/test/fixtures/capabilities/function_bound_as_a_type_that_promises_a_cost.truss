@@ -1,0 +1,8 @@
+fn f() -> Int64 {
+  let action: (fn() -> Int64 cost time finite) = forever
+  action()
+}
+
+fn forever() -> Int64 {
+  while true {}
+}

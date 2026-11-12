@@ -1,0 +1,6 @@
+fn f(items: mut List[Int64])
+  requires items.length() > 0
+  ensures identical(items.model(), old(items.model()))
+{
+  items[0] = 7
+}

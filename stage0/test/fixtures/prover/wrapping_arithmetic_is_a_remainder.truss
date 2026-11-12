@@ -1,0 +1,7 @@
+fn f(first: Int64, second: Int64, third: Int64) -> Bool
+  ensures result
+  cost time O(1)
+{
+  first.wrapping_add(second).wrapping_add(third)
+    == first.wrapping_add(second.wrapping_add(third))
+}

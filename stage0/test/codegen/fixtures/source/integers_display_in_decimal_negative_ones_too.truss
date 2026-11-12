@@ -1,0 +1,6 @@
+test "display" {
+  let small: Int8 = -128
+  let large: UInt64 = 18446744073709551615
+  let least: Int64 = -9223372036854775808
+  assert "${small} ${large} ${least} ${0}" == "-128 18446744073709551615 -9223372036854775808 0"
+}

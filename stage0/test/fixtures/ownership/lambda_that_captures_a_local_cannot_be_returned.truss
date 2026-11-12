@@ -1,0 +1,4 @@
+fn adder(amount: Int64) -> fn(Int64) -> Int64 {
+  let extra = amount
+  fn(value) { value + extra }
+}

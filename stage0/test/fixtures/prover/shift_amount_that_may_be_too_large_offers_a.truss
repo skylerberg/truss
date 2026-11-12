@@ -1,0 +1,3 @@
+fn shifted(value: UInt64, by: UInt64) -> UInt64 {
+  value << by
+}

@@ -1,0 +1,6 @@
+fn half(value: Int64) -> Int64
+  cost time O(1)
+{
+  value / 2
+}
+

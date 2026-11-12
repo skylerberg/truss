@@ -1,0 +1,27 @@
+trait Shape {
+  fn area(self) -> Int64
+}
+
+type Square(side: Int64)
+type Rectangle(width: Int64, height: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 { self.side * self.side }
+}
+
+impl Shape for Rectangle {
+  fn area(self) -> Int64 { self.width * self.height }
+}
+
+fn total(shapes: List[any Shape]) -> Int64 {
+  var sum = 0
+  for shape in shapes {
+    sum += shape.area()
+  }
+  sum
+}
+
+test "any" {
+  let shapes: List[any Shape] = [any Square(side: 2), any Rectangle(width: 3, height: 4)]
+  assert total(shapes) == 16
+}

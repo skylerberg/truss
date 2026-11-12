@@ -1,0 +1,29 @@
+use standard::processes
+
+fn run_or_time_out() -> String
+  uses Tasks, Clock, Console, Processes
+{
+  concurrent {
+    {
+      let slow = processes::Command.new("sleep")
+        .argument("5")
+        .output(processes::Redirect.Capture)
+        .error_output(processes::Redirect.Capture)
+      match Processes.run(slow) {
+        Ok(_) => Console.print_line("run: ended")
+        Err(error) => Console.print_line("run: ${error}")
+      }
+    }
+    {
+      Clock.sleep(Duration.nanoseconds(100000000))
+      return "timed out"
+    }
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Clock, Console, Processes
+{
+  Console.print_line(run_or_time_out())
+  ExitCode.success
+}

@@ -1,0 +1,3 @@
+fn adder(amount: Int64) -> fn(Int64) -> Int64 {
+  fn(value) { value + amount }
+}

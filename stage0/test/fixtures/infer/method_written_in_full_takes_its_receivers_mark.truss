@@ -1,0 +1,4 @@
+fn f() {
+  var items: List[Int64] = []
+  List.push(items, item: 1)
+}

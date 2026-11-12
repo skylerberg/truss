@@ -1,0 +1,4 @@
+fn f[capability Granted]()
+  uses Granted.Uses
+{
+}

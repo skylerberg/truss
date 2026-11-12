@@ -1,0 +1,5 @@
+test "replaced" {
+  var names: List[String] = ["a${1}", "b${2}"]
+  names[0] = "c${3}"
+  assert names[0] == "c3"
+}

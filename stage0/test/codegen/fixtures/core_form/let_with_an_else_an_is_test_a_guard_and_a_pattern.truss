@@ -1,0 +1,50 @@
+type Box(width: Int64, height: Int64)
+
+fn first_or(value: Option[Int64], fallback: Int64) -> Int64 {
+  let Some(present) = value else {
+    return fallback
+  }
+  present
+}
+
+fn positive(value: Option[Int64]) -> Bool {
+  if value is Some(present) && present > 0 {
+    return true
+  }
+  false
+}
+
+fn sign(value: Option[Int64]) -> Int64 {
+  match value {
+    Some(present) if present < 0 => -1
+    Some(present) if present > 0 => 1
+    _ => 0
+  }
+}
+
+fn area(box: Box) -> Int64 {
+  let (width: across, height: up) = box
+  across * up
+}
+
+fn total_area(boxes: List[Box]) -> Int64 {
+  var total = 0
+  for (width: across, height: up) in boxes {
+    total += across * up
+  }
+  total
+}
+
+test "binds" {
+  assert first_or(Some(4), fallback: 1) == 4
+  assert first_or(None, fallback: 1) == 1
+  assert positive(Some(3))
+  assert !positive(Some(-3))
+  assert !positive(None)
+  assert sign(Some(-8)) == -1
+  assert sign(Some(8)) == 1
+  assert sign(Some(0)) == 0
+  assert sign(None) == 0
+  assert area(Box(width: 3, height: 4)) == 12
+  assert total_area([Box(width: 1, height: 2), Box(width: 3, height: 4)]) == 14
+}

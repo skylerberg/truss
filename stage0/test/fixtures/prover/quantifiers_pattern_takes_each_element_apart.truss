@@ -1,0 +1,8 @@
+type Span(low: Int64, high: Int64)
+
+fn f(spans: List[Span]) -> Bool
+  requires forall (low, high) in spans => low <= high
+  ensures result
+{
+  spans.length() == 0 || spans[0].low <= spans[0].high
+}

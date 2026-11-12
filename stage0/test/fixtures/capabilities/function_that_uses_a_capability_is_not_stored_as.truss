@@ -1,0 +1,5 @@
+type Job(action: fn() -> Instant)
+
+fn f() -> Job {
+  Job(tick)
+}

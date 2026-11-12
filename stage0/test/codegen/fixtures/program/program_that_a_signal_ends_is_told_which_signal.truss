@@ -1,0 +1,12 @@
+use standard::processes
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Processes
+{
+  if Processes.run(processes::Command.new("sh").argument("-c").argument("kill -9 $$")) is Ok(ended)
+    && ended.status is Signaled(Kill)
+  {
+    Console.print_line("ended by a kill".slice())
+  }
+  ExitCode(0)
+}

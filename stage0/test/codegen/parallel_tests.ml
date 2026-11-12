@@ -17,235 +17,38 @@ let same_with_any_workers text ~expected =
 let () =
   test "branches give results through lets, change their own parts, and call a lambda" (fun () ->
       same_with_any_workers ~expected:"2500050000 2500000000 2 n100000 300000\n"
-        {|type Totals(evens: Int64, odds: Int64, names: List[String])
-
-fn sum_to(limit: Int64, step: Int64, from: Int64) -> Int64 {
-  var total: Int64 = 0
-  var next = from
-  while next <= limit {
-    total = total.wrapping_add(next)
-    next = next.wrapping_add(step)
-  }
-  total
-}
-
-fn label(count: Int64) -> String {
-  "n${count}"
-}
-
-fn main(arguments: List[String]) -> ExitCode
-  uses Console
-{
-  var totals = Totals(evens: 0, odds: 0, names: [])
-  let limit: Int64 = 100000
-  parallel {
-    totals.evens = sum_to(limit, step: 2, from: 0)
-    totals.odds = sum_to(limit, step: 2, from: 1)
-    {
-      mut totals.names.push(label(1))
-      mut totals.names.push(label(2))
-    }
-    let built = label(limit)
-    let scaled = [1, 2, 3].map(fn(item) { item.wrapping_multiply(limit) })
-  }
-  Console.print_line("${totals.evens} ${totals.odds} ${totals.names.length()} ${built} ${scaled[2]}")
-  ExitCode.success
-}
-|});
+        Fixtures.Parallel.branches_give_results_through_lets_change_their);
   test "a branch forks again at every depth of a recursion" (fun () ->
       same_with_any_workers ~expected:"832040\n"
-        {|fn fib(n: UInt64) -> UInt64 {
-  if n < 2 {
-    return n
-  }
-  parallel {
-    let left = fib(n - 1)
-    let right = fib(n - 2)
-  }
-  left.wrapping_add(right)
-}
-
-fn main(arguments: List[String]) -> ExitCode
-  uses Console
-{
-  Console.print_line("${fib(30)}")
-  ExitCode.success
-}
-|});
+        Fixtures.Parallel.branch_forks_again_at_every_depth_of_a_recursion);
   test "a branch takes a value out of its own part, and another gives its part a new one" (fun () ->
       same_with_any_workers ~expected:"first taken second!\n"
-        {|type Pair(first: String, second: String)
+        Fixtures.Parallel.branch_takes_a_value_out_of_its_own_part_and)
 
-fn main(arguments: List[String]) -> ExitCode
-  uses Console
-{
-  var pair = Pair(first: "first", second: "second")
-  parallel {
-    let moved = own pair.first
-    {
-      mut pair.second.push("!")
-    }
-  }
-  pair.first = "taken"
-  Console.print_line("${moved} ${pair.first} ${pair.second}")
-  ExitCode.success
-}
-|})
-
-let board =
-  {|type Board(cells: List[Int64])
-
-fn Board.each(mut self) yields mut Int64 {
-  for index in 0..self.cells.length() {
-    yield mut self.cells[index]
-  }
-}
-
-fn collatz(start: Int64) -> Int64 {
-  var value = start
-  var steps: Int64 = 0
-  while value > 1 {
-    if value % 2 == 0 {
-      value = value / 2
-    } else {
-      value = value.wrapping_multiply(3).wrapping_add(1)
-    }
-    steps = steps.wrapping_add(1)
-  }
-  steps
-}
-
-fn filled(count: Int64) -> List[Int64] {
-  var cells: List[Int64] = []
-  var next: Int64 = 1
-  while next <= count {
-    mut cells.push(next)
-    next = next.wrapping_add(1)
-  }
-  cells
-}
-|}
+let board = Fixtures.Parallel.board
 
 let () =
   test "a parallel for over a method that yields by position changes each element once" (fun () ->
       same_with_any_workers ~expected:"7905322 same\n"
-        (board
-       ^ {|
-fn main(arguments: List[String]) -> ExitCode
-  uses Console
-{
-  var board = Board(cells: filled(100000))
-  var expected = filled(100000)
-  for cell in mut expected {
-    if cell % 7 != 0 {
-      cell = collatz(cell)
-    }
-  }
-  parallel for cell in mut board {
-    if cell % 7 == 0 {
-      continue
-    }
-    cell = collatz(cell)
-  }
-  var same = true
-  for index in 0..expected.length() {
-    if expected[index] != board.cells[index] {
-      same = false
-    }
-  }
-  var total: Int64 = 0
-  for steps in board.cells {
-    if steps % 7 != 0 || steps < 7 {
-      total = total.wrapping_add(steps)
-    }
-  }
-  Console.print_line("${total} ${if same { "same" } else { "different" }}")
-  ExitCode.success
-}
-|}
-        ));
+        (board ^ Fixtures.Parallel.parallel_for_over_a_method_that_yields_by_position));
   test "a region reads a parameter that the function is passed by pointer" (fun () ->
       same_with_any_workers ~expected:"2 4 6 8\n"
-        {|fn doubled(items: mut List[Int64]) {
-  parallel for item in mut items {
-    item = item * 2
-  }
-}
-
-fn main(arguments: List[String]) -> ExitCode
-  uses Console
-{
-  var numbers: List[Int64] = [1, 2, 3, 4]
-  doubled(mut numbers)
-  Console.print_line("${numbers[0]} ${numbers[1]} ${numbers[2]} ${numbers[3]}")
-  ExitCode.success
-}
-|});
+        Fixtures.Parallel.region_reads_a_parameter_that_the_function_is);
   test "a parallel for over a list, whose each keeps a count between yields, runs in order"
     (fun () ->
       same_with_any_workers ~expected:"5050\n"
-        {|fn main(arguments: List[String]) -> ExitCode
-  uses Console
-{
-  var items: List[Int64] = []
-  var next: Int64 = 1
-  while next <= 100 {
-    mut items.push(0)
-    next = next.wrapping_add(1)
-  }
-  var position: Int64 = 0
-  for item in mut items {
-    position = position.wrapping_add(1)
-    item = position
-  }
-  parallel for item in mut items {
-    item = item.wrapping_multiply(1)
-  }
-  var total: Int64 = 0
-  for item in items {
-    total = total.wrapping_add(item)
-  }
-  Console.print_line("${total}")
-  ExitCode.success
-}
-|});
+        Fixtures.Parallel.parallel_for_over_a_list_whose_each_keeps_a_count);
   test "a panic in an iteration of a parallel for over a range ends the program" (fun () ->
       Unix.putenv "TRUSS_WORKERS" "8";
       let status, _, errors =
-        run_main
-          {|fn main(arguments: List[String]) -> ExitCode
-  uses Panic
-{
-  parallel for index in 0..=20 {
-    if index == 20 {
-      Panic.crash("the last one ran")
-    }
-  }
-  ExitCode.success
-}
-|}
+        run_main Fixtures.Parallel.panic_in_an_iteration_of_a_parallel_for_over_a
       in
       expect_int ~expected:101 status;
       if not (contains errors "the last one ran") then fail "reported %s" errors);
   test "an empty range and a range of one run their bodies no times and once" (fun () ->
       Unix.putenv "TRUSS_WORKERS" "8";
       let status, _, errors =
-        run_main
-          {|fn main(arguments: List[String]) -> ExitCode
-  uses Panic
-{
-  let none: Int64 = 0
-  parallel for _ in 5..none {
-    Panic.crash("an empty range ran")
-  }
-  parallel for index in -3..-2 {
-    if index == -3 {
-      Panic.crash("minus three ran")
-    }
-  }
-  ExitCode.success
-}
-|}
+        run_main Fixtures.Parallel.empty_range_and_a_range_of_one_run_their_bodies_no
       in
       expect_int ~expected:101 status;
       if not (contains errors "minus three ran") then fail "reported %s" errors)
@@ -254,45 +57,14 @@ let () =
   test "a parallel for over a range of characters steps over the surrogates" (fun () ->
       Unix.putenv "TRUSS_WORKERS" "8";
       let status, _, errors =
-        run_main
-          {|fn main(arguments: List[String]) -> ExitCode
-  uses Panic
-{
-  parallel for letter in Character"\u{D700}"..=Character"\u{E001}" {
-    if letter > Character"\u{D7FF}" && letter < Character"\u{E000}" {
-      Panic.crash("a surrogate")
-    }
-    if letter == Character"\u{E001}" {
-      Panic.crash("the last character ran")
-    }
-  }
-  ExitCode.success
-}
-|}
+        run_main Fixtures.Parallel.parallel_for_over_a_range_of_characters_steps_over
       in
       expect_int ~expected:101 status;
       if not (contains errors "the last character ran") then fail "reported %s" errors)
 
 let () =
   passes "a test runs the branches of a parallel block and of a parallel for, in order"
-    (board
-   ^ {|
-test "parallel in a test" {
-  var board = Board(cells: filled(50))
-  parallel {
-    let first = collatz(27)
-    let second = collatz(97)
-  }
-  assert first == 111
-  assert second == 118
-  parallel for cell in mut board {
-    cell = cell.wrapping_multiply(2)
-  }
-  assert board.cells[0] == 2
-  assert board.cells[49] == 100
-}
-|}
-    )
+    (board ^ Fixtures.Parallel.test_runs_the_branches_of_a_parallel_block_and_of)
 
 (* Outlining *)
 

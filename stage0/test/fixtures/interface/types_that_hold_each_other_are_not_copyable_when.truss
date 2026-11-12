@@ -1,0 +1,7 @@
+public opaque type Token(code: Int64)
+
+type Even =
+  | Zero
+  | indirect After(odd: Odd)
+
+type Odd(even: Even, token: Token)

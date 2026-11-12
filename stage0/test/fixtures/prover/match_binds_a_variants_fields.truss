@@ -1,0 +1,9 @@
+fn f(shape: Shape) -> Int64
+  ensures result >= 0
+{
+  match shape {
+    Circle(radius) => if radius < 0 { 0 } else { radius }
+    Square(side) => if side < 0 { 0 } else { side }
+    Empty => 0
+  }
+}

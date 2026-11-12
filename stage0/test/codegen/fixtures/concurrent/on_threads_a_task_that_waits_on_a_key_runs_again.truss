@@ -1,0 +1,44 @@
+type Flag(raised: Bool)
+
+capability Flags {
+  fn raise()
+  fn raised() -> Bool
+}
+
+impl Flags for Flag {
+  fn raise(mut self) {
+    self.raised = true
+  }
+
+  fn raised(self) -> Bool {
+    self.raised
+  }
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Tasks, Console
+{
+  var flag = Flag(raised: false)
+  provide mut flag {
+    concurrent {
+      {
+        var seen = false
+        while !seen {
+          let ticket = Tasks.watch(7)
+          if Flags.raised() {
+            seen = true
+          } else {
+            Tasks.wait(7, ticket: ticket, reason: "the flag")
+          }
+        }
+        Console.print_line("saw the flag")
+      }
+      {
+        Tasks.yield_now()
+        Flags.raise()
+        Tasks.wake(7)
+      }
+    }
+  }
+  ExitCode.success
+}

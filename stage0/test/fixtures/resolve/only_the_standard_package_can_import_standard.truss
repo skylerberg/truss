@@ -1,0 +1,3 @@
+use standard::intrinsic
+
+fn f() {}

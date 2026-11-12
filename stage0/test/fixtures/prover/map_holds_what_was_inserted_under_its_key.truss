@@ -1,0 +1,5 @@
+fn f(table: mut Map[Int64, Int64])
+  ensures table.model().contains_key(1) && table.model().get(1) == 2
+{
+  mut table.insert(1, value: 2)
+}

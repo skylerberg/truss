@@ -1,0 +1,11 @@
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Environment
+{
+  if Environment.variable("TRUSS_TEST_VARIABLE".slice()) is Some(value) {
+    Console.print_line("${value}".slice())
+  }
+  if Environment.variable("TRUSS_TEST_UNSET".slice()) is None {
+    Console.print_line("unset".slice())
+  }
+  ExitCode(0)
+}

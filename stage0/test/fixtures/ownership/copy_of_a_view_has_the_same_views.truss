@@ -1,0 +1,6 @@
+fn f(items: mut List[Int64]) -> USize {
+  let all = items[..]
+  let part = all.copy()
+  mut items.push(1)
+  part.length()
+}

@@ -1,0 +1,6 @@
+test "floats" {
+  let half: Float64 = 0.5
+  let third: Float32 = 0.25
+  let big: Float64 = 1e300
+  assert "${half} ${third} ${big} ${2.0}" == "0.5 0.25 1e+300 2.0"
+}

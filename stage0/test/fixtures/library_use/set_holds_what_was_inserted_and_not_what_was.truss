@@ -1,0 +1,11 @@
+fn added(seen: mut Set[Int64]) -> Bool
+  ensures seen.contains(4)
+{
+  mut seen.insert_new(4)
+}
+
+fn removed(seen: mut Set[Int64])
+  ensures !seen.contains(4)
+{
+  mut seen.remove(4)
+}

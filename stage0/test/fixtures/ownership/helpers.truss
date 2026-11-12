@@ -1,0 +1,12 @@
+type Handlers(first: fn(Int64) -> Int64)
+
+fn take(handler: own fn(Int64) -> Int64) {}
+
+fn apply(handler: fn(Int64) -> Int64, to: Int64) -> Int64 {
+  handler(to)
+}
+
+fn double(value: Int64) -> Int64 {
+  value
+}
+

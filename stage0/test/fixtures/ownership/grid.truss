@@ -1,0 +1,16 @@
+type Cell(name: String)
+
+type Grid(cells: List[Cell])
+
+fn Cell.visit(mut self) {
+  self.name = "seen"
+}
+
+fn Grid.cell(self, index: USize) lends Cell {
+  yield self.cells[index]
+}
+
+fn Grid.cell(mut self, index: USize) lends mut Cell {
+  yield mut self.cells[index]
+}
+

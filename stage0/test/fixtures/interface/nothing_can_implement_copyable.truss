@@ -1,0 +1,5 @@
+type P(x: Int64)
+
+impl Copyable for P {
+  fn copy(self) -> P { todo }
+}

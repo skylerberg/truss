@@ -1,0 +1,22 @@
+type Box[Item](item: Item)
+
+fn smaller[Item: Ordered](first: Box[Item], second: Box[Item]) -> Bool {
+  first.item < second.item
+}
+
+impl Equal for Box[Item: Equal] {
+  fn equal(self, other: Box[Item]) -> Bool {
+    self.item == other.item
+  }
+}
+
+impl Ordered for Box[Item: Ordered] {
+  fn compare(self, other: Box[Item]) -> Ordering {
+    self.item.compare(other.item)
+  }
+}
+
+proof Ordered.transitive for Box[Element: Ordered] {
+  let _ = smaller(first, second: second)
+  let _ = first.item < third.item
+}

@@ -1,0 +1,4 @@
+fn f[Source](source: Source)
+  uses Source.Uses
+{
+}

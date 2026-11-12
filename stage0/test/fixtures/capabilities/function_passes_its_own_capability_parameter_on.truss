@@ -1,0 +1,5 @@
+fn passes_on[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant
+  uses Mine
+{
+  each_time(action)
+}

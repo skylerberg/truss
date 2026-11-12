@@ -1,0 +1,7 @@
+test "passes" {
+  assert 1 + 1 == 2
+}
+
+test "fails" {
+  assert 1 + 1 == 3
+}

@@ -1,0 +1,7 @@
+fn apply(measure: (fn(Int64) -> Int64 cost time finite), value: Int64) -> Int64
+  ensures result == measure(value)
+  cost time finite
+{
+  measure(value)
+}
+

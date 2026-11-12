@@ -1,0 +1,6 @@
+fn f() -> Bool
+  uses Dice
+  ensures result
+{
+  Dice.roll() == Dice.roll()
+}

@@ -77,3 +77,12 @@
   cli)
  (deps
   (glob_files %{workspace_root}/*.md)))
+
+(rule
+ (target fixtures.ml)
+ (deps
+  (glob_files_rec fixtures/**.truss))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:embed_fixtures/embed_fixtures.exe} %{deps}))))

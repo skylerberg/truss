@@ -1,0 +1,6 @@
+fn both() -> Bool
+  ensures result
+{
+  let colors: Set[Int64] = [1, 2]
+  colors.contains(2) && !colors.contains(5) && colors.length() == 2
+}

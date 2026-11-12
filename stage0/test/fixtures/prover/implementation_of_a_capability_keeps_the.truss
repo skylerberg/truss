@@ -1,0 +1,7 @@
+type Loaded()
+
+impl Dice for Loaded {
+  fn roll(self) -> UInt8 {
+    9
+  }
+}

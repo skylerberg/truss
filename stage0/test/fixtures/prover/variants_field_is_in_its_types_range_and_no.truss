@@ -1,0 +1,6 @@
+fn f(shape: Shape) -> Int64 {
+  match shape {
+    Circle(radius) => radius * radius
+    _ => 0
+  }
+}

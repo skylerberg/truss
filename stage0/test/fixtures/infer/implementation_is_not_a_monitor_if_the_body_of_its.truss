@@ -1,0 +1,7 @@
+fn f() {
+  var table = Table(sessions: [])
+  provide mut table {
+    serve(1)
+    serve(2)
+  }
+}

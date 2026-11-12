@@ -1,0 +1,4 @@
+fn f() -> Instant {
+  let held = later(tick)
+  held()
+}

@@ -1,0 +1,6 @@
+fn twice(value: Int64) -> Int64
+  requires value < 1000 && value > -1000
+{
+  let unused = value
+  value * 2
+}

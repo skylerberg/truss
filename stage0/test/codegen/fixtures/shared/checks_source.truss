@@ -1,0 +1,73 @@
+use standard::intrinsic
+
+capability Ticker {
+  fn next() -> Int64
+}
+
+type Clockwork(ticks: intrinsic::Shared[Int64])
+
+impl Ticker for Clockwork {
+  fn next(self) -> Int64 {
+    intrinsic::shared_update(self.ticks, input: 1, change: fn(ticks, by) {
+      ticks += by
+      ticks
+    })
+  }
+}
+
+type Flag(raised: intrinsic::Shared[Bool])
+
+impl Tasks for Flag {
+  fn open(self) -> UInt64 {
+    intrinsic::shared_key(self.raised)
+  }
+
+  fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
+    work(item)
+    true
+  }
+
+  fn join(self, task_group: UInt64) {}
+
+  fn cancel(self, task_group: UInt64) -> Bool {
+    intrinsic::shared_update(self.raised, input: true, change: fn(raised, now) {
+      let first = !raised
+      raised = now
+      first
+    })
+  }
+
+  fn cancelled(self) -> Bool {
+    false
+  }
+
+  fn watch(self, key: UInt64) -> UInt64 {
+    0
+  }
+
+  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {}
+
+  fn wake(self, key: UInt64) {}
+
+  fn lock(self, mutex: UInt64) {}
+
+  fn unlock(self, mutex: UInt64) {}
+
+  fn yield_now(self) {}
+}
+
+fn with_tasks(ticks: intrinsic::Shared[Int64]) -> UInt64
+  uses Tasks
+{
+  intrinsic::shared_key(ticks)
+}
+
+fn without_tasks(ticks: intrinsic::Shared[Int64]) -> UInt64 {
+  intrinsic::shared_key(ticks)
+}
+
+fn of_a_view(numbers: intrinsic::Shared[Slice[Int64]]) -> UInt64
+  uses Tasks
+{
+  intrinsic::shared_key(numbers)
+}

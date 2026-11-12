@@ -1,0 +1,9 @@
+use clock_library::time
+
+fn f() -> UInt64
+  uses Clock
+{
+  provide time::Fixed() {
+    Random.next()
+  }
+}

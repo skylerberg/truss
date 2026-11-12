@@ -1,0 +1,3 @@
+fn T.each(self, yielded: Int64) yields Int64 {
+  yield 1
+}

@@ -1,0 +1,6 @@
+type Point(x: Int64)
+
+impl Equal for Point {
+  fn equal(self, other: Point) -> Bool { todo }
+  fn extra(self) {}
+}

@@ -1,0 +1,13 @@
+fn f(start: UInt32, stop: UInt32) -> UInt32
+  requires start <= stop
+  ensures result == stop - start
+{
+  var seen: UInt32 = 0
+  for index in start..stop
+    invariant seen == index - start
+    invariant seen == yielded.length()
+  {
+    seen += 1
+  }
+  seen
+}

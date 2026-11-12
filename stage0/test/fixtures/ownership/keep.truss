@@ -1,0 +1,4 @@
+fn keep(items: own List[Int64]) {}
+
+fn look(items: List[Int64]) {}
+

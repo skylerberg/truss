@@ -1,0 +1,4 @@
+fn f(amount: Int64) -> Int64 {
+  let handlers = Handlers(first: fn(value) { value + amount })
+  apply(handlers.first, to: 1) + apply(fn(value) { value + amount }, to: 2)
+}

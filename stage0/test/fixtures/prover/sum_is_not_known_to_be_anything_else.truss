@@ -1,0 +1,5 @@
+theorem appending(items: Sequence[List[Int64]], row: List[Int64])
+  ensures items.append(row).sum(fn(each) { each.length() })
+    == items.sum(fn(other) { other.length() })
+{
+}

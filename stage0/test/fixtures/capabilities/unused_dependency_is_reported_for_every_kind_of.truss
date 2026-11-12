@@ -1,0 +1,30 @@
+public type Square(side: Int64)
+  derives Equal
+
+public trait Sided {
+  fn sides(self) -> Int64
+
+  fn corners(self) -> Int64 {
+    self.sides()
+  }
+}
+
+impl Sided for Square {
+  fn sides(self) -> Int64 {
+    4
+  }
+}
+
+public capability Ledger {
+  fn record(amount: Int64)
+}
+
+public let limit: Int64 = 10
+
+fn Square.width(self) -> Int64 {
+  self.side
+}
+
+test "a square has four sides" {
+  assert Square(1).sides() == 4
+}

@@ -1,0 +1,5 @@
+fn compute() -> Int64 {
+  1
+}
+
+type Settings(limit: Int64 = compute())

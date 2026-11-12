@@ -1,0 +1,5 @@
+fn f(value: Option[Int64]) -> Int64
+  ensures result >= 0
+{
+  if value is Some(inner) && inner > 0 { inner } else { 0 }
+}

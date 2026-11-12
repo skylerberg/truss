@@ -1,0 +1,11 @@
+fn table() -> USize
+  cost time O(power(2, 10))
+{
+  todo
+}
+
+fn f() -> USize
+  cost time O(1)
+{
+  table()
+}

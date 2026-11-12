@@ -1,0 +1,9 @@
+test "pop" {
+  var items: List[String] = ["${1}", "${2}"]
+  var count = 0
+  while mut items.pop() is Some(item) {
+    assert item.length() == 1
+    count += 1
+  }
+  assert count == 2
+}

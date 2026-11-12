@@ -201,6 +201,15 @@ Every stage of stage0 is tested the same way:
   must panic with a message that contains the test's name. A test written
   in OCaml that compiles a program of its own is for the compiler: a
   diagnostic, generated code, or a whole program's output.
+- **A test's Truss source is a fixture file, not an OCaml string.** The
+  text a test checks lives in `fixtures/<suite>/<name>.truss` beside the
+  suite, where it can be read, edited, and renamed as Truss.
+  `embed_fixtures` compiles each directory of fixtures into the module
+  `Fixtures`, so the test names one as `Fixtures.Prover.overflow`, and a
+  fixture that is missing fails to compile. A fixture is named after its
+  test. Text that is not a whole module stays in OCaml: a template with a
+  hole that the test fills, a line given to the lexer or the parser, and a
+  snippet of one or two lines.
 - **Every test checks the code database too.** When a test ends, the harness
   computes every result the test's engines hold again, in a new engine with
   the same inputs, and fails the test if one differs. So a query that is not

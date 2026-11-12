@@ -1,0 +1,6 @@
+fn f() -> Option[Int64]
+  uses Meter
+{
+  var gauge = Gauge(last: 0)
+  rewind(mut gauge)
+}

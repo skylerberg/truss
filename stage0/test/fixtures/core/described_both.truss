@@ -1,0 +1,16 @@
+trait Described {
+  fn describe(self) -> Int64
+
+  fn twice(self) -> Int64 {
+    self.describe() + self.describe()
+  }
+}
+
+type Both[Value](first: Value, second: Value)
+  derives Equal
+
+impl Described for Both[Value: Described] {
+  fn describe(self) -> Int64 {
+    self.first.describe()
+  }
+}

@@ -1,0 +1,9 @@
+fn f(items: mut List[Int64]) -> USize
+  uses Tasks
+{
+  concurrent {
+    let length = items.length()
+    mut items.push(1)
+  }
+  length
+}

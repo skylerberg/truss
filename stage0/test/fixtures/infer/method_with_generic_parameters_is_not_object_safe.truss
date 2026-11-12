@@ -1,0 +1,7 @@
+trait Visitor {
+  fn visit[Other](self, other: Other) -> Int64
+}
+
+fn f(visitor: any Visitor) -> Int64 {
+  visitor.visit(3)
+}

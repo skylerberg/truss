@@ -1,0 +1,16 @@
+type Meter(credit: UInt32)
+  cost potential credit
+
+fn work(size: UInt32)
+  cost time O(size)
+{
+  for _ in 0..size {
+  }
+}
+
+fn Meter.spend(mut self)
+  cost time O(1)
+{
+  work(self.credit)
+  self.credit = 0
+}

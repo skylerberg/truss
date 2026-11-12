@@ -1,0 +1,6 @@
+fn f(count: Int64) -> Int64 {
+  match count {
+    ExitCode.success => 1
+    _ => 0
+  }
+}

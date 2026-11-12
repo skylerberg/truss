@@ -1,0 +1,11 @@
+fn keep(held: mut List[Slice[Int64]], view: Slice[Int64]) {
+  mut held.push(view)
+}
+
+fn f() -> USize {
+  var data: List[Int64] = [1, 2, 3]
+  var views: List[Slice[Int64]] = []
+  keep(mut views, view: data[0..2])
+  mut data.push(4)
+  views.length()
+}

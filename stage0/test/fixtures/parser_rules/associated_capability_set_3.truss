@@ -1,0 +1,4 @@
+fn drain[Source: Feed](source: mut Source)
+  uses Source.Uses, Clock
+{
+}

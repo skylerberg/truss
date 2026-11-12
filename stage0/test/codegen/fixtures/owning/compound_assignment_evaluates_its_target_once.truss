@@ -1,0 +1,12 @@
+fn next_index(calls: mut Int64) -> USize {
+  calls += 1
+  0
+}
+
+test "once" {
+  var items: List[Int64] = [10, 20]
+  var calls = 0
+  items[next_index(mut calls)] += 5
+  assert calls == 1
+  assert items[0] == 15
+}

@@ -1,0 +1,5 @@
+type Shape =
+  | Circle(radius: Int64)
+  | Square(side: Int64)
+  | Empty
+

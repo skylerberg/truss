@@ -1,0 +1,34 @@
+type Totals(evens: Int64, odds: Int64, names: List[String])
+
+fn sum_to(limit: Int64, step: Int64, from: Int64) -> Int64 {
+  var total: Int64 = 0
+  var next = from
+  while next <= limit {
+    total = total.wrapping_add(next)
+    next = next.wrapping_add(step)
+  }
+  total
+}
+
+fn label(count: Int64) -> String {
+  "n${count}"
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console
+{
+  var totals = Totals(evens: 0, odds: 0, names: [])
+  let limit: Int64 = 100000
+  parallel {
+    totals.evens = sum_to(limit, step: 2, from: 0)
+    totals.odds = sum_to(limit, step: 2, from: 1)
+    {
+      mut totals.names.push(label(1))
+      mut totals.names.push(label(2))
+    }
+    let built = label(limit)
+    let scaled = [1, 2, 3].map(fn(item) { item.wrapping_multiply(limit) })
+  }
+  Console.print_line("${totals.evens} ${totals.odds} ${totals.names.length()} ${built} ${scaled[2]}")
+  ExitCode.success
+}

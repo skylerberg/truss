@@ -1,0 +1,8 @@
+type Pair(first: Int64, second: Int64)
+  derives Equal, Ordered
+
+theorem pairs_order_by_first_then_second()
+  ensures forall a: Pair => forall b: Pair =>
+    (a < b) == (a.first < b.first || (a.first == b.first && a.second < b.second))
+{
+}

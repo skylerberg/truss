@@ -1,0 +1,6 @@
+fn f(x: USize, divisor: USize) -> USize {
+  proof {
+    return 1
+  }
+  x / divisor
+}

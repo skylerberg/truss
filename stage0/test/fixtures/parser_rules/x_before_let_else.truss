@@ -1,0 +1,3 @@
+let Some(f) = || g() else {
+  return
+}

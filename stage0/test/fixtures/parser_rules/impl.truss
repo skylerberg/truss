@@ -1,0 +1,6 @@
+impl FileRead for FilesWithin
+  uses FileRead
+{
+  type Error = FileError
+  fn read(self) -> Bytes { todo }
+}

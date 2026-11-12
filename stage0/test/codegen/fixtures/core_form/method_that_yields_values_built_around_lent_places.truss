@@ -1,0 +1,36 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, name: String, right: Tree)
+
+type Entry(depth: USize, name: String)
+
+fn Tree.entries(self) yields Entry {
+  match self {
+    Leaf => {}
+    Node(left, name, right) => {
+      for entry in left.entries() {
+        yield Entry(depth: entry.depth + 1, name: entry.name)
+      }
+      yield Entry(depth: 0, name: name)
+      for entry in right.entries() {
+        yield Entry(depth: entry.depth + 1, name: entry.name)
+      }
+    }
+  }
+}
+
+test "a method that yields values around lent places, and loops over itself" {
+  let tree = Tree.Node(
+    left: Tree.Node(left: Tree.Leaf, name: "${1}st", right: Tree.Leaf),
+    name: "${2}nd!",
+    right: Tree.Node(left: Tree.Leaf, name: "${3}rd!!", right: Tree.Leaf),
+  )
+  var lengths: USize = 0
+  var depths: USize = 0
+  for entry in tree.entries() {
+    lengths += entry.name.length()
+    depths += entry.depth
+  }
+  assert lengths == 12
+  assert depths == 2
+}

@@ -1,0 +1,9 @@
+type Point(x: Int64, y: Int64)
+
+fn f() -> Int64
+  ensures result == 2
+{
+  var point = Point(x: 1, y: 2)
+  point.x = 7
+  point.y
+}

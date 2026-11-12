@@ -1,0 +1,5 @@
+fn arrange[Element](items: mut Slice[Element], before: fn(Element, Element) -> Bool) {}
+
+fn by_key[Element](items: mut Slice[Element], key: fn(Element) -> Int64) {
+  arrange(mut items, before: fn(first, second) { key(first) < key(second) })
+}

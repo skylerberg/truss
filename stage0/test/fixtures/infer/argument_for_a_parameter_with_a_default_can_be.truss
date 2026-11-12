@@ -1,0 +1,5 @@
+fn connect(host: Int64, port: UInt16 = 443) {}
+
+fn f() {
+  connect(1)
+}

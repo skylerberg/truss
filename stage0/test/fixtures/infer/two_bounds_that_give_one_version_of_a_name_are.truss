@@ -1,0 +1,11 @@
+trait First {
+  fn make() -> Self
+}
+
+trait Second {
+  fn make() -> Self
+}
+
+fn f[Value: First + Second]() -> Value {
+  Value.make()
+}

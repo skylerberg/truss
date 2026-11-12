@@ -1,0 +1,13 @@
+fn scale(value: Int64, by: Int64 = 3) -> Int64 {
+  value.wrapping_multiply(by)
+}
+
+fn apply(change: fn(Int64, Int64) -> Int64) -> Int64 {
+  change(2, 5)
+}
+
+test "a function with a default, used as a value, uses the argument it is called with" {
+  assert scale(2) == 6
+  assert scale(2, by: 5) == 10
+  assert apply(scale) == 10
+}

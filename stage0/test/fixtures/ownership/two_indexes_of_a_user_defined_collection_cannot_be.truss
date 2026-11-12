@@ -1,0 +1,3 @@
+fn f(tally: mut Tally) {
+  bump(mut tally[0], second: mut tally[1])
+}

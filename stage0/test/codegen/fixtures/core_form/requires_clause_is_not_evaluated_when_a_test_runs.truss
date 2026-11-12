@@ -1,0 +1,16 @@
+fn step(start: Int64, by: Int64 = 1) -> Int64
+  requires by > 0
+{
+  start + by
+}
+
+fn settle(items: List[Int64], limit: USize, top: USize) -> USize
+  requires top < items.length() ==> items[top] >= 0
+{
+  limit
+}
+
+test "clauses that do not hold" {
+  assert step(1, by: 0) == 1
+  assert settle([1, -2], limit: 5, top: 1) == 5
+}

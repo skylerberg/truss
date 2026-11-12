@@ -1,0 +1,5 @@
+use library::numbers
+
+fn one() -> Int64 {
+  numbers::one()
+}

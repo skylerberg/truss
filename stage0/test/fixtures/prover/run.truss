@@ -1,0 +1,6 @@
+fn run(transform: (fn(UInt32) -> UInt32 cost time O(1))) -> UInt32
+  cost time O(1)
+{
+  transform(1)
+}
+

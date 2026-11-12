@@ -1,0 +1,4 @@
+fn f(actions: List[fn() -> Int64]) -> USize {
+  let bounded: List[(fn() -> Int64 cost time finite)] = actions
+  bounded.length()
+}

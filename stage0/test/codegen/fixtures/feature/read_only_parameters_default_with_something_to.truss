@@ -1,0 +1,17 @@
+fn total(items: List[Int64] = [1, 2, 3]) -> Int64 {
+  var sum = 0
+  for item in items {
+    sum += item
+  }
+  sum
+}
+
+fn first(names: List[String] = ["a", "b"]) -> USize {
+  names[0].length()
+}
+
+test "defaults" {
+  assert total() == 6
+  assert total([4]) == 4
+  assert first() == 1
+}

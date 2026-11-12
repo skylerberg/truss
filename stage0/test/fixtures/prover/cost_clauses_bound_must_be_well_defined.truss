@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> Int64
+  cost time O(items[0])
+{
+  0
+}

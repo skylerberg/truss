@@ -1,0 +1,6 @@
+fn spaced(low: Int64, high: Int64) -> Int64 {
+  proof {
+    assert low + 2 * high <= 100 - (high - low)
+  }
+  0
+}

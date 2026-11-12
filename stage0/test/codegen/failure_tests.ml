@@ -119,17 +119,7 @@ let refused name ~saying source =
 let () =
   refused "a lambda in a yielding method that is pulled is refused"
     ~saying:"a lambda in a yielding method that is pulled"
-    {|fn offsets(base: Int64) yields Int64 {
-  let add: fn(Int64) -> Int64 = fn(x) { x + base }
-  yield add(1)
-  yield add(2)
-}
-
-test "pulled" {
-  var each = offsets(10)
-  assert mut each.next() == Some(11)
-}
-|};
+    Fixtures.Failure.lambda_in_a_yielding_method_that_is_pulled_is;
   test "a compiler bug says which instance was being lowered" (fun () ->
       let _, compile = load "type Point(x: Int64)\n" in
       let not_code =

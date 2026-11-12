@@ -1,0 +1,3 @@
+fn f() -> Bool {
+  forall value: Int64 => value == value
+}

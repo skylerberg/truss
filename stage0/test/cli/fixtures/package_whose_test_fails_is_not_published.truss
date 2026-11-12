@@ -1,0 +1,4 @@
+
+test "a turn is a right angle" {
+  assert turn() == 90
+}

@@ -1,0 +1,4 @@
+type Light =
+  | Off
+  | On
+  derives Default

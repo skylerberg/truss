@@ -1,0 +1,4 @@
+public theorem keeps[Element](items: List[Element])
+  ensures true
+{
+}

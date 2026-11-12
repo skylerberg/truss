@@ -1,0 +1,7 @@
+type Point(x: Int64)
+
+impl Equal for Point
+  uses Clock
+{
+  fn equal(self, other: Point) -> Bool { todo }
+}

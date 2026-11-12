@@ -1,0 +1,22 @@
+fn integer_square_root(value: UInt64) -> UInt64
+  cost time O(64)
+{
+  var result: UInt64 = 0
+  var width: UInt64 = 4294967296
+  while width > 1
+    invariant width >= 1
+    invariant result + width <= 4294967296
+    decreases width
+    cost time O(log(4294967295) - log(width - 1))
+  {
+    let half = width / 2
+    let candidate = result + half
+    if candidate <= value / candidate {
+      result = candidate
+      width = width - half
+    } else {
+      width = half
+    }
+  }
+  result
+}

@@ -1,0 +1,8 @@
+fn label(value: Option[Int64]) -> Option[String] {
+  Some("number ${value?}")
+}
+
+test "left early" {
+  assert label(None) == None
+  assert label(Some(4)) == Some("number 4")
+}

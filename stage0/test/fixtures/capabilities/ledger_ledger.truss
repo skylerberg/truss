@@ -1,0 +1,9 @@
+public capability Ledger {
+  fn record(amount: Int64)
+}
+
+public fn pay(amount: Int64)
+  uses Ledger
+{
+  Ledger.record(amount)
+}

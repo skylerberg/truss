@@ -1,0 +1,11 @@
+trait Bounded {
+  fn largest() -> Self
+}
+
+type Level(value: Int64)
+
+let Level.largest: Level = Level(9)
+
+impl Bounded for Level {
+  fn largest() -> Level { todo }
+}

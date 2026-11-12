@@ -1,0 +1,11 @@
+fn double(value: Int64) -> Int64 {
+  value * 2
+}
+
+fn apply(value: Int64, transform: fn(Int64) -> Int64) -> Int64 {
+  transform(value)
+}
+
+test "named functions" {
+  assert apply(21, transform: double) == 42
+}

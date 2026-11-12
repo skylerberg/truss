@@ -1,0 +1,5 @@
+type Priority =
+  | Low
+  | Normal
+  | Urgent(deadline: Instant)
+

@@ -1,0 +1,5 @@
+type Cached(items: List[Int64], recent: Slice[Int64])
+
+fn Cached.refresh(mut self) {
+  self.recent = self.items[0..1]
+}

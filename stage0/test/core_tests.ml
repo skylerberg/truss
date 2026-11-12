@@ -72,41 +72,31 @@ let expect_body what text expected =
       let actual = printed_body text "g" in
       if actual <> expected then fail "found:\n%s" actual)
 
-let meters =
-  "type Meters(value: Int64)\n\n\
-   impl Ordered for Meters {\n\
-  \  fn compare(self, other: Meters) -> Ordering { todo }\n\
-   }\n\n\
-   impl Equal for Meters {\n\
-  \  fn equal(self, other: Meters) -> Bool { todo }\n\
-   }\n\n"
-
-let shape =
-  "type Shape =\n  | Circle(radius: Int64)\n  | Square(side: Int64, label: String = \"s\")\n\n"
+let meters = Fixtures.Core.meters
+let shape = Fixtures.Core.shape
 
 (* Operators *)
 
 let () =
   expect_body "an operator and a method call on built-in integers both become an Operator"
-    "fn g(left: Int64, right: Int64) -> Int64 {\n  left + right.multiply(2)\n}\n"
+    Fixtures.Core.operator_and_a_method_call_on_built_in_integers
     "{ add(left, multiply(right, 2)) }";
   expect_body "a comparison of built-in integers becomes a Compare"
-    "fn g(left: Int64, right: Int64) -> Bool {\n  left <= right && left != 0\n}\n"
+    Fixtures.Core.comparison_of_built_in_integers_becomes_a_compare
     "{ ((left <= right) && (left != 0)) }";
   expect_body
     "`<=` on a user type tests the result of `compare`, and `!=` negates a call of `equal`"
-    (meters
-   ^ "fn g(first: Meters, second: Meters) -> Bool {\n  first <= second || first != second\n}\n")
+    (meters ^ Fixtures.Core.on_a_user_type_tests_the_result_of_compare_and)
     "{ (!(Ordered.compare for Meters by app::main::impl Ordered for Meters(place first, place \
      second) is Greater) || !Equal.equal for Meters by app::main::impl Equal for Meters(place \
      first, place second)) }";
   expect_body "a compound assignment binds its operand, and evaluates its target once"
-    "fn g(items: mut List[Int64]) {\n  items[0] += 2\n}\n"
+    Fixtures.Core.compound_assignment_binds_its_operand_and
     "{ compound_assign lent Index.at for List[Int64] by standard::list::impl Index for \
      List[Element](mut place items, 0) lends mut = add(current_target, synthetic#0) with \
      synthetic#0 = 2 }";
   expect_definition "arithmetic in a specification converts its operands to Integer"
-    "fn g(count: Int64) -> Int64\n  ensures result + 1 > count\n{\n  count\n}\n"
+    Fixtures.Core.arithmetic_in_a_specification_converts_its
     "fn(count: Int64)\n\
      ensures (add(to_integer(result), to_integer(1)) > to_integer(count))\n\
      { count }"
@@ -115,31 +105,23 @@ let () =
 
 let () =
   expect_body "a call has one argument per parameter, in parameter order"
-    "fn connect(host: Int64, port: UInt16 = 443, secure: Bool = true) {}\n\n\
-     fn g() {\n\
-    \  connect(1, secure: false)\n\
-     }\n"
+    Fixtures.Core.call_has_one_argument_per_parameter_in_parameter
     "{ app::main::connect(1, default, false) }";
   expect_body "a read-only parameter receives a place, and an `own` parameter receives a value"
-    "fn keep(items: own List[Int64], limit: Int64) {}\n\n\
-     fn g(items: List[Int64], limit: Int64) {\n\
-    \  keep(own items, limit)\n\
-     }\n"
+    Fixtures.Core.read_only_parameter_receives_a_place_and_an_own
     "{ app::main::keep(own items, place limit) }";
   expect_body "the first argument of a method call is the receiver"
-    "fn g(items: mut List[Int64]) -> USize {\n  mut items.push(4)\n  items.length()\n}\n"
+    Fixtures.Core.first_argument_of_a_method_call_is_the_receiver
     "{ standard::list::List.push(mut self)[Int64](mut place items, own 4); \
      standard::list::List.length[Int64](place items) }";
   expect_body "a String passed as a StringSlice becomes a call of `slice`"
-    "fn greet(text: StringSlice) {}\n\nfn g(name: String) {\n  greet(name)\n}\n"
+    Fixtures.Core.string_passed_as_a_stringslice_becomes_a_call_of
     "{ app::main::greet(standard::text::String.slice(place name)) }";
   expect_body "a capability method call, and a built-in copy"
-    "fn g(count: Int64) -> Int64\n  uses Clock\n{\n  let _ = Clock.now()\n  count.copy()\n}\n"
+    Fixtures.Core.capability_method_call_and_a_built_in_copy
     "{ let _ = standard::capabilities::Clock.now(); copy(place count) }";
   expect_body "a lambda lists its parameters and its captures"
-    "fn g(items: List[Int64], step: Int64) -> List[Int64] {\n\
-    \  items.map(fn(item) { item + step })\n\
-     }\n"
+    Fixtures.Core.lambda_lists_its_parameters_and_its_captures
     "{ Iterable.map for List[Int64] by standard::list::impl Iterable for List[Element](place \
      items, lambda(item) capturing step { add(item, step) }) }"
 
@@ -147,19 +129,20 @@ let () =
 
 let () =
   expect_body "a constructor lists every field, and marks an omitted field as default"
-    (shape ^ "fn g() -> Shape {\n  Shape.Square(side: 2)\n}\n")
+    (shape ^ Fixtures.Core.constructor_lists_every_field_and_marks_an_omitted)
     "{ Shape.Square(side: 2, label: default) }";
-  expect_body "a range expression becomes a Range record" "fn g() -> Range[Int64] {\n  1..5\n}\n"
+  expect_body "a range expression becomes a Range record"
+    Fixtures.Core.range_expression_becomes_a_range_record
     "{ Range[Int64](start: 1, stop: 5, inclusive: false) }";
   expect_body "an interpolated string becomes a text builder, a call for each piece, and `finish`"
-    "fn g(name: String, count: Int64) -> String {\n  \"${name}: ${count}\"\n}\n"
+    Fixtures.Core.interpolated_string_becomes_a_text_builder_a_call
     "{ { let var own builder = standard::text::TextBuilder.new(); Display.display for String by \
      standard::text::impl Display for String(place name, mut place builder); \
      standard::text::TextBuilder.write(mut self)(mut place builder, \": \"); Display.display for \
      Int64 by standard::numbers::signed::impl Display for Int64(place count, mut place builder); \
      standard::text::TextBuilder.finish(own self)(own builder) } }";
   expect_body "a list literal, a slice, and an index"
-    "fn g() -> Int64 {\n  let numbers = [1, 2, 3]\n  let _ = numbers[1..]\n  numbers[0]\n}\n"
+    Fixtures.Core.list_literal_a_slice_and_an_index
     "{ let own numbers = { let var own storage = intrinsic::storage_with_capacity(3); \
      intrinsic::storage_push(mut place storage, own 1); intrinsic::storage_push(mut place storage, \
      own 2); intrinsic::storage_push(mut place storage, own 3); \
@@ -168,89 +151,52 @@ let () =
      standard::list::List.length[Int64](place numbers)); lent Index.at for List[Int64] by \
      standard::list::impl Index for List[Element](place numbers, 0) lends }";
   expect_body "a set literal becomes `with_capacity` and one `insert` per element"
-    "fn g(first: own String, second: own String) -> Set[String] {\n  [own first, own second]\n}\n"
+    Fixtures.Core.set_literal_becomes_with_capacity_and_one_insert
     "{ { let var own set = standard::set::Set.with_capacity[String](2); \
      standard::set::Set.insert(mut self)[String](mut place set, own first); \
      standard::set::Set.insert(mut self)[String](mut place set, own second); set } }";
   expect_body "a map literal becomes `with_capacity` and one `insert_absent` per entry"
-    "fn g() -> Map[Int64, Int64] {\n  [1: 2, 3: 4]\n}\n"
+    Fixtures.Core.map_literal_becomes_with_capacity_and_one_insert
     "{ { let var own map = standard::map::Map.with_capacity[Int64, Int64](2); \
      standard::map::Map.insert_absent(mut self)[Int64, Int64](mut place map, own 1, own 2); \
      standard::map::Map.insert_absent(mut self)[Int64, Int64](mut place map, own 3, own 4); map } \
      }";
   expect_body "an empty set literal is the call of `with_capacity`"
-    "fn g() -> Set[Int64] {\n  []\n}\n" "{ standard::set::Set.with_capacity[Int64](0) }";
+    Fixtures.Core.empty_set_literal_is_the_call_of_with_capacity
+    "{ standard::set::Set.with_capacity[Int64](0) }";
   expect_body "a slice holds the call of `slice_range`, with an inclusive stop as `stop + 1`"
-    "fn g(items: List[Int64], last: USize) -> Slice[Int64] {\n  items[..=last]\n}\n"
+    Fixtures.Core.slice_holds_the_call_of_slice_range_with_an
     "{ slice standard::list::List.slice_range[Int64](place items, 0, add(last, 1)) }";
   expect_body "a slice of a slice calls the slice's `slice_range`"
-    "fn g(items: Slice[Int64]) -> Slice[Int64] {\n  items[1..3]\n}\n"
+    Fixtures.Core.slice_of_a_slice_calls_the_slices_slice_range
     "{ slice standard::list::Slice.slice_range[Int64](place items, 1, 3) }";
   expect_body "a record update lists the replaced fields, and expands the shorthand"
-    "type Config(port: Int64, host: String)\n\n\
-     fn g(config: Config, port: Int64) -> Config {\n\
-    \  config with (port)\n\
-     }\n"
-    "{ config with (port: port) }"
+    Fixtures.Core.record_update_lists_the_replaced_fields_and "{ config with (port: port) }"
 
 (* Control flow *)
 
 let () =
   expect_body "`?` becomes a match that returns the error"
-    "fn parse(text: String) -> Result[Int64, String] { todo }\n\n\
-     fn g(text: String) -> Result[Int64, String] {\n\
-    \  let value = parse(text)?\n\
-    \  Ok(value)\n\
-     }\n"
+    Fixtures.Core.becomes_a_match_that_returns_the_error
     "{ let own value = match app::main::parse(place text) { Ok(value: own value) => { value } \
      Err(error: own error) => { return Result[Int64, String].Err(error: error) } }; Result[Int64, \
      String].Ok(value: value) }";
   expect_body "a match on a place borrows the place"
-    (shape
-   ^ "fn g(shape: Shape) -> Int64 {\n\
-     \  match shape {\n\
-     \    Circle(radius) => radius\n\
-     \    Square(side, ..) if side > 2 => side\n\
-     \    _ => 0\n\
-     \  }\n\
-      }\n")
+    (shape ^ Fixtures.Core.match_on_a_place_borrows_the_place)
     "{ match place shape { Circle(radius: radius) => { radius } Square(side: side) if (side > 2) \
      => { side } _ => { 0 } } }";
   expect_body "a `match` or `is` on a value binds `own`, even if the receiver of the call is marked"
-    "type Queue(items: List[Int64])\n\n\
-     fn Queue.take(mut self) -> Option[List[Int64]] {\n\
-    \  todo\n\
-     }\n\n\
-     fn g(queue: mut Queue) -> USize {\n\
-    \  if mut queue.take() is Some(first) {\n\
-    \    return first.length()\n\
-    \  }\n\
-    \  match mut queue.take() {\n\
-    \    Some(second) => second.length()\n\
-    \    None => 0\n\
-    \  }\n\
-     }\n"
+    Fixtures.Core.match_or_is_on_a_value_binds_own_even_if_the
     "{ if (app::main::Queue.take(mut self)(mut place queue) is Some(value: own first)) { return \
      standard::list::List.length[Int64](place first) }; match app::main::Queue.take(mut self)(mut \
      place queue) { Some(value: own second) => { standard::list::List.length[Int64](place second) \
      } None => { 0 } } }";
   expect_body "`is` becomes a Matches"
-    (shape
-   ^ "fn g(shape: Shape) -> Int64 {\n  if shape is Circle(radius) { return radius }\n  0\n}\n")
+    (shape ^ Fixtures.Core.is_becomes_a_matches)
     "{ if (place shape is Circle(radius: radius)) { return radius }; 0 }";
   expect_body
     "a `for` loop over a collection calls `each`, and one over a range is an Integer_range"
-    "fn g(items: List[Int64]) -> Int64 {\n\
-    \  var total = 0\n\
-    \  for item in items {\n\
-    \    total += item\n\
-    \  }\n\
-    \  for step in 0..=total {}\n\
-    \  while total < 3 {\n\
-    \    total += 1\n\
-    \  }\n\
-    \  total\n\
-     }\n"
+    Fixtures.Core.for_loop_over_a_collection_calls_each_and_one_over
     "{ let var own total = 0; for item in yielding_call standard::list::impl Iterable for \
      List[Element].each[Int64](place items) { compound_assign total = add(current_target, \
      synthetic#0) with synthetic#0 = item }; for step in integer_range 0..=total {  }; while \
@@ -259,14 +205,7 @@ let () =
 
 let () =
   expect_body "a `for` loop over the result of a call calls `each` on the result"
-    "fn make() -> List[Int64] {\n\
-    \  todo\n\
-     }\n\n\
-     fn g() {\n\
-    \  for item in make() {\n\
-    \    let _ = item\n\
-    \  }\n\
-     }\n"
+    Fixtures.Core.for_loop_over_the_result_of_a_call_calls_each_on
     "{ for item in yielding_call standard::list::impl Iterable for \
      List[Element].each[Int64](app::main::make()) { let _ = place item } }"
 
@@ -274,16 +213,7 @@ let () =
 
 let () =
   expect_definition "a `requires` clause with a quantifier is not executable"
-    "fn g(items: List[Int64], limit: Int64) -> Int64\n\
-    \  requires limit > 0\n\
-    \  requires forall index in 0..items.length() => items[index] < limit\n\
-    \  ensures result >= 0\n\
-     {\n\
-    \  proof {\n\
-    \    assert limit > 0\n\
-    \  }\n\
-    \  limit\n\
-     }\n"
+    Fixtures.Core.requires_clause_with_a_quantifier_is_not
     "fn(items: List[Int64], limit: Int64)\n\
      requires (limit > 0)\n\
      requires forall index in 0..standard::list::List.length[Int64](place items) { (lent Index.at \
@@ -296,14 +226,7 @@ let () =
 
 let () =
   expect_body "a tagged string becomes a call of `from_template`"
-    "type Shout(text: String)\n\n\
-     impl FromTemplate for Shout {\n\
-    \  type Part = String\n\n\
-    \  fn from_template(template: Template[String]) -> Shout { todo }\n\
-     }\n\n\
-     fn g(name: own String) -> Shout {\n\
-    \  Shout\"hey ${own name}!\"\n\
-     }\n"
+    Fixtures.Core.tagged_string_becomes_a_call_of_from_template
     "{ template(\"hey \", \"!\") call FromTemplate.from_template for Shout by app::main::impl \
      FromTemplate for Shout(own Template[String](literals: { let var own storage = \
      intrinsic::storage_with_capacity(2); intrinsic::storage_push(mut place storage, own \
@@ -312,73 +235,30 @@ let () =
      storage = intrinsic::storage_with_capacity(1); intrinsic::storage_push(mut place storage, own \
      name); standard::list::List.from_storage[String](own storage) })) }";
   expect_body "a cursor is advanced by a `for` loop or by a call of `next`"
-    "fn count_to(limit: Int64) yields Int64 {\n\
-    \  yield limit\n\
-     }\n\n\
-     fn g() {\n\
-    \  var first = count_to(3)\n\
-    \  while mut first.next() is Some(left) {\n\
-    \    let _ = left\n\
-    \  }\n\
-    \  for value in count_to(2) {}\n\
-    \  for value in first {}\n\
-     }\n"
+    Fixtures.Core.cursor_is_advanced_by_a_for_loop_or_by_a_call_of
     "{ let var own first = app::main::count_to(3); while (cursor_next(first) is Some(value: own \
      left)) { let _ = place left }; for value in yielding_call app::main::count_to(2) {  }; for \
      value in cursor first {  } }";
   expect_body "a conversion to `any` records the impl, and a method call on `any` is dynamic"
-    "trait Source {\n\
-    \  type Item\n\
-    \  fn first(self) -> Self.Item\n\
-     }\n\n\
-     type Numbers(items: List[Int64])\n\n\
-     impl Source for Numbers {\n\
-    \  type Item = Int64\n\n\
-    \  fn first(self) -> Int64 {\n\
-    \    self.items[0]\n\
-    \  }\n\
-     }\n\n\
-     fn g(numbers: own Numbers) -> Int64 {\n\
-    \  let source: any Source[Item = Int64] = any numbers\n\
-    \  source.first()\n\
-     }\n"
+    Fixtures.Core.conversion_to_any_records_the_impl_and_a_method
     "{ let own source = any Source[Item = Int64](numbers by app::main::impl Source for Numbers); \
      Source[Item = Int64].first for any Source[Item = Int64] by any(place source) }";
   expect_body "the result of a `lends mut` method is a place that can be assigned"
-    "type Cell(state: Int64)\n\n\
-     type Grid(cells: List[Cell])\n\n\
-     fn Grid.cell(mut self, index: USize) lends mut Cell {\n\
-    \  yield mut self.cells[index]\n\
-     }\n\n\
-     fn g(grid: mut Grid) {\n\
-    \  mut grid.cell(0).state = 4\n\
-     }\n"
+    Fixtures.Core.result_of_a_lends_mut_method_is_a_place_that_can
     "{ lent app::main::Grid.cell(mut self)(mut place grid, 0) lends mut.state = 4 }";
   expect_body
     "a `mut self` method called on an indexed element indexes with the `mut self` version of `at`"
-    "type Worker(count: Int64)\n\n\
-     fn Worker.reset(mut self) {\n\
-    \  self.count = 0\n\
-     }\n\n\
-     fn g(workers: mut List[Worker], index: USize) {\n\
-    \  mut workers[index].reset()\n\
-     }\n"
+    Fixtures.Core.mut_self_method_called_on_an_indexed_element
     "{ app::main::Worker.reset(mut self)(mut place lent Index.at for List[Worker] by \
      standard::list::impl Index for List[Element](mut place workers, place index) lends mut) }";
   expect_body "a `for` loop over a `mut` element indexes with the `mut self` version of `at`"
-    "fn g(rows: mut List[List[Int64]]) {\n  for cell in mut rows[0] {\n    cell = 0\n  }\n}\n"
+    Fixtures.Core.for_loop_over_a_mut_element_indexes_with_the_mut
     "{ for mut cell in yielding_call standard::list::List.each(mut self)[Int64](mut place lent \
      Index.at for List[List[Int64]] by standard::list::impl Index for List[Element](mut place \
      rows, 0) lends mut) { cell = 0 } }";
   test "a `lends mut` method yields a mutable place" (fun () ->
       let actual =
-        printed_body
-          "type Cell(state: Int64)\n\n\
-           type Grid(cells: List[Cell])\n\n\
-           fn Grid.cell(mut self, index: USize) lends mut Cell {\n\
-          \  yield mut self.cells[index]\n\
-           }\n"
-          "Grid.cell(mut self)"
+        printed_body Fixtures.Core.lends_mut_method_yields_a_mutable_place "Grid.cell(mut self)"
       in
       if
         actual
@@ -387,17 +267,7 @@ let () =
       then fail "found:\n%s" actual);
   test "a yielded constructor lends the places among its fields" (fun () ->
       let actual =
-        printed_body
-          "type Shelf(books: List[String])\n\n\
-           type First(title: String, rest: Slice[String])\n\n\
-           fn Shelf.first(self) lends Option[First] {\n\
-          \  if self.books.is_empty() {\n\
-          \    yield None\n\
-          \  } else {\n\
-          \    yield Some(First(title: self.books[0], rest: self.books[1..]))\n\
-          \  }\n\
-           }\n"
-          "Shelf.first"
+        printed_body Fixtures.Core.yielded_constructor_lends_the_places_among_its "Shelf.first"
       in
       if
         actual
@@ -409,16 +279,7 @@ let () =
       then fail "found:\n%s" actual);
   test "a constructor yielded `mut` lends the places that are marked `mut`" (fun () ->
       let actual =
-        printed_body
-          "type Shelf(books: List[String])\n\n\
-           type Numbered(index: USize, title: String)\n\n\
-           fn Shelf.numbered(mut self) yields mut Numbered {\n\
-          \  var index: USize = 0\n\
-          \  while index < self.books.length() {\n\
-          \    yield Numbered(index: index, title: mut self.books[index])\n\
-          \    index = index + 1\n\
-          \  }\n\
-           }\n"
+        printed_body Fixtures.Core.constructor_yielded_mut_lends_the_places_that_are
           "Shelf.numbered(mut self)"
       in
       if
@@ -429,21 +290,13 @@ let () =
             place index) lends mut); index = add(index, 1) } }"
       then fail "found:\n%s" actual);
   expect_definition "a quantifier over a collection calls `each` in code, and not in a contract"
-    "fn g(items: List[Int64]) -> Bool\n\
-    \  ensures result == (exists item in items => item < 0)\n\
-     {\n\
-    \  exists item in items => item < 0\n\
-     }\n"
+    Fixtures.Core.quantifier_over_a_collection_calls_each_in_code
     "fn(items: List[Int64])\n\
      ensures (result == exists item in items { (item < 0) })\n\
      { exists item in yielding_call standard::list::impl Iterable for \
      List[Element].each[Int64](place items) { (item < 0) } }";
   expect_body "a method of `Cursor` on a yielding method's cursor is a call, and `next` is not"
-    "fn g(items: List[Int64]) -> USize {\n\
-    \  var cursor = items.each()\n\
-    \  let _ = mut cursor.next()\n\
-    \  items.each().skip(1).count()\n\
-     }\n"
+    Fixtures.Core.method_of_cursor_on_a_yielding_methods_cursor_is_a
     "{ let var own cursor = standard::list::impl Iterable for List[Element].each[Int64](place \
      items); let _ = cursor_next(cursor); Cursor.count for Skip[the cursor of standard::list::impl \
      Iterable for List[Element].each] by standard::cursors::impl Cursor for Skip[Source](own \
@@ -451,36 +304,7 @@ let () =
      standard::core::Cursor for standard::list::impl Iterable for List[Element].each(own \
      standard::list::impl Iterable for List[Element].each[Int64](place items), 1)) }";
   expect_body "an early exit from concurrent code names the tasks that it ends"
-    "fn fetch(item: Int64) -> Result[Int64, Int64]\n\
-    \  uses Clock\n\
-     {\n\
-    \  Ok(item)\n\
-     }\n\n\
-     fn g(items: List[Int64]) -> Result[Int64, Int64]\n\
-    \  uses Tasks, Clock\n\
-     {\n\
-    \  for item in items {\n\
-    \    concurrent {\n\
-    \      let first = fetch(item)?\n\
-    \      if item > 3 {\n\
-    \        break\n\
-    \      }\n\
-    \    }\n\
-    \    let _ = first\n\
-    \  }\n\
-    \  concurrent for item in items {\n\
-    \    if item > 5 {\n\
-    \      break\n\
-    \    }\n\
-    \    if item > 4 {\n\
-    \      continue\n\
-    \    }\n\
-    \    if item > 3 {\n\
-    \      return Err(item)\n\
-    \    }\n\
-    \  }\n\
-    \  Ok(0)\n\
-     }\n"
+    Fixtures.Core.early_exit_from_concurrent_code_names_the_tasks
     "{ for item in yielding_call standard::list::impl Iterable for List[Element].each[Int64](place \
      items) { concurrent #1 { let own first = match app::main::fetch(place item) { Ok(value: own \
      value) => { value } Err(error: own error) => { task_exit branch 0 of #1 { return \
@@ -491,12 +315,7 @@ let () =
      task_exit an iteration of #2 { return Result[Int64, Int64].Err(error: item) } } }; \
      Result[Int64, Int64].Ok(value: 0) }";
   expect_body "an assignment through an index calls `assign` where the type has it"
-    "fn g(name: own String) {\n\
-    \  var ports: Map[String, Int64] = [\"http\": 80]\n\
-    \  var scores: List[Int64] = [1]\n\
-    \  ports[own name] = 8080\n\
-    \  scores[0] = 5\n\
-     }\n"
+    Fixtures.Core.assignment_through_an_index_calls_assign_where_the
     "{ let var own ports = { let var own map = standard::map::Map.with_capacity[String, Int64](1); \
      standard::map::Map.insert_absent(mut self)[String, Int64](mut place map, own \"http\", own \
      80); map }; let var own scores = { let var own storage = intrinsic::storage_with_capacity(1); \
@@ -506,28 +325,10 @@ let () =
      name, own 8080); lent Index.at for List[Int64] by standard::list::impl Index for \
      List[Element](mut place scores, 0) lends mut = 5 }";
   expect_body "patterns of constants, ranges, and strings"
-    "let limit: Int64 = 10\n\n\
-     fn g(count: Int64, name: String) -> Int64 {\n\
-    \  let size = match count {\n\
-    \    limit => 1\n\
-    \    0..5 => 2\n\
-    \    7 | 8 => 3\n\
-    \    _ => 4\n\
-    \  }\n\
-    \  match name {\n\
-    \    \"yes\" => size\n\
-    \    _ => 0\n\
-    \  }\n\
-     }\n"
+    Fixtures.Core.patterns_of_constants_ranges_and_strings
     "{ let own size = match place count { app::main::limit => { 1 } 0..5 => { 2 } 7 | 8 => { 3 } _ \
      => { 4 } }; match place name { equal to \"yes\" => { size } _ => { 0 } } }";
-  expect_definition "a quantifier over a type, and old"
-    "fn g(count: Int64) -> Bool\n\
-    \  ensures result == (forall value: Int64 => value + 0 == value)\n\
-    \  ensures old(count) == count\n\
-     {\n\
-    \  true\n\
-     }\n"
+  expect_definition "a quantifier over a type, and old" Fixtures.Core.quantifier_over_a_type_and_old
     "fn(count: Int64)\n\
      ensures (result == forall value: Int64 { (add(to_integer(value), to_integer(0)) == \
      to_integer(value)) })\n\
@@ -536,10 +337,7 @@ let () =
 
 let () =
   expect_body "a `mut` parameter receives a slice of a place"
-    "fn sort_part(part: mut Slice[Int64]) {}\n\n\
-     fn g(items: mut List[Int64]) {\n\
-    \  sort_part(mut items[..2])\n\
-     }\n"
+    Fixtures.Core.mut_parameter_receives_a_slice_of_a_place
     "{ app::main::sort_part(mut slice standard::list::List.slice_range[Int64](place items, 0, 2)) }"
 
 (* Holes *)
@@ -547,9 +345,9 @@ let () =
 let () =
   expect_body
     "a use of a local whose type is a hole is a Todo, and a pattern on a hole is a Wildcard"
-    "fn g() -> Int64 {\n  let value = todo\n  value\n}\n" "{ let _ = todo; todo }";
+    Fixtures.Core.use_of_a_local_whose_type_is_a_hole_is_a_todo_and "{ let _ = todo; todo }";
   expect_body "an operation on a hole evaluates its operands and ends in a Todo"
-    "fn g(count: Int64) -> Int64 {\n  let value = todo\n  value.method(count) + 1\n}\n"
+    Fixtures.Core.operation_on_a_hole_evaluates_its_operands_and
     "{ let _ = todo; { let _ = todo; let _ = place count; let _ = 1; todo } }";
   List.iter
     (fun statement ->
@@ -600,30 +398,17 @@ let () =
 (* Capabilities *)
 
 let () =
-  let apply =
-    "fn apply[capability Granted](run: (fn() uses Granted))\n\
-    \  uses Granted\n\
-     {\n\
-    \  run()\n\
-     }\n\n\
-     fn shout()\n\
-    \  uses Console\n\
-     {\n\
-    \  Console.print_line(\"named\")\n\
-     }\n\n"
-  in
+  let apply = Fixtures.Core.apply in
   expect_body "a capability parameter is inferred as the set of capabilities the argument uses"
-    (apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n")
+    (apply ^ Fixtures.Core.capability_parameter_is_inferred_as_the_set_of)
     "{ app::main::apply[{Console}](lambda() { \
      standard::capabilities::Console.print_line(standard::text::String.slice(\"inside\")) }) }";
   expect_body "a named function passed for a capability-generic parameter is a Function_value"
-    (apply ^ "fn g()\n  uses Console\n{\n  apply(shout)\n}\n")
+    (apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic)
     "{ app::main::apply[{Console}](fn app::main::shout) }";
   test "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
     (fun () ->
-      let text =
-        apply ^ "fn g()\n  uses Console\n{\n  apply(fn() { Console.print_line(\"inside\") })\n}\n"
-      in
+      let text = apply ^ Fixtures.Core.calls_uses_and_a_lambdas_type_contain_the_inferred in
       let database = setup [ ("app::main", text) ] in
       let actual = ref [] in
       List.iter
@@ -651,21 +436,7 @@ let () =
       if List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console}" ] then
         fail "found [%s]" (String.concat "; " !actual));
   test "a capability parameter in a result type is inferred separately for each call" (fun () ->
-      let text =
-        "fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {\n\
-        \  run\n\
-         }\n\n\
-         fn g()\n\
-        \  uses Console, Clock\n\
-         {\n\
-        \  let first = later(fn() { Console.print_line(\"x\") })\n\
-        \  let second = later(fn() {\n\
-        \    let _ = Clock.now()\n\
-        \  })\n\
-        \  first()\n\
-        \  second()\n\
-         }\n"
-      in
+      let text = Fixtures.Core.capability_parameter_in_a_result_type_is_inferred in
       let database = setup [ ("app::main", text) ] in
       let actual = ref [] in
       List.iter
@@ -694,15 +465,7 @@ let () =
 
 let () =
   test "a node's origin gives its source span" (fun () ->
-      let text =
-        "fn g(items: List[Int64]) -> Int64 {\n\
-        \  var total = 0\n\
-        \  for item in items {\n\
-        \    total += item\n\
-        \  }\n\
-        \  total\n\
-         }\n"
-      in
+      let text = Fixtures.Core.nodes_origin_gives_its_source_span in
       let database = setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
@@ -732,14 +495,7 @@ let () =
         (Query.demand database Resolve.Names.declarations (module_of "app::main")))
 
 let () =
-  expect_definition "a cost clause names its resource"
-    "fn g(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
-    \  uses Clock\n\
-    \  cost calls(visit) == items.length()\n\
-    \  cost calls(Clock.now) <= 1\n\
-    \  cost time O(items.length() * time(visit))\n\
-     {\n\
-     }\n"
+  expect_definition "a cost clause names its resource" Fixtures.Core.cost_clause_names_its_resource
     "fn(items: List[Int64], visit: (fn(Int64) cost time finite))\n\
      cost calls(visit) == standard::list::List.length[Int64](place items)\n\
      cost calls(standard::capabilities::Clock.now) <= 1\n\
@@ -748,34 +504,16 @@ let () =
 
 let () =
   expect_definition "`log` and `power` are specification functions outside a cost bound too"
-    "fn g(value: UInt64) -> USize\n\
-    \  ensures result <= log(value) + 1\n\
-    \  ensures power(2, result) >= 1\n\
-     {\n\
-    \  todo\n\
-     }\n"
+    Fixtures.Core.log_and_power_are_specification_functions_outside
     "fn(value: UInt64)\n\
      ensures (to_integer(result) <= add(log(value), 1))\n\
      ensures (power(2, result) >= 1)\n\
      { todo }";
   expect_definition "a function of the file named `power` is called in a specification"
-    "fn power(base: Int64, exponent: Int64) -> Int64\n\
-    \  cost time finite\n\
-     {\n\
-    \  base\n\
-     }\n\n\
-     fn g(value: Int64) -> Int64\n\
-    \  ensures result == power(value, exponent: 1)\n\
-     {\n\
-    \  value\n\
-     }\n"
+    Fixtures.Core.function_of_the_file_named_power_is_called_in_a
     "fn(value: Int64)\nensures (result == app::main::power(place value, 1))\n{ value }";
   expect_definition "the time of a method of a type parameter's bound names the trait method"
-    "fn g[Element: Equal](items: List[Element], item: Element) -> Bool\n\
-    \  cost time O(items.length() * time(Element.equal))\n\
-     {\n\
-    \  todo\n\
-     }\n"
+    Fixtures.Core.time_of_a_method_of_a_type_parameters_bound_names
     "fn(items: List[Element], item: Element)\n\
      cost time O(multiply(to_integer(standard::list::List.length[Element](place items)), \
      time(Equal.equal for Element by a bound)))\n\
@@ -786,23 +524,11 @@ let () =
           Resolve.diagnostics database module_
           @ Interface.diagnostics database module_
           @ Infer.diagnostics database module_)
-        [
-          ( "app::main",
-            "trait Sized {\n\
-            \  fn size(self) -> USize\n\n\
-            \  fn double(self) -> USize\n\
-            \    cost time O(time(Self.size))\n\
-            \  {\n\
-            \    self.size() + self.size()\n\
-            \  }\n\
-             }\n" );
-        ])
+        [ ("app::main", Fixtures.Core.in_a_trait_time_self_method_names_the_traits_own) ])
 
 let () =
   test "the origin of a cost is its cost clause" (fun () ->
-      let text =
-        "fn g(items: List[Int64]) -> USize\n  cost time O(items.length())\n{\n  items.length()\n}\n"
-      in
+      let text = Fixtures.Core.origin_of_a_cost_is_its_cost_clause in
       let database = setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
@@ -864,8 +590,7 @@ let expect_derived what text type_name trait name receiver expected =
 let pair =
   "type Pair[Second](first: Int64, second: Second)\n  derives Equal, Hash, Ordered, Default\n\n"
 
-let light =
-  "type Light =\n  | Off\n  | Dim(level: Int64)\n  | On\n  derives Equal, Hash, Ordered\n\n"
+let light = Fixtures.Core.light
 
 let () =
   expect_derived "a record's derived equal compares each field" pair "Pair" "Equal" "equal" Read
@@ -969,21 +694,7 @@ let () =
 (* [Infer.core_of_path] *)
 
 let () =
-  let text =
-    "trait Described {\n\
-    \  fn describe(self) -> Int64\n\n\
-    \  fn twice(self) -> Int64 {\n\
-    \    self.describe() + self.describe()\n\
-    \  }\n\
-     }\n\n\
-     type Both[Value](first: Value, second: Value)\n\
-    \  derives Equal\n\n\
-     impl Described for Both[Value: Described] {\n\
-    \  fn describe(self) -> Int64 {\n\
-    \    self.first.describe()\n\
-    \  }\n\
-     }\n"
-  in
+  let text = Fixtures.Core.described_both in
   let both : Path.t = Top { module_ = module_of "app::main"; name = "Both" } in
   let described : Types.trait_reference =
     {
@@ -1042,19 +753,7 @@ let () =
 
 (* A law's proof *)
 
-let pair_ordering =
-  "type Pair(first: UInt8, second: UInt8)\n\
-  \  derives Equal\n\n\
-   theorem only_equal(first: Pair, second: Pair)\n\
-  \  ensures (first.compare(second) == Ordering.Equal) == (first == second)\n\
-   {\n\
-   }\n\n\
-   impl Ordered for Pair {\n\
-  \  fn compare(self, other: Pair) -> Ordering {\n\
-  \    let order = self.first.compare(other.first)\n\
-  \    if order != Ordering.Equal { order } else { self.second.compare(other.second) }\n\
-  \  }\n\
-   }\n\n"
+let pair_ordering = Fixtures.Core.pair_ordering
 
 let () =
   test "a law's proof has the law's parameters, with the proof's type for Self" (fun () ->
@@ -1110,14 +809,7 @@ let () =
         fail "the specification changed");
   test "editing a clause changes the specification" (fun () ->
       if
-        equal (bump "counter += by")
-          "fn bump(counter: mut Int64, by: Int64)\n\
-          \  requires by > 1\n\
-          \  cost time O(1)\n\
-           {\n\
-          \  counter += by\n\
-           }\n"
-          "bump"
+        equal (bump "counter += by") Fixtures.Core.editing_a_clause_changes_the_specification "bump"
       then fail "the specification did not change");
   test "editing the body of a function in the logic changes its specification" (fun () ->
       if equal (double "value + value") (double "value * 2") "double" then
@@ -1156,25 +848,13 @@ let () =
       | Some { definition = Function { body = None; _ }; _ } -> ()
       | _ -> fail "the body of a function that is not transparent is in the exported specification");
   test "a theorem's specification has no body" (fun () ->
-      let _, _, form =
-        specification "theorem doubled(value: Int64)\n  ensures value + value == 2 * value\n{\n}\n"
-          "doubled"
-      in
+      let _, _, form = specification Fixtures.Core.theorems_specification_has_no_body "doubled" in
       match form.definition with
       | Function { body = None; _ } -> ()
       | _ -> fail "the body is in the specification");
   test "the body that a trait provides for a method is in the method's specification" (fun () ->
       let database =
-        setup
-          [
-            ( "app::main",
-              "trait Counted {\n\
-              \  fn count(self) -> Int64\n\
-              \  fn bump(mut self) -> Int64 {\n\
-              \    self.count() + 1\n\
-              \  }\n\
-               }\n" );
-          ]
+        setup [ ("app::main", Fixtures.Core.body_that_a_trait_provides_for_a_method_is_in_the) ]
       in
       let actual =
         List.find_map

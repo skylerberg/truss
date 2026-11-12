@@ -1,0 +1,19 @@
+let newline: UInt8 = UInt8"\n"
+
+fn kind(letter: Character) -> Int64 {
+  match letter {
+    Character"a"..=Character"z" => 1
+    Character"_" => 2
+    _ => 0
+  }
+}
+
+test "characters" {
+  assert newline == 10
+  assert UInt8"A" == 65
+  assert kind(Character"q") == 1
+  assert kind(Character"_") == 2
+  assert kind(Character"é") == 0
+  let accented = Character"é"
+  assert "${accented}${true}${Character"z"}" == "étruez"
+}

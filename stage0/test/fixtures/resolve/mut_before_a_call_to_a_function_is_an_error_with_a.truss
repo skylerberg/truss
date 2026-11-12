@@ -1,0 +1,5 @@
+fn make() -> List[Int64] { todo }
+
+fn f() {
+  mut make().push(1)
+}
