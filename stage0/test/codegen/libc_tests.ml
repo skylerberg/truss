@@ -17,25 +17,25 @@ let extra =
 
 let intrinsic_types : Intrinsics.types = { usize; string_slice = named "StringSlice" }
 
-let operate b ?destination ?(type_arguments = []) operation arguments =
+let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Intrinsics.lower (shape_env ~extra ()) b intrinsic_types operation ~type_arguments arguments
-       ~destination
+    (Intrinsics.lower (shape_env ~extra ()) builder intrinsic_types operation ~type_arguments
+       arguments ~destination
        ~site:{ definition = definition "entry"; line = 0; column = 1 })
 
 (* An [entry] built with the builder: [body] writes its statements and
    returns the local to exit with. *)
 let built_entry body =
-  let b = Lir_builder.create () in
-  Lir_builder.start b (Lir_builder.block b);
-  let result = body b in
-  Lir_builder.finish b (Return (Some (Copy (Lir_builder.at result))));
-  instance "entry" (Lir_builder.build b ~parameters:[] ~result:(Some (value int32)))
+  let builder = Lir_builder.create () in
+  Lir_builder.start builder (Lir_builder.block builder);
+  let result = body builder in
+  Lir_builder.finish builder (Return (Some (Copy (Lir_builder.at result))));
+  instance "entry" (Lir_builder.build builder ~parameters:[] ~result:(Some (value int32)))
 
-let view_of b text =
+let view_of builder text =
   let open Lir_builder in
-  let view = local b (value view_ty) in
-  emit b
+  let view = local builder (value view_ty) in
+  emit builder
     (Assign
        ( at view,
          Storage.view view_ty ~elements:(Constant (Bytes text)) ~length:(usize (String.length text))
@@ -43,20 +43,20 @@ let view_of b text =
   view
 
 (* The C library's numbers, joined with [or]. *)
-let flags b numbers =
+let flags builder numbers =
   let open Lir_builder in
-  let all = local b (value int32) in
-  emit b (Assign (at all, Use (constant_int32 0)));
+  let all = local builder (value int32) in
+  emit builder (Assign (at all, Use (constant_int32 0)));
   List.iter
     (fun number ->
-      let one = local b (value int32) in
-      operate b ~destination:(at one) (Libc_number number) [];
-      emit b (Assign (at all, Binary (Bit_or, Copy (at all), Copy (at one)))))
+      let one = local builder (value int32) in
+      operate builder ~destination:(at one) (Libc_number number) [];
+      emit builder (Assign (at all, Binary (Bit_or, Copy (at all), Copy (at one)))))
     numbers;
   all
 
-let free b storage =
-  Lir_builder.emit b
+let free builder storage =
+  Lir_builder.emit builder
     (Call
        {
          target = Intrinsic Free;
@@ -95,20 +95,20 @@ let () =
       if checked linux then fail "the check for Linux looks for proc_pidpath");
   test "a call of a function the system lacks stops the program, and calls nothing" (fun () ->
       let open Lir_builder in
-      let b = create () in
-      start b (block b);
-      let length = local b (value int32) in
-      let path = local b (value bytes_ty) in
+      let builder = create () in
+      start builder (block builder);
+      let length = local builder (value int32) in
+      let path = local builder (value bytes_ty) in
       ignore
         (Intrinsics.lower
            (Memory_layout.create (Memory_layout.target_64 linux) ~shape_of:(shapes extra))
-           b intrinsic_types (Libc Proc_pidpath) ~type_arguments:[]
+           builder intrinsic_types (Libc Proc_pidpath) ~type_arguments:[]
            [ Value (constant_int32 1); Place (at path); Value (usize 64) ]
            ~destination:(Some (at length))
            ~site:{ definition = definition "entry"; line = 0; column = 1 });
-      finish b (Return (Some (Copy (at length))));
+      finish builder (Return (Some (Copy (at length))));
       let lowered =
-        Lir.to_string (instance "entry" (build b ~parameters:[] ~result:(Some (value int32))))
+        Lir.to_string (instance "entry" (build builder ~parameters:[] ~result:(Some (value int32))))
       in
       if not (contains lowered "this system's C library has no proc_pidpath") then
         fail "the call does not stop the program:\n%s" lowered;
@@ -174,13 +174,13 @@ let () =
       let status, output, _ =
         run_program ~extra
           [
-            built_entry (fun b ->
-                let view = view_of b "written\n" in
-                let wrote = local b (value isize) in
-                operate b ~destination:(at wrote) (Libc Write)
+            built_entry (fun builder ->
+                let view = view_of builder "written\n" in
+                let wrote = local builder (value isize) in
+                operate builder ~destination:(at wrote) (Libc Write)
                   [ Value (constant_int32 1); Place (at view); Value (usize 8) ];
-                let status = local b (value int32) in
-                emit b (Assign (at status, Convert (Copy (at wrote), Integer Int32)));
+                let status = local builder (value int32) in
+                emit builder (Assign (at status, Convert (Copy (at wrote), Integer Int32)));
                 status);
           ]
       in
@@ -198,13 +198,13 @@ let () =
       let status, output, _ =
         run_program ~extra
           [
-            built_entry (fun b ->
-                let copy = local b (value int32) in
-                operate b ~destination:(at copy) (Libc Fcntl_dupfd_cloexec)
+            built_entry (fun builder ->
+                let copy = local builder (value int32) in
+                operate builder ~destination:(at copy) (Libc Fcntl_dupfd_cloexec)
                   [ Value (constant_int32 1); Value (constant_int32 10) ];
-                let view = view_of b "through the copy\n" in
-                let wrote = local b (value isize) in
-                operate b ~destination:(at wrote) (Libc Write)
+                let view = view_of builder "through the copy\n" in
+                let wrote = local builder (value isize) in
+                operate builder ~destination:(at wrote) (Libc Write)
                   [ Value (Copy (at copy)); Place (at view); Value (usize 17) ];
                 copy);
           ]
@@ -217,14 +217,14 @@ let () =
       let path = Filename.concat (Lazy.force scratch) "opened" in
       expect_status ~extra 0
         [
-          built_entry (fun b ->
-              let name = view_of b (path ^ "\000") in
-              let wanted = flags b [ O_wronly; O_creat; O_trunc ] in
-              let descriptor = local b (value int32) in
-              operate b ~destination:(at descriptor) (Libc Open)
+          built_entry (fun builder ->
+              let name = view_of builder (path ^ "\000") in
+              let wanted = flags builder [ O_wronly; O_creat; O_trunc ] in
+              let descriptor = local builder (value int32) in
+              operate builder ~destination:(at descriptor) (Libc Open)
                 [ Place (at name); Value (Copy (at wanted)); Value (constant_int32 0o600) ];
-              let closed = local b (value int32) in
-              operate b ~destination:(at closed) (Libc Close) [ Value (Copy (at descriptor)) ];
+              let closed = local builder (value int32) in
+              operate builder ~destination:(at closed) (Libc Close) [ Value (Copy (at descriptor)) ];
               closed);
         ];
       expect_int ~expected:0o600 (Unix.stat path).st_perm);
@@ -232,13 +232,13 @@ let () =
       let open Lir_builder in
       expect_status ~extra (Libc.value host Enoent)
         [
-          built_entry (fun b ->
-              let name = view_of b "/nonexistent/truss\000" in
-              let wanted = flags b [ O_rdonly ] in
-              operate b (Libc Open)
+          built_entry (fun builder ->
+              let name = view_of builder "/nonexistent/truss\000" in
+              let wanted = flags builder [ O_rdonly ] in
+              operate builder (Libc Open)
                 [ Place (at name); Value (Copy (at wanted)); Value (constant_int32 0) ];
-              let error = local b (value int32) in
-              operate b ~destination:(at error) (Libc Errno) [];
+              let error = local builder (value int32) in
+              operate builder ~destination:(at error) (Libc Errno) [];
               error);
         ]);
   test "read fills the room storage has after its last element" (fun () ->
@@ -246,23 +246,24 @@ let () =
       let status, _, _ =
         run_program ~extra ~input:"hello"
           [
-            built_entry (fun b ->
-                let storage = local b (value bytes_ty) in
-                operate b ~destination:(at storage) ~type_arguments:[ uint8 ] Storage_with_capacity
+            built_entry (fun builder ->
+                let storage = local builder (value bytes_ty) in
+                operate builder ~destination:(at storage) ~type_arguments:[ uint8 ]
+                  Storage_with_capacity
                   [ Value (usize 16) ];
-                operate b ~type_arguments:[ uint8 ] Storage_push
+                operate builder ~type_arguments:[ uint8 ] Storage_push
                   [ Place (at storage); Value (Constant (Integer (UInt8, Z.of_int 1))) ];
-                let got = local b (value isize) in
-                operate b ~destination:(at got) (Libc Read)
+                let got = local builder (value isize) in
+                operate builder ~destination:(at got) (Libc Read)
                   [ Value (constant_int32 0); Place (at storage); Value (usize 15) ];
                 (* The first byte read comes after the one the storage had. *)
-                let first = local b (value int32) and count = local b (value int32) in
-                emit b
+                let first = local builder (value int32) and count = local builder (value int32) in
+                emit builder
                   (Assign
                      (at first, Convert (Copy (Storage.at (at storage) (usize 1)), Integer Int32)));
-                emit b (Assign (at count, Convert (Copy (at got), Integer Int32)));
-                emit b (Assign (at first, Binary (Add, Copy (at first), Copy (at count))));
-                free b (at storage);
+                emit builder (Assign (at count, Convert (Copy (at got), Integer Int32)));
+                emit builder (Assign (at first, Binary (Add, Copy (at first), Copy (at count))));
+                free builder (at storage);
                 first);
           ]
       in
@@ -271,47 +272,49 @@ let () =
       let open Lir_builder in
       expect_status ~extra 1
         [
-          built_entry (fun b ->
-              let seconds = local b (value int64) and nanoseconds = local b (value int64) in
-              let clock = flags b [ Clock_realtime ] in
-              let failed = local b (value int32) in
-              operate b ~destination:(at failed) (Libc Clock_gettime)
+          built_entry (fun builder ->
+              let seconds = local builder (value int64)
+              and nanoseconds = local builder (value int64) in
+              let clock = flags builder [ Clock_realtime ] in
+              let failed = local builder (value int32) in
+              operate builder ~destination:(at failed) (Libc Clock_gettime)
                 [ Value (Copy (at clock)); Place (at seconds); Place (at nanoseconds) ];
               (* Later than 2023, and less than a second of nanoseconds. *)
-              let recent = local b (Raw Bool) and whole = local b (Raw Bool) in
-              emit b
+              let recent = local builder (Raw Bool) and whole = local builder (Raw Bool) in
+              emit builder
                 (Assign
                    (at recent, Binary (Greater, Copy (at seconds), constant_int64 1_700_000_000)));
-              emit b
+              emit builder
                 (Assign
                    (at whole, Binary (Less, Copy (at nanoseconds), constant_int64 1_000_000_000)));
-              emit b (Assign (at recent, Binary (Bit_and, Copy (at recent), Copy (at whole))));
-              let status = local b (value int32) in
-              emit b (Assign (at status, Convert (Copy (at recent), Integer Int32)));
-              emit b (Assign (at status, Binary (Subtract, Copy (at status), Copy (at failed))));
+              emit builder (Assign (at recent, Binary (Bit_and, Copy (at recent), Copy (at whole))));
+              let status = local builder (value int32) in
+              emit builder (Assign (at status, Convert (Copy (at recent), Integer Int32)));
+              emit builder
+                (Assign (at status, Binary (Subtract, Copy (at status), Copy (at failed))));
               status);
         ]);
   test "a number passed by address is read by the function and then written" (fun () ->
       let open Lir_builder in
       let uint32 = named "UInt32" in
       let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
-      let operate b ?destination operation arguments =
+      let operate builder ?destination operation arguments =
         ignore
-          (Intrinsics.lower (shape_env ~extra ()) b intrinsic_types operation ~type_arguments:[]
-             arguments ~destination
+          (Intrinsics.lower (shape_env ~extra ()) builder intrinsic_types operation
+             ~type_arguments:[] arguments ~destination
              ~site:{ definition = definition "entry"; line = 0; column = 1 })
       in
       (* A new socket's name is 16 bytes. The system is told there is room
          for 28, which it could not know from a number it only writes. *)
       expect_status ~extra 16
         [
-          built_entry (fun b ->
-              let domain = flags b [ Af_inet ] and kind = flags b [ Sock_stream ] in
-              let socket = local b (value int32) in
-              operate b ~destination:(at socket) (Libc Socket)
+          built_entry (fun builder ->
+              let domain = flags builder [ Af_inet ] and kind = flags builder [ Sock_stream ] in
+              let socket = local builder (value int32) in
+              operate builder ~destination:(at socket) (Libc Socket)
                 [ Value (Copy (at domain)); Value (Copy (at kind)); Value (constant_int32 0) ];
-              let name = local b (value bytes_ty) in
-              emit b
+              let name = local builder (value bytes_ty) in
+              emit builder
                 (Assign
                    ( at name,
                      Build
@@ -325,15 +328,16 @@ let () =
                              ("capacity", usize 0);
                            ];
                        } ));
-              let length = local b (value uint32) in
-              emit b (Assign (at length, Use (Constant (Integer (UInt32, Z.of_int 28)))));
-              let failed = local b (value int32) in
-              operate b ~destination:(at failed) (Libc Getsockname)
+              let length = local builder (value uint32) in
+              emit builder (Assign (at length, Use (Constant (Integer (UInt32, Z.of_int 28)))));
+              let failed = local builder (value int32) in
+              operate builder ~destination:(at failed) (Libc Getsockname)
                 [ Value (Copy (at socket)); Place (at name); Place (at length) ];
-              let status = local b (value int32) in
-              emit b (Assign (at status, Convert (Copy (at length), Integer Int32)));
-              emit b (Assign (at status, Binary (Subtract, Copy (at status), Copy (at failed))));
-              free b (at name);
+              let status = local builder (value int32) in
+              emit builder (Assign (at status, Convert (Copy (at length), Integer Int32)));
+              emit builder
+                (Assign (at status, Binary (Subtract, Copy (at status), Copy (at failed))));
+              free builder (at name);
               status);
         ]);
   test "an argument a row fixes is no argument of the Truss call" (fun () ->
@@ -341,18 +345,19 @@ let () =
       let uint64 = named "UInt64" in
       expect_status ~extra 1
         [
-          built_entry (fun b ->
+          built_entry (fun builder ->
               (* Two draws of eight random bytes differ. *)
               let draw () =
-                let value = local b (value uint64) and failed = local b (value int32) in
-                operate b ~destination:(at failed) (Libc Getentropy) [ Place (at value) ];
+                let value = local builder (value uint64) and failed = local builder (value int32) in
+                operate builder ~destination:(at failed) (Libc Getentropy) [ Place (at value) ];
                 value
               in
               let first = draw () in
               let second = draw () in
-              let differ = local b (Raw Bool) and status = local b (value int32) in
-              emit b (Assign (at differ, Binary (Not_equal, Copy (at first), Copy (at second))));
-              emit b (Assign (at status, Convert (Copy (at differ), Integer Int32)));
+              let differ = local builder (Raw Bool) and status = local builder (value int32) in
+              emit builder
+                (Assign (at differ, Binary (Not_equal, Copy (at first), Copy (at second))));
+              emit builder (Assign (at status, Convert (Copy (at differ), Integer Int32)));
               status);
         ])
 
@@ -361,10 +366,10 @@ let () =
       let open Lir_builder in
       expect_status ~extra 7
         [
-          built_entry (fun b ->
-              operate b (Libc Exit) [ Value (constant_int32 7) ];
-              let status = local b (value int32) in
-              emit b (Assign (at status, Use (constant_int32 0)));
+          built_entry (fun builder ->
+              operate builder (Libc Exit) [ Value (constant_int32 7) ];
+              let status = local builder (value int32) in
+              emit builder (Assign (at status, Use (constant_int32 0)));
               status);
         ]);
   test "a pipe's two ends arrive in the arguments named for them, and poll finds what was written"
@@ -373,33 +378,36 @@ let () =
       let waited_ty = Storage.of_elements int32 in
       expect_status ~extra 1
         [
-          built_entry (fun b ->
-              let read_end = local b (value int32) and write_end = local b (value int32) in
-              operate b (Libc Pipe) [ Place (at read_end); Place (at write_end) ];
-              let view = view_of b "x" in
-              operate b (Libc Write)
+          built_entry (fun builder ->
+              let read_end = local builder (value int32)
+              and write_end = local builder (value int32) in
+              operate builder (Libc Pipe) [ Place (at read_end); Place (at write_end) ];
+              let view = view_of builder "x" in
+              operate builder (Libc Write)
                 [ Value (Copy (at write_end)); Place (at view); Value (usize 1) ];
-              let waited = local b (value waited_ty) in
-              operate b ~destination:(at waited) ~type_arguments:[ int32 ] Storage_with_capacity
+              let waited = local builder (value waited_ty) in
+              operate builder ~destination:(at waited) ~type_arguments:[ int32 ]
+                Storage_with_capacity
                 [ Value (usize 2) ];
-              operate b ~type_arguments:[ int32 ] Storage_push
+              operate builder ~type_arguments:[ int32 ] Storage_push
                 [ Place (at waited); Value (Copy (at read_end)) ];
-              let reading = flags b [ Pollin ] in
-              operate b ~type_arguments:[ int32 ] Storage_push
+              let reading = flags builder [ Pollin ] in
+              operate builder ~type_arguments:[ int32 ] Storage_push
                 [ Place (at waited); Value (Copy (at reading)) ];
-              let ready = local b (value int32) in
-              operate b ~destination:(at ready) (Libc Poll)
+              let ready = local builder (value int32) in
+              operate builder ~destination:(at ready) (Libc Poll)
                 [ Place (at waited); Value (usize 1); Value (constant_int32 1000) ];
               (* What was found is the high half of the second number. *)
-              let actual = local b (value int32) in
-              emit b
+              let actual = local builder (value int32) in
+              emit builder
                 (Assign
                    ( at actual,
                      Binary (Shift_right, Copy (Storage.at (at waited) (usize 1)), constant_int32 16)
                    ));
-              emit b (Assign (at actual, Binary (Bit_and, Copy (at actual), Copy (at reading))));
-              emit b (Assign (at ready, Binary (Multiply, Copy (at ready), Copy (at actual))));
-              free b (at waited);
+              emit builder
+                (Assign (at actual, Binary (Bit_and, Copy (at actual), Copy (at reading))));
+              emit builder (Assign (at ready, Binary (Multiply, Copy (at ready), Copy (at actual))));
+              free builder (at waited);
               ready);
         ])
 
@@ -422,11 +430,11 @@ let () =
         { usize = Monomorphic.builtin USize; string_slice = standard "text" "StringSlice" () }
       in
       let entry =
-        let b = Lir_builder.create () in
-        start b (block b);
-        let name = local b (value view_ty) in
+        let builder = Lir_builder.create () in
+        start builder (block builder);
+        let name = local builder (value view_ty) in
         let text = path ^ "\000" in
-        emit b
+        emit builder
           (Assign
              ( at name,
                Storage.view view_ty ~elements:(Constant (Bytes text))
@@ -434,9 +442,9 @@ let () =
         (* [open] gives the lowest descriptor that is free, so the second
            gets the first's exactly when the first was closed. *)
         let opened () =
-          let descriptor = local b (value int32) in
+          let descriptor = local builder (value int32) in
           ignore
-            (Intrinsics.lower env b types (Libc Open) ~type_arguments:[]
+            (Intrinsics.lower env builder types (Libc Open) ~type_arguments:[]
                [
                  Place (at name);
                  Value (constant_int32 (Libc.value host O_rdonly));
@@ -447,29 +455,29 @@ let () =
           descriptor
         in
         let first = opened () in
-        let handle = local b (value handle_ty) in
-        emit b
+        let handle = local builder (value handle_ty) in
+        emit builder
           (Assign
              ( at handle,
                Build
                  { ty = handle_ty; variant = None; fields = [ ("descriptor", Copy (at first)) ] } ));
-        emit b (Drop (at handle));
+        emit builder (Drop (at handle));
         let second = opened () in
-        let same = local b (Raw Bool) and status = local b (value int32) in
-        emit b (Assign (at same, Binary (Equal, Copy (at first), Copy (at second))));
-        emit b (Assign (at status, Convert (Copy (at same), Integer Int32)));
-        finish b (Return (Some (Copy (at status))));
-        instance "entry" (build b ~parameters:[] ~result:(Some (value int32)))
+        let same = local builder (Raw Bool) and status = local builder (value int32) in
+        emit builder (Assign (at same, Binary (Equal, Copy (at first), Copy (at second))));
+        emit builder (Assign (at status, Convert (Copy (at same), Integer Int32)));
+        finish builder (Return (Some (Copy (at status))));
+        instance "entry" (build builder ~parameters:[] ~result:(Some (value int32)))
       in
       let status, _, errors = run_program ~env [ entry; Glue.drop glue handle_ty ] in
       if status <> 1 then fail "the descriptor was not free again (status %d, %s)" status errors)
 
 (* The checks of a build that does not wait for proofs *)
 
-let checked b ?destination ?(type_arguments = []) operation arguments =
+let checked builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Intrinsics.lower ~checks:true (shape_env ~extra ()) b intrinsic_types operation ~type_arguments
-       arguments ~destination
+    (Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types operation
+       ~type_arguments arguments ~destination
        ~site:{ definition = definition "entry"; line = 0; column = 1 })
 
 (* The position that a panic in [entry] reports. *)
@@ -485,15 +493,16 @@ let () =
       let open Lir_builder in
       expect_panic ~saying:"a call of the C library with less room than it writes"
         [
-          built_entry (fun b ->
-              let storage = local b (value bytes_ty) in
-              checked b ~destination:(at storage) ~type_arguments:[ uint8 ] Storage_with_capacity
+          built_entry (fun builder ->
+              let storage = local builder (value bytes_ty) in
+              checked builder ~destination:(at storage) ~type_arguments:[ uint8 ]
+                Storage_with_capacity
                 [ Value (usize 4) ];
-              let got = local b (value isize) in
-              checked b ~destination:(at got) (Libc Read)
+              let got = local builder (value isize) in
+              checked builder ~destination:(at got) (Libc Read)
                 [ Value (constant_int32 0); Place (at storage); Value (usize 100) ];
-              let status = local b (value int32) in
-              emit b (Assign (at status, Use (constant_int32 0)));
+              let status = local builder (value int32) in
+              emit builder (Assign (at status, Use (constant_int32 0)));
               status);
         ]);
   test "a checked build stops a C library call that is given fewer elements than it reads"
@@ -501,24 +510,24 @@ let () =
       let open Lir_builder in
       expect_panic ~saying:"a call of the C library with fewer elements than it reads"
         [
-          built_entry (fun b ->
-              let view = view_of b "short" in
-              let wrote = local b (value isize) in
-              checked b ~destination:(at wrote) (Libc Write)
+          built_entry (fun builder ->
+              let view = view_of builder "short" in
+              let wrote = local builder (value isize) in
+              checked builder ~destination:(at wrote) (Libc Write)
                 [ Value (constant_int32 1); Place (at view); Value (usize 100) ];
-              let status = local b (value int32) in
-              emit b (Assign (at status, Use (constant_int32 0)));
+              let status = local builder (value int32) in
+              emit builder (Assign (at status, Use (constant_int32 0)));
               status);
         ]);
   test "a checked build stops a C library call whose text does not end with a zero" (fun () ->
       let open Lir_builder in
       expect_panic ~saying:"a call of the C library with text that does not end with a zero"
         [
-          built_entry (fun b ->
-              let name = view_of b "/nonexistent/truss" in
-              let wanted = flags b [ O_rdonly ] in
-              let descriptor = local b (value int32) in
-              checked b ~destination:(at descriptor) (Libc Open)
+          built_entry (fun builder ->
+              let name = view_of builder "/nonexistent/truss" in
+              let wanted = flags builder [ O_rdonly ] in
+              let descriptor = local builder (value int32) in
+              checked builder ~destination:(at descriptor) (Libc Open)
                 [ Place (at name); Value (Copy (at wanted)); Value (constant_int32 0) ];
               descriptor);
         ]);
@@ -526,32 +535,32 @@ let () =
       let open Lir_builder in
       expect_status ~extra ~anchors (Libc.value host Enoent)
         [
-          built_entry (fun b ->
-              let name = view_of b "/nonexistent/truss\000" in
-              let wanted = flags b [ O_rdonly ] in
-              checked b (Libc Open)
+          built_entry (fun builder ->
+              let name = view_of builder "/nonexistent/truss\000" in
+              let wanted = flags builder [ O_rdonly ] in
+              checked builder (Libc Open)
                 [ Place (at name); Value (Copy (at wanted)); Value (constant_int32 0) ];
-              let error = local b (value int32) in
-              checked b ~destination:(at error) (Libc Errno) [];
+              let error = local builder (value int32) in
+              checked builder ~destination:(at error) (Libc Errno) [];
               error);
         ]);
   test "a checked build stops a float converted to an integer type that cannot hold it" (fun () ->
       let open Lir_builder in
       let float64 = named "Float64" in
       let extra = extra @ [ (Ground.to_string float64, Memory_layout.Scalar Float64) ] in
-      let convert b number =
-        let result = local b (value int32) in
+      let convert builder number =
+        let result = local builder (value int32) in
         ignore
-          (Intrinsics.lower ~checks:true (shape_env ~extra ()) b intrinsic_types Convert
+          (Intrinsics.lower ~checks:true (shape_env ~extra ()) builder intrinsic_types Convert
              ~type_arguments:[ float64; int32 ]
              [ Value (Constant (Float64 (Int64.bits_of_float number))) ]
              ~destination:(Some (at result))
              ~site:{ definition = definition "entry"; line = 0; column = 1 });
         result
       in
-      expect_status ~extra ~anchors 7 [ built_entry (fun b -> convert b 7.9) ];
+      expect_status ~extra ~anchors 7 [ built_entry (fun builder -> convert builder 7.9) ];
       let status, _, errors =
-        run_program ~extra ~anchors [ built_entry (fun b -> convert b 1.0e30) ]
+        run_program ~extra ~anchors [ built_entry (fun builder -> convert builder 1.0e30) ]
       in
       if status <> 101 || not (contains errors "conversion out of range") then
         fail "expected a panic about the conversion, got status %d (%s)" status errors)

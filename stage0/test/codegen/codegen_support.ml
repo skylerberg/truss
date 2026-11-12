@@ -23,9 +23,9 @@ let render_records records =
   in
   String.concat ""
     (List.mapi
-       (fun i (r : Compile.record) ->
-         Printf.sprintf "test %d %s\n" i (Compile.show_outcome r.outcome)
-         ^ block "message" r.message ^ block "echo" r.echo)
+       (fun index (record : Compile.record) ->
+         Printf.sprintf "test %d %s\n" index (Compile.show_outcome record.outcome)
+         ^ block "message" record.message ^ block "echo" record.echo)
        records)
 
 (* Types for the tests: a few prelude types and types defined by each test,
@@ -90,7 +90,7 @@ let shapes extra (ty : Ground.ty) : shape =
           ("length", Typed (named "USize"));
           ("capacity", Typed (named "USize"));
         ]
-  | Function f -> Convention.function_value_shape f
+  | Function function_type -> Convention.function_value_shape function_type
   | _ -> (
       match List.assoc_opt (Ground.to_string ty) extra with
       | Some shape -> shape
@@ -109,8 +109,8 @@ let local ?name ?(borrowed = false) ty : Lir.local_info = { ty; name; borrowed }
 let value ty = Lir.Value ty
 let at ?(projections = []) local : Lir.place = { root = Local local; projections }
 let copy ?projections local = Lir.Copy (at ?projections local)
-let constant_int32 n = Lir.Constant (Integer (Int32, Z.of_int n))
-let constant_int64 n = Lir.Constant (Integer (Int64, Z.of_int n))
+let constant_int32 number = Lir.Constant (Integer (Int32, Z.of_int number))
+let constant_int64 number = Lir.Constant (Integer (Int64, Z.of_int number))
 let block statements terminator : Lir.basic_block = { statements; terminator }
 
 let function_ ?(parameters = []) ?result ?(returns = true) ?(environment = []) locals blocks :
@@ -221,7 +221,7 @@ let run_program ?(extra = []) ?env ?(anchors = []) ?input (instances : Lir.t lis
   in
   match
     Build.program (Lazy.force compiler) (Lazy.force cache) env settings
-      ~files:[ List.map (fun i -> Lir.Code i) instances ]
+      ~files:[ List.map (fun index -> Lir.Code index) instances ]
       ~sources ~output
   with
   | Ok () -> Process.run ?input output []
@@ -267,7 +267,8 @@ let load text = load_modules [ (example, text) ]
 (* The paths of a module's tests, in order. *)
 let tests_in database module_ =
   List.filter_map
-    (fun (d : Resolve.Names.declaration) -> match d.path with Test _ -> Some d.path | _ -> None)
+    (fun (declaration : Resolve.Names.declaration) ->
+      match declaration.path with Test _ -> Some declaration.path | _ -> None)
     (Query.demand database Resolve.Names.declarations module_)
 
 let tests_of database = tests_in database example

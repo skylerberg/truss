@@ -53,7 +53,8 @@ let no_diagnostics files =
       | [] -> ()
       | reported ->
           fail "%s: %s" name
-            (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) reported)))
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) reported)))
     files
 
 (* The one diagnostic of the file [app::main], with its code, and, if

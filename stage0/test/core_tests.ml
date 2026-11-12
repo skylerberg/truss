@@ -17,7 +17,10 @@ let printed_definition text name =
      @ Infer.diagnostics database module_
    with
   | [] -> ()
-  | actual -> failwith (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
+  | actual ->
+      failwith
+        (String.concat "; "
+           (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
   let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
