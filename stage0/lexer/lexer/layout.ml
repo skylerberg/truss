@@ -68,8 +68,11 @@ let spelling punctuation = punctuation_spelling punctuation
 let opener_spelling bracket = spelling (Open bracket)
 let closer_spelling bracket = spelling (Close bracket)
 
-let is_name_byte c =
-  (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c = '_'
+let is_name_byte character =
+  (character >= 'a' && character <= 'z')
+  || (character >= 'A' && character <= 'Z')
+  || (character >= '0' && character <= '9')
+  || character = '_'
 
 let starts_definition source offset =
   Source.starts_line source offset

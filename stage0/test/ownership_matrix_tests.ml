@@ -347,8 +347,8 @@ let () =
                     wrong generated
                       (String.concat "; "
                          (List.map
-                            (fun (d : Diagnostic.t) ->
-                              Diagnostic.Code.name d.code ^ " " ^ d.message)
+                            (fun (diagnostic : Diagnostic.t) ->
+                              Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
                             actual)))
             functions;
           if !shown > 5 then fail "%d of %d functions are wrong" !shown (List.length functions)))

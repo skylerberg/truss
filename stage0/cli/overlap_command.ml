@@ -25,8 +25,8 @@ type comparison = {
 let place_json (place : Database.place) =
   Json.Object
     [
-      ("path", Json.option (fun p -> Json.String (Path.show p)) place.path);
-      ("part", Json.option (fun p -> Json.String p) place.part);
+      ("path", Json.option (fun path -> Json.String (Path.show path)) place.path);
+      ("part", Json.option (fun path -> Json.String path) place.part);
     ]
 
 let overlap_json : Database.overlap -> Json.t = function
@@ -44,11 +44,11 @@ let overlap_json : Database.overlap -> Json.t = function
 let to_json comparisons =
   Json.List
     (List.map
-       (fun f ->
+       (fun comparison ->
          Json.Object
            [
-             ("other", Json.String f.other);
-             ("overlaps", Json.List (List.map overlap_json f.overlaps));
+             ("other", Json.String comparison.other);
+             ("overlaps", Json.List (List.map overlap_json comparison.overlaps));
              ( "merged",
                Json.List
                  (List.map
@@ -59,20 +59,22 @@ let to_json comparisons =
                           ("code", Json.String code);
                           ("message", Json.String message);
                         ])
-                    f.merged) );
-             ("error", Json.option (fun e -> Json.String e) f.error);
+                    comparison.merged) );
+             ("error", Json.option (fun error -> Json.String error) comparison.error);
            ])
        comparisons)
 
 let print comparisons =
   List.iter
-    (fun f ->
-      List.iter (fun o -> Output.printf "  %s: %s\n" f.other (sentence o)) f.overlaps;
+    (fun comparison ->
+      List.iter
+        (fun overlap -> Output.printf "  %s: %s\n" comparison.other (sentence overlap))
+        comparison.overlaps;
       List.iter
         (fun (file, code, message) ->
-          Output.printf "  %s: merged: %s: %s: %s\n" f.other file code message)
-        f.merged;
-      Option.iter (fun e -> Output.printf "  %s: %s\n" f.other e) f.error)
+          Output.printf "  %s: merged: %s: %s: %s\n" comparison.other file code message)
+        comparison.merged;
+      Option.iter (fun error -> Output.printf "  %s: %s\n" comparison.other error) comparison.error)
     comparisons
 
 let compare_with ~merge session (name, other) =
@@ -122,7 +124,11 @@ let run ~directory ~with_ ~merge ~json =
   if json then Json.print (Json.document ~diagnostics:[] [ ("overlaps", to_json comparisons) ])
   else if others = [] then
     Output.print_line "No other worktree of this repository is open, and no branch was named."
-  else if List.for_all (fun f -> f.overlaps = [] && f.merged = [] && f.error = None) comparisons
+  else if
+    List.for_all
+      (fun comparison ->
+        comparison.overlaps = [] && comparison.merged = [] && comparison.error = None)
+      comparisons
   then
     Output.print_line
       (if merge then "No overlap, and merging gives no new error." else "No overlap.")

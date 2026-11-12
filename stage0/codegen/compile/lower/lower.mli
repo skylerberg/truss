@@ -16,19 +16,14 @@ exception Unsupported of unsupported
 
 (* What lowering reads, each one of the type checker's queries or code
    generation's own tables. *)
-type context = {
-  database : Query.context;
-  env : Memory_layout.env;
-  glue : Glue.t;
-  monomorphic : Monomorphic.context;
-  types : Intrinsics.types;
-  bool : Ground.ty;
-  checks : bool;
-      (** Whether the program checks, as it runs, each operation that is undefined or wrong where
-          its precondition does not hold: an index, a slice, arithmetic, a shift, a call of the C
-          library, and [unreachable]. No [requires] clause is evaluated. *)
-  constant : Path.t -> Lir.static_value option;  (** Another constant's value, where it folds *)
-}
+type context
+
+val env : context -> Memory_layout.env
+val glue : context -> Glue.t
+val monomorphic : context -> Monomorphic.context
+
+val constant_value : context -> Path.t -> Lir.static_value option
+(** Another constant's value, where it folds. *)
 
 val context :
   ?checks:bool ->

@@ -58,7 +58,7 @@ let served : string option ref = ref None
 
 (* Whether a background process of this compiler serves a key now. A
    process does not test its own lock: closing any descriptor of a file
-   gives up the process's lock on it. *)
+   releases the process's lock on it. *)
 let running key =
   !served = Some key
   || locked (server_path (Identity.compute (Store.default_directory ())) key ^ ".lock")

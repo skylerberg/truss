@@ -9,13 +9,13 @@ public opaque type Heap[Element: Ordered](items: List[Element], largest_first: B
   derives Copyable
 
 public opaque type SortedMap[Key: Ordered, Value](entries: List[map::Entry[Key, Value]])
-  invariant forall i in 0..entries.length() => forall j in 0..entries.length() =>
-    i < j ==> entries.model()[i].key < entries.model()[j].key
+  invariant forall first in 0..entries.length() => forall second in 0..entries.length() =>
+    first < second ==> entries.model()[first].key < entries.model()[second].key
   derives Copyable
 
 public opaque type SortedSet[Element: Ordered](elements: List[Element])
-  invariant forall i in 0..elements.length() => forall j in 0..elements.length() =>
-    i < j ==> elements.model()[i] < elements.model()[j]
+  invariant forall first in 0..elements.length() => forall second in 0..elements.length() =>
+    first < second ==> elements.model()[first] < elements.model()[second]
   derives Copyable
 
 public opaque type LruCache[Key: Hash + Ordered + Copyable, Value](

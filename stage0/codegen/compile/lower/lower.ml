@@ -4,24 +4,18 @@ open Lir_builder
 open Definitions
 open Lowering
 open Targets
-open Derived
 open Generated
 
 type unsupported = Lowering.unsupported = { what : string; at : Lir.site option }
 
 exception Unsupported = Lowering.Unsupported
 
-type context = Definitions.context = {
-  database : Query.context;
-  env : Memory_layout.env;
-  glue : Glue.t;
-  monomorphic : Monomorphic.context;
-  types : Intrinsics.types;
-  bool : Ground.ty;
-  checks : bool;
-  constant : Path.t -> Lir.static_value option;
-}
+type context = Definitions.context
 
+let env (context : context) = context.env
+let glue (context : context) = context.glue
+let monomorphic (context : context) = context.monomorphic
+let constant_value (context : context) = context.constant
 let context = Definitions.context
 let test_key = Definitions.test_key
 let cursor_result = Targets.cursor_result
@@ -38,9 +32,6 @@ let evaluator = Constants.evaluator
 let table = Generated.table
 let locked_table = Generated.locked_table
 let any_table = Generated.any_table
-
-let trait_provides context ~trait ~name ~receiver =
-  written context (Method { owner = trait; name; receiver }) <> None
 
 (* Binds the parameters of the code being lowered, each as [how] passes it.
    The function owns each [own] one, apart from one with a default, which
@@ -224,12 +215,5 @@ let instance context (key : Instance.key) : Lir.t =
   | Locked_entry { capability; name } -> Generated.locked_entry context key ~capability ~name
   | Adapter { function_; ty } -> adapter context key ~function_ ~ty
   | Program_main main -> program_main context key main
-  | Code
-      {
-        path = Method { owner = Derived { type_ = type_path; trait }; name; receiver };
-        type_arguments;
-      }
-    when not (trait_provides context ~trait ~name ~receiver) ->
-      derived context ~key ~type_path ~trait ~name ~type_arguments
   | Code { path; type_arguments } -> source_code context key ~path ~type_arguments
   | _ -> bug "%s is not code from source" (Instance.to_string key)

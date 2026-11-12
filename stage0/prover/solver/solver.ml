@@ -60,34 +60,41 @@ type sexp = Atom of string | List of sexp list
 
 let parse_sexps text =
   let length = String.length text in
-  let rec skip i =
-    if i < length && (text.[i] = ' ' || text.[i] = '\n' || text.[i] = '\t' || text.[i] = '\r') then
-      skip (i + 1)
-    else i
+  let rec skip position =
+    if
+      position < length
+      && (text.[position] = ' '
+         || text.[position] = '\n'
+         || text.[position] = '\t'
+         || text.[position] = '\r')
+    then skip (position + 1)
+    else position
   in
-  let rec one i =
-    let i = skip i in
-    if i >= length then None
-    else if text.[i] = '(' then
-      let rec items i acc =
-        let i = skip i in
-        if i >= length then (List (List.rev acc), i)
-        else if text.[i] = ')' then (List (List.rev acc), i + 1)
+  let rec one position =
+    let position = skip position in
+    if position >= length then None
+    else if text.[position] = '(' then
+      let rec items position acc =
+        let position = skip position in
+        if position >= length then (List (List.rev acc), position)
+        else if text.[position] = ')' then (List (List.rev acc), position + 1)
         else
-          match one i with
-          | Some (item, i) -> items i (item :: acc)
-          | None -> (List (List.rev acc), i)
+          match one position with
+          | Some (item, position) -> items position (item :: acc)
+          | None -> (List (List.rev acc), position)
       in
-      Some (items (i + 1) [])
+      Some (items (position + 1) [])
     else
-      let stop = ref i in
+      let stop = ref position in
       while !stop < length && not (List.mem text.[!stop] [ ' '; '\n'; '\t'; '\r'; '('; ')' ]) do
         incr stop
       done;
-      Some (Atom (String.sub text i (!stop - i)), !stop)
+      Some (Atom (String.sub text position (!stop - position)), !stop)
   in
-  let rec all i acc =
-    match one i with Some (item, i) -> all i (item :: acc) | None -> List.rev acc
+  let rec all position acc =
+    match one position with
+    | Some (item, position) -> all position (item :: acc)
+    | None -> List.rev acc
   in
   all 0 []
 
@@ -114,7 +121,7 @@ let cache : (string, canonical) Hashtbl.t = Hashtbl.create 256
 (* Queries are solved on several domains at once, which share the cache
    and the count of what was solved. *)
 let lock = Mutex.create ()
-let locked f = Mutex.protect lock f
+let locked work = Mutex.protect lock work
 
 let render query =
   match locked (fun () -> Asked.find_opt rendered_queries query) with

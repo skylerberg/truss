@@ -18,7 +18,7 @@ let as_module database names : Path.module_ option =
 
 let declarations database (module_ : Path.module_) =
   Query.demand database Names.declarations module_
-  |> List.filter (fun (d : Names.declaration) -> d.ordinal = 0)
+  |> List.filter (fun (declaration : Names.declaration) -> declaration.ordinal = 0)
 
 let package_modules database package = Query.demand database Workspace.modules package
 
@@ -46,7 +46,9 @@ let resolve (project : Project.t) text =
   match (Workspace.split_module database argument.names, module_, argument.member) with
   | Some { package; modules = [] }, _, None ->
       (* A package: what it makes public. *)
-      List.filter (fun (d : Names.declaration) -> Names.is_public d.visibility) (in_package package)
+      List.filter
+        (fun (declaration : Names.declaration) -> Names.is_public declaration.visibility)
+        (in_package package)
   | _, Some module_, _ -> List.filter (visible project) (declarations database module_)
   | _, None, member -> (
       match (as_module database (Path_argument.prefix argument), List.rev argument.names) with
@@ -57,7 +59,7 @@ let resolve (project : Project.t) text =
               let path : Path.t = Top { module_; name = last } in
               match
                 List.filter
-                  (fun (d : Names.declaration) -> Path.equal d.path path)
+                  (fun (declaration : Names.declaration) -> Path.equal declaration.path path)
                   (declarations database module_)
               with
               | [ declaration ] when declaration.kind = Type ->
@@ -65,19 +67,24 @@ let resolve (project : Project.t) text =
                   let package = in_package module_.package in
                   declaration
                   :: List.filter
-                       (fun (d : Names.declaration) ->
-                         match owner_of d.path with Some o -> Path.equal o path | None -> false)
+                       (fun (declaration : Names.declaration) ->
+                         match owner_of declaration.path with
+                         | Some owning_path -> Path.equal owning_path path
+                         | None -> false)
                        package
-                  @ List.filter (fun (d : Names.declaration) -> impl_of_type d.path last) package
+                  @ List.filter
+                      (fun (declaration : Names.declaration) -> impl_of_type declaration.path last)
+                      package
                   |> List.filter (visible project)
               | declarations -> List.filter (visible project) declarations)
           | Some member ->
               let owner : Path.t = Top { module_; name = last } in
               in_package module_.package
-              |> List.filter (fun (d : Names.declaration) ->
-                  match d.path with
-                  | Method { owner = o; name; _ } | Member_constant { owner = o; name } ->
-                      Path.equal o owner && name = member
+              |> List.filter (fun (declaration : Names.declaration) ->
+                  match declaration.path with
+                  | Method { owner = owning_path; name; _ }
+                  | Member_constant { owner = owning_path; name } ->
+                      Path.equal owning_path owner && name = member
                   | _ -> false)
               |> List.filter (visible project)))
 
@@ -114,14 +121,14 @@ let run ~directory ~paths ~body ~json =
                (List.concat_map
                   (fun (_, definitions) ->
                     List.map
-                      (fun f ->
+                      (fun definition ->
                         Json.Object
                           [
-                            ("path", Json.String (Path.show f.declaration.path));
-                            ("kind", Json.String (Signatures.kind_word f.declaration.kind));
-                            ("file", Json.String f.file);
-                            ("line", Json.Int f.line);
-                            ("text", Json.String f.text);
+                            ("path", Json.String (Path.show definition.declaration.path));
+                            ("kind", Json.String (Signatures.kind_word definition.declaration.kind));
+                            ("file", Json.String definition.file);
+                            ("line", Json.Int definition.line);
+                            ("text", Json.String definition.text);
                           ])
                       definitions)
                   results) );
@@ -132,10 +139,10 @@ let run ~directory ~paths ~body ~json =
     List.iter
       (fun (_, definitions) ->
         List.iter
-          (fun f ->
+          (fun definition ->
             if not !first then Output.print_line "";
             first := false;
-            Output.printf "%s:%d\n%s\n" f.file f.line f.text)
+            Output.printf "%s:%d\n%s\n" definition.file definition.line definition.text)
           definitions)
       results;
     List.iter (fun (path, _) -> Output.eprintf "Nothing named `%s` is visible here.\n" path) missing

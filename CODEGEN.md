@@ -311,8 +311,8 @@ parameter. The emitter only prints.
 | `free_block(place, variant)` | Free the block of an `indirect` variant whose fields have all been moved out or dropped |
 | `echo(text, length, site)` | Record a value's debug output, with its position |
 | `region(fork, kind)`, `regions_end(fork)` | Before outlining only. The start of a region of a `parallel` or `concurrent` statement, and the end of the fork's last region (see [Parallelism](#parallelism) and [Concurrency](#concurrency)) |
-| `fork(branches)` | Run each nested function, given the address of its environment, and go on when all have returned. They may run at the same time. |
-| `fork_range(body, environment, first, last)` | Run the nested function for parts that together hold each index from `first` to `last` once, and go on when all have returned |
+| `fork(branches)` | Run each nested function, given the address of its environment, and continue when all have returned. They may run at the same time. |
+| `fork_range(body, environment, first, last)` | Run the nested function for parts that together hold each index from `first` to `last` once, and continue when all have returned |
 
 | Rvalue | Meaning |
 |---|---|
@@ -331,7 +331,7 @@ parameter. The emitter only prints.
 | `return operand` | Return a value, or nothing |
 | `unreachable` | A proven-impossible point |
 | `fail(reason, message, length, site)` | End the run with a message and a position: a panic, a failed `assert` in a test, or a `todo` that was reached |
-| `yield(operand, resume, stop)` | Before yield lowering only: give a value to the caller's loop, then go on at `resume`, or at `stop` if the loop has ended. A lending method's `yield` has no `stop`, since it always continues. |
+| `yield(operand, resume, stop)` | Before yield lowering only: pass a value to the caller's loop, then continue at `resume`, or at `stop` if the loop has ended. A lending method's `yield` has no `stop`, since it always continues. |
 
 Places are a local or a constant's static data, followed by fields, the
 fields of a variant, elements, and dereferences of pointers. A variant's
@@ -727,8 +727,6 @@ so they are compiled once and shared:
   and the standard library's lists and slices, and quoted text with escapes
   for its strings. Integers are decimal, and floats the shortest decimal
   that reads back as the same value, always with a point or an exponent.
-- **Derived implementations:** `Equal`, `Hash`, `Ordered`, and `Default`, from
-  the type's shape and the version of the rule that derives them.
 
 ### Updates in place
 
@@ -902,6 +900,10 @@ methods it holds.
   monomorphization, every such call is a direct call to an instance.
 - **A trait's provided methods,** such as `max`, are compiled for each type
   that uses them, unless the `impl` replaces them.
+- **A derived implementation is lowered from its core form.** The type
+  checker writes the core form of each derived method from the type's
+  shape, as the body the method would have if it were written by hand, so
+  lowering compiles it as it compiles a written method.
 - **Derived implementations may be inlined into callers even in
   development builds.** Their code comes from the type's shape, which every
   caller already depends on through the layout, so inlining them adds
@@ -915,7 +917,7 @@ methods it holds.
 
 A lending or yielding method takes the caller's code as a function: the rest
 of the caller's statement for a lending method, or the loop body for a
-yielding one. That function returns whether to go on. Pulling is a separate compilation of the same method (see
+yielding one. That function returns whether to continue. Pulling is a separate compilation of the same method (see
 [Cursors](#cursors-1)), made only when some code pulls it.
 
 The standard library's `List.each` is ordinary Truss:
@@ -949,7 +951,7 @@ In the loop form, `Yields` adds the body as the method's last parameter, and
 turns each `yield` into a call to it followed by a switch on its result: on
 to the block after the `yield`, or to the `yield`'s `stop` path, whose drops
 drop elaboration has already placed. A lending method's `yield` has no
-`stop`, so it calls the body and always goes on.
+`stop`, so it calls the body and always continues.
 
 A caller's loop body becomes a function too. Its environment holds pointers
 to the caller's locals it reads and changes, and a slot that records why the
@@ -984,7 +986,7 @@ loop the C compiler would make of the loop form, and needs no rewriting of
 the caller into continuation-passing style. The caller then reads the
 method's body, and depends on it.
 
-A lending method goes on after the caller's statement, as DESIGN.md has
+A lending method resumes after the caller's statement, as DESIGN.md has
 it, and its own values live until then, so it may lend one it made. The
 LIR is a graph of blocks, so this needs no function for the rest of the
 statement:
@@ -996,7 +998,7 @@ statement:
 - The scope the lending call is in owns the lend, as it owns a temporary.
   As that scope ends, on each way out of it, the code sets a selector to
   the way it was going and jumps to what is left of the method, which ends
-  by going on that way. So a `return` or a `?` in the statement finishes
+  by continuing that way. So a `return` or a `?` in the statement finishes
   the method first, as an ordinary end does, and lends in one statement
   finish in reverse order.
 
@@ -1008,11 +1010,11 @@ A lending method may have a `yield` on each of several paths, as one
 that yields `self.first` on one path and `self.second` on another. Each
 `yield` then stores the address of what it lends and its own number, and
 the caller reads through the address. As the caller's scope ends, the code
-goes on from the `yield` that was reached, by its number. A value the
+resumes from the `yield` that was reached, by its number. A value the
 method makes to lend is built in one place that the caller's statement
 owns, so that it is dropped once whichever `yield` made it.
 
-A method may yield a value built around places it lends:
+A method may yield a constructor applied to places it lends:
 `yield Some(self[index])`, or `yield Indexed(index: index, value: mut
 self[index])`. The core form marks each such field as a place. Every
 `yield` of such a method builds a *lent value* in one local: a value of a
@@ -1024,7 +1026,7 @@ size.
 - **The type is the same at every `yield`.** A field holds an address if
   some `yield` gives it a place, or if its type has something to drop; a
   value made for such a field is a temporary of the `yield`'s statement,
-  which the method drops once it goes on. A field that some `yield` gives a
+  which the method drops once it resumes. A field that some `yield` gives a
   constructor of places holds a lent value of its own. Every other field
   holds a `Plain` value. A `yield` of a whole place or value takes the
   addresses of its fields.
@@ -1762,7 +1764,7 @@ The intrinsic module also provides one handle type: `Handle`, a file
 descriptor in an `Int32`, which is neither `Copyable` nor `Plain`.
 `handle_from` makes one of a descriptor that is open, and
 `handle_descriptor` reads it. Its drop function calls the operating system
-to release it, with `close`. `handle_release` gives up a handle without
+to release it, with `close`. `handle_release` consumes a handle without
 closing it and returns its descriptor, so that `Handles.close` can call
 `close` itself and report an error from it.
 
@@ -2274,11 +2276,9 @@ a command line can hold.
 - **A float's text without the C library.** DESIGN.md has it written in
   Truss so that it is the same on every system. The loop is Truss; the
   digits are `snprintf`'s and the check `strtod`'s.
-- **`match` as a decision tree.** A tree would test each part of the value
-  once, in the order the patterns need, and switch on tags and integers,
-  where arms tested in order may test one part again for each arm.
-  Maranget's "Compiling Pattern Matching to Good Decision Trees" (2008) is
-  the method.
+- **`match` as a decision tree.** Arms are tested in order, so one part of
+  the value may be tested again for each arm. MIR.md has the MIR builder
+  make the tree, for every consumer.
 - **Room reserved for an interpolation.** The literal lengths are known, so
   the `TextBuilder` can start with that much room and grow only if a part
   writes more than its estimate.

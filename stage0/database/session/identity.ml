@@ -22,8 +22,8 @@ let compute directory =
           In_channel.with_open_bin remembered In_channel.input_lines
           |> List.find_map (fun line ->
               match String.index_opt line '\t' with
-              | Some i when String.sub line 0 i = tag ->
-                  Some (String.sub line (i + 1) (String.length line - i - 1))
+              | Some separator when String.sub line 0 separator = tag ->
+                  Some (String.sub line (separator + 1) (String.length line - separator - 1))
               | _ -> None)
         with Sys_error _ -> None
       in

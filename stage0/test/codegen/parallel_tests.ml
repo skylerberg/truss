@@ -72,7 +72,9 @@ fn main(arguments: List[String]) -> ExitCode
   ExitCode.success
 }
 |});
-  test "a branch takes a value out of its own part, and another gives its part a new one" (fun () ->
+  test
+    "one branch moves a field out and another changes a second field, and the first is \
+     reinitialized after" (fun () ->
       same_with_any_workers ~expected:"first taken second!\n"
         {|type Pair(first: String, second: String)
 
@@ -303,7 +305,7 @@ let () =
   test "a region's own local goes with it, and a shared one is reached through the environment"
     (fun () ->
       let int = Lir.Value int32 in
-      let add a b = Lir.Binary (Add, copy a, copy b) in
+      let add left right = Lir.Binary (Add, copy left, copy right) in
       let actual =
         outlined
           (instance "entry"

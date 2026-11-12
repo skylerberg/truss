@@ -2,8 +2,8 @@
 
 open Harness
 
-let expect_bug f check =
-  match f () with
+let expect_bug work check =
+  match work () with
   | () -> fail "expected a compiler bug"
   | exception Compiler_bug.Bug bug -> check bug
 

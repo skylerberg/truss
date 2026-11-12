@@ -77,7 +77,7 @@ let builtin_name = function
 let builtin_path builtin = Path.Top { module_; name = builtin_name builtin }
 
 let builtin_of_path = function
-  | Path.Top { module_ = m; name } when m = module_ ->
+  | Path.Top { module_ = path_module; name } when path_module = module_ ->
       List.find_opt (fun builtin -> builtin_name builtin = name) builtins
   | _ -> None
 
@@ -185,6 +185,16 @@ type operation =
   | System_is_architecture of Libc.architecture
   | Libc of Libc.function_
   | Libc_number of Libc.number
+
+let primitive = function
+  | Add | Subtract | Multiply | Divide | Remainder | Negate | Wrapping_add | Wrapping_subtract
+  | Wrapping_multiply | Add_overflows | Subtract_overflows | Multiply_overflows | Equal | Less
+  | Ieee_equal | Ieee_less | Bit_and | Bit_or | Bit_xor | Complement | Shift_left | Shift_right
+  | Convert | Fits | Square_root | Fused_multiply_add | Floor | Ceiling | Truncate | Round_to_even
+  | To_bits | From_bits | Is_nan | Leading_zeros | Trailing_zeros | Count_ones | Swap_bytes
+  | Rotate_left | Rotate_right | Multiply_high ->
+      true
+  | _ -> false
 
 let operations =
   [
@@ -391,6 +401,6 @@ let uses : operation -> Path.t list = function
   | _ -> []
 
 let operation_of_path = function
-  | Path.Top { module_ = m; name } when m = module_ ->
+  | Path.Top { module_ = path_module; name } when path_module = module_ ->
       List.find_opt (fun operation -> operation_name operation = name) operations
   | _ -> None

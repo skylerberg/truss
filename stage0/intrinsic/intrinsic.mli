@@ -163,7 +163,7 @@ type operation =
       (** [(descriptor) -> Handle]: owns a descriptor that is open, which dropping it closes *)
   | Handle_descriptor  (** [(handle) -> Int32]: the descriptor a handle owns *)
   | Handle_release
-      (** [(own handle) -> Int32]: the descriptor of a handle that is given up without closing it,
+      (** [(own handle) -> Int32]: the descriptor of a handle, which is consumed without closing it,
           so that the caller can close it and see whether closing failed *)
   | Run_test
       (** [(index)]: runs a test of the test program, by its place in the program's table of them *)
@@ -214,6 +214,12 @@ type operation =
           that takes nothing: [libc_o_creat()] *)
 
 val operations : operation list
+
+val primitive : operation -> bool
+(** Whether an operation is a primitive operation on built-in values: arithmetic, comparison,
+    conversion, and the bitwise and float operations. Its result depends only on its operands, it
+    changes nothing, and an operator such as [+] means the same operation. *)
+
 val operation_name : operation -> string
 val operation_path : operation -> Path.t
 val operation_of_path : Path.t -> operation option

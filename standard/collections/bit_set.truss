@@ -51,14 +51,14 @@ theorem all_ones_below_a_bit_are_counted(word: UInt64, bits: USize)
 
 fn zero_words(count: USize) -> List[UInt64]
   ensures result.length() == count
-  ensures forall i in 0..count => result.model()[i] == 0
+  ensures forall position in 0..count => result.model()[position] == 0
   cost time O(count)
 {
   var words: intrinsic::Storage[UInt64] = intrinsic::storage_with_capacity(count)
   for index in 0..count
     invariant intrinsic::storage_length(words) == index
     invariant intrinsic::storage_capacity(words) == count
-    invariant forall i in 0..index => intrinsic::storage_model(words)[i] == 0
+    invariant forall position in 0..index => intrinsic::storage_model(words)[position] == 0
   {
     intrinsic::storage_push(mut words, value: 0)
   }
@@ -246,8 +246,8 @@ public fn collections::BitSet.resize(mut self, length: USize)
 
 public fn collections::BitSet.count_ones(self) -> USize
   ensures result <= self.length()
-  ensures (forall i in 0..self.words.length() => self.words.model()[i] == 0) ==> result == 0
-  ensures ((forall i in 0..self.length / 64 => self.words.model()[i] == UInt64.maximum)
+  ensures (forall position in 0..self.words.length() => self.words.model()[position] == 0) ==> result == 0
+  ensures ((forall position in 0..self.length / 64 => self.words.model()[position] == UInt64.maximum)
     && (self.length % 64 == 0 || self.words.model()[self.length / 64] == power(2, self.length % 64) - 1))
     ==> result == self.length
   cost time O(self.length())
@@ -258,8 +258,8 @@ public fn collections::BitSet.count_ones(self) -> USize
   while index < full
     invariant index <= full
     invariant count <= 64 * index
-    invariant (forall i in 0..index => self.words.model()[i] == 0) ==> count == 0
-    invariant (forall i in 0..index => self.words.model()[i] == UInt64.maximum) ==> count == 64 * index
+    invariant (forall position in 0..index => self.words.model()[position] == 0) ==> count == 0
+    invariant (forall position in 0..index => self.words.model()[position] == UInt64.maximum) ==> count == 64 * index
     decreases full - index
     cost time O(index)
   {
@@ -301,7 +301,7 @@ public fn collections::BitSet.first_one(self) -> Option[USize]
   var index: USize = 0
   while index < self.words.length() && self.words[index] == 0
     invariant index <= self.words.length()
-    invariant forall i in 0..index => self.words.model()[i] == 0
+    invariant forall position in 0..index => self.words.model()[position] == 0
     decreases self.words.length() - index
     cost time O(index)
   {
@@ -331,7 +331,7 @@ public fn collections::BitSet.first_zero(self) -> Option[USize]
   var index: USize = 0
   while index < full && self.words[index] == UInt64.maximum
     invariant index <= full
-    invariant forall i in 0..index => self.words.model()[i] == UInt64.maximum
+    invariant forall position in 0..index => self.words.model()[position] == UInt64.maximum
     decreases full - index
     cost time O(index)
   {

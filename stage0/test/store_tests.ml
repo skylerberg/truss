@@ -8,7 +8,7 @@ let fresh_directory () = scratch "store"
 let segment_files directory =
   let segments = Filename.concat directory "segments" in
   Array.to_list (Sys.readdir segments)
-  |> List.filter (fun f -> Filename.check_suffix f ".segment")
+  |> List.filter (fun file -> Filename.check_suffix file ".segment")
   |> List.map (Filename.concat segments)
 
 let () =
@@ -35,7 +35,7 @@ let () =
       Store.close store;
       let indexes =
         Array.to_list (Sys.readdir (Filename.concat directory "segments"))
-        |> List.filter (fun f -> Filename.check_suffix f ".index")
+        |> List.filter (fun file -> Filename.check_suffix file ".index")
       in
       if List.length indexes <> 1 then fail "%d indexes" (List.length indexes);
       let again = Store.open_ directory in
@@ -69,7 +69,7 @@ let () =
       if Store.find_result store ~kind:"proofs" ~key:"k" <> None then fail "found as another kind")
 
 let () =
-  test "a pointer gives back what it was last pointed at" (fun () ->
+  test "a pointer reads the value it was last set to" (fun () ->
       let store = Store.open_ (fresh_directory ()) in
       let pointer = Store.pointer store "session" in
       Store.write_pointer pointer "first";

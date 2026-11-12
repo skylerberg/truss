@@ -60,7 +60,7 @@ test "a map is walked in the order its keys were first inserted" {
   assert order(table) == "b c a "
 }
 
-test "replace gives back the value a key had" {
+test "replace returns the key's previous value" {
   var table = sample()
   assert mut table.replace("a", value: 5) == Some(1)
   assert mut table.replace("d", value: 4) is None

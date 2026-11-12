@@ -20,7 +20,8 @@ let named_program ~entry_name ~helper_name returned =
   in
   [ main; helper ]
 
-let lookup instances key = List.find (fun (i : Lir.t) -> Instance.equal i.key key) instances
+let lookup instances key =
+  List.find (fun (instance : Lir.t) -> Instance.equal instance.key key) instances
 
 (* What each instance of a small program refers to. *)
 let references program key =
@@ -67,25 +68,25 @@ let () =
       let program = named_program ~entry_name:"start" ~helper_name:"helper" 1 in
       let reached =
         Reachable.reachable (shape_env ())
-          ~lookup:(fun k -> Lir.Code (lookup program k))
+          ~lookup:(fun key -> Lir.Code (lookup program key))
           [ key "start" ]
       in
       expect_string ~expected:"test::start test::helper"
         (String.concat " "
            (List.map
               (function
-                | Lir.Code i -> Instance.to_string i.key
-                | Data d -> Instance.to_string d.data_key
-                | Table t -> Instance.to_string t.table_key)
+                | Lir.Code instance -> Instance.to_string instance.key
+                | Data data -> Instance.to_string data.data_key
+                | Table table -> Instance.to_string table.table_key)
               reached)));
   test "a drop reaches the type's drop function" (fun () ->
-      let f =
+      let dropping_instance =
         instance "f"
           (function_ ~parameters:[ 0 ]
              [ local (value text) ]
              [ block [ Drop (at 0) ] (Return None) ])
       in
-      let references = Reachable.references (shape_env ~extra:drop_shapes ()) f in
+      let references = Reachable.references (shape_env ~extra:drop_shapes ()) dropping_instance in
       expect_string ~expected:"drop Text"
         (String.concat " " (List.map Instance.to_string references)));
   let test_key ~entry_name ~helper_name returned =
@@ -129,7 +130,9 @@ let () =
       if reach_key (ping_pong 1) (key "start") = reach_key (ping_pong 2) (key "start") then
         fail "a change inside the group left the key the same");
   test "a group's key does not depend on its instances' names" (fun () ->
-      let renamed = List.map (fun (i : Lir.t) -> i) (ping_pong ~ping:"alpha" ~pong:"omega" 1) in
+      let renamed =
+        List.map (fun (instance : Lir.t) -> instance) (ping_pong ~ping:"alpha" ~pong:"omega" 1)
+      in
       if reach_key (ping_pong 1) (key "start") <> reach_key renamed (key "start") then
         fail "the keys differ")
 

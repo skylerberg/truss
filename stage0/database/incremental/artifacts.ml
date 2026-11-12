@@ -12,8 +12,8 @@ let require_store engine =
 let record_fact engine store (node : node) reads =
   match node.cell with
   | Result (query, _) when query.saved -> (
-      match fingerprint engine node with
-      | Some value when node.stored -> (
+      match (fingerprint engine node, node.fingerprint) with
+      | Some value, Hashed { stored = true; _ } -> (
           let parts =
             List.fold_right
               (fun read parts_so_far ->
@@ -34,7 +34,7 @@ let record_fact engine store (node : node) reads =
                      []))
       (* A result that raised, or whose bytes are not in the store, is no
          fact: there would be no value to give. *)
-      | Some _ | None -> ())
+      | _ -> ())
   | _ -> ()
 
 let unsaved_nodes engine =
@@ -57,11 +57,9 @@ let record_facts engine =
 type saved_node = {
   saved_name : string;
   saved_key : string;
-  saved_value : string option;  (** A fingerprint; [None] for an input that is not set *)
+  saved_fingerprint : fingerprint;  (** [Unknown] for an input that is not set *)
   saved_reads : int list;
   saved_root : bool;
-  saved_stored : bool;  (** Whether the store has the value's bytes *)
-  saved_opaque : bool;
 }
 
 let artifact_header store = "truss artifact " ^ store.version ^ "\n"
@@ -124,7 +122,7 @@ let write ?(full = false) engine =
   let places = Hashtbl.create 256 in
   let table = ref [] in
   let place (read : node) =
-    if read.engine == engine && (not read.written) && not (Hashtbl.mem scheduled read.id) then begin
+    if read.engine == engine && read.written = Unwritten && not (Hashtbl.mem scheduled read.id) then begin
       Hashtbl.replace scheduled read.id ();
       Queue.add read more
     end;
@@ -136,19 +134,16 @@ let write ?(full = false) engine =
         table := (name read, key_bytes read) :: !table;
         place
   in
-  let written (node : node) saved_value saved_reads =
+  let written ?(unset = false) (node : node) saved_reads =
     ensure_stored engine node;
-    node.written <- true;
-    node.superseding <- not full;
+    node.written <- (if full then In_whole else In_difference);
     Some
       {
         saved_name = name node;
         saved_key = key_bytes node;
-        saved_value;
+        saved_fingerprint = (if unset then Unknown else node.fingerprint);
         saved_reads;
         saved_root = node.root;
-        saved_stored = node.stored;
-        saved_opaque = node.opaque;
       }
   in
   let save (node : node) =
@@ -157,13 +152,13 @@ let write ?(full = false) engine =
     (* A copy that came out as the base's node, reading the same, is the
            base's node, and is not written, unless an earlier difference
            holds another result for it, which this one takes the place of. *)
-    let as_base = (not full) && engine.on_whole && not node.superseding in
+    let as_base = (not full) && engine.on_whole && node.written <> In_difference in
     let as_below () =
       as_base
       &&
       match node.below with
       | Some base ->
-          base.fingerprint = node.fingerprint
+          hash_of base.fingerprint = hash_of node.fingerprint
           && base.root = node.root
           && same_reads engine (Lazy.force reads) base
       | None -> false
@@ -172,16 +167,14 @@ let write ?(full = false) engine =
     | Input (_, { slot = Unset; _ }) -> (
         match node.below with
         | Some { cell = Input (_, { slot = Unset; _ }); _ } when as_base -> None
-        | _ -> written node None [])
+        | _ -> written ~unset:true node [])
     | Input _ -> (
         match fingerprint engine node with
-        | Some value when not (as_below ()) -> written node (Some value) []
+        | Some _ when not (as_below ()) -> written node []
         | _ -> None)
     | Result _ -> (
         match fingerprint engine node with
-        | Some value ->
-            if as_below () then None
-            else written node (Some value) (List.map place (Lazy.force reads))
+        | Some _ -> if as_below () then None else written node (List.map place (Lazy.force reads))
         (* A result that was never computed. *)
         | None -> None)
     | Unfilled -> None
@@ -254,7 +247,10 @@ let values_in store name =
   | Some chain ->
       List.concat_map
         (fun (name, artifact) ->
-          name :: List.filter_map (fun (node : saved_node) -> node.saved_value) artifact.saved)
+          name
+          :: List.filter_map
+               (fun (node : saved_node) -> hash_of node.saved_fingerprint)
+               artifact.saved)
         chain
 
 (* Fills an engine with artifacts' nodes, each the last of its name and key,
@@ -293,8 +289,7 @@ let fill engine (artifacts : artifact list) =
           | Some (existing : node) when existing.engine != engine -> (
               match restorer.restore engine ~key with
               | node ->
-                  node.written <- true;
-                  node.superseding <- true;
+                  node.written <- In_difference;
                   node.root <- false
               | exception _ -> ())
           | _ | (exception _) -> ())
@@ -312,15 +307,12 @@ let fill engine (artifacts : artifact list) =
                 match restorer.restore engine ~key:saved.saved_key with
                 | exception _ -> None
                 | node ->
-                    node.fingerprint <- saved.saved_value;
+                    node.fingerprint <- saved.saved_fingerprint;
                     node.root <- saved.saved_root;
-                    node.stored <- saved.saved_stored;
-                    node.opaque <- saved.saved_opaque;
-                    node.written <- true;
-                    node.superseding <- true;
+                    node.written <- In_difference;
                     (match node.cell with
                     | Input (_, cell) ->
-                        cell.slot <- (if saved.saved_value = None then Unset else Stored)
+                        cell.slot <- (if saved.saved_fingerprint = Unknown then Unset else Stored)
                     | Result (_, cell) -> cell.outcome <- None
                     | Unfilled -> ());
                     Some (node, saved, artifact))))
