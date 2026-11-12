@@ -94,10 +94,11 @@ val attach : t -> Store.t -> version:string -> unit
 val record_facts : t -> unit
 (** Keeps a fact for each saved result computed since the last call. *)
 
-val write : ?full:bool -> t -> string
+val write : ?full:bool -> ?stores_every_value:bool -> t -> string
 (** Writes the state, and returns its artifact's name: a difference over the artifact it was opened
     from or last wrote, or with [~full:true], or when there is none, the whole state apart from its
-    fixed bases. *)
+    fixed bases. With [~stores_every_value:true] the values of unsaved results are stored too, as
+    for a fixed base. *)
 
 type chain_size = Incremental.chain_size = { whole : int; differences : int; depth : int }
 

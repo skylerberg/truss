@@ -210,11 +210,13 @@ val record_facts : t -> unit
     reads. Another state whose reads have the same fingerprints finds it instead of computing.
     {!write} does this too. *)
 
-val write : ?full:bool -> t -> string
+val write : ?full:bool -> ?stores_every_value:bool -> t -> string
 (** Writes the state as an artifact in the store, and returns its name. The artifact holds the
     engine's own nodes that changed since the last write, as a difference over the artifact the
     engine was opened from or last wrote; with [~full:true], or when there is no such artifact, it
-    holds the whole state apart from its fixed bases. *)
+    holds the whole state apart from its fixed bases. Only saved results' values are stored, unless
+    [~stores_every_value:true], as for a fixed base, which is written once and read by every state
+    over it. *)
 
 type chain_size = { whole : int; differences : int; depth : int }
 (** How many nodes the whole state an engine's artifact chain starts from holds, how many the

@@ -114,7 +114,7 @@ let stored_standard () =
       Engine.attach engine store ~version:identity;
       check_standard engine;
       Store.add_result store ~kind:"package" ~key:(standard_key identity)
-        (Engine.write ~full:true engine);
+        (Engine.write ~full:true ~stores_every_value:true engine);
       Engine.freeze ~fixed:true engine;
       engine
 
