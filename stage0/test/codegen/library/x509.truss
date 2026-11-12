@@ -13,6 +13,10 @@ let leaf_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49AgE
 
 let intermediate_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDRCLVoSDA/wfx2\n8TWxmh6syZ7suEpgGYaW67ScbFFeM8jU3L2pmL9+/1og+SLbIYI2kaHqhhmAyS6u\ny4QXL/UTeLmweDQuQXSG/AeP4OaSw9IvvUy0y/2f2YzUaNXjgwHzwAWZIAVebfGh\n1DYpMRGobUuwZTYOnvsyfpWD9R2XNwdCFo7U984dgWWUGafr83Pv3wahSUtk3aIQ\ngsOLNJEZuIVAxRAC2sC27kJgDXZ9Lt0a7DjfFXXiZKQOXZMhYAc9sAZhFqYsDDg4\n3Nx3odr20CTDyTLHHqRonsee/RqeKfvnHsq8g2rflTE8ZM5j2I/avYY6RhelV5hf\nbszT6KK3AgMBAAECggEACXUAaBBkBm5rUqJFEJztaFnS09jenIxrF2bgi/cmk0F6\ng47dEdA0UbWRyU4cMpfIgVmDXs3kV3xCnWvdtQLZbqEWnZJCohkaAYVjfjHpnJg5\naSmCT+euuM2p3m5DxwBFVVbJqgzV0VjeBrlIHgL3ToxrUTazBGRS7wzlDMxJI28n\n94la9X2HvUK8zxM1VC56tUITCOT3+eEAMSuUHZRD2hfOLdr9M5eu3STU0wyP9afX\n64rN8px6bSJ9AcaANZ+gtZ32RBSbo4j/6/XzIxf9apgOIc1sXTtX+G3y+lNIgLdC\n+kOb/tG3Ns9mvLH5DuVNNjDtllfqRRQBq9VxVtHzMQKBgQDthjPZNDn3PciN0EqT\n0ib10TENHNKQL/3HuNVBhU8mTH9KQyrEpt+v2wwfHEYYI0+7cNdakcZnstqzvwN+\nG5rTckSo78WLvd1VuE6UARDWWaipYj2Ji/WLbIGY5cKeAlDV9kfN/fC2q3mTXMbX\nZJQQc8NHiqpKmNW+pOpVcc/HfwKBgQDhSy7nzh1P8QkMGn5QraFrD6zTs/NrGHhp\nIpkbWbM3T8zZdHqwU9/qXa39oWzL5gT8Pt7G3ibRQztbQ2Sd8rP95ZvmB6WRkXD7\ndUGap9sj/dClnSizRsFikQ78y4KYlU6C+Hky7emlZNZTAgFzVskxpzPwhjVC/aH9\nqPr/QrsAyQKBgQCbEmoZXaqWi4S7aYi3F5YOGQSAPhgOwPZcBYVdYI57P6g/MLjk\naNpTcpxoV0pAChXNF2/SFqhFHZUBkyzRkW40rD69WMVNZajyhQDwSf3XI/Qkmhn5\nCiJGY5H848x64qIp/r+Eck1MxYj7N7AuAeFVGG8e7x4c08mAzSScolB4OwKBgCC6\n3HCeuBFyEf9pJeqwnt+/4jrLTNTFNFEJzrZzfJ7PgBIjYuOU+9W/kFRljDm/DABd\nXd4ETh1eqBPlIYv0w4NiRRjRCZOxTnmpmkNOmX6MFDDLOSt6XwPj0QqWwj1Ki6Jp\nWKo2eBgoIx7iDrXj6MzG3rvVs40s7ci9MOG+nw5JAoGAb4h8OXyNyOW9pgh0KMBe\nRIgO5lwB92eGgyo2Hc6nPe223Z20wdp6zIRQvBAakhXylry3YrhuRq+RFb+fTfQZ\nrhuULht1t9oGKOE0DF7et3S7PaPwcpukfQEEBnwrXr7uZkhNvPKAv7oDwV+Ue7Pw\nwFX608zezDf3ilFLAj7YRKQ=\n-----END PRIVATE KEY-----\n"
 
+let sha1_root_pem: String = "-----BEGIN CERTIFICATE-----\nMIIC/jCCAeagAwIBAgIUJ/wrf6b0VMuwvyDB1vx3Y5+LvcswDQYJKoZIhvcNAQEF\nBQAwFjEUMBIGA1UEAwwLTGVnYWN5IFJvb3QwIBcNMjYxMTEyMjI1MTQ4WhgPMjEy\nNjEwMTkyMjUxNDhaMBYxFDASBgNVBAMMC0xlZ2FjeSBSb290MIIBIjANBgkqhkiG\n9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqlgpaKCTcFNxIsu8tnRbcW2tPTZJjiRWpCdE\nDnVhHSaB0PJMwFVSo2bJ+QJZaE04rw7llCPBynvEBiTYjXWcwJQ4PQBYY6TMsk7g\nSoYhGthK2O4EGh49au31k2L7/7yDieqmkXWkErZgysB6YZwhy9/NKj3ntbxvVEEd\nGemf7qi8mlLxab81wjRV/wSN+cVqdWcxa6V0gUNik15ODSNsoPk9n03asWFF7fbZ\nqp/5qvrbWKtQF5g1HjVjrh+dQnN7XIybtaPHVszDf3nLFUvBrZ9ipMhhTDPJeENJ\nP8/hB+9VmgcHnySTTaaWWMlaDvmfJthPLtLS6xoT69riqfjo/QIDAQABo0IwQDAd\nBgNVHQ4EFgQU6enEp/SuJk4fVBYmE9668laeph4wDwYDVR0TAQH/BAUwAwEB/zAO\nBgNVHQ8BAf8EBAMCAgQwDQYJKoZIhvcNAQEFBQADggEBAJ5tfkJS0I16Tcw0Wsej\nLiZDSTnqWncji6lYghiBhKrfeZepryhJ6xoiCixwt0nvC+7xYwwFRzGzTVag7s+A\n1BaAjLkpQyfKmYUcl71tIDRVljzUVSl8vM1G0JQ2smQ8mAHMUR4XB9gxTVK5G+6p\nYuLV9Oqtg/1POxUdiTgZn2KzyYE3bNfoyq+ZcqXN8N5MdeTM2nyzJ9tI9O9MOXCo\n6E6+KKrUkPat2G4+vWcTs8A2O7iET50FBRs0CpnPt2BgArIolc7iNspiH2agUN6N\n/EKjpMaYgl8rnhdMN58O5IAKbXxxGtssQD0lpkfkldIQvo6LpH0aY/w5Y2ynd6LJ\ns2c=\n-----END CERTIFICATE-----\n"
+
+let sha1_signed_leaf_pem: String = "-----BEGIN CERTIFICATE-----\nMIICKDCCARCgAwIBAgIBTTANBgkqhkiG9w0BAQsFADAWMRQwEgYDVQQDDAtMZWdh\nY3kgUm9vdDAgFw0yNjExMTIyMjUxNDhaGA8yMTI2MTAxOTIyNTE0OFowFjEUMBIG\nA1UEAwwLbGVnYWN5LnRlc3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQuLRSk\ndXvxRz+fv3AmVhHYqL7VpGZyiKFwkWAwwEx8CmPyuuoIu7eKqfLc+einKKwLwBxT\naU9xekoN+KHpRCMdo0owSDAJBgNVHRMEAjAAMA4GA1UdDwEB/wQEAwIHgDATBgNV\nHSUEDDAKBggrBgEFBQcDATAWBgNVHREEDzANggtsZWdhY3kudGVzdDANBgkqhkiG\n9w0BAQsFAAOCAQEAb5khD9gmPvbtdJttaIUXXq1YCfWVtWkhTVxpB9uKqCTKTdCC\ngyvK24122riAIocf+rM4H3N4pIypayKIbl2aXxbXG1BbvLaemSjUeNzC9gOXICZM\nzY6kCti2WD803YeJpNvnVEwhFkwQ9zyhRL0z1CKt/Rzlea8fFaV8xAoVlPZgV4HR\nh8TixSDjDFIr+QcwvOX62sM2Ttg21zpv/tLygHZjnIvDhCsPso3UajPBPO7oOvwM\nY8T2SFDr3upi3zbTj/ieKsDIcUhvb2+46YWolOytEl2NkKzvKicEQg9B37FqGBkQ\nlC6Y3WBG6g+qp/8bHar0g7TKHP8ZBdPYzO8HCw==\n-----END CERTIFICATE-----\n"
+
 fn one(text: StringSlice) -> x509::Certificate
   uses Panic
 {
@@ -79,4 +83,12 @@ test "the system's roots are read from the first bundle present" {
   provide mut disk {
     assert x509::system_roots() is Ok(roots) && roots.length() == 1
   }
+}
+
+test "a root self-signed with SHA-1 is read, and anchors a chain whose links use SHA-256" {
+  let root = one(sha1_root_pem.slice())
+  assert !root.is_signed_by(root)
+  let chain: List[x509::Certificate] = [one(sha1_signed_leaf_pem.slice())]
+  let roots: List[x509::Certificate] = [root.copy()]
+  assert x509::verify_chain(chain, roots: roots, host: "legacy.test", now: now()) == Ok(Unit)
 }

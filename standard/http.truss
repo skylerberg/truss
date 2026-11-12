@@ -7,7 +7,9 @@ use standard::serialization
 use standard::streams
 use standard::text
 use standard::time
+use standard::tls
 use standard::url
+use standard::x509
 
 public type Method =
   | Get
@@ -352,6 +354,7 @@ public type Error =
   | BodyTooLarge
   | Closed
   | System(error: SystemError)
+  | Tls(error: tls::Error)
   | Unsupported(message: String)
   derives Equal
 
@@ -367,6 +370,7 @@ impl Display for Error {
       BodyTooLarge => mut output.write("the body is too large")
       Closed => mut output.write("the connection closed before the message ended")
       System(error) => error.display(mut output)
+      Tls(error) => error.display(mut output)
       Unsupported(message) => mut output.write(message.slice())
     }
   }
@@ -822,6 +826,15 @@ fn error_status(error: Error) -> Status {
 public type ServerOptions(limits: Limits = Limits(), timeout_seconds: Int64 = 30)
   derives Equal
 
+fn prepare(connection: mut network::Connection, options: ServerOptions)
+  uses Handles
+{
+  let _ = mut connection.set_no_delay(true)
+  let timeout = timeout_of(options.timeout_seconds)
+  let _ = mut connection.set_read_timeout(timeout)
+  let _ = mut connection.set_write_timeout(timeout)
+}
+
 fn serve_connection[capability Granted](
   connection: own network::Connection,
   handler: (fn(Request) -> Response uses Granted),
@@ -830,11 +843,41 @@ fn serve_connection[capability Granted](
   uses Handles, Clock, Granted
 {
   var opened = own connection
-  let _ = mut opened.set_no_delay(true)
-  let timeout = timeout_of(options.timeout_seconds)
-  let _ = mut opened.set_read_timeout(timeout)
-  let _ = mut opened.set_write_timeout(timeout)
+  prepare(mut opened, options: options)
   var reader = streams::BufferedReader.new(own opened, capacity: 16384)
+  serve_stream(mut reader, handler: handler, options: options)
+  let _ = mut reader.source().shut_down(network::Direction.Both)
+}
+
+fn serve_secured[capability Granted](
+  connection: own network::Connection,
+  config: tls::ServerConfig,
+  handler: (fn(Request) -> Response uses Granted),
+  options: ServerOptions,
+)
+  uses Handles, Clock, Random, Panic, Granted
+{
+  var opened = own connection
+  prepare(mut opened, options: options)
+  match tls::accept(own opened, config: config) {
+    Ok(secured) => {
+      var reader = streams::BufferedReader.new(own secured, capacity: 16384)
+      serve_stream(mut reader, handler: handler, options: options)
+      var session = own reader.finish()
+      let _ = mut session.close()
+      let _ = mut session.stream().shut_down(network::Direction.Both)
+    }
+    Err(_) => {}
+  }
+}
+
+fn serve_stream[Stream: streams::Reader + streams::Writer, capability Granted](
+  reader: mut streams::BufferedReader[Stream],
+  handler: (fn(Request) -> Response uses Granted),
+  options: ServerOptions,
+)
+  uses Handles, Clock, Granted
+{
   var open = true
   while open {
     match read_head(mut reader, limits: options.limits) {
@@ -879,7 +922,6 @@ fn serve_connection[capability Granted](
       }
     }
   }
-  let _ = mut reader.source().shut_down(network::Direction.Both)
 }
 
 public fn serve[capability Granted](
@@ -894,6 +936,23 @@ public fn serve[capability Granted](
       return
     }
     serve_accepted(own accepted, handler: handler, options: options)
+  }
+}
+
+public fn serve_tls[capability Granted](
+  listener: mut network::Listener,
+  config: tls::ServerConfig,
+  handler: (fn(Request) -> Response uses Granted),
+  options: ServerOptions = ServerOptions(),
+)
+  uses Tasks, Handles, Clock, Random, Panic, Granted
+{
+  concurrent for accepted in mut listener.connections() {
+    match own accepted {
+      Ok(connection) => serve_secured(own connection, config: config, handler: handler, options: options)
+      Err(Cancelled) => return
+      Err(_) => Clock.sleep(Duration.milliseconds(10))
+    }
   }
 }
 
@@ -1107,7 +1166,11 @@ public fn Request.matches(self, route: Route) -> Option[Parameters] {
   Some(Parameters(names: own names, values: own values))
 }
 
-public type ClientOptions(timeout_seconds: Int64 = 30, limits: Limits = Limits(head_bytes: 65536, body_bytes: 67108864))
+public type ClientOptions(
+  timeout_seconds: Int64 = 30,
+  limits: Limits = Limits(head_bytes: 65536, body_bytes: 67108864),
+  roots: Option[List[x509::Certificate]] = None,
+)
   derives Equal
 
 fn read_until_closed[Source: streams::Reader](
@@ -1226,16 +1289,17 @@ public fn send(
   body: List[UInt8] = [],
   options: ClientOptions = ClientOptions(),
 ) -> Result[Response, Error]
-  uses NetworkClient, Handles
+  uses NetworkClient, Handles, FileRead, Random, Clock, Panic
 {
-  if url.scheme() != "http".slice() {
-    return Err(Error.Unsupported(message: "a URL whose scheme is not http"))
+  let is_secure = url.scheme() == "https".slice()
+  if !is_secure && url.scheme() != "http".slice() {
+    return Err(Error.Unsupported(message: "a URL whose scheme is not http or https"))
   }
   let host = match url.host() {
     Some(host) => "${host}"
     None => return Err(malformed("a URL with no host"))
   }
-  let port = url.port_or_default().unwrap_or(80)
+  let port = url.port_or_default().unwrap_or(if is_secure { 443 } else { 80 })
   let timeout = timeout_of(options.timeout_seconds)
   var connection = system(network::connect(host.slice(), port: port, timeout: timeout))?
   let _ = mut connection.set_read_timeout(timeout)
@@ -1243,13 +1307,36 @@ public fn send(
   let head_only = method == Method.Head
   var bytes = request_head(method, url: url, headers: headers, body_length: body.length())
   mut bytes.append_slice(body.slice())
-  system(mut connection.write_all(bytes.slice()))?
-  var reader = streams::BufferedReader.new(own connection, capacity: 16384)
-  read_response(mut reader, head_only: head_only, limits: options.limits)
+  if !is_secure {
+    return exchange(own connection, request: bytes.slice(), head_only: head_only, limits: options.limits)
+  }
+  let roots = match options.roots {
+    Some(roots) => roots.copy()
+    None => system(x509::system_roots())?
+  }
+  let config = tls::ClientConfig(roots: own roots, protocols: ["http/1.1"])
+  match tls::connect(own connection, host: host.slice(), config: config) {
+    Ok(secured) => exchange(own secured, request: bytes.slice(), head_only: head_only, limits: options.limits)
+    Err(error) => Err(Error.Tls(error: own error))
+  }
+}
+
+fn exchange[Stream: streams::Reader + streams::Writer](
+  stream: own Stream,
+  request: Slice[UInt8],
+  head_only: Bool,
+  limits: Limits,
+) -> Result[Response, Error]
+  uses Handles
+{
+  var opened = own stream
+  system(mut opened.write_all(request))?
+  var reader = streams::BufferedReader.new(own opened, capacity: 16384)
+  read_response(mut reader, head_only: head_only, limits: limits)
 }
 
 public fn get(address: StringSlice, options: ClientOptions = ClientOptions()) -> Result[Response, Error]
-  uses NetworkClient, Handles
+  uses NetworkClient, Handles, FileRead, Random, Clock, Panic
 {
   match url::parse(address) {
     Ok(parsed) => send(Method.Get, url: parsed, options: options)

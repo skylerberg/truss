@@ -1,0 +1,141 @@
+use standard::http
+use standard::network
+use standard::simulation
+use standard::tls
+use standard::x509
+
+let leaf_pem: String = "-----BEGIN CERTIFICATE-----\nMIICbjCCAVagAwIBAgIBAzANBgkqhkiG9w0BAQsFADAiMSAwHgYDVQQDDBdUcnVz\ncyBUZXN0IEludGVybWVkaWF0ZTAgFw0yNjExMTIyMjIxMjJaGA8yMTI2MTAxOTIy\nMjEyMlowFzEVMBMGA1UEAwwMZXhhbXBsZS50ZXN0MHYwEAYHKoZIzj0CAQYFK4EE\nACIDYgAEvzvKOxz5C93X+OXxQrp3/F0dtxh3eK9pIopcBnV1gVjKYzM4mKt45UQ/\nzGDdhSCOAEOBzULop1k3QI6hM7vDTltWP4mICpcLW2aHRcfMRSDhLuzXlVtsOfzZ\nlpFnVsTGo2YwZDAJBgNVHRMEAjAAMA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAK\nBggrBgEFBQcDATAyBgNVHREEKzApggxleGFtcGxlLnRlc3SCEyouYXBwcy5leGFt\ncGxlLnRlc3SHBAoBAgMwDQYJKoZIhvcNAQELBQADggEBAIutZbGNFD9/bKe4syl2\n3zsPy2RM7QNpEANP1qnre58eQ3jrex5CgUXrjphhM4+aA3JHrYEhnTo0aR+06SNg\n6SdIZRGnarCFyCHLGlU7U6egA5q9lghJmwLW16DCFk0B0cYEB7mqXJI3Ggn+o+Ld\nYaeXx5E32o+Zxk9WAlWZxAJWA8hhYwk7BlrD05tDoHnD8dtRyFZkjPQA2JtiiepX\nDKvL8+nnv38K+TPx3PgKHvlUCXemKXf1IM7BnVuWQ7h11TRcRaOyMI2nj+z9chnH\nb668LZE68cgTcXc2WT+xDpKZ7++gMW8WR/5VD/p8PmGCIuf0q3PX8QxvMubFV57+\nQ8M=\n-----END CERTIFICATE-----\n"
+
+let intermediate_pem: String = "-----BEGIN CERTIFICATE-----\nMIICHTCCAcSgAwIBAgIBAjAKBggqhkjOPQQDAjAaMRgwFgYDVQQDDA9UcnVzcyBU\nZXN0IFJvb3QwIBcNMjYxMTEyMjIyMTIyWhgPMjEyNjEwMTkyMjIxMjJaMCIxIDAe\nBgNVBAMMF1RydXNzIFRlc3QgSW50ZXJtZWRpYXRlMIIBIjANBgkqhkiG9w0BAQEF\nAAOCAQ8AMIIBCgKCAQEA0Qi1aEgwP8H8dvE1sZoerMme7LhKYBmGluu0nGxRXjPI\n1Ny9qZi/fv9aIPki2yGCNpGh6oYZgMkursuEFy/1E3i5sHg0LkF0hvwHj+DmksPS\nL71MtMv9n9mM1GjV44MB88AFmSAFXm3xodQ2KTERqG1LsGU2Dp77Mn6Vg/UdlzcH\nQhaO1PfOHYFllBmn6/Nz798GoUlLZN2iEILDizSRGbiFQMUQAtrAtu5CYA12fS7d\nGuw43xV14mSkDl2TIWAHPbAGYRamLAw4ONzcd6Ha9tAkw8kyxx6kaJ7Hnv0anin7\n5x7KvINq35UxPGTOY9iP2r2GOkYXpVeYX27M0+iitwIDAQABoyYwJDASBgNVHRMB\nAf8ECDAGAQH/AgEAMA4GA1UdDwEB/wQEAwICBDAKBggqhkjOPQQDAgNHADBEAiAO\n8JFenyaQPpZU2tNOtXoJJ40Z1eOT2O6iPMSan24s3wIgHAojsSLTw4JnBCx3dS7q\noHD5V4eN6RPW/aJXXw+h0tg=\n-----END CERTIFICATE-----\n"
+
+let root_pem: String = "-----BEGIN CERTIFICATE-----\nMIIBZzCCAQ2gAwIBAgIBATAKBggqhkjOPQQDAjAaMRgwFgYDVQQDDA9UcnVzcyBU\nZXN0IFJvb3QwIBcNMjYxMTEyMjIyMTIyWhgPMjEyNjEwMTkyMjIxMjJaMBoxGDAW\nBgNVBAMMD1RydXNzIFRlc3QgUm9vdDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IA\nBCfhX1Qdf96EEGtKWroHZr+BKXqWBBA2wlcyEokMJ8/YdaZaZuhy5WrmSA9g86KI\nvvtFrzu+27/Pxx6vVJU4F/CjQjBAMB0GA1UdDgQWBBSCaJNI2d3QmDK3XykacsXN\nZTG9QjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAKBggqhkjOPQQD\nAgNIADBFAiEA8pe+1IlvjVklgXclN5mofhk3LB4GlbXcQ8O/qh1+iBACIDUH1nvd\npxBpi5fLaZ/7HZdobxHaII3PnGetZ0IWCRK9\n-----END CERTIFICATE-----\n"
+
+let leaf_key_pem: String = "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDBy766aCiN2LsAG1Jlw\nKI4tX3IoEJowFwLE4gwHaedWy839HnUeAhUrSKib+bG7Uv6hZANiAAS/O8o7HPkL\n3df45fFCunf8XR23GHd4r2kiilwGdXWBWMpjMziYq3jlRD/MYN2FII4AQ4HNQuin\nWTdAjqEzu8NOW1Y/iYgKlwtbZodFx8xFIOEu7NeVW2w5/NmWkWdWxMY=\n-----END PRIVATE KEY-----\n"
+
+fn certificate(text: StringSlice) -> x509::Certificate
+  uses Panic
+{
+  match x509::parse_pem(text) {
+    Ok(certificates) => certificates[0].copy()
+    Err(_) => Panic.crash("a certificate")
+  }
+}
+
+fn server_config() -> tls::ServerConfig
+  uses Panic
+{
+  let blocks = x509::pem_blocks(leaf_key_pem.slice(), label: "PRIVATE KEY")
+  let key = x509::parse_private_key(blocks[0].slice()).expect("a key")
+  tls::ServerConfig(
+    chain: [certificate(leaf_pem.slice()), certificate(intermediate_pem.slice())],
+    key: own key,
+    protocols: ["h2", "http/1.1"],
+  )
+}
+
+fn world() -> simulation::World
+  uses Panic
+{
+  let now = Instant.from_unix_seconds(1900000000).expect("in range")
+  simulation::World.from(simulation::Setup.new().with_time(now).with_host("example.test", address: network::IpAddress.loopback))
+}
+
+fn serve_once(listener: mut network::Listener) -> String
+  uses Handles, Random, Panic
+{
+  var connection = mut listener.accept().expect("a client connects")
+  let _ = mut connection.set_read_timeout(Some(Duration.seconds(5)))
+  match tls::accept(own connection, config: server_config()) {
+    Ok(secured) => {
+      var session = own secured
+      var line: List[UInt8] = []
+      let _ = mut session.read_exactly(mut line, count: 5)
+      var reply: String = "echo "
+      mut reply.push(String.from_utf8_lossy(line.slice()).slice())
+      let _ = mut session.write_all(reply.slice().bytes())
+      var rest: List[UInt8] = []
+      let ended = mut session.read_to_end(mut rest)
+      let protocol = session.protocol().unwrap_or("none".slice()).to_string()
+      "${protocol} ${ended == Ok(0)}"
+    }
+    Err(error) => "failed: ${error}"
+  }
+}
+
+fn visit(host: StringSlice, roots: own List[x509::Certificate], protocols: own List[String]) -> String
+  uses NetworkClient, Handles, Random, Clock, Panic
+{
+  var connection = network::connect(host, port: 8443).expect("the server accepts")
+  let _ = mut connection.set_read_timeout(Some(Duration.seconds(5)))
+  match tls::connect(own connection, host: host, config: tls::ClientConfig(roots: own roots, protocols: own protocols)) {
+    Ok(secured) => {
+      var session = own secured
+      let _ = mut session.write_all("hello".bytes())
+      var reply: List[UInt8] = []
+      let _ = mut session.read_exactly(mut reply, count: 10)
+      let _ = mut session.close()
+      let protocol = session.protocol().unwrap_or("none".slice()).to_string()
+      "${String.from_utf8_lossy(reply.slice())} ${protocol} ${session.peer_certificates().length()}"
+    }
+    Err(error) => "failed: ${error}"
+  }
+}
+
+fn handshake(host: StringSlice, roots: own List[x509::Certificate], protocols: own List[String]) -> List[String]
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8443)).expect("the port is free")
+  var server = ""
+  var client = ""
+  concurrent {
+    server = serve_once(mut listener)
+    client = visit(host, roots: own roots, protocols: own protocols)
+  }
+  [own client, own server]
+}
+
+test "a client and a server agree on keys, verify the chain, pick a protocol, and exchange data" {
+  provide world() {
+    let seen = handshake("example.test", roots: [certificate(root_pem.slice())], protocols: ["http/1.1", "h2"])
+    assert seen[0] == "echo hello h2 2"
+    assert seen[1] == "h2 true"
+  }
+}
+
+test "a client rejects a chain for another host or from an unknown root" {
+  provide world() {
+    let other = handshake("localhost", roots: [certificate(root_pem.slice())], protocols: [])
+    assert other[0] == "failed: the certificate is not for this host"
+    assert other[1].slice().starts_with("failed: ")
+  }
+  provide world() {
+    let unknown = handshake("example.test", roots: [], protocols: [])
+    assert unknown[0] == "failed: the chain does not lead to a trusted root"
+  }
+}
+
+fn greet(request: http::Request) -> http::Response {
+  http::Response.text("secure ${request.path()}".slice())
+}
+
+fn secure_exchange() -> String
+  uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic
+{
+  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8443)).expect("the port is free")
+  concurrent {
+    http::serve_tls(mut listener, config: server_config(), handler: greet)
+    {
+      let options = http::ClientOptions(roots: Some([certificate(root_pem.slice())]))
+      return match http::get("https://example.test:8443/page", options: options) {
+        Ok(response) => "${response.status.code} ${response.text_body().unwrap_or("")}"
+        Err(error) => "failed: ${error}"
+      }
+    }
+  }
+}
+
+test "an HTTPS client and server exchange a request and a response" {
+  provide world() {
+    assert secure_exchange() == "200 secure /page"
+  }
+}
