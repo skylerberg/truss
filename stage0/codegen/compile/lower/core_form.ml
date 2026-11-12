@@ -678,8 +678,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
              Binary ((if inclusive then Less_equal else Less), Copy first_value, Copy last_value) ));
       let inside = block st.b and after = block st.b in
       let depth = List.length st.scopes in
-      finish st.b
-        (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
+      Lir_builder.branch st.b (Copy (at going)) ~yes:inside ~no:after;
       start st.b inside;
       let first = local st.b ~name:"first" wide and last = local st.b ~name:"last" wide in
       let low_wide = local st.b wide and high_wide = local st.b wide in
@@ -721,8 +720,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
       let ended = local st.b (Raw Bool) in
       emit st.b (Assign (at ended, Binary (Equal, Copy (at index), Copy (at last))));
       let next = block st.b in
-      finish st.b
-        (Switch { value = Copy (at ended); cases = [ (Z.one, done_) ]; default = Some next });
+      Lir_builder.branch st.b (Copy (at ended)) ~yes:done_ ~no:next;
       start st.b next;
       emit st.b (Assign (at index, Binary (Add, Copy (at index), one)));
       finish st.b (Goto again);
@@ -744,8 +742,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
       let going = local st.b (Raw Bool) in
       emit st.b
         (Assign (at going, Binary ((if inclusive then Less_equal else Less), Copy index, Copy stop)));
-      finish st.b
-        (Switch { value = Copy (at going); cases = [ (Z.one, inside) ]; default = Some after });
+      Lir_builder.branch st.b (Copy (at going)) ~yes:inside ~no:after;
       start st.b inside;
       looping st ~continue_:step ~break_:after ~depth (fun () ->
           let run value =
@@ -771,8 +768,7 @@ and for_each st ~origin ~(schedule : schedule) ~(iteration : Core.iteration)
         let last = local st.b (Raw Bool) in
         emit st.b (Assign (at last, Binary (Equal, Copy index, Copy stop)));
         let next = block st.b in
-        finish st.b
-          (Switch { value = Copy (at last); cases = [ (Z.one, after) ]; default = Some next });
+        Lir_builder.branch st.b (Copy (at last)) ~yes:after ~no:next;
         start st.b next
       end;
       emit st.b (Assign (index, Binary (Add, Copy index, constant 1)));
@@ -1384,7 +1380,7 @@ and spawn_iteration st (loop : spawn_loop) ~(not_spawned : unit -> unit) (f : un
   emit st.b (Regions_end { fork });
   let spawned = tasks_bool st "spawn" [ loop.group; at function_value; at loop.item ] in
   let next = block st.b and cancelled = block st.b in
-  finish st.b (Switch { value = spawned; cases = [ (Z.one, next) ]; default = Some cancelled });
+  Lir_builder.branch st.b spawned ~yes:next ~no:cancelled;
   start st.b cancelled;
   not_spawned ();
   break_loop st;
@@ -1489,7 +1485,7 @@ and branch st (condition : Core.expression) ~yes ~no =
       finish st.b (Goto yes)
   | _ ->
       let value = operand st condition in
-      finish st.b (Switch { value; cases = [ (Z.one, yes) ]; default = Some no })
+      Lir_builder.branch st.b value ~yes ~no
 
 and block_into st (inner : Core.block) destination =
   in_scope st (fun () ->
@@ -1561,8 +1557,7 @@ and statement st (node : Core.statement) =
       | Assert { value; _ } ->
           let condition = operand st value in
           let failed = block st.b and after = block st.b in
-          finish st.b
-            (Switch { value = condition; cases = [ (Z.one, after) ]; default = Some failed });
+          Lir_builder.branch st.b condition ~yes:after ~no:failed;
           start st.b failed;
           let message = "assert " ^ source st (spans st).(value.origin) in
           finish st.b
@@ -1681,8 +1676,7 @@ and test_pattern st (pattern : Core.pattern) (place : Lir.place) ~failed =
   let require (condition : Lir.rvalue) =
     let holds = local st.b (Raw Bool) and matched = block st.b in
     emit st.b (Assign (at holds, condition));
-    finish st.b
-      (Switch { value = Copy (at holds); cases = [ (Z.one, matched) ]; default = Some failed });
+    Lir_builder.branch st.b (Copy (at holds)) ~yes:matched ~no:failed;
     start st.b matched
   in
   match pattern.kind with
@@ -1984,10 +1978,7 @@ and fill_defaults st mask (parameters : Core.parameter list) =
       emit b (Assign (at given, Binary (Not_equal, Copy (at passed), constant_int UInt64 Z.zero)));
       let arrived = local_place st parameter.local in
       let fill = block b and after = block b in
-      let unless_given other =
-        finish b
-          (Switch { value = Copy (at given); cases = [ (Z.one, other) ]; default = Some fill })
-      in
+      let unless_given other = Lir_builder.branch b (Copy (at given)) ~yes:other ~no:fill in
       let pulled what =
         if st.pulling then
           unsupported ~at:(site_of st default.origin)

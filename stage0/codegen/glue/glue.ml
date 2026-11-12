@@ -54,7 +54,7 @@ let rec trivial t ty =
 
 open Lir_builder
 
-let loop t b ~count body = loop b ~usize:t.usize ~count body
+let loop t b ~count body = loop b ~index_type:(Value t.usize) ~count body
 let instance key main : Lir.t = { key; main; nested = [||] }
 
 let variant_shapes t ty =
@@ -296,13 +296,13 @@ let copy t ty =
          let share = block b and owning = block b and hollow = block b in
          let allocate = block b and after = block b in
          let owns = Storage.owns_buffer b self in
-         finish b (Switch { value = owns; cases = [ (Z.one, owning) ]; default = Some share });
+         branch b owns ~yes:owning ~no:share;
          start b share;
          emit b (Assign (result, Use (Copy self)));
          finish b (Goto after);
          start b owning;
          let empty = Storage.is_empty b self in
-         finish b (Switch { value = empty; cases = [ (Z.one, hollow) ]; default = Some allocate });
+         branch b empty ~yes:hollow ~no:allocate;
          start b hollow;
          emit b (Assign (result, Storage.empty ty));
          finish b (Goto after);
@@ -390,8 +390,6 @@ let copy t ty =
 
 (* Debug output *)
 
-let zero_size t ty = (Memory_layout.of_type t.env ty).size = 0
-
 (* What a debug or an encode function appends to: storage of bytes, which
    its caller owns and passes to be changed. *)
 let builtin builtin : Ground.ty = Named { path = Intrinsic.builtin_path builtin; arguments = [] }
@@ -406,7 +404,8 @@ let output_parameter t =
 let debug_signature t ty : Lir.signature =
   {
     parameters =
-      (if zero_size t ty then [] else [ Lir.Pointer { target = Value ty; writable = false } ])
+      (if Memory_layout.has_zero_size t.env ty then []
+       else [ Lir.Pointer { target = Value ty; writable = false } ])
       @ [ output_parameter t ];
     result = None;
     returns = true;
@@ -448,7 +447,9 @@ let text t b ~output value =
       (bytes b ~elements:(Constant (Bytes value)) ~length:(usize (String.length value)))
 
 let debug_call t b ~output ty (place : Lir.place) =
-  let arguments = if zero_size t ty then [] else [ Lir.Address { place; writable = false } ] in
+  let arguments =
+    if Memory_layout.has_zero_size t.env ty then [] else [ Lir.Address { place; writable = false } ]
+  in
   emit b
     (Call
        {
@@ -478,7 +479,7 @@ let scalar_debug t b ~output (scalar : Memory_layout.scalar) (place : Lir.place)
 let debug t ty =
   let b = create () in
   let parameter =
-    if zero_size t ty then None
+    if Memory_layout.has_zero_size t.env ty then None
     else Some (local b ~name:"value" (Pointer { target = Value ty; writable = false }))
   in
   let value : Lir.place =
@@ -578,7 +579,7 @@ let debug t ty =
 let encode_signature t ty = debug_signature t ty
 
 let encode_call t b ~output ty (place : Lir.place) =
-  if not (zero_size t ty) then
+  if not (Memory_layout.has_zero_size t.env ty) then
     emit b
       (Call
          {
@@ -590,7 +591,7 @@ let encode_call t b ~output ty (place : Lir.place) =
 let encode t ty =
   let b = create () in
   let parameter =
-    if zero_size t ty then None
+    if Memory_layout.has_zero_size t.env ty then None
     else Some (local b ~name:"value" (Pointer { target = Value ty; writable = false }))
   in
   let value : Lir.place =

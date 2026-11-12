@@ -102,12 +102,18 @@ val target : env -> target
 val shape : env -> Ground.ty -> shape
 val of_type : env -> Ground.ty -> t
 
+val has_zero_size : env -> Ground.ty -> bool
+(** Whether values of a type take no bytes, so that code generation erases them. *)
+
 (* The heap block of the [indirect] variant [variant] of [ty]: its fields as
    a [Struct]. Asked for separately, because a block may hold the type
    itself, which is why the variant is [indirect]. *)
 val block : env -> Ground.ty -> string -> t
 val scalar_size : target -> scalar -> int
 val integer_size : target -> integer -> int
+
+val integer_range : target -> integer -> Z.t * Z.t
+(** The least and the greatest value of an integer kind on a target. *)
 
 (* The index of a variant in a sum type's layout, and how it is told apart:
    by its tag value, or by the value stored at the niche. *)
@@ -120,4 +126,6 @@ type discriminant =
 val discriminant : t -> string -> discriminant
 
 (* A compact, one-line description, for tests. *)
+val integer_to_string : integer -> string
+val scalar_to_string : scalar -> string
 val to_string : t -> string

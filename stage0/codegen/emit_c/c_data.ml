@@ -50,7 +50,7 @@ let rec initializer_c context ty (value : Lir.static_value) : string option =
       let element_c = value_c context element in
       let count = List.length elements in
       let buffer =
-        if count = 0 || (Memory_layout.of_type context.env element).size = 0 then
+        if count = 0 || Memory_layout.has_zero_size context.env element then
           "((void *)" ^ bytes_name context "" ^ ")"
         else begin
           let values = List.filter_map (initializer_c context element) elements in
