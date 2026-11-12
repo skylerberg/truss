@@ -57,10 +57,12 @@ let empty ty = static ty ~elements:(Constant (Bytes "")) ~length:(usize 0)
 let view ty ~elements ~length : Lir.rvalue =
   Build { ty; variant = None; fields = [ (elements_field, elements); (length_field, length) ] }
 
-let test b rvalue =
-  let result = local b (Raw Bool) in
-  emit b (Assign (Lir_builder.at result, rvalue));
+let test builder rvalue =
+  let result = local builder (Raw Bool) in
+  emit builder (Assign (Lir_builder.at result, rvalue));
   Lir.Copy (Lir_builder.at result)
 
-let owns_buffer b storage = test b (Binary (Not_equal, Copy (capacity storage), usize 0))
-let is_empty b storage = test b (Binary (Equal, Copy (length storage), usize 0))
+let owns_buffer builder storage =
+  test builder (Binary (Not_equal, Copy (capacity storage), usize 0))
+
+let is_empty builder storage = test builder (Binary (Equal, Copy (length storage), usize 0))

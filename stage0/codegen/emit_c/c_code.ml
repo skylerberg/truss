@@ -5,10 +5,12 @@ open C_types
 open C_values
 
 let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.ty) list) =
-  let argument i = fst (List.nth arguments i) in
-  let scalar i = scalar_of context (snd (List.nth arguments i)) in
-  let width i = bit_width context (scalar i) in
-  let unsigned i = Printf.sprintf "((%s)%s)" (unsigned_of context (scalar i)) (argument i) in
+  let argument position = fst (List.nth arguments position) in
+  let scalar position = scalar_of context (snd (List.nth arguments position)) in
+  let width position = bit_width context (scalar position) in
+  let unsigned position =
+    Printf.sprintf "((%s)%s)" (unsigned_of context (scalar position)) (argument position)
+  in
   let all = String.concat ", " (List.map fst arguments) in
   let float_builtin name = if scalar 0 = Float32 then name ^ "f" else name in
   match intrinsic with
@@ -30,26 +32,27 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
         (width 0) (unsigned 0)
   | Count_ones -> Printf.sprintf "__builtin_popcountll((unsigned long long)%s)" (unsigned 0)
   | Swap_bytes -> (
-      let c = scalar_c context (scalar 0) in
+      let c_type = scalar_c context (scalar 0) in
       match width 0 with
       | 8 -> argument 0
-      | w -> Printf.sprintf "((%s)__builtin_bswap%d(%s))" c w (unsigned 0))
+      | width -> Printf.sprintf "((%s)__builtin_bswap%d(%s))" c_type width (unsigned 0))
   | Rotate_left | Rotate_right ->
-      let c = scalar_c context (scalar 0) in
+      let c_type = scalar_c context (scalar 0) in
       let mask = width 0 - 1 in
       let first, second = if intrinsic = Rotate_left then ("<<", ">>") else (">>", "<<") in
-      Printf.sprintf "((%s)((%s %s (%s & %d)) | (%s %s ((-%s) & %d))))" c (unsigned 0) first
+      Printf.sprintf "((%s)((%s %s (%s & %d)) | (%s %s ((-%s) & %d))))" c_type (unsigned 0) first
         (argument 1) mask (unsigned 0) second (argument 1) mask
   | Multiply_high ->
-      let c = scalar_c context (scalar 0) in
-      let w = width 0 in
+      let c_type = scalar_c context (scalar 0) in
+      let width = width 0 in
       let signed = match scalar 0 with Integer integer -> signed integer | _ -> false in
       let wide =
-        if w = 64 then if signed then "__int128" else "unsigned __int128"
+        if width = 64 then if signed then "__int128" else "unsigned __int128"
         else if signed then "int64_t"
         else "uint64_t"
       in
-      Printf.sprintf "((%s)(((%s)%s * (%s)%s) >> %d))" c wide (argument 0) wide (argument 1) w
+      Printf.sprintf "((%s)(((%s)%s * (%s)%s) >> %d))" c_type wide (argument 0) wide (argument 1)
+        width
   | Square_root -> Printf.sprintf "%s(%s)" (float_builtin "__builtin_sqrt") all
   | Fused_multiply_add -> Printf.sprintf "%s(%s)" (float_builtin "__builtin_fma") all
   | Floor -> Printf.sprintf "%s(%s)" (float_builtin "__builtin_floor") all
@@ -109,9 +112,9 @@ let intrinsic_c context (intrinsic : Lir.intrinsic) (arguments : (string * Lir.t
       let slot = argument 0 in
       let outer =
         List.mapi
-          (fun i (text, _) ->
-            Printf.sprintf "%s->outer[%d] = (const struct t_evidence *)%s, " slot i text)
-          (List.filteri (fun i _ -> i >= 3) arguments)
+          (fun position (text, _) ->
+            Printf.sprintf "%s->outer[%d] = (const struct t_evidence *)%s, " slot position text)
+          (List.filteri (fun position _ -> position >= 3) arguments)
       in
       Printf.sprintf
         "(%s->evidence.implementation = (void *)%s, %s->evidence.table = (const void *const *)%s, \
@@ -148,7 +151,7 @@ let call_c context fc (target : Lir.target) arguments =
       let cast_arguments =
         try
           List.map2
-            (fun c (text, _) -> Printf.sprintf "(%s)(%s)" (Libc.show_c_type c) text)
+            (fun c_type (text, _) -> Printf.sprintf "(%s)(%s)" (Libc.show_c_type c_type) text)
             declaration.takes arguments
         with Invalid_argument _ ->
           bug "a call of %s with an argument of zero size" declaration.symbol
@@ -236,8 +239,8 @@ let statement_c context fc buffer (statement : Lir.statement) =
           line "%s(&%s);" symbol text
       | Some _ -> bug "a drop of a place that is not a value")
   | Echo { text; length; site } ->
-      let operand o =
-        match operand_c context fc o with
+      let operand lir_operand =
+        match operand_c context fc lir_operand with
         | Some (text, _) -> text
         | None -> bug "an echo of nothing"
       in
@@ -251,8 +254,8 @@ let statement_c context fc buffer (statement : Lir.statement) =
       | _ -> bug "a block of a place that is not a sum type")
   | Region _ | Regions_end _ -> bug "a region that outlining left in place"
   | Fork { branches } ->
-      let operand o =
-        match operand_c context fc o with
+      let operand lir_operand =
+        match operand_c context fc lir_operand with
         | Some (text, _) -> text
         | None -> bug "an environment of zero size"
       in
@@ -268,8 +271,8 @@ let statement_c context fc buffer (statement : Lir.statement) =
       line "  t_runtime_parallel(branches, %d);" (List.length branches);
       line "}"
   | Fork_range { body; environment; first; last } ->
-      let operand o =
-        match operand_c context fc o with
+      let operand lir_operand =
+        match operand_c context fc lir_operand with
         | Some (text, _) -> text
         | None -> bug "an operand of zero size"
       in
@@ -286,8 +289,10 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
   let line format =
     Printf.ksprintf (fun text -> Buffer.add_string buffer ("  " ^ text ^ "\n")) format
   in
-  let operand o =
-    match operand_c context fc o with Some x -> x | None -> bug "an operand of zero size"
+  let operand lir_operand =
+    match operand_c context fc lir_operand with
+    | Some expression -> expression
+    | None -> bug "an operand of zero size"
   in
   let default = function
     | Some block -> Printf.sprintf "goto b%d;" block
@@ -297,10 +302,10 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
   | Goto block -> line "goto b%d;" block
   | Switch { value; cases; default = otherwise } ->
       let text, ty = operand value in
-      let c = scalar_c context (scalar_of context ty) in
+      let c_type = scalar_c context (scalar_of context ty) in
       line "switch (%s) {" text;
       List.iter
-        (fun (value, block) -> line "case (%s)%sULL: goto b%d;" c (Z.to_string value) block)
+        (fun (value, block) -> line "case (%s)%sULL: goto b%d;" c_type (Z.to_string value) block)
         cases;
       line "default: %s" (default otherwise);
       line "}"
@@ -332,7 +337,7 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
       | Some _ -> bug "a variant switch on a place that is not a value")
   | Return None -> line "return;"
   | Return (Some value) -> (
-      match (fc.f.result, operand_c context fc value) with
+      match (fc.function_.result, operand_c context fc value) with
       | None, _ | _, None -> line "return;"
       | Some _, Some (text, _) -> line "return %s;" text)
   | Unreachable -> line "%s" (unreachable_c context)
@@ -348,36 +353,38 @@ let terminator_c context fc buffer (terminator : Lir.terminator) =
         site.line site.column
   | Yield _ -> bug "a yield that yield lowering left in place"
 
-let function_c context key symbol ~linkage (f : Lir.function_) =
-  let fc = { symbol = Instance.symbol key; f } in
+let function_c context key symbol ~linkage (function_ : Lir.function_) =
+  let fc = { symbol = Instance.symbol key; function_ } in
   let buffer = Buffer.create 1024 in
-  let names = List.map (local_name f) f.parameters in
-  let header = prototype context fc.symbol symbol ~names ~linkage (Lir.signature f) in
+  let names = List.map (local_name function_) function_.parameters in
+  let header = prototype context fc.symbol symbol ~names ~linkage (Lir.signature function_) in
   let targets = Hashtbl.create 16 in
   Array.iter
     (fun (block : Lir.basic_block) ->
-      List.iter (fun b -> Hashtbl.replace targets b ()) (Lir.successors block.terminator))
-    f.blocks;
+      List.iter
+        (fun block_index -> Hashtbl.replace targets block_index ())
+        (Lir.successors block.terminator))
+    function_.blocks;
   Buffer.add_string buffer (header ^ " {\n");
   Array.iteri
     (fun local (info : Lir.local_info) ->
-      if (not (List.mem local f.parameters)) && not (erased context info.ty) then
+      if (not (List.mem local function_.parameters)) && not (erased context info.ty) then
         let zero =
           match info.ty with
           | Value ty when is_struct context ty -> "{0}"
-          | Environment n when environment_of context fc n = [] -> "{}"
+          | Environment nested_index when environment_of context fc nested_index = [] -> "{}"
           | Environment _ | Evidence _ -> "{0}"
           | _ -> "0"
         in
         Buffer.add_string buffer
-          (Printf.sprintf "  %s %s = %s;\n" (c_ty context fc.symbol info.ty) (local_name f local)
-             zero))
-    f.locals;
+          (Printf.sprintf "  %s %s = %s;\n" (c_ty context fc.symbol info.ty)
+             (local_name function_ local) zero))
+    function_.locals;
   Array.iteri
     (fun index (block : Lir.basic_block) ->
       if Hashtbl.mem targets index then Buffer.add_string buffer (Printf.sprintf "b%d:;\n" index);
       List.iter (statement_c context fc buffer) block.statements;
       terminator_c context fc buffer block.terminator)
-    f.blocks;
+    function_.blocks;
   Buffer.add_string buffer "}\n";
   Buffer.contents buffer

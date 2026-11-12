@@ -3,9 +3,9 @@
 open Ir
 
 let version = 25
-let tagged n items = Cbor.Array (Cbor.int n :: items)
-let list f items = Cbor.Array (List.map f items)
-let option f = function None -> Cbor.Null | Some x -> f x
+let tagged tag items = Cbor.Array (Cbor.int tag :: items)
+let list encode_item items = Cbor.Array (List.map encode_item items)
+let option encode_item = function None -> Cbor.Null | Some item -> encode_item item
 
 let integer_tag = function
   | Memory_layout.Int8 -> 0
@@ -33,22 +33,22 @@ let rec encode_scalar instance (scalar : Memory_layout.scalar) =
   | Pointer pointee -> tagged 5 [ encode_pointee instance pointee ]
   | Nullable_pointer pointee -> tagged 6 [ encode_pointee instance pointee ]
 
-and encode_pointee e : Memory_layout.pointee -> Cbor.t = function
-  | Data ty -> tagged 0 [ Ground.encode ~path:e.path ty ]
-  | Block (ty, variant) -> tagged 1 [ Ground.encode ~path:e.path ty; Text variant ]
-  | Code f -> tagged 2 [ Ground.encode ~path:e.path (Function f) ]
+and encode_pointee pointee_encoder : Memory_layout.pointee -> Cbor.t = function
+  | Data ty -> tagged 0 [ Ground.encode ~path:pointee_encoder.path ty ]
+  | Block (ty, variant) -> tagged 1 [ Ground.encode ~path:pointee_encoder.path ty; Text variant ]
+  | Code encode_item -> tagged 2 [ Ground.encode ~path:pointee_encoder.path (Function encode_item) ]
   | Opaque -> tagged 3 []
 
 let rec encode_ty instance = function
   | Value ty -> tagged 0 [ Ground.encode ~path:instance.path ty ]
   | Pointer { target; writable } -> tagged 1 [ encode_ty instance target; Bool writable ]
   | Raw scalar -> tagged 2 [ encode_scalar instance scalar ]
-  | Environment n -> tagged 3 [ Cbor.int n ]
-  | Evidence n -> tagged 4 [ Cbor.int n ]
+  | Environment tag -> tagged 3 [ Cbor.int tag ]
+  | Evidence tag -> tagged 4 [ Cbor.int tag ]
 
 let encode_function_ref instance = function
   | Instance key -> tagged 0 [ instance.instance key ]
-  | Nested n -> tagged 1 [ Cbor.int n ]
+  | Nested tag -> tagged 1 [ Cbor.int tag ]
 
 let rec encode_place instance (place : place) =
   Cbor.Array
@@ -85,15 +85,19 @@ and encode_constant instance = function
   | Size_of ty -> tagged 8 [ Ground.encode ~path:instance.path ty ]
   | Alignment_of ty -> tagged 9 [ Ground.encode ~path:instance.path ty ]
 
-let encode_signature instance (s : signature) =
+let encode_signature instance (lir_signature : signature) =
   Cbor.Array
-    [ list (encode_ty instance) s.parameters; option (encode_ty instance) s.result; Bool s.returns ]
+    [
+      list (encode_ty instance) lir_signature.parameters;
+      option (encode_ty instance) lir_signature.result;
+      Bool lir_signature.returns;
+    ]
 
-let equal_signature a b =
+let equal_signature left right =
   let encoders = { path = Ground.encode_path; instance = Instance.encode } in
   String.equal
-    (Cbor.encode (encode_signature encoders a))
-    (Cbor.encode (encode_signature encoders b))
+    (Cbor.encode (encode_signature encoders left))
+    (Cbor.encode (encode_signature encoders right))
 
 let unary_tag = function Negate -> 0 | Not -> 1 | Complement -> 2
 
@@ -168,16 +172,16 @@ let intrinsic_tag = function
 let encode_rvalue instance rvalue =
   let operand = encode_operand instance in
   match rvalue with
-  | Use o -> tagged 0 [ operand o ]
-  | Unary (op, o) -> tagged 1 [ Cbor.int (unary_tag op); operand o ]
-  | Binary (op, a, b) -> tagged 2 [ Cbor.int (binary_tag op); operand a; operand b ]
-  | Convert (o, scalar) -> tagged 3 [ operand o; encode_scalar instance scalar ]
+  | Use lir_operand -> tagged 0 [ operand lir_operand ]
+  | Unary (op, lir_operand) -> tagged 1 [ Cbor.int (unary_tag op); operand lir_operand ]
+  | Binary (op, left, right) -> tagged 2 [ Cbor.int (binary_tag op); operand left; operand right ]
+  | Convert (lir_operand, scalar) -> tagged 3 [ operand lir_operand; encode_scalar instance scalar ]
   | Build { ty; variant; fields } ->
       tagged 4
         [
           Ground.encode ~path:instance.path ty;
-          option (fun v -> Cbor.Text v) variant;
-          list (fun (name, o) -> Cbor.Array [ Text name; operand o ]) fields;
+          option (fun variant_name -> Cbor.Text variant_name) variant;
+          list (fun (name, lir_operand) -> Cbor.Array [ Text name; operand lir_operand ]) fields;
         ]
   | Is_variant (place, variant) -> tagged 5 [ encode_place instance place; Text variant ]
   | Function_value { code; environment } ->
@@ -187,8 +191,8 @@ let rec encode_c_type : Libc.c_type -> Cbor.t = function
   | Void -> tagged 0 []
   | Named name -> tagged 1 [ Text name ]
   | Struct name -> tagged 2 [ Text name ]
-  | Const c -> tagged 3 [ encode_c_type c ]
-  | Pointer c -> tagged 4 [ encode_c_type c ]
+  | Const c_type -> tagged 3 [ encode_c_type c_type ]
+  | Pointer c_type -> tagged 4 [ encode_c_type c_type ]
 
 let encode_foreign (declaration : Libc.declaration) =
   Cbor.Array
@@ -273,14 +277,24 @@ let encode_statement instance = function
 
 let encode_terminator instance terminator =
   let operand = encode_operand instance in
-  let cases f cases = list (fun (value, block) -> Cbor.Array [ f value; Cbor.int block ]) cases in
+  let cases encode_item cases =
+    list (fun (value, block) -> Cbor.Array [ encode_item value; Cbor.int block ]) cases
+  in
   let block = option Cbor.int in
   match terminator with
-  | Goto b -> tagged 0 [ Cbor.int b ]
-  | Switch { value; cases = c; default } ->
-      tagged 1 [ operand value; cases (fun v -> Cbor.Integer v) c; block default ]
-  | Switch_variant { place; cases = c; default } ->
-      tagged 2 [ encode_place instance place; cases (fun v -> Cbor.Text v) c; block default ]
+  | Goto block_index -> tagged 0 [ Cbor.int block_index ]
+  | Switch { value; cases = c_type; default } ->
+      tagged 1
+        [
+          operand value; cases (fun variant_name -> Cbor.Integer variant_name) c_type; block default;
+        ]
+  | Switch_variant { place; cases = c_type; default } ->
+      tagged 2
+        [
+          encode_place instance place;
+          cases (fun variant_name -> Cbor.Text variant_name) c_type;
+          block default;
+        ]
   | Return value -> tagged 3 [ option operand value ]
   | Unreachable -> tagged 4 []
   | Fail { failure; message; length; site } ->
@@ -295,52 +309,72 @@ let encode_terminator instance terminator =
         ]
   | Yield { value; resume; stop } -> tagged 6 [ operand value; Cbor.int resume; block stop ]
 
-let encode_function instance (f : function_) =
+let encode_function instance (encode_item : function_) =
   Cbor.Array
     [
-      list Cbor.int f.parameters;
-      option Cbor.int f.written_result;
-      option (encode_ty instance) f.result;
-      Bool f.returns;
+      list Cbor.int encode_item.parameters;
+      option Cbor.int encode_item.written_result;
+      option (encode_ty instance) encode_item.result;
+      Bool encode_item.returns;
       list
         (fun (local : local_info) ->
           Cbor.Array
             [
               encode_ty instance local.ty;
-              option (fun n -> Cbor.Text n) local.name;
+              option (fun tag -> Cbor.Text tag) local.name;
               Bool local.borrowed;
             ])
-        (Array.to_list f.locals);
+        (Array.to_list encode_item.locals);
       list
-        (fun (b : basic_block) ->
+        (fun (block_index : basic_block) ->
           Cbor.Array
             [
-              list (encode_statement instance) b.statements; encode_terminator instance b.terminator;
+              list (encode_statement instance) block_index.statements;
+              encode_terminator instance block_index.terminator;
             ])
-        (Array.to_list f.blocks);
-      list (fun (name, ty) -> Cbor.Array [ Text name; encode_ty instance ty ]) f.environment;
+        (Array.to_list encode_item.blocks);
+      list
+        (fun (name, ty) -> Cbor.Array [ Text name; encode_ty instance ty ])
+        encode_item.environment;
     ]
 
-let encode ?(path = Ground.encode_path) ?instance t =
+let encode ?(path = Ground.encode_path) ?instance lir =
   let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
   let encoders = { path; instance } in
   Cbor.Array
     [
-      instance t.key;
-      encode_function encoders t.main;
-      list (encode_function encoders) (Array.to_list t.nested);
+      instance lir.key;
+      encode_function encoders lir.main;
+      list (encode_function encoders) (Array.to_list lir.nested);
     ]
 
-let rec encode_static (e : encoders) = function
-  | Static_scalar constant -> tagged 0 [ encode_constant e constant ]
+let rec encode_static (pointee_encoder : encoders) = function
+  | Static_scalar constant -> tagged 0 [ encode_constant pointee_encoder constant ]
   | Static_record fields ->
-      tagged 1 [ list (fun (name, v) -> Cbor.Array [ Text name; encode_static e v ]) fields ]
+      tagged 1
+        [
+          list
+            (fun (name, variant_name) ->
+              Cbor.Array [ Text name; encode_static pointee_encoder variant_name ])
+            fields;
+        ]
   | Static_variant (variant, fields) ->
       tagged 2
-        [ Text variant; list (fun (name, v) -> Cbor.Array [ Text name; encode_static e v ]) fields ]
-  | Static_array values -> tagged 3 [ list (encode_static e) values ]
+        [
+          Text variant;
+          list
+            (fun (name, variant_name) ->
+              Cbor.Array [ Text name; encode_static pointee_encoder variant_name ])
+            fields;
+        ]
+  | Static_array values -> tagged 3 [ list (encode_static pointee_encoder) values ]
   | Static_storage { element; elements; owned } ->
-      tagged 4 [ Ground.encode ~path:e.path element; list (encode_static e) elements; Bool owned ]
+      tagged 4
+        [
+          Ground.encode ~path:pointee_encoder.path element;
+          list (encode_static pointee_encoder) elements;
+          Bool owned;
+        ]
 
 let encode_data ?(path = Ground.encode_path) ?instance data =
   let instance = match instance with Some instance -> instance | None -> Instance.encode ~path in
@@ -359,11 +393,12 @@ let encode_table ?(path = Ground.encode_path) ?instance (table : table) =
       instance table.table_key;
       option path table.capability;
       list
-        (fun (key, s) -> Cbor.Array [ instance key; encode_signature encoders_default s ])
+        (fun (key, lir_signature) ->
+          Cbor.Array [ instance key; encode_signature encoders_default lir_signature ])
         table.entries;
     ]
 
 let derive_lir_hash = Blake3.derive_key ~context:"truss 2026-11-12 lir instance"
 
-let hash t =
-  derive_lir_hash (Cbor.encode (Cbor.Array [ Cbor.int version; encode (canonical_instance t) ]))
+let hash lir =
+  derive_lir_hash (Cbor.encode (Cbor.Array [ Cbor.int version; encode (canonical_instance lir) ]))

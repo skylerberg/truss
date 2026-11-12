@@ -1,4 +1,4 @@
-type function_context = { symbol : string; f : Lir.function_ }
+type function_context = { symbol : string; function_ : Lir.function_ }
 
 val local_name : Lir.function_ -> int -> string
 val erased : C_types.context -> Lir.ty -> bool

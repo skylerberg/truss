@@ -56,18 +56,20 @@ let compile_one toolchain cache settings (name, text) =
 
 (* Runs the jobs on several domains, each taking every [n]th job, and
    returns the results in the jobs' order. *)
-let parallel jobs f =
+let parallel jobs work =
   let jobs = Array.of_list jobs in
   let results = Array.make (Array.length jobs) None in
   let workers = max 1 (min (Array.length jobs) (Domain.recommended_domain_count () - 1)) in
   let work start =
-    let i = ref start in
-    while !i < Array.length jobs do
-      results.(!i) <- Some (f jobs.(!i));
-      i := !i + workers
+    let next = ref start in
+    while !next < Array.length jobs do
+      results.(!next) <- Some (work jobs.(!next));
+      next := !next + workers
     done
   in
-  let domains = List.init (workers - 1) (fun w -> Domain.spawn (fun () -> work (w + 1))) in
+  let domains =
+    List.init (workers - 1) (fun worker -> Domain.spawn (fun () -> work (worker + 1)))
+  in
   work 0;
   List.iter Domain.join domains;
   Array.to_list (Array.map Option.get results)
@@ -112,8 +114,10 @@ let program ?progress ?(tests = false) ?(in_order = tests) ?(copied = fun _ -> [
   let target = Memory_layout.target env in
   let emitted =
     List.mapi
-      (fun i units ->
-        let own = List.filter_map (function Lir.Code t -> Some t | _ -> None) units in
+      (fun part_index units ->
+        let own =
+          List.filter_map (function Lir.Code instance -> Some instance | _ -> None) units
+        in
         (* Each copy once, and none of an instance the file defines itself. *)
         let copies =
           List.fold_left
@@ -125,12 +129,14 @@ let program ?progress ?(tests = false) ?(in_order = tests) ?(copied = fun _ -> [
             [] (List.concat_map copied own)
         in
         let code =
-          List.map (fun t -> (t, Emit_c.External)) own
-          @ List.map (fun t -> (t, Emit_c.Internal)) copies
+          List.map (fun instance -> (instance, Emit_c.External)) own
+          @ List.map (fun instance -> (instance, Emit_c.Internal)) copies
         in
-        let data = List.filter_map (function Lir.Data d -> Some d | _ -> None) units in
-        let tables = List.filter_map (function Lir.Table t -> Some t | _ -> None) units in
-        (Printf.sprintf "file %d" i, Emit_c.file env settings.build ~data ~tables code))
+        let data = List.filter_map (function Lir.Data data -> Some data | _ -> None) units in
+        let tables =
+          List.filter_map (function Lir.Table instance -> Some instance | _ -> None) units
+        in
+        (Printf.sprintf "file %d" part_index, Emit_c.file env settings.build ~data ~tables code))
       files
   in
 
