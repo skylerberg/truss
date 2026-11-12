@@ -145,7 +145,8 @@ let fetch name version ~hash =
     | Some registry -> Registry.Index.fetch registry ~into:packages name version ~hash
     | None ->
         Error
-          (Printf.sprintf "no registry is set: `%s` names its directory" Registry.Index.variable)
+          (Printf.sprintf "no registry is set; set `%s` to the registry's directory"
+             Registry.Index.variable)
 
 (* A published package's manifest and record, for planning a lock file. *)
 let load_published name version ~hash =
@@ -668,7 +669,9 @@ let project_manifests session =
 let plan_lock session ~set ~all =
   match Registry.Index.current () with
   | None ->
-      Error (Printf.sprintf "No registry is set: `%s` names its directory." Registry.Index.variable)
+      Error
+        (Printf.sprintf "No registry is set. Set `%s` to the registry's directory."
+           Registry.Index.variable)
   | Some registry -> (
       let before =
         try

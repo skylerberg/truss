@@ -145,6 +145,13 @@ type number =
   | Pollout
   | Sockaddr_family_offset
   | Sockaddr_family_size
+  | Af_unix
+  | Ipproto_tcp
+  | Tcp_nodelay
+  | So_keepalive
+  | Tcp_keepidle
+  | So_reuseport
+  | Sockaddr_un_path_size
 
 type extent =
   | Counted of { by : string; each : int }
@@ -1426,6 +1433,13 @@ let numbers =
     Pollout;
     Sockaddr_family_offset;
     Sockaddr_family_size;
+    Af_unix;
+    Ipproto_tcp;
+    Tcp_nodelay;
+    So_keepalive;
+    Tcp_keepidle;
+    So_reuseport;
+    Sockaddr_un_path_size;
   ]
 
 let number_name = function
@@ -1551,6 +1565,13 @@ let number_name = function
   | Pollout -> "POLLOUT"
   | Sockaddr_family_offset -> "SOCKADDR_FAMILY_OFFSET"
   | Sockaddr_family_size -> "SOCKADDR_FAMILY_SIZE"
+  | Af_unix -> "AF_UNIX"
+  | Ipproto_tcp -> "IPPROTO_TCP"
+  | Tcp_nodelay -> "TCP_NODELAY"
+  | So_keepalive -> "SO_KEEPALIVE"
+  | Tcp_keepidle -> "TCP_KEEPIDLE"
+  | So_reuseport -> "SO_REUSEPORT"
+  | Sockaddr_un_path_size -> "SOCKADDR_UN_PATH_SIZE"
 
 (* A size or an offset in a structure is a [USize], and the bits of a
    file's mode are compared with a number read out of the structure. *)
@@ -1563,7 +1584,7 @@ let number_type = function
   | Path_max | Spawn_file_actions_size | Dirent_length_offset | Dirent_kind_offset
   | Dirent_name_offset | Termios_size | Termios_iflag_offset | Termios_oflag_offset
   | Termios_cflag_offset | Termios_lflag_offset | Termios_flag_size | Termios_cc_offset | Vmin
-  | Vtime | Sockaddr_family_offset | Sockaddr_family_size ->
+  | Vtime | Sockaddr_family_offset | Sockaddr_family_size | Sockaddr_un_path_size ->
       USize
   | Tiocgwinsz | Icanon | Echo | Isig | Iexten | Ixon | Icrnl | Brkint | Inpck | Istrip | Opost
   | Cs8 ->
@@ -1606,7 +1627,10 @@ let number_headers = function
   | So_sndtimeo | So_error | Shut_rd | Shut_wr | Shut_rdwr | Sockaddr_family_offset
   | Sockaddr_family_size ->
       [ "sys/socket.h" ]
-  | Ipproto_ipv6 | Ipv6_v6only -> [ "netinet/in.h" ]
+  | Af_unix | So_keepalive | So_reuseport -> [ "sys/socket.h" ]
+  | Ipproto_ipv6 | Ipv6_v6only | Ipproto_tcp -> [ "netinet/in.h" ]
+  | Tcp_nodelay | Tcp_keepidle -> [ "netinet/tcp.h" ]
+  | Sockaddr_un_path_size -> [ "sys/un.h" ]
   | O_nonblock | F_getfl | F_setfl -> [ "fcntl.h" ]
   | Einprogress | Eagain -> [ "errno.h" ]
   | Pollout -> [ "poll.h" ]
@@ -1622,6 +1646,8 @@ let number_expression (system : system) number =
   | Stat_size, _ -> Some "sizeof(struct stat)"
   | Sockaddr_family_offset, _ -> Some "__builtin_offsetof(struct sockaddr, sa_family)"
   | Sockaddr_family_size, _ -> Some "sizeof(((struct sockaddr *)0)->sa_family)"
+  | Sockaddr_un_path_size, _ -> Some "sizeof(((struct sockaddr_un *)0)->sun_path)"
+  | Tcp_keepidle, Macos -> Some "TCP_KEEPALIVE"
   | Termios_size, _ -> Some "sizeof(struct termios)"
   | Termios_iflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_iflag)"
   | Termios_oflag_offset, _ -> Some "__builtin_offsetof(struct termios, c_oflag)"
@@ -1834,6 +1860,17 @@ let value (system : system) number =
   | Sockaddr_family_offset, Macos -> 1
   | Sockaddr_family_size, Linux -> 2
   | Sockaddr_family_size, Macos -> 1
+  | Af_unix, (Linux | Macos) -> 1
+  | Ipproto_tcp, (Linux | Macos) -> 6
+  | Tcp_nodelay, (Linux | Macos) -> 1
+  | So_keepalive, Linux -> 9
+  | So_keepalive, Macos -> 8
+  | Tcp_keepidle, Linux -> 4
+  | Tcp_keepidle, Macos -> 16
+  | So_reuseport, Linux -> 15
+  | So_reuseport, Macos -> 512
+  | Sockaddr_un_path_size, Linux -> 108
+  | Sockaddr_un_path_size, Macos -> 104
   | Vreg, Macos -> 1
   | Vdir, Macos -> 2
   | Vlnk, Macos -> 5

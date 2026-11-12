@@ -1499,10 +1499,10 @@ test the prover itself:
   evaluates no `requires` clause in either.
 - **The build** refuses a package with an obligation that is not proven,
   and a program whose `main` can reach a hole in a proof. A dependency's
-  proofs are the program's too, since the build leaves out the run-time
-  checks they stand for: `truss check` and `truss build` prove every package
-  the command's packages depend on, but the standard library, whose proofs
-  are checked where it is released.
+  proofs are the program's too, since the build omits the run-time checks
+  they replace. `truss check` and `truss build` therefore prove every
+  project package that the command's packages depend on. A registry package
+  and the standard library are proven when they are published.
 
 ## Not built
 

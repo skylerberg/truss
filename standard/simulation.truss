@@ -89,7 +89,7 @@ public fn Setup.with_time(own self, now: Instant) -> Setup {
   changed
 }
 
-type Listener(local: network::SocketAddress, waiting: List[USize], timeout: Option[Duration], open: Bool)
+type Listener(local: network::SocketAddress, path: Option[Path], waiting: List[USize], timeout: Option[Duration], open: Bool)
 
 type Stream(
   local: network::SocketAddress,
@@ -261,8 +261,38 @@ internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network::I
 internal fn State.listen(mut self, address: network::SocketAddress) -> Result[BoundEndpoint, SystemError] {
   let local = mut self.claim_address(address, datagrams: false)?
   let listener = self.listeners.length()
-  mut self.listeners.push(Listener(local: local, waiting: [], timeout: None, open: true))
+  mut self.listeners.push(Listener(local: local, path: None, waiting: [], timeout: None, open: true))
   Ok(BoundEndpoint(endpoint: mut self.add_endpoint(Endpoint.Listening(listener: listener)), local: local))
+}
+
+internal fn State.listen_local(mut self, path: own Path) -> Result[USize, SystemError] {
+  if self.local_listener_at(path) is Some(_) {
+    return Err(SystemError.AddressInUse)
+  }
+  let listener = self.listeners.length()
+  let nowhere = network::SocketAddress(address: network::IpAddress.unspecified, port: 0)
+  mut self.listeners.push(Listener(local: nowhere, path: Some(own path), waiting: [], timeout: None, open: true))
+  Ok(mut self.add_endpoint(Endpoint.Listening(listener: listener)))
+}
+
+internal fn State.local_listener_at(self, path: Path) -> Option[USize] {
+  self.listeners.slice().find_index(fn(listener) {
+    listener.open && listener.path == Some(path.copy())
+  })
+}
+
+internal fn State.connect_local(mut self, path: Path) -> Result[USize, SystemError] {
+  match mut self.next_fault(Operation.Connect) {
+    Some(error) => return Err(error)
+    None => {}
+  }
+  match self.local_listener_at(path) {
+    Some(listener) => {
+      let nowhere = network::SocketAddress(address: network::IpAddress.unspecified, port: 0)
+      Ok(mut self.connect_to(listener, local: nowhere, peer: nowhere))
+    }
+    None => Err(SystemError.ConnectionRefused)
+  }
 }
 
 internal fn State.bind_datagrams(mut self, address: network::SocketAddress) -> Result[BoundEndpoint, SystemError] {
@@ -289,39 +319,30 @@ internal fn State.connect(mut self, address: network::SocketAddress) -> Result[B
         network::SocketAddress(address: network::IpAddress.loopback, port: 0),
         datagrams: false,
       )?
-      let near = self.streams.length()
-      mut self.streams.push(
-        Stream(
-          local: local,
-          peer: address,
-          other_end: near + 1,
-          unread: [],
-          ended: false,
-          receives: true,
-          sends: true,
-          timeout: None,
-        ),
-      )
-      mut self.streams.push(
-        Stream(
-          local: address,
-          peer: local,
-          other_end: near,
-          unread: [],
-          ended: false,
-          receives: true,
-          sends: true,
-          timeout: None,
-        ),
-      )
-      let far_endpoint = mut self.add_endpoint(Endpoint.Connected(stream: near + 1))
-      if listener < self.listeners.length() {
-        mut self.listeners[listener].waiting.push(far_endpoint)
-      }
-      Ok(BoundEndpoint(endpoint: mut self.add_endpoint(Endpoint.Connected(stream: near)), local: local))
+      Ok(BoundEndpoint(endpoint: mut self.connect_to(listener, local: local, peer: address), local: local))
     }
     None => Err(SystemError.ConnectionRefused)
   }
+}
+
+internal fn State.connect_to(
+  mut self,
+  listener: USize,
+  local: network::SocketAddress,
+  peer: network::SocketAddress,
+) -> USize {
+  let near = self.streams.length()
+  mut self.streams.push(
+    Stream(local: local, peer: peer, other_end: near + 1, unread: [], ended: false, receives: true, sends: true, timeout: None),
+  )
+  mut self.streams.push(
+    Stream(local: peer, peer: local, other_end: near, unread: [], ended: false, receives: true, sends: true, timeout: None),
+  )
+  let far_endpoint = mut self.add_endpoint(Endpoint.Connected(stream: near + 1))
+  if listener < self.listeners.length() {
+    mut self.listeners[listener].waiting.push(far_endpoint)
+  }
+  mut self.add_endpoint(Endpoint.Connected(stream: near))
 }
 
 internal fn State.end_sending(mut self, stream: USize) {
@@ -1222,6 +1243,15 @@ impl NetworkClient for World
     Ok(network::Connection.from_handle(handle_of(bound.endpoint), local: bound.local, peer: address))
   }
 
+  fn connect_local(self, path: Path) -> Result[network::LocalConnection, SystemError] {
+    self.preemption_point()
+    let endpoint = intrinsic::shared_update(self.state, input: path.copy(), change: fn(state, wanted) {
+      mut state.connect_local(wanted)
+    })?
+    self.wake()
+    Ok(network::LocalConnection.from_handle(handle_of(endpoint)))
+  }
+
   fn open_datagram(self) -> Result[network::DatagramSocket, SystemError] {
     self.preemption_point()
     let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
@@ -1234,12 +1264,20 @@ impl NetworkClient for World
 impl NetworkServer for World
   uses Panic
 {
-  fn listen(self, address: network::SocketAddress) -> Result[network::Listener, SystemError] {
+  fn listen(self, address: network::SocketAddress, options: network::ListenOptions) -> Result[network::Listener, SystemError] {
     self.preemption_point()
     let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.listen(address)
     })?
     Ok(network::Listener.from_handle(handle_of(bound.endpoint), local: bound.local))
+  }
+
+  fn listen_local(self, path: Path) -> Result[network::LocalListener, SystemError] {
+    self.preemption_point()
+    let endpoint = intrinsic::shared_update(self.state, input: path.copy(), change: fn(state, wanted) {
+      mut state.listen_local(own wanted)
+    })?
+    Ok(network::LocalListener.from_handle(handle_of(endpoint), path: path.copy()))
   }
 
   fn bind_datagram(self, address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
@@ -1248,6 +1286,24 @@ impl NetworkServer for World
       mut state.bind_datagrams(address)
     })?
     Ok(network::DatagramSocket.from_handle(handle_of(bound.endpoint), local: bound.local))
+  }
+}
+
+fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, SystemError]
+  uses Panic
+{
+  match endpoint_of(listener) {
+    Some(endpoint) => {
+      let completion = self.perform(
+        Blocking.Arriving(listener: endpoint),
+        reason: "accepting a connection that no task has made",
+      )?
+      match completion {
+        Arrival(endpoint: accepted, peer) => Ok(network::Accepted(handle: handle_of(accepted), peer: peer))
+        _ => Err(SystemError.InvalidData)
+      }
+    }
+    None => Err(SystemError.InvalidInput)
   }
 }
 
@@ -1461,17 +1517,18 @@ impl Handles for World
   }
 
   fn accept(self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
-    match endpoint_of(listener) {
-      Some(endpoint) => {
-        let completion = self.perform(
-          Blocking.Arriving(listener: endpoint),
-          reason: "accepting a connection that no task has made",
-        )?
-        match completion {
-          Arrival(endpoint: accepted, peer) => Ok(network::Accepted(handle: handle_of(accepted), peer: peer))
-          _ => Err(SystemError.InvalidData)
-        }
-      }
+    self.arrival(listener)
+  }
+
+
+  fn accept_local(self, listener: streams::Handle) -> Result[streams::Handle, SystemError] {
+    let accepted = self.arrival(listener)?
+    Ok(own accepted.handle)
+  }
+
+  fn configure(self, socket: streams::Handle, option: network::SocketOption) -> Result[Unit, SystemError] {
+    match endpoint_of(socket) {
+      Some(_) => Ok(Unit)
       None => Err(SystemError.InvalidInput)
     }
   }

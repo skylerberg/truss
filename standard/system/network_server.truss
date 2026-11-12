@@ -4,8 +4,12 @@ use standard::system::sockets
 internal type SystemNetworkServer()
 
 impl NetworkServer for SystemNetworkServer {
-  fn listen(self, address: network::SocketAddress) -> Result[network::Listener, SystemError] {
-    sockets::listen(address)
+  fn listen(self, address: network::SocketAddress, options: network::ListenOptions) -> Result[network::Listener, SystemError] {
+    sockets::listen(address, options: options)
+  }
+
+  fn listen_local(self, path: Path) -> Result[network::LocalListener, SystemError] {
+    sockets::listen_local(path)
   }
 
   fn bind_datagram(self, address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
