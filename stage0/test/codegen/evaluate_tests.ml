@@ -4,11 +4,11 @@
 open Harness
 open Codegen_support
 
-(* What the solver said, set in the engine, as the database does for a
-   session. *)
-let tell database said =
+(* The oracles' responses, recorded in the engine, as the database does for
+   a session. *)
+let record database responses =
   let engine = Engine.of_context database in
-  List.iter (fun (key, told) -> Engine.set engine Prover.told key told) said
+  List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses
 
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
@@ -18,8 +18,8 @@ let solver =
 let proven_with_running text =
   let database, compile = load text in
   Prover.diagnostics
-    ~running:(Running.through (lazy compile))
-    ~tell:(tell database) database (Lazy.force solver) example
+    ~evaluator:(Evaluator.of_compiler (lazy compile))
+    ~record:(record database) database (Lazy.force solver) example
 
 let shout =
   {|use standard::text
@@ -126,7 +126,7 @@ let () =
       let database, _ =
         load (counting ^ "\nfn f() -> UInt8\n  ensures result == 7\n{\n  count_up(7)\n}\n")
       in
-      match Prover.diagnostics ~tell:(tell database) database (Lazy.force solver) example with
+      match Prover.diagnostics ~record:(record database) database (Lazy.force solver) example with
       | [ _ ] -> ()
       | found -> fail "%d diagnostics" (List.length found));
   test "what running a call gives is what it gives, not what was hoped" (fun () ->
@@ -185,5 +185,94 @@ let () =
       | [] -> ()
       | found ->
           fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)))
+
+(* The same call with the same arguments, in one database, before and
+   after the callee's body changes: a stale value would prove a false
+   [ensures]. *)
+let () =
+  test "a call is run again when the callee's body has changed" (fun () ->
+      let source body =
+        "fn same(value: UInt8) -> UInt8\n  cost time finite\n{\n  " ^ body
+        ^ "\n}\n\nfn f() -> UInt8\n  ensures result == 7\n{\n  same(7)\n}\n"
+      in
+      let database, compile = load (source "value") in
+      let proven () =
+        Prover.diagnostics
+          ~evaluator:(Evaluator.of_compiler (lazy compile))
+          ~record:(record database) database (Lazy.force solver) example
+      in
+      (match proven () with
+      | [] -> ()
+      | found ->
+          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)));
+      Database.Testing.set_text (Engine.of_context database) example (source "0");
+      match proven () with
+      | [ _ ] -> ()
+      | found -> fail "expected the changed callee to fail, got %d diagnostics" (List.length found))
+
+(* A timeout is not kept: the next check runs the template's check again,
+   with the code unchanged. The evaluator here times out on its first run
+   only, as a run on a loaded machine may. *)
+let () =
+  test "a template check that timed out is run again on the next check" (fun () ->
+      let database, _ = load (shout ^ "\nfn f() -> Shout {\n  Shout\"hey\"\n}\n") in
+      let runs = ref 0 in
+      let evaluator : Prover.evaluator =
+        {
+          code_key = (fun _ -> Some "unchanged");
+          run =
+            (fun _ ->
+              incr runs;
+              if !runs = 1 then Timed_out else Returned Z.one);
+        }
+      in
+      let proven () =
+        Prover.diagnostics ~evaluator ~record:(record database) database (Lazy.force solver) example
+      in
+      (match proven () with
+      | [ _ ] -> ()
+      | found -> fail "expected the timed-out check to fail, got %d diagnostics" (List.length found));
+      (match proven () with
+      | [] -> ()
+      | found ->
+          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) found)));
+      if !runs <> 2 then fail "expected 2 runs, got %d" !runs)
+
+(* Only a proof that used a value from running code trusts compiled code. *)
+let () =
+  test "a state says whether its proof trusts compiled code" (fun () ->
+      let database, compile =
+        load
+          (counting
+         ^ "\n\
+            fn f() -> UInt8\n\
+           \  ensures result == 7\n\
+            {\n\
+           \  count_up(7)\n\
+            }\n\n\
+            fn g(value: UInt8) -> UInt8\n\
+           \  ensures result == value\n\
+            {\n\
+           \  value\n\
+            }\n")
+      in
+      let states =
+        Prover.states
+          ~evaluator:(Evaluator.of_compiler (lazy compile))
+          ~record:(record database) database (Lazy.force solver) example
+      in
+      let ensures =
+        List.filter
+          (fun (state : Prover.state) ->
+            Diagnostic.Code.name (Prover state.code) = "prover.ensures")
+          states
+      in
+      match ensures with
+      | [ first; second ] ->
+          if not (first.trusts_compiled_code && first.failure = None) then
+            fail "the proof of f's ensures should trust compiled code";
+          if second.trusts_compiled_code || second.failure <> None then
+            fail "the proof of g's ensures should be proven without trusting compiled code"
+      | found -> fail "expected 2 ensures states, got %d" (List.length found))
 
 let () = Harness.finish ()

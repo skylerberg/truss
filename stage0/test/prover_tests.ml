@@ -12,7 +12,7 @@ let solver =
 
 let check database module_ =
   match Type_checker.diagnostics database module_ with
-  | [] -> Prover.diagnostics ~tell:(Support.tell database) database solver module_
+  | [] -> Prover.diagnostics ~record:(Support.record database) database solver module_
   | errors -> errors
 
 let proven text = Support.no_diagnostics ~check [ ("app::main", text) ]
@@ -3798,7 +3798,8 @@ let () =
           ]
       in
       let states =
-        Prover.states ~tell:(Support.tell database) database solver (Support.module_of "app::main")
+        Prover.states ~record:(Support.record database) database solver
+          (Support.module_of "app::main")
       in
       let failed = List.filter (fun (state : Prover.state) -> state.failure <> None) states in
       if List.length failed <> 1 || List.length states < 2 then
@@ -4623,7 +4624,7 @@ let again before after =
   let engine = Engine.of_context database in
   let prove () =
     match Type_checker.diagnostics database module_ with
-    | [] -> Prover.diagnostics ~tell:(Support.tell database) database solver module_
+    | [] -> Prover.diagnostics ~record:(Support.record database) database solver module_
     | errors -> errors
   in
   (match prove () with

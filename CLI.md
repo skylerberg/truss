@@ -722,8 +722,9 @@ that text in place of what is on disk. Nothing is written to a file.
   diagnostic, as `truss check` checks them.
 - **Each obligation's state** is sent as a `truss/proofStates`
   notification: for each open file, every obligation's range, its code,
-  what it is to show, and whether it is proven, for an editor to mark
-  proven and unproven code apart.
+  what it is to show, whether it is proven, and whether its proof trusts
+  compiled code, for an editor to mark proven and unproven code apart and
+  to show which proofs rely on running code.
 - **Positions count UTF-16 code units,** the protocol's default, or bytes
   where the client offers `utf-8` among its position encodings.
 - **A burst of changes is checked once:** a check waits until no message

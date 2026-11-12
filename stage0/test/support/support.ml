@@ -458,6 +458,6 @@ let one_diagnostic ~check ?(others = []) ?fixed ?says text code =
               (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code ^ " " ^ d.message)
               found))
 
-let tell database said =
+let record database responses =
   let engine = Engine.of_context database in
-  List.iter (fun (key, told) -> Engine.set engine Prover.told key told) said
+  List.iter (fun (key, response) -> Engine.set engine Prover.oracle_response key response) responses

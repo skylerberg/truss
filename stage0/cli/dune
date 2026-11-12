@@ -31,7 +31,7 @@
   compile
   solver
   prover
-  running
+  evaluator
   token
   database
   types

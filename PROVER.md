@@ -1267,22 +1267,34 @@ It also decides a tagged template's checks by running them, as
   worked out and written out. A clause that cannot run, such as one that
   calls a function for specifications only, is left to the solver.
 - **The prover does not depend on code generation,** and code generation
-  does not depend on the prover. `Prover.diagnostics` is given the running
-  as a value of the prover's own type `Prover.running`. The library
-  `stage0/running` depends on both and makes that value from code
-  generation's results, and `truss check` gives it through the compiler it
-  builds programs with, made only when a template asks for it. So proofs
-  stay queries of their own, and what ran is decided only when obligations
-  are asked, as the solver's answers are. The solver is run as a child
+  does not depend on the prover. The evaluator is an oracle, as the solver
+  is: `Prover.diagnostics` is given it as a value of the prover's own type
+  `Prover.evaluator`, which runs a request and gives the key of the code
+  the request runs. The library `stage0/evaluator` depends on both and
+  makes that value from code generation, and `truss check` gives it
+  through the compiler it builds programs with, made only when a proof
+  needs a run. So proofs stay queries of their own, and a run's result is
+  recorded as an oracle's response, as the solver's answers are. The solver is run as a child
   process by `stage0/process`, which the C compiler is run by too. A test
   of code generation fails if a library of the prover reaches one of code
   generation's, or the reverse.
 - **A clause that runs true is proven, and one that runs false is an
-  error** that says so. A run past the test time limit is an error that
-  says the check is not known.
+  error** that says so. A run that times out is an error that says the
+  check is not known. A timeout is not recorded as final: the next check
+  runs it again, since the same run can finish on a less loaded machine.
+- **A run is done again when its code changes.** Its response is recorded
+  with its code key, code generation's key of everything the run can
+  reach. The code a run reaches is not among the reads of a proof's
+  outcome, so before it decides any outcome, the driver compares each
+  run's recorded code key with the current one and runs it again where
+  they differ. Without this, a callee's new body would leave its callers
+  proven by its old result, which would prove a false `ensures`.
 - **This trusts compiled code.** A fact from running code is only as true as
   code generation and the C compiler, which is what Lean's `native_decide`
-  trusts too. It is the price of a check that no solver could make.
+  trusts too. It is the price of a check that no solver could make. Each
+  obligation's state says whether its proof trusts compiled code, as
+  Lean's `#print axioms` shows a theorem's use of `native_decide`, so a
+  reviewer can see which proofs rely on it.
 
 ## Holes
 
@@ -1387,19 +1399,21 @@ callee's specification, whose body is there only where the callee is a
 function in the logic, and, from another package, only where it is
 `transparent`, and the callee's text only to report something about it, so
 editing or reformatting the body of any other function makes no caller's
-obligations again. A definition's outcome is a saved result worked
-out from its obligations and from what the solver and running code were
-told, which are the database's inputs, so a definition whose reads have not
-changed is neither translated nor asked anything again, in this process or
-the next. The driver asks for every outcome, asks the solver and running
-code what they wait for, together, tells the database the answers, and
-asks again, which takes a round or two, since an obligation asks again only
-after an answer such as running out of steps. The solver is asked again
-only about a query whose text changed:
+obligations again. A definition's outcome is a saved result derived
+from its obligations and from the oracles' responses, which are the
+database's inputs, so a definition whose reads have not changed is neither
+translated nor asked anything again, in this process or the next. The
+driver first runs again each run whose code key changed. It then asks for
+every outcome, sends the requests they are pending on to the solver and
+the evaluator together, records the responses, and asks again, which takes
+a round or two, since an obligation asks again only after an answer such
+as running out of steps. The solver is asked again only about a query
+whose text changed:
 
 | Edit | Solved again |
 |---|---|
 | A function's body | The queries whose paths pass through what changed |
+| The code a run reaches | The run, and the outcomes that used its result |
 | A function's `ensures` | Queries that used it: the function's own, and callers' that included it after pruning |
 | A function's `requires` | The same, plus each caller's obligation to meet it |
 | A body that is a definition | Queries that unfolded it |

@@ -54,6 +54,5 @@ val one_diagnostic :
     [code]. With [~fixed], its first fix gives that text, which then has no diagnostic. With
     [~says], its message contains that text. *)
 
-val tell : Query.context -> (string * Prover.told) list -> unit
-(** Sets what the solver and run code said in the context's engine, as the database does for a
-    session. *)
+val record : Query.context -> (string * Prover.oracle_response) list -> unit
+(** Records the oracles' responses in the context's engine, as the database does for a session. *)
