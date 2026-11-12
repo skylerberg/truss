@@ -360,7 +360,7 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                           { expression = key.id; parameter_index = 1; mode = Read; mark = None };
                         ];
                       omitted_defaults = [];
-                      uses = [];
+                      uses = Types.no_capabilities;
                       callee_result = output;
                     };
                 Form.register_index state value;

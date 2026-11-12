@@ -77,7 +77,8 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
            now.has_default && not was.has_default)
          before.parameters after.parameters
   in
-  let more = missing_from before.uses after.uses and fewer = missing_from after.uses before.uses in
+  let more = Types.capability_difference after.uses before.uses
+  and fewer = Types.capability_difference before.uses after.uses in
   List.concat
     [
       (if
@@ -95,8 +96,8 @@ let signature ~(before : Types.signature) ~(after : Types.signature) =
          [ Breaks "no longer promises to terminate" ]
        else if after.terminates && not before.terminates then [ Grows "promises to terminate" ]
        else []);
-      List.map uses_more more;
-      (if fewer <> [] then [ Grows "uses fewer capabilities" ] else []);
+      List.map uses_more (more :> Types.capability list);
+      (if fewer <> Types.no_capabilities then [ Grows "uses fewer capabilities" ] else []);
       (if gained_default then [ Grows "gained a default" ] else []);
     ]
 
@@ -349,7 +350,9 @@ let compare ~before ~after package =
         match List.find_opt (fun (_, other, _) -> other = shown) new_impls with
         | None -> [ public_change path (Breaks (Printf.sprintf "was removed: %s" shown)) ]
         | Some (_, _, new_sets) ->
-            let set name sets = Option.value ~default:[] (List.assoc_opt name sets) in
+            let set name sets =
+              Option.value ~default:Types.no_capabilities (List.assoc_opt name sets)
+            in
             List.concat_map
               (fun name ->
                 let was = set name old_sets and is = set name new_sets in
@@ -360,9 +363,9 @@ let compare ~before ~after package =
                          (Printf.sprintf "added `%s` to its `%s`: %s"
                             (Types.show_capability capability)
                             name shown)))
-                  (missing_from was is)
+                  (Types.capability_difference is was :> Types.capability list)
                 @
-                if missing_from is was <> [] then
+                if Types.capability_difference was is <> Types.no_capabilities then
                   [
                     public_change path
                       (Grows (Printf.sprintf "removed capabilities from its `%s`: %s" name shown));

@@ -410,7 +410,7 @@ and construct state env ?expected ?type_arguments (value : expression) type_path
             callee = Constructor { type_ = type_path; variant; type_arguments };
             arguments = checked;
             omitted_defaults = left_out;
-            uses = [];
+            uses = Types.no_capabilities;
             callee_result = type_;
           };
       Form.register_call state value;

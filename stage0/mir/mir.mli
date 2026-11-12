@@ -60,7 +60,7 @@ type argument =
 type call = {
   callee : callee;
   arguments : argument list;  (** One per parameter, in parameter order. *)
-  uses : Types.capability list;
+  uses : Types.capability_set;
   node : Core.id;  (** The core form's [Call]. *)
 }
 

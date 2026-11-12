@@ -25,7 +25,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       receiver = None;
       parameters;
       output;
-      uses = [];
+      uses = Types.no_capabilities;
       terminates = true;
       specification_only = false;
       stores_functions = [];
@@ -57,7 +57,12 @@ let signature (operation : Intrinsic.operation) : Types.signature =
   let work_item = Types.builtin UInt64 in
   let work =
     Types.Function
-      { inputs = [ (Read, work_item) ]; output = Returns Types.unit; uses = []; costs = [] }
+      {
+        inputs = [ (Read, work_item) ];
+        output = Returns Types.unit;
+        uses = Types.no_capabilities;
+        costs = [];
+      }
   in
   let with_storage ?(mode = Types.Read) ?(output = Types.Returns Types.unit) rest =
     make ~generics:[ "Element" ] ~output (input ~mode "storage" (storage element) :: rest)
@@ -229,7 +234,7 @@ let signature (operation : Intrinsic.operation) : Types.signature =
             {
               inputs = [ (Mut, value); (Own, parameter_type "Input") ];
               output = Returns (parameter_type "Result");
-              uses = [];
+              uses = Types.no_capabilities;
               costs = [];
             }
           in

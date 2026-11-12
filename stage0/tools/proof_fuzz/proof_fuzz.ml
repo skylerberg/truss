@@ -93,12 +93,12 @@ let runnable database =
         ( Query.demand database Interface.Environment.signature declaration.path,
           Prover.Translate.source_at_key database key )
       with
-      | ( Some
-            ({ generics = []; receiver = None; uses = []; output = Returns output; _ } as signature),
+      | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           Some
             ({ core = { definition = Function { contract = { requires; _ }; _ }; _ }; _ } as source)
         )
-        when integer output <> None
+        when uses = Types.no_capabilities
+             && integer output <> None
              && List.for_all (fun (condition : Core.condition) -> condition.executable) requires
         -> (
           let ranges =

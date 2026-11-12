@@ -383,7 +383,8 @@ let check_proof_bounds state (written : type_head) (generics : Types.generic lis
             | Type_generic _ -> Types.Type (Types.Parameter of_impl.generic)
             | Value_generic -> Types.Value (Types.Value_parameter of_impl.generic)
             | Capability_generic ->
-                Types.Capabilities [ Types.Capability_parameter of_impl.generic ] ))
+                Types.Capabilities
+                  (Types.capability_set [ Types.Capability_parameter of_impl.generic ]) ))
         generics impl.impl_generics
     in
     let impl_bounds = Types.bounds_of impl.impl_generics in

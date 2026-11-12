@@ -714,7 +714,7 @@ type progress =
    world, so it is never kept and runs every time. *)
 let external_test compiler test =
   match Query.demand compiler.database Interface.Environment.interface test with
-  | Some (Test_interface (_ :: _)) -> true
+  | Some (Test_interface uses) when uses <> Types.no_capabilities -> true
   | _ -> false
 
 let run_tests ?results ?(rerun = false) ?(progress = ignore) compiler ~time_limit tests =

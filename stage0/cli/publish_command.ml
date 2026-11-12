@@ -107,7 +107,7 @@ let failed_tests (project : Project.t) (package : Project.package) =
         test.module_.package = package.name
         &&
         match Query.demand project.context Interface.Environment.interface test.path with
-        | Some (Test_interface []) -> true
+        | Some (Test_interface uses) when uses = Types.no_capabilities -> true
         | _ -> false)
       (Test_command.select project ~paths:[] ~match_:None)
   in

@@ -9,7 +9,7 @@ type context = {
   self_type : Types.ty option;  (** What [Self] means here. *)
   self_trait : Types.trait_reference option;  (** In a trait, the trait [Self] implements. *)
   self_associated : (string * Types.ty) list;  (** In an [impl], its associated types. *)
-  self_capabilities : (string * Types.capability list) list;
+  self_capabilities : (string * Types.capability_set) list;
       (** In an [impl], each associated capability set that its trait declares. *)
   diagnostics : Syntax.diagnostic list ref;  (** Shared by every copy of the context. *)
   named : (Syntax.span * Types.ty) list ref;
@@ -36,7 +36,7 @@ val trait_reference :
 *)
 
 val trait_bounds : context -> Syntax.path_type list -> Types.trait_reference list
-val capabilities : context -> Syntax.capability_reference list -> Types.capability list
+val capabilities : context -> Syntax.capability_reference list -> Types.capability_set
 
 val generics : context -> Path.t -> Syntax.generic_parameter list -> Types.generic list
 (** Generic parameters, each named by its owner and its own name, as resolution names them. *)

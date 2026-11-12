@@ -55,7 +55,7 @@ type argument =
 type call = {
   callee : callee;
   arguments : argument list;  (** One per parameter, in parameter order. *)
-  uses : Types.capability list;
+  uses : Types.capability_set;
   node : Core.id;  (** The core form's [Call]. *)
 }
 
@@ -825,7 +825,7 @@ and test b (pattern : Core.pattern) (scrutinee : place) ~fail =
                            };
                          Passed { mode = Read; value; mark = None };
                        ];
-                     uses = [];
+                     uses = Types.no_capabilities;
                      node = pattern.id;
                    };
                })
@@ -1168,7 +1168,7 @@ and cursor_loop b ~origin ~pattern ~cursor ~next ~loop ~each =
                                  mark = None;
                                };
                            ];
-                         uses = [];
+                         uses = Types.no_capabilities;
                          node = origin;
                        };
                    })

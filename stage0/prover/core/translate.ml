@@ -1450,7 +1450,7 @@ let make_contract database path ~own ~others ~body =
     | Some (signature : Types.signature) -> (
         (* A function of its arguments: it may take them [own], but
            changes none of the caller's. *)
-        signature.uses = []
+        signature.uses = Types.no_capabilities
         && signature.terminates
         && List.for_all
              (fun (info : Types.parameter_info) -> info.mode <> Types.Mut)
@@ -4331,7 +4331,7 @@ and measure_type element : Types.function_type =
   {
     inputs = [ (Types.Read, element) ];
     output = Returns Types.Integer;
-    uses = [];
+    uses = Types.no_capabilities;
     costs = [ { amortized = false; resource = Types.Time; bound = Finite_cost } ];
   }
 
@@ -6454,7 +6454,8 @@ and contract_call context frame (node : expression) (call_ : call) path contract
             callee_amount ?ends_in context after ~path ~parts:contract.parts
               ~bound_frame:(fun part ->
                 { (entry_frame part) with result = Some result; condition = after.condition })
-              ~uses:call_.uses ~values ~change:(Some change) counter)
+              ~uses:(call_.uses :> Types.capability list)
+              ~values ~change:(Some change) counter)
   in
   (after, result)
 
@@ -6820,7 +6821,7 @@ and function_value_amount context frame (function_type : Types.function_type) ca
             | Types.Capability_parameter _ | Types.Capability_projection _
             | Types.Capability_variable _ ->
                 true)
-          function_type.uses
+          (function_type.uses :> Types.capability list)
       then unknown_amount context frame counter
       else Costs.zero
 
@@ -7125,7 +7126,8 @@ and buffer_model context (builtin : Intrinsic.builtin) element term =
    logic: it ends, uses no capabilities, changes none of its arguments, and
    returns its result. *)
 and in_the_logic (function_type : Types.function_type) =
-  Types.terminates function_type && function_type.uses = []
+  Types.terminates function_type
+  && function_type.uses = Types.no_capabilities
   && List.for_all (fun (mode, _) -> mode <> Types.Mut) function_type.inputs
   && match function_type.output with Returns _ -> true | _ -> false
 
@@ -7255,13 +7257,14 @@ and step_amount context frame (call_ : call) (values : passed list) (counter : C
                 ~path:(Path.Method { owner = capability; name; receiver = Static })
                 ~parts:[ part ]
                 ~bound_frame:(fun _ -> inside)
-                ~uses:call_.uses ~values ~change:None counter
+                ~uses:(call_.uses :> Types.capability list)
+                ~values ~change:None counter
           | None -> unknown_amount context frame counter))
   | Function _ | Trait_method _ | Indirect _ -> (
       match counter.resource with
       | Calls target ->
           spent_where
-            (call_reaches context frame call_.uses values target)
+            (call_reaches context frame (call_.uses :> Types.capability list) values target)
             (unknown_amount context frame counter)
       | _ -> unknown_amount context frame counter)
 
@@ -9062,7 +9065,8 @@ and each_loop context frame (node : statement) (pattern : pattern) (driven : exp
         spend context frame
           (callee_amount context frame ~path ~parts:contract.parts
              ~bound_frame:(fun part -> method_frame frame part)
-             ~uses:call_.uses ~values ~change:None)
+             ~uses:(call_.uses :> Types.capability list)
+             ~values ~change:None)
     | _ -> spend context frame (unknown_amount context frame)
   in
   (* A loop over a collection [mut] changes the collection too. *)
@@ -9185,7 +9189,7 @@ and own_cursor_loop context frame (node : statement) (pattern : pattern) (cursor
       callee = next;
       arguments = [ Passed { mode = Types.Mut; value = Place cursor_place; mark = None } ];
       lends = None;
-      uses = [];
+      uses = Types.no_capabilities;
     }
   in
   let pulling : expression =

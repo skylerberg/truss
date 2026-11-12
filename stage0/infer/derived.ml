@@ -123,7 +123,7 @@ let form database (path : Path.t) : Core.t option =
                        };
                    arguments;
                    lends = None;
-                   uses = [];
+                   uses = Types.no_capabilities;
                  })
           in
           let trait_call ~trait ~name ~receiver ~self_type ~evidence arguments type_ =
@@ -142,7 +142,7 @@ let form database (path : Path.t) : Core.t option =
                        };
                    arguments;
                    lends = None;
-                   uses = [];
+                   uses = Types.no_capabilities;
                  })
           in
           let text_argument text : Core.argument =
@@ -329,7 +329,7 @@ let form database (path : Path.t) : Core.t option =
                                      };
                                  ];
                                lends = None;
-                               uses = [];
+                               uses = Types.no_capabilities;
                              })))
                 in
                 of_self unit (fun variant index mine ->
@@ -646,7 +646,7 @@ let form database (path : Path.t) : Core.t option =
                                 };
                             arguments = [ source_argument Mut; text_argument field.field_name ];
                             lends = None;
-                            uses = [];
+                            uses = Types.no_capabilities;
                           }))
                 in
                 let bind_local local name type_ ~is_var value =
@@ -848,7 +848,7 @@ let form database (path : Path.t) : Core.t option =
                                                          arguments =
                                                            [ source_argument Read; read name_place ];
                                                          lends = None;
-                                                         uses = [];
+                                                         uses = Types.no_capabilities;
                                                        }))) );
                                         ];
                                     }))))
