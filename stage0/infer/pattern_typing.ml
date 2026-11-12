@@ -18,7 +18,7 @@ and pattern state env written type_ ~mode =
 
 and pattern_with state env (written : pattern) type_ ~mutable_ ~mode =
   let type_ = normalize state type_ in
-  state.tables.pattern_types.(written.id) <- Some type_;
+  state.tables.scrutinee_types.(written.id) <- Some type_;
   (match current_frame state with
   | Some frame -> frame.patterns <- written.id :: frame.patterns
   | None -> ());
@@ -296,7 +296,7 @@ and pattern_fields state env (written : pattern) (fields : T.field list)
    that every use of a name has a type. Each name gets the given unknown
    type (an error or a hole), and so do the sub-patterns. *)
 and unknown_pattern state env (written : pattern) unknown ~mutable_ ~mode =
-  state.tables.pattern_types.(written.id) <- Some unknown;
+  state.tables.scrutinee_types.(written.id) <- Some unknown;
   match written.kind with
   | Variant { fields = Some fields; _ } | Record fields ->
       List.iter

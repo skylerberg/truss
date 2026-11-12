@@ -385,7 +385,7 @@ render.truss:12:14: hole of type String
 
 A `todo` whose type nothing fixes, such as one inside an interpolation, is
 listed as "not decided yet". Name resolution records the names in scope at
-each `todo`, and the checked form gives their types, through the `Inspect`
+each `todo`, and the type checker's tables give their types, through the `Inspect`
 library. What a hole blocks is every test, and `main`, that reaches the
 hole's definition through what each definition reads, which the code
 database keeps. The JSON document is

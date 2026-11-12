@@ -11,7 +11,6 @@
   syntax
   syntax_walk
   types
-  checked
   core
   core_walk
   interface

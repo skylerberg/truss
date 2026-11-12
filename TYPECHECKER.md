@@ -20,8 +20,9 @@ it produces four results:
 - a *core form*: the desugared and fully typed definition, which the pattern
   check, the ownership check, the package checks, the prover, and code
   generation read;
-- a *checked form*: tables of types, meanings, and calls by syntax node, which
-  the usage check and the tools read.
+- *tables* by syntax node: the type of each expression and binding, the
+  resolution of each name and member, and the callee of each call, which the
+  usage check and the tools read.
 
 The database records the dependencies of each result and caches each result
 under them, as DATABASE.md describes.
@@ -66,7 +67,7 @@ It does not:
 ## Structure
 
 ```text
-syntax tree ──▶ Resolve ──▶ Interface ──▶ Body ──▶ core form, checked form
+syntax tree ──▶ Resolve ──▶ Interface ──▶ Body ──▶ core form, tables
    (per definition)  │            │             │
                      └─────▶ diagnostics ◀──────┘
                                   ▲
@@ -513,8 +514,8 @@ without a report: it holds a value that only a report produces, as rustc's
 Types are invariant, and there is no subtyping relation. Two types are equal or
 they are not, and function types with different `uses` or different costs are
 different types. Exactly four conversions exist. All are decided in the one
-function that checks a value against its expected type. A conversion of an
-argument is recorded with the argument in the checked form:
+function that checks a value against its expected type, which wraps the
+value's core node in the conversion:
 
 | Conversion | Where |
 |---|---|
@@ -928,7 +929,7 @@ values between. A range pattern's type must be an integer type or
 
 ### Operators
 
-Each operator desugars to a call, so the checked form has no operator-specific
+Each operator desugars to a call, so the checker has no operator-specific
 rules. The recorded call is the call of the trait method, and its result type
 is the method's, which for a comparison is not the operator's `Bool`:
 
@@ -976,8 +977,8 @@ For a named function, arguments are matched to parameters in one pass:
 
 The arguments must then appear in parameter order; otherwise the call is an
 error with a fix that reorders them. An argument for a parameter with a default
-can be omitted, and the checked form records the omitted parameters, for the
-default-presence mask that CODEGEN.md describes. Records and variants differ in
+can be omitted, and the core form passes `Default` for each omitted parameter,
+for the default-presence mask that CODEGEN.md describes. Records and variants differ in
 two ways, as SYNTAX.md says: their arguments can come in any order, and only a
 record or a variant with exactly one field takes a bare value.
 
@@ -2022,8 +2023,8 @@ variants, lists, maps, arrays, sets, strings, and tagged templates without
 interpolation, built from constant parts. A call is an error. A default of
 a parameter or of a field follows the same rules, and names no parameter.
 
-Whether an expression is constant is read from its checked form, not from
-how it is spelled:
+Whether an expression is constant is read from the types, resolutions, and
+calls that the checker records, not from how it is spelled:
 
 - **Arithmetic is an operator on built-in integers, floats, and `Bool`:**
   the arithmetic, comparison, logical, and bitwise operators, and shifts. An
@@ -2064,36 +2065,33 @@ capabilities it declares in `uses` and `Panic`. A capability its code uses
 that it neither declares nor provides is an error. Two tests with the same
 name in one package are an error.
 
-## The checked form
+## The tables
 
-The checked form of a definition is four tables keyed by the tree's node ids
-(see [Node identity](#node-identity)). Tools read it, because they answer
+The checker publishes four tables of each definition, keyed by the tree's node
+ids (see [Node identity](#node-identity)). Tools read them, because they answer
 questions about the source as it is written, including code with errors: the
-type at a position, the meaning of a name, the holes. The usage check reads it
-to find the statements that diverge. Every other check, the prover, and code
-generation read [the core form](#the-core-form) instead. The tables record:
+type at a position, the resolution of a name, the holes. The usage check reads
+them to find the statements that diverge. Every other check, the prover, and
+code generation read [the core form](#the-core-form) instead, which exists
+only for a definition without errors. The tables record:
 
 - **the type of every expression and of every binding,** with no inference
   variables
-- **the meaning of each name:** the definition and its type arguments, the
-  field or variant, and each normalized associated type
-- **each call:** the callee, with the method's version by receiver mode and the
-  `impl` chosen for a trait method; the parameter that each argument goes to,
-  and its mode; the defaults left out; every conversion from the [No
-  subtyping](#no-subtyping) table; and the capability set, with each capability
-  parameter of the callee solved among the call's type arguments
+- **the resolution of each name and member:** the definition and its type
+  arguments, the field or variant, and each normalized associated type
+- **the callee of each call of a named function or a type's own method**
 
-While it checks a body, the checker fills six more tables: the value of each
-literal, the variant or record of each pattern and the type of its scrutinee,
-the iteration of each `for` loop, the conversions of each template, and the
-mode of each lending call. They are private to the checker (`Tables` in
-`stage0/infer`), which builds the core form from all ten. What a `provide`
-provides, and the obligations that the type checker creates, are in the core
-form only.
+While it checks a body, the checker fills more tables, which are private to it
+(`Tables` in `stage0/infer`): each call in full, with the `impl` chosen for a
+trait method, the parameter and mode of each argument, the omitted defaults,
+and the capability set; the value of each literal; the variant or record of
+each pattern and the type of its scrutinee; the iteration of each `for` loop;
+the conversions of each template; and the mode of each lending call. The
+checker builds the core form from them. What a `provide` provides, and the
+obligations that the type checker creates, are in the core form only.
 
-The checked form is canonical, so that two checks of the same definition give
-equal results, and the database saves it with the graph, as DATABASE.md
-describes.
+The tables are canonical, so that two checks of the same definition give equal
+results, and the database saves them with the graph, as DATABASE.md describes.
 
 ### The core form
 
@@ -2453,7 +2451,7 @@ whenever the intent is unambiguous:
 - **The build** uses core forms to find the definitions that `main` can reach,
   and rejects a program that can reach a `todo` or an `echo`.
 - **Tools** show the type of an expression and the definition of a name from
-  checked forms, and list every hole with its type, the names in scope, and the
+  the tables, and list every hole with its type, the names in scope, and the
   definitions that it blocks.
 
 ## The prelude

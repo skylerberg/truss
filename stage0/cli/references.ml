@@ -30,26 +30,25 @@ let declared_name (definition : Syntax.definition) : Syntax.name option =
 
 (* The method or member a type-checked expression names, if any: a call to
    a type's own method, or a method or constant used as a value. *)
-let member_targets (checked : Checked.t) (definition : Syntax.definition) =
-  let found = ref [] in
-  let add (name : Syntax.name) path = found := (name, path) :: !found in
+let member_targets (tables : Infer.tables) (definition : Syntax.definition) =
+  let members = ref [] in
+  let add (name : Syntax.name) path = members := (name, path) :: !members in
   let at table id = if id < Array.length table then table.(id) else None in
   let rec visit (expression : Syntax.expression) =
     (match expression.kind with
     | Call ({ kind = Member (_, name); _ }, _) -> (
-        match at checked.calls expression.id with
-        | Some { callee = Function { path = (Method _ | Member_constant _) as path; _ }; _ } ->
-            add name path
+        match at tables.callees expression.id with
+        | Some ((Method _ | Member_constant _) as path) -> add name path
         | _ -> ())
     | Member (_, name) -> (
-        match at checked.meanings expression.id with
+        match at tables.resolutions expression.id with
         | Some (Global { path = (Method _ | Member_constant _) as path; _ }) -> add name path
         | _ -> ())
     | _ -> ());
     Syntax_walk.children visit expression
   in
   Syntax_walk.definition visit definition;
-  !found
+  !members
 
 (* Every occurrence in one definition, in order. *)
 let of_definition database (key : Names.key) =
@@ -103,11 +102,11 @@ let of_definition database (key : Names.key) =
         | None -> []
       in
       let members =
-        match Query.demand database Infer.checked key with
-        | Some { checked; _ } ->
+        match Query.demand database Infer.type_check_result key with
+        | Some { tables; _ } ->
             List.map
               (fun ((name : Syntax.name), path) -> occurrence name.span (Definition path))
-              (member_targets checked definition)
+              (member_targets tables definition)
         | None -> []
       in
       List.sort (fun a b -> compare a.span.start b.span.start) (declared @ resolved_names @ members)
@@ -124,14 +123,14 @@ let all (project : Project.t) =
 
 (* The [use] lines that name a module: each file's, with the span of the
    path in the file's offsets. *)
-let uses (project : Project.t) (wanted : Path.module_) =
+let uses (project : Project.t) (target_module : Path.module_) =
   List.concat_map
     (fun module_ ->
       let file = Project.parsed project module_ in
       List.filter_map
         (fun (item : Syntax.path Syntax.item) ->
           let path = item.value in
-          if Names.used_module project.context ~from:module_ path = wanted then
+          if Names.used_module project.context ~from:module_ path = target_module then
             let first = match path.modules with first :: _ -> first | [] -> path.last in
             Some
               (module_, Source.span (item.base + first.span.start) (item.base + path.last.span.stop))
@@ -141,21 +140,21 @@ let uses (project : Project.t) (wanted : Path.module_) =
 
 (* Whether an occurrence names a definition or, for a method, any version
    of it. *)
-let names_definition (wanted : Path.t) occurrence =
-  match (occurrence.target, wanted) with
+let names_definition (definition : Path.t) occurrence =
+  match (occurrence.target, definition) with
   | Definition (Method { owner; name; _ }), Method { owner = o; name = n; _ } ->
       Path.equal owner o && name = n
-  | Definition path, wanted -> Path.equal path wanted
+  | Definition path, definition -> Path.equal path definition
   | Module _, _ -> false
 
-(* The definitions, apart from itself, whose code names [wanted]. *)
-let dependents occurrences (wanted : Path.t) =
+(* The definitions, apart from itself, whose code names [definition]. *)
+let dependents occurrences (definition : Path.t) =
   List.filter_map
     (fun occurrence ->
       if
-        names_definition wanted occurrence
+        names_definition definition occurrence
         && (not occurrence.declares)
-        && not (Path.equal occurrence.in_definition.path wanted)
+        && not (Path.equal occurrence.in_definition.path definition)
       then Some occurrence.in_definition.path
       else None)
     occurrences

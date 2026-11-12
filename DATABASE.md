@@ -999,10 +999,10 @@ by value where fingerprints differ.
 
 ### Holes and what can ship
 
-A hole's type and the names in scope come from the definition's checked form
-and resolution: name resolution records the names in
+A hole's type and the names in scope come from the definition's type checker
+tables and resolution: name resolution records the names in
 scope at each `todo` as it walks the definition, so there is one account of
-scope, and the checked form gives their types. What a hole blocks is every
+scope, and the tables give their types. What a hole blocks is every
 test and `main` that reaches its definition through what each definition
 reads.
 

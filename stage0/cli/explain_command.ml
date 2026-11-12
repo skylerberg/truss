@@ -56,12 +56,12 @@ let run ~directory ~position ~json =
                     Query.demand context Resolve.resolved key )
                 with
                 | Some definition, Some resolved ->
-                    let checked =
+                    let tables =
                       Option.map
-                        (fun (r : Infer.result) -> r.checked)
-                        (Query.demand context Infer.checked key)
+                        (fun (result : Infer.type_check_result) -> result.tables)
+                        (Query.demand context Infer.type_check_result key)
                     in
-                    Inspect.at definition resolved checked ~text (offset - base)
+                    Inspect.explain_at definition resolved tables ~text (offset - base)
                 | _ -> None)
             | _ -> None)
           (Query.demand context Names.declarations module_)

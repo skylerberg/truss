@@ -367,12 +367,9 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
             let parameter : T.parameter_info =
               { name = "self"; mode; type_ = receiver_type; has_default = false }
             in
-            let conversion, mode = argument_value state env first.value parameter in
+            let mode = argument_value state env first.value parameter in
             ignore (default_literal state self_type);
-            ( [ { C.expression = first.value.id; parameter = 0; mode; conversion } ],
-              1,
-              parameters,
-              rest )
+            ([ { C.expression = first.value.id; parameter_index = 0; mode } ], 1, parameters, rest)
         | [] -> ([], 1, parameters, []))
     | None -> ([], 0, parameters, arguments)
   in
@@ -402,9 +399,9 @@ and trait_method_through_type state env ?expected:_ ?trait_arguments (value : ex
               evidence = Built_in;
             };
         arguments = checked;
-        defaults_left_out = left_out;
+        omitted_defaults = left_out;
         uses = instance.signature.uses;
-        result;
+        callee_result = result;
       };
   Form.register_call state value;
   resolve_evidence state value self_type reference;
@@ -452,9 +449,9 @@ and capability_call state env (value : expression) capability (member : name) ar
           {
             callee = Capability_method { capability; name = member.text };
             arguments = checked;
-            defaults_left_out = left_out;
+            omitted_defaults = left_out;
             uses = [ T.Capability capability ];
-            result;
+            callee_result = result;
           };
       Form.register_call state value;
       result
@@ -636,13 +633,12 @@ and method_with_receiver state env ?expected ?(type_arguments = []) (value : exp
       let receiver_argument =
         {
           C.expression = receiver.id;
-          parameter = 0;
+          parameter_index = 0;
           mode =
             (match signature.receiver with
             | Some (Mut, _) -> Mut
             | Some (Own, _) -> Own
             | _ -> Read);
-          conversion = None;
         }
       in
       check_specification_call state env value signature;
@@ -695,9 +691,8 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
   let receiver_argument =
     {
       C.expression = receiver.id;
-      parameter = 0;
+      parameter_index = 0;
       mode = (match method_.method_receiver with Mut -> Mut | Own -> Own | _ -> Read);
-      conversion = None;
     }
   in
   let evidence = match receiver_type with T.Any _ -> C.Dynamic | _ -> C.Built_in in
@@ -715,9 +710,9 @@ and trait_method_call state env (value : expression) ~(receiver : expression) ~r
               evidence;
             };
         arguments = receiver_argument :: checked;
-        defaults_left_out = left_out;
+        omitted_defaults = left_out;
         uses = instance.signature.uses;
-        result;
+        callee_result = result;
       };
   Form.register_call state value;
   (match receiver_type with

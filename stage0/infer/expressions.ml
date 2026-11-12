@@ -38,7 +38,7 @@ let rec expression state env ?expected (value : expression) : T.ty =
 
 and check state env (value : expression) (expected : T.ty) =
   let found = expression state env ~expected value in
-  ignore (coerce state env value ~found ~expected)
+  coerce state env value ~found ~expected
 
 and expression_kind state env ?expected (value : expression) : T.ty =
   match value.kind with
@@ -339,10 +339,8 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                 let associated name = associated state base_type index_trait name ~at:value.span in
                 let key_type = associated "Key" and output = associated "Output" in
                 (* The key is an argument for the parameter of [at]. *)
-                let key_conversion =
-                  let found = expression state env ~expected:key_type key in
-                  coerce state env ~argument:true key ~found ~expected:key_type
-                in
+                let found = expression state env ~expected:key_type key in
+                coerce state env ~argument:true key ~found ~expected:key_type;
                 state.tables.calls.(value.id) <-
                   Some
                     {
@@ -358,17 +356,12 @@ and index state env ?expected:_ (value : expression) (base : expression) items =
                           };
                       arguments =
                         [
-                          { expression = base.id; parameter = 0; mode = Read; conversion = None };
-                          {
-                            expression = key.id;
-                            parameter = 1;
-                            mode = Read;
-                            conversion = key_conversion;
-                          };
+                          { expression = base.id; parameter_index = 0; mode = Read };
+                          { expression = key.id; parameter_index = 1; mode = Read };
                         ];
-                      defaults_left_out = [];
+                      omitted_defaults = [];
                       uses = [];
-                      result = output;
+                      callee_result = output;
                     };
                 Form.register_index state value;
                 output

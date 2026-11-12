@@ -1,19 +1,37 @@
 module Members = Members
 
-type result = Body.result = {
-  checked : Checked.t;
+type resolution = Tables.resolution =
+  | Local_value of Syntax.id
+  | Global of { path : Path.t; type_arguments : Types.argument list }
+  | Field_access of { type_ : Types.ty; field : string }
+  | Variant_value of { type_ : Types.ty; variant : string }
+  | Type_name of Types.ty
+  | Value_parameter of Types.parameter
+  | Specification_value
+
+type tables = Tables.published = {
+  types : Types.ty option array;
+  local_types : Types.ty option array;
+  resolutions : resolution option array;
+  callees : Path.t option array;
+}
+
+type type_check_result = Body.type_check_result = {
+  tables : tables;
   core : Core.t option;
   diagnostics : Diagnostic.t list;
   evidence : string list;
 }
 
-let checked = Body.checked
+let type_check_result = Body.type_check_result
 let derived = Derived.core
+let show_resolution = Tables.show_resolution
 let diagnostics = Body.diagnostics
 
 let core =
   Query.query ~name:"core" ~phase:Phases.bodies ~show:Resolve.Names.show_key (fun database key ->
-      Option.bind (Query.demand database checked key) (fun (result : result) -> result.core))
+      Option.bind (Query.demand database type_check_result key) (fun (result : type_check_result) ->
+          result.core))
 
 let of_path ~written database (path : Path.t) =
   let written path =
@@ -104,17 +122,17 @@ let exported_specification_of_path =
 let evidence =
   Query.query ~name:"evidence" ~phase:Phases.bodies ~show:Resolve.Names.show_key
     (fun database key ->
-      match Query.demand database checked key with
-      | Some (result : result) -> result.evidence
+      match Query.demand database type_check_result key with
+      | Some (result : type_check_result) -> result.evidence
       | None -> [])
 
 let clean database key =
   match
     ( Query.demand database Resolve.Names.definition key,
       Query.demand database Resolve.resolved key,
-      Query.demand database checked key )
+      Query.demand database type_check_result key )
   with
-  | Some definition, Some resolved, Some { checked; diagnostics = []; _ }
+  | Some definition, Some resolved, Some { tables; diagnostics = []; _ }
     when resolved.diagnostics = []
          && (not (Resolve.Parts.broken definition Header || Resolve.Parts.broken definition Body))
          &&
@@ -122,7 +140,7 @@ let clean database key =
          match Query.demand database Interface.Environment.lowered key with
          | Some { interface = Error_interface _; _ } -> false
          | _ -> true ->
-      Some checked
+      Some tables
   | _ -> None
 
 let is_clean database key = Option.is_some (clean database key)

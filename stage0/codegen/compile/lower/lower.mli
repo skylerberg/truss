@@ -1,7 +1,7 @@
-(* Lowering: the checked form of one instance to its LIR.
+(* Lowering: the core form of one instance to its LIR.
 
-   Lowering reads a definition's syntax tree with its checked form's tables,
-   which say what every node means, and writes LIR with every choice made:
+   Lowering reads a definition's core form, which says what every node
+   means, and writes LIR with every choice made:
    which instance each call reaches, how each argument is passed, which
    values move and which are copied, and where each owned local goes out of
    scope, on every path. It writes a [drop] wherever an owned value leaves
