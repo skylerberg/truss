@@ -24,11 +24,11 @@ let range encoding source (span : Diagnostic.span) =
   in
   Json.Object [ ("start", point span.start); ("end", point span.stop) ]
 
-let hex_digit c =
-  match c with
-  | '0' .. '9' -> Some (Char.code c - Char.code '0')
-  | 'a' .. 'f' -> Some (Char.code c - Char.code 'a' + 10)
-  | 'A' .. 'F' -> Some (Char.code c - Char.code 'A' + 10)
+let hex_digit character =
+  match character with
+  | '0' .. '9' -> Some (Char.code character - Char.code '0')
+  | 'a' .. 'f' -> Some (Char.code character - Char.code 'a' + 10)
+  | 'A' .. 'F' -> Some (Char.code character - Char.code 'A' + 10)
   | _ -> None
 
 (* The absolute path a [file:] URI names, with its escapes decoded. *)
@@ -51,8 +51,8 @@ let path_of_uri uri =
             | _ ->
                 Buffer.add_char buffer '%';
                 decode (at + 1))
-        | c ->
-            Buffer.add_char buffer c;
+        | character ->
+            Buffer.add_char buffer character;
             decode (at + 1)
     in
     decode 0;

@@ -82,13 +82,13 @@ and node = {
   mutable verified_at : int;
   mutable root : bool;
   mutable alive : bool;
-  mutable fingerprint : string option;
-  mutable stored : bool;
-  mutable opaque : bool;
+  mutable fingerprint : fingerprint;
   mutable identity : string option;
-  mutable written : bool;
-  mutable superseding : bool;
+  mutable written : written;
 }
+
+and written = Unwritten | In_whole | In_difference
+and fingerprint = Unknown | Hashed of { hash : string; stored : bool } | Opaque of string
 
 and cell =
   | Input : ('key, 'value) input * ('key, 'value) input_cell -> cell
@@ -147,6 +147,7 @@ val auditing : bool ref
 val remembered : t Weak.t ref
 val within_audit : bool ref
 val create : ?log:bool -> ?bases:t list -> unit -> t
+val hash_of : fingerprint -> string option
 val context : t -> context
 val observer : t -> context
 val engine_of : context -> t

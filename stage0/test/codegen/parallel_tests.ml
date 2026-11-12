@@ -305,7 +305,7 @@ let () =
   test "a region's own local goes with it, and a shared one is reached through the environment"
     (fun () ->
       let int = Lir.Value int32 in
-      let add a b = Lir.Binary (Add, copy a, copy b) in
+      let add left right = Lir.Binary (Add, copy left, copy right) in
       let actual =
         outlined
           (instance "entry"

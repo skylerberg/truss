@@ -34,13 +34,13 @@ type lowered_outcome = Compiled of Lir.compiled | Evaluate of Path.t * Ground.ty
 let environment (instance : Lir.t) nested_index = instance.nested.(nested_index).environment
 
 let elaborate_code (context : Lower.context) (instance : Lir.t) =
-  let needs_drop ty = not (Glue.trivial context.glue ty) in
+  let needs_drop ty = not (Glue.trivial (Lower.glue context) ty) in
   let elaborate function_ =
-    Drops.elaborate context.env ~needs_drop ~environment:(environment instance) function_
+    Drops.elaborate (Lower.env context) ~needs_drop ~environment:(environment instance) function_
   in
   Lir.Code
     (Lir.canonical_instance
-       (Outline.instance context.env
+       (Outline.instance (Lower.env context)
           {
             instance with
             main = elaborate instance.main;
@@ -54,7 +54,7 @@ let rec fresh_context lowering database =
   Lower.context ~checks:lowering.checks
     ~cursor_fields:(fun context yielding ->
       let function_, _ = Query.demand database (Lazy.force pulled) (lowering, yielding) in
-      Yields.cursor_fields context.env
+      Yields.cursor_fields (Lower.env context)
         ~evidence:(Lower.pulled_evidence context yielding function_)
         function_)
     ~constant:(fun _ path ->
@@ -76,14 +76,14 @@ and pulled =
            (fun () ->
              let context = fresh_context lowering database in
              let function_, owned = Lower.pulled context yielding in
-             ( Drops.elaborate context.env
-                 ~needs_drop:(fun ty -> not (Glue.trivial context.glue ty))
+             ( Drops.elaborate (Lower.env context)
+                 ~needs_drop:(fun ty -> not (Glue.trivial (Lower.glue context) ty))
                  ~environment:(fun _ -> [])
                  function_,
                owned ))))
 
 and make (context : Lower.context) lowering database (key : Instance.key) : lowered_outcome =
-  let glue = context.glue in
+  let glue = Lower.glue context in
   let pulled yielding = Query.demand database (Lazy.force pulled) (lowering, yielding) in
   let code instance = Compiled (elaborate_code context instance) in
   match key with
@@ -101,7 +101,7 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
               {
                 key;
                 main =
-                  Yields.cursor_drop context.env ~cursor ~owned
+                  Yields.cursor_drop (Lower.env context) ~cursor ~owned
                     ~evidence:(Lower.pulled_evidence context yielding function_)
                     function_;
                 nested = [||];
@@ -116,7 +116,7 @@ and make (context : Lower.context) lowering database (key : Instance.key) : lowe
               {
                 key;
                 main =
-                  Yields.cursor_next context.env ~cursor ~result
+                  Yields.cursor_next (Lower.env context) ~cursor ~result
                     ~evidence:(Lower.pulled_evidence context yielding function_)
                     function_;
                 nested = [||];
@@ -149,7 +149,7 @@ and lowered =
              let context = fresh_context lowering database in
              let outcome = make context lowering database key in
              (match outcome with
-             | Compiled (Code instance) -> Verify.instance context.env instance
+             | Compiled (Code instance) -> Verify.instance (Lower.env context) instance
              | Compiled _ | Evaluate _ -> ());
              outcome)))
 
@@ -176,7 +176,7 @@ let linked =
       | Evaluate (path, _) -> (evaluated_own_hash, [ Instance.Evaluator path ])
       | Compiled compiled ->
           let context = fresh_context lowering database in
-          let references = Reachable.compiled_references context.env compiled in
+          let references = Reachable.compiled_references (Lower.env context) compiled in
           (Reachable.own_hash ~references compiled, references))
 
 let own_hash =
@@ -324,8 +324,8 @@ let anchor compiler (path : Path.t) : Positions.anchor option =
 (* A value read back from its binary form, as [Glue.encode] writes it, as
    static data. *)
 let decode compiler ty text : Lir.static_value =
-  let env = compiler.context.env in
-  let monomorphic = compiler.context.monomorphic in
+  let env = Lower.env compiler.context in
+  let monomorphic = Lower.monomorphic compiler.context in
   let target = Memory_layout.target env in
   let at = ref 0 in
   let take count =
@@ -456,7 +456,7 @@ let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~start
     | Some instance -> Lir.Code instance
     | None -> compiled compiler key
   in
-  let units = Reachable.reachable compiler.context.env ~lookup roots in
+  let units = Reachable.reachable (Lower.env compiler.context) ~lookup roots in
   let units_by_key =
     List.fold_left
       (fun units_by_key unit -> Reachable.Keys.add (Reachable.compiled_key unit) unit units_by_key)
@@ -467,14 +467,14 @@ let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~start
       Compiler_bug.while_doing ~stage:"Compile"
         ("linking " ^ Instance.to_string (Reachable.compiled_key unit))
         (fun () ->
-          Verify.links compiler.context.env
+          Verify.links (Lower.env compiler.context)
             ~find:(fun key -> Reachable.Keys.find_opt key units_by_key)
             unit))
     units;
   let code = List.filter_map (function Lir.Code instance -> Some instance | _ -> None) units in
   let paths = List.sort_uniq Path.compare (List.concat_map anchored code) in
   let anchors = List.filter_map (anchor compiler) paths in
-  let target = Memory_layout.target compiler.context.env in
+  let target = Memory_layout.target (Lower.env compiler.context) in
   let sources = [ ("startup", startup); ("anchors", Positions.anchors_file target anchors) ] in
   let find key = Reachable.Keys.find_opt key units_by_key in
   let copied =
@@ -484,7 +484,7 @@ let rec build ?progress ?tests ?in_order ?(supplied = []) compiler ~roots ~start
   in
   match
     Build.program ?progress ?tests ?in_order ~copied compiler.toolchain compiler.cache
-      compiler.context.env compiler.settings
+      (Lower.env compiler.context) compiler.settings
       ~files:(List.map (fun unit -> [ unit ]) units)
       ~sources ~output
   with
@@ -816,7 +816,9 @@ type unshippable = {
 let unshippable compiler ~main ~echo =
   reporting compiler @@ fun () ->
   let root = Instance.Program_main main in
-  let reached = Reachable.running compiler.context.env ~lookup:(compiled compiler) [ root ] in
+  let reached =
+    Reachable.running (Lower.env compiler.context) ~lookup:(compiled compiler) [ root ]
+  in
   begin
     let definitions keys =
       List.fold_left
@@ -965,7 +967,7 @@ let evaluate_call ?results compiler ~time_limit ~function_ ~arguments =
   reporting compiler @@ fun () ->
   match Query.demand compiler.database Interface.Environment.signature function_ with
   | Some { output = Returns result; _ } -> (
-      let ty = Monomorphic.ground compiler.context.monomorphic [] result in
+      let ty = Monomorphic.ground (Lower.monomorphic compiler.context) [] result in
       let root = Instance.Call_evaluation { function_; arguments } in
       let key = run_key compiler root in
       match Hashtbl.find_opt compiler.called key with

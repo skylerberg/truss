@@ -69,8 +69,8 @@ let check_robust text =
   | tokens, diagnostics ->
       check_tokens text ~start:0 ~stop:(String.length text) tokens;
       List.iter
-        (fun (d : Diagnostic.t) ->
-          if d.span.stop > String.length text then
+        (fun (diagnostic : Diagnostic.t) ->
+          if diagnostic.span.stop > String.length text then
             fail "diagnostic out of bounds in %s" (Diagnostic.quote text))
         diagnostics
 
@@ -120,8 +120,8 @@ let check_parse_robust text =
   | (file, diagnostics), _ ->
       List.iter (check_tree text) file.definitions;
       List.iter
-        (fun (d : Diagnostic.t) ->
-          if d.span.stop > String.length text then
+        (fun (diagnostic : Diagnostic.t) ->
+          if diagnostic.span.stop > String.length text then
             fail "a parser diagnostic is out of bounds in %s" (Diagnostic.quote text))
         diagnostics
 
@@ -196,9 +196,13 @@ let check_parsers_agree text =
       in
       let verdicts =
         List.filter_map
-          (fun (d : Diagnostic.t) ->
-            if start <= d.span.start && d.span.start <= stop && not (inside_interpolation d.span)
-            then Some (if in_cost_clause d.span.start then Unknown else verdict d.code)
+          (fun (diagnostic : Diagnostic.t) ->
+            if
+              start <= diagnostic.span.start && diagnostic.span.start <= stop
+              && not (inside_interpolation diagnostic.span)
+            then
+              Some
+                (if in_cost_clause diagnostic.span.start then Unknown else verdict diagnostic.code)
             else None)
           diagnostics
       in
@@ -234,8 +238,11 @@ let check_fixes_work text =
   let codes ~lexer_only text =
     List.sort compare
       (List.filter_map
-         (fun (d : Diagnostic.t) ->
-           match d.code with Lexer _ -> Some d.code | _ when lexer_only -> None | _ -> Some d.code)
+         (fun (diagnostic : Diagnostic.t) ->
+           match diagnostic.code with
+           | Lexer _ -> Some diagnostic.code
+           | _ when lexer_only -> None
+           | _ -> Some diagnostic.code)
          (all text))
   in
   List.iter
@@ -369,7 +376,7 @@ let round_trip random =
   if diagnostics <> [] then fail "diagnostics for valid tokens %s" (Diagnostic.quote text);
   let kinds =
     Array.to_list tokens
-    |> List.map (fun (t : Token.t) -> t.kind)
+    |> List.map (fun (token : Token.t) -> token.kind)
     |> List.filter (fun kind -> kind <> Newline && kind <> End_of_file)
   in
   if kinds <> List.map snd items then

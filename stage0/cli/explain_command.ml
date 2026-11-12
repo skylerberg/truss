@@ -19,7 +19,7 @@ let run ~directory ~position ~json =
   let here = Project.load directory in
   let project = Project.load (Database.root here.session) in
   let path = Project.real file in
-  match List.find_opt (fun (_, f) -> f = path) project.files with
+  match List.find_opt (fun (_, file_path) -> file_path = path) project.files with
   | None -> Project.cannot_run "%s is not a module of a package in this worktree." file
   | Some (module_, _) -> (
       let context = project.context in
@@ -29,8 +29,8 @@ let run ~directory ~position ~json =
       in
       let symbol_at =
         List.find_map
-          (fun (d : Names.declaration) ->
-            let key = Names.key_of d in
+          (fun (declaration : Names.declaration) ->
+            let key = Names.key_of declaration in
             match (Query.demand context Names.base key, Query.demand context Names.text key) with
             | Some (_, base), Some text when base <= offset && offset <= base + String.length text
               -> (
@@ -69,11 +69,15 @@ let run ~directory ~position ~json =
                      Json.Object
                        [
                          ("text", Json.String explanation.text);
-                         ("meaning", Json.option (fun m -> Json.String m) explanation.meaning);
+                         ( "meaning",
+                           Json.option (fun meaning -> Json.String meaning) explanation.meaning );
                          ( "refers_to",
-                           Json.option (fun p -> Json.String (Path.show p)) explanation.refers_to );
-                         ("type", Json.option (fun t -> Json.String t) explanation.type_);
-                         ("signature", Json.option (fun s -> Json.String s) signature);
+                           Json.option
+                             (fun target -> Json.String (Path.show target))
+                             explanation.refers_to );
+                         ( "type",
+                           Json.option (fun type_text -> Json.String type_text) explanation.type_ );
+                         ("signature", Json.option (fun text -> Json.String text) signature);
                        ] );
                  ])
           else begin
@@ -81,9 +85,9 @@ let run ~directory ~position ~json =
             Option.iter (Output.printf "means %s\n") explanation.meaning;
             Option.iter (Output.printf "has type %s\n") explanation.type_;
             Option.iter
-              (fun s ->
+              (fun text ->
                 Output.printf "signature:\n  %s\n"
-                  (String.concat "\n  " (String.split_on_char '\n' s)))
+                  (String.concat "\n  " (String.split_on_char '\n' text)))
               signature
           end;
           0)

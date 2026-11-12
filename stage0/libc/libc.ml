@@ -170,7 +170,7 @@ let rec show_c_type = function
   | Named name -> name
   | Struct name -> "struct " ^ name
   | Const (Pointer _ as pointer) -> show_c_type pointer ^ "const"
-  | Const c -> "const " ^ show_c_type c
+  | Const c_type -> "const " ^ show_c_type c_type
   | Pointer (Pointer _ as inner) -> show_c_type inner ^ "*"
   | Pointer inner -> show_c_type inner ^ " *"
 
@@ -178,7 +178,7 @@ let rec show_c_type = function
    declares before it can mention them. *)
 let rec structures = function
   | Struct name -> [ name ]
-  | Const c | Pointer c -> structures c
+  | Const c_type | Pointer c_type -> structures c_type
   | Void | Named _ -> []
 
 type declaration = {
@@ -465,7 +465,7 @@ type row = {
   named : (string * c_type) list;
 }
 
-let everywhere c (_ : system) = c
+let everywhere c_type (_ : system) = c_type
 let by_os choose (system : system) = choose system.os
 let size = everywhere (Named "__SIZE_TYPE__")
 
@@ -1276,7 +1276,7 @@ let declaration system function_ : declaration =
     symbol = row.symbol system;
     returns = row.returns system;
     never_returns = row.result = Never;
-    takes = List.map (fun (_, _, c) -> c system) row.parameters;
+    takes = List.map (fun (_, _, c_type) -> c_type system) row.parameters;
     variadic_from = row.variadic_from;
   }
 
@@ -1864,11 +1864,11 @@ let check system =
   let holds what condition = Printf.sprintf "_Static_assert(%s, \"%s\");\n" condition what in
   (* The address is of one of the numbers, where C takes the first of
      several, or of a structure that is all of them. *)
-  let reached symbol c count scalar =
-    let c = show_c_type c in
+  let reached symbol c_type count scalar =
+    let c_type = show_c_type c_type in
     holds
       (symbol ^ " reaches numbers of another size")
-      (Printf.sprintf "sizeof(*(%s)0) == %d || sizeof(*(%s)0) == %d" c (bytes scalar) c
+      (Printf.sprintf "sizeof(*(%s)0) == %d || sizeof(*(%s)0) == %d" c_type (bytes scalar) c_type
          (count * bytes scalar))
   in
   let is_void = function Pointer (Void | Const Void) -> true | _ -> false in
@@ -1901,10 +1901,10 @@ let check system =
               declaration with
               takes =
                 List.map
-                  (fun (name, _, c) ->
+                  (fun (name, _, c_type) ->
                     match List.assoc_opt name row.named with
                     | Some named -> named
-                    | None -> c system)
+                    | None -> c_type system)
                   row.parameters;
             }
           in
@@ -1913,10 +1913,10 @@ let check system =
             | Points_at scalar -> [ reached declaration.symbol declaration.returns 1 scalar ]
             | Returns _ | Text | Never -> [])
           @ List.filter_map
-              (fun (_, passes, c) ->
+              (fun (_, passes, c_type) ->
                 match passes with
-                | Written (scalar, names) when not (is_void (c system)) ->
-                    Some (reached declaration.symbol (c system) (List.length names) scalar)
+                | Written (scalar, names) when not (is_void (c_type system)) ->
+                    Some (reached declaration.symbol (c_type system) (List.length names) scalar)
                 | Written _ | Value _ | Elements _ | Room _ | Elements_to_change _ | Always _
                 | Fixed _ ->
                     None)

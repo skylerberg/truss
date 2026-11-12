@@ -359,9 +359,11 @@ let target_packages session requested =
   match List.filter under packages with
   | [] -> (
       match
-        Project.package_directory ~is_package:(fun d -> List.mem_assoc d packages) requested
+        Project.package_directory
+          ~is_package:(fun candidate -> List.mem_assoc candidate packages)
+          requested
       with
-      | Some directory -> List.filter (fun (d, _) -> d = directory) packages
+      | Some directory -> List.filter (fun (candidate, _) -> candidate = directory) packages
       | None -> [])
   | under_requested -> under_requested
 
@@ -486,13 +488,16 @@ let matches name path =
   let shown = Path.show path in
   shown = name
   ||
-  let n = String.length name and l = String.length shown in
-  l > n && String.sub shown (l - n) n = name && (shown.[l - n - 1] = ':' || shown.[l - n - 1] = '.')
+  let name_length = String.length name and shown_length = String.length shown in
+  shown_length > name_length
+  && String.sub shown (shown_length - name_length) name_length = name
+  && (shown.[shown_length - name_length - 1] = ':' || shown.[shown_length - name_length - 1] = '.')
 
 let find_definitions session name =
   List.sort_uniq Path.compare
     (List.filter_map
-       (fun (d : Resolve.Names.declaration) -> if matches name d.path then Some d.path else None)
+       (fun (candidate : Resolve.Names.declaration) ->
+         if matches name candidate.path then Some candidate.path else None)
        (all_declarations session))
 
 (* Comparing a session with another, such as its base commit's *)
@@ -589,8 +594,8 @@ let overlap_with session other =
   check_all other;
   let root = root session in
   match (commit_of session, commit_of other) with
-  | Some a, Some b -> (
-      match Git.merge_base ~directory:root a b with
+  | Some left, Some right -> (
+      match Git.merge_base ~directory:root left right with
       | None -> Error "no common commit."
       | Some base -> (
           match open_commit ~repository:root base with
@@ -793,11 +798,14 @@ let merge_preview session other =
       | None -> Error "the two do not merge without a textual conflict."
       | Some texts ->
           let merged = trial_over session (Files.of_texts texts) in
-          let keys s =
+          let keys session =
             List.concat_map
-              (fun (m, ds) ->
-                List.map (fun (d : Diagnostic.t) -> (m, Diagnostic.Code.name d.code, d.message)) ds)
-              (diagnostics_of s (packages s))
+              (fun (module_, diagnostics) ->
+                List.map
+                  (fun (candidate : Diagnostic.t) ->
+                    (module_, Diagnostic.Code.name candidate.code, candidate.message))
+                  diagnostics)
+              (diagnostics_of session (packages session))
           in
           let sides =
             List.concat_map
@@ -809,8 +817,9 @@ let merge_preview session other =
           in
           Ok
             (List.filter_map
-               (fun ((m, code, message) as key) ->
-                 if List.mem key sides then None else Some (module_file merged m, code, message))
+               (fun ((module_, code, message) as key) ->
+                 if List.mem key sides then None
+                 else Some (module_file merged module_, code, message))
                (List.sort_uniq compare (keys merged))))
 
 let recovering = Session.recovering

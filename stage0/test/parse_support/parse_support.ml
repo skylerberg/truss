@@ -9,12 +9,15 @@ let parse text =
   let file, parser_diagnostics = Parser.parse source tokens in
   (file, lexer_diagnostics @ parser_diagnostics)
 
-let codes diagnostics = List.map (fun (d : Diagnostic.t) -> Diagnostic.Code.name d.code) diagnostics
+let codes diagnostics =
+  List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
 
 let no_diagnostics text diagnostics =
   List.iter
-    (fun (d : Diagnostic.t) ->
-      fail "unexpected %s at %d: %s in %S" (Diagnostic.Code.name d.code) d.span.start d.message text)
+    (fun (diagnostic : Diagnostic.t) ->
+      fail "unexpected %s at %d: %s in %S"
+        (Diagnostic.Code.name diagnostic.code)
+        diagnostic.span.start diagnostic.message text)
     diagnostics
 
 let definitions text expected =

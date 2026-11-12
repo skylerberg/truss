@@ -34,10 +34,7 @@ let nonce () =
   let bits () = Cbor.int (Random.State.bits (Lazy.force random)) in
   derive_nonce (Cbor.encode (Cbor.Array [ Cbor.int !nonces; bits (); bits (); bits () ]))
 
-let forget_fingerprint (node : node) =
-  node.fingerprint <- None;
-  node.stored <- false;
-  node.opaque <- false
+let forget_fingerprint (node : node) = node.fingerprint <- Unknown
 
 (* A node's fingerprint: the hash of its outcome's bytes. Every input that
    is set and every result that has an outcome has one. A value's bytes are
@@ -55,15 +52,16 @@ let derive_exception_fingerprint =
    attached. *)
 let fingerprint engine (node : node) =
   match node.fingerprint with
-  | Some fingerprint -> Some fingerprint
-  | None -> (
-      let set fingerprint =
-        node.fingerprint <- Some fingerprint;
-        Some fingerprint
+  | Hashed { hash; _ } | Opaque hash -> Some hash
+  | Unknown -> (
+      let set ?(stored = false) hash =
+        node.fingerprint <- Hashed { hash; stored };
+        Some hash
       in
       let opaque () =
-        node.opaque <- true;
-        set (nonce ())
+        let nonce = nonce () in
+        node.fingerprint <- Opaque nonce;
+        Some nonce
       in
       match node.cell with
       | Input (_, { slot = Set value; _ }) -> (
@@ -75,9 +73,7 @@ let fingerprint engine (node : node) =
           match bytes_of value with
           | bytes -> (
               match engine.store with
-              | Some store when query.saved ->
-                  node.stored <- true;
-                  set (store.put bytes)
+              | Some store when query.saved -> set ~stored:true (store.put bytes)
               | _ -> set (Blake3.hash bytes))
           | exception Invalid_argument _ -> opaque ())
       | Result (_, { outcome = Some (Raised raised); _ }) -> (
@@ -91,10 +87,12 @@ let fingerprint engine (node : node) =
 let ensure_stored engine (node : node) =
   match (engine.store, node.cell) with
   | Some store, Input (_, { slot = Set value; _ }) -> ignore (store.put (bytes_of value))
-  | Some store, Result (query, { outcome = Some (Value value); _ })
-    when query.saved && (not node.stored) && not node.opaque ->
-      ignore (store.put (bytes_of value));
-      node.stored <- true
+  | Some store, Result (query, { outcome = Some (Value value); _ }) when query.saved -> (
+      match node.fingerprint with
+      | Hashed { hash; stored = false } ->
+          ignore (store.put (bytes_of value));
+          node.fingerprint <- Hashed { hash; stored = true }
+      | Hashed { stored = true; _ } | Opaque _ | Unknown -> ())
   | _ -> ()
 
 (* What a fact's key takes of a node: its fingerprint, or that it is an
@@ -104,13 +102,13 @@ let key_part engine (node : node) =
   match node.cell with
   | Input (_, { slot = Unset; _ }) -> Some unset
   | _ -> (
-      match fingerprint engine node with
-      | Some fingerprint when not node.opaque -> Some fingerprint
+      match (fingerprint engine node, node.fingerprint) with
+      | Some fingerprint, Hashed _ -> Some fingerprint
       | _ -> None)
 
 let stored_bytes engine (node : node) =
   match (node.fingerprint, engine.store) with
-  | Some fingerprint, Some store -> store.get fingerprint
+  | Hashed { hash; _ }, Some store -> store.get hash
   | _ -> None
 
 (* An input's value, [None] for one that is not set. An input is what the
@@ -134,11 +132,10 @@ let input_value engine (cell : ('key, 'value) input_cell) : 'value option =
 let load engine (cell : ('key, 'value) result_cell) : 'value outcome option =
   match cell.outcome with
   | Some outcome -> Some outcome
-  | None when not cell.node.stored -> None
   | None -> (
       match (cell.node.fingerprint, engine.store) with
-      | Some fingerprint, Some store -> (
-          match store.get fingerprint with
+      | Hashed { hash; stored = true }, Some store -> (
+          match store.get hash with
           | Some bytes ->
               let outcome = Value (unmarshal bytes) in
               cell.outcome <- Some outcome;

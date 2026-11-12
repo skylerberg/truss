@@ -398,5 +398,7 @@ removes the code that it replaces:
    such as `Current_target`, and its consumers' cases for
    specification-only forms in executable code.
 
-Pattern matching as a decision tree comes after step 2, as an improvement
-of the builder.
+The prover already reads `Operator` and a call of an intrinsic that is a
+primitive operation through one translation, since the core form names the
+operation in both. Pattern matching as a decision tree comes after step 2,
+as an improvement of the builder.

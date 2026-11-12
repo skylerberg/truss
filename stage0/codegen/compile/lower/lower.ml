@@ -10,17 +10,12 @@ type unsupported = Lowering.unsupported = { what : string; at : Lir.site option 
 
 exception Unsupported = Lowering.Unsupported
 
-type context = Definitions.context = {
-  database : Query.context;
-  env : Memory_layout.env;
-  glue : Glue.t;
-  monomorphic : Monomorphic.context;
-  types : Intrinsics.types;
-  bool : Ground.ty;
-  checks : bool;
-  constant : Path.t -> Lir.static_value option;
-}
+type context = Definitions.context
 
+let env (context : context) = context.env
+let glue (context : context) = context.glue
+let monomorphic (context : context) = context.monomorphic
+let constant_value (context : context) = context.constant
 let context = Definitions.context
 let test_key = Definitions.test_key
 let cursor_result = Targets.cursor_result

@@ -84,8 +84,8 @@ let skip_audit engine = engine.audited <- max_int
 let audit_all () =
   let problems = ref [] in
   let table = !remembered in
-  for i = 0 to Weak.length table - 1 do
-    match Weak.get table i with
+  for index = 0 to Weak.length table - 1 do
+    match Weak.get table index with
     | Some engine
       when (not engine.frozen) && engine.audited <> max_int && engine.activity <> engine.audited
            && engine.frames = [] ->

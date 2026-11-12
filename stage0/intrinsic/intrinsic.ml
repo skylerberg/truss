@@ -77,7 +77,7 @@ let builtin_name = function
 let builtin_path builtin = Path.Top { module_; name = builtin_name builtin }
 
 let builtin_of_path = function
-  | Path.Top { module_ = m; name } when m = module_ ->
+  | Path.Top { module_ = path_module; name } when path_module = module_ ->
       List.find_opt (fun builtin -> builtin_name builtin = name) builtins
   | _ -> None
 
@@ -401,6 +401,6 @@ let uses : operation -> Path.t list = function
   | _ -> []
 
 let operation_of_path = function
-  | Path.Top { module_ = m; name } when m = module_ ->
+  | Path.Top { module_ = path_module; name } when path_module = module_ ->
       List.find_opt (fun operation -> operation_name operation = name) operations
   | _ -> None

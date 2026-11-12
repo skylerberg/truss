@@ -181,11 +181,11 @@ and substitute_function substitution (function_type : function_type) =
 let result_type = function Returns type_ | Yields (_, type_) | Lends (_, type_) -> type_
 let show_mode = function Read -> "" | Mut -> "mut " | Own -> "own "
 
-let rec map ?(capabilities = Fun.id) f type_ =
-  match f type_ with
+let rec map ?(capabilities = Fun.id) transform type_ =
+  match transform type_ with
   | Some replacement -> replacement
   | None -> (
-      let map = map ~capabilities f in
+      let map = map ~capabilities transform in
       let argument = function
         | Type type_ -> Type (map type_)
         | Capabilities set -> Capabilities (capabilities set)
@@ -218,15 +218,15 @@ let rec map ?(capabilities = Fun.id) f type_ =
       | Cursor { method_; arguments } -> Cursor { method_; arguments = List.map argument arguments }
       | Parameter _ | Never | Integer | Variable _ | Literal _ | Hole | Error _ -> type_)
 
-let rec exists ?(resolve = Fun.id) f type_ =
+let rec exists ?(resolve = Fun.id) transform type_ =
   let type_ = resolve type_ in
-  let exists = exists ~resolve f in
+  let exists = exists ~resolve transform in
   let argument = function Type type_ -> exists type_ | Value _ | Capabilities _ -> false in
   let trait (reference : trait_reference) =
     List.exists argument reference.trait_arguments
     || List.exists (fun (_, type_) -> exists type_) reference.associated
   in
-  f type_
+  transform type_
   ||
   match type_ with
   | Named { arguments; _ } | Cursor { arguments; _ } -> List.exists argument arguments
@@ -425,19 +425,19 @@ let body_is_definition (signature : signature) =
   && List.for_all (fun (parameter : parameter_info) -> parameter.mode <> Mut) signature.parameters
   && match signature.output with Returns _ -> true | Yields _ | Lends _ -> false
 
-let map_signature f (signature : signature) =
+let map_signature transform (signature : signature) =
   {
     signature with
-    receiver = Option.map (fun (receiver, type_) -> (receiver, f type_)) signature.receiver;
+    receiver = Option.map (fun (receiver, type_) -> (receiver, transform type_)) signature.receiver;
     parameters =
       List.map
-        (fun (parameter : parameter_info) -> { parameter with type_ = f parameter.type_ })
+        (fun (parameter : parameter_info) -> { parameter with type_ = transform parameter.type_ })
         signature.parameters;
     output =
       (match signature.output with
-      | Returns type_ -> Returns (f type_)
-      | Yields (mode, type_) -> Yields (mode, f type_)
-      | Lends (mode, type_) -> Lends (mode, f type_));
+      | Returns type_ -> Returns (transform type_)
+      | Yields (mode, type_) -> Yields (mode, transform type_)
+      | Lends (mode, type_) -> Lends (mode, transform type_));
   }
 
 let substitute_signature substitution (signature : signature) =

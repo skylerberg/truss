@@ -56,7 +56,7 @@ let computed (type key value) engine (query : (key, value) query) : key list =
     (Dynarray.to_list engine.log)
 
 let clear_log engine = Dynarray.clear engine.log
-let by_id nodes = List.sort (fun (a : node) (b : node) -> compare a.id b.id) nodes
+let by_id nodes = List.sort (fun (left : node) (right : node) -> compare left.id right.id) nodes
 let differing engine = by_id (Hashtbl.fold (fun _ node nodes -> node :: nodes) engine.own [])
 let count engine = Hashtbl.length engine.own
 
@@ -144,7 +144,7 @@ let same_outcome engine (left : node) other (right : node) =
   | Result (query, mine), Result (other_query, theirs) -> (
       match Type.Id.provably_equal query.cells other_query.cells with
       | Some Type.Equal -> (
-          match (left.fingerprint, right.fingerprint) with
+          match (hash_of left.fingerprint, hash_of right.fingerprint) with
           | Some mine, Some theirs when mine = theirs -> true
           | _ -> (
               match (load engine mine, load other theirs) with

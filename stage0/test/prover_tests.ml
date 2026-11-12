@@ -3304,7 +3304,9 @@ let () =
       with
       | [] -> ()
       | actual ->
-          fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual)));
+          fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
   test "a caller in another package does not read a body that is not transparent" (fun () ->
       match
         across (doubling "")
@@ -3401,8 +3403,9 @@ let () =
           fail "%s"
             (String.concat "; "
                (List.map
-                  (fun (d : Diagnostic.t) ->
-                    String.concat ", " (List.map (fun (f : _ Diagnostic.fix) -> f.title) d.fixes))
+                  (fun (diagnostic : Diagnostic.t) ->
+                    String.concat ", "
+                      (List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes))
                   actual)))
 
 (* Facts under a quantifier *)
@@ -3498,7 +3501,8 @@ let () =
   let fix_titles text =
     let database = Support.setup [ ("app::main", text) ] in
     List.concat_map
-      (fun (d : Diagnostic.t) -> List.map (fun (f : _ Diagnostic.fix) -> f.title) d.fixes)
+      (fun (diagnostic : Diagnostic.t) ->
+        List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes)
       (check database (Support.module_of "app::main"))
   in
   test "a divisor that may be zero offers a requires that it is not" (fun () ->
@@ -3521,8 +3525,9 @@ let () =
           fail "%s"
             (String.concat "; "
                (List.map
-                  (fun (d : Diagnostic.t) ->
-                    String.concat ", " (List.map (fun (f : _ Diagnostic.fix) -> f.title) d.fixes))
+                  (fun (diagnostic : Diagnostic.t) ->
+                    String.concat ", "
+                      (List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes))
                   actual)));
   test "a failed assert about the parameters offers it as a requires" (fun () ->
       match
@@ -4455,22 +4460,27 @@ let () =
 
 (* Triggers *)
 
-let v label = Logic.Symbol.Variable { label; numbers = [] }
+let variable label = Logic.Symbol.Variable { label; numbers = [] }
 
 let triggered fact =
   let open Logic in
   Logic.text
     {
       declarations =
-        [ Function (v "f", [ Int ], Int); Function (v "g", [ Int ], Int); Constant (v "n", Int) ];
+        [
+          Function (variable "f", [ Int ], Int);
+          Function (variable "g", [ Int ], Int);
+          Constant (variable "n", Int);
+        ];
       facts = [ fact ];
-      goal = Operation (">", [ Apply (v "f", [ Symbol (v "n") ]); int 0 ]);
+      goal = Operation (">", [ Apply (variable "f", [ Symbol (variable "n") ]); int 0 ]);
     }
 
 let () =
   let open Logic in
-  let i = Symbol (v "i") and j = Symbol (v "j") in
-  let f term = Apply (v "f", [ term ]) and g term = Apply (v "g", [ term ]) in
+  let i_term = Symbol (variable "i") and j_term = Symbol (variable "j") in
+  let applied_f term = Apply (variable "f", [ term ])
+  and applied_g term = Apply (variable "g", [ term ]) in
   let positive term = Operation (">", [ term; int 0 ]) in
   let expect fact fragment =
     let text = triggered fact in
@@ -4478,44 +4488,61 @@ let () =
   in
   test "a quantified fact triggers on an application of its variable" (fun () ->
       expect
-        (Forall ([ (v "i", Int) ], Operation (">=", [ i; int 0 ]) ==> positive (f i)))
+        (Forall
+           ( [ (variable "i", Int) ],
+             Operation (">=", [ i_term; int 0 ]) ==> positive (applied_f i_term) ))
         ":pattern ((x0 b0))");
   test "a trigger has no arithmetic on a bound variable" (fun () ->
       let text =
-        triggered (Forall ([ (v "i", Int) ], positive (f (Operation ("+", [ i; int 1 ])))))
+        triggered
+          (Forall
+             ([ (variable "i", Int) ], positive (applied_f (Operation ("+", [ i_term; int 1 ])))))
       in
       if contains text ":pattern" then fail "%s" text);
   test "a trigger that would match its own body's larger term is passed over" (fun () ->
       expect
         (Forall
-           ( [ (v "i", Int) ],
-             Operation ("<", [ f i; f (Operation ("+", [ i; int 1 ])) ]) &&& positive (g i) ))
+           ( [ (variable "i", Int) ],
+             Operation ("<", [ applied_f i_term; applied_f (Operation ("+", [ i_term; int 1 ])) ])
+             &&& positive (applied_g i_term) ))
         ":pattern ((x2 b0)))");
   test "a definition triggers on what it defines" (fun () ->
       let text =
-        triggered (Forall ([ (v "i", Int) ], equal (f i) (Operation ("+", [ g i; int 1 ]))))
+        triggered
+          (Forall
+             ( [ (variable "i", Int) ],
+               equal (applied_f i_term) (Operation ("+", [ applied_g i_term; int 1 ])) ))
       in
       if (not (contains text ":pattern ((x0 b0)))")) || contains text ":pattern ((x1" then
         fail "%s" text);
   let query fact =
     {
       declarations =
-        [ Function (v "f", [ Int ], Int); Function (v "g", [ Int ], Int); Constant (v "n", Int) ];
+        [
+          Function (variable "f", [ Int ], Int);
+          Function (variable "g", [ Int ], Int);
+          Constant (variable "n", Int);
+        ];
       facts = [ fact ];
-      goal = Operation (">", [ Apply (v "f", [ Symbol (v "n") ]); int 0 ]);
+      goal = Operation (">", [ Apply (variable "f", [ Symbol (variable "n") ]); int 0 ]);
     }
   in
   test "a quantified fact with no trigger is told apart" (fun () ->
       if
         not
           (untriggered
-             (query (Forall ([ (v "i", Int) ], positive (f (Operation ("+", [ i; int 1 ])))))))
+             (query
+                (Forall
+                   ( [ (variable "i", Int) ],
+                     positive (applied_f (Operation ("+", [ i_term; int 1 ]))) ))))
       then fail "a fact on f(i + 1) alone has no trigger";
-      if untriggered (query (Forall ([ (v "i", Int) ], positive (f i)))) then
+      if untriggered (query (Forall ([ (variable "i", Int) ], positive (applied_f i_term)))) then
         fail "a fact on f(i) has one");
   test "variables named by no one application share a trigger" (fun () ->
       expect
-        (Forall ([ (v "i", Int); (v "j", Int) ], Operation ("<", [ f i; g j ])))
+        (Forall
+           ( [ (variable "i", Int); (variable "j", Int) ],
+             Operation ("<", [ applied_f i_term; applied_g j_term ]) ))
         ":pattern ((x0 b0) (x2 b1))")
 
 (* Short-circuit operators *)
@@ -4841,18 +4868,25 @@ let () =
 
 (* Addresses of views *)
 
+(* A module of the standard library, which alone can import
+   [standard::intrinsic]: its diagnostics. *)
+let in_standard text =
+  let database = Engine.context (Engine.create ~log:true ()) in
+  Database.load_package (Engine.of_context database)
+    ~name:{ owner = None; name = "standard" }
+    ~dependencies:[]
+    [ (Support.module_of "standard::probe", text) ];
+  check database (Support.module_of "standard::probe")
+
+let proven_in_standard text =
+  match in_standard text with
+  | [] -> ()
+  | actual ->
+      fail "%s"
+        (String.concat "; "
+           (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual))
+
 let () =
-  let proven_in_standard text =
-    let database = Engine.context (Engine.create ~log:true ()) in
-    Database.load_package (Engine.of_context database)
-      ~name:{ owner = None; name = "standard" }
-      ~dependencies:[]
-      [ (Support.module_of "standard::probe", text) ];
-    match check database (Support.module_of "standard::probe") with
-    | [] -> ()
-    | actual ->
-        fail "%s" (String.concat "; " (List.map (fun (d : Diagnostic.t) -> d.message) actual))
-  in
   test "a view of a scalar ends within the address space and is not at zero" (fun () ->
       proven_in_standard
         "use standard::intrinsic\n\n\
@@ -4864,3 +4898,26 @@ let () =
         \  }\n\
         \  first\n\
          }\n")
+
+(* Intrinsic operations *)
+
+let () =
+  test "an intrinsic operation has its operator's facts" (fun () ->
+      proven_in_standard
+        "use standard::intrinsic\n\n\
+         fn low(value: UInt64, mask: UInt64) -> UInt64\n\
+        \  ensures result <= mask\n\
+         {\n\
+        \  intrinsic::bit_and(value, right: mask)\n\
+         }\n");
+  test "an intrinsic shift has its operator's obligation on the amount" (fun () ->
+      match
+        Support.codes
+          (in_standard
+             "use standard::intrinsic\n\n\
+              fn shifted(value: UInt64, amount: UInt64) -> UInt64 {\n\
+             \  intrinsic::shift_left(value, amount: amount)\n\
+              }\n")
+      with
+      | [ "prover.shift" ] -> ()
+      | codes -> fail "expected prover.shift, found %s" (String.concat ", " codes))
