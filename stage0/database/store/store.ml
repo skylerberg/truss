@@ -68,8 +68,6 @@ let default_directory () =
           in
           Filename.concat (Filename.concat home ".cache") "truss")
 
-(* Reading records *)
-
 let close_channel segment =
   Option.iter close_in_noerr segment.channel;
   segment.channel <- None
@@ -213,8 +211,6 @@ let refresh t =
   t.segments <- fresh @ known;
   t.refreshed <- Unix.gettimeofday ()
 
-(* Writing *)
-
 let writer_name () =
   Random.self_init ();
   Printf.sprintf "%d-%d-%06x" (Unix.getpid ()) (int_of_float (Unix.time ())) (Random.bits ())
@@ -324,8 +320,6 @@ let flush t =
       Unix.fsync writer.descriptor)
     t.writer
 
-(* Looking up *)
-
 (* The record must be the key's own: an index that is damaged can name
    another record's offset. *)
 let read_from segment key location =
@@ -402,8 +396,6 @@ let files t name =
   let path = Filename.concat t.root name in
   File_system.make_directory path;
   path
-
-(* Pointers *)
 
 type pointer = {
   store : t;
@@ -490,8 +482,6 @@ let remove_pointer pointer =
   List.iter
     (fun path -> try Sys.remove path with Sys_error _ -> ())
     [ pointer.pointer_path; pointer.pointer_path ^ ".lock" ]
-
-(* Collection *)
 
 let file_size path = try (Unix.stat path).st_size with Unix.Unix_error _ -> 0
 

@@ -161,12 +161,6 @@ let walk env ~lookup ~by_call roots =
 let reached env ~lookup roots = walk env ~lookup ~by_call:false roots
 let running env ~lookup roots = walk env ~lookup ~by_call:true roots
 let reachable env ~lookup roots = List.map fst (reached env ~lookup roots)
-
-(* The hash of what an instance compiles to, by itself: its encoding with
-   each instance it refers to written as that instance's place among
-   [references], itself as a mark, and each path as a number given in the
-   order paths are first met. So the hash holds no name, and renaming or
-   moving a definition changes no hash. *)
 let derive_own_hash = Blake3.derive_key ~context:"truss 2026-11-12 instance own hash"
 
 let own_hash ~references compiled =
@@ -206,11 +200,9 @@ module Keys = Map.Make (struct
   let compare = Instance.compare
 end)
 
-(* The groups of instances that reach each other, among everything the
-   roots reach: for each instance of such a group, the group's instances in
-   order. An instance that refers only to itself is no group, since its own
-   hash marks that. Tarjan's algorithm, with a stack of its own in place of
-   recursion, so that a long chain of calls is no deeper than a short one. *)
+(* Tarjan's algorithm, with an explicit stack in place of recursion, so that
+   a long chain of calls cannot overflow the stack. An instance that refers
+   only to itself is in no group, since its own hash marks that. *)
 let groups ~edges roots =
   let counter = ref 0 in
   let number = Table.create 1024 and low = Table.create 1024 in
@@ -269,8 +261,6 @@ let groups ~edges roots =
 let derive_reach_key = Blake3.derive_key ~context:"truss 2026-11-12 reach key"
 let key_of parts = derive_reach_key (Cbor.encode (Cbor.Array parts))
 
-(* The key of everything an instance that is in no group can reach: its own
-   hash, and the key of each instance it refers to, in order. *)
 let unit_key ~own reached =
   key_of [ Text "unit"; Bytes own; Cbor.Array (List.map (fun key -> Cbor.Bytes key) reached) ]
 

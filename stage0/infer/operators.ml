@@ -9,6 +9,7 @@ module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 open State
+open Instantiation
 open Hooks
 open Lookups
 open Pattern_typing

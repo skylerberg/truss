@@ -39,7 +39,6 @@ let rec is_prefix prefix steps =
 (* [inner] is [outer] or lies inside it. *)
 let is_inside ~outer inner = outer.local = inner.local && is_prefix outer.steps inner.steps
 
-(* The places an operand moves out of, in order. *)
 let rec operand_moves (operand : Lir.operand) =
   match operand with
   | Move place | Moved_address place -> place_index_moves place @ [ place ]
@@ -92,8 +91,6 @@ let terminator_moves (terminator : Lir.terminator) =
   | Yield { value; _ } -> operand_moves value
   | Switch_variant { place; _ } -> place_index_moves place
   | Goto _ | Unreachable -> []
-
-(* The analysis *)
 
 type analysis = {
   env : Memory_layout.env;
@@ -331,8 +328,6 @@ let status s i =
   | false, _ -> No
   | true, true -> Maybe
 
-(* Elaborating one drop *)
-
 type op =
   | Statement of Lir.statement
   | If_flag of int * op list  (** Runs the ops when the path's flag is set *)
@@ -437,8 +432,6 @@ let check_nothing_owned a s =
       if s.maybe_init.(i) && not (List.mem Deref path.steps) then
         bug "%s may still own a value where the function returns" (describe a path))
     a.paths
-
-(* Rewriting *)
 
 type builder = {
   mutable blocks : Lir.basic_block array;

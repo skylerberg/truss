@@ -59,8 +59,6 @@ type keyword =
   | Yield
   | Yields
 
-(* Reserved for later use. The parser reports them, since a good fix depends
-   on the construct around them. *)
 type reserved =
   | As
   | Async
@@ -121,12 +119,8 @@ type punctuation =
   | Shift_left
   | Shift_right
 
-(* Sequences from other languages whose fix depends on the expression around
-   them. No grammar rule accepts them, and the parser reports them. *)
 type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Pipe_greater
 
-(* An exact decimal, significand × 10^exponent, with the trailing zeros of
-   the significand removed, so that equal values are equal records. *)
 module Decimal : sig
   type t = private { significand : Z.t; exponent : Z.t }
 
@@ -177,9 +171,6 @@ and kind =
   | Newline
   | End_of_file
 
-(* A string's texts alternate with its interpolations, starting and ending
-   with a text, which is the shape of a Template: "a${x}b" has [first] "a"
-   and [rest] [(x, "b")]. *)
 and string_literal = {
   tag : (string * span) option;
   form : form;
@@ -333,7 +324,6 @@ let foreign_sequences =
     ("|>", Pipe_greater);
   ]
 
-(* The keywords that start a top-level definition. *)
 let definition_keywords =
   [ Fn; Type; Trait; Impl; Capability; Let; Test; Theorem; Proof; Use; Public; Internal ]
 

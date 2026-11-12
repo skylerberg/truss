@@ -183,7 +183,6 @@ let build database package =
 
 let graph = Query.query ~phase:Phases.proofs ~name:"call_graph" ~show:Path.show_package build
 
-(* The methods an [impl] writes. *)
 let impl_methods database impl =
   List.concat_map
     (fun (written, _, _, methods) -> if Path.equal written impl then methods else [])

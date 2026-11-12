@@ -10,9 +10,11 @@ let stabilize engine =
   check_can_change engine;
   sweep engine;
   settle engine;
-  let change = { computed = List.rev engine.computed; changed = List.rev engine.changed } in
-  engine.computed <- [];
-  engine.changed <- [];
+  let change =
+    { computed = Dynarray.to_list engine.computed; changed = Dynarray.to_list engine.changed }
+  in
+  Dynarray.clear engine.computed;
+  Dynarray.clear engine.changed;
   change
 
 let freeze ?(fixed = false) engine =
@@ -37,24 +39,23 @@ let unroot engine (query : ('key, 'value) query) key =
       sweep engine
   | None -> ()
 
-let executed engine = List.rev_map label engine.log
+let executed engine = List.map label (Dynarray.to_list engine.log)
 
 let result_label (query : ('key, 'value) query) key =
   Printf.sprintf "%s(%s)" query.name (query.show key)
 
 let computed (type key value) engine (query : (key, value) query) : key list =
-  List.rev
-    (List.filter_map
-       (fun (node : node) ->
-         match node.cell with
-         | Result (stored_query, cell) when stored_query.number = query.number -> (
-             match Type.Id.provably_equal stored_query.cells query.cells with
-             | Some Equal -> Some (cell.key : key)
-             | None -> None)
-         | Result _ | Input _ | Unfilled -> None)
-       engine.log)
+  List.filter_map
+    (fun (node : node) ->
+      match node.cell with
+      | Result (stored_query, cell) when stored_query.number = query.number -> (
+          match Type.Id.provably_equal stored_query.cells query.cells with
+          | Some Equal -> Some (cell.key : key)
+          | None -> None)
+      | Result _ | Input _ | Unfilled -> None)
+    (Dynarray.to_list engine.log)
 
-let clear_log engine = engine.log <- []
+let clear_log engine = Dynarray.clear engine.log
 let by_id nodes = List.sort (fun (a : node) (b : node) -> compare a.id b.id) nodes
 let differing engine = by_id (Hashtbl.fold (fun _ node nodes -> node :: nodes) engine.own [])
 let count engine = Hashtbl.length engine.own

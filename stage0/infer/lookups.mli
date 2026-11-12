@@ -30,7 +30,7 @@ val explicit_type_arguments :
   ?head:int ->
   State.state ->
   Syntax.expression ->
-  State.instance ->
+  Instantiation.instance ->
   Syntax.bracket_item list ->
   unit
 
@@ -38,7 +38,7 @@ val finish_call :
   State.state ->
   Syntax.expression ->
   State.C.callee ->
-  State.instance ->
+  Instantiation.instance ->
   State.C.argument list ->
   string list ->
   State.T.ty

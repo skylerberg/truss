@@ -178,8 +178,6 @@ let map_arguments f = function
   | Is (constructor, argument) -> Is (constructor, f argument)
   | (Symbol _ | Integer _ | Boolean _ | Bits _ | Forall _ | Exists _) as term -> term
 
-(* Building terms *)
-
 let int value = Integer (Z.of_int value)
 
 let ( &&& ) left right =
@@ -269,8 +267,6 @@ let rec replace ~from ~into term =
         if mentions (List.map fst bound) from then term else Forall (bound, replace ~from ~into body)
     | Exists (bound, body) ->
         if mentions (List.map fst bound) from then term else Exists (bound, replace ~from ~into body)
-
-(* Triggers *)
 
 (* The terms that make the solver use a quantified statement, as Dafny
    chooses them: sets of applications of the query's own functions that
@@ -413,8 +409,6 @@ let untriggered query =
   in
   List.exists without query.facts
 
-(* Pruning *)
-
 (* The declared symbols a term mentions. A datatype's constructors and
    selectors are shared vocabulary, like SMT-LIB's own operations, so they
    connect nothing. *)
@@ -484,8 +478,6 @@ let prune query =
   done;
   { query with facts = List.filteri (fun index _ -> is_needed.(index)) query.facts }
 
-(* Canonical text *)
-
 (* Numbering: every declared symbol and every sort is named by the order
    of its first appearance in a walk of the facts, in order, and then the
    goal. A datatype's constructors and selectors are named after
@@ -499,9 +491,9 @@ type numbering = {
       (** Each constructor and selector: its datatype and its canonical suffix. *)
   triggering : symbol -> bool;
   symbol_names : (symbol, string) Hashtbl.t;
-  mutable symbol_order : symbol list;  (** Reversed. *)
+  symbol_order : symbol Dynarray.t;
   sort_names : (string, string) Hashtbl.t;
-  mutable sort_order : string list;  (** Reversed. *)
+  sort_order : string Dynarray.t;
 }
 
 let rec sort_name numbering = function
@@ -514,7 +506,7 @@ let rec sort_name numbering = function
       | None ->
           let canonical = Printf.sprintf "S%d" (Hashtbl.length numbering.sort_names) in
           Hashtbl.replace numbering.sort_names name canonical;
-          numbering.sort_order <- name :: numbering.sort_order;
+          Dynarray.add_last numbering.sort_order name;
           (* A datatype's fields' sorts are numbered with it. *)
           (match Hashtbl.find_opt numbering.datatypes name with
           | Some constructors ->
@@ -534,7 +526,7 @@ let symbol_name numbering name =
       | Some declaration ->
           let canonical = Printf.sprintf "x%d" (Hashtbl.length numbering.symbol_names) in
           Hashtbl.replace numbering.symbol_names name canonical;
-          numbering.symbol_order <- name :: numbering.symbol_order;
+          Dynarray.add_last numbering.symbol_order name;
           (* The sorts a declaration mentions are numbered with it. *)
           (match declaration with
           | Constant (_, sort) -> ignore (sort_name numbering sort)
@@ -653,9 +645,9 @@ let numbering query =
     member_of;
     triggering = triggering_in query.declarations;
     symbol_names = Hashtbl.create 64;
-    symbol_order = [];
+    symbol_order = Dynarray.create ();
     sort_names = Hashtbl.create 8;
-    sort_order = [];
+    sort_order = Dynarray.create ();
   }
 
 let render query =
@@ -669,7 +661,7 @@ let render query =
   in
   let assertions = List.map assertion query.facts @ [ assertion (not_ query.goal) ] in
   let declarations =
-    List.rev_map
+    List.map
       (fun name ->
         let canonical = Hashtbl.find numbering.symbol_names name in
         match Hashtbl.find numbering.declared name with
@@ -680,12 +672,12 @@ let render query =
               (String.concat " " (List.map (sort_name numbering) inputs))
               (sort_name numbering output)
         | Datatype _ -> "")
-      numbering.symbol_order
+      (Dynarray.to_list numbering.symbol_order)
   in
   (* Every datatype goes in one block, so that datatypes may refer to each
      other; every other sort is declared on its own. Sorts are listed only
      once the walk above has numbered them all. *)
-  let sort_order = List.rev numbering.sort_order in
+  let sort_order = Dynarray.to_list numbering.sort_order in
   let sorts =
     List.filter_map
       (fun name ->
@@ -754,7 +746,9 @@ let term_text query term =
 
 let symbols query =
   let _, numbering = render query in
-  List.rev_map (fun name -> (name, Hashtbl.find numbering.symbol_names name)) numbering.symbol_order
+  List.map
+    (fun name -> (name, Hashtbl.find numbering.symbol_names name))
+    (Dynarray.to_list numbering.symbol_order)
 
 let members query =
   let _, numbering = render query in

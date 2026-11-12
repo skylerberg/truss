@@ -11,6 +11,8 @@ module Impls = Interface.Impls
 module Properties = Interface.Properties
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 open Hooks
 open Lookups
 open Calls

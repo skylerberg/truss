@@ -207,8 +207,6 @@ and statement_parts cursor context (parent : statement) =
   Syntax_walk.statement_parts ~expression:(expression cursor context)
     ~statement:(statement cursor context) parent
 
-(* Definitions *)
-
 let parameters ?(lends_or_yields = false) cursor (parameters : parameter list) =
   List.iter
     (fun (parameter : parameter) ->

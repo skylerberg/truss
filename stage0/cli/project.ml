@@ -170,7 +170,6 @@ let selected t paths =
           else None)
         t.files
 
-(* A module's parsed file. *)
 let parsed t module_ = Query.demand t.context Workspace.file module_
 
 (* A module's text as a source named by its file as the current directory

@@ -5,8 +5,6 @@ open C_runtime
 open C_types
 open C_values
 
-(* Static data *)
-
 let static_name context =
   let name = Printf.sprintf "t_static_%d" (List.length context.statics) in
   name

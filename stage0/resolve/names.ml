@@ -127,8 +127,6 @@ let receiver (parameters : parameter list) : Path.receiver =
   | { kind = Self_parameter (Some Own); _ } :: _ -> Own
   | _ -> Static
 
-(* Imports *)
-
 (* The packages a file can name at the start of a path: its own, the
    standard library, and its dependencies. *)
 let packages database (module_ : Path.module_) =
@@ -152,7 +150,6 @@ let full_module database ~(from : Path.module_) (names : string list) : Path.mod
   | Some module_ -> module_
   | None -> { package = { owner = None; name = "" }; modules = [] }
 
-(* The module a [use] line names. *)
 let used_module database ~from (path : path) =
   full_module database ~from
     (List.map (fun (name : name) -> name.text) path.modules @ [ path.last.text ])
@@ -173,8 +170,6 @@ let imports =
 
 let module_exists database (module_ : Path.module_) =
   module_ = Intrinsic.module_ || Query.demand database Workspace.module_exists module_
-
-(* Declarations *)
 
 let top module_ name : Path.t = Top { module_; name }
 
@@ -526,7 +521,6 @@ let trait_index =
           | _ -> index)
         String_map.empty declared)
 
-(* The traits of a package that declare a method with a name. *)
 let traits_declaring =
   Query.query ~name:"traits_declaring" ~phase:Phases.declarations ~saved:true
     ~show:(fun (package, name) -> Path.show_package package ^ " " ^ name)

@@ -1,8 +1,6 @@
 let bug format = Compiler_bug.bug ~stage:"Yields" format
 let local_place = Lir.local_place
 
-(* The loop form *)
-
 let loop_form env ~(body : Ground.function_type) (f : Lir.function_) =
   let go_on_ty =
     match body.result with
@@ -104,7 +102,6 @@ let terminator_reads (terminator : Lir.terminator) =
   | Yield { value; _ } -> operand_reads value
   | Goto _ | Unreachable -> []
 
-(* The locals live at the start of each block. *)
 let live_in (f : Lir.function_) =
   let n = Array.length f.locals in
   let live = Array.map (fun _ -> Array.make n false) f.blocks in
@@ -176,8 +173,6 @@ let cursor_fields _env ~evidence (f : Lir.function_) =
   :: List.map
        (fun local -> (field_name f local, member f.locals.(local).ty))
        (saved_locals ~evidence f)
-
-(* The state machine *)
 
 (* The function's blocks, shifted up by one for a new entry block, with
    every saved local moved into the cursor that local [cursor] points at,

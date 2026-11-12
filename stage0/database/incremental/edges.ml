@@ -194,7 +194,7 @@ let record_read (context : context) (node : node) =
   | Some frame ->
       if not (Hashtbl.mem frame.seen node.id) then begin
         Hashtbl.replace frame.seen node.id ();
-        frame.read <- node :: frame.read
+        Dynarray.add_last frame.read node
       end
   | None ->
       let engine = context.engine in

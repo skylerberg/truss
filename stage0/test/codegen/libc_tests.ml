@@ -32,7 +32,6 @@ let built_entry body =
   Lir_builder.finish b (Return (Some (Copy (Lir_builder.at result))));
   instance "entry" (Lir_builder.build b ~parameters:[] ~result:(Some (value int32)))
 
-(* A view of static bytes. *)
 let view_of b text =
   let open Lir_builder in
   let view = local b (value view_ty) in

@@ -14,8 +14,6 @@
 module T = Types
 module Members = Infer.Members
 
-(* The space of patterns *)
-
 type constructor =
   | Variant of string
   | Record
@@ -189,8 +187,6 @@ and fielded ?replace context type_ constructor (written : (string * Core.pattern
           | Some inner -> space ?replace context inner
           | None -> Wild)
         (fields_of context type_ constructor) )
-
-(* Matrices *)
 
 type row = space list
 
@@ -417,8 +413,6 @@ let rec show context type_ (pattern : space) =
                   fields shown)))
 
 let show_row context types row = String.concat ", " (List.map2 (show context) types row)
-
-(* Checking *)
 
 let operand_type : Core.operand -> T.ty = function
   | Place core_place -> Core_walk.place_type core_place

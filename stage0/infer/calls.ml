@@ -10,6 +10,8 @@ module Environment = Interface.Environment
 module Impls = Interface.Impls
 module Lower = Interface.Lower
 open State
+open Modes
+open Instantiation
 open Hooks
 open Lookups
 

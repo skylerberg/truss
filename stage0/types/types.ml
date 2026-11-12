@@ -103,8 +103,6 @@ let is_signed type_ = match integer_bits type_ with Some (_, signed) -> signed |
 let is_float_type type_ =
   match builtin_of type_ with Some builtin -> List.mem builtin float_types | None -> false
 
-(* Substitution *)
-
 type substitution = (parameter * argument) list
 
 let rec substitute substitution type_ =
@@ -298,8 +296,6 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
         provided)
     required
 
-(* Showing *)
-
 let path_name = function Path.Top { name; _ } -> name | path -> Path.show path
 
 let show_resource = function
@@ -383,8 +379,6 @@ and show_function (function_type : function_type) =
       Printf.sprintf "(%s%s%s)" base
         (if uses = [] then "" else " uses " ^ String.concat ", " uses)
         (String.concat "" (List.map (fun cost -> " " ^ cost) costs))
-
-(* Interfaces *)
 
 type generic_kind = Type_generic of trait_reference list | Value_generic | Capability_generic
 type generic = { generic : parameter; kind : generic_kind }

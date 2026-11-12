@@ -1554,11 +1554,11 @@ test "a function with a default, used as a value, uses the argument it is called
 let folds what ~folded ~run source =
   test what (fun () ->
       let database, _ = load source in
-      let context = Lower.context ~checks:true database target_64 in
-      let value path =
-        match Lower.constant context path with Folded data -> Some data.value | Run _ -> None
+      let context =
+        Lower.context ~checks:true database target_64 ~constant:(fun context path ->
+            match Lower.constant context path with Folded data -> Some data.value | Run _ -> None)
       in
-      context.constant := value;
+      let value = context.constant in
       let constant name : Path.t = Top { module_ = example; name } in
       List.iter
         (fun name -> if value (constant name) = None then fail "%s is run, and should fold" name)

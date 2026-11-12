@@ -35,8 +35,6 @@ let fail format =
 
 let lex text = Lexer.lex (Source.create ~path:"fuzz.truss" text)
 
-(* Robustness *)
-
 let rec check_tokens text ~start ~stop (tokens : Token.t array) =
   let quoted = Diagnostic.quote text in
   let length = Array.length tokens in
@@ -75,8 +73,6 @@ let check_robust text =
           if d.span.stop > String.length text then
             fail "diagnostic out of bounds in %s" (Diagnostic.quote text))
         diagnostics
-
-(* Parsing *)
 
 (* An example lexed and parsed piece by piece, as the documents' tests do. *)
 let snippet text =
@@ -226,8 +222,6 @@ let check_parsers_agree text =
             item.first item.stop (Diagnostic.quote text))
     items
 
-(* Fixes for single mistakes *)
-
 (* Applying a fix removes its diagnostic and adds no other: what is left is
    the other diagnostics, or fewer. *)
 let check_fixes_work text =
@@ -338,8 +332,6 @@ let mistakes =
     "elif ";
     "{ it }";
   |]
-
-(* Round trips *)
 
 let round_trip random =
   let pick array = array.(Random.State.int random (Array.length array)) in

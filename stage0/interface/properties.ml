@@ -52,21 +52,8 @@ let has_bound database ~bounds type_ trait =
     (fun (bound : T.trait_reference) -> Path.equal bound.trait trait)
     (known_bounds database ~bounds type_)
 
-type property =
-  | Copyable
-  | Plain
-  | View
-  | Holds_function
-      (** A value of the type can hold a function value: the type is a function type, or a type
-          whose value is of an unknown type, or it has a part that is one. *)
-
-(* How a type occurs in a value of another type. *)
-type occurrence =
-  | In_place  (** In a field of a variant that is not [indirect], or in an array. *)
-  | Indirect
-      (** Behind a pointer: in an [indirect] variant, a collection's storage, an [any], or the
-          output of a function type. *)
-  | Function_input  (** At any depth in the input of a function type that has a [time] clause. *)
+type property = Copyable | Plain | View | Holds_function
+type occurrence = In_place | Indirect | Function_input
 
 let through outer inner =
   match (outer, inner) with
@@ -81,25 +68,37 @@ let through outer inner =
    type nested in itself cannot be mistaken for a recursive type. A
    condition is a parameter or an associated type, and it is decided where
    the parameter's instantiation is known. *)
+type requirement = Never | Requires of T.ty list  (** Each of the types has the property. *)
+type exposure = Always | If_any of T.ty list  (** One of the types has the property. *)
+
 type facts = {
-  copyable : T.ty list option;
-      (** The types that must be [Copyable] for the type to be. [None] if the type never is. *)
-  plain : T.ty list option;  (** The same for [Plain]. *)
-  view : T.ty list option;
-      (** The types of which any one makes the type a view. [None] if the type always is one. *)
-  holds_function : T.ty list option;  (** The same for [Holds_function]. *)
+  copyable : requirement;
+  plain : requirement;
+  view : exposure;
+  holds_function : exposure;
   contains : (T.ty * occurrence) list;  (** The types that a value contains. *)
 }
 
 (* The facts of a type with no fields. *)
 let empty =
-  { copyable = Some []; plain = Some []; view = Some []; holds_function = Some []; contains = [] }
+  {
+    copyable = Requires [];
+    plain = Requires [];
+    view = If_any [];
+    holds_function = If_any [];
+    contains = [];
+  }
+
+let requirement = function None -> Never | Some types -> Requires types
+let exposure = function None -> Always | Some types -> If_any types
+let of_requirement = function Never -> None | Requires types -> Some types
+let of_exposure = function Always -> None | If_any types -> Some types
 
 let conditions_of facts = function
-  | Copyable -> facts.copyable
-  | Plain -> facts.plain
-  | View -> facts.view
-  | Holds_function -> facts.holds_function
+  | Copyable -> of_requirement facts.copyable
+  | Plain -> of_requirement facts.plain
+  | View -> of_exposure facts.view
+  | Holds_function -> of_exposure facts.holds_function
 
 let type_arguments arguments =
   List.filter_map (function T.Type type_ -> Some type_ | _ -> None) arguments
@@ -192,24 +191,13 @@ let rec conditions database ~facts_of ~resolve ~leaf ?(in_progress = []) propert
                        ~in_progress:(type_ :: in_progress) property)
                     (instantiate ~resolve interface arguments arguments_conditions))))
 
-(* A named type that contains itself through its arguments. No type
-   definition's fields name such a type: [Kept[Marker]] is one when
-   [Kept[Source]] has a field of type [Source.Part] and [Marker]'s [impl]
-   defines [Part] as [Kept[Marker]]. *)
 type recursion = {
   recursive : T.ty;
   occurrence : occurrence;  (** How the type occurs in itself. *)
   defining : Path.t list;
-      (** The [impl]s whose definitions of associated types the type contains itself through. *)
 }
 
-(* The types that a value of a type contains. *)
-type contents = {
-  contained : (T.ty * occurrence) list;
-      (** Named types, parameters, and associated types, including those in the arguments of generic
-          types. *)
-  recursions : recursion list;
-}
+type contents = { contained : (T.ty * occurrence) list; recursions : recursion list }
 
 (* [resolve] normalizes a type and gives the [impl]s whose definitions
    replaced its associated types. *)
@@ -326,13 +314,13 @@ let facts_from database ~facts_of (interface : T.type_interface) =
   in
   match interface.shape with
   | Error_shape _ | Builtin_type _ -> empty
-  | Todo_type -> { empty with copyable = None; plain = None; holds_function = None }
+  | Todo_type -> { empty with copyable = Never; plain = Never; holds_function = Always }
   | Record _ | Sum _ ->
       {
-        copyable = owned Copyable;
-        plain = owned Plain;
-        view = conditions View field_types;
-        holds_function = conditions Holds_function field_types;
+        copyable = requirement (owned Copyable);
+        plain = requirement (owned Plain);
+        view = exposure (conditions View field_types);
+        holds_function = exposure (conditions Holds_function field_types);
         contains =
           List.sort_uniq compare
             (List.concat_map
@@ -445,8 +433,6 @@ and facts_of database path =
    opened before a query is declared leaves out every result that read
    it. *)
 let () = ignore (Lazy.force group_facts)
-
-(* The facts of a type definition. *)
 let facts = Query.query ~name:"type_facts" ~phase:Phases.interfaces ~show:Path.show facts_of
 
 (* Whether the base of an associated type is a generic parameter or a type

@@ -180,8 +180,6 @@ let has_comma cursor ~opener =
   in
   scan (opener + 1)
 
-(* Types *)
-
 let rec type_expression cursor : type_expression = Cursor.nested cursor type_expression_in
 
 and type_expression_in cursor : type_expression =
@@ -519,8 +517,6 @@ and parenthesized_expression cursor =
   if cursor.index < closer then Cursor.fail cursor "`)`";
   Cursor.skip_to cursor (closer + 1);
   value
-
-(* Expressions *)
 
 (* An expression at the lowest level. Inside brackets, [open_range] lets a
    range leave out its start or its end. *)
@@ -1275,8 +1271,6 @@ and arm cursor : arm =
     blank_line_before = Cursor.blank_line_before cursor start;
     id = Cursor.fresh_id cursor;
   }
-
-(* Statements *)
 
 (* Before a [{] that must open a body, one line break is skipped, so a body
    can start on the line after a signature's clauses or a loop's header. *)

@@ -76,8 +76,6 @@ and ground_function context substitution (f : Types.function_type) : Ground.func
 let usize = builtin USize
 let types_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
-(* A ground type, written back as the checker's, so that the checker's own
-   substitution and its lookups apply to it. *)
 let rec back : Ground.ty -> Types.ty = function
   | Named { path; arguments } -> Named { path; arguments = List.map back_argument arguments }
   | Never -> Never

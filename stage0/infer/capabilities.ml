@@ -27,6 +27,7 @@ module Names = Resolve.Names
 module Environment = Interface.Environment
 module Impls = Interface.Impls
 open State
+open Instantiation
 
 let panic : T.capability = Capability (Well_known.path Panic)
 
