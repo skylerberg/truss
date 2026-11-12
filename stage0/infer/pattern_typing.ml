@@ -406,25 +406,7 @@ and check_literal_fits state (value : expression) number type_ =
    for: 32, unless the manifest says [usize_bits = 64]. Code checked for 32
    bits is correct on every target. *)
 and usize_bits state = Query.demand state.database Workspace.usize_bits state.package
-
-and builtin_range ?(usize_bits = 64) type_ =
-  let bits signed width =
-    if signed then
-      Some (Z.neg (Z.shift_left Z.one (width - 1)), Z.pred (Z.shift_left Z.one (width - 1)))
-    else Some (Z.zero, Z.pred (Z.shift_left Z.one width))
-  in
-  match T.builtin_of type_ with
-  | Some Int8 -> bits true 8
-  | Some Int16 -> bits true 16
-  | Some Int32 -> bits true 32
-  | Some Int64 -> bits true 64
-  | Some ISize -> bits true usize_bits
-  | Some UInt8 -> bits false 8
-  | Some UInt16 -> bits false 16
-  | Some UInt32 -> bits false 32
-  | Some UInt64 -> bits false 64
-  | Some USize -> bits false usize_bits
-  | _ -> None
+and builtin_range ?usize_bits type_ = T.integer_range ?usize_bits type_
 
 (* [Character"a"] and [UInt8"\n"]: a character or byte literal is a tagged
    string with exactly one Unicode scalar value or one ASCII character, and

@@ -108,25 +108,25 @@ let revealed_proof =
 (* A float from the solver's model, as Truss writes it: the shortest
    decimal that reads back as the same bits, with a point. *)
 let float_text bits =
-  let shortest digits_for read =
+  (* The fewest significant digits, up to [most], that read back as
+     [value], by [same]. *)
+  let shortest ~most ~same value =
     let rec go digits =
-      let text = Printf.sprintf "%.*g" digits read in
-      if digits >= 17 || float_of_string text = read then text else go (digits + 1)
+      let text = Printf.sprintf "%.*g" digits value in
+      if digits >= most || same (float_of_string text) then text else go (digits + 1)
     in
-    go digits_for
+    go 1
   in
   let text =
     match String.length bits with
-    | 64 -> shortest 1 (Int64.float_of_bits (Int64.of_string ("0b" ^ bits)))
+    | 64 ->
+        let value = Int64.float_of_bits (Int64.of_string ("0b" ^ bits)) in
+        shortest ~most:17 ~same:(fun read -> read = value) value
     | 32 ->
         let value = Int32.float_of_bits (Int32.of_string ("0b" ^ bits)) in
-        let rec go digits =
-          let text = Printf.sprintf "%.*g" digits value in
-          if digits >= 9 || Int32.bits_of_float (float_of_string text) = Int32.bits_of_float value
-          then text
-          else go (digits + 1)
-        in
-        go 1
+        shortest ~most:9
+          ~same:(fun read -> Int32.bits_of_float read = Int32.bits_of_float value)
+          value
     | _ -> "a float"
   in
   if text = "nan" || text = "-nan" then "NaN"

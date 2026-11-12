@@ -46,6 +46,24 @@ val expression : visit -> Core.expression -> unit
 val definition : visit -> Core.definition -> unit
 (** Calls the visitor on every node of a definition. *)
 
+val block_exists :
+  ?expression:(Core.expression -> bool) -> ?statement:(Core.statement -> bool) -> Core.block -> bool
+(** Whether some expression or statement of a block, to any depth, satisfies its test. *)
+
+val expression_exists :
+  ?expression:(Core.expression -> bool) ->
+  ?statement:(Core.statement -> bool) ->
+  Core.expression ->
+  bool
+(** Whether an expression, or an expression or statement in it, satisfies its test. *)
+
+val statement_exists :
+  ?expression:(Core.expression -> bool) ->
+  ?statement:(Core.statement -> bool) ->
+  Core.statement ->
+  bool
+(** Whether a statement, or an expression or statement in it, satisfies its test. *)
+
 val tasks_capability : Path.t
 
 (** How code can use [Tasks]. *)
