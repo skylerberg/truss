@@ -269,9 +269,12 @@ that cannot lose information, and `UInt32.try_from(size)` (which returns a
 - The prefixes `0x`, `0b`, and `0o` and the exponent `e` are lowercase. Hex
   digits may be either case.
 - Literals have no type suffixes. A literal takes its type from its context,
-  as in `let small: UInt8 = 3`. When nothing decides it, an integer literal is
-  an `Int64` and a float literal is a `Float64`, so `var best = 0` makes an
-  `Int64`.
+  as in `let small: UInt8 = 3`. A local declared from literals alone takes
+  its type from its first use that decides it: after `let limit = 10`,
+  `count < limit` with a `UInt8` count makes `limit` a `UInt8`, and so does
+  `let digit: UInt8 = index` in the body of `for index in 0..10`. When
+  nothing decides it, an integer literal is an `Int64` and a float literal is
+  a `Float64`, so `var best = 0` with no other use makes an `Int64`.
 - A literal operand of an arithmetic operator, a comparison, or a range takes
   the type of the other operand when it can be that type, as Go's untyped
   constants do. So in `count + 1` with a `UInt8` count, the `1` is a `UInt8`,

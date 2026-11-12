@@ -1,0 +1,10 @@
+fn f(count: UInt8) -> Bool {
+  let limit = 10
+  let doubled = limit * 2
+  count < doubled
+}
+
+fn g() -> Float32 {
+  let ratio = 0.5
+  ratio
+}

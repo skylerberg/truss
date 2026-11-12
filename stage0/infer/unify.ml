@@ -1,4 +1,6 @@
-(* Inference variables and unification, within one statement. *)
+(* Inference variables and unification. A variable is solved within its
+   statement, except a literal variable in the type of a local, which later
+   statements may solve. *)
 type t = {
   mutable next : int;
   types : (int, Types.ty) Hashtbl.t;  (** The solution of each solved type variable or literal. *)
@@ -11,6 +13,10 @@ type t = {
   mutable integer_range : Types.ty -> (Z.t * Z.t) option;
       (** For a type parameter or projection that an integer trait bounds, the values an integer
           literal of its type may have: those every implementor holds. *)
+  code_literals : (int, unit) Hashtbl.t;
+      (** The literal variables in the types of locals of code that later statements may decide. A
+          specification can use such a local, and converts it to [Integer] as it does any built-in
+          integer, so the variable never becomes [Integer]: [Integer] is no type of code. *)
 }
 
 let create () =
@@ -21,6 +27,7 @@ let create () =
     capability_variable_count = 0;
     deferred_capability_equalities = [];
     integer_range = (fun _ -> None);
+    code_literals = Hashtbl.create 4;
   }
 
 let fresh unifier =
@@ -217,9 +224,17 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
   | Variable left_index, Variable right_index when left_index = right_index -> true
   | Variable index, other | other, Variable index -> bind unifier index other
   | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
-      left_kind = right_kind && (left_index = right_index || bind unifier left_index right)
+      let join () =
+        (* The joined variable is of code if either one is. *)
+        if Hashtbl.mem unifier.code_literals left_index then
+          Hashtbl.replace unifier.code_literals right_index ();
+        bind unifier left_index right
+      in
+      left_kind = right_kind && (left_index = right_index || join ())
   | Literal (kind, index), other | other, Literal (kind, index) ->
-      literal_fits unifier kind other && bind unifier index other
+      literal_fits unifier kind other
+      && (not (other = Integer && Hashtbl.mem unifier.code_literals index))
+      && bind unifier index other
   | Named left, Named right ->
       Path.equal left.path right.path && unify_arguments unifier left.arguments right.arguments
   | Parameter left, Parameter right -> left = right
