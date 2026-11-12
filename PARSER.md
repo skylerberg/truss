@@ -213,7 +213,7 @@ from the spans, and the token at a position from the lexer's token array.
 
 ### Shape
 
-The tree types, in [`stage0/syntax/syntax.ml`](stage0/syntax/syntax.ml),
+The tree types, in [`stage0/syntax/syntax.mli`](stage0/syntax/syntax.mli),
 follow GRAMMAR.md closely. Most of the tree is made of one record,
 `'kind node`, which holds a construct's kind, its span, and its id: an
 expression is an `expression_kind node`, and patterns, types, clauses,

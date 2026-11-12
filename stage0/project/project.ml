@@ -1,7 +1,3 @@
-(* Inputs. A root is a tree of files: the project being worked on, the
-   standard library, a registry package's files, or a package given by
-   itself. *)
-
 let roots : (unit, string list) Query.input =
   Query.input ~name:"project_roots" ~show:(fun () -> "") ()
 
@@ -12,7 +8,6 @@ let text : (string * string, string) Query.input =
     ~show:(fun (root, path) -> if root = "" then path else root ^ ":" ^ path)
     ()
 
-(* Why a registry package's files could not be had, by their hash. *)
 let unavailable : (string, string) Query.input =
   Query.input ~name:"project_unavailable" ~show:Fun.id ()
 
@@ -43,8 +38,6 @@ let module_path ~directory (module_ : Path.module_) =
   let file = String.concat "/" module_.modules ^ ".truss" in
   if directory = "" then file else directory ^ "/" ^ file
 
-(* One root *)
-
 type package = {
   name : string;
   dependencies : Manifest.dependency list;
@@ -53,22 +46,14 @@ type package = {
 }
 
 type layout = {
-  packages : (string * Manifest.package) list;  (** Each package's directory and manifest *)
+  packages : (string * Manifest.package) list;
   modules : (string * string * Path.module_) list;
-      (** Each module's file, its package's directory, and the module *)
   problems : string list;
   time_limit : int;
 }
 
 let files database root = Option.value (Query.find database tree root) ~default:[]
 
-(* What a root's manifests and paths give: its packages, each module file's
-   module, and what is wrong with a manifest by itself. It reads the tree
-   and the manifests, and no module's text, so an edit to a module leaves it
-   as it was. Manifests of another project are left out: under a root whose
-   own manifest has a [[project]] table, a directory whose manifest has one
-   too, with everything below it, and under a root without one, which is a
-   project of one package, every other directory with a manifest. *)
 let layout =
   Query.query ~name:"project_layout" ~phase:Phases.project ~saved:true ~show:Fun.id
     (fun database root ->
@@ -173,23 +158,16 @@ let layout =
       in
       { packages; modules; problems = List.rev !problems; time_limit })
 
-(* The registry packages of the build *)
-
 type selection = {
   selected : Registry.Selection.package list;
   missing : (string * Registry.Version.t * string) list;
-      (** Packages whose files are not inputs yet: each one's name, version, and hash *)
-  failed : string list;  (** The hashes of packages whose files could not be had *)
+  failed : string list;
   lock_problems : string list;
-  lock_fix : string option;  (** The lock file the manifests give, when the one written is another *)
+  lock_fix : string option;
 }
 
 let project_packages database = List.map snd (Query.demand database layout project_root).packages
 
-(* The registry packages of the build: what the project's packages depend on
-   that is no package of the project, at the versions the lock file and
-   their own records give. A package whose files are not inputs is missing:
-   the database fetches it and sets them, which reaches this result. *)
 let selection =
   Query.query ~name:"project_selection" ~phase:Phases.project ~saved:true
     ~show:(fun () -> "")
@@ -303,13 +281,9 @@ let selection =
         lock_fix = !lock_fix;
       })
 
-(* The build: every package, by name *)
-
 type place = { root : string; directory : string; manifest : Manifest.package }
 
-(* Where each package of the build is. A project's package takes the place
-   of any other of its name, and a root given by itself, such as the
-   standard library's, that of a registry package. *)
+(* Where each package of the build is, by name. *)
 let build =
   Query.query ~name:"project_build" ~phase:Phases.project ~saved:true
     ~show:(fun () -> "")
@@ -335,7 +309,6 @@ let place =
   Query.query ~name:"project_place" ~phase:Phases.project ~saved:true ~show:Fun.id
     (fun database name -> List.assoc_opt name (Query.demand database build ()))
 
-(* A package: what its manifest says, and its modules. *)
 let package =
   Query.query ~name:"project_package" ~phase:Phases.project ~saved:true ~show:Fun.id
     (fun database name ->
@@ -365,7 +338,6 @@ let module_place =
           then Some (root, path)
           else None))
 
-(* A module's text, [None] for a module that no package has. *)
 let module_text =
   Query.query ~name:"project_module_text" ~phase:Phases.project ~show:Path.show_module
     (fun database module_ ->
@@ -401,8 +373,6 @@ let dependency_cycle (packages : (string * Manifest.package) list) =
       Option.map (fun way -> (directory, way)) (reaches package.name [] package.name))
     packages
 
-(* What reading the project's manifests and lock file shows to be wrong,
-   each as its file and sentences. *)
 let problems =
   Query.query ~name:"project_problems" ~phase:Phases.project ~saved:true
     ~show:(fun () -> "")
@@ -490,8 +460,6 @@ let problems =
       | None -> ());
       own.problems @ chosen.lock_problems @ List.rev !problems)
 
-(* The registry packages of the build, in order of name: each one's name,
-   its version, and the hash of its files. *)
 let registry =
   Query.query ~name:"project_registry" ~phase:Phases.project ~saved:true
     ~show:(fun () -> "")

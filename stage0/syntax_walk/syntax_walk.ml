@@ -1,15 +1,3 @@
-(* Visiting the expressions and statements of a tree.
-
-   [expression_parts] and [statement_parts] visit one level: a node's own
-   expressions, including those in the types and clauses it holds, with
-   [expression], and the statements of the blocks it holds, with
-   [statement]. A walk that needs a context overrides the nodes that change
-   it and leaves every other to these, so a construct added to the tree is
-   walked by every check without the check listing it. [children],
-   [statement], and [block] go all the way down through statements, calling
-   one function on expressions; [definition] calls it on each outermost
-   expression of a definition. *)
-
 open Syntax
 
 let rec type_expression f (type_ : type_expression) =
@@ -184,9 +172,6 @@ let field f (field : field) =
       Option.iter f default
   | Field_error -> ()
 
-(* Calls [f] on each outermost expression of a definition. With
-   [~statement], each statement of the definition's own blocks goes to it
-   instead, so a walk that cares about statements sees every one. *)
 let definition ?statement:visit f (definition : definition) =
   let block (written : block) =
     match visit with Some visit -> List.iter visit written.statements | None -> block f written
@@ -253,10 +238,6 @@ let definition ?statement:visit f (definition : definition) =
       block body
   | Definition_error _ -> ()
 
-(* The span of each expression, statement, pattern, match arm, record
-   update, contract clause, and loop clause of a definition, indexed by
-   node id. The core form holds no spans, so a stage that reads it looks up
-   a node's origin here to show its source text. *)
 let spans (definition_ : definition) : span array =
   let spans = Array.make (definition_.id + 1) definition_.span in
   let rec pattern (written : pattern) =
@@ -309,8 +290,7 @@ let spans (definition_ : definition) : span array =
   definition ~statement expression definition_;
   spans
 
-(* Visits every name in a definition, references and the names that bind,
-   in expressions, patterns, types, clauses, and heads. *)
+(* Visits names in expressions, patterns, types, clauses, and heads. *)
 let walk_names ~on_name:add (definition_ : definition) =
   let path (written : path) =
     List.iter add written.modules;
@@ -601,8 +581,6 @@ let walk_names ~on_name:add (definition_ : definition) =
       block_ body
   | Definition_error { name; _ } -> Option.iter definition_name name
 
-(* Every name in a definition, in source order. Tools use it to find the
-   name at a position, and checks to find every binding. *)
 let names definition_ =
   let found = ref [] in
   walk_names ~on_name:(fun name -> found := name :: !found) definition_;

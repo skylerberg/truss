@@ -1,15 +1,6 @@
-(* The facts about a definition that are available from its syntax alone:
-   its location, its generic parameters, and the names of its associated
-   types. Lowering a type reads these instead of whole interfaces, so a
-   recursive type, whose fields name the type itself, never causes a query
-   cycle. *)
-
 open Syntax
 module Names = Resolve.Names
 
-(* The definition a path names, with ordinal 0. A method or a member
-   constant is found among its owner's members, since it may be written in
-   any file of its package. *)
 let key =
   Query.query ~name:"key" ~phase:Phases.declarations ~show:Path.show
     (fun database (path : Path.t) ->
@@ -48,9 +39,6 @@ let generic_kinds (generics : generic_parameter list) =
       | Generic_error -> None)
     generics
 
-(* The generic parameters a type, trait, or capability takes, which is what
-   naming it with arguments needs. [None] for a definition whose header did
-   not parse, which accepts any arguments. *)
 let generics_of =
   Query.query ~name:"generics_of" ~phase:Phases.declarations ~show:Path.show
     (fun database (path : Path.t) ->
@@ -78,9 +66,6 @@ type trait_header = {
   laws : string list;
 }
 
-(* The names of a trait's associated types, of its associated capability
-   sets, and of its laws, and the traits it requires, as resolution named
-   them. *)
 let trait_header =
   Query.query ~name:"trait_header" ~phase:Phases.resolution ~show:Path.show
     (fun database (path : Path.t) ->
@@ -119,8 +104,6 @@ let trait_header =
           Some { associated; capabilities; required; laws }
       | _ -> None)
 
-(* The traits a trait requires, directly or not, with itself first. Stops
-   at a cycle, which [Check] reports. *)
 let rec trait_closure database ?(seen = []) path =
   if List.exists (Path.equal path) seen then []
   else

@@ -38,7 +38,6 @@ let trait_method database trait name receiver =
     (fun (method_ : T.trait_method) -> method_.method_receiver = receiver)
     (trait_methods database trait name)
 
-(* The fields of a record type, with its type arguments substituted. *)
 let substitution_for database path arguments =
   match Query.demand database Environment.type_interface path with
   | Some interface -> Option.value ~default:[] (T.substitution_of interface.type_generics arguments)

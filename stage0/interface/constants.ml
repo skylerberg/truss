@@ -1,13 +1,5 @@
-(* The values of integer constants, evaluated exactly where the checker
-   needs them: a [USize] in a type argument, as in [Array[UInt8, size]].
-   Code generation evaluates every other constant. Constants that refer to
-   each other in a cycle have no value. *)
-
 open Syntax
 
-(* Evaluates a constant through the constants that it refers to. [visiting]
-   holds the constants on the current path, so that a cycle is detected here
-   and gives no value, instead of becoming a query cycle. *)
 let rec expression database ~visiting resolved (value : expression) : Z.t option =
   let recurse = expression database ~visiting resolved in
   match value.kind with
@@ -50,7 +42,6 @@ let value_of =
   Query.query ~name:"constant_value" ~phase:Phases.interfaces ~saved:true ~show:Path.show
     (fun database path -> evaluate database ~visiting:[] path)
 
-(* Whether a constant is declared a [USize], as a type argument needs. *)
 let is_usize database path =
   match Summary.definition database path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) -> (

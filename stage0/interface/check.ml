@@ -1,9 +1,3 @@
-(* Checking each definition's outward-facing part.
-
-   These checks read other definitions' interfaces, such as the [impl]s
-   that decide whether a bound holds, so they run apart from lowering: an
-   interface never waits on a check of itself. *)
-
 open Syntax
 module T = Types
 module Names = Resolve.Names
@@ -33,10 +27,6 @@ let implements state type_ trait =
 
 (* Bounds on the arguments of a written type *)
 
-(* The bounds that the arguments of each written type must satisfy. Each
-   failure is a diagnostic: the bound does not hold, or the [impl] that
-   satisfies it uses a capability that its package is not granted. The types
-   that the annotations in a body write are checked in the same way. *)
 let bound_diagnostics database ~package ~bounds named =
   let diagnostic code (span : span) message =
     Diagnostic.make ~code (Source.span span.start span.stop) message
@@ -104,7 +94,7 @@ let visibility_of state (path : Path.t) =
    can a public type's visible fields: callers in other packages could never
    name it. *)
 let check_private_in_public state types (span : span) =
-  if is_public state.definition.visibility then
+  if Names.is_public state.definition.visibility then
     List.iter
       (fun path ->
         match visibility_of state path with
@@ -991,8 +981,6 @@ let diagnostics =
             (lowered.diagnostics @ state.diagnostics)
       | _ -> [])
 
-(* The report of a definition whose interface has an error, for a use of it
-   that the error leaves nothing to check against. *)
 let reported database (path : Path.t) =
   match Query.demand database Summary.key path with
   | Some key -> (

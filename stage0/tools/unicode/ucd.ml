@@ -1,5 +1,3 @@
-(* Reading the files of the Unicode character database. *)
-
 let read_lines directory name =
   In_channel.with_open_bin (Filename.concat directory name) In_channel.input_lines
 
@@ -10,8 +8,6 @@ let strip_byte_order_mark line =
 let strip_comment line =
   match String.index_opt line '#' with Some index -> String.sub line 0 index | None -> line
 
-(* The fields of each data line of a semicolon-separated file, trimmed, with
-   comments and blank lines left out. *)
 let records directory name =
   read_lines directory name
   |> List.filter_map (fun line ->
@@ -21,7 +17,6 @@ let records directory name =
 
 let code_point text = int_of_string ("0x" ^ text)
 
-(* [first..last], or one code point. *)
 let code_point_range text =
   match String.index_opt text '.' with
   | Some index ->
@@ -31,7 +26,6 @@ let code_point_range text =
       let value = code_point text in
       (value, value)
 
-(* The ranges sorted, with the ones that touch or overlap joined. *)
 let merge ranges =
   let sorted = List.sort compare ranges in
   let rec loop merged = function
