@@ -10,22 +10,6 @@
 
 open Cmdliner
 
-(* Runs a command, turning a reason it cannot run into status 2: one the
-   command gives, or a bug in the compiler, reported with what the compiler
-   was doing. *)
-let guard f =
-  try f () with
-  | Project.Cannot_run message ->
-      Output.eprint_line message;
-      Outcome.Exit 2
-  | Compiler_bug.Bug bug ->
-      Output.eprint_line
-        ("The compiler has a bug, and cannot go on. Please report it.\n  "
-       ^ Compiler_bug.to_string bug);
-      Outcome.Exit 2
-
-let exit_with f = guard (fun () -> Outcome.Exit (f ()))
-
 (* Options many commands share *)
 
 let directory =
@@ -80,8 +64,7 @@ let check =
   in
   command "check" ~doc:"Report every diagnostic in the packages."
     Term.(
-      const (fun directory fix json ->
-          exit_with (fun () -> Check_command.run ~directory ~fix ~json))
+      const (fun directory fix json -> Outcome.Exit (Check_command.run ~directory ~fix ~json))
       $ directory $ fix $ json)
 
 let test =
@@ -107,8 +90,7 @@ let test =
   command "test" ~doc:"Check the packages, then run the tests whose results are not kept."
     Term.(
       const (fun directory paths match_ timings rerun json sanitize ->
-          exit_with (fun () ->
-              Test_command.run ~directory ~paths ~match_ ~timings ~rerun ~json ~sanitize))
+          Outcome.Exit (Test_command.run ~directory ~paths ~match_ ~timings ~rerun ~json ~sanitize))
       $ directory $ paths "tests" $ match_ $ timings $ rerun $ json $ sanitize)
 
 let release_flag doc = Arg.(value & flag & info [ "release" ] ~doc)
@@ -128,7 +110,7 @@ let run =
       ]
     Term.(
       const (fun directory release sanitize arguments ->
-          guard (fun () -> Program_command.run ~directory ~release ~sanitize ~arguments))
+          Program_command.run ~directory ~release ~sanitize ~arguments)
       $ directory
       $ release_flag "Build as $(b,truss build) does, refusing an $(b,echo) as it does."
       $ sanitize $ arguments)
@@ -146,16 +128,14 @@ let build =
       "Check the package and build its program for release, refusing any $(b,todo) or $(b,echo) \
        its $(b,main) can reach."
     Term.(
-      const (fun directory output json ->
-          guard (fun () -> Program_command.build ~directory ~output ~json))
+      const (fun directory output json -> Program_command.build ~directory ~output ~json)
       $ directory $ output $ json)
 
 let holes =
   command "holes"
     ~doc:"List every $(b,todo), with its type, the names in scope, and what it blocks."
     Term.(
-      const (fun directory paths json ->
-          exit_with (fun () -> Holes_command.run ~directory ~paths ~json))
+      const (fun directory paths json -> Outcome.Exit (Holes_command.run ~directory ~paths ~json))
       $ directory $ paths "holes" $ json)
 
 let show =
@@ -172,7 +152,7 @@ let show =
   command "show" ~doc:"Print the signatures of a package, module, type, or definition."
     Term.(
       const (fun directory paths body json ->
-          exit_with (fun () -> Show_command.run ~directory ~paths ~body ~json))
+          Outcome.Exit (Show_command.run ~directory ~paths ~body ~json))
       $ directory $ paths $ body $ json)
 
 let impact =
@@ -188,8 +168,7 @@ let impact =
   command "impact"
     ~doc:"List what the worktree's changes from a base commit change, and what they reach."
     Term.(
-      const (fun directory base json ->
-          exit_with (fun () -> Impact_command.run ~directory ~base ~json))
+      const (fun directory base json -> Outcome.Exit (Impact_command.run ~directory ~base ~json))
       $ directory $ base $ json)
 
 let name_argument =
@@ -205,14 +184,14 @@ let references =
   command "references" ~doc:"List what reads a definition, part by part."
     Term.(
       const (fun directory name json ->
-          exit_with (fun () -> Graph_command.run ~directory ~direction:References ~name ~json))
+          Outcome.Exit (Graph_command.run ~directory ~direction:References ~name ~json))
       $ directory $ name_argument $ json)
 
 let dependencies =
   command "dependencies" ~doc:"List what a definition reads, part by part."
     Term.(
       const (fun directory name json ->
-          exit_with (fun () -> Graph_command.run ~directory ~direction:Dependencies ~name ~json))
+          Outcome.Exit (Graph_command.run ~directory ~direction:Dependencies ~name ~json))
       $ directory $ name_argument $ json)
 
 let explain =
@@ -226,7 +205,7 @@ let explain =
     ~doc:"Say what is at a position: what a name means, its type, and the signature it refers to."
     Term.(
       const (fun directory position json ->
-          exit_with (fun () -> Explain_command.run ~directory ~position ~json))
+          Outcome.Exit (Explain_command.run ~directory ~position ~json))
       $ directory $ position $ json)
 
 let overlap =
@@ -246,7 +225,7 @@ let overlap =
     ~doc:"List where this worktree's changes meet those of other worktrees, or of a branch."
     Term.(
       const (fun directory with_ merge json ->
-          exit_with (fun () -> Overlap_command.run ~directory ~with_ ~merge ~json))
+          Outcome.Exit (Overlap_command.run ~directory ~with_ ~merge ~json))
       $ directory $ with_ $ merge $ json)
 
 let rename =
@@ -257,7 +236,7 @@ let rename =
       "Rename a definition, method, or module, and every reference to it in the project's packages."
     Term.(
       const (fun directory from_ to_ json ->
-          exit_with (fun () -> Rename_command.run ~directory ~from_ ~to_ ~json))
+          Outcome.Exit (Rename_command.run ~directory ~from_ ~to_ ~json))
       $ directory $ from_ $ to_ $ json)
 
 let packages_argument ~doc = Arg.(value & pos_all string [] & info [] ~docv:"PACKAGE" ~doc)
@@ -268,8 +247,7 @@ let add =
       "Make registry packages dependencies of the package, each granted nothing, at the version \
        written after $(b,@), or at its newest."
     Term.(
-      const (fun directory names json ->
-          exit_with (fun () -> Add_command.run ~directory ~names ~json))
+      const (fun directory names json -> Outcome.Exit (Add_command.run ~directory ~names ~json))
       $ directory
       $ packages_argument
           ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."
@@ -281,8 +259,7 @@ let upgrade =
       "Move the project's registry packages to their newest versions, or the packages named to \
        theirs or to the version written after $(b,@), and say what that changes."
     Term.(
-      const (fun directory names json ->
-          exit_with (fun () -> Upgrade_command.run ~directory ~names ~json))
+      const (fun directory names json -> Outcome.Exit (Upgrade_command.run ~directory ~names ~json))
       $ directory
       $ packages_argument
           ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."
@@ -294,14 +271,14 @@ let publish =
       "Add the package to the registry as its next version, once it is finished and breaks nothing \
        its last version offers."
     Term.(
-      const (fun directory json -> exit_with (fun () -> Publish_command.run ~directory ~json))
+      const (fun directory json -> Outcome.Exit (Publish_command.run ~directory ~json))
       $ directory $ json)
 
 let new_ =
   let name = Arg.(required & pos 0 (some string) None & info [] ~docv:"NAME") in
   command "new" ~doc:"Make a new package in a directory named $(i,NAME)."
     Term.(
-      const (fun directory name -> exit_with (fun () -> New_command.run ~directory ~name))
+      const (fun directory name -> Outcome.Exit (New_command.run ~directory ~name))
       $ directory $ name)
 
 let sync =
@@ -309,29 +286,26 @@ let sync =
     ~doc:"Bring the project's session up to date with its files, and do nothing else."
     Term.(
       const (fun directory ->
-          exit_with (fun () ->
-              ignore (Project.load directory);
-              0))
+          ignore (Project.load directory);
+          Outcome.Exit 0)
       $ directory)
 
 let status =
   command "status" ~doc:"List the background process's sessions."
     Term.(
       const (fun () ->
-          exit_with (fun () ->
-              List.iter
-                (fun (name, nodes) -> Output.printf "%s: %d results\n" name nodes)
-                (Database.sessions ());
-              0))
+          List.iter
+            (fun (name, nodes) -> Output.printf "%s: %d results\n" name nodes)
+            (Database.sessions ());
+          Outcome.Exit 0)
       $ const ())
 
 let stop =
   command "stop" ~doc:"Stop the background process."
     Term.(
       const (fun () ->
-          exit_with (fun () ->
-              Database.stop ();
-              0))
+          Database.stop ();
+          Outcome.Exit 0)
       $ const ())
 
 let clean =
@@ -388,19 +362,39 @@ let truss =
 
 (* Evaluating a command line *)
 
-(* Parses the arguments and runs the command, writing as [Output] says. *)
+(* Parses the arguments and runs the command, writing as [Output] says. A
+   reason the command cannot run, or a bug in the compiler with what the
+   compiler was doing, gives status 2. *)
 let evaluate arguments =
   let buffer_out = Buffer.create 256 and buffer_err = Buffer.create 256 in
   let help = Format.formatter_of_buffer buffer_out
   and err = Format.formatter_of_buffer buffer_err in
-  let outcome =
+  let run () =
     match arguments with
-    | "__check-buffers" :: rest -> exit_with (fun () -> Lsp_command.check_buffers rest)
+    | "__check-buffers" :: rest -> Outcome.Exit (Lsp_command.check_buffers rest)
     | _ -> (
-        match Cmd.eval_value ~help ~err ~argv:(Array.of_list ("truss" :: arguments)) truss with
+        match
+          Cmd.eval_value ~help ~err ~catch:false ~argv:(Array.of_list ("truss" :: arguments)) truss
+        with
         | Ok (`Ok outcome) -> outcome
         | Ok (`Version | `Help) -> Outcome.Exit 0
         | Error (`Parse | `Term | `Exn) -> Outcome.Exit 2)
+  in
+  let outcome =
+    match
+      Compiler_bug.within ~stage:"Command"
+        ("running `truss " ^ String.concat " " arguments ^ "`")
+        run
+    with
+    | outcome -> outcome
+    | exception Project.Cannot_run message ->
+        Output.eprint_line message;
+        Outcome.Exit 2
+    | exception Compiler_bug.Bug bug ->
+        Output.eprint_line
+          ("The compiler has a bug, and cannot go on. Please report it.\n  "
+         ^ Compiler_bug.to_string bug);
+        Outcome.Exit 2
   in
   Format.pp_print_flush help ();
   Format.pp_print_flush err ();
@@ -410,6 +404,16 @@ let evaluate arguments =
   List.iter Database.save_session !Project.opened;
   Project.opened := [];
   outcome
+
+(* Runs a command line, once more from the files if another process
+   collected a state it read. A failure of the machine, such as a file that
+   cannot be read, gives status 2. *)
+let run_command_line arguments =
+  match Database.recovering (fun () -> evaluate arguments) with
+  | outcome -> outcome
+  | exception exception_ ->
+      Output.eprintf "The compiler failed: %s\n" (Printexc.to_string exception_);
+      Outcome.Exit 2
 
 type request = {
   arguments : string list;
@@ -440,11 +444,7 @@ let handle ~progress request =
             terminal = request.terminal;
             columns = request.columns;
           }
-          (fun () ->
-            try evaluate request.arguments
-            with exception_ ->
-              Output.eprintf "The compiler failed: %s\n" (Printexc.to_string exception_);
-              Outcome.Exit 2))
+          (fun () -> run_command_line request.arguments))
   in
   { output = Buffer.contents buffer; outcome }
 
@@ -535,7 +535,7 @@ let client argv =
   let arguments = List.tl (Arguments.prepare argv) in
   let no_server = List.mem "--no-server" arguments || Sys.getenv_opt "TRUSS_NO_SERVER" = Some "1" in
   let arguments = List.filter (( <> ) "--no-server") arguments in
-  let local () = finish (Database.recovering (fun () -> evaluate arguments)) in
+  let local () = finish (run_command_line arguments) in
   match command_of arguments with
   | Some "clean" -> clean_store ()
   | Some "lsp" -> language_server ~no_server
