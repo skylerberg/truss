@@ -33,23 +33,17 @@ stage0's stages, which [IMPLEMENTATION.md](IMPLEMENTATION.md) lists.
   `requires`, `ensures`, `decreases`, and `cost` clauses, which only callers'
   proofs depend on. Strengthening an `ensures` re-proves callers but
   type-checks none of them again.
-- **A function's body is part of its package's interface only when the
-  function is `transparent`.** Inside a package, the body of a pure function
-  with a `time` clause is its definition, which proofs read. In another
-  package, proofs read the contract only, unless the function is declared
-  `public transparent fn`. A body that other packages' proofs rely on would
-  otherwise be part of the interface without being in the signature, and a
-  change to it could break their proofs with no change that a reader of
-  signatures sees. Verus makes the same choice with `open` and `closed`, and
-  Dafny's exports with `reveals` and `provides`. A method that a trait
-  provides is read everywhere, because an `impl` in any package inherits it.
-  A public contract and a `transparent` body call only public functions and
-  name only public constants, as a public specification and an `open`
-  function's body do in Verus, and as an exported specification does in
-  Dafny: the contract of a function that other packages cannot see is not
-  compared between releases. Unlike Verus, a `transparent` body can read a
-  hidden field, since a change to the field is a change to the body, which
-  is compared.
+- **A function's body is never part of its package's interface.** Proofs
+  in every package read a function's contract, which is in its signature
+  and compared between releases, so a change to a body breaks no proof that
+  a reader of signatures would not see break. A method that a trait
+  provides is read everywhere, because an `impl` in any package inherits
+  it. A public `requires` and `cost` call only public functions and name
+  only public constants, as a public specification does in Verus and an
+  exported specification does in Dafny: the contract of a function that
+  other packages cannot see is not compared between releases. An `ensures`
+  may name a private function, so that callers in the package can know a
+  result in terms of private helpers.
 - **The order of a type's fields is not part of its shape.** Reordering fields
   rebuilds nothing, except code that uses a derived `Ordered`, which compares
   fields in declaration order. The compiler chooses memory layout, and a record
@@ -1797,41 +1791,38 @@ a claim that is not ready can simply be left out.
 
 ### What a function means to the prover
 
-A function is known to the prover in one of two ways: by its contract, or
-by its definition.
+A function is known to callers' proofs by its contract alone: its
+`requires`, `ensures`, and `cost` clauses.
 
 ```truss
 fn is_sorted[Element: Ordered](items: Slice[Element]) -> Bool
+  ensures result == (forall i in 1..items.length() => items[i - 1] <= items[i])
   cost time finite
 {
   forall i in 1..items.length() => items[i - 1] <= items[i]
 }
 ```
 
-- **A functional body is the function's definition.** When a function is
-  pure, has a `time` clause, and its body is functional, the prover uses
-  the body as the function's definition, so `is_sorted(items)` means exactly
-  the quantifier above. A functional body uses `let`, `if`, `match`, `is`,
-  calls, fields, building values, `with`, operators, and quantifiers. It has
-  no `var`, no assignment, no loop, and passes nothing `mut` or `own`. This
-  follows Dafny, whose `function`s are their bodies, and SPARK, whose
-  expression functions are visible to the prover without being asked.
-- **Every other function is known by its contract.** A body with a loop has
-  no meaning the solver could use without a loop invariant, and the
-  invariant would restate the contract.
-- **No keyword marks either kind.** The body already says which it is, as a
-  signature that mentions `Integer` already says a function is for
-  specifications. Prusti's `#[pure]` and Liquid Haskell's `reflect` mark it
-  instead. Whether a body is read is a fact callers' proofs depend on, so
-  their traces record it, as they record whether a method can be pulled,
-  and the tools show it with the signature.
-- **A definition is read only where everything it reads is visible.** A
-  body that reads the fields of an opaque type is a definition inside that
-  type's package, and elsewhere the function is known by its contract, so
-  `opaque` keeps the representation private from proofs too. Verus makes
-  the same distinction with `open` and `closed` specification functions.
-- **Definitions must be well founded.** A definition is sound only for a
-  function that terminates, which the `time` clause and the rules of
+- **A caller reads the contract, never the body.** A function whose body is
+  its meaning, such as `is_sorted`, states the body in its `ensures`. The
+  dependency is then in the signature, where a reader and the
+  compatibility check see it, and editing the body re-proves the function
+  alone. Verus knows an `exec fn` by its contract in the same way; Truss
+  needs no second, specification-only function to state what it means.
+- **A method of a trait or an `impl` is known by its body.** Its contract
+  is the trait's, which says nothing of the type it is for, so the body is
+  what the method means: `Int64.compare` is the integers' order. A trait's
+  provided method is read in every package, and an `impl`'s method in the
+  `impl`'s own package.
+- **A clause is read only where everything it reads is visible.** An
+  `ensures` that reads an opaque type's fields, such as
+  `ensures result == intrinsic::storage_length(self.storage)`, is a fact for
+  callers inside the type's package, which reason about the representation,
+  and no fact elsewhere, where callers know the type by its other clauses.
+  So `opaque` keeps the representation private from proofs too, as Verus's
+  `closed` specification functions do.
+- **Definitions must be well founded.** A definition or a contract is sound
+  only for a function that terminates, which the `time` clause and the rules of
   [Termination](#termination) guarantee, and a function with a `requires`
   is defined only where its `requires` holds.
 - **Quantifiers are expressions in code too.** `forall i in 0..count => p`

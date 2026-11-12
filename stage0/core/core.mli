@@ -352,7 +352,8 @@ and statement_kind =
           capabilities that are available around the block. The block ends when every branch has
           ended. A branch is named by the block's id and its index, from 0 (see {!Task_exit}). *)
   | Proof of block
-  | Assert of condition
+  | Assert of { condition : condition; by_bit_vector : bool }
+      (** [by_bit_vector]: proven alone, for every value of the variables it names. *)
   | Yield of { mode : Types.mode; part : operand }
       (** [yield] in a lending or yielding method. [mode] is the mode in the method's signature. *)
 

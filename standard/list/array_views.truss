@@ -142,7 +142,8 @@ public fn Array[Element: Equal, count: USize].find_slice(self, needle: Slice[Ele
   self.slice().find_slice(needle)
 }
 
-public transparent fn Array[Element: Ordered, count: USize].is_sorted(self) -> Bool
+public fn Array[Element: Ordered, count: USize].is_sorted(self) -> Bool
+  ensures result == (self.slice().is_sorted())
   cost time finite
 {
   self.slice().is_sorted()

@@ -1,6 +1,8 @@
 fn triangle(n: Int64) -> Int64
   requires n >= 0 && n <= 1000
   ensures result <= n * 1000
+  ensures n == 0 ==> result == 0
+  ensures n > 0 ==> result == n + triangle(n - 1)
   decreases n
   cost time finite
 {

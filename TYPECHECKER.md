@@ -379,29 +379,31 @@ the change invalidates nothing beyond the definition:
   PROVER.md lists the parts of a callee that the prover reads.
 - **A function's specification is separate from its body.** The specification
   is the core form of the parameters and the contract. It has the body only
-  when a caller's proof can read the body: the body of a function in the
-  logic, which is the function's definition, and the body that a trait
-  provides for a method, which an `impl`'s method that replaces it is compared
-  with. The parameters and the contract are built before the body, so their
+  when a caller's proof can read the body: the body of a method of a trait
+  or an `impl` in the logic, and never the body of a function or a method of
+  a type, whose callers read the contract alone. The parameters and the contract are built before the body, so their
   nodes are numbered the same whatever the body is. Editing a body that the
   specification leaves out leaves the specification equal. A second result,
   the exported specification, is what a proof in another package reads. It has
-  the body of a function only when the function is `public transparent`, so
-  editing any other body re-proves nothing in a package that depends on this
-  one. `transparent` is part of the signature, and it is an error on a function
-  whose body cannot be a definition.
+  the body of no function, so editing a body re-proves nothing in a package
+  that depends on this one.
+- **An assertion `by bit_vector` names only integers and booleans**
+  (`types.not_bit_vector`), since the prover decides it over the bits of
+  their fixed widths.
 - **What another package's proofs read names only what is public.** Those
-  proofs read the `requires`, `ensures`, and `cost` of every definition that
-  the package can call, and the body of a `transparent` function. A function
-  or a constant that such a clause or body names must be public
+  proofs must meet the `requires`, and count on the `cost`, of every
+  definition that the package can call. A function or a constant that such
+  a clause names must be public
   (`types.private_in_public`). The contract of a function that other packages
   cannot see is not compared between releases, so a change to it would break
   their proofs with no change reported. A definition that other packages can
   call is a public function, method, or theorem, a method of a public trait
   or capability, and a method of an `impl` of a public trait for a public
-  type. A `transparent` body can read a hidden field, because a change to
-  the field changes the body. Type invariants, laws, and the `requires` of a
-  function-typed parameter are not checked yet.
+  type. An `ensures` may name a private function, so that callers in the
+  package can know a public function's result in terms of its private
+  helpers. Type invariants, laws, and the `requires` of a function-typed
+  parameter are not checked yet. The compatibility check does not compare
+  the contracts of the private functions that these clauses name.
 - **A default is separate from the signature,** as DESIGN.md requires: callers
   read only whether a parameter has a default.
 - **A type's invariants are separate from its shape.** Strengthening an

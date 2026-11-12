@@ -94,7 +94,7 @@ Reserved everywhere:
 any assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
 lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait transparent true type unreachable use uses var while
+Self test theorem todo trait true type unreachable use uses var while
 with yield yields
 ```
 
@@ -111,7 +111,7 @@ name resolution gives the rest their meaning:
 
 ```text
 amortized time allocations allocated_bytes calls O finite potential
-log power result old
+log power result old by bit_vector
 ```
 
 ### Number literals
@@ -255,7 +255,7 @@ Every other token continues the line before it: `.`, `,`, `:`, `::`, `)`,
 `]`, `}`, `?`, `|`, `=>`, `->`, `=` and the compound assignments, the binary
 operators other than `-`, `..`, `..=`, and the keywords `cost`, `decreases`,
 `derives`, `else`, `ensures`, `in`, `indirect`, `invariant`, `is`, `lends`,
-`opaque`, `requires`, `transparent`, `uses`, `with`, and `yields`. So no
+`opaque`, `requires`, `uses`, `with`, and `yields`. So no
 `NEWLINE` ever comes before a closing `}`, and statements, `match` arms, and
 members are separated by `NEWLINE`s, not ended by them.
 
@@ -273,12 +273,10 @@ module_path = LOWER_NAME { "::" LOWER_NAME } ;
 definition = [ visibility ] ( function | type_definition | trait
                             | capability | constant | theorem )
            | impl | test | law_proof ;
-visibility = "public" [ "opaque" | "transparent" ] | "internal" ;
+visibility = "public" [ "opaque" ] | "internal" ;
 ```
 
 - `opaque` is allowed only before `type`.
-- `transparent` is allowed only before `fn`, on a function or a method of a
-  type.
 - An `impl`, a test, and a law proof take no visibility. An `impl` applies
   wherever its trait and the types it names are visible, since a type has at
   most one `impl` of each trait; nothing refers to a test or a law proof by
@@ -465,7 +463,7 @@ statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
           | "concurrent" block
           | "concurrent" "for" pattern "in" expression { loop_clause } block
           | "proof" block
-          | "assert" expression
+          | "assert" expression [ "by" "bit_vector" ]
           | "yield" expression ;
 
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="

@@ -37,6 +37,8 @@ internal fn digit_count(value: UInt64, base: UInt64) -> USize
   ensures result >= 1
   ensures result <= log(value) + 1
   ensures result <= 65
+  ensures value < base ==> result == 1
+  ensures value >= base ==> result == 1 + digit_count(value / base, base: base)
   decreases value
   cost time O(log(value))
 {

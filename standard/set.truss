@@ -13,14 +13,16 @@ impl Model for Set[Element: Hash + Ordered] {
   }
 }
 
-public transparent fn contains_equal[Element: Equal](set: FiniteSet[Element], value: Element) -> Bool
+public fn contains_equal[Element: Equal](set: FiniteSet[Element], value: Element) -> Bool
+  ensures result == (exists other: Element => set.contains(other) && other == value)
   cost time finite
 {
   exists other: Element => set.contains(other) && other == value
 }
 
-public transparent fn Set[Element: Hash + Ordered].length(self) -> USize
+public fn Set[Element: Hash + Ordered].length(self) -> USize
   ensures result == self.model().size()
+  ensures result == (self.elements.length())
   cost time O(1)
 {
   self.elements.length()
@@ -60,8 +62,7 @@ public fn Set[Element: Hash + Ordered].contains(self, element: Element) -> Bool
   ensures result == contains_equal(self.model(), value: element)
   cost time O(self.length() * time(Element.equal))
 {
-  var is_present = self.index_of(element) < self.elements.length()
-  is_present
+  self.index_of(element) < self.elements.length()
 }
 
 internal fn Set[Element: Hash + Ordered].insert_absent(mut self, element: own Element)

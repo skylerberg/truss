@@ -416,7 +416,6 @@ type signature = {
   terminates : bool;
   specification_only : bool;
   stores_functions : string list;
-  transparent : bool;
 }
 
 let body_is_definition (signature : signature) =

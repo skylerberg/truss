@@ -1,4 +1,4 @@
 public trait Sized {
-  fn size(self) -> Int64
-    ensures small(result)
+  fn size(self, limit: Int64) -> Int64
+    requires small(limit)
 }

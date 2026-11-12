@@ -393,6 +393,10 @@ own form, and any other token starts an expression, which may be followed
 by `=` or a compound assignment. A `match` arm's body is parsed by the same
 function.
 
+- **`assert ... by bit_vector`.** After an `assert`'s expression, the names
+  `by` and `bit_vector`, in that order, mark the assertion for bit-vector
+  solving. Each is an ordinary name everywhere else.
+
 - **`let ... else`.** After the expression of a `let` or `var`, an `else`
   starts the `else` block. If the expression ends with `}`, as an `if` or
   `match` does, that is an error, with a fix that puts the expression in
@@ -406,12 +410,11 @@ function.
 ## Definitions
 
 Each definition is chosen by its first token, after an optional `public`,
-`public opaque`, `public transparent`, or `internal`. The rules that the
+`public opaque`, or `internal`. The rules that the
 grammar leaves to a check are checked as the definition is parsed, where the
 tokens and their spans are available for fixes:
 
 - `opaque` only before `type`, with a fix that removes it
-- `transparent` only before `fn`, with a fix that removes it
 - no visibility on an `impl`, a test, or a law's proof, with a fix that
   removes it
 - `self` only as a method's first parameter. A method is declared

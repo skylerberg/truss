@@ -902,45 +902,13 @@ let () =
   test "a field's default's arithmetic must stay within its type" (fun () ->
       one_diagnostic "type Settings(retries: UInt8 = 250 + 10)\n" "types.constant_overflow")
 
-(* The body of a transparent function *)
+(* What other packages' proofs read *)
 
 let () =
-  let transparent body =
-    Printf.sprintf
-      "public transparent fn shown(value: Int64) -> Int64\n  cost time O(1)\n{\n  %s\n}\n" body
-  in
   let helper visibility =
     Printf.sprintf "%sfn half(value: Int64) -> Int64\n  cost time O(1)\n{\n  value - 1\n}\n\n"
       visibility
   in
-  test "a transparent body calls only functions that other packages can call" (fun () ->
-      one_diagnostic (helper "internal " ^ transparent "half(value)") "types.private_in_public";
-      one_diagnostic (helper "" ^ transparent "half(value)") "types.private_in_public";
-      fine (helper "public " ^ transparent "half(value)");
-      fine (helper "public transparent " ^ transparent "half(value) + value"));
-  test "a transparent body names only constants that other packages can name" (fun () ->
-      one_diagnostic
-        ("internal let limit: Int64 = 10\n\n" ^ transparent "value + limit")
-        "types.private_in_public";
-      fine ("public let limit: Int64 = 10\n\n" ^ transparent "value + limit"));
-  test "a transparent body calls only public methods, and can read a hidden field" (fun () ->
-      let meter visibility =
-        Printf.sprintf
-          "public opaque type Meter(reading: Int64)\n\n\
-          \           %sfn Meter.raw(self) -> Int64\n\
-          \            cost time O(1)\n\
-          \           {\n\
-          \            self.reading\n\
-          \           }\n\n\
-          \           public transparent fn Meter.shown(self) -> Int64\n\
-          \            cost time O(1)\n\
-          \           {\n\
-          \            self.raw() + self.reading\n\
-          \           }\n"
-          visibility
-      in
-      one_diagnostic (meter "internal ") "types.private_in_public";
-      fine (meter "public "));
   test "a public contract names only functions that other packages can call" (fun () ->
       let sorted visibility =
         Printf.sprintf
@@ -955,20 +923,28 @@ let () =
         Printf.sprintf "%sfn sort(items: mut Slice[Int64])\n  %s\n{\n  todo\n}\n" visibility clause
       in
       one_diagnostic
-        (sorted "internal " ^ sort "public " "ensures in_order(items)")
+        (sorted "internal " ^ sort "public " "requires in_order(items)")
         "types.private_in_public";
       one_diagnostic
         (sorted "" ^ sort "public " "requires in_order(items)")
         "types.private_in_public";
-      fine (sorted "public " ^ sort "public " "ensures in_order(items)");
-      fine (sorted "internal " ^ sort "internal " "ensures in_order(items)");
-      fine (sorted "" ^ sort "" "ensures in_order(items)"));
+      fine (sorted "public " ^ sort "public " "requires in_order(items)");
+      fine (sorted "internal " ^ sort "internal " "requires in_order(items)");
+      fine (sorted "" ^ sort "" "requires in_order(items)"));
+  test "a public ensures may name a private function" (fun () ->
+      fine
+        ("fn in_order(items: Slice[Int64]) -> Bool\n\
+         \  cost time O(1)\n\
+          {\n\
+         \  items.length() < 2\n\
+          }\n\n"
+       ^ "public fn sort(items: mut Slice[Int64])\n  ensures in_order(items)\n{\n  todo\n}\n"));
   test "a public contract names only constants that other packages can name" (fun () ->
       let capped visibility =
         Printf.sprintf
           "%slet limit: Int64 = 10\n\n\
            public fn capped(value: Int64) -> Int64\n\
-          \  ensures result <= limit\n\
+          \  requires value <= limit\n\
            {\n\
           \  todo\n\
            }\n"
@@ -976,9 +952,7 @@ let () =
       in
       one_diagnostic (capped "internal ") "types.private_in_public";
       fine (capped "public "));
-  test
-    "the contract of a public trait's method and of its impl's method names only public functions"
-    (fun () ->
+  test "a public trait's method names only public functions in its requires" (fun () ->
       let helper = Fixtures.Infer.helper in
       one_diagnostic
         (helper ^ Fixtures.Infer.contract_of_a_public_traits_method_and_of_its)
@@ -1000,8 +974,14 @@ let () =
              }\n"
             visibility
       in
-      one_diagnostic (implemented "public ") "types.private_in_public";
+      fine (implemented "public ");
       fine (implemented "internal "));
-  test "a function that is not transparent can call a function that other packages cannot"
-    (fun () ->
-      fine (helper "internal " ^ Fixtures.Infer.function_that_is_not_transparent_can_call_a))
+  test "a function's body can call a function that other packages cannot" (fun () ->
+      fine (helper "internal " ^ Fixtures.Infer.functions_body_can_call_a_function_that_other))
+
+(* Bit-vector assertions *)
+
+let () =
+  test "a bit-vector assertion names only integers and booleans" (fun () ->
+      one_diagnostic Fixtures.Infer.bit_vector_assertion_names_only_integers_and_booleans
+        "types.not_bit_vector")

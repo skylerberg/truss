@@ -3,13 +3,15 @@ public type Result[Value, Error] =
   | Err(error: Error)
   derives Equal, Hash, Ordered
 
-public transparent fn Result[Value, Error].is_ok(self) -> Bool
+public fn Result[Value, Error].is_ok(self) -> Bool
+  ensures result == (self is Ok(_))
   cost time O(1)
 {
   self is Ok(_)
 }
 
-public transparent fn Result[Value, Error].is_err(self) -> Bool
+public fn Result[Value, Error].is_err(self) -> Bool
+  ensures result == (self is Err(_))
   cost time O(1)
 {
   self is Err(_)

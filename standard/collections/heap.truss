@@ -99,6 +99,7 @@ public fn collections::Heap[Element: Ordered].largest_first_of(items: own List[E
 }
 
 public fn collections::Heap[Element: Ordered].length(self) -> USize
+  ensures result == (self.items.length())
   cost time O(1)
 {
   self.items.length()

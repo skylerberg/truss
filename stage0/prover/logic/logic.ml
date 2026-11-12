@@ -3,11 +3,6 @@
 type sort = Int | Bool | Float of int * int | Uninterpreted of string
 
 module Symbol = struct
-  type cost_group =
-    | Own_bound of { counter : int; inherited : bool }
-    | Lambda_bound of { lambda : int; counter : int }
-    | Loop_bound of int
-
   type 'term t =
     | Variable of { label : string; numbers : int list }
     | Function of { callee : Path.t; instance : string list }
@@ -41,8 +36,6 @@ module Symbol = struct
     | Libc_number of string
     | Handle_descriptor
     | Compare_bytes_order
-    | Cost_factor of cost_group
-    | Cost_addend of cost_group
     | Cost_most
     | Cost_log
     | Cost_power
@@ -87,12 +80,6 @@ let sort_text = function
 let instance_text = function [] -> "" | keys -> "[" ^ String.concat ", " keys ^ "]"
 let variant_text = Option.value ~default:"record"
 
-let group_text : Symbol.cost_group -> string = function
-  | Own_bound { counter; inherited } ->
-      Printf.sprintf "counter.%d" counter ^ if inherited then ".trait" else ""
-  | Lambda_bound { lambda; counter } -> Printf.sprintf "lambda.%d.counter.%d" lambda counter
-  | Loop_bound origin -> Printf.sprintf "loop.%d" origin
-
 let rec show_symbol : symbol -> string = function
   | Variable { label; numbers } -> String.concat "." (label :: List.map string_of_int numbers)
   | Function { callee; instance } -> "function." ^ Path.show callee ^ instance_text instance
@@ -129,8 +116,6 @@ let rec show_symbol : symbol -> string = function
   | Libc_number number -> "libc.number." ^ number
   | Handle_descriptor -> "handle.descriptor"
   | Compare_bytes_order -> "compare_bytes.order"
-  | Cost_factor group -> "cost.factor." ^ group_text group
-  | Cost_addend group -> "cost.addend." ^ group_text group
   | Cost_most -> "cost.most"
   | Cost_log -> "cost.log"
   | Cost_power -> "cost.power"

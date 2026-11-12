@@ -229,7 +229,8 @@ and statement names (node : statement) =
       Printf.sprintf "concurrent #%d { %s }" node.origin
         (String.concat "; " (List.map (statement names) branches))
   | Proof body -> "proof " ^ block names body
-  | Assert asserted -> "assert " ^ condition names asserted
+  | Assert { condition = asserted; by_bit_vector } ->
+      "assert " ^ condition names asserted ^ if by_bit_vector then " by bit_vector" else ""
   | Yield { mode = lent; part } -> "yield " ^ mode lent ^ operand names part
 
 and condition names (condition : condition) =

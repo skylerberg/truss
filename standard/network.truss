@@ -249,6 +249,7 @@ internal fn parse_group(text: StringSlice, from: USize) -> Result[Group, Address
 internal type Ipv6Parser(groups: Array[UInt16, 8], count: USize, gap: USize, index: USize, pending: Bool)
 
 internal fn Ipv6Parser.holds(self, text: StringSlice) -> Bool
+  ensures result == (self.count <= 8 && (self.gap == 9 || self.gap <= self.count) && self.index <= text.length())
   cost time O(1)
 {
   self.count <= 8 && (self.gap == 9 || self.gap <= self.count) && self.index <= text.length()

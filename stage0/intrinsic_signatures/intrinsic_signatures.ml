@@ -29,7 +29,6 @@ let signature (operation : Intrinsic.operation) : Types.signature =
       terminates = true;
       specification_only = false;
       stores_functions = [];
-      transparent = false;
     }
   in
   let value = parameter_type "Value" and element = parameter_type "Element" in

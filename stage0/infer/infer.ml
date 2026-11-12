@@ -61,12 +61,18 @@ let callers_read_body database ~same_package (path : Path.t) =
         Option.is_some (Query.demand database Interface.Environment.trait_interface owner)
     | _ -> false
   in
+  let is_function_or_method_of_type =
+    match path with
+    | Top _ -> Interface.Summary.kind_of database path = Some Function
+    | Method { owner = Top _ as owner; _ } -> Interface.Summary.kind_of database owner = Some Type
+    | _ -> false
+  in
   provided
-  || Interface.Summary.kind_of database path <> Some Theorem
+  || (not is_function_or_method_of_type)
+     && Interface.Summary.kind_of database path <> Some Theorem
      &&
      match Interface.Impls.signature database path with
-     | Some signature ->
-         Types.body_is_definition signature && (same_package || signature.transparent)
+     | Some signature -> Types.body_is_definition signature && same_package
      | None -> true
 
 (* A form without the body of its function. *)

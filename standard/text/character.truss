@@ -6,9 +6,10 @@ public let Character.replacement: Character = Character"\u{FFFD}"
 
 public let Character.maximum: Character = Character"\u{10FFFF}"
 
-public transparent fn Character.code(self) -> UInt32
+public fn Character.code(self) -> UInt32
   ensures result <= 1114111
   ensures result < 55296 || result > 57343
+  ensures result == (intrinsic::convert(self))
   cost time O(1)
   cost allocations == 0
 {
@@ -17,10 +18,11 @@ public transparent fn Character.code(self) -> UInt32
 
 internal fn Character.scalar_index(self) -> UInt32
   ensures result < 1112064
+  ensures self.code() < 55296 ==> result == self.code()
+  ensures self.code() >= 55296 ==> result == self.code() - 2048
   cost time O(1)
 {
-  let code = self.code()
-  if code < 55296 { code } else { code - 2048 }
+  if self.code() < 55296 { self.code() } else { self.code() - 2048 }
 }
 
 internal fn Character.at_scalar_index(index: UInt32) -> Character
@@ -108,13 +110,15 @@ public fn Character.is_alphanumeric(self) -> Bool
   self.is_alphabetic() || self.is_numeric()
 }
 
-public transparent fn Character.is_whitespace(self) -> Bool
+public fn Character.is_whitespace(self) -> Bool
+  ensures result == ((self.code() >= 9 && self.code() <= 13) || self.code() == 32 || self.code() == 133 || self.code() == 160 || self.code() == 5760
+      || (self.code() >= 8192 && self.code() <= 8202) || self.code() == 8232 || self.code() == 8233 || self.code() == 8239 || self.code() == 8287
+      || self.code() == 12288)
   cost time O(1)
 {
-  let code = self.code()
-  (code >= 9 && code <= 13) || code == 32 || code == 133 || code == 160 || code == 5760
-    || (code >= 8192 && code <= 8202) || code == 8232 || code == 8233 || code == 8239 || code == 8287
-    || code == 12288
+  (self.code() >= 9 && self.code() <= 13) || self.code() == 32 || self.code() == 133 || self.code() == 160 || self.code() == 5760
+    || (self.code() >= 8192 && self.code() <= 8202) || self.code() == 8232 || self.code() == 8233 || self.code() == 8239 || self.code() == 8287
+    || self.code() == 12288
 }
 
 public fn Character.is_uppercase(self) -> Bool
@@ -131,46 +135,48 @@ public fn Character.is_lowercase(self) -> Bool
   if code < 128 { code >= 97 && code <= 122 } else { unicode_tables::is_lowercase(code) }
 }
 
-public transparent fn Character.is_control(self) -> Bool
+public fn Character.is_control(self) -> Bool
+  ensures result == (self.code() < 32 || (self.code() >= 127 && self.code() < 160))
   cost time O(1)
 {
-  let code = self.code()
-  code < 32 || (code >= 127 && code < 160)
+  self.code() < 32 || (self.code() >= 127 && self.code() < 160)
 }
 
-public transparent fn Character.is_ascii_digit(self) -> Bool
+public fn Character.is_ascii_digit(self) -> Bool
+  ensures result == (self.code() >= 48 && self.code() <= 57)
   cost time O(1)
 {
-  let code = self.code()
-  code >= 48 && code <= 57
+  self.code() >= 48 && self.code() <= 57
 }
 
-public transparent fn Character.is_ascii_alphabetic(self) -> Bool
+public fn Character.is_ascii_alphabetic(self) -> Bool
+  ensures result == ((self.code() >= 97 && self.code() <= 122) || (self.code() >= 65 && self.code() <= 90))
   cost time O(1)
 {
-  let code = self.code()
-  (code >= 97 && code <= 122) || (code >= 65 && code <= 90)
+  (self.code() >= 97 && self.code() <= 122) || (self.code() >= 65 && self.code() <= 90)
 }
 
-public transparent fn Character.is_ascii_alphanumeric(self) -> Bool
+public fn Character.is_ascii_alphanumeric(self) -> Bool
+  ensures result == (self.is_ascii_digit() || self.is_ascii_alphabetic())
   cost time O(1)
 {
   self.is_ascii_digit() || self.is_ascii_alphabetic()
 }
 
-public transparent fn Character.is_ascii_punctuation(self) -> Bool
+public fn Character.is_ascii_punctuation(self) -> Bool
+  ensures result == ((self.code() >= 33 && self.code() <= 47) || (self.code() >= 58 && self.code() <= 64) || (self.code() >= 91 && self.code() <= 96)
+      || (self.code() >= 123 && self.code() <= 126))
   cost time O(1)
 {
-  let code = self.code()
-  (code >= 33 && code <= 47) || (code >= 58 && code <= 64) || (code >= 91 && code <= 96)
-    || (code >= 123 && code <= 126)
+  (self.code() >= 33 && self.code() <= 47) || (self.code() >= 58 && self.code() <= 64) || (self.code() >= 91 && self.code() <= 96)
+    || (self.code() >= 123 && self.code() <= 126)
 }
 
-public transparent fn Character.is_ascii_hexadecimal_digit(self) -> Bool
+public fn Character.is_ascii_hexadecimal_digit(self) -> Bool
+  ensures result == ((self.code() >= 48 && self.code() <= 57) || (self.code() >= 97 && self.code() <= 102) || (self.code() >= 65 && self.code() <= 70))
   cost time O(1)
 {
-  let code = self.code()
-  (code >= 48 && code <= 57) || (code >= 97 && code <= 102) || (code >= 65 && code <= 70)
+  (self.code() >= 48 && self.code() <= 57) || (self.code() >= 97 && self.code() <= 102) || (self.code() >= 65 && self.code() <= 70)
 }
 
 internal fn Character.or_scalar(self, code: UInt32) -> Character

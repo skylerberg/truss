@@ -865,42 +865,32 @@ let () =
       if
         equal (bump "counter += by") Fixtures.Core.editing_a_clause_changes_the_specification "bump"
       then fail "the specification did not change");
-  test "editing the body of a function in the logic changes its specification" (fun () ->
-      if equal (double "value + value") (double "value * 2") "double" then
-        fail "the specification did not change");
+  test "editing the body of a function leaves its specification equal" (fun () ->
+      if not (equal (double "value + value") (double "value * 2") "double") then
+        fail "the specification changed");
   test "a specification without its body meets the core form's invariants" (fun () ->
       let database, key, form = specification (bump "counter += by") "bump" in
       (match form.definition with
       | Function { body = None; _ } -> ()
       | _ -> fail "the body is in the specification");
       check_core_invariants database key form);
-  test "the specification that other packages read has the body of a transparent function only"
-    (fun () ->
-      let exported modifier =
-        let database =
-          setup
-            [
-              ( "app::main",
-                Printf.sprintf
-                  "public%s fn double(value: Int64) -> Int64\n\
-                  \  cost time O(1)\n\
-                   {\n\
-                  \  value + value\n\
-                   }\n"
-                  modifier );
-            ]
-        in
+  test "the specification that other packages read has no function's body" (fun () ->
+      let database =
+        setup
+          [
+            ( "app::main",
+              "public fn double(value: Int64) -> Int64\n  cost time O(1)\n{\n  value + value\n}\n"
+            );
+          ]
+      in
+      match
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
             Query.demand database Infer.exported_specification (Resolve.Names.key_of declaration))
           (Query.demand database Resolve.Names.declarations (module_of "app::main"))
-      in
-      (match exported " transparent" with
-      | Some { definition = Function { body = Some _; _ }; _ } -> ()
-      | _ -> fail "the body of a transparent function is not in the exported specification");
-      match exported "" with
+      with
       | Some { definition = Function { body = None; _ }; _ } -> ()
-      | _ -> fail "the body of a function that is not transparent is in the exported specification");
+      | _ -> fail "the body of a function is in the exported specification");
   test "a theorem's specification has no body" (fun () ->
       let _, _, form = specification Fixtures.Core.theorems_specification_has_no_body "doubled" in
       match form.definition with

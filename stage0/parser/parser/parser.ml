@@ -7,7 +7,7 @@ type piece = Split.piece = { first : int; stop : int }
 let split = Split.pieces
 let is_use (tokens : Token.t array) piece = tokens.(piece.first).kind = Keyword Use
 let begins_statement = Atoms.begins_statement
-let spelled_words = List.map fst Cost_word.spellings
+let spelled_words = List.map fst Cost_word.spellings @ [ "by"; "bit_vector" ]
 
 type 'value parsed = { value : 'value Syntax.item; diagnostics : Syntax.diagnostic list }
 

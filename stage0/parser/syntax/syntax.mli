@@ -247,7 +247,8 @@ and statement_kind =
   | Parallel of block
   | Concurrent of block
   | Proof of block
-  | Assert of expression
+  | Assert of { value : expression; by_bit_vector : bool }
+      (** [assert value], or [assert value by bit_vector]. *)
   | Yield of expression
   | Statement_error
 
@@ -309,8 +310,6 @@ type visibility =
   | Internal
   | Public
   | Public_opaque  (** A type whose fields other packages cannot name. *)
-  | Public_transparent
-      (** A function whose body the proofs of callers in other packages can read. *)
 
 type type_head = { path : path; generics : generic_parameter list; span : span; id : id }
 (** The type a method or constant belongs to: [List[Element: Ordered]] in

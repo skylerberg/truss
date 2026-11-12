@@ -690,7 +690,7 @@ let check database (key : Names.key) =
           (since interface_named !(context.named))
         @ state.diagnostics;
       finalize state;
-      Exported_parts.check state lowered;
+      Exported_parts.check state;
       (* Whether a recorded type contains a type that [unwanted] accepts. *)
       let any_type unwanted =
         let contains table =

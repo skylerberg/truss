@@ -983,7 +983,7 @@ and statement_actions builder frontier (node : Core.statement) =
         :: builder.fork_join_blocks;
       frontier
   | Proof _ -> frontier
-  | Assert { value; _ } -> expression builder frontier value
+  | Assert { condition = { value; _ }; _ } -> expression builder frontier value
   | Yield { mode; part = Value { kind = Construct { fields; _ }; _ } as part } ->
       let frontier = construct builder frontier mode fields in
       let lent = Core_walk.lent_places part in

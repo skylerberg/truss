@@ -13,7 +13,8 @@ public fn String.is_ascii(self) -> Bool
   self.slice().is_ascii()
 }
 
-public transparent fn String.is_boundary(self, offset: USize) -> Bool
+public fn String.is_boundary(self, offset: USize) -> Bool
+  ensures result == (self.slice().is_boundary(offset))
   cost time O(1)
 {
   self.slice().is_boundary(offset)
@@ -110,6 +111,7 @@ public fn String.contains(self, pattern: StringSlice) -> Bool
 public fn String.find(self, pattern: StringSlice) -> Option[USize]
   ensures !(result is Some(offset)
     && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
+  ensures identical(result, self.slice().find(pattern))
   cost time O(self.length() + pattern.length())
 {
   self.slice().find(pattern)
@@ -118,6 +120,7 @@ public fn String.find(self, pattern: StringSlice) -> Option[USize]
 public fn String.find_last(self, pattern: StringSlice) -> Option[USize]
   ensures !(result is Some(offset)
     && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
+  ensures identical(result, self.slice().find_last(pattern))
   cost time O(self.length() + pattern.length())
 {
   self.slice().find_last(pattern)
@@ -144,12 +147,14 @@ public fn String.occurrences(self, pattern: StringSlice) -> USize
 }
 
 public fn String.starts_with(self, prefix: StringSlice) -> Bool
+  ensures result == (self.slice().starts_with(prefix))
   cost time O(prefix.length())
 {
   self.slice().starts_with(prefix)
 }
 
 public fn String.ends_with(self, suffix: StringSlice) -> Bool
+  ensures result == (self.slice().ends_with(suffix))
   cost time O(suffix.length())
 {
   self.slice().ends_with(suffix)

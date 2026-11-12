@@ -125,7 +125,7 @@ let statement_parts ~expression:on_expression ~statement (written : statement) =
       Option.iter (type_expression on_expression) annotation;
       on_expression value;
       Option.iter block else_
-  | Expression value | Assert value | Yield value -> on_expression value
+  | Expression value | Assert { value; _ } | Yield value -> on_expression value
   | Assignment { target; value; _ } ->
       on_expression target;
       on_expression value

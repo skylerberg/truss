@@ -222,9 +222,9 @@ and `reads` clauses):
   `is_nan`. `from_bits` is the float the bits encode, and `to_bits` gives
   bits that encode the float, for any float but a NaN. `multiply_high` is
   the upper word of the exact product. `rotate_left`, `rotate_right`, and
-  `swap_bytes` are known first only by their range, as the bitwise
-  operations are, and exactly when a query asks again. The standard library's integer methods each
-  have a `time` clause, so `wrapping_add`, `saturating_add`,
+  `swap_bytes` are known only by their range, as the bitwise
+  operations are, and exactly in an `assert ... by bit_vector`. The standard library's integer methods
+  are provided by the integer traits, so `wrapping_add`, `saturating_add`,
   `checked_add`, `try_from`, and the rest are definitions their callers
   unfold.
 - **An array is a sequence.** An `Array[Element, count]` is known by its
@@ -272,11 +272,12 @@ and `reads` clauses):
   the call, the owner is as long as it was and the same outside the run,
   and the slice read again is a view of the new run, which the callee's
   postconditions are about.
-- **Bitwise operations get a second encoding.** On integers, `&`, `|`, `^`,
+- **Bitwise operations are known by facts.** On integers, `&`, `|`, `^`,
   `~`, and shifts are functions the solver knows only by a few facts. For
   unsigned values, `a & b` is at most `a` and `b`, `a | b` is at least
   each, `a | b` and `a ^ b` are at most `a + b`, and each is below every
-  `power(2, k)` that both `a` and `b` are below. An unsigned shift multiplies
+  `power(2, k)` that both `a` and `b` are below. For signed values, `a & b`
+  with a nonnegative operand lies from zero to that operand. An unsigned shift multiplies
   or divides by a power of two: `x << k` is `x * power(2, k)` where that
   fits, and `x >> k` is `x / power(2, k)`. `leading_zeros`,
   `trailing_zeros`, and `count_ones` are at most the width, and a nonzero
@@ -287,16 +288,18 @@ and `reads` clauses):
   it equals where `x + 1` is that power of two; `trailing_zeros(x)` is
   below the highest one; and zero has `width` leading and trailing zeros,
   as compiled code gives. That proves the bounds most bit twiddling
-  needs. When a query that mentions a bitwise operation is not
-  proven that way, the prover tries it once more with each such operation
-  defined exactly: as the operation on its operands' bits, of their type's
-  width, read back as an integer, which the solver decides by
-  bit-blasting. Verus asks for this by hand with `by (bit_vector)`; Truss
-  tries both, always in the same order, and caches both answers. Only the
-  bitwise operations change, not the integers, so arithmetic stays exact
-  and the second query is equivalent to the first: an integer that
-  is never in its type's range, which recoding every integer as a
-  bit-vector would wrap, cannot make it prove something false.
+  needs.
+- **An `assert ... by bit_vector` is proven by bit-blasting.** Its query
+  holds the assertion alone, about every value of the integers and
+  booleans it names, with each bitwise operation defined exactly: as the
+  operation on its operands' bits, of their type's width, read back as an
+  integer. The assertion then holds where it is written, as a fact. A
+  query of its own stays small enough for the solver to bit-blast, and a
+  fact from the rest of the proof is a hypothesis the assertion states
+  with `==>`, as with Verus's `by (bit_vector)`. Only the bitwise
+  operations change, not the integers, so arithmetic stays exact: an
+  integer that is never in its type's range, which recoding every integer
+  as a bit-vector would wrap, cannot make it prove something false.
 - **Floats follow IEEE 754 exactly,** as DESIGN.md requires, through the
   solver's floating-point theory: literals bit for bit, and `+`, `-`, `*`,
   `/`, and negation rounding to nearest, ties to even. `==` on floats is
@@ -415,31 +418,27 @@ decides when a body is a definition. In the solver:
 - **Its contract is known at each call.** Where a call's arguments meet the
   `requires`, the `ensures` holds of its result. That is sound because the
   function terminates, and is defined, wherever the `requires` holds.
-- **A functional body is a definition,** unfolded at each call: where the
-  `requires` holds, the call's result is the body's value. A body that
-  reads something the prover cannot see, such as an opaque type's fields from
-  another package, is not unfolded, and the function is known by its
-  contract alone.
-- **A body is read across packages only where it is exported.** A caller
-  in another package reads the callee's exported specification, which has
-  the body of a `public transparent fn`, of a trait's provided method, and
-  of a derived method, and no other. So another function, and a method an
-  `impl` writes, is known there by its contract, and editing its body
-  proves nothing in a package that depends on it again. Where an
-  obligation is not proven and its query names such a callee, the
-  definition is translated again with every callee read as its own package
-  reads it, and the same obligation of that translation is asked; where it
-  proves, the message says that the callee's body is not visible and that
-  with it the obligation would be proven, and names the fixes: an
-  `ensures` that says what is needed, or, for a function,
-  `public transparent fn`.
+- **A function is known by its contract.** A function or a method of a
+  type is known to every caller's proof by its `requires`, `ensures`, and
+  `cost`, never by its body. A function whose body is its meaning states it
+  in its `ensures`, which the prover shows from the body, and which gives
+  callers what unfolding the body would. So a caller's query holds only the
+  contracts of the callees it names, and a change to a body re-proves only
+  the function. An `ensures` that reads what the caller's package cannot
+  see, such as an opaque type's fields, is no fact there.
+- **A method of a trait or an `impl` is a definition,** unfolded at each
+  call: where the `requires` holds, the call's result is the body's value.
+  Its contract is the trait's, which says nothing of the type it is for. A
+  trait's provided method and a derived method are read in every package,
+  and a method an `impl` writes in the `impl`'s own package. A body that
+  reads something the prover cannot see, such as an opaque type's fields
+  from another package, is not unfolded.
 - **Called on a quantifier's bound values,** a definition with no
   `requires` is stated once, for every argument, since a fact about one
   call would name the bound values. So `forall a: Pair => forall b: Pair
   => (a < b) == ...` unfolds a derived `compare`, which has a body as a
-  written one would. A function known by its contract alone, as one in
-  another package that is not `transparent` is, or one with a `requires`,
-  has its `ensures` stated once in the same way, for every argument its
+  written one would. A function, or a method known by its contract alone
+  because it has a `requires`, has its `ensures` stated once in the same way, for every argument its
   parameters' types admit where its `requires` holds. A pure function's
   result is in its type's range, for every argument, stated once the
   same way, so `forall i in 0..items.length() => items[i] <= Int64.maximum`
@@ -457,16 +456,6 @@ decides when a body is a definition. In the solver:
   level of nesting. Such an argument is a symbol named by its term and
   equal to it, the same symbol wherever the same term is, so a query grows
   only with the calls in it.
-- **A query that runs out of steps is asked again with contracts alone.**
-  Unfolding gives the solver every definition a query reaches, which can
-  be too much for it where the callee's `ensures` already says what is
-  needed, as a caller's bound on a callee that itself unfolds several
-  others' arithmetic. Leaving facts out is always sound, so such a query is
-  asked once more without what unfolding gave, and is proven if that one
-  is. This is what Dafny's and Verus's ways to hide a body from the
-  solver are for, so Truss has no such way: pruning keeps a definition out
-  of a query that does not reach it, and this keeps one that does from
-  costing a proof its contract alone would give.
 - **Every other function is a fresh result.** A call to a function that is
   not pure, or has no `time` clause, gives a new value about which its
   `ensures` is known, and two calls are not known to agree.
@@ -516,11 +505,11 @@ decides when a body is a definition. In the solver:
   the parameters' values on entry, as the caller did, even where a `mut`
   parameter has changed since.
 
-Callers' proofs depend on whether a body is a definition, and on the body
-itself when it is. Both are in the trace of every proof that used the
-definition, and pruning (see [Queries](#queries)) keeps a definition out of
-the queries that do not need it, so editing the body of `is_sorted`
-re-proves only the queries that unfolded it.
+Callers' proofs depend on a function's contract, not its body, so editing
+the body of `is_sorted` re-proves only `is_sorted`. A method of a trait or an
+`impl` is a definition, which is in the trace of every proof that unfolded
+it, and pruning (see [Queries](#queries)) keeps it out of the queries that do
+not need it.
 
 ## Verification conditions
 
@@ -714,9 +703,8 @@ invariants and the validity of its fields.
 - **Values that are not parameters keep what is known.** A local that was
   valid stays known to be valid until it changes, so a body may break an
   invariant between two calls and restore it.
-- **Functions in an invariant are definitions or contracts like any
-  others,** so a type's validity may unfold `is_sorted` or rely on its
-  contract.
+- **Functions in an invariant are known by their contracts like any
+  others,** so a type's validity relies on `is_sorted`'s `ensures`.
 - **Validity is not computed twice for one type on one path.** A type can
   contain itself through a type that has an invariant. `type Tree = Leaf |
   Branch(children: Map[String, Tree])` does: `Map`'s invariant calls
@@ -921,9 +909,12 @@ A query's text is canonical, so that its hash can be its cache key:
   the queries of every definition being checked are solved together, and
   each definition then finds its answers solved. Since an answer depends
   only on its text, solving them at once gives what solving them one after
-  another does. A query asked only after another's answer, such as a bound
-  with another choice of constants, or a bitwise query asked again exactly,
-  is solved when it is asked.
+  another does.
+- **One query per obligation.** The source decides what each query holds,
+  so the prover never asks an obligation again with other facts. A
+  failure costs one step limit. The one query asked after another's answer
+  is a counterexample's: the same facts, asked for the values of the
+  locals too.
 - **An answer is a fact about the text.** Its key is the hash of the
   query's text, the solver's version, its options, and its limit, so an
   answer can be reused whenever the text is the same. The command line
@@ -1078,23 +1069,16 @@ removes them in two steps:
    constants and 1. That `C` is a fixed number, though unknown, so a bound
    `counted <= c' * f + d'` proves the real cost is at most
    `C * c' * f + C * d'`, which is `O(f)`.
-2. **Try fixed constants.** Since counting in units removed every unknown,
-   the prover tries a short, fixed list of pairs for `c'` and `d'`, in
-   order, and stops at the first one the solver proves. The list starts with
-   `c' = 2^17` and `d' = 2^16`, which covers bounds whose terms differ by
-   large constant factors, a recursion with any number of recursive calls,
-   and the base cases of recursion, and then tries `d' = 0`. Each try is its
-   own query, so a cost clause's result is as deterministic and as cached
-   as any other.
+2. **Use fixed constants.** Since counting in units removed every unknown,
+   every bound is proven with `c' = 2^17` and `d' = 2^16`, which covers
+   bounds whose terms differ by large constant factors, a recursion with any
+   number of recursive calls, and the base cases of recursion.
 
 Recursion uses the same constants: a recursive call adds `c' * f + d'` with
 its arguments, which is the induction hypothesis, made sound by the measure
 that proves termination. Functions that call each other in a cycle each
-assume the others' bounds with their own constants, which is sound only if
-all of them are proven with the same pair, so each of them tries only the
-first. The constants are two symbols in the queries; every query of a
-definition that mentions them is asked with the same pair, and the first
-pair that proves all of them is taken. So binary search's
+assume the others' bounds, which is sound because all of them are proven
+with the same constants. So binary search's
 `1 + c' * log(n / 2) + d' <= c' * log(n) + d'` holds because
 `log(n / 2) == log(n) - 1` for every `n` at least 1, one of the facts the
 prover gives the solver about `log`. That fact is exact because DESIGN.md
@@ -1102,8 +1086,7 @@ rounds `log(n)` as it does. `log` of a number is its bit length, `power`
 of two numbers is their power, and `log` of a value of a bounded integer
 type is at most the bit length of the type's largest value, so a bound of
 `O(64)` can pay for `log` of any `UInt64`. A tree's `O(size)` walk needs `c' > d'`, and
-merge sort's `O(n * log(n))` needs `c'` large enough to pay for the merge,
-which the first pair gives both.
+merge sort's `O(n * log(n))` needs `c'` large enough to pay for the merge.
 
 ### Loops
 
@@ -1253,8 +1236,7 @@ regular-expression parser. Stage0 runs two kinds of code while proving.
   clause, compiled rather than for specifications only, not generic,
   reached directly rather than through a bound, with every argument an
   integer or `Bool` literal and a result of one of those, in the package
-  of the definition proven or `transparent`, since running a body reads
-  it. Each such call a
+  of the definition proven, since running a body reads it. Each such call a
   query mentions is run, as a `Call_evaluation` instance (see CODEGEN.md,
   "Code run while compiling"), and its result is a fact of the query, so
   `count_up(7)` is known to be `7` though nothing in `count_up`'s contract
@@ -1404,19 +1386,17 @@ Each obligation the prover could not prove is an error, with the shared
 
 A definition's obligations are made again when something they read
 changed, as DATABASE.md describes for every query. A caller reads its
-callee's specification, whose body is there only where the callee is a
-function in the logic, and, from another package, only where it is
-`transparent`, and the callee's text only to report something about it, so
-editing or reformatting the body of any other function makes no caller's
-obligations again. A definition's outcome is a saved result derived
+callee's specification, which has no function's body, and the callee's
+text only to report something about it, so editing or reformatting a
+function's body makes no caller's obligations again. A definition's outcome is a saved result derived
 from its obligations and from the oracles' responses, which are the
 database's inputs, so a definition whose reads have not changed is neither
 translated nor asked anything again, in this process or the next. The
 driver first runs again each run whose code key changed. It then asks for
 every outcome, sends the requests they are pending on to the solver and
 the evaluator together, records the responses, and asks again, which takes
-a round or two, since an obligation asks again only after an answer such
-as running out of steps. The solver is asked again only about a query
+a round or two, since a query waits for the runs whose values it holds,
+and a counterexample asks again for the values of the locals. The solver is asked again only about a query
 whose text changed:
 
 | Edit | Solved again |
@@ -1425,7 +1405,7 @@ whose text changed:
 | The code a run reaches | The run, and the outcomes that used its result |
 | A function's `ensures` | Queries that used it: the function's own, and callers' that included it after pruning |
 | A function's `requires` | The same, plus each caller's obligation to meet it |
-| A body that is a definition | Queries that unfolded it |
+| The body of a method of a trait or an `impl` | Queries that unfolded it |
 | A type's invariant | Queries that assumed or asserted it |
 | A trait's law | Each `impl`'s proof of it, and queries that used it |
 | A local's name or a definition's name or module | Nothing, since queries number their names |

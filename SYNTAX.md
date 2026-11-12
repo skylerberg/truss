@@ -85,7 +85,7 @@ These keywords are reserved everywhere and cannot be used as names:
 `forall` `if` `impl` `in` `indirect` `internal` `is` `invariant` `law`
 `lends` `let` `match` `mut` `opaque` `own` `parallel` `proof` `provide`
 `public` `requires` `return` `self` `Self` `test` `theorem` `todo` `trait`
-`transparent` `true` `type` `unreachable` `use` `uses` `var` `while` `with` `yield`
+`true` `type` `unreachable` `use` `uses` `var` `while` `with` `yield`
 `yields`
 
 A few words have a special meaning in one position only, and are ordinary
@@ -102,6 +102,7 @@ or name resolution gives them their meaning where they appear:
 | `old` | Inside specifications: `requires`, `ensures`, invariants, laws, `decreases`, `cost`, and proofs |
 | `identical` | Inside specifications: `identical(a, b)`, whether two values of one type are the same value |
 | `yielded`, `finished` | Inside the `ensures` of a lending or yielding method, and `yielded` in the clauses of a `for` loop, where they name what was yielded so far and whether the method ran to its end |
+| `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
 
 A parameter cannot be named `result`, and a function cannot be named `old`,
 because inside specifications those names mean the return value and a value as
@@ -3287,6 +3288,7 @@ These forms can be used in `requires`, `ensures`, invariants, laws, and proofs:
 | `old(self.items)` | A value as it was when the function was called. |
 | `identical(result, self.model()[key])` | The same value, for values of any one type, whether or not it implements `Equal`. `==` is always the type's `Equal`. |
 | `assert condition` | Inside a proof: a fact the prover must show, which can then be used. |
+| `assert (word & mask) <= mask by bit_vector` | A fact about fixed-width bits, shown for every value of the integers and booleans it names, with its bitwise operations exact. A fact it needs from the proof around it is a hypothesis: `assert used < 64 ==> (word >> used) == 0 by bit_vector`. |
 
 A quantifier over a range or a collection is an ordinary expression, and can
 be used in code too. It runs as a loop that stops as soon as the answer is
@@ -3305,11 +3307,8 @@ cannot run, so they appear only in specifications and in the bodies of
 functions for specifications only. A quantifier's body is pure: it cannot use
 capabilities.
 
-The prover reads `is_sorted`'s body as what `is_sorted` means, because the
-function is pure, has a `time` clause, and its body is functional: `let`,
-`if`, `match`, `is`, calls, fields, building values, `with`, operators, and
-quantifiers, with no `var`, assignment, or loop. Any other function is known
-to the prover only by its contract. See
+Callers' proofs know `is_sorted` by its contract, so a function whose body
+is its meaning states the body in its `ensures`. See
 [DESIGN.md](DESIGN.md#what-a-function-means-to-the-prover).
 
 A function called in a specification must be pure, with no `uses` at all,
@@ -3565,36 +3564,29 @@ A public function's signature cannot mention a private or `internal` type, and
 neither can a public type's fields, unless the type is opaque. Other packages
 could never name such a type.
 
-A public function's `requires`, `ensures`, and `cost` clauses cannot call a
-private or `internal` function, or name such a constant. A proof in another
-package reads those clauses, and would rely on the contract of a function
-that is not part of the package's interface. The same holds for a method of
-a public trait or capability, and for a method of an `impl` that other
-packages can use.
+A public function's `requires` and `cost` clauses cannot call a private or
+`internal` function, or name such a constant. A caller in another package
+must meet the `requires` and counts on the `cost`, and would rely on the
+contract of a function that is not part of the package's interface. The same
+holds for a method of a public trait or capability, and for a method of an
+`impl` that other packages can use. An `ensures` may name anything its
+function can, so that callers in the function's own package can know its
+result in terms of private helpers.
 
-A public function can show its body to the proofs of other packages with
-`transparent`:
+A caller's proof knows a function by its contract alone, in every package.
+A function whose body is its meaning says so in its `ensures`:
 
 ```truss
-public transparent fn is_sorted(items: Slice[Int64]) -> Bool
+public fn is_sorted(items: Slice[Int64]) -> Bool
+  ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])
   cost time O(items.length())
 {
   forall index in 1..items.length() => items[index - 1] <= items[index]
 }
 ```
 
-- Inside its package, the body of a pure function with a `time` clause is the
-  function's definition, and a proof can read it. In another package, a proof
-  reads only the `requires` and `ensures`, unless the function is
-  `transparent`.
-- A `transparent` function's body is part of the package's interface, as its
-  signature is: changing it can break a proof in a package that uses it.
-- The body calls only public functions and names only public constants, as
-  a public contract does. The body can read a field that other packages
-  cannot see.
-- Only a function or a method of a type can be `transparent`, and only one
-  whose body can be a definition: it has a `time` clause, no `uses` clause,
-  and no `mut` parameter, and it returns its result.
+A method of a trait or an `impl` is known by its body, since its contract is
+the trait's.
 
 ### No foreign code
 

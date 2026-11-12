@@ -1,5 +1,0 @@
-public transparent fn bump(counter: mut Int64)
-  cost time O(1)
-{
-  counter += 1
-}

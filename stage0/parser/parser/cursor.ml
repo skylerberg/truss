@@ -220,11 +220,10 @@ let recovers : Diagnostic.Code.parser -> bool = function
   | Elif | Angle_brackets | Path_separator | Qualified_variant | Macro_call | Tuple | Power_operator
   | Short_declaration | Pipe_operator | Lambda_annotation | Impl_parameters | Null_coalescing ->
       true
-  | Use_after_definition | Let_else_brace | Misplaced_opaque | Misplaced_transparent
-  | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Finite_not_time
-  | Loop_cost_bound | Function_type_names | Misplaced_requires | Specification_only
-  | Misplaced_assert | Misplaced_proof | Misplaced_yield | Misplaced_loop_exit | Leaves_parallel
-  | Echo_in_specification | Reserved_specification_name ->
+  | Use_after_definition | Let_else_brace | Misplaced_opaque | Misplaced_visibility | Misplaced_self
+  | Lends_own | Repeated_clause | Finite_not_time | Loop_cost_bound | Function_type_names
+  | Misplaced_requires | Specification_only | Misplaced_assert | Misplaced_proof | Misplaced_yield
+  | Misplaced_loop_exit | Leaves_parallel | Echo_in_specification | Reserved_specification_name ->
       false
 
 let report cursor ?notes ?fixes code span message =

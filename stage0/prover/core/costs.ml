@@ -36,34 +36,16 @@ let covers ~clause ~counter =
       Path.equal left right && left_method = right_method
   | _ -> false
 
-(* The constants of one [O(...)] bound: two symbols, which each query that
-   mentions them pins to one pair from the list, tried in order. *)
-type constants = {
-  factor : Logic.symbol;
-  addend : Logic.symbol;
-  mutable pairs : (Z.t * Z.t) list;
-      (** Cut to the first when the bound is assumed of another function in a cycle, which is proven
-          with that pair. *)
-}
-
-let pairs = [ (Z.shift_left Z.one 17, Z.shift_left Z.one 16); (Z.shift_left Z.one 17, Z.zero) ]
-
-let constants group =
-  { factor = Symbol.Cost_factor group; addend = Symbol.Cost_addend group; pairs }
-
-(* [c * f + d]. *)
-let bound constants bound_function =
+(* [O(f)] promises a cost of at most [c * f + d] for some constants. Every
+   bound is proven with the same [c] and [d], so a call back into a
+   definition through a cycle assumes the bound the definition proves. *)
+let bound bound_function =
   Logic.Operation
     ( "+",
       [
-        Logic.Operation ("*", [ Logic.Symbol constants.factor; bound_function ]);
-        Logic.Symbol constants.addend;
+        Logic.Operation ("*", [ Logic.Integer (Z.shift_left Z.one 17); bound_function ]);
+        Logic.Integer (Z.shift_left Z.one 16);
       ] )
-
-let pin constants (factor, addend) =
-  Logic.(
-    equal (Symbol constants.factor) (Integer factor)
-    &&& equal (Symbol constants.addend) (Integer addend))
 
 let plus left right =
   match (left, right) with
