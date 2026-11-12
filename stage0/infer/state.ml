@@ -1483,12 +1483,18 @@ let check_mode state env (value : expression) (parameter : T.parameter_info) typ
 (* A yielded constructor that lends a place owns nothing, so nothing drops
    it when the lend ends. Each of its other fields must then have nothing
    to drop: the field is a constructor too, or its type is [Plain].
+
+   A place lent [mut] is not inside a variant's constructor at any depth.
+   The caller could change the variant, as [mut pair.maybe() = None] does,
+   and the place would be left without a value: a use after free.
    [operand] is the operand of the [yield]. *)
 let check_lent_value state env (operand : expression) =
   let lends = ref false and taken = ref [] in
-  let rec fields (value : expression) =
+  let rec fields ~variant (value : expression) =
     match (value.kind, state.tables.calls.(value.id)) with
-    | Call (_, arguments), Some { callee = Constructor _; arguments = checked; _ } ->
+    | ( Call (_, arguments),
+        Some { callee = Constructor { variant = constructed; _ }; arguments = checked; _ } ) ->
+        let variant = if Option.is_some constructed then constructed else variant in
         List.iter
           (fun (argument : argument) ->
             match
@@ -1496,12 +1502,26 @@ let check_lent_value state env (operand : expression) =
                 (fun (found : C.argument) -> found.expression = argument.value.id)
                 checked
             with
-            | Some { mode = Read | Mut; _ } -> lends := true
-            | _ -> fields argument.value)
+            | Some { mode = Read; _ } -> lends := true
+            | Some { mode = Mut; _ } -> (
+                lends := true;
+                match variant with
+                | Some variant when runs env ->
+                    state.diagnostics <-
+                      Diagnostic.make ~code:(Ownership Lent_mut_in_variant) argument.value.span
+                        (Printf.sprintf
+                           "This place is lent `mut` inside the variant `%s`. The caller could \
+                            change the variant, and the place would be left without a value. Lend \
+                            a local of the whole type instead, and store it back after the \
+                            `yield`."
+                           variant)
+                      :: state.diagnostics
+                | _ -> ())
+            | _ -> fields ~variant argument.value)
           arguments
     | _ -> taken := value :: !taken
   in
-  fields operand;
+  fields ~variant:None operand;
   if !lends && runs env then
     List.iter
       (fun (value : expression) ->

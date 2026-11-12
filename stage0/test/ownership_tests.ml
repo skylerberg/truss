@@ -187,6 +187,15 @@ let () =
         (lends "tagged" "(self) lends Tagged"
            "  yield Tagged(tag: \"new\".copy(), book: self.books[0])\n")
         "ownership.owned_beside_lent");
+  test "a place lent `mut` inside a variant is rejected" (fun () ->
+      one_diagnostic
+        (lends "first" "(mut self) lends mut Option[String]" "  yield Some(mut self.books[0])\n")
+        "ownership.lent_mut_in_variant");
+  test "a place lent `mut` inside a record inside a variant is rejected" (fun () ->
+      one_diagnostic
+        (lends "first" "(mut self) yields mut Option[Numbered]"
+           "  yield Some(Numbered(index: 0, title: mut self.books[0]))\n")
+        "ownership.lent_mut_in_variant");
   test "a constructor yielded `mut` lends the places marked `mut`" (fun () ->
       fine
         (lends "numbered" "(mut self) yields mut Numbered"

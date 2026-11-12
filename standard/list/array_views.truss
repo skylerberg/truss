@@ -50,10 +50,7 @@ public fn Array[Element, count: USize].split_first(self) lends Option[list::Spli
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
-  match self.slice().split_first() {
-    Some(found) => yield Some(found)
-    None => yield None
-  }
+  yield self.slice().split_first()
 }
 
 public fn Array[Element, count: USize].split_last(self) lends Option[list::SplitLast[Element]]
@@ -61,10 +58,7 @@ public fn Array[Element, count: USize].split_last(self) lends Option[list::Split
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
-  match self.slice().split_last() {
-    Some(found) => yield Some(found)
-    None => yield None
-  }
+  yield self.slice().split_last()
 }
 
 public fn Array[Element, count: USize].split_at(self, index: USize) -> core::Pair[Slice[Element], Slice[Element]]

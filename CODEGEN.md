@@ -1004,28 +1004,43 @@ Where nothing is left, as for an index into a `List`, whose method ends at
 its `yield` owning nothing, the method simply ends there and the lend costs
 nothing.
 
-A lending method may have a `yield` on each of several paths, as
-`Slice.get` yields `Some(self[index])` or `None`. Each `yield` then stores
-the address of what it lends and its own number, and the caller reads
-through the address. As the caller's scope ends, the code goes on from the
-`yield` that was reached, by its number. A value the method makes to lend,
-such as that `None`, is built in one place that the caller's statement
+A lending method may have a `yield` on each of several paths, as one
+that yields `self.first` on one path and `self.second` on another. Each
+`yield` then stores the address of what it lends and its own number, and
+the caller reads through the address. As the caller's scope ends, the code
+goes on from the `yield` that was reached, by its number. A value the
+method makes to lend is built in one place that the caller's statement
 owns, so that it is dropped once whichever `yield` made it.
 
 A method may yield a value built around places it lends:
 `yield Some(self[index])`, or `yield Indexed(index: index, value: mut
-self[index])`. The core form marks each such field as a place.
+self[index])`. The core form marks each such field as a place. Every
+`yield` of such a method builds a *lent value* in one local: a value of a
+type of its own, `Ground.Lent`, laid out as the yielded type but with an
+address in place of each lent field. So `Slice.get` lends an
+`Option[Element]` as one pointer, null for `None`, whatever the element's
+size.
 
-- **Lent to be read,** the value holds a copy of each place's bytes and
-  owns nothing. No Truss value depends on its own address, and the places
-  cannot change while they are lent, so the copy is as good as the place.
-  Nothing drops it.
-- **Lent to be changed,** each place's value is moved into the built
-  value, and the scope around the `yield` moves each back as it ends, on
-  every way out of it: the end of the caller's statement or loop body, a
-  `break`, a `return`, a `?`. While the caller has the value it owns what
-  it holds, so a field the caller replaces is dropped first, as in any
-  value, and what goes back is what the caller left.
+- **The type is the same at every `yield`.** A field holds an address if
+  some `yield` gives it a place, or if its type has something to drop; a
+  value made for such a field is a temporary of the `yield`'s statement,
+  which the method drops once it goes on. A field that some `yield` gives a
+  constructor of places holds a lent value of its own. Every other field
+  holds a `Plain` value. A `yield` of a whole place or value takes the
+  addresses of its fields.
+- **The caller reads a lent field through its address.** A field access
+  or a pattern adds the dereference, and a name a pattern binds is the
+  place itself, so `match items.get(i) { Some(item) => item.total }` copies
+  nothing. Lent to be changed, a change to a field is made in the place.
+- **A lent value is copied where it is used whole,** as an argument, a
+  receiver, or an operand of `==`, since code there expects the yielded
+  type. Lent to be read, the copy holds each place's bytes and owns
+  nothing: no Truss value depends on its own address, and the places cannot
+  change while they are lent. Lent to be changed, each place's value is
+  moved into the copy, and the scope around moves each back as it ends, on
+  every way out of it. The type checker allows a place lent `mut` only
+  outside a variant, so the variant of the copy cannot change, and every
+  place gets a value back.
 
 Where such a method is pulled, which only a loop over a method that is
 already inlined around it does, `next` gives a value that owns a copy of

@@ -545,6 +545,11 @@ let elaborate env ~needs_drop ~environment (f : Lir.function_) =
                     emit_ops builder (drop_ops a s ~flag path);
                     apply a s statement;
                     update before s
+                | Some path when a.f.locals.(path.local).borrowed && List.mem Deref path.steps ->
+                    (* A place that a borrowed local points at, such as one
+                       that a lent value holds the address of, is another
+                       owner's and always holds a value. *)
+                    push builder statement
                 | Some _ -> ()
                 | None ->
                     (* An element reached through an index, which always
